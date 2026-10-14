@@ -8,9 +8,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_sandbox.api.slurm import SlurmProcessBroker, run_brokered_process
-from vs_sandbox.api.testing import FakeCapturedProcessRunner, StoppableScript
-from vs_sim.api.testing import SimThreads
+from vs_sandbox.api.slurm import BrokeredProcesses, SlurmProcessBroker
+from vs_sim.api import OsProcesses, ProcessOutcome, ProcessSpec, UnixNetwork
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
@@ -26,30 +26,29 @@ def _config() -> SlurmConfig:
     )
 
 
+def _brokered(
+    broker: SlurmProcessBroker, argv: tuple[str, ...], stdin: bytes = b"", timeout: float = 5
+) -> ProcessOutcome:
+    processes = BrokeredProcesses(broker.socket_path, broker.token, network=UnixNetwork())
+    run = processes.run(ProcessSpec(argv, input=stdin), timeout=timeout)
+    assert isinstance(run, ProcessOutcome)
+    return run
+
+
 def test_broker_executes_only_the_configured_destination(tmp_path: Path) -> None:
-    broker = SlurmProcessBroker(_config(), tmp_path / "broker.sock", local_roots=(tmp_path,))
+    broker = SlurmProcessBroker(
+        _config(), tmp_path / "broker.sock", local_roots=(tmp_path,), processes=OsProcesses()
+    )
     broker.start()
     try:
-        result = run_brokered_process(
-            broker.socket_path,
-            broker.token,
-            ("/usr/bin/printf", "--", "cluster", "hostname"),
-            stdin=None,
-            timeout=5,
-        )
+        result = _brokered(broker, ("/usr/bin/printf", "--", "cluster", "hostname"))
         with pytest.raises(PermissionError, match="unauthorized destination"):
-            run_brokered_process(
-                broker.socket_path,
-                broker.token,
-                ("/usr/bin/printf", "--", "other-cluster", "hostname"),
-                stdin=None,
-                timeout=5,
-            )
+            _brokered(broker, ("/usr/bin/printf", "--", "other-cluster", "hostname"))
     finally:
         broker.close()
 
     assert result.returncode == 0
-    assert result.stdout == "cluster"
+    assert result.stdout == b"cluster"
     assert not broker.socket_path.exists()
 
 
@@ -63,13 +62,14 @@ def test_broker_rejects_rsync_paths_outside_run_roots(tmp_path: Path) -> None:
             )
         }
     )
-    broker = SlurmProcessBroker(config, tmp_path / "unused.sock", local_roots=(tmp_path,))
+    broker = SlurmProcessBroker(
+        config, tmp_path / "unused.sock", local_roots=(tmp_path,), processes=OsProcesses()
+    )
     broker.start()
     try:
         with pytest.raises(PermissionError, match="run-owned roots"):
-            run_brokered_process(
-                broker.socket_path,
-                broker.token,
+            _brokered(
+                broker,
                 (
                     "rsync",
                     "-a",
@@ -79,8 +79,6 @@ def test_broker_rejects_rsync_paths_outside_run_roots(tmp_path: Path) -> None:
                     "/etc/passwd",
                     "cluster:/remote/vibesys/cluster/workspace/passwd",
                 ),
-                stdin=None,
-                timeout=5,
             )
     finally:
         broker.close()
@@ -95,15 +93,13 @@ def test_a_brokered_process_is_outside_the_callers_process_group(tmp_path: Path)
         transport=SlurmSshTransport(host="cluster", ssh_command=(sys.executable, "-c", report)),
         transport_timeout_seconds=30,
     )
-    broker = SlurmProcessBroker(config, tmp_path / "broker.sock", local_roots=(tmp_path,))
+    broker = SlurmProcessBroker(
+        config, tmp_path / "broker.sock", local_roots=(tmp_path,), processes=OsProcesses()
+    )
     broker.start()
     try:
-        result = run_brokered_process(
-            broker.socket_path,
-            broker.token,
-            (sys.executable, "-c", report, "--", "cluster", "scancel 1"),
-            stdin=None,
-            timeout=30,
+        result = _brokered(
+            broker, (sys.executable, "-c", report, "--", "cluster", "scancel 1"), timeout=30
         )
     finally:
         broker.close()
@@ -113,35 +109,23 @@ def test_a_brokered_process_is_outside_the_callers_process_group(tmp_path: Path)
     assert group != os.getpgid(0)
 
 
-def test_a_broker_timeout_settles_the_transport_group_before_replying(tmp_path: Path) -> None:
-    processes = FakeCapturedProcessRunner(
-        StoppableScript(stdout="partial-out", stderr="partial-err", runs_for=None),
-        threads=SimThreads(),
+def test_a_broker_timeout_is_refused_after_the_transport_timeout(tmp_path: Path) -> None:
+    clock = ManualClock()
+    processes = FakeProcesses(
+        lambda _spec: ProcessScript(stdout=b"partial-out", runs_until_signalled=True),
+        pass_time=clock.advance,
     )
     broker = SlurmProcessBroker(
-        _config(),
-        tmp_path / "broker.sock",
-        local_roots=(tmp_path,),
-        processes=processes,
+        _config(), tmp_path / "broker.sock", local_roots=(tmp_path,), processes=processes
     )
     broker.start()
     try:
-        with pytest.raises(PermissionError, match=r"timed out after 5(?:\.0)? seconds"):
-            run_brokered_process(
-                broker.socket_path,
-                broker.token,
-                ("/usr/bin/printf", "--", "cluster", "hostname"),
-                stdin="transport input",
-                timeout=5,
-            )
+        with pytest.raises(PermissionError, match=r"timed out after 5 seconds"):
+            _brokered(broker, ("/usr/bin/printf", "--", "cluster", "hostname"), b"transport input")
     finally:
         broker.close()
 
-    process = processes.processes[0]
-    request = processes.calls[0]
-    assert [number.name for number, _at in process.signals] == ["SIGKILL"]
-    assert process.closed
-    assert request.stdin == "transport input"
-    assert request.env == os.environ
-    assert request.cwd is None
-    assert not request.start_new_session
+    assert clock.now() == 5
+    assert processes.ran == [
+        ProcessSpec(("/usr/bin/printf", "--", "cluster", "hostname"), input=b"transport input")
+    ]

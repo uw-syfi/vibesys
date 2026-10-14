@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.run.environment import open_run_environment
 from vs_agent.api.images import ImageBuildProgress, TaskImageBuildError
@@ -50,6 +51,7 @@ def _open(
         evaluator_requirements=TrustedEvaluatorRequirements(),
         startup=observed.append,
         clock=ManualClock(),
+        slurm_processes=REAL_PROCESSES,
     )
     environment = DockerEnvironment(DockerEnvironmentConfig(docker=engine, build_runner=runner))
     open_run_environment(environment, request).close()

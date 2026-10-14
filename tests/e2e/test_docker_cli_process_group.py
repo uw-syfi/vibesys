@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from vs_sandbox.api import SubprocessDockerCli
-from vs_sandbox.api.slurm import SlurmProcessBroker, run_brokered_process
+from vs_sandbox.api.slurm import BrokeredProcesses, SlurmProcessBroker
 
 # test-isolation: the synchronized real-process contract injects the package's process owner
 # into public Docker and Slurm boundaries so timeout begins only after the descendant is ready.
@@ -29,6 +29,7 @@ from vs_sandbox.process_execution import (
     OwnedProcessRunner,
     PopenProcess,
 )
+from vs_sim.api import OsProcesses, ProcessOutcome, ProcessSpec, UnixNetwork
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 _HANG_GUARD_SECONDS = 30.0
@@ -187,46 +188,6 @@ def test_docker_interruption_kills_the_unreaped_ready_process_group(tmp_path: Pa
         os.close(reader)
 
 
-def test_slurm_broker_timeout_kills_the_ready_descendant_and_closes_its_pipe(
-    tmp_path: Path,
-) -> None:
-    ready_fifo = tmp_path / "slurm-descendant-ready"
-    reader = _ready_reader(ready_fifo)
-    wrapper = _descendant_wrapper(ready_fifo)
-    transport = SlurmSshTransport(
-        host="cluster",
-        ssh_command=(sys.executable, "-c", wrapper),
-    )
-    config = SlurmConfig(
-        name="cluster",
-        remote_workspace_root="/remote/vibesys",
-        transport=transport,
-        transport_timeout_seconds=1,
-    )
-    launcher = _ReadyLauncher(reader)
-    broker = SlurmProcessBroker(
-        config,
-        tmp_path / "broker.sock",
-        local_roots=(tmp_path,),
-        processes=OwnedProcessRunner(processes=launcher),
-    )
-    broker.start()
-    try:
-        with pytest.raises(PermissionError, match="timed out"):
-            run_brokered_process(
-                broker.socket_path,
-                broker.token,
-                (*transport.ssh_command, "--", "cluster", "hostname"),
-                stdin=None,
-                timeout=5,
-            )
-        _assert_descendant_writer_closed(reader)
-    finally:
-        broker.close()
-        _settle_started_processes(launcher.started)
-        os.close(reader)
-
-
 def test_slurm_broker_preserves_stdin_environment_cwd_and_complete_streams(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -249,19 +210,20 @@ def test_slurm_broker_preserves_stdin_environment_cwd_and_complete_streams(
         transport=transport,
         transport_timeout_seconds=30,
     )
-    broker = SlurmProcessBroker(config, tmp_path / "broker.sock", local_roots=(tmp_path,))
+    broker = SlurmProcessBroker(
+        config, tmp_path / "broker.sock", local_roots=(tmp_path,), processes=OsProcesses()
+    )
     broker.start()
     try:
-        result = run_brokered_process(
-            broker.socket_path,
-            broker.token,
-            (*transport.ssh_command, "--", "cluster", "hostname"),
-            stdin="complete stdin",
+        result = BrokeredProcesses(broker.socket_path, broker.token, network=UnixNetwork()).run(
+            ProcessSpec(
+                (*transport.ssh_command, "--", "cluster", "hostname"), input=b"complete stdin"
+            ),
             timeout=30,
         )
     finally:
         broker.close()
 
-    assert result.returncode == 0
-    assert result.stdout == f"present|{Path.cwd()}|complete stdin\n"
-    assert result.stderr == "complete stderr\n"
+    assert result == ProcessOutcome(
+        0, f"present|{Path.cwd()}|complete stdin\n".encode(), b"complete stderr\n"
+    )

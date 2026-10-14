@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.real_git import REAL_PROCESSES
 
 from vs_runtime.api.infrastructure import (
     RunEnvironmentPresentation,
@@ -117,6 +118,7 @@ def test_candidate_objective_verification_uses_run_root_and_requires_exact_text(
             objective=objective,
             objective_document=document,
             clock=ManualClock(),
+            slurm_processes=REAL_PROCESSES,
         )
         presentation = RunEnvironmentPresentation(prompt_notes="")
         with unconfined_host_environment().prepare(request).open(presentation) as session:

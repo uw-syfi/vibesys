@@ -179,7 +179,7 @@ class _ScenarioCluster(FakeCluster):
             }
         )
         runner = SlurmJobRunner(
-            config, process=FakeConnector(root / "scheduler"), clock=ManualClock()
+            config, processes=FakeConnector(root / "scheduler"), clock=ManualClock()
         )
 
         # A missing exit code is injected into the collected raw record below;
@@ -1463,7 +1463,7 @@ async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
         }
     )
     cluster = SlurmCluster(
-        SlurmJobRunner(config, process=connector, clock=ManualClock()),
+        SlurmJobRunner(config, processes=connector, clock=ManualClock()),
         state_root=tmp_path / "cluster-state",
     )
     clock = ManualClock(1_000)
@@ -1828,7 +1828,7 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         )
         cluster = SlurmCluster(
-            SlurmJobRunner(config, process=connector, clock=ManualClock()),
+            SlurmJobRunner(config, processes=connector, clock=ManualClock()),
             state_root=tmp_path / "cluster-identity",
         )
     owner = SlurmEvaluationExecutor(
@@ -2013,7 +2013,7 @@ async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recoverin
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         )
         cluster = SlurmCluster(
-            SlurmJobRunner(config, process=connector, clock=ManualClock()),
+            SlurmJobRunner(config, processes=connector, clock=ManualClock()),
             state_root=tmp_path / "cluster-identity",
         )
     executor = SlurmEvaluationExecutor(

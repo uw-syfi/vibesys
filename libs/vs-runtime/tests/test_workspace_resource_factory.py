@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import REAL_PROCESSES
 
 from vs_agent.api import NULL_SKILL_SELECTION, AgentBackend, AgentSpec
 from vs_project.api import (
@@ -137,6 +138,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
             framework_root=tmp_path,
             project_path_policy=ProjectPathPolicy(),
             clock=ManualClock(),
+            slurm_processes=REAL_PROCESSES,
         ),
         open_session,
         clock=ManualClock(),
@@ -191,6 +193,7 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
             run_id="workspace-resource-test",
             framework_root=tmp_path,
             clock=ManualClock(),
+            slurm_processes=REAL_PROCESSES,
         ),
         lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
         clock=ManualClock(),
@@ -252,6 +255,7 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             objective_document=authored,
             git_history_root=project.git.history_root,
             clock=ManualClock(),
+            slurm_processes=REAL_PROCESSES,
         )
         objective_paths: list[str] = []
 
@@ -327,6 +331,7 @@ def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Pa
             run_id="workspace-resource-test",
             framework_root=tmp_path,
             clock=ManualClock(),
+            slurm_processes=REAL_PROCESSES,
         ),
         lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
         clock=ManualClock(),

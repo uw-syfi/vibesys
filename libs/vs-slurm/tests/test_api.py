@@ -16,6 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec, ProcessTimedOut
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     SCHEDULER_READ_END,
@@ -114,16 +115,15 @@ class _FakeConnector:
         self.ready_content_objects: set[str] = set()
         self.locked_content_objects: set[str] = set()
 
-    def __call__(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        argv, stdin = spec.argv, spec.input.decode() or None
         assert tuple(argv) == ("cluster-connector",)
         assert timeout == 20
         assert stdin is not None
         request: dict[str, object] = json.loads(stdin)
         self.requests.append(request)
         if self.connector_exit_code:
-            return subprocess.CompletedProcess(argv, self.connector_exit_code, "", "private error")
+            return ProcessOutcome(self.connector_exit_code, b"", b"private error")
 
         if request["operation"] == self.fail_operation or (
             request["operation"] == "get"
@@ -131,7 +131,7 @@ class _FakeConnector:
             and str(request["remote_path"]).endswith(self.failed_get_suffix)
         ):
             response = {"version": 1, "returncode": 17, "stdout": "", "stderr": "private error"}
-            return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+            return ProcessOutcome(0, json.dumps(response).encode(), b"")
 
         if (
             request["operation"] == "get"
@@ -139,11 +139,11 @@ class _FakeConnector:
             and not self.batch_stage_results
         ):
             response = {"version": 1, "returncode": 1, "stdout": "", "stderr": "no result tree"}
-            return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+            return ProcessOutcome(0, json.dumps(response).encode(), b"")
 
         stdout = self._perform(request)
         response = {"version": 1, "returncode": 0, "stdout": stdout, "stderr": ""}
-        return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+        return ProcessOutcome(0, json.dumps(response).encode(), b"")
 
     def _perform(self, request: dict[str, object]) -> str:
         operation = request["operation"]
@@ -231,9 +231,8 @@ class _FakeConnector:
 class _FilesystemConnector:
     """Faithful local filesystem implementation of the connector protocol."""
 
-    def __call__(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        argv, stdin = spec.argv, spec.input.decode() or None
         del timeout
         assert tuple(argv) == ("cluster-connector",)
         assert stdin is not None
@@ -241,17 +240,17 @@ class _FilesystemConnector:
         operation = request["operation"]
         if operation == "sync_to":
             self._sync_tree(request)
-            return self._response(argv)
+            return self._response()
         if operation == "put":
             source = Path(str(request["local_path"]))
             destination = Path(str(request["remote_path"]))
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
-            return self._response(argv)
+            return self._response()
         if operation == "exec":
             command = str(request["command"])
             if "sbatch-rr" in command:
-                return self._response(argv, stdout="Submitted batch job 1234\n")
+                return self._response(stdout="Submitted batch job 1234\n")
             completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-092712 [S603]; this faithful connector test must execute the exact production-generated shell program to verify its symlink behavior; inspecting the string or replacing the shell would not exercise the security boundary.
                 ("/bin/bash", "-c", command),
                 check=False,
@@ -259,7 +258,6 @@ class _FilesystemConnector:
                 text=True,
             )
             return self._response(
-                argv,
                 returncode=completed.returncode,
                 stdout=completed.stdout,
                 stderr=completed.stderr,
@@ -268,19 +266,18 @@ class _FilesystemConnector:
 
     @staticmethod
     def _response(
-        argv: Sequence[str],
         *,
         returncode: int = 0,
         stdout: str = "",
         stderr: str = "",
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> ProcessRun:
         response = {
             "version": 1,
             "returncode": returncode,
             "stdout": stdout,
             "stderr": stderr,
         }
-        return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+        return ProcessOutcome(0, json.dumps(response).encode(), b"")
 
     @staticmethod
     def _sync_tree(request: dict[str, object]) -> None:
@@ -372,7 +369,7 @@ def test_runner_uses_versioned_connector_protocol_and_collects_artifacts(tmp_pat
     connector = _FakeConnector()
 
     result = SlurmJobRunner(
-        _config(), process=connector, invocation_id=lambda: "run_01", clock=ManualClock()
+        _config(), processes=connector, invocation_id=lambda: "run_01", clock=ManualClock()
     ).run(
         SlurmJobRequest(
             workspace=workspace,
@@ -425,13 +422,12 @@ class _FakeSshProcess:
     """Answer a transport's processes; *program* is what executes remote commands."""
 
     def __init__(self, program: str = "ssh") -> None:
-        self.calls: list[tuple[tuple[str, ...], str | None, float]] = []
+        self.calls: list[tuple[tuple[str, ...], str | None, float | None]] = []
         self.environments: list[dict[str, str] | None] = []
         self._program = program
 
-    def __call__(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        argv, stdin = spec.argv, spec.input.decode() or None
         environment, command = _split_clean_environment(argv)
         self.environments.append(environment)
         self.calls.append((command, stdin, timeout))
@@ -447,13 +443,13 @@ class _FakeSshProcess:
                 stdout = "MISSING"
             else:
                 stdout = ""
-            return subprocess.CompletedProcess(argv, 0, stdout + end, "")
+            return ProcessOutcome(0, (stdout + end).encode(), b"")
         source, destination = command[-2:]
         if source.endswith("exit-code.txt"):
             Path(destination).write_text("0\n", encoding="utf-8")
         elif source.endswith("job.log"):
             Path(destination).write_text("ssh output\n", encoding="utf-8")
-        return subprocess.CompletedProcess(argv, 0, "", "")
+        return ProcessOutcome(0, b"", b"")
 
 
 def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
@@ -470,7 +466,7 @@ def test_runner_uses_builtin_ssh_and_rsync_transport(tmp_path: Path) -> None:
     )
 
     result = SlurmJobRunner(
-        config, process=process, invocation_id=lambda: "ssh_01", clock=ManualClock()
+        config, processes=process, invocation_id=lambda: "ssh_01", clock=ManualClock()
     ).run(SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused)
 
     assert result.job_id == "4567"
@@ -514,7 +510,7 @@ def test_local_transport_runs_commands_and_copies_on_this_host(tmp_path: Path) -
     )
 
     result = SlurmJobRunner(
-        config, process=process, invocation_id=lambda: "local_01", clock=ManualClock()
+        config, processes=process, invocation_id=lambda: "local_01", clock=ManualClock()
     ).run(SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused)
 
     assert result.job_id == "4567"
@@ -546,7 +542,7 @@ def test_the_ssh_transport_leaves_the_environment_to_the_login_session(tmp_path:
 
     config = _config(transport={"kind": "ssh", "host": "cluster.example"})
     SlurmJobRunner(
-        config, process=process, invocation_id=lambda: "env_01", clock=ManualClock()
+        config, processes=process, invocation_id=lambda: "env_01", clock=ManualClock()
     ).run(SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused)
 
     assert process.environments
@@ -579,7 +575,7 @@ def test_local_transport_processes_get_exactly_the_login_environment(host: dict[
     with tempfile.TemporaryDirectory() as workspace:
         SlurmJobRunner(
             config,
-            process=process,
+            processes=process,
             invocation_id=lambda: "env_01",
             host_environment=lambda: host,
             clock=ManualClock(),
@@ -625,6 +621,7 @@ def test_builtin_ssh_does_not_consume_embedding_process_stdin(tmp_path: Path) ->
         textwrap.dedent(
             f"""
             from pathlib import Path
+            from vs_sim.api import OsProcesses
             from vs_sim.api.testing import ManualClock
             from vs_slurm.api import SlurmConfig, SlurmJobRequest, SlurmJobRunner
 
@@ -641,7 +638,10 @@ def test_builtin_ssh_does_not_consume_embedding_process_stdin(tmp_path: Path) ->
                 "transport_timeout_seconds": 20,
             }})
             handle = SlurmJobRunner(
-                config, invocation_id=lambda: "stdin_01", clock=ManualClock()
+                config,
+                processes=OsProcesses(),
+                invocation_id=lambda: "stdin_01",
+                clock=ManualClock(),
             ).submit(
                 SlurmJobRequest(workspace=Path({str(workspace)!r}), command=("true",))
             )
@@ -671,7 +671,7 @@ def test_public_job_handle_recovers_without_resubmission(tmp_path: Path) -> None
     clock = ManualClock()
     runner = SlurmJobRunner(
         _config(poll_interval_seconds=1),
-        process=connector,
+        processes=connector,
         invocation_id=lambda: "recover_01",
         clock=clock,
     )
@@ -688,10 +688,10 @@ def test_public_job_handle_recovers_without_resubmission(tmp_path: Path) -> None
     )
 
     connector.active_polls = 0
-    resumed = SlurmJobRunner(_config(), process=connector, clock=ManualClock()).wait(
+    resumed = SlurmJobRunner(_config(), processes=connector, clock=ManualClock()).wait(
         recovered_handle, pause=clock.advance
     )
-    result = SlurmJobRunner(_config(), process=connector, clock=ManualClock()).collect(
+    result = SlurmJobRunner(_config(), processes=connector, clock=ManualClock()).collect(
         recovered_handle
     )
 
@@ -714,7 +714,7 @@ def test_cancel_uses_existing_handle_without_resubmitting(tmp_path: Path) -> Non
     workspace.mkdir()
     connector = _FakeConnector(active_polls=1)
     runner = SlurmJobRunner(
-        _config(), process=connector, invocation_id=lambda: "cancel_01", clock=ManualClock()
+        _config(), processes=connector, invocation_id=lambda: "cancel_01", clock=ManualClock()
     )
     handle = runner.submit(SlurmJobRequest(workspace=workspace, command=("true",)))
 
@@ -739,13 +739,13 @@ def test_recovered_handle_is_bound_to_cluster_and_validated(tmp_path: Path) -> N
     workspace.mkdir()
     connector = _FakeConnector()
     runner = SlurmJobRunner(
-        _config(), process=connector, invocation_id=lambda: "bound_01", clock=ManualClock()
+        _config(), processes=connector, invocation_id=lambda: "bound_01", clock=ManualClock()
     )
     handle = runner.submit(SlurmJobRequest(workspace=workspace, command=("true",)))
 
     other_cluster = SlurmJobRunner(
         _config(remote_workspace_root="/operator/other-runs"),
-        process=connector,
+        processes=connector,
         clock=ManualClock(),
     )
     with pytest.raises(SlurmError, match="does not belong to this cluster"):
@@ -764,7 +764,7 @@ def test_bounded_wait_requires_positive_timeout(tmp_path: Path) -> None:
     workspace.mkdir()
     connector = _FakeConnector(active_polls=1)
     runner = SlurmJobRunner(
-        _config(), process=connector, invocation_id=lambda: "timeout_01", clock=ManualClock()
+        _config(), processes=connector, invocation_id=lambda: "timeout_01", clock=ManualClock()
     )
     handle = runner.submit(SlurmJobRequest(workspace=workspace, command=("true",)))
 
@@ -778,11 +778,10 @@ def test_bounded_wait_requires_positive_timeout(tmp_path: Path) -> None:
 
 
 class _TimedOutProcess:
-    def __call__(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        stdin = spec.input.decode() or None
         del stdin
-        raise subprocess.TimeoutExpired(argv, timeout)
+        return ProcessTimedOut(timeout or 0.0, b"", b"")
 
 
 def test_builtin_transport_enforces_hard_process_timeout(tmp_path: Path) -> None:
@@ -791,7 +790,7 @@ def test_builtin_transport_enforces_hard_process_timeout(tmp_path: Path) -> None
     config = _config(transport={"kind": "ssh", "host": "cluster.example"})
 
     with pytest.raises(SlurmError, match="transport timed out during exec"):
-        SlurmJobRunner(config, process=_TimedOutProcess(), clock=ManualClock()).run(
+        SlurmJobRunner(config, processes=_TimedOutProcess(), clock=ManualClock()).run(
             SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused
         )
 
@@ -806,7 +805,7 @@ def test_service_and_setup_are_request_policy(tmp_path: Path) -> None:
         startup_timeout_seconds=30,
     )
 
-    SlurmJobRunner(_config(), process=connector, clock=ManualClock()).run(
+    SlurmJobRunner(_config(), processes=connector, clock=ManualClock()).run(
         SlurmJobRequest(
             workspace=workspace,
             command=("python", "check.py", "http://127.0.0.1:VIBESYS_DYNAMIC_PORT"),
@@ -827,7 +826,7 @@ def test_artifact_paths_are_candidate_relative(path: str, tmp_path: Path) -> Non
     workspace = tmp_path / "candidate"
     workspace.mkdir()
     with pytest.raises(SlurmError, match="candidate-relative"):
-        SlurmJobRunner(_config(), clock=ManualClock()).run(
+        SlurmJobRunner(_config(), processes=_FakeConnector(), clock=ManualClock()).run(
             SlurmJobRequest(
                 workspace=workspace,
                 command=("true",),
@@ -843,7 +842,7 @@ def test_connector_failure_does_not_expose_output(tmp_path: Path) -> None:
     connector = _FakeConnector(connector_exit_code=23)
 
     with pytest.raises(SlurmError, match="exit code 23") as error:
-        SlurmJobRunner(_config(), process=connector, clock=ManualClock()).run(
+        SlurmJobRunner(_config(), processes=connector, clock=ManualClock()).run(
             SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused
         )
     assert "private error" not in str(error.value)
@@ -855,7 +854,7 @@ def test_nonzero_job_skips_output_artifact_collection(tmp_path: Path) -> None:
     output = tmp_path / "metrics.json"
     connector = _FakeConnector(job_exit_code=2)
 
-    result = SlurmJobRunner(_config(), process=connector, clock=ManualClock()).run(
+    result = SlurmJobRunner(_config(), processes=connector, clock=ManualClock()).run(
         SlurmJobRequest(
             workspace=workspace,
             command=("false",),
@@ -891,7 +890,7 @@ def test_a_lost_or_cut_progress_count_is_unknown_not_zero(tmp_path: Path, raw: s
     clock = ManualClock()
     runner = SlurmJobRunner(
         _config(),
-        process=_ProgressAnswer(raw),
+        processes=_ProgressAnswer(raw),
         invocation_id=lambda: "batch_01",
         clock=clock,
     )
@@ -911,7 +910,7 @@ def test_a_whole_progress_count_is_read(tmp_path: Path) -> None:
     clock = ManualClock()
     runner = SlurmJobRunner(
         _config(),
-        process=_ProgressAnswer(f"2\n{SCHEDULER_READ_END}\n"),
+        processes=_ProgressAnswer(f"2\n{SCHEDULER_READ_END}\n"),
         invocation_id=lambda: "batch_01",
         clock=clock,
     )
@@ -965,7 +964,7 @@ def test_batch_runs_ordered_stages_in_one_allocation_and_stops_after_failure(
     clock = ManualClock()
     runner = SlurmJobRunner(
         _config(),
-        process=connector,
+        processes=connector,
         invocation_id=lambda: "batch_01",
         clock=clock,
     )
@@ -1082,7 +1081,7 @@ def test_batch_collection_preserves_evidence_without_inventing_outcomes(
             "0001": benchmark,
         },
     )
-    runner = SlurmJobRunner(_config(), process=connector, clock=ManualClock())
+    runner = SlurmJobRunner(_config(), processes=connector, clock=ManualClock())
     handle = runner.submit_batch(
         SlurmBatchRequest(
             workspace=workspace,
@@ -1136,7 +1135,7 @@ def test_batch_collection_only_recovers_stages_with_available_evidence(
             for index in range(stage_count)
         },
     )
-    runner = SlurmJobRunner(_config(), process=connector, clock=ManualClock())
+    runner = SlurmJobRunner(_config(), processes=connector, clock=ManualClock())
     handle = runner.submit_batch(
         SlurmBatchRequest(
             workspace=workspace,
@@ -1174,7 +1173,7 @@ def test_batch_collection_keeps_available_evidence_when_metadata_is_missing(
         job_exit_code=allocation_exit, batch_stage_results={"0000": stage_files}
     )
     metrics = tmp_path / "metrics.json"
-    runner = SlurmJobRunner(_config(), process=connector, clock=ManualClock())
+    runner = SlurmJobRunner(_config(), processes=connector, clock=ManualClock())
     handle = runner.submit_batch(
         SlurmBatchRequest(
             workspace=workspace,
@@ -1221,7 +1220,7 @@ def test_batch_collection_transport_failures_never_publish_successful_evidence(
         },
     )
     connector.failed_get_suffix = failed_get
-    runner = SlurmJobRunner(_config(), process=connector, clock=ManualClock())
+    runner = SlurmJobRunner(_config(), processes=connector, clock=ManualClock())
     handle = runner.submit_batch(
         SlurmBatchRequest(
             workspace=workspace,
@@ -1271,7 +1270,7 @@ def test_batch_collection_keeps_stage_evidence_when_local_artifact_path_is_block
             },
         },
     )
-    runner = SlurmJobRunner(_config(), process=connector, clock=ManualClock())
+    runner = SlurmJobRunner(_config(), processes=connector, clock=ManualClock())
     handle = runner.submit_batch(
         SlurmBatchRequest(
             workspace=workspace,
@@ -1320,7 +1319,7 @@ def _service_log_tail(tmp_path: Path, log_lines: list[str]) -> tuple[str, str | 
     clock = ManualClock()
     runner = SlurmJobRunner(
         _config(),
-        process=connector,
+        processes=connector,
         invocation_id=lambda: "batch_tail",
         clock=clock,
     )
@@ -1373,7 +1372,7 @@ def test_service_log_tail_bounds_line_length_and_total_size(tmp_path: Path) -> N
 def test_batch_rejects_duplicate_or_unsafe_stage_names(tmp_path: Path) -> None:
     workspace = tmp_path / "candidate"
     workspace.mkdir()
-    runner = SlurmJobRunner(_config(), clock=ManualClock())
+    runner = SlurmJobRunner(_config(), processes=_FakeConnector(), clock=ManualClock())
 
     with pytest.raises(SlurmError, match="unique safe names"):
         runner.submit_batch(
@@ -1414,7 +1413,7 @@ def test_content_addressed_staging_reuses_objects_and_keeps_workspaces_fresh(
     invocation_ids = iter(("cache_01", "cache_02", "cache_03", "cache_04"))
     runner = SlurmJobRunner(
         _config(),
-        process=connector,
+        processes=connector,
         invocation_id=lambda: next(invocation_ids),
         clock=ManualClock(),
     )
@@ -1469,17 +1468,16 @@ def test_input_that_changes_during_staging_is_reported_as_a_transient_condition(
     edited.write_text("v1\n", encoding="utf-8")
 
     class _EditingConnector(_FilesystemConnector):
-        def __call__(
-            self, argv: Sequence[str], *, stdin: str | None, timeout: float
-        ) -> subprocess.CompletedProcess[str]:
+        def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+            stdin = spec.input.decode() or None
             assert stdin is not None
             if json.loads(stdin)["operation"] == "sync_to":
                 edited.write_text("v2\n", encoding="utf-8")
-            return super().__call__(argv, stdin=stdin, timeout=timeout)
+            return super().run(spec, timeout=timeout)
 
     runner = SlurmJobRunner(
         _config(remote_workspace_root=str(tmp_path / "remote")),
-        process=_EditingConnector(),
+        processes=_EditingConnector(),
         invocation_id=lambda: "racing_edit",
         clock=ManualClock(),
     )
@@ -1505,7 +1503,7 @@ def test_support_staging_replaces_a_destination_symlink_without_following_it(
     remote_root = tmp_path / "remote"
     runner = SlurmJobRunner(
         _config(remote_workspace_root=str(remote_root)),
-        process=_FilesystemConnector(),
+        processes=_FilesystemConnector(),
         invocation_id=lambda: "safe_destination",
         clock=ManualClock(),
     )
@@ -1536,7 +1534,7 @@ def test_support_staging_rejects_a_symlinked_parent_component(tmp_path: Path) ->
     (support / "helper.py").write_text("safe = True\n", encoding="utf-8")
     runner = SlurmJobRunner(
         _config(remote_workspace_root=str(tmp_path / "remote")),
-        process=_FilesystemConnector(),
+        processes=_FilesystemConnector(),
         invocation_id=lambda: "safe_parent",
         clock=ManualClock(),
     )
@@ -1560,7 +1558,10 @@ def test_failed_content_upload_does_not_publish_a_ready_object(tmp_path: Path) -
 
     with pytest.raises(SlurmError, match="exit code 17"):
         SlurmJobRunner(
-            _config(), process=connector, invocation_id=lambda: "failed_upload", clock=ManualClock()
+            _config(),
+            processes=connector,
+            invocation_id=lambda: "failed_upload",
+            clock=ManualClock(),
         ).submit(SlurmJobRequest(workspace=workspace, command=("true",)))
 
     remote_commands = [
@@ -1582,7 +1583,7 @@ def test_concurrent_content_publisher_wins_without_loser_deleting_its_object(
     connector = _FakeConnector(content_cache_behavior="concurrent-publisher")
 
     handle = SlurmJobRunner(
-        _config(), process=connector, invocation_id=lambda: "race_01", clock=ManualClock()
+        _config(), processes=connector, invocation_id=lambda: "race_01", clock=ManualClock()
     ).submit(SlurmJobRequest(workspace=workspace, command=("true",)))
 
     assert handle.content_cache_hits == 1
@@ -1618,7 +1619,7 @@ def test_cache_lock_timeout_is_reported_as_retryable_and_never_deletes_target(
 
     with pytest.raises(SlurmError, match=r"temporarily unavailable.*retry staging"):
         SlurmJobRunner(
-            _config(), process=connector, invocation_id=lambda: "busy_01", clock=ManualClock()
+            _config(), processes=connector, invocation_id=lambda: "busy_01", clock=ManualClock()
         ).submit(SlurmJobRequest(workspace=workspace, command=("true",)))
 
     publish = next(
@@ -1640,9 +1641,8 @@ class _SubmissionFaultConnector(_FakeConnector):
         self.during_sbatch = during_sbatch
         self.scheduler_called = False
 
-    def __call__(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        stdin = spec.input.decode() or None
         assert stdin is not None
         request = json.loads(stdin)
         is_sbatch = request["operation"] == "exec" and "sbatch-rr " in request["command"]
@@ -1652,8 +1652,8 @@ class _SubmissionFaultConnector(_FakeConnector):
             not self.during_sbatch and request["operation"] == "exec"
         ):
             response = {"version": 1, "returncode": 255, "stdout": "", "stderr": "private"}
-            return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
-        return super().__call__(argv, stdin=stdin, timeout=timeout)
+            return ProcessOutcome(0, json.dumps(response).encode(), b"")
+        return super().run(spec, timeout=timeout)
 
 
 @pytest.mark.parametrize("during_sbatch", [False, True])
@@ -1662,7 +1662,7 @@ def test_submission_fault_distinguishes_staging_rejection_from_unknown_scheduler
 ) -> None:
     """Only a fault before invoking sbatch proves no scheduler-owned resource exists."""
     process = _SubmissionFaultConnector(during_sbatch=during_sbatch)
-    runner = SlurmJobRunner(_config(), process=process, clock=ManualClock())
+    runner = SlurmJobRunner(_config(), processes=process, clock=ManualClock())
     with pytest.raises(SlurmError, match="transport exec failed") as raised:
         runner.submit(SlurmJobRequest(workspace=tmp_path, command=("true",)))
     assert process.scheduler_called is during_sbatch
@@ -1677,9 +1677,8 @@ class _SubmissionFaultSshProcess(_FakeSshProcess):
         self.phase = phase
         self.scheduler_called = False
 
-    def __call__(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        argv = spec.argv
         command = argv[-1]
         is_sbatch = argv[0] == "ssh" and "sbatch-rr " in command
         self.scheduler_called |= is_sbatch
@@ -1691,8 +1690,8 @@ class _SubmissionFaultSshProcess(_FakeSshProcess):
             "sbatch": is_sbatch,
         }[self.phase]
         if should_fail:
-            return subprocess.CompletedProcess(argv, 255, "", "private SSH failure")
-        return super().__call__(argv, stdin=stdin, timeout=timeout)
+            return ProcessOutcome(255, b"", b"private SSH failure")
+        return super().run(spec, timeout=timeout)
 
 
 @pytest.mark.parametrize("phase", ["mkdir", "staging", "rsync", "script-upload", "sbatch"])
@@ -1702,7 +1701,7 @@ def test_ssh_submission_failure_preserves_the_acceptance_boundary(
     process = _SubmissionFaultSshProcess(phase)
     runner = SlurmJobRunner(
         _config(transport={"kind": "ssh", "host": "cluster.example"}),
-        process=process,
+        processes=process,
         clock=ManualClock(),
     )
     with pytest.raises(SlurmError) as raised:
@@ -1716,7 +1715,7 @@ def test_local_script_staging_failure_is_definitely_rejected(tmp_path: Path) -> 
     scratch_root.write_text("not a directory", encoding="utf-8")
     connector = _FakeConnector()
     runner = SlurmJobRunner(
-        _config(), process=connector, scratch_root=scratch_root, clock=ManualClock()
+        _config(), processes=connector, scratch_root=scratch_root, clock=ManualClock()
     )
     with pytest.raises(SlurmSubmissionRejectedError):
         runner.submit(SlurmJobRequest(workspace=tmp_path, command=("true",)))
@@ -1725,7 +1724,7 @@ def test_local_script_staging_failure_is_definitely_rejected(tmp_path: Path) -> 
 
 def test_invalid_batch_is_definitely_rejected_before_any_transport(tmp_path: Path) -> None:
     connector = _FakeConnector()
-    runner = SlurmJobRunner(_config(), process=connector, clock=ManualClock())
+    runner = SlurmJobRunner(_config(), processes=connector, clock=ManualClock())
     with pytest.raises(SlurmSubmissionRejectedError):
         runner.submit_batch(SlurmBatchRequest(workspace=tmp_path, stages=()))
     assert connector.requests == []
@@ -1733,7 +1732,7 @@ def test_invalid_batch_is_definitely_rejected_before_any_transport(tmp_path: Pat
 
 def test_unencodable_job_script_is_definitely_rejected_before_sbatch(tmp_path: Path) -> None:
     connector = _FakeConnector()
-    runner = SlurmJobRunner(_config(), process=connector, clock=ManualClock())
+    runner = SlurmJobRunner(_config(), processes=connector, clock=ManualClock())
     with pytest.raises(SlurmSubmissionRejectedError) as caught:
         runner.submit(
             SlurmJobRequest(workspace=tmp_path, command=("true",), setup_script="/operator/\ud800")

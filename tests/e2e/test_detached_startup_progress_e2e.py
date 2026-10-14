@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 
 from entrypoints.detached_run import RecordPublisher
 from entrypoints.production import production_runs
@@ -90,7 +90,11 @@ def _serve(
     def serve() -> None:
         hostname, version = host_facts()
         integration = LocalRunIntegration(
-            clock=clock, git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+            clock=clock,
+            git=REAL_GIT,
+            github=NO_GITHUB,
+            threads=OsThreads(),
+            slurm_processes=REAL_PROCESSES,
         )
         try:
             with registry.register(instance_id) as hold:

@@ -1,23 +1,23 @@
 """The Slurm broker client against a broker that does not answer by its protocol.
 
-``run_brokered_process`` stands in for ``subprocess.run`` behind ``vs_slurm``'s process
-seam, whose runner maps ``FileNotFoundError`` and ``subprocess.TimeoutExpired`` and whose
-callers catch ``OSError``. Against a scripted broker on a ``SimNetwork``, in virtual time,
-every reply ends in a completed process or one of those errors: a refusal, a typed
-``BrokerReplyError`` for a reply outside the protocol or a hang-up, or a timeout.
+``BrokeredProcesses`` is the ``Processes`` behind ``vs_slurm``'s transport, whose runner
+maps ``FileNotFoundError`` and a timed-out run and whose callers catch ``OSError``. Against
+a scripted broker on a ``SimNetwork``, in virtual time, every reply ends in a completed
+process, a timed-out run, or an ``OSError``: a refusal, or a typed ``BrokerReplyError`` for
+a reply outside the protocol or a hang-up.
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_sandbox.api.slurm import BrokerReplyError, run_brokered_process
+from vs_sandbox.api.slurm import BrokeredProcesses, BrokerReplyError
+from vs_sim.api import ProcessOutcome, ProcessSpec, ProcessTimedOut
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     SimNetwork,
@@ -49,9 +49,8 @@ _WRONG_TYPES = (
 )
 _FRAMES = (*hostile_json_frames((_RAN.encode(), _REFUSED.encode())), *_WRONG_TYPES)
 _FRAME_BOUND = 16 * 1024 * 1024
-_Completed = subprocess.CompletedProcess
-_TimedOut = subprocess.TimeoutExpired
-"""The data types of ``subprocess.run``'s contract; no process is launched."""
+_Completed = ProcessOutcome
+_TimedOut = ProcessTimedOut
 
 type Broker = Callable[[Connection], None]
 """What the scripted broker does once it has read the request line."""
@@ -69,7 +68,7 @@ def _read_request(connection: Connection) -> bytes:
 
 def _call(
     broker: Broker, *, seed: int | None, buffer: int | None = None, serve: bool = True
-) -> tuple[_Completed[str] | OSError | _TimedOut, float, bytes]:
+) -> tuple[_Completed | OSError | _TimedOut, float, bytes]:
     """What the client returns or raises against ``broker``, the virtual time it took,
     and the request line the broker read."""
     clock = VirtualClock()
@@ -77,7 +76,7 @@ def _call(
     network = SimNetwork(threads, buffer_bytes=buffer)
     request: list[bytes] = [b""]
 
-    def program() -> _Completed[str] | OSError | _TimedOut:
+    def program() -> _Completed | OSError | _TimedOut:
         listener = network.listen(ADDRESS) if serve else None
 
         def respond() -> None:
@@ -91,17 +90,15 @@ def _call(
 
         worker = threads.spawn(respond, name="broker") if serve else None
         try:
-            return run_brokered_process(
-                Path(ADDRESS),
-                "token",
-                ("ssh", "--", "cluster", "hostname"),
-                stdin=None,
-                timeout=TIMEOUT_S,
-                network=network,
+            run = BrokeredProcesses(Path(ADDRESS), "token", network=network).run(
+                ProcessSpec(("ssh", "--", "cluster", "hostname")), timeout=TIMEOUT_S
             )
-        except (OSError, _TimedOut) as error:
+        except OSError as error:
             # Anything else escapes and fails the test.
             return error
+        else:
+            assert isinstance(run, (_Completed, _TimedOut)), run
+            return run
         finally:
             if worker is not None:
                 worker.join(HANG_GUARD_S)
@@ -144,8 +141,7 @@ def test_a_well_formed_result_is_the_completed_process() -> None:
     outcome, _, request = _call(_replying(_RAN.encode()), seed=3)
 
     assert isinstance(outcome, _Completed)
-    assert (outcome.returncode, outcome.stdout, outcome.stderr) == (0, "o", "e")
-    assert outcome.args == ("ssh", "--", "cluster", "hostname")
+    assert (outcome.returncode, outcome.stdout, outcome.stderr) == (0, b"o", b"e")
     assert json.loads(request) == {
         "token": "token",
         "argv": ["ssh", "--", "cluster", "hostname"],

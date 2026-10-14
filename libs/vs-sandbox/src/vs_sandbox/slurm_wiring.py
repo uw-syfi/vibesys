@@ -10,8 +10,8 @@ from vs_slurm.wiring import SlurmCluster
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sim.api import Clock
-    from vs_slurm.api import Cluster, SlurmConfig, SlurmProcess
+    from vs_sim.api import Clock, Processes
+    from vs_slurm.api import Cluster, SlurmConfig
 
 
 def make_cluster(
@@ -19,15 +19,14 @@ def make_cluster(
     *,
     state_root: Path,
     clock: Clock,
-    process: SlurmProcess | None = None,
+    processes: Processes,
 ) -> Cluster:
     """Wire transport details once; execution depends only on Cluster.
 
-    ``process`` replaces the transport's process boundary (``None`` runs the
-    configured programs); a Fake that implements it never spawns one.
+    ``processes`` starts the transport's programs; a Fake answers them without a process.
     """
     state_root.mkdir(parents=True, exist_ok=True)
     return SlurmCluster(
-        SlurmJobRunner(config, scratch_root=state_root, process=process, clock=clock),
+        SlurmJobRunner(config, scratch_root=state_root, processes=processes, clock=clock),
         state_root=state_root,
     )

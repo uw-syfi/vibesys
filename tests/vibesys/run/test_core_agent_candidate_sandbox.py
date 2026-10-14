@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
@@ -76,7 +76,11 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
         }
     )
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     clock = VirtualClock(at=0.0)
 
@@ -187,7 +191,11 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
         }
     )
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     clock = VirtualClock(at=0.0)
     turns = _Turns()

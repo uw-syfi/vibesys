@@ -15,7 +15,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
-from tests.support.real_git import REAL_GIT
+from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_core.api import HostFence, HostId, Until
@@ -142,6 +142,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     run_id="workspace-contract",
                     framework_root=Path(scratch),
                     clock=ManualClock(),
+                    slurm_processes=REAL_PROCESSES,
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),

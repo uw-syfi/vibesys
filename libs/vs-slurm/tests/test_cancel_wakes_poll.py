@@ -10,7 +10,6 @@ job timeout (two seconds here) and fail the assertions instead of hanging.
 from __future__ import annotations
 
 import json
-import subprocess
 import threading
 from typing import TYPE_CHECKING
 
@@ -18,6 +17,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     ClusterCancelRequested,
@@ -38,7 +38,6 @@ from vs_slurm.fake_connector import JOB_ID, FakeConnector, handle, recorded_comm
 from vs_slurm.wiring import SlurmCluster
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
 _POLL_INTERVAL_SECONDS = 3600.0
@@ -67,14 +66,11 @@ class _Cluster:
     def __init__(self, state: Path) -> None:
         self.state = state
 
-    def process(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        stdin = spec.input.decode() or None
         del timeout
         assert stdin is not None
-        return subprocess.CompletedProcess(
-            argv, 0, json.dumps(handle(self.state, json.loads(stdin)))
-        )
+        return ProcessOutcome(0, (json.dumps(handle(self.state, json.loads(stdin)))).encode(), b"")
 
 
 def _runner(cluster: _Cluster, poll_interval: float) -> SlurmJobRunner:
@@ -85,7 +81,7 @@ def _runner(cluster: _Cluster, poll_interval: float) -> SlurmJobRunner:
         poll_interval_seconds=poll_interval,
         job_timeout_seconds=_JOB_TIMEOUT_SECONDS,
     )
-    return SlurmJobRunner(config, process=cluster.process, clock=ManualClock())
+    return SlurmJobRunner(config, processes=cluster, clock=ManualClock())
 
 
 def _unpaused(seconds: float) -> None:
@@ -165,7 +161,7 @@ def test_a_wait_without_a_cancel_pauses_only_through_its_pause(
         poll_interval_seconds=poll_interval,
         job_timeout_seconds=_JOB_TIMEOUT_SECONDS,
     )
-    runner = SlurmJobRunner(config, process=_Cluster(state).process, clock=clock)
+    runner = SlurmJobRunner(config, processes=_Cluster(state), clock=clock)
     job = runner.submit(_request(state))
     pauses: list[float] = []
 
@@ -245,7 +241,7 @@ def test_cancel_does_not_reuse_a_completed_inspection_read(tmp_path: Path) -> No
             remote_workspace_root=str(tmp_path / "remote"),
             transport=SlurmConnectorTransport(kind="connector", command=("fake",)),
         ),
-        process=connector,
+        processes=connector,
         clock=ManualClock(),
     )
     cluster = SlurmCluster(runner, state_root=tmp_path / "state")

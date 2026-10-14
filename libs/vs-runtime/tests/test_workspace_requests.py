@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.real_git import REAL_GIT
+from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 from tests.support.session_world import RunningRunInvocations, SettledRunInvocations
 
 from vs_agent.api import NULL_SKILL_SELECTION
@@ -231,6 +231,7 @@ def _env(
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
                 clock=ManualClock(),
+                slurm_processes=REAL_PROCESSES,
             ),
             lambda _request: _Session(),
             clock=ManualClock(),

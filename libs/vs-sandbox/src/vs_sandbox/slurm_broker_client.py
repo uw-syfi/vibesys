@@ -1,14 +1,14 @@
 """Confined client for the host-owned Slurm process broker.
 
-``run_brokered_process`` stands in for ``subprocess.run`` behind ``vs_slurm``'s process
-seam, so it keeps that call's contract: a broker nobody serves is ``FileNotFoundError``, a
-call the broker does not answer in time is ``subprocess.TimeoutExpired``, and a refusal is
+``BrokeredProcesses`` is the ``vs_sim`` ``Processes`` that ``vs_slurm``'s transport starts its
+programs with inside a confined environment: a broker nobody serves is ``FileNotFoundError``,
+a call the broker does not answer in time is ``ProcessTimedOut``, and a refusal is
 ``PermissionError``. A reply outside the broker protocol is ``BrokerReplyError``.
 """
 
 from __future__ import annotations
 
-import subprocess
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
@@ -19,13 +19,12 @@ from vs_sandbox.slurm_broker_protocol import (
     BrokerRefused,
     ProcessCall,
 )
-from vs_sim.api import UnixNetwork
+from vs_sim.api import ProcessOutcome, ProcessTimedOut
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
-    from vs_sim.api import Connection, Network
+    from vs_sim.api import Connection, Network, ProcessRun, ProcessSpec
 
 _RECV_BYTES = 65_536
 
@@ -49,52 +48,58 @@ class BrokerReplyError(ConnectionError):
         return cls(f"Slurm broker reply is malformed: {error.error_count()} errors")
 
 
-def run_brokered_process(  # noqa: PLR0913  # lint-waiver: LW-241403 [PLR0913]; the first five are ``vs_slurm``'s process seam, which this function implements, and ``network`` is its one transport seam; bundling any of them into an object would break the drop-in ``subprocess.run`` shape callers rely on.
-    socket_path: Path,
-    token: str,
-    argv: Sequence[str],
-    *,
-    stdin: str | None,
-    timeout: float,
-    network: Network | None = None,
-) -> subprocess.CompletedProcess[str]:
-    """Execute one process through the host broker's constrained capability.
+@dataclass(frozen=True)
+class BrokeredProcesses:
+    """Runs each transport program through the host broker's constrained capability.
 
-    ``timeout`` bounds each wait on the broker: to connect, to send, and for each part
-    of the reply.
+    A run the broker does not answer within its timeout is :class:`ProcessTimedOut`; each
+    wait on the broker (to connect, to send, for each part of the reply) is bounded by it.
+    The broker runs the program, so it owns the program's process group.
 
-    Raises:
+    Raises from :meth:`run`:
         FileNotFoundError: nothing listens on ``socket_path``.
-        subprocess.TimeoutExpired: the broker did not answer within ``timeout``.
         PermissionError: the broker refused the call or could not run it.
         BrokerReplyError: the broker hung up early or replied outside its protocol.
     """
-    request = ProcessCall.model_construct(
-        token=token, argv=tuple(argv), stdin=stdin, timeout=timeout
-    )
-    try:
-        line = _exchange(
-            network or UnixNetwork(),
-            str(socket_path),
-            request.model_dump_json().encode() + b"\n",
-            timeout,
+
+    socket_path: Path
+    token: str = field(repr=False)
+    network: Network
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        """Ask the broker to run ``spec.argv`` with ``spec.input`` as its stdin."""
+        if timeout is None:
+            message = "a brokered Slurm transport call needs a timeout"
+            raise ValueError(message)
+        if spec.cwd is not None or spec.env is not None:
+            message = "the Slurm broker runs a program in its own directory and environment"
+            raise ValueError(message)
+        request = ProcessCall.model_construct(
+            token=self.token,
+            argv=spec.argv,
+            stdin=spec.input.decode() if spec.input else None,
+            timeout=timeout,
         )
-    except ConnectionRefusedError as error:
-        raise FileNotFoundError(str(error)) from error
-    except TimeoutError as error:
-        raise subprocess.TimeoutExpired(list(argv), timeout) from error
-    try:
-        reply = BROKER_REPLY.validate_json(line)
-    except ValidationError as error:
-        raise BrokerReplyError.malformed(error) from error
-    if isinstance(reply, BrokerRefused):
-        raise PermissionError(reply.error)
-    return subprocess.CompletedProcess(
-        args=tuple(argv),
-        returncode=reply.result.returncode,
-        stdout=reply.result.stdout,
-        stderr=reply.result.stderr,
-    )
+        try:
+            line = _exchange(
+                self.network,
+                str(self.socket_path),
+                request.model_dump_json().encode() + b"\n",
+                timeout,
+            )
+        except ConnectionRefusedError as error:
+            raise FileNotFoundError(str(error)) from error
+        except TimeoutError:
+            return ProcessTimedOut(timeout, b"", b"")
+        try:
+            reply = BROKER_REPLY.validate_json(line)
+        except ValidationError as error:
+            raise BrokerReplyError.malformed(error) from error
+        if isinstance(reply, BrokerRefused):
+            raise PermissionError(reply.error)
+        return ProcessOutcome(
+            reply.result.returncode, reply.result.stdout.encode(), reply.result.stderr.encode()
+        )
 
 
 def _exchange(network: Network, address: str, request: bytes, timeout: float) -> bytes:
@@ -120,4 +125,4 @@ def _reply_line(connection: Connection, timeout: float) -> bytes:
     return bytes(received)
 
 
-__all__ = ["BrokerReplyError", "run_brokered_process"]
+__all__ = ["BrokerReplyError", "BrokeredProcesses"]

@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from tests.server.support import REQUEST_TIME
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from websockets.sync.client import connect
 
 from entrypoints.production import production_runs
@@ -265,7 +265,11 @@ def test_runtime_snapshots_namespace_client_state_by_project(tmp_path: Path) -> 
 def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: Path) -> None:
     """A stop accepted from ``listening`` survives until session installation."""
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     control = _SessionControlStub(integration.control)
 

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.docker_environment import host_container_backend
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
@@ -105,7 +105,11 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     submitted_ids: list[str] = []
 

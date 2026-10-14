@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from tests.support.docker_environment import host_container_backend
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import (
     _plugin,
@@ -84,7 +84,11 @@ def _services(tmp_path: Path) -> CoreServices:
     )
     plugin = type(plugin)(id=plugin.id, agents=plugin.agents, options=EmptyOptions, core=policy)
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     clock = VirtualClock(at=0.0)
 

@@ -82,7 +82,7 @@ if TYPE_CHECKING:
     from vs_project.api import StateStoreFactory
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
-    from vs_slurm.api import SlurmProcess
+    from vs_sim.api import Processes
 
 # Simulated seconds one run may wait; a healthy scenario needs a small fraction of it.
 SIMULATED_BUDGET_S = 120.0
@@ -445,7 +445,7 @@ class LoopInput:
     slurm_config: Path
     agent_config: Path
     connector: FakeConnector
-    """The in-process Fake cluster; pass it to :func:`run_request` as ``slurm_process``."""
+    """The in-process Fake cluster; pass it to :func:`run_request` as ``slurm_processes``."""
     state_stores: FakeStateStores | None
     """The run's durable records, kept across a simulated crash; ``None`` is the real ``.vibesys``.
 
@@ -627,7 +627,7 @@ def run_request(  # noqa: PLR0913
     client_factory: Callable[..., AgentClientProtocol] | None = None,
     clock: CrashableRunClock | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-    slurm_process: SlurmProcess | None = None,
+    slurm_processes: Processes | None = None,
     state_stores: StateStoreFactory | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
@@ -657,7 +657,7 @@ def run_request(  # noqa: PLR0913
             # repository must exist on disk: these runs use the product's real Git.
             processes=REAL_PROCESSES,
             git_repository=None,
-            slurm_process=slurm_process,
+            slurm_processes=slurm_processes,
             state_stores=state_stores,
         )
     )

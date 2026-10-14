@@ -40,7 +40,6 @@ from vs_sim.crash import (
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
 from vs_sim.fakes import (
-    FakeCapturedTextProcessLauncher,
     FakeForegroundChild,
     FakeForegroundLauncher,
     FakeMergedOutputProcessLauncher,
@@ -115,7 +114,6 @@ __all__ = [
     "CrashableClock",
     "Depth",
     "EventTrace",
-    "FakeCapturedTextProcessLauncher",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
     "FakeMergedOutputProcessLauncher",

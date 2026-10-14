@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import REAL_PROCESSES
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     plan_of,
     resolved,
@@ -176,6 +177,7 @@ def _request(
         benchmark_command=benchmark,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         clock=ManualClock(),
+        slurm_processes=REAL_PROCESSES,
     )
 
 

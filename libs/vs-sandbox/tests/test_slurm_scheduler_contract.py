@@ -13,7 +13,6 @@ latency per remote command, so nothing sleeps.
 from __future__ import annotations
 
 import asyncio
-import subprocess
 import tempfile
 import threading
 from dataclasses import dataclass
@@ -34,7 +33,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
-from vs_sim.api import yield_now
+from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec, yield_now
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     CANCEL_REACTIONS,
@@ -61,7 +60,7 @@ from vs_slurm.api import (
 from vs_slurm.api import SlurmBatchStageResult as _StageResult
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
     from vs_sim.api import Sleeper
 
@@ -169,15 +168,13 @@ class _Faults:
         """Fail the ``index``-th command from now (0 is the next one) with a transport error."""
         self._countdown = index
 
-    def __call__(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
         if self._countdown is not None:
             if self._countdown == 0:
                 self._countdown = None
-                return subprocess.CompletedProcess(argv, 255, "", "connection lost")
+                return ProcessOutcome(255, b"", b"connection lost")
             self._countdown -= 1
-        return self._inner(argv, stdin=stdin, timeout=timeout)
+        return self._inner.run(spec, timeout=timeout)
 
 
 @dataclass
@@ -230,7 +227,7 @@ def _replay_world(
             remote_workspace_root=str(remote),
             transport=SlurmConnectorTransport(kind="connector", command=("trace-connector",)),
         ),
-        process=faults,
+        processes=faults,
         clock=clock,
     )
     cluster = SlurmCluster(runner, state_root=root / "identity")

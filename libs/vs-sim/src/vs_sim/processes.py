@@ -261,53 +261,6 @@ class PipedProcessLauncher(Protocol):
         ...
 
 
-class CapturedTextProcess(Protocol):
-    """A synchronous UTF-8 child with captured streams and an owned process group.
-
-    A caller that sees :class:`ProcessTimeoutError` from :meth:`communicate`
-    still owns an unreaped group leader. It must call :meth:`kill_group` before
-    :meth:`wait`; that ordering keeps the leader's PID allocated while the
-    group is signalled, so the numeric process-group ID cannot be reused for an
-    unrelated process group.
-    """
-
-    @property
-    def returncode(self) -> int:
-        """Return the leader's status after successful communication or waiting."""
-        ...
-
-    def communicate(self, input_text: str | None, timeout: float) -> tuple[str, str]:
-        """Feed optional input and collect both streams, or raise on timeout."""
-        ...
-
-    def kill_group(self) -> None:
-        """Kill the leader and every descendant in its owned process group."""
-        ...
-
-    def wait(self, timeout: float) -> int:
-        """Reap the group leader within *timeout*, or raise on timeout."""
-        ...
-
-    def close(self) -> None:
-        """Attempt every pipe close, grouping multiple failures in stream order."""
-        ...
-
-
-class CapturedTextProcessLauncher(Protocol):
-    """Start a synchronous UTF-8 command in an owned POSIX process group."""
-
-    def start(
-        self,
-        argv: tuple[str, ...],
-        *,
-        pipe_stdin: bool,
-        cwd: Path | None = None,
-        env: Mapping[str, str] | None = None,
-    ) -> CapturedTextProcess:
-        """Start *argv*, raising ``OSError`` when it cannot be started."""
-        ...
-
-
 class _StartedPipedProcess(Protocol):
     """A newly started group whose binary pipes have not changed ownership yet."""
 
@@ -491,36 +444,6 @@ class _ProcessGroupLeader(Protocol):
     def wait(self, timeout: float | None = None) -> int: ...
 
 
-class _CapturedTextPopen(_ProcessGroupLeader, Protocol):
-    """The ``Popen`` surface behind a captured text-process handle."""
-
-    @property
-    def stdin(self) -> IO[str] | None: ...
-
-    @property
-    def stdout(self) -> IO[str] | None: ...
-
-    @property
-    def stderr(self) -> IO[str] | None: ...
-
-    def communicate(
-        self, input_text: str | None = None, /, timeout: float | None = None
-    ) -> tuple[str, str]: ...
-
-
-class _CapturedTextProcessFactory(Protocol):
-    """Construct the Popen-like resource owned by the public real adapter."""
-
-    def __call__(
-        self,
-        argv: tuple[str, ...],
-        *,
-        pipe_stdin: bool,
-        cwd: Path | None,
-        env: Mapping[str, str] | None,
-    ) -> _CapturedTextPopen: ...
-
-
 class _OwnedProcessGroup:
     """Serialize process-group signals with leader reaping while its PGID is reserved."""
 
@@ -702,97 +625,6 @@ class SubprocessPipedProcessLauncher:
             message = "piped process groups require a POSIX host"
             raise OSError(message)
         return _start_piped_process(argv, cwd, _start_subprocess_group, _CancellableTextPipe)
-
-
-class _SubprocessCapturedTextProcess:
-    """Own a ``Popen`` until its caller has settled the whole process group."""
-
-    def __init__(self, process: _CapturedTextPopen) -> None:
-        self._process = process
-        self._group = _OwnedProcessGroup(process)
-
-    @property
-    def returncode(self) -> int:
-        returncode = self._process.returncode
-        if returncode is None:
-            message = "captured process has not exited"
-            raise RuntimeError(message)
-        return returncode
-
-    def communicate(self, input_text: str | None, timeout: float) -> tuple[str, str]:
-        return self._process.communicate(input_text, timeout=timeout)
-
-    def kill_group(self) -> None:
-        self._group.send_signal(signal.SIGKILL)
-
-    def wait(self, timeout: float) -> int:
-        return self._group.reap(timeout)
-
-    def close(self) -> None:
-        failures: list[BaseException] = []
-        for stream in (self._process.stdin, self._process.stdout, self._process.stderr):
-            if stream is not None:
-                try:
-                    stream.close()
-                except BaseException as failure:  # noqa: BLE001  # lint-waiver: LW-195404 [BLE001]; all three owned pipes must be attempted even when cancellation or an injected stream failure interrupts an earlier close.
-                    # > Catching only I/O errors would let cancellation skip later
-                    # > resources; a context manager would likewise retain only
-                    # > its last failure instead of reporting the complete cleanup.
-                    failures.append(failure)
-        if len(failures) == 1:
-            raise failures[0]
-        if failures:
-            message = "captured process pipes could not be closed"
-            raise BaseExceptionGroup(message, failures)
-
-
-def _start_captured_text_process(
-    argv: tuple[str, ...],
-    *,
-    pipe_stdin: bool,
-    cwd: Path | None,
-    env: Mapping[str, str] | None,
-) -> _CapturedTextPopen:
-    """Start the real captured process behind its deterministic construction seam."""
-    return subprocess.Popen(  # noqa: S603  # lint-waiver: LW-195405 [S603]; this is the real adapter for a caller-owned argv vector, with no shell parsing.
-        argv,
-        cwd=cwd,
-        env=dict(env) if env is not None else None,
-        stdin=subprocess.PIPE if pipe_stdin else subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        process_group=0,
-    )
-
-
-class SubprocessCapturedTextProcessLauncher:
-    """Start captured UTF-8 commands on VibeSys's supported POSIX hosts."""
-
-    def __init__(self, process_factory: _CapturedTextProcessFactory | None = None) -> None:
-        """Use the OS process factory unless a deterministic boundary is supplied."""
-        self._process_factory = process_factory or _start_captured_text_process
-
-    def start(
-        self,
-        argv: tuple[str, ...],
-        *,
-        pipe_stdin: bool,
-        cwd: Path | None = None,
-        env: Mapping[str, str] | None = None,
-    ) -> CapturedTextProcess:
-        """Start *argv* with inherited cwd/env defaults and isolated descendants."""
-        if os.name != "posix":
-            message = "captured process groups require a POSIX host"
-            raise OSError(message)
-        process = self._process_factory(
-            argv,
-            pipe_stdin=pipe_stdin,
-            cwd=cwd,
-            env=env,
-        )
-        return _SubprocessCapturedTextProcess(process)
 
 
 def _start_piped_process(

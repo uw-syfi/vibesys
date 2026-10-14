@@ -22,7 +22,8 @@ from tests.support.workspace_world import open_workspace_env
 from vibesys.run.environment import open_run_environment
 from vs_runtime.api.infrastructure import SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
-from vs_sandbox.api.slurm import load_slurm_operator_settings, run_brokered_process
+from vs_sandbox.api.slurm import BrokeredProcesses, load_slurm_operator_settings
+from vs_sim.api import ProcessOutcome, ProcessSpec, UnixNetwork
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
@@ -210,13 +211,14 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             f"{local}/",
             "test-cluster:/remote/vibesys/test-cluster/job/",
         )
-        return run_brokered_process(
+        processes = BrokeredProcesses(
             Path(env["VIBESYS_SLURM_BROKER_SOCKET"]),
             env["VIBESYS_SLURM_BROKER_TOKEN"],
-            argv,
-            stdin=None,
-            timeout=5,
-        ).returncode
+            network=UnixNetwork(),
+        )
+        run = processes.run(ProcessSpec(tuple(argv)), timeout=5)
+        assert isinstance(run, ProcessOutcome)
+        return run.returncode
 
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         first = await workspaces.create_candidate()

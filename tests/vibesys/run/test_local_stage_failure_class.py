@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
 
 from vibesys.config import Config
@@ -227,7 +227,11 @@ def _measure_with_lost_command(
     _write_project(root)
     sandbox = _LosesStageCommands(lost)
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     request = ProjectRunRequest(
         project_root=root,
@@ -267,6 +271,7 @@ def _measure_with_lost_command(
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
                 clock=ManualClock(),
+                slurm_processes=REAL_PROCESSES,
             ),
             lambda _request: _Session(sandbox),
             clock=ManualClock(),

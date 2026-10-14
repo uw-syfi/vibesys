@@ -16,7 +16,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.server.support import REQUEST_TIME
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 
 from entrypoints.production import production_runs
 from server.api.protocol import StopCommand, SubscribeRequest
@@ -369,7 +369,11 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
             daemon=False,
         )
         integration = LocalRunIntegration(
-            clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+            clock=ManualClock(),
+            git=REAL_GIT,
+            github=NO_GITHUB,
+            threads=OsThreads(),
+            slurm_processes=REAL_PROCESSES,
         )
         integration.events.subscribe(runtime.integration.project_event)
 

@@ -150,7 +150,7 @@ if TYPE_CHECKING:
         WorkspaceSandbox,
     )
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Processes
 
 
 @dataclass(frozen=True)
@@ -371,6 +371,8 @@ class RunEnvironmentRequest:
     framework_root: Path
     clock: Clock
     """Measures the agent image build budget."""
+    slurm_processes: Processes
+    """Starts the Slurm transport programs a host broker runs for the agent's container."""
     objective: str | None = None
     # Authored run state belongs to git_history_root, including when workspace
     # is a candidate revision that predates the objective's committed document.

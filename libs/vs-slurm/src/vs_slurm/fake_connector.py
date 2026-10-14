@@ -60,11 +60,15 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
+from vs_sim.api import ProcessOutcome
+
 from . import fake_shell
 from .scheduler_read import split_framed
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+
+    from vs_sim.api import ProcessSpec
 
     from .runner import SlurmJobStatus
 
@@ -565,20 +569,18 @@ class FakeConnector:
         """
         self._intercept = intercept
 
-    def __call__(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
-        """Answer a connector request without a transport subprocess."""
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessOutcome:
+        """Answer a connector request without a transport subprocess; it takes no time."""
         del timeout
-        if stdin is None:
+        if not spec.input:
             raise ValueError(_STDIN_REQUIRED)
-        request = json.loads(stdin)
+        request = json.loads(spec.input)
         response = (
             self._answer(request)
             if self._intercept is None
             else self._intercept(request, self._answer)
         )
-        return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
+        return ProcessOutcome(0, json.dumps(response).encode(), b"")
 
     def _answer(self, request: dict[str, object]) -> dict[str, object]:
         query, end = split_framed(str(request.get("command", "")))

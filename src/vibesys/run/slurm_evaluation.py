@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from vs_runtime.api import Workspaces
     from vs_runtime.api.infrastructure import TrustedEvaluationPlan
     from vs_sandbox.api.slurm import SharedSlurmAdmission, SlurmEvaluationPlan, SlurmExecutionPolicy
-    from vs_sim.api import Clock, Sleeper
-    from vs_slurm.api import Cluster, SlurmConfig, SlurmProcess
+    from vs_sim.api import Clock, Processes, Sleeper
+    from vs_slurm.api import Cluster, SlurmConfig
 
 
 class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
@@ -35,7 +35,7 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
         sleeper: Sleeper,
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
-        process: SlurmProcess | None = None,
+        processes: Processes | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state."""
         super().__init__(
@@ -51,7 +51,7 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
             sleeper=sleeper,
             admission=admission,
             cluster=cluster,
-            process=process,
+            processes=processes,
         )
 
 

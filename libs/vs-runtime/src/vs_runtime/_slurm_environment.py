@@ -603,6 +603,7 @@ def _start_transport_broker(
             *request.run_owned_roots,
             *plans.support_paths.values(),
         ),
+        processes=request.slurm_processes,
     )
     broker.start()
     brokers.append(broker)

@@ -11,6 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
+from vs_sim.api import ProcessSpec
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     CANCEL_REACTIONS,
@@ -71,7 +72,7 @@ def _runner(
             remote_workspace_root=str(remote),
             transport=SlurmConnectorTransport(kind="connector", command=("trace-connector",)),
         ),
-        process=connector,
+        processes=connector,
         clock=clock,
     )
     return runner, connector, clock
@@ -353,9 +354,8 @@ def test_a_connector_prints_sacct_states_as_the_real_command_does(tmp_path: Path
     replies = {}
     for flag in ("", "-P "):
         command = f"sacct -n {flag}-X -j {observed.job_id} --format=State,ExitCode"
-        reply = connector(
-            ["c"], stdin=json.dumps({"operation": "exec", "command": command}), timeout=1
-        )
+        request = json.dumps({"operation": "exec", "command": command})
+        reply = connector.run(ProcessSpec(("c",), input=request.encode()), timeout=1)
         replies[flag] = json.loads(reply.stdout)["stdout"]
 
     assert replies == {"": "OUT_OF_ME+    0:125\n", "-P ": "OUT_OF_MEMORY|0:125\n"}
@@ -444,9 +444,8 @@ def test_a_connector_refuses_squeue_and_scancel_for_a_purged_job_as_slurm_does(
     assert isinstance(observed, ClusterObservation)
     replies = {}
     for command in (f"squeue -h -j {observed.job_id} -o %T", f"scancel {observed.job_id}"):
-        reply = connector(
-            ["c"], stdin=json.dumps({"operation": "exec", "command": command}), timeout=1
-        )
+        request = json.dumps({"operation": "exec", "command": command})
+        reply = connector.run(ProcessSpec(("c",), input=request.encode()), timeout=1)
         replies[command.split()[0]] = json.loads(reply.stdout)
 
     assert {name: (r["returncode"], r["stderr"].strip()) for name, r in replies.items()} == {

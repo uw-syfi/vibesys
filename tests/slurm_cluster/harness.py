@@ -26,6 +26,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
 from tests.slurm_cluster.cluster import SlurmCluster, build_image, docker
+from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
@@ -313,6 +314,7 @@ def make_request(
         benchmark_output_argument=BENCHMARK_OUTPUT_ARGUMENT,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         clock=MonotonicClock(),
+        slurm_processes=REAL_PROCESSES,
     )
 
 

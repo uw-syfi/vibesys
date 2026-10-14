@@ -28,8 +28,6 @@ if TYPE_CHECKING:
     from vs_sim.os_platform import Platform
     from vs_sim.probes import CommandProbe, ProbeResult, SubprocessProbe
     from vs_sim.processes import (
-        CapturedTextProcess,
-        CapturedTextProcessLauncher,
         ForegroundChild,
         ForegroundLauncher,
         InheritedStdioLauncher,
@@ -48,7 +46,6 @@ if TYPE_CHECKING:
         ProcessTimedOut,
         ProcessTimeoutError,
         RunningProcess,
-        SubprocessCapturedTextProcessLauncher,
         SubprocessLauncher,
         SubprocessMergedOutputProcessLauncher,
         SubprocessPipedProcessLauncher,
@@ -89,8 +86,6 @@ _MODULES: dict[str, str] = {
     "CommandProbe": "vs_sim.probes",
     "ProbeResult": "vs_sim.probes",
     "SubprocessProbe": "vs_sim.probes",
-    "CapturedTextProcess": "vs_sim.processes",
-    "CapturedTextProcessLauncher": "vs_sim.processes",
     "ForegroundChild": "vs_sim.processes",
     "ForegroundLauncher": "vs_sim.processes",
     "InheritedStdioLauncher": "vs_sim.processes",
@@ -110,7 +105,6 @@ _MODULES: dict[str, str] = {
     "ProcessTimedOut": "vs_sim.processes",
     "ProcessTimeoutError": "vs_sim.processes",
     "RunningProcess": "vs_sim.processes",
-    "SubprocessCapturedTextProcessLauncher": "vs_sim.processes",
     "SubprocessLauncher": "vs_sim.processes",
     "SubprocessMergedOutputProcessLauncher": "vs_sim.processes",
     "SubprocessPipedProcessLauncher": "vs_sim.processes",
@@ -149,8 +143,6 @@ def __dir__() -> list[str]:
 
 __all__ = [
     "BlockingRunner",
-    "CapturedTextProcess",
-    "CapturedTextProcessLauncher",
     "Clock",
     "CommandProbe",
     "Condition",
@@ -191,7 +183,6 @@ __all__ = [
     "Sleeper",
     "SleepingClock",
     "StreamingCommand",
-    "SubprocessCapturedTextProcessLauncher",
     "SubprocessLauncher",
     "SubprocessMergedOutputProcessLauncher",
     "SubprocessPipedProcessLauncher",

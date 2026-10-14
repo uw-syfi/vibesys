@@ -12,7 +12,7 @@ from tests.support.docker_environment import (
     fake_docker_environment,
     host_container_backend,
 )
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
 
 from vibesys.config import Config
@@ -180,7 +180,11 @@ def _run_project(
     agent_backend: str | None = None,
 ) -> tuple[_Result, LocalRunIntegration]:
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
 
     async def exercise() -> _Result:
@@ -394,7 +398,11 @@ def test_the_adapter_evaluates_a_task_and_reports_each_gate_as_events(tmp_path: 
         await _refused_requests(ctx, root, gates)
 
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
 
     async def exercise() -> None:
@@ -430,7 +438,11 @@ def test_a_docker_gate_runs_in_a_throwaway_candidate_not_the_live_root(tmp_path:
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     backend = FakeComputeBackend()
 
@@ -458,7 +470,11 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     sandbox = _BlockingEvaluationSandbox()
     backend = FakeComputeBackend()

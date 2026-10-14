@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import secrets
 import shlex
 import socketserver
@@ -10,11 +9,6 @@ import threading
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
-from vs_sandbox.process_execution import (
-    CapturedProcessRequest,
-    CapturedProcessRunner,
-    OwnedProcessRunner,
-)
 from vs_sandbox.slurm_broker_protocol import (
     MAX_FRAME_BYTES,
     BrokerRan,
@@ -23,10 +17,13 @@ from vs_sandbox.slurm_broker_protocol import (
     ProcessCall,
     ProcessReply,
 )
+from vs_sim.api import ProcessGroupUnreaped, ProcessOutcome, ProcessSpec, ProcessTimedOut
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from vs_sim.api import Processes
 
 _SSH_SUFFIX_LENGTH = 3
 _RSYNC_OPERAND_COUNT = 2
@@ -107,9 +104,12 @@ class SlurmProcessBroker:
         socket_path: Path,
         *,
         local_roots: Sequence[Path],
-        processes: CapturedProcessRunner | None = None,
+        processes: Processes,
     ) -> None:
-        """Bind the operator config, private socket, and allowed local roots."""
+        """Bind the operator config, private socket, and allowed local roots.
+
+        ``processes`` runs each validated transport program with the host's credentials.
+        """
         transport = config.transport
         if not isinstance(transport, SlurmSshTransport):
             message = "Slurm process broker requires the SSH transport"
@@ -119,7 +119,7 @@ class SlurmProcessBroker:
         self.socket_path = socket_path
         self.token = secrets.token_urlsafe(32)
         self._local_roots = tuple(path.resolve() for path in local_roots)
-        self._processes = processes or OwnedProcessRunner()
+        self._processes = processes
         self._server: _BrokerServer | None = None
         self._thread: threading.Thread | None = None
         self._socket_identity: tuple[int, int] | None = None
@@ -169,22 +169,25 @@ class SlurmProcessBroker:
         if not secrets.compare_digest(call.token, self.token):
             raise SlurmProcessBrokerError.invalid_capability()
         self._validate_argv(call.argv)
-        completed = self._processes.run(
-            CapturedProcessRequest(
-                argv=call.argv,
-                stdin=call.stdin,
-                timeout=min(call.timeout, float(self._config.transport_timeout_seconds)),
-                env=os.environ.copy(),
-                # As in vs_slurm's own transport: in its own process group, Ctrl-C
-                # aimed at the run's terminal cannot kill an in-flight sbatch (its
-                # job id would be lost) or the scancel a stopping gate requests.
-            )
+        timeout = min(call.timeout, float(self._config.transport_timeout_seconds))
+        # As in vs_slurm's own transport, the program runs in its own process group:
+        # Ctrl-C aimed at the run's terminal cannot kill an in-flight sbatch (its job
+        # id would be lost) or the scancel a stopping gate requests.
+        run = self._processes.run(
+            ProcessSpec(call.argv, input=b"" if call.stdin is None else call.stdin.encode()),
+            timeout=timeout,
         )
-        return ProcessReply(
-            returncode=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-        )
+        match run:
+            case ProcessOutcome(returncode=returncode, stdout=stdout, stderr=stderr):
+                return ProcessReply(
+                    returncode=returncode, stdout=stdout.decode(), stderr=stderr.decode()
+                )
+            case ProcessTimedOut():
+                message = f"{call.argv[0]} timed out after {timeout:g} seconds"
+                raise TimeoutError(message)
+            case ProcessGroupUnreaped(detail=detail):
+                message = f"{call.argv[0]} timed out after {timeout:g} seconds; {detail}"
+                raise TimeoutError(message)
 
     def _validate_argv(self, argv: tuple[str, ...]) -> None:
         ssh = self._transport.ssh_command

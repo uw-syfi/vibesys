@@ -83,7 +83,7 @@ def _cluster(base: Path, cuts: dict[str, Kept]) -> tuple[SlurmCluster, SlurmJobR
             remote_workspace_root=str(remote),
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         ),
-        process=connector,
+        processes=connector,
         clock=ManualClock(),
     )
     cluster = SlurmCluster(runner, state_root=base / "identity")

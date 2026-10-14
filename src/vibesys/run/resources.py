@@ -593,6 +593,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 cli_provider=resolved_cli_provider,
                 run_id=run_id,
                 clock=clock,
+                slurm_processes=integration.slurm_processes,
                 objective=agent_objective,
                 objective_document=project_resources.objective_document,
                 accuracy_command=accuracy_command,

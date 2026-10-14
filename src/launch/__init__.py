@@ -47,7 +47,6 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
     from vs_sim.api import BlockingRunner, Network, Processes
-    from vs_slurm.api import SlurmProcess
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,8 +72,8 @@ class LaunchSettings:
     )
     git_repository: GitRepositoryFactory | None = None
     """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
-    slurm_process: SlurmProcess | None = None
-    """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
+    slurm_processes: Processes | None = None
+    """Starts the Slurm transport's programs; ``None`` starts them with ``processes``."""
     state_stores: StateStoreFactory | None = None
     """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
     profiler_preflight: ProfilerPreflight | None = None
@@ -129,7 +128,9 @@ def create_session(
             git=Git(settings.processes),
             github=GitHubCLI(settings.processes),
             git_repository=settings.git_repository,
-            slurm_process=settings.slurm_process,
+            slurm_processes=(
+                settings.processes if settings.slurm_processes is None else settings.slurm_processes
+            ),
             state_stores=settings.state_stores,
             agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
         ),

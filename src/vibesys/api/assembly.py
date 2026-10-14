@@ -28,8 +28,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
     from vs_sandbox.api import ComputeBackendImpl, HostResource
-    from vs_sim.api import BlockingRunner, Network
-    from vs_slurm.api import SlurmProcess
+    from vs_sim.api import BlockingRunner, Network, Processes
 
 
 class SessionAgents(Protocol):
@@ -79,14 +78,14 @@ class SessionImplementations:
     """Starts the run's Git commands."""
     github: GitHubCLI
     """Runs the run's GitHub CLI commands."""
+    slurm_processes: Processes
+    """Starts the Slurm transport's programs (ssh, rsync, a connector) for the run's evaluations."""
     stateless_tool_servers: Mapping[str, Callable[[object], ToolServerDescriptor | None]] | None = (
         None
     )
     """The server of each tool that holds no run state, which a core run may offer a role."""
     git_repository: GitRepositoryFactory | None = None
     """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
-    slurm_process: SlurmProcess | None = None
-    """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
     state_stores: StateStoreFactory | None = None
     """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
     profiler_preflight: ProfilerPreflight | None = None

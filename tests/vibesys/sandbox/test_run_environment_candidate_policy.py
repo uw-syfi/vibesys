@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.run.environment import open_run_environment
 from vibesys.run.project_policy import build_project_path_policy
@@ -43,6 +44,7 @@ def test_run_environment_prepares_hidden_state_before_opening(
         framework_root=tmp_path,
         project_path_policy=policy,
         clock=ManualClock(),
+        slurm_processes=REAL_PROCESSES,
     )
 
     with open_run_environment(unconfined_host_environment(), request):

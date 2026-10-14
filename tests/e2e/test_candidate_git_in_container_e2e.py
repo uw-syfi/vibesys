@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.run.environment import open_run_environment
 from vs_runtime.api.infrastructure import (
@@ -82,6 +83,7 @@ def candidate(tmp_path: Path) -> Iterator[tuple[RunEnvironmentSession, Path, Pat
         project_path_policy=ProjectPathPolicy(),
         git_history_root=project,
         clock=MonotonicClock(),
+        slurm_processes=REAL_PROCESSES,
     )
     session = open_run_environment(build_run_environment(RunEnvironmentSpec("docker")), request)
     try:

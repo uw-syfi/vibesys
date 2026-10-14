@@ -60,7 +60,6 @@ from .runner import (
     SlurmJobResult,
     SlurmJobRunner,
     SlurmJobWaitResult,
-    SlurmProcess,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
@@ -168,7 +167,6 @@ __all__ = [
     "SlurmJobWaitResult",
     "SlurmLocalTransport",
     "SlurmPhase",
-    "SlurmProcess",
     "SlurmRawState",
     "SlurmService",
     "SlurmSshTransport",

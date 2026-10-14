@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge
 
 from vs_sandbox.api.slurm import SlurmCapturePlan, SlurmProcessBroker, write_slurm_capture_plan
-from vs_sim.api import MonotonicClock
+from vs_sim.api import MonotonicClock, OsProcesses
 from vs_sim.api.testing import HANG_GUARD_S, start_thread
 from vs_slurm.api import SlurmError, load_slurm_config
 from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
@@ -90,6 +90,7 @@ remote_python = "/remote/venv/bin/python"
         load_slurm_config(config_path),
         tmp_path / "broker.sock",
         local_roots=(worktrees, tmp_path / "cluster-state"),
+        processes=OsProcesses(),
     )
     broker.start()
     monkeypatch.setenv("VIBESYS_SLURM_BROKER_SOCKET", str(broker.socket_path))

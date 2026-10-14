@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import subprocess
 import threading
 from typing import TYPE_CHECKING
 
@@ -26,12 +25,12 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
+from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import SlurmCluster, SlurmConfig, SlurmConnectorTransport, SlurmJobRunner
 from vs_slurm.fake_connector import HOLD_FILE, executing_cluster, handle, recorded_commands
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
     from pathlib import Path
 
 
@@ -43,9 +42,8 @@ class _HeldReplyConnector:
         self.submitted = threading.Event()
         self.release_reply = threading.Event()
 
-    def __call__(
-        self, argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        stdin = spec.input.decode() or None
         del timeout
         request = json.loads(stdin or "{}")
         response = handle(self._state, request)
@@ -54,7 +52,7 @@ class _HeldReplyConnector:
             # The job now exists on the cluster; the executor has not heard of it.
             self.submitted.set()
             self.release_reply.wait()
-        return subprocess.CompletedProcess(list(argv), 0, json.dumps(response), "")
+        return ProcessOutcome(0, json.dumps(response).encode(), b"")
 
 
 def _request() -> EvaluationRequest:
@@ -90,7 +88,7 @@ async def test_a_stop_during_sbatch_reply_cancels_the_submitted_job_once(tmp_pat
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=SlurmCluster(
-            SlurmJobRunner(config, process=connector, clock=ManualClock()),
+            SlurmJobRunner(config, processes=connector, clock=ManualClock()),
             state_root=tmp_path / "identity",
         ),
         clock=ManualClock(),

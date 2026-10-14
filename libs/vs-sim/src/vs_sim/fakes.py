@@ -6,11 +6,10 @@ import asyncio
 import signal
 import subprocess
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from vs_sim.gate import arrival
 from vs_sim.processes import (
-    CapturedTextProcess,
     ForegroundChild,
     MergedOutputProcess,
     PipedProcess,
@@ -322,40 +321,6 @@ class FakeMergedOutputProcessLauncher:
         request = (tuple(argv), cwd, dict(env))
         self.started.append(request)
         return self.factory(*request)
-
-
-class _CapturedTextProcessFactory(Protocol):
-    def __call__(
-        self,
-        argv: tuple[str, ...],
-        *,
-        pipe_stdin: bool,
-        cwd: Path | None,
-        env: Mapping[str, str] | None,
-    ) -> CapturedTextProcess: ...
-
-
-@dataclass
-class FakeCapturedTextProcessLauncher:
-    """Record captured text-process starts and create each process through a Fake factory."""
-
-    factory: _CapturedTextProcessFactory
-    started: list[tuple[tuple[str, ...], bool, Path | None, Mapping[str, str] | None]] = field(
-        default_factory=list
-    )
-
-    def start(
-        self,
-        argv: tuple[str, ...],
-        *,
-        pipe_stdin: bool,
-        cwd: Path | None = None,
-        env: Mapping[str, str] | None = None,
-    ) -> CapturedTextProcess:
-        """Record the complete start request and return its scripted process."""
-        request = (tuple(argv), pipe_stdin, cwd, env)
-        self.started.append(request)
-        return self.factory(argv, pipe_stdin=pipe_stdin, cwd=cwd, env=env)
 
 
 @dataclass(frozen=True)

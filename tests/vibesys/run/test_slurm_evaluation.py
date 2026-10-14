@@ -214,7 +214,7 @@ class _Runner(SlurmJobRunner):
         scratch_root.mkdir(parents=True, exist_ok=True)
         super().__init__(
             config,
-            process=FakeConnector(state_root / "transport"),
+            processes=FakeConnector(state_root / "transport"),
             scratch_root=scratch_root,
             clock=ManualClock(),
         )

@@ -56,8 +56,7 @@ if TYPE_CHECKING:
         RunEnvironmentResources,
     )
     from vs_sandbox.api import HostResource
-    from vs_sim.api import Clock, Threads
-    from vs_slurm.api import SlurmProcess
+    from vs_sim.api import Clock, Processes, Threads
 
 
 def run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
@@ -320,19 +319,19 @@ class LocalRunIntegration:
         # > instead of the two roles it passes on.
         self,
         git_repository: GitRepositoryFactory | None = None,
-        slurm_process: SlurmProcess | None = None,
         state_stores: StateStoreFactory | None = None,
         *,
         clock: Clock,
         git: Git,
         github: GitHubCLI,
         threads: Threads,
+        slurm_processes: Processes,
     ) -> None:
         """Compose a durable journal with direct invocation control.
 
         ``git`` starts the run's Git commands and ``github`` its GitHub CLI commands. ``git_repository`` builds the run's
-        ``GitRepository`` implementations; ``None`` opens the configured one over ``git``. ``slurm_process`` replaces the Slurm transport's process
-        boundary for the run's evaluations; ``None`` runs the configured programs.
+        ``GitRepository`` implementations; ``None`` opens the configured one over ``git``. ``slurm_processes`` starts the Slurm
+        transport's programs for the run's evaluations.
         ``state_stores`` opens each run's ``StateStore``; ``None`` is the local
         crash-atomic one. ``clock`` counts seconds since the epoch; it stamps the
         run's events, names its logs, and times its boot. ``threads`` makes the run's
@@ -341,7 +340,7 @@ class LocalRunIntegration:
         self.git = git
         self.github = github
         self.git_repository = git_repositories(git) if git_repository is None else git_repository
-        self.slurm_process = slurm_process
+        self.slurm_processes = slurm_processes
         self.state_stores = state_stores
         self.clock = clock
         self.threads = threads

@@ -11,7 +11,7 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from tests.support.real_git import REAL_GIT
+from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_project.api import (
@@ -210,6 +210,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                     else ()
                 ),
                 clock=ManualClock(),
+                slurm_processes=REAL_PROCESSES,
             ),
             open_session if open_session is not None else lambda _request: _Session(),
             clock=ManualClock(),

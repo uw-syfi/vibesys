@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.core_host_world import open_core_host
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
@@ -90,7 +90,11 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
 
     async def exercise() -> None:
@@ -119,7 +123,11 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
     project_root = tmp_path / "project"
     _write_project(project_root)
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     backend = _LifecycleBackend()
 

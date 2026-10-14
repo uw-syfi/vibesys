@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment
 from tests.support.host_environment import unconfined_host_spec
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import task_path, write_task
 
 from launch import built_in_orchestrations, open_run_store
@@ -220,7 +220,11 @@ def _create_context(
             request,
             options.get("integration")
             or LocalRunIntegration(
-                clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+                clock=ManualClock(),
+                git=REAL_GIT,
+                github=NO_GITHUB,
+                threads=OsThreads(),
+                slurm_processes=REAL_PROCESSES,
             ),
             ownership=ownership,
             agent_specs=resolve_agent_specs(
@@ -483,7 +487,11 @@ def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> Non
     project = tmp_path / "queue"
     evaluator = _write_project(project)
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     try:
         with _create_context(project, evaluator=evaluator, integration=integration) as ctx:
@@ -854,7 +862,11 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
     _git(project, "push", "-q", "-u", "origin", f"vibesys-runs/{run_id}")
     published = _git(remote, "rev-parse", f"refs/heads/vibesys-runs/{run_id}")
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
 
     def reject_resources(_resources: object) -> None:

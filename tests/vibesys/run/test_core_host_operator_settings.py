@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.core_plugins import core_policy
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
@@ -92,7 +92,11 @@ def _run(
         backend=ComputeBackend.CPU,
     )
     integration = LocalRunIntegration(
-        clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB, threads=OsThreads()
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
     )
     # A paused run asks for nothing; it stays open until the deadline stops it.
     if strategy is None:

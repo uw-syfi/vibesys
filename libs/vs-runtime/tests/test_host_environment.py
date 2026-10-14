@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.real_git import REAL_PROCESSES
 
 from vs_project.api import RunEnvironmentRecord
 from vs_runtime.api.infrastructure import (
@@ -87,6 +88,7 @@ def _request(tmp_path: Path) -> RunEnvironmentRequest:
         environment_bind_mounts=(),
         project_path_policy=ProjectPathPolicy(),
         clock=ManualClock(),
+        slurm_processes=REAL_PROCESSES,
     )
 
 

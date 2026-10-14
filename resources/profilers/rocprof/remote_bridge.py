@@ -19,11 +19,12 @@ from pydantic import BaseModel, ConfigDict, StringConstraints
 
 from vs_decode.api import Unreadable, read_json
 from vs_sandbox.api.slurm import (
+    BrokeredProcesses,
     configured_capture_lifecycle,
     load_slurm_policy,
     read_slurm_capture_plan,
-    run_brokered_process,
 )
+from vs_sim.api import OsProcesses, UnixNetwork
 from vs_slurm.api import (
     ClusterCollected,
     ClusterConflict,
@@ -54,13 +55,12 @@ for _common_name in ("_common", "profilers_common"):
 capture_runtime = importlib.import_module("capture_runtime")
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
-    from subprocess import CompletedProcess
+    from collections.abc import Iterator, Mapping
     from threading import Event
     from typing import TypeGuard
 
-    from vs_sim.api import Clock
-    from vs_slurm.api import Cluster, ClusterInspectOutcome, SlurmProcess
+    from vs_sim.api import Clock, Processes
+    from vs_slurm.api import Cluster, ClusterInspectOutcome
 
 
 class RemoteCaptureError(ValueError):
@@ -136,20 +136,16 @@ class RemoteCaptureBridge:
             if state_root is None:
                 raise RemoteCaptureError.missing_state_root()
             state_root.mkdir(parents=True, exist_ok=True)
-            process: SlurmProcess | None = None
-            if broker_socket is not None and broker_token is not None:
-                socket_path = Path(broker_socket)
-
-                def process(
-                    argv: Sequence[str], *, stdin: str | None, timeout: float
-                ) -> CompletedProcess[str]:
-                    return run_brokered_process(
-                        socket_path, broker_token, argv, stdin=stdin, timeout=timeout
-                    )
-
+            # This profiler server is its own program, so it builds its real processes:
+            # through the run's broker when the runtime granted one, else on this host.
+            processes: Processes = (
+                BrokeredProcesses(Path(broker_socket), broker_token, network=UnixNetwork())
+                if broker_socket is not None and broker_token is not None
+                else OsProcesses()
+            )
             # Runtime grants the same durable root to the MCP process and broker.
             transport = SlurmJobRunner(
-                self._config, process=process, scratch_root=state_root, clock=clock
+                self._config, processes=processes, scratch_root=state_root, clock=clock
             )
             self._cluster = SlurmCluster(transport, state_root=state_root)
         self._capture_lock = Lock()

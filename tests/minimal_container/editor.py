@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from tests.slurm_cluster.cluster import docker
+from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.config import BUNDLED_RESOURCES, PROJECT_ROOT
 from vibesys.orchestration.profilers import (
@@ -233,6 +234,7 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
         profiler_support_name=definition.support_name,
         profiler_support_extra=profiler_support_extra(definition),
         clock=MonotonicClock(),
+        slurm_processes=REAL_PROCESSES,
     )
     environment = SlurmEnvironment(
         load_slurm_operator_settings(_slurm_config(directory)),
