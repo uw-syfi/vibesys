@@ -1,6 +1,6 @@
 # TUI display and key conventions
 
-Open this when a change to `clients/tui/` adds or moves a key binding, changes
+Open this when a change to the terminal UI adds or moves a key binding, changes
 which pane holds focus, or changes how a pane is sized or drawn. The terminal
 UI (TUI) is deprecated but maintained, so these rules hold until it is deleted.
 
@@ -10,27 +10,24 @@ WCAG 2.2, `less`/`vi`/`tig` habits, readline), is
 and the comparison of candidate keymaps is
 [keybinding-matrix.md](../../../../docs/contributing/tui/keybinding-matrix.md).
 This file restates only the rules the code keeps today, checked against
-`clients/tui/src/ui/keybindings.ts`. Terms: a **pane** is a bordered region
+the key router. Terms: a **pane** is a bordered region
 that can take keys (a `PaneId`); **focus** is which pane receives keys;
 **zoom** gives the whole content row to one pane.
 
 ## Where the rules live in code
 
-- `clients/tui/src/ui/keybindings.ts:bindKeybindings` is the one key router.
-  Handlers run top to bottom, and the first that claims a key calls
-  `preventDefault` and returns, so a modal's handler above shadows everything
-  below it. Put a new binding at the level of the surface that owns it.
-- `clients/tui/src/session-model.ts:focusedPane` is the single authority for
-  which pane wears the focus treatment. Keys that act on "the focused pane"
-  ask it, rather than reading `roundFocus` or `layout.focus` directly, so the
-  key target and the lit border cannot disagree.
-- `clients/tui/src/ui/focus.ts` draws the focus treatment (`paneTitle`,
-  `paneBorderStyle`), held by `clients/tui/src/ui/focus.test.ts` for every
-  built-in theme.
-- `clients/tui/src/ui/pane-resize.ts` holds the resize step;
-  `clients/tui/src/ui/chat-pane.ts` and `clients/tui/src/ui/agent-map.ts` hold
-  each resizable pane's floor, ceiling and clamp. Do not restate their numbers
-  in prose or tests; import them.
+- The TUI has one key router. Handlers run top to bottom, and the first that
+  claims a key calls `preventDefault` and returns, so a modal's handler above
+  shadows everything below it. Put a new binding at the level of the surface
+  that owns it.
+- The session model has a single authority for which pane wears the focus
+  treatment. Keys that act on "the focused pane" ask it, rather than reading
+  the round or layout focus directly, so the key target and the lit border
+  cannot disagree.
+- One module draws the focus treatment (pane title and border style), and a
+  test holds it for every built-in theme.
+- Each resizable pane owns its floor, ceiling and clamp, and the resize step
+  is shared. Do not restate their numbers in prose or tests; import them.
 
 ## Rules in force
 
@@ -42,7 +39,7 @@ keys for pane movement) act only while the command input is empty
 glyph in a gutter cell its title always reserves, so the title does not shift
 on focus; the border colour reinforces it. Border weight is not a channel: the
 frame shape is the same focused or not, because Unicode has no heavy rounded
-corner. Held by `clients/tui/src/ui/focus.test.ts`.
+corner. A focus test holds it.
 
 **One surface is lit, and it is a pane.** A box nested inside a pane (the chat
 composer, the command box) keeps the resting frame. A surface that takes the
@@ -53,7 +50,7 @@ focus border from `roundFocus` while `focusedPane` reports the agents side, so
 
 **Arrow keys in the round view.** `←` and `→` step across rounds rail, agents,
 transcript, and clamp at the ends; when the rail is hidden
-(`clients/tui/src/ui/round-rail.ts:roundRailColumns` is 0) the order is agents,
+(its column width is 0) the order is agents,
 transcript. `↑` and `↓` step rounds while the rail holds focus, agents while
 the agents pane does, and transcript entries otherwise. A focus left on a
 hidden rail falls through to the agents pane, so keys never drive an invisible
@@ -93,11 +90,10 @@ so a row appearing does not shift the list under the cursor.
 screen width and changes with the surface in front.
 
 **A fill lives on an inner box.** A bordered box with a background colour
-paints its border ring too, which bleeds past rounded corners (#642). Put the
-fill on an inner layer through `clients/tui/src/ui/box-fill.ts:fillLayer`. An
+paints its border ring too, which bleeds past rounded corners. Put the
+fill on an inner layer through the shared fill-layer helper. An
 overlay that floats over content keeps an outer fill and therefore draws a
-square border. Held over the whole constructed tree by
-`clients/tui/src/ui/app.test.ts`. OpenTUI turns a border back on when
+square border. A test over the whole constructed tree holds it. OpenTUI turns a border back on when
 `borderStyle` or `borderColor` is passed beside `border: false`, so a
 borderless box omits both.
 
@@ -107,7 +103,7 @@ borderless box omits both.
    the Rules in force section of
    [conventions.md](../../../../docs/contributing/tui/conventions.md) in the
    same change, citing the keybinding-matrix entry it follows.
-2. Add a case to `clients/tui/src/ui/keybindings.test.ts` that drives the key
+2. Add a case to the keybinding tests that drives the key
    through the router and checks the resulting state.
 3. Update the key-help line for the surface that owns the binding.
 4. A layout consequence (widths, clipping, overlap) gets a `createTestRenderer`

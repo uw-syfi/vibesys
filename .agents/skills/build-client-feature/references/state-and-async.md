@@ -12,7 +12,7 @@ Control state is an XState v5 machine written as
 `setup({types, actors, actions, guards, delays}).createMachine(...)`.
 
 - Every operation is an invoked actor with an explicit `id`. Declare it with
-  `unprovided` from `clients/libs/machine/src/index.ts` and supply the real one
+  `unprovided` from `@vibesys/machine` and supply the real one
   from the shell with `provide`, so the machine stays pure and the operation
   injectable. Type the placeholder with the operation's input and output, or
   `provide` rejects the real one.
@@ -25,23 +25,22 @@ Control state is an XState v5 machine written as
   rejection the same way, so a throw ends the flight instead of leaving its
   region waiting.
 
-Examples: `clients/libs/run-session/src/session.ts:sessionMachine` (start-up,
-recovery and snapshot fencing as parallel regions),
-`clients/libs/connection/src/state/host-connection.ts` (a host connection), and
-`clients/features/run-control/src/state/run-control.ts` (latest command wins).
+Examples to read: the session machine in `@vibesys/run-session` (start-up,
+recovery and snapshot fencing as parallel regions), the host-connection
+machine in `@vibesys/connection`, and the run-control feature's machine
+(latest command wins).
 
 ## Folds
 
 A data fold is a pure `(state, action) -> state` reducer on `@vibesys/store`
-(`clients/libs/store/src/index.ts:createStore`), in its own module, tested with
-`checkModel` from `@vibesys/store/testing`. Wrapping a fold in a one-state
-machine adds a runtime and checks nothing more. `run-session`'s fold is
-`clients/libs/run-session/src/run.ts`, kept apart from its machine.
+(`createStore`), in its own module, tested with `checkModel` from
+`@vibesys/store/testing`. Wrapping a fold in a one-state machine adds a
+runtime and checks nothing more. `@vibesys/run-session` keeps its fold in a
+module apart from its machine.
 
-Features not yet migrated (start-run, replay, gateway-connect, and parts of
-hosts; the hosts inspector sheet is already a machine) still run control state
-as reducers with request tokens. `clients/biome.json` shows which packages the
-control-state rules already cover. Migrate one
+Features not yet migrated still run control state as reducers with request
+tokens. The clients Biome configuration shows which features the control-state
+rules already cover. Migrate one
 feature per change, keeping its seeded invariants (ported to `checkMachine`)
 and deleting the reducer in the same change.
 
@@ -59,20 +58,18 @@ ending the owner aborts the work.
 - An outcome can go stale between the operation ending and the machine taking
   it. Guard `onDone` with a guard the shell provides and add a fallback
   transition whose action hands the resource back: the `current` guard and
-  `discard` action in `clients/libs/connection/src/state/host-connection.ts`.
+  `discard` action in the host-connection machine of `@vibesys/connection`.
 - Outside machines, pass the signal down every layer: a dial takes the signal
-  its relay owns (`clients/features/run-control/src/main/relay.ts:relay`), and
-  a snapshot load takes the signal of the state that asked for it
-  (`RunConnection` in `clients/libs/run-session/src/ports.ts`). Attach abort
-  listeners with `registerAbort` from `@vibesys/transport`
-  (`clients/libs/transport/src/request-policy.ts:registerAbort`), which has no
-  gap between checking `aborted` and listening.
+  its relay owns (the run-control feature's relay), and a snapshot load takes
+  the signal of the state that asked for it (the `RunConnection` port of
+  `@vibesys/run-session`). Attach abort listeners with `registerAbort` from
+  `@vibesys/transport`, which has no gap between checking `aborted` and
+  listening.
 - Shutting down a stream composition closes both the stream and its transport
-  even if one close fails:
-  `clients/libs/transport/src/stream-shutdown.ts:closeStreamAndTransport`.
+  even if one close fails: use `closeStreamAndTransport` from
+  `@vibesys/transport`.
 - In the TUI, which has no machines, a latest-wins query goes through
-  `clients/tui/src/latest-query-owner.ts:LatestQueryOwner` so a stale result
-  never replaces a newer one.
+  the TUI's latest-query owner so a stale result never replaces a newer one.
 
 ## Bounded waits
 
@@ -84,7 +81,7 @@ connection retirement.
 - Inside a machine the deadline is an `after` transition.
 - In shell code it is scheduled through an injected `ScheduleTimeout`, with the
   real timer only as the production default, so a test drives it with
-  `clients/libs/transport/src/testing/fake-clock.ts:FakeClock`. Cancel the
+  `FakeClock` from `@vibesys/transport/testing`. Cancel the
   deadline on every exit path, including a deadline that fires synchronously
-  (the relay test for #2289 schedules one that does).
+  (the relay's tests include one that schedules a deadline that does).
 - A buffer that waits for more input has a size bound as well as a time bound.
