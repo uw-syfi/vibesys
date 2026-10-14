@@ -96,7 +96,7 @@ function settleOne(random: Seeded, live: Live, snapshot: SessionSnapshot): Event
 }
 
 function plainEvent(random: Seeded): SessionEvent {
-  switch (random.int(14)) {
+  switch (random.int(15)) {
     case 0:
       return {type: 'start'};
     case 1:
@@ -126,6 +126,8 @@ function plainEvent(random: Seeded): SessionEvent {
       return {type: 'projection-rejected', error: random.pick(ERRORS)};
     case 12:
       return {type: 'iterations-refresh', storeId: `store-${random.int(4) + 1}`};
+    case 13:
+      return {type: 'iteration-rejected', error: random.pick(ERRORS)};
     default:
       // Rare, so most sequences stay open long enough to interleave.
       return random.int(4) === 0 ? {type: 'close'} : {type: 'start'};
@@ -481,6 +483,34 @@ describe('session machine', () => {
       iterationError: iterationFailure,
     });
 
+    state = steps(
+      [{type: 'iterations-refresh', storeId: 'store-a'}, iterationsDone(navigation('recovered'))],
+      state,
+    );
+    expect(state.context.view).toMatchObject({
+      status: 'connected',
+      error: null,
+      iterationError: null,
+    });
+  });
+
+  test('an iteration ownership rejection affects only iteration health', () => {
+    const ownershipFailure = new Error('navigation belongs to run-2, not run-1');
+    let state = steps([
+      {type: 'start'},
+      {type: 'stream-established', storeId: 'store-a'},
+      {type: 'iterations-refresh', storeId: 'store-a'},
+      subscribed,
+      replacementDone(loaded(1)),
+      iterationsDone(navigation('initial')),
+      {type: 'iteration-rejected', error: ownershipFailure},
+    ]);
+
+    expect(state.context.view).toMatchObject({
+      status: 'connected',
+      error: null,
+      iterationError: ownershipFailure,
+    });
     state = steps(
       [{type: 'iterations-refresh', storeId: 'store-a'}, iterationsDone(navigation('recovered'))],
       state,

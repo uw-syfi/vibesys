@@ -6,6 +6,7 @@ import {
   ServerError,
 } from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
+import {initialIterationNavigation} from '@vibesys/run-state';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import type {BatchReconciliation, StreamMessageContext} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -437,6 +438,25 @@ describe('WebSession', () => {
       kind: 'generation',
       label: 'Generation 1',
     });
+    await session.close();
+  });
+
+  test('rejects foreign iteration navigation without crashing or replacing the run view', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+    transport.iterations.push(iterationResponse('foreign', 'Generation 2', 'run-2'));
+
+    await session.start();
+    await waitForSession(session, () => session.getState().iterationError !== null);
+
+    expect(session.store.getState().runId).toBe('run-1');
+    expect(session.store.getIterations()).toEqual(initialIterationNavigation());
+    expect(session.getState()).toMatchObject({
+      status: 'connected',
+      error: null,
+      controls: {status: 'connected'},
+    });
+    expect(session.getState().iterationError?.message).toContain('run-1');
+    expect(session.getState().iterationError?.message).toContain('run-2');
     await session.close();
   });
 
@@ -2328,7 +2348,7 @@ describe('WebSession', () => {
   });
 });
 
-function iterationResponse(revision: string, label: string): ProtocolResponse {
+function iterationResponse(revision: string, label: string, runId = 'run-1'): ProtocolResponse {
   const ordinal = Number(label.split(' ').at(-1));
   return {
     protocol_version: 1,
@@ -2339,7 +2359,7 @@ function iterationResponse(revision: string, label: string): ProtocolResponse {
     iterations: {
       kind: 'page',
       schema_version: 1,
-      run_id: 'run-1',
+      run_id: runId,
       projection_revision: revision,
       parent_id: null,
       from_cursor: null,

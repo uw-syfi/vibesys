@@ -38,7 +38,13 @@ import type {
   RunStreamHandlers,
   TransportHooks,
 } from './ports.js';
-import {createRunStore, type RunStore, runStep} from './run.js';
+import {
+  createRunStore,
+  type IterationPublicationOutcome,
+  type RunAction,
+  type RunStore,
+  runStep,
+} from './run.js';
 import {
   type IterationQueryOutcome,
   type Reachability,
@@ -237,7 +243,9 @@ export class WebSession {
         },
         redialControls: () => this.#guarded(() => this.#connection.redialControls()),
         publishIterations: (_, {navigation}) => {
-          if (navigation !== null) this.store.publishIterations(navigation);
+          if (navigation !== null) {
+            this.#reportIterationMismatch(this.store.publishIterations(navigation));
+          }
         },
         closeShell: () => void this.#release(),
       },
@@ -246,7 +254,7 @@ export class WebSession {
 
   #applySnapshot(snapshot: RunSnapshot): void {
     const previous = this.store.getState();
-    this.store.dispatch({type: 'snapshot', snapshot});
+    this.#dispatchRun({type: 'snapshot', snapshot});
     const rejection = runIdentityRejection(previous, this.store.getState());
     if (rejection !== null) {
       // The load's dry run accepted this snapshot, but the run latched another identity before the
@@ -300,7 +308,7 @@ export class WebSession {
     const firstGeneration = previousStoreId === null;
     const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
     const previousRun = this.store.getState();
-    this.store.dispatch({type: 'batch', message, reconciliation});
+    this.#dispatchRun({type: 'batch', message, reconciliation});
     const rejection = runIdentityRejection(previousRun, this.store.getState());
     this.#streamStoreId = storeId;
     if (storeReplaced) {
@@ -378,8 +386,25 @@ export class WebSession {
     const run = this.store.getState();
     const rejection = runIdentityRejection(run, runStep(run, {type: 'snapshot', snapshot}).state);
     if (rejection === null) return {ok: true, snapshot};
-    if (!signal.aborted) this.store.dispatch({type: 'snapshot', snapshot});
+    if (!signal.aborted) this.#dispatchRun({type: 'snapshot', snapshot});
     return {ok: false, error: rejection};
+  }
+
+  /** Fold run data and report a deferred navigation result once run identity resolves against it. */
+  #dispatchRun(action: RunAction): void {
+    this.#reportIterationMismatch(this.store.dispatch(action));
+  }
+
+  /** Keep iteration projection failures on their independent session-health channel. */
+  #reportIterationMismatch(outcome: IterationPublicationOutcome | null): void {
+    if (outcome?.kind !== 'run-mismatch') return;
+    this.#send({
+      type: 'iteration-rejected',
+      error: new Error(
+        `Ignored iteration navigation for run ${outcome.receivedRunId}; ` +
+          `this session owns run ${outcome.expectedRunId}`,
+      ),
+    });
   }
 
   async #collectIterationPages(
