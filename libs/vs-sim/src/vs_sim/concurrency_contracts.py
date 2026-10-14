@@ -463,6 +463,44 @@ class NetworkContract:
 
         assert subject.threads.run(program) == (True, True, True)
 
+    def test_a_recv_timeout_bounds_only_that_recv(self) -> None:
+        """A ``send`` after a timed-out ``recv`` waits for a slow reader instead of timing out.
+
+        The real network once set the timeout on the socket, where it outlived the
+        ``recv`` and bounded every later ``send``: a write larger than the socket's
+        buffer then failed whenever the peer took longer than that to read.
+        """
+        subject = self.network_under_test(0)
+        payload = b"x" * (8 << 20)
+
+        def program() -> tuple[bool, bool]:
+            threads = subject.threads.threads
+            address = subject.address("slow")
+            listener = subject.network.listen(address)
+            received: list[bytes] = []
+
+            def serve() -> None:
+                connection = listener.accept(HANG_GUARD_S)
+                threads.sleep(10 * subject.threads.tick)
+                received.append(_recv_exact(connection, len(payload)))
+                connection.close()
+
+            server = threads.spawn(serve, name="server")
+            client = subject.network.connect(address, HANG_GUARD_S)
+            try:
+                client.recv(1, subject.threads.tick)
+            except TimeoutError:
+                timed_out = True
+            else:
+                timed_out = False
+            client.send(payload)
+            _join(server)
+            client.close()
+            listener.close()
+            return timed_out, received == [payload]
+
+        assert subject.threads.run(program) == (True, True)
+
     def test_a_peer_that_closed_leaves_its_data_readable_and_then_reads_eof(self) -> None:
         """``peer_closed`` stays false while data is unread; EOF (``b""``) follows the last byte."""
         subject = self.network_under_test(0)

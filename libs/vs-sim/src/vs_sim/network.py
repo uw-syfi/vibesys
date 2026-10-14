@@ -13,6 +13,8 @@ runs its own accept loop on a :class:`~vs_sim.concurrency.Threads` worker.
 from __future__ import annotations
 
 import contextlib
+import math
+import select
 import socket
 from pathlib import Path
 from typing import Protocol
@@ -80,7 +82,14 @@ class _UnixConnection:
         self._sock.sendall(data)
 
     def recv(self, max_bytes: int, timeout: float | None = None) -> bytes:
-        self._sock.settimeout(timeout)
+        # The socket stays blocking: a socket timeout would also bound a later ``send``
+        # from any thread, so a slow reader would fail a write. Wait for readability instead.
+        if timeout is not None:
+            poller = select.poll()
+            poller.register(self._sock, select.POLLIN)
+            if not poller.poll(max(math.ceil(timeout * 1000), 0)):
+                message = f"nothing arrived within {timeout} s"
+                raise TimeoutError(message)
         return self._sock.recv(max_bytes)
 
     def peer_closed(self) -> bool:
