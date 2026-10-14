@@ -40,6 +40,8 @@ class Cluster:
     ref: core.AttemptRef
     running_polls: int
     ending: core.ObservationStatus
+    lost: bool = False
+    """The executor holds no record of the job until a cancel ends it (its submit was lost)."""
     polls: int = 0
     sequence: int = 1
     authorized: set[str] = field(default_factory=set)
@@ -63,6 +65,15 @@ class Cluster:
     def job_view(self) -> core.Observation:
         """What the job looks like now: running for a while, then ended and released."""
         self.sequence += 1
+        if self.lost:
+            return observation(
+                self.submission,
+                self.sequence,
+                status=core.ObservationStatus.UNKNOWN,
+                accepted=False,
+                resource_id=JOB,
+                observed_at=self.now + self.sequence,
+            )
         ended = self.polls >= self.running_polls
         self.polls += 1
         return observation(
@@ -102,6 +113,10 @@ class Cluster:
             self.authorized.add(request.request_id.root)
             self.feed(core.DispatchAuthorized(request_id=request.request_id))
         self.feed(core.RequestObserved(observation=self.completed(request)))
+        if isinstance(request, core.CancelOwnedJob):
+            # A cancel ends the job whether or not the executor still knew of it.
+            self.lost = False
+            self.running_polls = 0
         if isinstance(
             request,
             core.ObserveOwnedJob
@@ -167,6 +182,17 @@ actions = st.one_of(
 )
 
 
+def play(cluster: Cluster, plan: list[Action]) -> None:
+    """The far side follows *plan*, then answers everything still outstanding."""
+    for kind, index in plan:
+        pending = cluster.pending()
+        if kind == "answer" and pending:
+            cluster.answer(pending[index % len(pending)])
+        elif kind == "tick":
+            cluster.tick()
+    run_out(cluster)
+
+
 def run_out(cluster: Cluster) -> None:
     """The far side answers everything outstanding, oldest first, and the clock reaches every poll."""
     for _ in range(100):
@@ -195,13 +221,7 @@ def test_an_attempt_closed_over_a_running_job_ends_terminal_whenever_the_job_is_
     assert (
         core.ReleaseDependency(kind="job", identity=JOB) in cluster.attempt().release_dependencies
     )
-    for kind, index in plan:
-        pending = cluster.pending()
-        if kind == "answer" and pending:
-            cluster.answer(pending[index % len(pending)])
-        elif kind == "tick":
-            cluster.tick()
-    run_out(cluster)
+    play(cluster, plan)
 
     owner = cluster.attempt()
     job = cluster.state.evaluation.jobs[0]
@@ -209,3 +229,36 @@ def test_an_attempt_closed_over_a_running_job_ends_terminal_whenever_the_job_is_
     assert job.released
     assert owner.release_dependencies == ()
     assert owner.phase == core.AttemptPhase.TERMINAL
+
+
+@settings(max_examples=examples(pr=4, nightly=300), deadline=None)
+@example(plan=[], closed=True)
+@example(plan=[], closed=False)
+@given(plan=st.lists(actions, max_size=12), closed=st.booleans())
+def test_a_job_the_executor_lost_is_inspected_then_cancelled_once(
+    plan: list[Action], *, closed: bool
+) -> None:
+    """Chaos seeds 268 and 479: core ends a job the executor holds no record of.
+
+    The job's submit was lost, so every poll and inspection answers "no record" (unknown,
+    unaccepted). Core ends the job because its attempt closes (``closed``) or because a
+    continuation's deadline asks for its termination. Being unconfirmed, the job is inspected
+    first; when that finds it still unconfirmed, core cancels it anyway, once: a cancel is
+    idempotent, and waiting for a confirmation that never comes would hold the attempt, and
+    the run with it, until the run deadline.
+    """
+    cluster = started(running_polls=0, ending=core.ObservationStatus.CANCELLED)
+    cluster.lost = True
+    cluster.feed(core.JobObserved(resource_id=JOB, observation=cluster.job_view()))
+    if closed:
+        cluster.feed(retirement(cluster.ref, "cancel"))
+    else:
+        cluster.feed(core.JobTerminationRequested(resource_id=JOB, cause="deadline"))
+    play(cluster, plan)
+
+    asked = [type(row.request) for row in cluster.state.records.records]
+    assert asked.count(core.InspectOwnedJob) >= 1
+    assert asked.count(core.CancelOwnedJob) == 1
+    assert cluster.state.evaluation.jobs[0].terminal
+    if closed:
+        assert cluster.attempt().phase == core.AttemptPhase.TERMINAL
