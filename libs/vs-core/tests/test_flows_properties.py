@@ -266,7 +266,12 @@ class Interpreter:
         return ",".join(seen)
 
     async def scope(self, ctx: core.Flow, op: Scope, prefix: str) -> str:
-        """A group of tasks, each running its program."""
+        """A group of tasks, each running its program.
+
+        ``prefix`` names the scope by its position, so the tasks of two scopes never share a
+        workspace or a conversation name: core refuses a second workspace of one attempt, and
+        the host's ledger is keyed by name.
+        """
         async with ctx.group(stops=op.stops) as group:
             for number, task in enumerate(op.tasks):
                 group.start(f"t{number}", self.run, task, f"{prefix}t{number}.")
@@ -294,7 +299,7 @@ class Interpreter:
             case Work():
                 seen = await self.work(ctx, op, f"{prefix}w{index}")
             case Scope():
-                seen = await self.scope(ctx, op, prefix)
+                seen = await self.scope(ctx, op, f"{prefix}{index}")
         return seen
 
     async def run(self, ctx: core.Flow, body: tuple[Op, ...], prefix: str = "") -> str:
@@ -373,6 +378,30 @@ class Host:
     body=(
         Choose(name=None),
         Work(asks=False, measure=False, verify=False, keep="candidate", choose=True),
+    ),
+    script=[],
+)
+# Two scopes whose tasks run the same program each open their own workspace and session.
+@example(
+    body=(
+        Scope(
+            tasks=(
+                (
+                    Session(turns=1),
+                    Work(asks=False, measure=False, verify=False, keep="nothing", choose=False),
+                ),
+            ),
+            stops=False,
+        ),
+        Scope(
+            tasks=(
+                (
+                    Session(turns=1),
+                    Work(asks=False, measure=False, verify=False, keep="nothing", choose=False),
+                ),
+            ),
+            stops=False,
+        ),
     ),
     script=[],
 )
