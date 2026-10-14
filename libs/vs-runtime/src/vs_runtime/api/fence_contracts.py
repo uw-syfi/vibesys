@@ -13,8 +13,8 @@ crashes at every durable-write boundary followed by a newer host. It checks:
   of any delivery creates anything, and nothing is held at the answer;
 * a host that crashed between creating and answering leaves the creation visible: a later
   release finds it and releases it, so nothing stays held behind a "released" answer;
-* a release delivered on a newer host after every other delivery ends answers released, so
-  the fence never strands a release.
+* a release delivered on a newer host after every other delivery ends settles (for most
+  pairs: answers released), so the fence never strands a release.
 
 A new executor implements ``FencePair`` and gets all of it.
 """
@@ -159,6 +159,24 @@ class FenceWorld(Protocol):
         """How many created things are held now (not yet released)."""
         ...
 
+    def released(self, result: ExecutionResult) -> bool:
+        """Whether *result*, a release's answer, says nothing is held, now or later.
+
+        For most pairs that is the release's own terminal "released" (``answered_released``);
+        an inspection says it about its target instead.
+        """
+        ...
+
+    def settled(self, result: ExecutionResult) -> bool:
+        """Whether *result* is as final as a release delivered after every other one ended must be."""
+        ...
+
+
+def answered_released(result: ExecutionResult) -> bool:
+    """The release's own observation is terminal and released."""
+    observed = result.observation.observation
+    return observed.terminal and observed.released
+
 
 class FencePair(Protocol):
     """A registered setup/release pair and a fresh world to run it in."""
@@ -207,13 +225,12 @@ class ScheduleReport:
 
     def ended(self, world: FenceWorld, final: ExecutionResult) -> None:
         """Check the final release's answer and what exists once every delivery ended."""
-        observed = final.observation.observation
-        if not (observed.terminal and observed.released):
+        if not world.settled(final):
             self.violations.append(
-                "a release on a newer host after every delivery ended did not release: "
-                f"{observed.diagnostic}"
+                "a release on a newer host after every delivery ended did not settle: "
+                f"{final.observation.observation.diagnostic}"
             )
-        else:
+        elif world.released(final):
             self.released(world)
         if not self.created_at_release:
             return
@@ -248,8 +265,7 @@ async def run_schedule(
             result = await host.execute(request)
         except ProcessKilledError:
             return
-        observed = result.observation.observation
-        if kind == "release" and observed.terminal and observed.released:
+        if kind == "release" and world.released(result):
             report.released(world)
 
     await world.prepare(world.host(0, HostLife(None), blocking))
@@ -281,5 +297,6 @@ __all__ = [
     "HostLife",
     "HostRun",
     "ScheduleReport",
+    "answered_released",
     "run_schedule",
 ]

@@ -10,6 +10,11 @@ otherwise reports a typed Unknown. Nothing here performs an effect twice.
 the shared store, for every request kind. This executor registers itself as the
 probe for operation results, because only it can decode an operation outcome and
 re-observe an operation's external effect through its owner.
+
+An inspection that would prove an operation never ran first closes the operation's effect
+fence (``vs_runtime._effect_fence``), which every delivery of the operation enters with its
+record and again just before the owner runs it. So once the inspection seals "never ran",
+no delivery runs it later, and a delivery still inside the fence makes the answer Unknown.
 """
 
 from __future__ import annotations
@@ -32,8 +37,16 @@ from vs_core.api import (
     SetupFailureKind,
     TargetObservation,
 )
-from vs_runtime._core_identity import CoreRequestId, core_named
+from vs_runtime._core_identity import CoreRequestId, core_identity, core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult
+from vs_runtime._effect_fence import (
+    EffectFences,
+    Entered,
+    Fenced,
+    FenceKey,
+    FenceKind,
+    NothingHeld,
+)
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 from vs_runtime._operation_catalog import (
     Applied,
@@ -79,6 +92,7 @@ class RegisteredOperationRequests:
         self._receipts = receipts
         self._observations = observations
         self._inspector = RecordedRequestInspector(receipts.store, observations, (self,))
+        self._fences = EffectFences(receipts.store)
 
     result_type = ResultReceipt
 
@@ -112,9 +126,12 @@ class RegisteredOperationRequests:
         ``own_effect`` is true when a receipt proves the subject's own outcome. Only
         a proven terminal result claims acceptance and release, because Unknown never
         does. A terminal rejection that names no resource proves the effect never began
-        and never will (a sealed self-refusal, `ObservationFacts.refused`), so it holds nothing; a cancel
-        names the resource it leaves owned and never claims its release. The sequence is
-        per subject, so an Inspect of a target continues the target's own history.
+        and never will, so it holds nothing. Each is one of: a self-refusal before the owner
+        was reached (an operation outside the catalog, or declared but refused); a delivery
+        a closed fence stopped before its owner ran (``_withdrawn``); or an inspection's
+        "never ran", sealed only with the fence's ``NothingHeld`` (``_seal_never_ran``). A
+        cancel names the resource it leaves owned and never claims its release. The sequence
+        is per subject, so an Inspect of a target continues the target's own history.
         """
         terminal = own_effect and status is not ObservationStatus.UNKNOWN
         accepted = terminal and status in (ObservationStatus.SUCCEEDED, ObservationStatus.FAILED)
@@ -224,15 +241,40 @@ class RegisteredOperationRequests:
                 )
             )
         request_id = _identity(request)
-        self._receipts.record_record(
-            RecordReceipt(
-                request_id=request_id.root,
-                payload_digest=context.payload_digest,
-                operation=request.operation,
+        fence, by = operation_fence(request_id), core_identity(request)
+        with self._receipts.store.exclusive():
+            admission = self._fences.enter(fence, by=by, host=context.fence)
+            if isinstance(admission, Entered):
+                self._receipts.record_record(
+                    RecordReceipt(
+                        request_id=request_id.root,
+                        payload_digest=context.payload_digest,
+                        operation=request.operation,
+                    )
+                )
+        try:
+            return await self._run_owner(
+                request, context, entry, owner, resumed=resumed, admission=admission
             )
-        )
+        finally:
+            self._fences.leave(fence, by=by)
+
+    async def _run_owner(  # noqa: PLR0913  # lint-waiver: LW-410009 [PLR0913]; each argument is an independent fact of the one delivery the owner runs for.
+        self,
+        request: ExecuteRegisteredOperation,
+        context: ExecutionContext,
+        entry: OperationEntry,
+        owner: OperationOwner,
+        *,
+        resumed: bool,
+        admission: Entered | Fenced,
+    ) -> Settled[ResultReceipt] | Transient[ResultReceipt]:
+        """Run the owner inside the operation's fence, inspecting first when it may have run."""
         decoded = self._catalog.registry.decode(request.operation)
-        if resumed:
+        if isinstance(admission, Fenced) and not admission.entered_before:
+            # An inspection proved it never ran and closed the fence first: it never will.
+            return Settled(self._withdrawn(request, context, entry))
+        if resumed or isinstance(admission, Fenced):
             match await _inspect(owner, decoded, context):
                 case Applied(outcome):
                     return Settled(self._complete(request, context, entry, outcome))
@@ -242,6 +284,12 @@ class RegisteredOperationRequests:
                     )
                 case NotApplied():
                     pass
+        fence = operation_fence(_identity(request))
+        if not isinstance(
+            self._fences.enter(fence, by=core_identity(request), host=context.fence), Entered
+        ):
+            # The owner has not run it, and the fence closed: it never runs.
+            return Settled(self._withdrawn(request, context, entry))
         try:
             outcome = await owner.execute(decoded, context)
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410001 [BLE001]; an owner failure after the begun marker leaves the effect unproven, and the contract is to report typed Unknown rather than halt or guess.
@@ -255,6 +303,25 @@ class RegisteredOperationRequests:
                 )
             )
         return Settled(self._complete(request, context, entry, outcome))
+
+    def _withdrawn(
+        self, request: ExecuteRegisteredOperation, context: ExecutionContext, entry: OperationEntry
+    ) -> ResultReceipt:
+        """The result of a delivery a closed fence stopped before the owner ran it.
+
+        The inspection that closed the fence may have sealed the operation's result already;
+        that result stands, so a replay answers what the inspection answered.
+        """
+        sealed = self._receipts.result(_identity(request).root)
+        if sealed is not None:
+            return sealed
+        return self._receipt(
+            request,
+            context,
+            entry,
+            ObservationStatus.REJECTED,
+            "withdrawn: an inspection proved the operation never ran",
+        )
 
     def _complete(
         self,
@@ -371,18 +438,16 @@ class RegisteredOperationRequests:
                     request, context, "target declared but refused, no result recorded"
                 )
             decoded = self._catalog.registry.decode(record.operation)
-            match await _inspect(entry.owner, decoded, context):
+            inspected = await _inspect(entry.owner, decoded, context)
+            if isinstance(inspected, NotApplied):
+                inspected = await self._fence_not_applied(request, context, entry.owner, decoded)
+            match inspected:
                 case Applied(outcome):
                     sealed = self._seal_inspected(target_id, record, entry, outcome)
-                case NotApplied():
-                    sealed = ResultReceipt(
-                        request_id=target_id.root,
-                        payload_digest=record.payload_digest,
-                        schema_ref=entry.schema,
-                        status=ObservationStatus.REJECTED,
-                        detail="owner proved the effect did not happen",
-                    )
-                    self._receipts.record_result(sealed)
+                case NothingHeld() as proof:
+                    sealed = self._seal_never_ran(record, entry, proof)
+                case ResultReceipt():
+                    sealed = inspected
                 case Indeterminate(reason):
                     return self._unknown(request, context, reason)
         outcome = (
@@ -399,6 +464,52 @@ class RegisteredOperationRequests:
             outcome_schema=entry.schema.outcome_schema if outcome is not None else None,
             outcome=outcome,
         )
+
+    async def _fence_not_applied(
+        self,
+        request: InspectRequest,
+        context: ExecutionContext,
+        owner: OperationOwner,
+        decoded: OperationRequest,
+    ) -> Applied | Indeterminate | NothingHeld | ResultReceipt:
+        """Make the owner's "not applied" final: close the fence, then confirm it.
+
+        A delivery may have entered the fence and run the owner after the first inspection,
+        so the answer is the target's seal if it has one by now, Unknown while a delivery is
+        still inside, and otherwise a second inspection: nothing starts once the fence is
+        closed, so its "not applied" holds for good.
+        """
+        with self._receipts.store.exclusive():
+            closure = self._fences.close(
+                operation_fence(request.target), by=core_identity(request), host=context.fence
+            )
+            sealed = self._receipts.result(request.target.root)
+        if sealed is not None:
+            return sealed
+        if isinstance(closure, NothingHeld):
+            return closure
+        if closure.live:
+            return Indeterminate("a delivery of the operation may still be running it")
+        match await _inspect(owner, decoded, context):
+            case NotApplied():
+                return self._fences.cleared(closure)
+            case confirmed:
+                return confirmed
+
+    def _seal_never_ran(
+        self, record: RecordReceipt, entry: OperationEntry, proof: NothingHeld
+    ) -> ResultReceipt:
+        """Seal that the operation never ran and never will; only a closed fence proves it."""
+        del proof  # its existence is the proof
+        sealed = ResultReceipt(
+            request_id=record.request_id,
+            payload_digest=record.payload_digest,
+            schema_ref=entry.schema,
+            status=ObservationStatus.REJECTED,
+            detail="owner proved the effect did not happen",
+        )
+        self._receipts.record_result(sealed)
+        return sealed
 
     def _seal_inspected(
         self, target_id: RequestId, record: RecordReceipt, entry: OperationEntry, outcome: object
@@ -544,6 +655,11 @@ async def _inspect(
         return await owner.inspect(request, context)
     except Exception as error:  # noqa: BLE001  # lint-waiver: LW-410008 [BLE001]; an inspection that cannot run proves nothing, so it is reported indeterminate instead of halting recovery.
         return Indeterminate(f"owner inspection raised {type(error).__name__}: {error}")
+
+
+def operation_fence(request_id: RequestId) -> FenceKey:
+    """The fence of one operation's effect: its deliveries enter it, a "never ran" proof closes it."""
+    return FenceKey(FenceKind.OPERATION, request_id.root)
 
 
 def _identity(request: RequestBase) -> RequestId:
