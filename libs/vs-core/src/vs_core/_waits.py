@@ -400,7 +400,7 @@ def _acquisition_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[Op
     return found
 
 
-def _recovery_waits(core: CoreState) -> list[OpenWait]:
+def _recovery_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:
     barrier = core.records.recovery
     if not recovery_waits(barrier.phase):
         return []
@@ -417,7 +417,7 @@ def _recovery_waits(core: CoreState) -> list[OpenWait]:
             subject=check.target.root,
             producer=Producer.PENDING_REQUEST
             if check.target in live or check.inspection in live or check.target in inspected
-            else _children_producer(core, check.target),
+            else _children_producer(core, check.target, outbox),
         )
         for check in barrier.checks
         if check.resolution == "pending"
@@ -437,7 +437,9 @@ def _with_successors(core: CoreState, related: list[RequestRecord]) -> list[Requ
     ]
 
 
-def _children_producer(core: CoreState, target: RequestId) -> Producer | None:
+def _children_producer(
+    core: CoreState, target: RequestId, outbox: frozenset[RequestId]
+) -> Producer | None:
     """What settles every child resource *target* left, when each is a job its ledger tracks.
 
     The job ledger is the other party that can settle such a child: once it observes the job
@@ -455,7 +457,7 @@ def _children_producer(core: CoreState, target: RequestId) -> Producer | None:
         for job in core.evaluation.registered_jobs
         if not job.terminal and job.resource_id is not None
     }
-    producers = {wait.subject: wait.producer for wait in _job_waits(core, frozenset())}
+    producers = {wait.subject: wait.producer for wait in _job_waits(core, outbox)}
     found = [
         producers.get(subject)
         if (subject := jobs.get((child.resource_id, child.scope))) is not None
@@ -776,7 +778,7 @@ def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[OpenWait, 
     return (
         *_session_waits(core, pending),
         *_acquisition_waits(core, pending),
-        *_recovery_waits(core),
+        *_recovery_waits(core, pending),
         *_job_waits(core, pending),
         *_release_waits(core),
         *_yield_waits(core, pending),

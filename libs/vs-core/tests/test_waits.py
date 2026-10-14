@@ -264,14 +264,18 @@ def test_a_recovery_check_waits_on_every_party_that_can_settle_the_child_its_tar
     assert (WaitKind.RECOVERY_CHECK, expected) in found
 
 
+@pytest.mark.parametrize("observed", [False, True], ids=["no-outbox", "observation-in-outbox"])
 @pytest.mark.parametrize("ledger", ["jobs", "registered", "unpaced"])
-def test_a_check_on_a_left_job_waits_on_that_job_in_either_ledger_and_only_while_it_is_polled(
-    ledger: str,
+def test_a_check_on_a_left_job_waits_on_that_job_in_either_ledger_and_only_while_it_moves(
+    ledger: str, *, observed: bool
 ) -> None:
-    """A left job settles the check only through its own wait: polled, in either job ledger.
+    """A left job settles the check only through its own wait, with the same producer.
 
     A registered job counts like a measurement job. A job nothing polls any more leaves the
-    check an orphan too, instead of a timer that never fires hiding it.
+    check an orphan too, instead of a timer that never fires hiding it, unless the job's next
+    observation is already committed in the outbox. The check was once judged against an
+    empty outbox, so ``test_a_measurement_whose_submit_and_cancel_both_fail_still_ends_the_run``
+    halted on a check the outbox was about to end.
     """
     state = _left_a_child(inspecting=False, job_terminal=False)
     job = state.evaluation.jobs[0]
@@ -292,11 +296,33 @@ def test_a_check_on_a_left_job_waits_on_that_job_in_either_ledger_and_only_while
         evaluation = state.evaluation.model_copy(
             update={"jobs": (job.model_copy(update={"pacing": pacing}),)}
         )
-    state = state.model_copy(update={"evaluation": evaluation})
+    # The job's submission record is what an outbox observation of the job names.
+    submission = submitted()[0].records.record(job.submission_id)
+    assert submission is not None
+    records = state.records.model_copy(update={"records": (*state.records.records, submission)})
+    state = state.model_copy(update={"evaluation": evaluation, "records": records})
+    outbox = (
+        (
+            RequestObserved(
+                observation=Observation(
+                    event_id=EventId(root="job-observed"),
+                    request_id=job.submission_id,
+                    scope=job.scope,
+                    sequence=1,
+                    observed_at=1.0,
+                    status=ObservationStatus.UNKNOWN,
+                )
+            ),
+        )
+        if observed
+        else ()
+    )
 
-    found = {(wait.waiter, wait.producer) for wait in waits(state)}
+    found = {(wait.waiter, wait.producer) for wait in waits(state, outbox)}
 
-    expected = None if ledger == "unpaced" else Producer.TIMER
+    expected = (
+        Producer.TIMER if ledger != "unpaced" else Producer.OUTBOX_EVENT if observed else None
+    )
     assert (WaitKind.RECOVERY_CHECK, expected) in found
     assert (WaitKind.OWNED_JOB, expected) in found
 
