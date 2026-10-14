@@ -769,14 +769,13 @@ export const sessionMachine = setup({
                           snapshot: applies(context, replacementSettled(context, event.output)),
                         }),
                       },
-                      // Applying higher post-replacement evidence changes whether a closed stream
-                      // should reconnect: the stream owner reevaluates, even if its terminal socket
-                      // closed while this snapshot was in flight.
+                      // Applying newer fenced evidence changes whether a closed stream should
+                      // reconnect: the stream owner reevaluates, even if its terminal socket closed
+                      // while this snapshot was in flight.
                       {
                         type: 'reevaluateStream',
                         params: ({context, event}) => ({
                           applied:
-                            context.replacement.owner !== 'startup' &&
                             applies(context, replacementSettled(context, event.output)) !== null,
                         }),
                       },

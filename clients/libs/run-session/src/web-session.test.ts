@@ -994,6 +994,49 @@ describe('WebSession', () => {
     await session.close();
   });
 
+  test('retries a quietly closed startup stream when its fenced snapshot proves a gap', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    const startupSnapshot = deferred<ProtocolResponse>();
+    transport.snapshots.push(startupSnapshot.promise);
+    transport.silentDials = 1;
+
+    const starting = session.start();
+    await settle();
+    const initial = transport.subscriptions[0];
+    if (initial === undefined) throw new Error('Initial subscription did not open');
+
+    initial.onMessage(
+      eventBatch([event(1, 'run_finished', {run_id: 'run-1'})], {
+        store_id: 'store-1',
+        through_sequence: 1,
+        history_after_sequence: 0,
+      }),
+    );
+    await settle();
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').at(-1),
+    ).toMatchObject({type: 'query.snapshot', expected_store_id: 'store-1'});
+
+    // The terminal fold makes this established close look complete until its snapshot answers.
+    initial.onDisconnect(disconnect('startup stream closed before snapshot'));
+    expect(transport.subscriptions).toHaveLength(1);
+
+    // The fenced snapshot is authoritative evidence that two journal events are still missing.
+    transport.silentDials = 1;
+    startupSnapshot.resolve(snapshotResponse({sequence: 3, status: 'completed'}));
+    await starting;
+    await settle();
+
+    expect(initial.closed).toBe(true);
+    expect(transport.subscriptions).toHaveLength(2);
+    expect(transport.subscriptions[1]).toMatchObject({
+      afterSequence: 1,
+      options: {storeId: 'store-1'},
+    });
+    await session.close();
+  });
+
   test('keeps the old watermark until a fresh batch proves the stream store changed', async () => {
     const lifecycle = new FakeLifecycle();
     const scheduler = new FakeClock();

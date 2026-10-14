@@ -388,7 +388,10 @@ describe('session machine', () => {
     expect(established.requests).toEqual([{kind: 'load-replacement-snapshot', storeId: 'store-a'}]);
     const handshake = step(established.state, subscribed);
     const live = step(handshake.state, replacementDone(loaded(1)));
-    expect(live.requests).toEqual([{kind: 'apply-snapshot', snapshot: snapshotOf(1)}]);
+    expect(live.requests).toEqual([
+      {kind: 'apply-snapshot', snapshot: snapshotOf(1)},
+      {kind: 'reevaluate-stream'},
+    ]);
     expect(live.state.context.view.hasSnapshot).toBe(true);
     expect(live.state.context.view.status).toBe('connected');
     expect(live.state.matches({open: {startup: 'done'}})).toBe(true);
