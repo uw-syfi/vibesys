@@ -25,6 +25,7 @@ export interface CampaignUi {
   readonly playing: boolean;
   readonly selectedWorkstreamId: string | null;
   readonly selectedAgentId: string | null;
+  readonly selectedArchitectureComponentId: string | null;
   readonly view: CampaignView;
   readonly timelineMode: CampaignTimeline;
   readonly workstreamLayout: WorkstreamLayout;
@@ -50,6 +51,7 @@ export type CampaignAction =
   | {readonly type: 'play'; readonly playing: boolean}
   | {readonly type: 'workstream'; readonly id: string | null}
   | {readonly type: 'agent'; readonly id: string | null}
+  | {readonly type: 'architecture-component'; readonly id: string | null}
   | {readonly type: 'view'; readonly view: CampaignView}
   | {readonly type: 'timeline'; readonly mode: CampaignTimeline}
   | {readonly type: 'layout'; readonly layout: WorkstreamLayout}
@@ -89,6 +91,7 @@ export function initialCampaignUi(record: CampaignRecord | null): CampaignUi {
     playing: false,
     selectedWorkstreamId: null,
     selectedAgentId: null,
+    selectedArchitectureComponentId: null,
     view: 'dashboard',
     timelineMode: 'workstreams',
     workstreamLayout: 'kanban',
@@ -135,6 +138,8 @@ function navigate(context: CampaignContext, event: CampaignAction): CampaignUi {
       return {...ui, selectedWorkstreamId: event.id};
     case 'agent':
       return {...ui, selectedAgentId: event.id};
+    case 'architecture-component':
+      return {...ui, selectedArchitectureComponentId: event.id};
     case 'view':
       return {...ui, view: event.view};
     case 'timeline':
@@ -205,6 +210,7 @@ export const campaignMachine = setup({
     close: '.closed',
     workstream: {actions: 'navigate'},
     agent: {actions: 'navigate'},
+    'architecture-component': {actions: 'navigate'},
     view: {actions: 'navigate'},
     timeline: {actions: 'navigate'},
     layout: {actions: 'navigate'},

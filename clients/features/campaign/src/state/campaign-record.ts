@@ -3,6 +3,8 @@
  * Adapters validate and normalize fixture or live data into this contract.
  */
 
+import type {ArchitectureGraphDocument} from '@vibesys/contracts';
+
 export type MetricDirection = 'maximize' | 'minimize';
 export type WorkstreamOutcome = 'accepted' | 'rejected';
 export type MeasurementDisposition = 'accepted' | 'rejected' | 'inconclusive';
@@ -30,6 +32,7 @@ export interface CampaignRecord {
   title: string;
   summary: string;
   provenance: string;
+  architecture: ArchitectureGraphDocument | null;
   objective: {
     title: string;
     statement: string;

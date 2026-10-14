@@ -14,6 +14,12 @@ performance, and selected measurement side by side; narrow screens reflow.
 Timeline zoom and pan do not change the selected measurement. Detail navigation
 preserves the replay position and keyboard focus.
 
+Validated architecture captures may also project onto that same measurement
+cursor. Stable component identities, deterministic layout, change highlights,
+and optional profiler attribution are defined in the
+[campaign architecture graph](architecture-graph-contract.md); the browser does
+not infer missing topology or measurements.
+
 The Connect action uses the current gateway connection feature. Live runs keep
 main's event bootstrap, reconnect, stream/control banners, iteration navigation,
 run commands, and server-selected themes. A Conversation action adds the branch's

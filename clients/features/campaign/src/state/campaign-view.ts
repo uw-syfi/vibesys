@@ -33,6 +33,9 @@ export interface CampaignViewModel {
   readonly playing: boolean;
   readonly pointIndex: number;
   readonly selectedAgent: CampaignRecord['agents'][number] | null;
+  readonly selectedArchitectureComponent:
+    | NonNullable<CampaignRecord['architecture']>['components'][number]
+    | null;
   readonly selectedWorkstream: CampaignRecord['workstreams'][number] | null;
   readonly status: 'active' | 'completed';
   readonly timeline: {readonly start: number; readonly end: number};
@@ -46,6 +49,7 @@ export interface CampaignViewModel {
   readonly setPlaying: (playing: boolean) => void;
   readonly setPointIndex: (index: number) => void;
   readonly setSelectedAgentId: (id: string | null) => void;
+  readonly setSelectedArchitectureComponentId: (id: string | null) => void;
   readonly setSelectedWorkstreamId: (id: string | null) => void;
   readonly setView: (view: CampaignView) => void;
   readonly setTimelineMode: (mode: CampaignTimeline) => void;

@@ -73,6 +73,34 @@ test('rejects unknown keys at the fixture boundary with their path', () => {
   expect(() => parseReplayScenario(invalid)).toThrow('$.objective.shadowTarget: unknown key');
 });
 
+test('legacy schema-v1 records without architecture remain valid', () => {
+  const legacy = cloneFixture();
+  delete legacy['architecture'];
+
+  expect(parseReplayScenario(legacy).architecture).toBeNull();
+});
+
+test('architecture observations reference a campaign measurement at its exact sequence', () => {
+  const unknownMeasurement = cloneFixture();
+  const unknownArchitecture = unknownMeasurement['architecture'] as Record<string, unknown>;
+  unknownArchitecture['observations'] = [architectureObservation('missing-measurement', 1)];
+  expect(() => parseReplayScenario(unknownMeasurement)).toThrow(
+    '$.architecture.observations[0].measurement_id: unknown measurement missing-measurement',
+  );
+
+  const wrongSequence = cloneFixture();
+  const measurements = wrongSequence['measurements'] as Record<string, unknown>[];
+  const first = measurements[0];
+  if (first === undefined) throw new Error('Fixture has no measurements');
+  const architecture = wrongSequence['architecture'] as Record<string, unknown>;
+  architecture['observations'] = [
+    architectureObservation(String(first['id']), Number(first['sequence']) + 1),
+  ];
+  expect(() => parseReplayScenario(wrongSequence)).toThrow(
+    `$.architecture.observations[0].sequence: expected ${first['sequence']} for measurement ${first['id']}`,
+  );
+});
+
 test('rejects measurements attributed to the wrong benchmark side of the boundary', () => {
   const invalid = cloneFixture();
   const campaign = parseReplayScenario(fixture);
@@ -104,4 +132,14 @@ test('rejects a workstream link to an unknown agent before returning typed data'
 
 function cloneFixture(): Record<string, unknown> {
   return JSON.parse(JSON.stringify(fixture)) as Record<string, unknown>;
+}
+
+function architectureObservation(measurementId: string, sequence: number): Record<string, unknown> {
+  return {
+    measurement_id: measurementId,
+    sequence,
+    label: 'Architecture capture',
+    changes: [],
+    attributions: [],
+  };
 }

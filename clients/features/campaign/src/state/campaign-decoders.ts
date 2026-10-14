@@ -30,6 +30,7 @@ export type CampaignJsonObject = Record<string, unknown> & {
   title?: unknown;
   summary?: unknown;
   provenance?: unknown;
+  architecture?: unknown;
   objective?: unknown;
   benchmarkVersions?: unknown;
   benchmarkVersionBoundary?: unknown;

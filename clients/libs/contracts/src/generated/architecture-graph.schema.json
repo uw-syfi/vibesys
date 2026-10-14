@@ -1,0 +1,416 @@
+{
+  "$defs": {
+    "ArchitectureAnchor": {
+      "additionalProperties": false,
+      "description": "A stable path, module, or service identity; never a layout coordinate.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/ArchitectureAnchorKind"
+        },
+        "value": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "title": "ArchitectureAnchor",
+      "type": "object"
+    },
+    "ArchitectureAnchorKind": {
+      "description": "Stable namespace that gives a component its cross-measurement identity.",
+      "enum": [
+        "module",
+        "path",
+        "service"
+      ],
+      "title": "ArchitectureAnchorKind",
+      "type": "string"
+    },
+    "ArchitectureAttributionValue": {
+      "additionalProperties": false,
+      "description": "A non-negative profiler value with explicit units and provenance.",
+      "properties": {
+        "value": {
+          "minimum": 0,
+          "title": "Value",
+          "type": "number"
+        },
+        "unit": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Unit",
+          "type": "string"
+        },
+        "provenance": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Provenance",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "unit",
+        "provenance"
+      ],
+      "title": "ArchitectureAttributionValue",
+      "type": "object"
+    },
+    "ArchitectureComponent": {
+      "additionalProperties": false,
+      "description": "One stable node in the system topology.",
+      "properties": {
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ArchitectureComponentKind"
+        },
+        "anchor": {
+          "$ref": "#/$defs/ArchitectureAnchor"
+        },
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Group"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "kind",
+        "anchor",
+        "description",
+        "group"
+      ],
+      "title": "ArchitectureComponent",
+      "type": "object"
+    },
+    "ArchitectureComponentAttribution": {
+      "additionalProperties": false,
+      "description": "Optional cost and latency slots for one component at one observation.",
+      "properties": {
+        "component_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Component Id",
+          "type": "string"
+        },
+        "cost": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArchitectureAttributionValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "latency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArchitectureAttributionValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "component_id",
+        "cost",
+        "latency"
+      ],
+      "title": "ArchitectureComponentAttribution",
+      "type": "object"
+    },
+    "ArchitectureComponentChange": {
+      "additionalProperties": false,
+      "description": "Recorded files that changed one stable component at an observation.",
+      "properties": {
+        "component_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Component Id",
+          "type": "string"
+        },
+        "changed_files": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 2000,
+          "minItems": 1,
+          "title": "Changed Files",
+          "type": "array"
+        }
+      },
+      "required": [
+        "component_id",
+        "changed_files"
+      ],
+      "title": "ArchitectureComponentChange",
+      "type": "object"
+    },
+    "ArchitectureComponentKind": {
+      "description": "Closed presentation-neutral component categories.",
+      "enum": [
+        "api",
+        "database",
+        "external",
+        "library",
+        "process",
+        "queue",
+        "service",
+        "storage"
+      ],
+      "title": "ArchitectureComponentKind",
+      "type": "string"
+    },
+    "ArchitectureEdge": {
+      "additionalProperties": false,
+      "description": "One stable directed relationship between components.",
+      "properties": {
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "source_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Source Id",
+          "type": "string"
+        },
+        "target_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Target Id",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ArchitectureEdgeKind"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Label"
+        }
+      },
+      "required": [
+        "id",
+        "source_id",
+        "target_id",
+        "kind",
+        "label"
+      ],
+      "title": "ArchitectureEdge",
+      "type": "object"
+    },
+    "ArchitectureEdgeKind": {
+      "description": "Semantic relationship rendered independently of its geometry.",
+      "enum": [
+        "call",
+        "data",
+        "dependency",
+        "ownership",
+        "queue",
+        "storage"
+      ],
+      "title": "ArchitectureEdgeKind",
+      "type": "string"
+    },
+    "ArchitectureGeneration": {
+      "additionalProperties": false,
+      "description": "Provenance for one graph document.",
+      "properties": {
+        "approach": {
+          "$ref": "#/$defs/ArchitectureGenerationApproach"
+        },
+        "source": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "approach",
+        "source"
+      ],
+      "title": "ArchitectureGeneration",
+      "type": "object"
+    },
+    "ArchitectureGenerationApproach": {
+      "description": "How the producer assembled topology and attribution facts.",
+      "enum": [
+        "static-analysis",
+        "profiler-derived",
+        "agent-authored",
+        "hybrid"
+      ],
+      "title": "ArchitectureGenerationApproach",
+      "type": "string"
+    },
+    "ArchitectureObservation": {
+      "additionalProperties": false,
+      "description": "Architecture facts aligned to one campaign measurement cursor.",
+      "properties": {
+        "measurement_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+          "title": "Measurement Id",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "label": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/ArchitectureComponentChange"
+          },
+          "maxItems": 500,
+          "title": "Changes",
+          "type": "array"
+        },
+        "attributions": {
+          "items": {
+            "$ref": "#/$defs/ArchitectureComponentAttribution"
+          },
+          "maxItems": 500,
+          "title": "Attributions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "measurement_id",
+        "sequence",
+        "label",
+        "changes",
+        "attributions"
+      ],
+      "title": "ArchitectureObservation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The complete version-1 architecture graph and its campaign observations.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "graph_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$",
+      "title": "Graph Id",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "description": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "generation": {
+      "$ref": "#/$defs/ArchitectureGeneration"
+    },
+    "components": {
+      "items": {
+        "$ref": "#/$defs/ArchitectureComponent"
+      },
+      "maxItems": 500,
+      "minItems": 1,
+      "title": "Components",
+      "type": "array"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/ArchitectureEdge"
+      },
+      "maxItems": 2000,
+      "title": "Edges",
+      "type": "array"
+    },
+    "observations": {
+      "items": {
+        "$ref": "#/$defs/ArchitectureObservation"
+      },
+      "maxItems": 2000,
+      "title": "Observations",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "graph_id",
+    "title",
+    "description",
+    "generation",
+    "components",
+    "edges",
+    "observations"
+  ],
+  "title": "ArchitectureGraphDocument",
+  "type": "object"
+}

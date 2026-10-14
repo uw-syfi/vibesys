@@ -217,6 +217,9 @@ path = "vibesys.api.evolve"
 depends_on = ["vibesys.orchestration.evolve"]
 
 [[modules]]
+path = "vibesys.api.architecture"
+
+[[modules]]
 path = "vibesys.api.hypothesis"
 depends_on = ["vibesys.hypothesis", "vibesys.hypothesis.readmodel"]
 
@@ -874,6 +877,10 @@ from = ["vibesys.run.resources"]
 [[interfaces]]
 expose = ["resolve_openevolve_options"]
 from = ["vibesys.api.evolve"]
+
+[[interfaces]]
+expose = ["ArchitectureAnchor", "ArchitectureAnchorKind", "ArchitectureAttributionValue", "ArchitectureComponent", "ArchitectureComponentAttribution", "ArchitectureComponentChange", "ArchitectureComponentKind", "ArchitectureEdge", "ArchitectureEdgeKind", "ArchitectureGeneration", "ArchitectureGenerationApproach", "ArchitectureGraphDocument", "ArchitectureObservation"]
+from = ["vibesys.api.architecture"]
 
 [[interfaces]]
 expose = ["AgentRunProjection", "CandidateDisposition", "HypothesisOutcome", "HypothesisResolution", "HypothesisRoundView", "HypothesisView", "JudgeVerdict", "PerfDeltaReason", "PerfProvenance", "RoundHistory", "RoundRecord", "RoundView", "agent_projection", "parse_round_record", "serialize_round_record"]

@@ -9,6 +9,7 @@ import {
 import type {CampaignMetricAnalytics} from '../../state/campaign-analytics.js';
 import type {CampaignRecord, TurnMessage} from '../../state/campaign-record.js';
 import type {CampaignViewModel} from '../../state/campaign-view.js';
+import {ArchitectureDiagram} from './ArchitectureDiagram.js';
 import brandMark from './assets/brand-mark.svg';
 import {CampaignTimeline} from './CampaignTimeline.js';
 import {Button} from './components/button.js';
@@ -50,6 +51,15 @@ export function CampaignDashboard({
         previewLabel={previewLabel}
       />
       <CampaignOverview scenario={scenario} campaign={campaign} />
+      {scenario.architecture !== null && (
+        <ArchitectureDiagram
+          graph={scenario.architecture}
+          cursorMeasurementId={campaign.activeMeasurement?.id ?? null}
+          cursorSequence={campaign.cursorSequence}
+          selectedComponentId={campaign.selectedArchitectureComponent?.id ?? null}
+          onSelectedComponentId={campaign.setSelectedArchitectureComponentId}
+        />
+      )}
       {campaign.selectedWorkstream !== null && (
         <WorkstreamDialog
           scenario={scenario}

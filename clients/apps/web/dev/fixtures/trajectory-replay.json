@@ -4,6 +4,83 @@
   "title": "Qwen3.5-397B-A17B on 4x MI300A",
   "summary": "Campaign trajectory with recorded measurements and reconstructed workstreams.",
   "provenance": "82 plotted points recovered from campaign results; later continuation measurements include paired speculative-decoding runs. Per-point agent attribution is unknown. Workstream windows, role assignments, and turn text are curated reconstructions from available evidence, not backend events.",
+  "architecture": {
+    "schema_version": 1,
+    "graph_id": "qwen-serving-replay",
+    "title": "Qwen serving stack",
+    "description": "An illustrative topology assembled only from component names stated in this replay's objective and workstreams.",
+    "generation": {
+      "approach": "agent-authored",
+      "source": "Curated from the replay fixture's OpenAI-compatible server objective and its scheduling, graph runtime, KV cache, collective, and speculative-decoding workstream names. No runtime attribution or changed-file mapping is claimed."
+    },
+    "components": [
+      {
+        "id": "qwen.api",
+        "label": "OpenAI API",
+        "kind": "api",
+        "anchor": {"kind": "service", "value": "openai-api"},
+        "description": "Receives the benchmark's OpenAI-compatible generation requests.",
+        "group": "Serving"
+      },
+      {
+        "id": "qwen.scheduler",
+        "label": "Request scheduler",
+        "kind": "service",
+        "anchor": {"kind": "service", "value": "request-scheduler"},
+        "description": "Coordinates prefill, decode lanes, and concurrency capacity.",
+        "group": "Serving"
+      },
+      {
+        "id": "qwen.executor",
+        "label": "Model executor",
+        "kind": "process",
+        "anchor": {"kind": "service", "value": "model-executor"},
+        "description": "Runs the accepted prefill and decode paths across the model workers.",
+        "group": "Runtime"
+      },
+      {
+        "id": "qwen.graphs",
+        "label": "Graph runtime",
+        "kind": "library",
+        "anchor": {"kind": "module", "value": "graph-runtime"},
+        "description": "Owns the captured prefill, decode, and mixed-step execution graphs.",
+        "group": "Runtime"
+      },
+      {
+        "id": "qwen.kv-cache",
+        "label": "KV cache",
+        "kind": "storage",
+        "anchor": {"kind": "module", "value": "kv-cache"},
+        "description": "Retains prefix and history state across serving turns.",
+        "group": "State"
+      },
+      {
+        "id": "qwen.collectives",
+        "label": "GPU collectives",
+        "kind": "library",
+        "anchor": {"kind": "module", "value": "sequence-parallel-collectives"},
+        "description": "Coordinates sequence-parallel data movement across the four GPUs.",
+        "group": "Runtime"
+      },
+      {
+        "id": "qwen.mtp",
+        "label": "MTP verifier",
+        "kind": "service",
+        "anchor": {"kind": "service", "value": "mtp-speculative-decoding"},
+        "description": "Drafts and verifies speculative decode tokens before serving them.",
+        "group": "Serving"
+      }
+    ],
+    "edges": [
+      {"id": "api-scheduler", "source_id": "qwen.api", "target_id": "qwen.scheduler", "kind": "call", "label": "submit request"},
+      {"id": "scheduler-executor", "source_id": "qwen.scheduler", "target_id": "qwen.executor", "kind": "call", "label": "schedule batch"},
+      {"id": "scheduler-cache", "source_id": "qwen.scheduler", "target_id": "qwen.kv-cache", "kind": "data", "label": "reuse state"},
+      {"id": "executor-graphs", "source_id": "qwen.executor", "target_id": "qwen.graphs", "kind": "dependency", "label": "launch capture"},
+      {"id": "executor-collectives", "source_id": "qwen.executor", "target_id": "qwen.collectives", "kind": "dependency", "label": "exchange shards"},
+      {"id": "executor-mtp", "source_id": "qwen.executor", "target_id": "qwen.mtp", "kind": "call", "label": "verify drafts"}
+    ],
+    "observations": []
+  },
   "objective": {
     "title": "Maximize goodput under latency and correctness gates",
     "statement": "Build a from-scratch OpenAI-compatible Qwen3.5-397B-A17B-MXFP4 server on one 4x MI300A node and maximize the corrected load-ramp goodput while preserving the campaign gates.",

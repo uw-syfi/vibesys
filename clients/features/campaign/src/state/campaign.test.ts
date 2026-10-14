@@ -1,7 +1,9 @@
 import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
+import {parseArchitectureGraph} from '@vibesys/contracts';
 import {checkMachine} from '@vibesys/machine/testing';
+import {createActor} from 'xstate';
 import {campaignMachine, parseReplayScenario, projectCampaign} from './index.js';
 
 const record = parseReplayScenario(
@@ -11,6 +13,9 @@ const record = parseReplayScenario(
       'utf8',
     ),
   ),
+);
+const architecture = parseArchitectureGraph(
+  JSON.parse(readFileSync(resolve(import.meta.dir, '../fixtures/architecture-queue.json'), 'utf8')),
 );
 
 test('model: playback owns one delay, scrubbing stays bounded, and close releases every operation', () => {
@@ -72,4 +77,23 @@ test('model: loading retries through typed outcomes and never keeps an operation
         ? []
         : ['loading does not match operation'],
   });
+});
+
+test('component detail selection is machine-owned and survives measurement scrubbing', () => {
+  const actor = createActor(campaignMachine, {
+    input: {mode: 'history', record: {...record, architecture}},
+  });
+  actor.start();
+
+  actor.send({type: 'architecture-component', id: 'queue.producer'});
+  actor.send({type: 'point', index: 0});
+  expect(
+    projectCampaign(actor.getSnapshot().context).campaign?.selectedArchitectureComponent?.id,
+  ).toBe('queue.producer');
+
+  actor.send({type: 'architecture-component', id: null});
+  expect(
+    projectCampaign(actor.getSnapshot().context).campaign?.selectedArchitectureComponent,
+  ).toBeNull();
+  actor.stop();
 });

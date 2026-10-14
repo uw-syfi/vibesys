@@ -1,6 +1,22 @@
 /** Campaign records and their pure frame projection; no browser or transport implementation. */
 
 export {
+  type ArchitectureAction,
+  type ArchitectureCursor,
+  type ArchitectureState,
+  type ArchitectureView,
+  foldArchitectureCursor,
+  initialArchitectureState,
+  projectArchitecture,
+} from './architecture.js';
+export {
+  type ArchitectureEdgeLayout,
+  type ArchitectureLayout,
+  type ArchitectureNodeLayout,
+  layoutArchitecture,
+} from './architecture-layout.js';
+
+export {
   type CampaignAction,
   type CampaignContext,
   type CampaignInput,

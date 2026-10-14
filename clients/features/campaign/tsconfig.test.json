@@ -15,6 +15,7 @@
     "jsx": "react-jsx"
   },
   "include": [
+    "dom-tests/**/*.test.tsx",
     "src/**/*.test.ts",
     "src/**/*.test.tsx"
   ],
@@ -24,6 +25,9 @@
     },
     {
       "path": "./tsconfig.renderer.json"
+    },
+    {
+      "path": "../../libs/contracts/tsconfig.lib.json"
     },
     {
       "path": "../../libs/machine/tsconfig.lib.json"

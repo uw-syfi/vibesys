@@ -300,6 +300,7 @@ export function foldStateToRecord(state: FoldState, now: number): CampaignRecord
     title: state.header.title,
     summary: state.header.summary,
     provenance: state.header.provenance,
+    architecture: null,
     objective: state.header.objective,
     benchmarkVersions: state.header.benchmarkVersions,
     benchmarkVersionBoundary: state.header.benchmarkVersionBoundary,

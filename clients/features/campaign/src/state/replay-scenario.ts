@@ -5,6 +5,7 @@
  * adapters may both produce it; presentation and history logic consume it.
  */
 
+import {parseArchitectureGraph} from '@vibesys/contracts';
 import {
   arrayAt,
   CampaignDecodeError,
@@ -59,6 +60,7 @@ function decodeReplayScenario(value: unknown): ReplayScenario {
     'title',
     'summary',
     'provenance',
+    ...('architecture' in root ? ['architecture'] : []),
     'objective',
     'benchmarkVersions',
     'benchmarkVersionBoundary',
@@ -88,8 +90,7 @@ function decodeReplayScenario(value: unknown): ReplayScenario {
   validateAgentWorkstreams(agents, workstreamIds);
 
   const measurements = arrayAt(root.measurements, '$.measurements', parseMeasurement);
-  const measurementIds = uniqueIds(measurements, '$.measurements');
-  void measurementIds;
+  uniqueIds(measurements, '$.measurements');
   const versionIds = header.benchmarkVersions.map(version => version.id);
   validateMeasurements(
     measurements,
@@ -100,14 +101,43 @@ function decodeReplayScenario(value: unknown): ReplayScenario {
     header.benchmarkVersionBoundary,
   );
   validateTrajectories(header.trajectories, agentIds, workstreams);
+  const architecture =
+    root.architecture === undefined || root.architecture === null
+      ? null
+      : parseArchitectureGraph(root.architecture);
+  validateArchitectureObservations(architecture, measurements);
 
   return {
     schemaVersion: 1,
     ...header,
+    architecture,
     workstreams,
     agents,
     measurements,
   };
+}
+
+function validateArchitectureObservations(
+  architecture: CampaignRecord['architecture'],
+  measurements: CampaignRecord['measurements'],
+): void {
+  if (architecture === null) return;
+  const measurementSequences = new Map(
+    measurements.map(measurement => [measurement.id, measurement.sequence]),
+  );
+  for (const [index, observation] of architecture.observations.entries()) {
+    const path = `$.architecture.observations[${index}]`;
+    const sequence = measurementSequences.get(observation.measurement_id);
+    if (sequence === undefined) {
+      fail(`${path}.measurement_id`, `unknown measurement ${observation.measurement_id}`);
+    }
+    if (observation.sequence !== sequence) {
+      fail(
+        `${path}.sequence`,
+        `expected ${sequence} for measurement ${observation.measurement_id}`,
+      );
+    }
+  }
 }
 
 function validateAgentWorkstreams(agents: ReplayScenario['agents'], workstreamIds: string[]): void {

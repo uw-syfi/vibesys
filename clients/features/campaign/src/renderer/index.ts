@@ -9,4 +9,8 @@ export {
   createLiveCampaignStore,
   type LoadCampaign,
 } from './effects/stores.js';
+export {
+  ArchitectureDiagram,
+  type ArchitectureDiagramProps,
+} from './ui/ArchitectureDiagram.js';
 export {CampaignDashboard} from './ui/CampaignDashboard.js';

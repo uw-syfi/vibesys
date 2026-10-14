@@ -39,6 +39,8 @@ function createCampaignStore(
     setPlaying: (playing: boolean) => send({type: 'play', playing}),
     setPointIndex: (index: number) => send({type: 'point', index}),
     setSelectedAgentId: (id: string | null) => send({type: 'agent', id}),
+    setSelectedArchitectureComponentId: (id: string | null) =>
+      send({type: 'architecture-component', id}),
     setSelectedWorkstreamId: (id: string | null) => send({type: 'workstream', id}),
     setView: (view: CampaignViewModel['view']) => send({type: 'view', view}),
     setTimelineMode: (mode: CampaignViewModel['timelineMode']) => send({type: 'timeline', mode}),

@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "graph_id": "hotel-search",
+  "title": "Hotel search request path",
+  "description": "A gateway request enters the frontend, calls the search service, and reads the hotel datastore.",
+  "generation": {
+    "approach": "hybrid",
+    "source": "Service and call edges are normalized from the servicebench schema-v2 OTLP trace graph exercised in tests/vibesys/loops/test_profiler_mcp.py; datastore and p95 rows use its schema-v1 telemetry report and changes are repository-relative git paths."
+  },
+  "components": [
+    {
+      "id": "hotel.gateway",
+      "label": "HTTP gateway",
+      "kind": "api",
+      "anchor": {"kind": "service", "value": "gateway"},
+      "description": "Receives the public hotel search request.",
+      "group": "Request edge"
+    },
+    {
+      "id": "hotel.frontend",
+      "label": "Frontend",
+      "kind": "service",
+      "anchor": {"kind": "service", "value": "frontend"},
+      "description": "Handles GET /hotels and calls the search service.",
+      "group": "Services"
+    },
+    {
+      "id": "hotel.search",
+      "label": "Search",
+      "kind": "service",
+      "anchor": {"kind": "service", "value": "search"},
+      "description": "Runs Search/Nearby for the frontend request.",
+      "group": "Services"
+    },
+    {
+      "id": "hotel.database",
+      "label": "Hotel database",
+      "kind": "database",
+      "anchor": {"kind": "service", "value": "frontend:db"},
+      "description": "The datastore row reported by the workload-correlated telemetry capture.",
+      "group": "Data"
+    }
+  ],
+  "edges": [
+    {"id": "gateway-frontend", "source_id": "hotel.gateway", "target_id": "hotel.frontend", "kind": "call", "label": "GET /hotels"},
+    {"id": "frontend-search", "source_id": "hotel.frontend", "target_id": "hotel.search", "kind": "call", "label": "Search/Nearby"},
+    {"id": "search-database", "source_id": "hotel.search", "target_id": "hotel.database", "kind": "storage", "label": "hotel lookup"}
+  ],
+  "observations": [
+    {
+      "measurement_id": "hotel-baseline",
+      "sequence": 10,
+      "label": "OTLP baseline",
+      "changes": [],
+      "attributions": [
+        {"component_id": "hotel.frontend", "cost": null, "latency": {"value": 21, "unit": "p95 ms", "provenance": "servicebench schema-v2 frontend:GET /hotels inclusive-latency row."}},
+        {"component_id": "hotel.search", "cost": null, "latency": {"value": 16, "unit": "p95 ms", "provenance": "servicebench schema-v2 search:Search/Nearby inclusive-latency row."}},
+        {"component_id": "hotel.database", "cost": {"value": 4, "unit": "spans", "provenance": "servicebench schema-v1 datastore sample count."}, "latency": {"value": 20, "unit": "p95 ms", "provenance": "servicebench schema-v1 frontend:db datastore row."}}
+      ]
+    },
+    {
+      "measurement_id": "hotel-pooled-client",
+      "sequence": 20,
+      "label": "Reuse the search client",
+      "changes": [
+        {"component_id": "hotel.frontend", "changed_files": ["services/frontend/client.go"]},
+        {"component_id": "hotel.search", "changed_files": ["services/search/server.go"]}
+      ],
+      "attributions": [
+        {"component_id": "hotel.frontend", "cost": {"value": 0.004, "unit": "USD/1k requests", "provenance": "Workload-correlated infrastructure allocation."}, "latency": {"value": 15.2, "unit": "p95 ms", "provenance": "servicebench service latency row after connection reuse."}},
+        {"component_id": "hotel.search", "cost": null, "latency": {"value": 11.8, "unit": "p95 ms", "provenance": "servicebench service latency row after connection reuse."}}
+      ]
+    },
+    {
+      "measurement_id": "hotel-index",
+      "sequence": 30,
+      "label": "Add the nearby-search index",
+      "changes": [
+        {"component_id": "hotel.search", "changed_files": ["services/search/index.go"]},
+        {"component_id": "hotel.database", "changed_files": ["schema/hotels.sql"]}
+      ],
+      "attributions": [
+        {"component_id": "hotel.database", "cost": null, "latency": {"value": 7.4, "unit": "p95 ms", "provenance": "servicebench datastore latency row after the index migration."}}
+      ]
+    }
+  ]
+}

@@ -17,6 +17,7 @@ export type CampaignReadonlyView = Omit<
   | 'setPlaying'
   | 'setPointIndex'
   | 'setSelectedAgentId'
+  | 'setSelectedArchitectureComponentId'
   | 'setSelectedWorkstreamId'
   | 'setView'
   | 'setTimelineMode'
@@ -41,6 +42,13 @@ function measurementMetric(
 
 function requestedMetricId(record: CampaignRecord, requested: string): string {
   return requested === '' ? defaultMetricId(record) : requested;
+}
+
+function selectedArchitectureComponent(
+  record: CampaignRecord,
+  id: string | null,
+): NonNullable<CampaignRecord['architecture']>['components'][number] | null {
+  return record.architecture?.components.find(component => component.id === id) ?? null;
 }
 
 export function projectCampaign(context: CampaignContext): {
@@ -76,6 +84,10 @@ export function projectCampaign(context: CampaignContext): {
       playing: context.mode === 'live' ? ui.following : ui.playing,
       pointIndex,
       selectedAgent: scenario.agents.find(item => item.id === ui.selectedAgentId) ?? null,
+      selectedArchitectureComponent: selectedArchitectureComponent(
+        scenario,
+        ui.selectedArchitectureComponentId,
+      ),
       selectedWorkstream:
         scenario.workstreams.find(item => item.id === ui.selectedWorkstreamId) ?? null,
       status:

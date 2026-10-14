@@ -34,6 +34,7 @@ const record: CampaignRecord = parseReplayScenario(
 function normalize(value: CampaignRecord): CampaignRecord {
   return {
     ...value,
+    architecture: null,
     workstreams: [...value.workstreams].sort((a, b) => a.id.localeCompare(b.id)),
     agents: [...value.agents].sort((a, b) => a.id.localeCompare(b.id)),
     measurements: [...value.measurements].sort((a, b) => a.sequence - b.sequence),
@@ -122,7 +123,7 @@ function rejectedOutcome(
   return outcome;
 }
 
-test('folding a replayed record reconstructs the original record', () => {
+test('folding a frame replay reconstructs every field the live stream owns', () => {
   const frames = framesFromRecord(record);
   const state = acceptedState(foldFrames(frames));
   const reconstructed = foldStateToRecord(state, latestMoment(state));

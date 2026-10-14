@@ -594,3 +594,47 @@
 :where(.campaign-shell, .campaign-overlay) .selected-values { flex: 0 1 auto; max-width: 100px; overflow: hidden; }
 :where(.campaign-shell, .campaign-overlay) .selected-values span { font-size: 7px; overflow: hidden; text-overflow: ellipsis; }
 }
+:where(.campaign-shell, .campaign-overlay) .architecture-panel { margin-top: 20px; overflow: hidden; }
+:where(.campaign-shell, .campaign-overlay) .architecture-header { align-items: start; display: flex; gap: 24px; justify-content: space-between; padding: 20px 22px 18px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-header > div:first-child { min-width: 0; }
+:where(.campaign-shell, .campaign-overlay) .architecture-header h2 { font-size: 17px; margin: 0; }
+:where(.campaign-shell, .campaign-overlay) .architecture-header p:not(.section-kicker) { color: var(--text-muted); font-size: 12px; line-height: 1.5; margin: 7px 0 0; max-width: 78ch; }
+:where(.campaign-shell, .campaign-overlay) .architecture-observation { border-left: 1px solid var(--border-strong); display: grid; flex: 0 0 min(270px,35%); gap: 5px; padding-left: 18px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-observation span { color: var(--text-faint); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+:where(.campaign-shell, .campaign-overlay) .architecture-observation strong { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+:where(.campaign-shell, .campaign-overlay) .architecture-scroll { background: var(--surface-2); border-block: 1px solid var(--border); max-width: 100%; overflow: auto; overscroll-behavior-inline: contain; }
+:where(.campaign-shell, .campaign-overlay) .architecture-canvas { min-width: 100%; position: relative; }
+:where(.campaign-shell, .campaign-overlay) .architecture-edges { inset: 0; pointer-events: none; position: absolute; }
+:where(.campaign-shell, .campaign-overlay) .architecture-edges path { fill: none; stroke: var(--neutral-border-soft); stroke-width: 1.5; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node { background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: 7px; color: inherit; display: grid; gap: 6px; overflow: hidden; padding: 12px 13px; position: absolute; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node-changed { border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); }
+:where(.campaign-shell, .campaign-overlay) .architecture-node:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node-trigger { appearance: none; background: transparent; border: 0; color: inherit; cursor: pointer; display: grid; font: inherit; gap: 6px; min-width: 0; padding: 0; text-align: left; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node-trigger:focus-visible { outline: 0; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node-heading { align-items: center; display: flex; justify-content: space-between; min-width: 0; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node-heading span { color: var(--text-faint); font-family: 'DM Mono',monospace; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node-heading b { color: var(--accent); font-size: 9px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node-trigger > strong { color: var(--text-primary); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node-description { color: var(--text-muted); display: -webkit-box; font-size: 10px; -webkit-line-clamp: 2; line-height: 1.35; overflow: hidden; -webkit-box-orient: vertical; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node dl { display: grid; gap: 5px; grid-template-columns: repeat(2,minmax(0,1fr)); margin: auto 0 0; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node dl > div { min-width: 0; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node dt { color: var(--text-faint); font-size: 8px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-node dd { color: var(--text-secondary); font-family: 'DM Mono',monospace; font-size: 8px; margin: 1px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+:where(.campaign-shell, .campaign-overlay) .architecture-changes { align-items: baseline; display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 13px 22px 15px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-changes > strong { color: var(--text-secondary); font-size: 11px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-changes > span { color: var(--text-muted); font-size: 11px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-changes ul { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
+:where(.campaign-shell, .campaign-overlay) .architecture-changes code { background: var(--code-bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text-secondary); font-size: 10px; padding: 3px 6px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-detail-sheet { width: min(480px,calc(100vw - 24px)); }
+:where(.campaign-shell, .campaign-overlay) .architecture-detail-facts { display: grid; gap: 12px; margin: 22px 0; }
+:where(.campaign-shell, .campaign-overlay) .architecture-detail-facts > div { border-bottom: 1px solid var(--border); display: grid; gap: 5px; padding-bottom: 10px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-detail-facts dt { color: var(--text-faint); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; }
+:where(.campaign-shell, .campaign-overlay) .architecture-detail-facts dd { color: var(--text-secondary); margin: 0; overflow-wrap: anywhere; }
+:where(.campaign-shell, .campaign-overlay) .architecture-detail-changes h3 { font-size: 12px; margin: 0 0 10px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-detail-changes p { color: var(--text-muted); font-size: 11px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-detail-changes ul { display: grid; gap: 7px; list-style: none; margin: 0; padding: 0; }
+@media (max-width: 640px) {
+:where(.campaign-shell, .campaign-overlay) .architecture-header { align-items: stretch; flex-direction: column; gap: 12px; padding: 16px; }
+:where(.campaign-shell, .campaign-overlay) .architecture-observation { border-left: 0; border-top: 1px solid var(--border); flex-basis: auto; padding: 11px 0 0; }
+:where(.campaign-shell, .campaign-overlay) .architecture-changes { align-items: flex-start; flex-direction: column; padding-inline: 16px; }
+}

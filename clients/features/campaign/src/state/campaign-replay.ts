@@ -2,7 +2,9 @@
  * Turn a finished `CampaignRecord` into the ordered frame stream a live run
  * would have emitted. This is the single producer of frames for the prototype:
  * the dev SSE server calls it to replay a fixture "as if live", and the
- * round-trip test folds its output back to prove the projection is faithful.
+ * round-trip test folds its output back to prove the streamed projection is
+ * faithful. Static architecture metadata is deliberately absent: live diagram
+ * transport needs an authoritative backend contract and is not invented here.
  *
  * Frames are time-ordered so a client watching them arrive sees workstreams
  * start, measurements stream in, and workstreams finish in the order they

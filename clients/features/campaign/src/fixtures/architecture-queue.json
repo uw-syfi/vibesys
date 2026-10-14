@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "graph_id": "queue-rs",
+  "title": "queue-rs bounded queue",
+  "description": "The public C ABI enters a bounded Rust queue whose producers and consumers share one mutex-protected deque.",
+  "generation": {
+    "approach": "hybrid",
+    "source": "Static module and call relationships from examples/data-structures/repositories/queue-rs/src; attribution rows use the folded-sample shape emitted by Linux perf and changed-file lists use repository-relative git paths."
+  },
+  "components": [
+    {
+      "id": "queue.ffi",
+      "label": "C ABI",
+      "kind": "api",
+      "anchor": {"kind": "path", "value": "src/ffi.rs"},
+      "description": "FFI constructors and queue operations exposed to benchmark callers.",
+      "group": "Boundary"
+    },
+    {
+      "id": "queue.owner",
+      "label": "Queue owner",
+      "kind": "library",
+      "anchor": {"kind": "module", "value": "queue_rs::Queue"},
+      "description": "Owns queue configuration and shared state handles.",
+      "group": "Rust core"
+    },
+    {
+      "id": "queue.producer",
+      "label": "Producer",
+      "kind": "process",
+      "anchor": {"kind": "module", "value": "queue_rs::Producer"},
+      "description": "Validates and enqueues one caller-provided value.",
+      "group": "Rust core"
+    },
+    {
+      "id": "queue.mutex",
+      "label": "Queue lock",
+      "kind": "queue",
+      "anchor": {"kind": "module", "value": "queue_rs::QueueState::values"},
+      "description": "The synchronization boundary around the bounded deque.",
+      "group": "Shared state"
+    },
+    {
+      "id": "queue.deque",
+      "label": "Bounded deque",
+      "kind": "storage",
+      "anchor": {"kind": "module", "value": "std::collections::VecDeque"},
+      "description": "Stores values in FIFO order up to the configured capacity.",
+      "group": "Shared state"
+    },
+    {
+      "id": "queue.consumer",
+      "label": "Consumer",
+      "kind": "process",
+      "anchor": {"kind": "module", "value": "queue_rs::Consumer"},
+      "description": "Copies and removes the oldest available value.",
+      "group": "Rust core"
+    }
+  ],
+  "edges": [
+    {"id": "ffi-owner", "source_id": "queue.ffi", "target_id": "queue.owner", "kind": "call", "label": "create"},
+    {"id": "owner-producer", "source_id": "queue.owner", "target_id": "queue.producer", "kind": "ownership", "label": "clone state"},
+    {"id": "owner-consumer", "source_id": "queue.owner", "target_id": "queue.consumer", "kind": "ownership", "label": "clone state"},
+    {"id": "producer-lock", "source_id": "queue.producer", "target_id": "queue.mutex", "kind": "queue", "label": "enqueue"},
+    {"id": "consumer-lock", "source_id": "queue.consumer", "target_id": "queue.mutex", "kind": "queue", "label": "dequeue"},
+    {"id": "lock-deque", "source_id": "queue.mutex", "target_id": "queue.deque", "kind": "ownership", "label": "guards"}
+  ],
+  "observations": [
+    {
+      "measurement_id": "queue-baseline",
+      "sequence": 1,
+      "label": "Locked VecDeque baseline",
+      "changes": [],
+      "attributions": [
+        {"component_id": "queue.ffi", "cost": {"value": 420, "unit": "samples", "provenance": "Linux perf folded stacks mapped to src/ffi.rs."}, "latency": null},
+        {"component_id": "queue.mutex", "cost": {"value": 3310, "unit": "samples", "provenance": "Linux perf folded stacks attributed to Mutex lock and unlock frames."}, "latency": {"value": 18.4, "unit": "ns/op", "provenance": "Criterion-style queue operation sample after warmup."}},
+        {"component_id": "queue.deque", "cost": {"value": 1270, "unit": "samples", "provenance": "Linux perf folded stacks mapped to VecDeque push and pop frames."}, "latency": null}
+      ]
+    },
+    {
+      "measurement_id": "queue-copy-elision",
+      "sequence": 2,
+      "label": "Avoid a redundant enqueue allocation",
+      "changes": [
+        {"component_id": "queue.producer", "changed_files": ["src/lib.rs"]},
+        {"component_id": "queue.deque", "changed_files": ["src/lib.rs"]}
+      ],
+      "attributions": [
+        {"component_id": "queue.producer", "cost": {"value": 710, "unit": "samples", "provenance": "Linux perf folded stacks mapped to Producer::try_enqueue."}, "latency": {"value": 15.1, "unit": "ns/op", "provenance": "Criterion-style queue operation sample after warmup."}},
+        {"component_id": "queue.mutex", "cost": {"value": 3140, "unit": "samples", "provenance": "Linux perf folded stacks attributed to Mutex lock and unlock frames."}, "latency": null}
+      ]
+    },
+    {
+      "measurement_id": "queue-ffi-bounds",
+      "sequence": 3,
+      "label": "Tighten FFI validation",
+      "changes": [{"component_id": "queue.ffi", "changed_files": ["src/ffi.rs"]}],
+      "attributions": []
+    }
+  ]
+}

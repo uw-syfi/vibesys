@@ -97,6 +97,9 @@ test('campaign preview loads through its campaign service alone', async () => {
   await flush();
   const html = renderToStaticMarkup(app.view);
   expect(html).toContain('Qwen3.5-397B-A17B on 4x MI300A');
+  expect(html).toContain('Qwen serving stack');
+  expect(html).toContain('SYSTEM TOPOLOGY · agent-authored');
+  expect(html).toContain('aria-controls="architecture-component-qwen.api"');
   expect(html).not.toContain('Replay failed to load');
   app.close();
 });

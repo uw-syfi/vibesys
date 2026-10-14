@@ -90,6 +90,9 @@ commands = [
   ["pnpm", "check:knip"],
   ["pnpm", "--dir", "libs/contracts", "generate:protocol"],
   ["git", "diff", "--exit-code", "--", "libs/contracts/src/generated/"],
+  ["uv", "run", "python", "../scripts/generate_architecture_graph_contract.py", "--schema", "libs/contracts/src/generated/architecture-graph.schema.json", "--module", "libs/contracts/src/generated/architecture-graph.schema.ts"],
+  ["pnpm", "exec", "json2ts", "-i", "libs/contracts/src/generated/architecture-graph.schema.json", "-o", "libs/contracts/src/generated/architecture-graph.generated.ts", "--bannerComment", "/* Generated from vibesys.api.architecture. Do not edit. */"],
+  ["git", "diff", "--exit-code", "--", "libs/contracts/src/generated/architecture-graph.schema.json", "libs/contracts/src/generated/architecture-graph.schema.ts", "libs/contracts/src/generated/architecture-graph.generated.ts"],
   ["pnpm", "check:clients"],
 ]
 

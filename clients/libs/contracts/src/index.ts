@@ -4,6 +4,23 @@
  * that turns untrusted wire text into those types, and the error taxonomy that validator and the
  * transports report through. Runtime neutral: no DOM, no Node.
  */
+
+export {
+  type ArchitectureAnchor,
+  type ArchitectureAnchorKind,
+  type ArchitectureAttributionValue,
+  type ArchitectureComponent,
+  type ArchitectureComponentAttribution,
+  type ArchitectureComponentChange,
+  type ArchitectureComponentKind,
+  type ArchitectureEdge,
+  type ArchitectureEdgeKind,
+  type ArchitectureGeneration,
+  type ArchitectureGenerationApproach,
+  type ArchitectureGraphDocument,
+  type ArchitectureObservation,
+  parseArchitectureGraph,
+} from './architecture-graph.js';
 export {
   BackendClientError,
   type BackendErrorKind,
