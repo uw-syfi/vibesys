@@ -163,7 +163,7 @@ def fake_host(
             threads,
         ),
         stop_effects=StopEffects(
-            requester=ControlSocketStopRequester(network),
+            requester=ControlSocketStopRequester(network, clock=threads),
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,

@@ -724,7 +724,7 @@ export interface PauseCommand {
   protocol_version?: ProtocolVersion;
   request_id?: RequestId;
   client_id?: ClientId;
-  timestamp?: Timestamp;
+  timestamp: Timestamp;
   type: Type;
   mode?: Mode;
 }
@@ -735,7 +735,7 @@ export interface ResumeCommand {
   protocol_version?: ProtocolVersion1;
   request_id?: RequestId1;
   client_id?: ClientId1;
-  timestamp?: Timestamp1;
+  timestamp: Timestamp1;
   type: Type1;
   fallback?: Fallback;
 }
@@ -746,7 +746,7 @@ export interface SteerCommand {
   protocol_version?: ProtocolVersion2;
   request_id?: RequestId2;
   client_id?: ClientId2;
-  timestamp?: Timestamp2;
+  timestamp: Timestamp2;
   type: Type2;
   text: Text;
 }
@@ -757,7 +757,7 @@ export interface StopCommand {
   protocol_version?: ProtocolVersion3;
   request_id?: RequestId3;
   client_id?: ClientId3;
-  timestamp?: Timestamp3;
+  timestamp: Timestamp3;
   type: Type3;
   mode?: Mode1;
 }
@@ -773,7 +773,7 @@ export interface SnapshotQuery {
   protocol_version?: ProtocolVersion4;
   request_id?: RequestId4;
   client_id?: ClientId4;
-  timestamp?: Timestamp4;
+  timestamp: Timestamp4;
   type: Type4;
   expected_store_id?: ExpectedStoreId;
 }
@@ -784,7 +784,7 @@ export interface ChatQuery {
   protocol_version?: ProtocolVersion5;
   request_id?: RequestId5;
   client_id?: ClientId5;
-  timestamp?: Timestamp5;
+  timestamp: Timestamp5;
   type: Type5;
   text: Text1;
   thread_id?: ChatThreadId | null;
@@ -799,7 +799,7 @@ export interface ChatThreadCreateQuery {
   protocol_version?: ProtocolVersion6;
   request_id?: RequestId6;
   client_id?: ClientId6;
-  timestamp?: Timestamp6;
+  timestamp: Timestamp6;
   type: Type6;
   provider?: Provider;
   model?: Model;
@@ -812,7 +812,7 @@ export interface ChatOptionsQuery {
   protocol_version?: ProtocolVersion7;
   request_id?: RequestId7;
   client_id?: ClientId7;
-  timestamp?: Timestamp7;
+  timestamp: Timestamp7;
   type: Type7;
 }
 /**
@@ -826,7 +826,7 @@ export interface TuiDefaultsQuery {
   protocol_version?: ProtocolVersion8;
   request_id?: RequestId8;
   client_id?: ClientId8;
-  timestamp?: Timestamp8;
+  timestamp: Timestamp8;
   type: Type8;
 }
 /**
@@ -836,7 +836,7 @@ export interface HistoryQuery {
   protocol_version?: ProtocolVersion9;
   request_id?: RequestId9;
   client_id?: ClientId9;
-  timestamp?: Timestamp9;
+  timestamp: Timestamp9;
   type: Type9;
 }
 /**
@@ -846,7 +846,7 @@ export interface PerformanceQuery {
   protocol_version?: ProtocolVersion10;
   request_id?: RequestId10;
   client_id?: ClientId10;
-  timestamp?: Timestamp10;
+  timestamp: Timestamp10;
   type: Type10;
 }
 /**
@@ -856,7 +856,7 @@ export interface ExperimentQuery {
   protocol_version?: ProtocolVersion11;
   request_id?: RequestId11;
   client_id?: ClientId11;
-  timestamp?: Timestamp11;
+  timestamp: Timestamp11;
   type: Type11;
   after?: ExperimentCursor | null;
 }
@@ -880,7 +880,7 @@ export interface IterationQuery {
   protocol_version?: ProtocolVersion12;
   request_id?: RequestId12;
   client_id?: ClientId12;
-  timestamp?: Timestamp12;
+  timestamp: Timestamp12;
   type: Type12;
   expected_store_id?: ExpectedStoreId1;
   parent_id?: ParentId;
@@ -898,7 +898,7 @@ export interface DesignQuery {
   protocol_version?: ProtocolVersion13;
   request_id?: RequestId13;
   client_id?: ClientId13;
-  timestamp?: Timestamp13;
+  timestamp: Timestamp13;
   type: Type13;
 }
 /**
@@ -914,7 +914,7 @@ export interface DesignPatchQuery {
   protocol_version?: ProtocolVersion14;
   request_id?: RequestId14;
   client_id?: ClientId14;
-  timestamp?: Timestamp14;
+  timestamp: Timestamp14;
   type: Type14;
   base: Base;
   head: Head;
@@ -932,7 +932,7 @@ export interface EventsQuery {
   protocol_version?: ProtocolVersion15;
   request_id?: RequestId15;
   client_id?: ClientId15;
-  timestamp?: Timestamp15;
+  timestamp: Timestamp15;
   type: Type15;
   expected_store_id?: ExpectedStoreId2;
   after_sequence?: AfterSequence;
@@ -946,7 +946,7 @@ export interface SubscribeRequest {
   protocol_version?: ProtocolVersion16;
   request_id?: RequestId16;
   client_id?: ClientId16;
-  timestamp?: Timestamp16;
+  timestamp: Timestamp16;
   type: Type16;
   after_sequence?: AfterSequence1;
   tail?: Tail;
@@ -959,7 +959,7 @@ export interface Response {
   protocol_version?: ProtocolVersion17;
   request_id: RequestId17;
   client_id?: ClientId17;
-  timestamp?: Timestamp17;
+  timestamp: Timestamp17;
   ok?: Ok;
   error?: Error;
   diagnostic?: Diagnostic | null;

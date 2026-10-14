@@ -28,9 +28,13 @@ from vibesys.api.hypothesis import (
     JudgeVerdict,
     PerfDeltaReason,
 )
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from datetime import datetime
+
+    from vs_sim.api import Clock
 
 # Both snapshots and streamed batches publish the same execution checkpoint.
 # Naming the list keeps the generated client contract referentially identical,
@@ -519,19 +523,19 @@ class Response(ResponseEnvelope):
         request_id: str,
         error: BaseException,
         *,
+        timestamp: datetime,
         operation: str = "Request",
-        scope: DiagnosticScope = DiagnosticScope.REQUEST,
-        code: str | None = None,
     ) -> Response:
         """Build a failed response with consistent legacy and typed errors."""
         diagnostic = exception_to_diagnostic(
             error,
-            scope=scope,
+            scope=DiagnosticScope.REQUEST,
             operation=operation,
-            code=code or getattr(error, "diagnostic_code", None),
+            code=getattr(error, "diagnostic_code", None),
         )
         return cls(
             request_id=request_id,
+            timestamp=timestamp,
             ok=False,
             error=diagnostic.summary,
             diagnostic=diagnostic,
@@ -542,13 +546,13 @@ _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
-def decode_request(frame: str | bytes) -> ProtocolRequest | Response:
+def decode_request(frame: str | bytes, *, clock: Clock) -> ProtocolRequest | Response:
     """Parse one request frame, or the failed response that rejects it.
 
     Every transport decodes through here, so a malformed frame (invalid JSON or
     UTF-8, a JSON value that is not an object, a missing or unknown ``type``,
     unknown keys, nesting deeper than the JSON parser's depth limit) draws the
-    same typed response on each of them. The rejection echoes the frame's
+    same typed response on each of them, stamped by ``clock``. The rejection echoes the frame's
     ``request_id`` and ``client_id`` when it carries them as an object, so a
     client can match it to what it sent.
 
@@ -561,9 +565,16 @@ def decode_request(frame: str | bytes) -> ProtocolRequest | Response:
         return _REQUEST_ADAPTER.validate_json(frame)
     except ValueError as error:
         request_id, client_id = _frame_ids(frame)
-        return Response.from_exception(request_id, error, operation="Request").model_copy(
-            update={"client_id": client_id}
-        )
+        return failure_response(request_id, client_id, error, clock=clock)
+
+
+def failure_response(
+    request_id: str, client_id: str, error: BaseException, *, clock: Clock
+) -> Response:
+    """The failed response for ``error``, stamped by ``clock`` and addressed to ``client_id``."""
+    return Response.from_exception(
+        request_id, error, timestamp=utc_datetime(clock), operation="Request"
+    ).model_copy(update={"client_id": client_id})
 
 
 def _frame_ids(frame: str | bytes) -> tuple[str, str]:

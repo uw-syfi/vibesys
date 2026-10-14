@@ -444,6 +444,7 @@ describe('WebSession', () => {
     const {session, transport} = sessionWith(new FakeLifecycle());
     transport.snapshots.push({
       request_id: 'request-pause',
+      timestamp: '2026-01-01T00:00:00Z',
       ok: true,
       ack: {action: 'pause', status: 'pending'},
     });
@@ -459,6 +460,7 @@ describe('WebSession', () => {
     const {session, transport} = sessionWith(new FakeLifecycle());
     transport.snapshots.push({
       request_id: 'request-stop',
+      timestamp: '2026-01-01T00:00:00Z',
       ok: false,
       error: 'run is read only',
     });
@@ -2366,6 +2368,7 @@ function storeReplacedResponse(): ProtocolResponse {
   return {
     ok: false,
     request_id: 'request-store-replaced',
+    timestamp: '2026-01-01T00:00:00Z',
     error: 'Request failed',
     diagnostic: {
       code: 'snapshot_store_replaced',

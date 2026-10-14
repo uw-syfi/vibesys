@@ -314,6 +314,7 @@ def test_mock_response_body_is_a_valid_response(request_type: str) -> None:
     envelope = {
         "protocol_version": PROTOCOL_VERSION,
         "request_id": "schema-check",
+        "timestamp": "1970-01-01T00:00:00+00:00",
         "ok": True,
         **body,
     }

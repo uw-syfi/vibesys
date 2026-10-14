@@ -13,7 +13,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from server.api.protocol import Response, decode_request
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 _REJECTED = "Request received invalid input"
 _SCALARS = st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text()
@@ -54,7 +54,7 @@ def _object_ids(frame: str | bytes) -> tuple[str, str] | None:
 
 def _check(frame: str | bytes) -> None:
     """A request is exactly what a well-formed object frame named; anything else is rejected."""
-    decoded = decode_request(frame)
+    decoded = decode_request(frame, clock=ManualClock())
 
     if isinstance(decoded, Response):
         assert decoded.ok is False
@@ -69,7 +69,7 @@ def _check(frame: str | bytes) -> None:
         value = json.loads(frame)
         assert isinstance(value, dict)
         assert value["type"] == decoded.type
-        assert decode_request(decoded.model_dump_json()) == decoded
+        assert decode_request(decoded.model_dump_json(), clock=ManualClock()) == decoded
 
 
 @settings(max_examples=examples(pr=25, nightly=1000))
@@ -127,7 +127,7 @@ def test_any_bytes_decode_to_a_request_or_a_typed_rejection(frame: bytes) -> Non
 def test_a_rejection_echoes_the_ids_of_an_object_frame(request_id: str, client_id: str) -> None:
     frame = json.dumps({"request_id": request_id, "client_id": client_id, "type": "no.such.type"})
 
-    decoded = decode_request(frame)
+    decoded = decode_request(frame, clock=ManualClock())
 
     assert isinstance(decoded, Response)
     assert (decoded.request_id, decoded.client_id) == (request_id, client_id)

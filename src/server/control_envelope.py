@@ -16,7 +16,7 @@ Public surface: ``ProtocolModel``, ``Request``, ``StopCommand``, ``CommandAck``,
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,7 +40,9 @@ class Request(ProtocolModel):
     # dedicated chat connections. Empty preserves compatibility with clients
     # and servers that predate connection attribution.
     client_id: str = ""
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # When the sender made the request, by the sender's clock. Required so no
+    # request is stamped by a clock the sender did not inject.
+    timestamp: datetime
 
 
 class StopCommand(Request):
@@ -67,7 +69,7 @@ class ResponseEnvelope(ProtocolModel):
     protocol_version: Literal[1] = PROTOCOL_VERSION
     request_id: str
     client_id: str = ""
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime
     ok: bool = True
     error: str | None = None
     diagnostic: Diagnostic | None = None

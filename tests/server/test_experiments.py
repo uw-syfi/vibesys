@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 import pytest
 from pydantic import ValidationError
 from tests.server.support import (
+    REQUEST_TIME,
     Task,
     agent_descriptor,
     build_server_parts,
@@ -682,7 +683,7 @@ def test_service_reads_only_authoritative_agent_state(tmp_path: Path) -> None:
     parts = build_server_parts(
         project.state.log_directory(run_id), record=run_record(project, run_id)
     )
-    response = parts.api.execute(ExperimentQuery())
+    response = parts.api.execute(ExperimentQuery(timestamp=REQUEST_TIME))
 
     assert [entry.hypothesis_id for entry in response.experiments] == ["H-01", "H-02"]
     assert response.experiments[1].active is True
@@ -706,7 +707,7 @@ def test_service_projects_committed_live_state_without_reloading_history(
     parts = build_server_parts(
         project.state.log_directory(run_id), record=run_record(project, run_id)
     )
-    full = parts.api.execute(ExperimentQuery())
+    full = parts.api.execute(ExperimentQuery(timestamp=REQUEST_TIME))
     assert full.experiment_update is not None
 
     changed = initial.clone()
@@ -730,11 +731,12 @@ def test_service_projects_committed_live_state_without_reloading_history(
 
     delta = parts.api.execute(
         ExperimentQuery(
+            timestamp=REQUEST_TIME,
             after=ExperimentCursor(
                 run_id=run_id,
                 projection_id=full.experiment_update.projection_id,
                 revision=1,
-            )
+            ),
         )
     )
 
@@ -775,7 +777,9 @@ def test_committed_update_wins_a_race_with_a_cold_authoritative_load(
     monkeypatch.setattr(Project, "stored_record", delayed_load)
 
     def scenario() -> Response:
-        response_future = Task(threads, lambda: parts.api.execute(ExperimentQuery()))
+        response_future = Task(
+            threads, lambda: parts.api.execute(ExperimentQuery(timestamp=REQUEST_TIME))
+        )
         wait_or_fail(loaded, "the authoritative load to start")
         changed = initial.clone()
         changed.experiment_revision = 2
@@ -814,7 +818,7 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
         first_project.state.log_directory(run_id),
         record=run_record(first_project, run_id),
     )
-    first = parts.api.execute(ExperimentQuery())
+    first = parts.api.execute(ExperimentQuery(timestamp=REQUEST_TIME))
     assert first.experiment_update is not None
 
     second_project, _ = _project_run(tmp_path / "second")
@@ -834,11 +838,12 @@ def test_service_resets_when_another_project_attaches_with_the_same_run_id(
 
     response = parts.api.execute(
         ExperimentQuery(
+            timestamp=REQUEST_TIME,
             after=ExperimentCursor(
                 run_id=run_id,
                 projection_id=first.experiment_update.projection_id,
                 revision=1,
-            )
+            ),
         )
     )
 
@@ -857,7 +862,7 @@ def test_committed_state_is_projected_synchronously_before_later_mutation(tmp_pa
 
     parts.publish_committed_view(_committed_view(state, run_id=run_id, loop="multi-agent"))
     state.hypotheses[0].plan.task = "uncommitted mutation"
-    response = parts.api.execute(ExperimentQuery())
+    response = parts.api.execute(ExperimentQuery(timestamp=REQUEST_TIME))
 
     assert response.experiments[0].action == "test H-01"
 
@@ -886,7 +891,7 @@ def test_service_reads_performance_from_authoritative_agent_state(tmp_path: Path
     parts = build_server_parts(
         project.state.log_directory(run_id), record=run_record(project, run_id)
     )
-    response = parts.api.execute(PerformanceQuery())
+    response = parts.api.execute(PerformanceQuery(timestamp=REQUEST_TIME))
 
     assert [(item.round, item.perf_metric) for item in response.performance] == [(1, 42.0)]
 
@@ -960,7 +965,7 @@ def test_service_projects_a_within_noise_delta_as_inconclusive(tmp_path: Path) -
     parts = build_server_parts(
         project.state.log_directory(run_id), record=run_record(project, run_id)
     )
-    entries = parts.api.execute(ExperimentQuery()).experiments
+    entries = parts.api.execute(ExperimentQuery(timestamp=REQUEST_TIME)).experiments
 
     entry = next(item for item in entries if item.hypothesis_id == "H-within-noise")
     assert entry.resolved_outcome == "inconclusive"
@@ -971,7 +976,7 @@ def test_service_returns_authoritative_empty_log_after_attach(tmp_path: Path) ->
     parts = build_server_parts(
         project.state.log_directory(run_id), record=run_record(project, run_id)
     )
-    response = parts.api.execute(ExperimentQuery())
+    response = parts.api.execute(ExperimentQuery(timestamp=REQUEST_TIME))
 
     assert response.experiments == []
     assert response.experiments_ready is True

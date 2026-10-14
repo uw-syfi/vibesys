@@ -246,6 +246,7 @@ class ServerRuntime:
             self.chat,
             self.integration,
             controls=self.controls,
+            clock=clock,
             project_scope=_project_scope(project_root) if project_root is not None else None,
             tui_defaults=tui_defaults,
             threads=self.threads,

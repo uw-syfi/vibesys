@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.server.support import Task, build_server_parts
+from tests.server.support import REQUEST_TIME, Task, build_server_parts
 
 from server.api.protocol import ChatQuery, Response
 from server.chat.manager import ChatAnswer
@@ -28,7 +28,10 @@ def test_chat_response_excludes_concurrent_run_events(tmp_path: Path) -> None:
         return ChatAnswer(text="bounded answer", invocation_id="exec-bounded")
 
     def scenario() -> Response:
-        pending = Task(threads, lambda: parts.api.execute(ChatQuery(text="what changed?")))
+        pending = Task(
+            threads,
+            lambda: parts.api.execute(ChatQuery(timestamp=REQUEST_TIME, text="what changed?")),
+        )
         try:
             # The handler is parked until released, so the output below is
             # guaranteed to land while the chat request is in flight.
@@ -57,7 +60,9 @@ def test_chat_response_excludes_concurrent_run_events(tmp_path: Path) -> None:
 def test_unknown_thread_chat_response_has_no_events(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
-    response = parts.api.execute(ChatQuery(text="hello?", thread_id="missing"))
+    response = parts.api.execute(
+        ChatQuery(timestamp=REQUEST_TIME, text="hello?", thread_id="missing")
+    )
 
     assert response.chat is not None
     assert "Unknown experiment chat thread 'missing'" in response.chat.answer

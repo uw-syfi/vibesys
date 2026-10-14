@@ -44,16 +44,19 @@ from server.api.protocol import (
     SteerCommand,
     StopCommand,
     TuiDefaultsQuery,
+    decode_request,
+    failure_response,
 )
 from server.chat.options import ChatOptions, build_chat_options
 from server.control_envelope import CommandAck
 from server.events import EventType, RunEvent
 from vibesys.api import IterationUnavailable, RunRecordReadError
 from vibesys.api.hypothesis import agent_projection
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from datetime import datetime
 
     from server.chat.manager import ChatManager
     from server.controller import RunController
@@ -62,7 +65,7 @@ if TYPE_CHECKING:
     from server.journal import WireJournal
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunControl, RunRecord, RunView, WorkspaceChange
-    from vs_sim.api import Condition, Threads
+    from vs_sim.api import Clock, Condition, Threads
 
 
 @dataclass(frozen=True)
@@ -265,6 +268,7 @@ class RunApi:
         integration: RunIntegrationAdapter,
         *,
         controls: RunControlSlot,
+        clock: Clock,
         project_scope: str | None = None,
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
         threads: Threads | None = None,
@@ -278,6 +282,7 @@ class RunApi:
         self._chat = chat
         self._integration = integration
         self._controls = controls
+        self._clock = clock
         self._project_scope = project_scope
         self._tui_defaults_provider = tui_defaults
         self._tui_defaults: InteractiveSetupDefaults | None = None
@@ -291,6 +296,17 @@ class RunApi:
             self._observe_experiment_change,
             replay_filter=lambda _header: False,
         )
+
+    def _now(self) -> datetime:
+        return utc_datetime(self._clock)
+
+    def decode_request(self, frame: str | bytes) -> ProtocolRequest | Response:
+        """Parse one request frame, or the failed response that rejects it, stamped by this API."""
+        return decode_request(frame, clock=self._clock)
+
+    def failure(self, request_id: str, client_id: str, error: BaseException) -> Response:
+        """Build the failed response for ``error``, addressed to the client that asked."""
+        return failure_response(request_id, client_id, error, clock=self._clock)
 
     def execute(self, request: ProtocolRequest) -> Response:
         """Execute a request and reflect the issuing client on its response."""
@@ -306,16 +322,27 @@ class RunApi:
         if isinstance(request, ChatThreadCreateQuery):
             return self._execute_chat_thread_create(request)
         if isinstance(request, ChatOptionsQuery):
-            return Response(request_id=request.request_id, chat_options=self.chat_options())
+            return Response(
+                request_id=request.request_id,
+                timestamp=self._now(),
+                chat_options=self.chat_options(),
+            )
         if isinstance(request, TuiDefaultsQuery):
-            return Response(request_id=request.request_id, tui_defaults=self.tui_defaults())
+            return Response(
+                request_id=request.request_id,
+                timestamp=self._now(),
+                tui_defaults=self.tui_defaults(),
+            )
         if isinstance(request, HistoryQuery):
             self._journal.record(EventType.STATUS_QUERY, "/history")
-            return Response(request_id=request.request_id, events=self.history_events())
+            return Response(
+                request_id=request.request_id, timestamp=self._now(), events=self.history_events()
+            )
         if isinstance(request, PerformanceQuery):
             self._journal.record(EventType.STATUS_QUERY, "/perf")
             return Response(
                 request_id=request.request_id,
+                timestamp=self._now(),
                 performance=self.performance_rounds(),
                 performance_context=self.performance_context(),
             )
@@ -328,6 +355,7 @@ class RunApi:
             )
             return Response(
                 request_id=request.request_id,
+                timestamp=self._now(),
                 experiments=result.entries if result is not None else [],
                 experiment_update=result.update if result is not None else None,
                 experiments_ready=ready,
@@ -341,6 +369,7 @@ class RunApi:
             )
             return Response(
                 request_id=request.request_id,
+                timestamp=self._now(),
                 iterations=iterations,
                 iterations_ready=iterations is not None,
             )
@@ -349,6 +378,7 @@ class RunApi:
             ready = self._controller.attached_run is not None
             return Response(
                 request_id=request.request_id,
+                timestamp=self._now(),
                 design=self.design_rounds() if ready else [],
                 design_ready=ready,
             )
@@ -358,11 +388,13 @@ class RunApi:
             # spam the run journal without recording anything about the run.
             return Response(
                 request_id=request.request_id,
+                timestamp=self._now(),
                 design_patch=self.design_patch(request.base, request.head, request.path),
             )
         if isinstance(request, SnapshotQuery):
             return Response(
                 request_id=request.request_id,
+                timestamp=self._now(),
                 snapshot=self.snapshot(expected_store_id=request.expected_store_id),
             )
         if isinstance(request, EventsQuery):
@@ -381,7 +413,7 @@ class RunApi:
                     expected_store_id=request.expected_store_id,
                 )
             )
-            return Response(request_id=request.request_id, events=events)
+            return Response(request_id=request.request_id, timestamp=self._now(), events=events)
         message = f"Unsupported protocol request: {type(request).__name__}"
         raise TypeError(message)
 
@@ -392,12 +424,13 @@ class RunApi:
         if self._controller.is_read_only():
             raise RunReadOnlyError
         ack = self._controls.execute(request)
-        return Response(request_id=request.request_id, ack=ack)
+        return Response(request_id=request.request_id, timestamp=self._now(), ack=ack)
 
     def _execute_chat(self, request: ChatQuery) -> Response:
         answer, event = self._chat.chat_with_event(request.text, thread_id=request.thread_id)
         return Response(
             request_id=request.request_id,
+            timestamp=self._now(),
             chat=ChatResult(question=request.text, answer=answer, thread_id=request.thread_id),
             events=[] if event is None else [event],
         )
@@ -413,6 +446,7 @@ class RunApi:
         )
         return Response(
             request_id=request.request_id,
+            timestamp=self._now(),
             chat_thread=ChatThreadInfo(
                 thread_id=spec.thread_id,
                 title=spec.title,

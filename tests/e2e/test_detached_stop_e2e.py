@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.server.support import REQUEST_TIME
 
 from launch import default_runs
 from server.api.protocol import SubscribeRequest
@@ -101,7 +102,10 @@ class _Subscriber:
         self.seen: list[str] = []
         self.subscribed = threading.Event()
         self.stopped = threading.Event()
-        self.connection.send(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+        self.connection.send(
+            SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json().encode()
+            + b"\n"
+        )
         self.thread = threading.Thread(target=self._read)
         self.thread.start()
 
@@ -196,7 +200,10 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         result = registry.stop(
             instance_id,
             StopEffects(
-                ControlSocketStopRequester(UnixNetwork()), _NoSignal(), threads, threads.sleep
+                ControlSocketStopRequester(UnixNetwork(), clock=SystemClock()),
+                _NoSignal(),
+                threads,
+                threads.sleep,
             ),
         )
 

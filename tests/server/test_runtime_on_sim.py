@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.server.support import REQUEST_TIME
 
 from launch import default_runs
 from server.api.protocol import StopCommand, SubscribeRequest
@@ -144,7 +145,12 @@ def test_a_subscriber_reads_the_event_that_ends_the_run_before_the_server_closes
         def subscriber() -> None:
             assert runtime.transport_listening.wait(HANG_GUARD_S)
             client = network.connect(str(socket_path))
-            client.send(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            client.send(
+                SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
+                .model_dump_json()
+                .encode()
+                + b"\n"
+            )
             seen.append(_read_events_to_end(client))
             read.set()
 
@@ -172,7 +178,10 @@ class _Subscription:
 
     def __init__(self, network: SimNetwork, socket_path: Path) -> None:
         self._connection = network.connect(str(socket_path), HANG_GUARD_S)
-        self._connection.send(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+        self._connection.send(
+            SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json().encode()
+            + b"\n"
+        )
         self._buffer = b""
 
     def read(self) -> dict[str, Any]:
@@ -364,7 +373,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
             control = _SessionControlStub(integration.control)
             runtime.controls.install(control)
             try:
-                runtime.api.execute(StopCommand())
+                runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
                 integration.control.raise_if_stopped()
                 return "unreachable"
             finally:

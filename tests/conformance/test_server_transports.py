@@ -204,7 +204,14 @@ def test_a_rebootstrap_split_across_frames_supersedes_the_fold_once(
         with _running_connection(
             "websocket", parts, socket_dir / "split-rebootstrap.sock", limits
         ) as connection:
-            connection.send({"type": "subscribe", "after_sequence": 0, "tail": 10})
+            connection.send(
+                {
+                    "type": "subscribe",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "after_sequence": 0,
+                    "tail": 10,
+                }
+            )
             assert connection.receive()["type"] == "subscribed"
             assert connection.receive()["type"] == "event_batch"
             with parts.condition:
@@ -314,7 +321,9 @@ def test_a_backlog_published_between_checkpoints_arrives_as_coalesced_batches(
     parts = build_server_parts(tmp_path / "logs")
     try:
         with _running_connection(transport, parts, socket_dir / "burst.sock") as connection:
-            connection.send({"type": "subscribe", "after_sequence": 0})
+            connection.send(
+                {"type": "subscribe", "timestamp": "2026-01-01T00:00:00Z", "after_sequence": 0}
+            )
             assert connection.receive()["type"] == "subscribed"
             assert connection.receive()["type"] == "event_batch"
 

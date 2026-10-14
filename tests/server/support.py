@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from launch import open_run_store
@@ -40,6 +41,9 @@ if TYPE_CHECKING:
     from vibesys.api import RunRecord, RunView
     from vs_project.api import Project
     from vs_sim.api import Condition, Threads, Worker
+
+REQUEST_TIME = datetime(2026, 1, 1, tzinfo=UTC)
+"""The stamp a test gives a request or response it builds."""
 
 
 class _ControlBridge:
@@ -126,6 +130,7 @@ class ServerParts:
     api: RunApi
     core_events: CoreEventJournal
     control: RunControlChannel
+    clock: ManualClock
 
     def start_execution(
         self,
@@ -245,6 +250,7 @@ def build_server_parts(
         chat,
         integration,
         controls=controls,
+        clock=clock,
         tui_defaults=tui_defaults,
         threads=threads,
     )
@@ -258,6 +264,7 @@ def build_server_parts(
         api=api,
         core_events=core_events,
         control=control,
+        clock=clock,
     )
     if log_dir is not None:
         parts.attach(log_dir, record=record)

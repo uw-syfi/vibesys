@@ -30,6 +30,7 @@ from server.api.protocol import (
     SubscribedMessage,
     SubscribeRequest,
     decode_request,
+    failure_response,
 )
 from server.transport.discovery import (
     CAPABILITY_ROTATION_HEADER,
@@ -1142,7 +1143,7 @@ class WebSocketGateway:
                 await websocket.close()
 
     async def _handle_request(self, websocket: ServerConnection, raw: str) -> bool:
-        request = decode_request(raw)
+        request = decode_request(raw, clock=self._clock)
         if isinstance(request, Response):
             response = request
         else:
@@ -1164,11 +1165,9 @@ class WebSocketGateway:
             # lint-waiver: LW-101111 [BLE001]; the request boundary converts arbitrary API failures into the protocol's typed response.
             # > Listing current service exceptions would leak future request failures out of the transport; a helper would retain the same broad boundary catch with more indirection.
             except Exception as error:  # noqa: BLE001
-                response = Response.from_exception(
-                    request.request_id,
-                    error,
-                    operation="Request",
-                ).model_copy(update={"client_id": request.client_id})
+                response = failure_response(
+                    request.request_id, request.client_id, error, clock=self._clock
+                )
         await self._send(websocket, response.model_dump_json())
         return False
 

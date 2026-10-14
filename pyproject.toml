@@ -301,9 +301,6 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 "resources/**" = ["TID251"]
 "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py" = ["TID251"]
 "sdk/vs-bench/**" = ["TID251"]
-# The protocol's request and response timestamps still default to the wall clock; moving them
-# onto the API service's clock changes the published protocol schema and is its own change.
-"src/server/control_envelope.py" = ["TID251"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]

@@ -27,7 +27,7 @@ from urllib.request import urlopen
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
+from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, build_server_parts
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
@@ -263,7 +263,7 @@ def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -
             assert response.headers["Content-Type"] == "image/png"
             assert response.read() == image
 
-        response = asyncio.run(_request(gateway, SnapshotQuery()))
+        response = asyncio.run(_request(gateway, SnapshotQuery(timestamp=REQUEST_TIME)))
 
     assert response["ok"] is True
     assert response["snapshot"]["status"] == "running"
@@ -480,7 +480,9 @@ def test_gateway_accepts_the_origin_a_browser_sends_for_a_differently_spelled_de
             "http://127.0.0.1",
             "http://[::1]:5173",
         }
-        response = asyncio.run(_request(gateway, SnapshotQuery(), origin="http://localhost:5173"))
+        response = asyncio.run(
+            _request(gateway, SnapshotQuery(timestamp=REQUEST_TIME), origin="http://localhost:5173")
+        )
 
     assert response["ok"] is True
 
@@ -916,7 +918,9 @@ def test_gateway_accepts_an_explicit_browser_harness_origin(tmp_path: Path) -> N
     with WebSocketGateway(
         parts.api, allowed_origins=("http://127.0.0.1:5173",), clock=ManualClock()
     ) as gateway:
-        response = asyncio.run(_request(gateway, SnapshotQuery(), origin="http://127.0.0.1:5173"))
+        response = asyncio.run(
+            _request(gateway, SnapshotQuery(timestamp=REQUEST_TIME), origin="http://127.0.0.1:5173")
+        )
 
     assert response["ok"] is True
 
@@ -978,7 +982,7 @@ class _RecordingRequestApi:
 
     def execute(self, request: ProtocolRequest) -> Response:
         self.executed.append(request)
-        return Response(request_id=request.request_id)
+        return Response(timestamp=REQUEST_TIME, request_id=request.request_id)
 
 
 class _HeldBootstrapRunner:
@@ -1010,14 +1014,18 @@ class _HeldBootstrapRunner:
 async def _assert_initial_bootstrap_isolated(
     gateway: WebSocketGateway, runner: _HeldBootstrapRunner
 ) -> None:
-    snapshot = SnapshotQuery()
+    snapshot = SnapshotQuery(timestamp=REQUEST_TIME)
     async with (
         asyncio.timeout(DEADLOCK_GUARD_S),
         _gateway_connection(gateway) as stream,
         _gateway_connection(gateway) as control,
     ):
         try:
-            await stream.send(SubscribeRequest(client_id="held-bootstrap").model_dump_json())
+            await stream.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME, client_id="held-bootstrap"
+                ).model_dump_json()
+            )
             first_stream_frame = asyncio.create_task(stream.recv())
             await runner.bootstrap_entered.wait(first_stream_frame)
 
@@ -1051,7 +1059,11 @@ async def _assert_shutdown_drains_initial_bootstrap(
     closing = None
     async with _gateway_connection(gateway) as stream:
         try:
-            await stream.send(SubscribeRequest(client_id="shutdown-bootstrap").model_dump_json())
+            await stream.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME, client_id="shutdown-bootstrap"
+                ).model_dump_json()
+            )
             first_stream_frame = asyncio.create_task(stream.recv())
             await runner.bootstrap_entered.wait(first_stream_frame)
 
@@ -1092,9 +1104,9 @@ async def _assert_chat_connection_is_isolated(
     runner: _HeldChatRequestRunner,
     api: _RecordingRequestApi,
 ) -> None:
-    held_chat = ChatQuery(text="hold this chat")
-    same_connection_snapshot = SnapshotQuery()
-    other_connection_snapshot = SnapshotQuery()
+    held_chat = ChatQuery(timestamp=REQUEST_TIME, text="hold this chat")
+    same_connection_snapshot = SnapshotQuery(timestamp=REQUEST_TIME)
+    other_connection_snapshot = SnapshotQuery(timestamp=REQUEST_TIME)
     async with (
         asyncio.timeout(DEADLOCK_GUARD_S),
         _gateway_connection(gateway) as chat,
@@ -1165,7 +1177,7 @@ async def _assert_shutdown_drains_started_request(
     closing = None
     async with _gateway_connection(gateway) as websocket:
         try:
-            request = ChatQuery(text="finish during shutdown")
+            request = ChatQuery(timestamp=REQUEST_TIME, text="finish during shutdown")
             await websocket.send(request.model_dump_json())
             response = asyncio.create_task(websocket.recv())
             await runner.entered(request).wait(response)
@@ -1507,7 +1519,11 @@ def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) 
         origin = f"http://127.0.0.1:{gateway.bound_port}"
         messages: list[dict[str, Any]] = []
         async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-            await websocket.send(SubscribeRequest(client_id="browser-client").model_dump_json())
+            await websocket.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME, client_id="browser-client"
+                ).model_dump_json()
+            )
             messages.append(json.loads(await websocket.recv()))
             messages.append(json.loads(await websocket.recv()))
         return messages
@@ -1585,7 +1601,7 @@ async def _assert_subscription_failure_lifecycle(
     """Assert the public subscription frames and the normal close that follows."""
     origin = f"http://127.0.0.1:{gateway.bound_port}"
     async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-        request = SubscribeRequest(client_id="failing-browser-client")
+        request = SubscribeRequest(timestamp=REQUEST_TIME, client_id="failing-browser-client")
         await websocket.send(request.model_dump_json())
         async with asyncio.timeout(DEADLOCK_GUARD_S):
             messages = [json.loads(await websocket.recv()) for _ in expected_types]
@@ -1606,7 +1622,7 @@ async def _assert_subscription_failure_lifecycle(
 
 def test_gateway_converts_control_api_timeout_into_response() -> None:
     with WebSocketGateway(cast("RunApi", _ControlTimeoutApi()), clock=ManualClock()) as gateway:
-        response = asyncio.run(_request(gateway, SnapshotQuery()))
+        response = asyncio.run(_request(gateway, SnapshotQuery(timestamp=REQUEST_TIME)))
 
     assert response["ok"] is False
     assert response["error"] == "Request timed out"
@@ -1697,7 +1713,11 @@ class _HalfOpenPeer:
 
     def subscribe(self) -> None:
         """Send one masked subscribe frame."""
-        payload = SubscribeRequest(client_id="half-open-peer").model_dump_json().encode()
+        payload = (
+            SubscribeRequest(timestamp=REQUEST_TIME, client_id="half-open-peer")
+            .model_dump_json()
+            .encode()
+        )
         mask = secrets.token_bytes(4)
         masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
         length = (
@@ -1946,7 +1966,9 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
             ``aborts == 1`` below counts only ``_send``'s own abort.
             """
 
-    connection = StalledConnection([SubscribeRequest(client_id="stalled").model_dump_json()])
+    connection = StalledConnection(
+        [SubscribeRequest(timestamp=REQUEST_TIME, client_id="stalled").model_dump_json()]
+    )
 
     with caplog.at_level(logging.DEBUG, logger="server.transport.websocket"):
         asyncio.run(
@@ -2003,7 +2025,9 @@ async def _replay_batches(gateway: WebSocketGateway, watermark: int) -> list[str
     origin = f"http://127.0.0.1:{gateway.bound_port}"
     frames: list[str] = []
     async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-        await websocket.send(SubscribeRequest(client_id="backlog-client").model_dump_json())
+        await websocket.send(
+            SubscribeRequest(timestamp=REQUEST_TIME, client_id="backlog-client").model_dump_json()
+        )
         assert json.loads(await _next_frame(websocket))["type"] == "subscribed"
         while True:
             frame = await _next_frame(websocket)
@@ -2174,7 +2198,7 @@ def test_an_inbound_frame_past_the_stated_cap_is_refused_by_the_gateway(
         async with connect(
             gateway.websocket_url, origin=cast("Origin", origin), max_size=None
         ) as websocket:
-            await websocket.send(SteerCommand(text=text).model_dump_json())
+            await websocket.send(SteerCommand(timestamp=REQUEST_TIME, text=text).model_dump_json())
             return json.loads(await _next_frame(websocket))
 
     with WebSocketGateway(parts.api, limits=limits, clock=ManualClock()) as gateway:
@@ -2245,7 +2269,7 @@ def test_browser_session_survives_launch_capability_rotation(
             origin = cast("Origin", page_origin)
             async with connect(gateway.websocket_url, origin=origin) as attached:
                 assert web_entrypoint.main(["rotate", "--instance", str(instance_path)]) == 0
-                await attached.send(SnapshotQuery().model_dump_json())
+                await attached.send(SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json())
                 assert json.loads(await attached.recv())["ok"] is True
                 await _assert_rejected(
                     f"ws://127.0.0.1:{gateway.bound_port}/ws"
@@ -2257,13 +2281,13 @@ def test_browser_session_survives_launch_capability_rotation(
                 origin=origin,
                 additional_headers={"Cookie": cookie},
             ) as resumed:
-                await resumed.send(SnapshotQuery().model_dump_json())
+                await resumed.send(SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json())
                 assert json.loads(await resumed.recv())["ok"] is True
             async with connect(
                 f"ws://127.0.0.1:{gateway.bound_port}/ws?session={browser_session}",
                 origin=origin,
             ) as harness:
-                await harness.send(SnapshotQuery().model_dump_json())
+                await harness.send(SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json())
                 assert json.loads(await harness.recv())["ok"] is True
 
         asyncio.run(rotate_with_an_attached_socket())
@@ -2350,7 +2374,9 @@ def test_a_browser_stream_reports_what_it_delivered_so_a_closing_server_can_wait
 
     async def subscribe() -> None:
         async with _gateway_connection(gateway) as websocket:
-            await websocket.send(SubscribeRequest(client_id="browser").model_dump_json())
+            await websocket.send(
+                SubscribeRequest(timestamp=REQUEST_TIME, client_id="browser").model_dump_json()
+            )
             assert json.loads(await websocket.recv())["type"] == "subscribed"
             assert json.loads(await websocket.recv())["type"] == "event_batch"
             caught_up.append(

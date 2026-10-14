@@ -207,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
                 epoch,
             ),
             effects=StopEffects(
-                requester=ControlSocketStopRequester(UnixNetwork()),
+                requester=ControlSocketStopRequester(UnixNetwork(), clock=epoch),
                 signaller=PidfdProcessSignaller(),
                 clock=threads,
                 pause=threads.sleep,

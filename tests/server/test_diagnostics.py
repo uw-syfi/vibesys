@@ -3,6 +3,7 @@
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, ValidationError
+from tests.server.support import REQUEST_TIME
 
 from server.api.protocol import ProtocolErrorMessage, Response, SubscribeRequest
 from server.diagnostics import (
@@ -36,7 +37,11 @@ def test_diagnostic_round_trips_on_protocol_and_event_models() -> None:
     )
 
     response = Response(
-        request_id="request", ok=False, error=diagnostic.summary, diagnostic=diagnostic
+        timestamp=REQUEST_TIME,
+        request_id="request",
+        ok=False,
+        error=diagnostic.summary,
+        diagnostic=diagnostic,
     )
     restored_response = Response.model_validate_json(response.model_dump_json())
     assert restored_response.diagnostic == diagnostic
@@ -60,7 +65,9 @@ def test_diagnostic_round_trips_on_protocol_and_event_models() -> None:
 
 
 def test_legacy_payloads_without_diagnostic_still_parse() -> None:
-    response = Response.model_validate_json('{"request_id":"request","ok":false,"error":"failed"}')
+    response = Response.model_validate_json(
+        '{"request_id":"request","timestamp":"2026-01-01T00:00:00Z","ok":false,"error":"failed"}'
+    )
     assert response.diagnostic is None
     event = RunEvent.model_validate_json(
         '{"protocol_version":1,"timestamp":"2026-01-01T00:00:00Z","type":"run_failed","text":"failed"}'
@@ -140,7 +147,9 @@ def test_diagnostic_redacts_explicit_text_on_construction_and_round_trip() -> No
 
 def test_failure_factories_keep_legacy_fields_consistent_and_sanitized() -> None:
     error = PermissionError("OPENAI_API_KEY=secret")
-    response = Response.from_exception("request", error, operation="Codex startup")
+    response = Response.from_exception(
+        "request", error, timestamp=REQUEST_TIME, operation="Codex startup"
+    )
     assert response.ok is False
     assert response.diagnostic is not None
     assert response.error == response.diagnostic.summary
@@ -160,10 +169,15 @@ def test_response_validation_diagnostic_preserves_all_pydantic_location_segments
     """A capability probe reads locations, never Pydantic's rendered message."""
     try:
         SubscribeRequest.model_validate(
-            {"type": "subscribe", "after_sequence": "not-a-number", "heartbeat_ms": 15_000}
+            {
+                "type": "subscribe",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "after_sequence": "not-a-number",
+                "heartbeat_ms": 15_000,
+            }
         )
     except ValidationError as error:
-        response = Response.from_exception("request", error)
+        response = Response.from_exception("request", error, timestamp=REQUEST_TIME)
     else:  # pragma: no cover - the invalid payload above must stay invalid
         raise AssertionError
 

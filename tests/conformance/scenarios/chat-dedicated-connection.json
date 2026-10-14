@@ -15,6 +15,7 @@
       "dir": "c2s",
       "frame": {
         "type": "query.chat",
+        "timestamp": "2026-01-01T00:00:00Z",
         "text": "why did round 2 regress?"
       }
     },

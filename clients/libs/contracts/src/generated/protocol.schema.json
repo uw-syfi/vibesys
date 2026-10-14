@@ -494,11 +494,12 @@
           "type": "string"
         }
       },
-      "title": "ChatOptionsQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "ChatOptionsQuery",
+      "type": "object"
     },
     "ChatProviderOptions": {
       "additionalProperties": false,
@@ -569,6 +570,7 @@
         }
       },
       "required": [
+        "timestamp",
         "type",
         "text"
       ],
@@ -679,11 +681,12 @@
           "title": "Title"
         }
       },
-      "title": "ChatThreadCreateQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "ChatThreadCreateQuery",
+      "type": "object"
     },
     "ChatThreadCreatedData": {
       "description": "Identity and resolved agent settings for one experiment-chat thread.\n\nReplayed by clients to rebuild the thread list; the default thread is\nimplicit and never records one of these.",
@@ -1025,6 +1028,7 @@
         }
       },
       "required": [
+        "timestamp",
         "type",
         "base",
         "head",
@@ -1064,11 +1068,12 @@
           "type": "string"
         }
       },
-      "title": "DesignQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "DesignQuery",
+      "type": "object"
     },
     "DesignRound": {
       "additionalProperties": false,
@@ -1486,11 +1491,12 @@
           "type": "integer"
         }
       },
-      "title": "EventsQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "EventsQuery",
+      "type": "object"
     },
     "ExperimentCursor": {
       "additionalProperties": false,
@@ -1560,11 +1566,12 @@
           "default": null
         }
       },
-      "title": "ExperimentQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "ExperimentQuery",
+      "type": "object"
     },
     "ExperimentUpdate": {
       "additionalProperties": false,
@@ -1920,11 +1927,12 @@
           "type": "string"
         }
       },
-      "title": "HistoryQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "HistoryQuery",
+      "type": "object"
     },
     "HypothesisEntry": {
       "additionalProperties": false,
@@ -2584,11 +2592,12 @@
           "type": "integer"
         }
       },
-      "title": "IterationQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "IterationQuery",
+      "type": "object"
     },
     "IterationSlice": {
       "additionalProperties": false,
@@ -2939,11 +2948,12 @@
           "type": "string"
         }
       },
-      "title": "PauseCommand",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "PauseCommand",
+      "type": "object"
     },
     "PerfDeltaReason": {
       "description": "Why a headline measurement carries no causal delta.\n\nAlways re-derived from round evidence (``perf_provenance`` and the\nbaseline fields), never stored on the round record, so it cannot drift\nfrom them. Absent entirely for records that predate provenance tracking:\na legacy absolute number keeps reading as a deliberate absolute rather\nthan being relabelled as unresolved.",
@@ -3082,11 +3092,12 @@
           "type": "string"
         }
       },
-      "title": "PerformanceQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "PerformanceQuery",
+      "type": "object"
     },
     "PerformanceRound": {
       "additionalProperties": false,
@@ -3755,7 +3766,8 @@
         }
       },
       "required": [
-        "request_id"
+        "request_id",
+        "timestamp"
       ],
       "title": "Response",
       "type": "object"
@@ -3796,11 +3808,12 @@
           "type": "boolean"
         }
       },
-      "title": "ResumeCommand",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "ResumeCommand",
+      "type": "object"
     },
     "RoundFinishedData": {
       "description": "Summary of attempt, judge, and performance outcomes for a round.",
@@ -4602,11 +4615,12 @@
           "title": "Expected Store Id"
         }
       },
-      "title": "SnapshotQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "SnapshotQuery",
+      "type": "object"
     },
     "StartupProgress": {
       "additionalProperties": false,
@@ -4689,6 +4703,7 @@
         }
       },
       "required": [
+        "timestamp",
         "type",
         "text"
       ],
@@ -4732,11 +4747,12 @@
           "type": "string"
         }
       },
-      "title": "StopCommand",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "StopCommand",
+      "type": "object"
     },
     "SubprocessOutputData": {
       "description": "Captured output from a managed subprocess.",
@@ -4833,11 +4849,12 @@
           "type": "string"
         }
       },
-      "title": "SubscribeRequest",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "SubscribeRequest",
+      "type": "object"
     },
     "SubscribedMessage": {
       "additionalProperties": false,
@@ -5067,11 +5084,12 @@
           "type": "string"
         }
       },
-      "title": "TuiDefaultsQuery",
-      "type": "object",
       "required": [
+        "timestamp",
         "type"
-      ]
+      ],
+      "title": "TuiDefaultsQuery",
+      "type": "object"
     },
     "TuiTheme": {
       "description": "Selectable terminal UI themes.",

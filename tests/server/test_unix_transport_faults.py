@@ -57,7 +57,12 @@ _RECV_CHUNK = 65536
 
 
 def _frame(kind: str) -> bytes:
-    body = {"type": kind, "request_id": f"req-{kind}", **_REQUIRED.get(kind, {})}
+    body = {
+        "type": kind,
+        "request_id": f"req-{kind}",
+        "timestamp": "2026-01-01T00:00:00Z",
+        **_REQUIRED.get(kind, {}),
+    }
     return json.dumps(body).encode() + b"\n"
 
 

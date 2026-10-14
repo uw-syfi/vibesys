@@ -14,6 +14,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, invariant, precondition, rule
 from pydantic import ValidationError
+from tests.server.support import REQUEST_TIME
 
 import server.registry as instance_module
 from server.api.protocol import Response
@@ -965,7 +966,7 @@ def test_an_unreadable_lock_is_reported_but_neither_trusted_nor_removed() -> Non
 
 # A server whose control socket nothing answers: every stop below that uses it
 # exercises the signal fallback.
-_UNANSWERED = ControlSocketStopRequester(SimNetwork(SimThreads()))
+_UNANSWERED = ControlSocketStopRequester(SimNetwork(SimThreads()), clock=CLOCK)
 
 
 class _ExitingSignaller:
@@ -1075,10 +1076,14 @@ def _reply_bytes(reply: _Reply, request_id: str) -> bytes:
     match reply:
         case _Reply.ACK:
             response = Response(
-                request_id=request_id, ack=CommandAck(action="stop", status="pending")
+                timestamp=REQUEST_TIME,
+                request_id=request_id,
+                ack=CommandAck(action="stop", status="pending"),
             )
         case _Reply.ERROR:
-            response = Response(request_id=request_id, ok=False, error="read-only run")
+            response = Response(
+                timestamp=REQUEST_TIME, request_id=request_id, ok=False, error="read-only run"
+            )
         case _:
             return b"not json\n"
     return response.model_dump_json().encode() + b"\n"
@@ -1124,7 +1129,9 @@ def _stop_against(
             threads.spawn(lambda: serve(listener), name="server", daemon=True)
         return LiveRegistry(store, CLOCK).stop(
             IDS[0],
-            StopEffects(ControlSocketStopRequester(network), signaller, threads, threads.sleep),
+            StopEffects(
+                ControlSocketStopRequester(network, clock=CLOCK), signaller, threads, threads.sleep
+            ),
             force=force,
         )
 

@@ -10,6 +10,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.conformance.frame_matching import RESPONSE_PSEUDO_TYPE, assert_frame_matches
+from tests.server.support import REQUEST_TIME
 
 from server.api.protocol import (
     EventBatchMessage,
@@ -52,7 +53,9 @@ def test_the_node_corpus_gate_names_the_same_pseudo_type() -> None:
 
 
 def test_a_response_frame_satisfies_the_pseudo_type() -> None:
-    assert_frame_matches(_frame(Response(request_id="r-1")), {"type": RESPONSE_PSEUDO_TYPE})
+    assert_frame_matches(
+        _frame(Response(timestamp=REQUEST_TIME, request_id="r-1")), {"type": RESPONSE_PSEUDO_TYPE}
+    )
 
 
 @pytest.mark.parametrize(
@@ -95,7 +98,7 @@ def test_a_response_step_still_compares_every_other_expected_key(
     Expressed as a property so the guarantee covers every combination of
     agreeing and disagreeing constrained fields, not one hand-picked pair.
     """
-    frame = _frame(Response(request_id="r-1", client_id=client_id, ok=ok))
+    frame = _frame(Response(timestamp=REQUEST_TIME, request_id="r-1", client_id=client_id, ok=ok))
     expected = {
         "type": RESPONSE_PSEUDO_TYPE,
         "client_id": expected_client_id,
@@ -109,7 +112,7 @@ def test_a_response_step_still_compares_every_other_expected_key(
 
 
 def test_a_mismatched_payload_names_the_offending_key() -> None:
-    frame = _frame(Response(request_id="r-1", ok=True))
+    frame = _frame(Response(timestamp=REQUEST_TIME, request_id="r-1", ok=True))
     with pytest.raises(AssertionError, match=r"expected ok=False, received True"):
         assert_frame_matches(frame, {"type": RESPONSE_PSEUDO_TYPE, "ok": False})
 
@@ -117,6 +120,7 @@ def test_a_mismatched_payload_names_the_offending_key() -> None:
 def test_a_response_step_matches_a_nested_diagnostic_subset() -> None:
     frame = _frame(
         Response(
+            timestamp=REQUEST_TIME,
             request_id="r-1",
             ok=False,
             diagnostic=Diagnostic(

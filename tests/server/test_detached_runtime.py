@@ -11,7 +11,7 @@ import threading
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
+from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, build_server_parts
 
 from launch import default_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
@@ -87,7 +87,12 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
         client.settimeout(DEADLOCK_GUARD_S)
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
-            stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            stream.write(
+                SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
+                .model_dump_json()
+                .encode()
+                + b"\n"
+            )
             stream.flush()
             assert json.loads(stream.readline())["type"] == "subscribed"
 
@@ -181,17 +186,17 @@ def test_finished_journal_reopens_read_only_without_mutating_storage(tmp_path: P
 
     reader = build_server_parts()
     reader.controller.attach_read_only(log_dir)
-    snapshot = reader.api.execute(SnapshotQuery())
+    snapshot = reader.api.execute(SnapshotQuery(timestamp=REQUEST_TIME))
     assert snapshot.ok is True
     assert snapshot.snapshot is not None
     assert snapshot.snapshot.status.value == "completed"
 
     # Queries may still use the normal API, but neither query bookkeeping nor
     # a command can mutate the durable journal.
-    history = reader.api.execute(SnapshotQuery())
+    history = reader.api.execute(SnapshotQuery(timestamp=REQUEST_TIME))
     assert history.ok is True
     with pytest.raises(RuntimeError) as failure:
-        reader.api.execute(StopCommand())
+        reader.api.execute(StopCommand(timestamp=REQUEST_TIME))
     assert getattr(failure.value, "diagnostic_code", None) == "run_read_only"
     reader.close()
     assert before == {path: path.read_bytes() for path in before}
@@ -211,7 +216,7 @@ def test_relocated_journal_replays_its_recorded_identity(tmp_path: Path) -> None
     reader = build_server_parts()
     reader.controller.attach_read_only(relocated)
 
-    snapshot = reader.api.execute(SnapshotQuery())
+    snapshot = reader.api.execute(SnapshotQuery(timestamp=REQUEST_TIME))
     bootstrap = reader.api.subscription_bootstrap(0, None)
     assert snapshot.snapshot is not None
     assert snapshot.snapshot.run_id == recorded_run_id

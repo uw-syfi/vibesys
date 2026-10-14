@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 from resources.profilers.rocprof import analyze_rocprof, att, counters
+from tests.server.support import REQUEST_TIME
 
 from server.api.protocol import Response, SubscribeRequest, decode_request
 from server.control_envelope import ResponseEnvelopeReader
@@ -68,7 +69,7 @@ if TYPE_CHECKING:
     from types import ModuleType
 
 _VALID = (
-    SubscribeRequest(after_sequence=0).model_dump_json().encode(),
+    SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json().encode(),
     json.dumps(
         {"type": "hello", "request_id": "h", "client_versions": [1, 1], "app_version": "v"}
     ).encode(),
@@ -90,7 +91,7 @@ class _Decoder:
 
 
 def _decode_request(frame: bytes, _: Path) -> None:
-    result = decode_request(frame)
+    result = decode_request(frame, clock=ManualClock())
     assert isinstance(result, Response) or result.type
 
 

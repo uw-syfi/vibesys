@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Never
 
 import pytest
-from tests.server.support import ServerParts, build_server_parts
+from tests.server.support import REQUEST_TIME, ServerParts, build_server_parts
 
 from server.api.protocol import (
     ChatQuery,
@@ -94,7 +94,7 @@ def test_api_routes_chat_to_configured_handler(tmp_path: Path) -> None:
             )
         )
 
-        response = parts.api.execute(ChatQuery(text="what changed?"))
+        response = parts.api.execute(ChatQuery(timestamp=REQUEST_TIME, text="what changed?"))
 
         assert response.chat is not None
         assert response.chat.answer == "agent answer"
@@ -123,7 +123,7 @@ def test_transport_round_trips_the_stop_command(socket_dir: Path) -> None:
     """`command.stop` parses off the wire, dispatches, and acks as pending."""
 
     def body(parts: ServerParts, dial: _Dial) -> None:
-        response = _request(dial, StopCommand(client_id="unix-client"))
+        response = _request(dial, StopCommand(timestamp=REQUEST_TIME, client_id="unix-client"))
 
         assert response["ok"] is True
         assert response["client_id"] == "unix-client"
@@ -138,8 +138,8 @@ def test_transport_supports_multiple_clients_and_replay(socket_dir: Path) -> Non
         socket_dir,
         socket_dir / "logs",
         lambda _parts, dial: (
-            _request(dial, SnapshotQuery()),
-            _request(dial, EventsQuery(after_sequence=0)),
+            _request(dial, SnapshotQuery(timestamp=REQUEST_TIME)),
+            _request(dial, EventsQuery(timestamp=REQUEST_TIME, after_sequence=0)),
         ),
     )
 
@@ -171,7 +171,9 @@ def test_transport_returns_sanitized_request_errors(socket_dir: Path) -> None:
     response = _served(
         socket_dir,
         socket_dir / "logs",
-        lambda _parts, dial: _request(dial, ChatQuery(text="what happened?")),
+        lambda _parts, dial: _request(
+            dial, ChatQuery(timestamp=REQUEST_TIME, text="what happened?")
+        ),
         prepare=lambda parts: parts.chat.install_default_handler(fail_chat),
     )
 
@@ -186,7 +188,10 @@ def test_transport_returns_sanitized_request_errors(socket_dir: Path) -> None:
 def test_subscription_streams_one_consistent_append_batch(socket_dir: Path) -> None:
     def body(parts: ServerParts, dial: _Dial) -> list[dict[str, Any]]:
         client = dial()
-        _send(client, SubscribeRequest(after_sequence=0, client_id="unix-subscriber"))
+        _send(
+            client,
+            SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, client_id="unix-subscriber"),
+        )
         subscribed = _receive(client)
         replay = _receive(client)
         with parts.condition:
@@ -218,7 +223,12 @@ def test_subscription_reports_structured_stream_failure(
 
     def body(parts: ServerParts, dial: _Dial) -> list[dict[str, Any]]:
         client = dial()
-        _send(client, SubscribeRequest(after_sequence=0, client_id="failing-unix-client"))
+        _send(
+            client,
+            SubscribeRequest(
+                timestamp=REQUEST_TIME, after_sequence=0, client_id="failing-unix-client"
+            ),
+        )
         subscribed = _receive(client)
         bootstrap = _receive(client)
         parts.journal.record(EventType.CHAT, "hello", status="answered")

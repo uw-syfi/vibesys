@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from tests.server.support import auxiliary_agent_providers, build_server_parts
+from tests.server.support import REQUEST_TIME, auxiliary_agent_providers, build_server_parts
 
 from server.api.protocol import (
     ChatOptionsQuery,
@@ -189,13 +189,15 @@ def test_api_creates_threads_and_routes_threaded_chat(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.chat.set_thread_factory(_factory([], "thread-agent"))
 
-    created = parts.api.execute(ChatThreadCreateQuery(provider="claude"))
+    created = parts.api.execute(ChatThreadCreateQuery(timestamp=REQUEST_TIME, provider="claude"))
     assert created.chat_thread is not None
     assert created.chat_thread.provider == "claude"
     assert any(event.type is EventType.CHAT_THREAD_CREATED for event in created.events)
 
     response = parts.api.execute(
-        ChatQuery(text="what changed?", thread_id=created.chat_thread.thread_id)
+        ChatQuery(
+            timestamp=REQUEST_TIME, text="what changed?", thread_id=created.chat_thread.thread_id
+        )
     )
     assert response.chat is not None
     assert response.chat.answer == "thread-agent: what changed?"
@@ -215,7 +217,7 @@ def test_chat_options_group_by_provider_and_mark_run_model(tmp_path: Path) -> No
             role_models=("gpt-5.6-outer", "gpt-5.5-run"),
         )
     )
-    options = parts.api.execute(ChatOptionsQuery()).chat_options
+    options = parts.api.execute(ChatOptionsQuery(timestamp=REQUEST_TIME)).chat_options
     assert options is not None
     assert [group.provider for group in options.providers] == [
         "claude",
@@ -238,7 +240,7 @@ def test_chat_options_group_by_provider_and_mark_run_model(tmp_path: Path) -> No
 
 
 def test_chat_options_are_absent_before_run_settings_attach(tmp_path: Path) -> None:
-    response = build_server_parts(tmp_path).api.execute(ChatOptionsQuery())
+    response = build_server_parts(tmp_path).api.execute(ChatOptionsQuery(timestamp=REQUEST_TIME))
     assert response.ok is True
     assert response.chat_options is None
 
@@ -248,17 +250,24 @@ def test_api_passes_optional_thread_choices_to_factory(tmp_path: Path) -> None:
     calls: list[tuple[str, str | None, str | None]] = []
     parts.chat.set_thread_factory(_factory(calls, "thread-agent"))
 
-    created = parts.api.execute(ChatThreadCreateQuery(provider="claude", model="opus"))
+    created = parts.api.execute(
+        ChatThreadCreateQuery(timestamp=REQUEST_TIME, provider="claude", model="opus")
+    )
     assert created.chat_thread is not None
     assert calls == [(created.chat_thread.thread_id, "claude", "opus")]
 
 
 def test_chat_thread_wire_shapes_round_trip() -> None:
-    request = ChatThreadCreateQuery(provider="codex", model="o4", title="t")
+    request = ChatThreadCreateQuery(timestamp=REQUEST_TIME, provider="codex", model="o4", title="t")
     assert ChatThreadCreateQuery.model_validate_json(request.model_dump_json()) == request
-    query = ChatQuery(text="why?", thread_id="thread-1")
+    query = ChatQuery(timestamp=REQUEST_TIME, text="why?", thread_id="thread-1")
     assert ChatQuery.model_validate_json(query.model_dump_json()) == query
-    assert ChatQuery.model_validate({"type": "query.chat", "text": "why?"}).thread_id is None
+    assert (
+        ChatQuery.model_validate(
+            {"type": "query.chat", "timestamp": REQUEST_TIME.isoformat(), "text": "why?"}
+        ).thread_id
+        is None
+    )
 
     event = make_event(
         EventType.CHAT_THREAD_CREATED,
@@ -290,6 +299,7 @@ def test_chat_thread_wire_shapes_round_trip() -> None:
 
     response = Response.model_validate_json(
         Response(
+            timestamp=REQUEST_TIME,
             request_id="r1",
             chat_thread=ChatThreadInfo(
                 thread_id="thread-1",
@@ -305,6 +315,6 @@ def test_chat_thread_wire_shapes_round_trip() -> None:
 @pytest.mark.parametrize("thread_id", ["../outside", "con"])
 def test_chat_query_rejects_a_nonportable_thread_identity(thread_id: str) -> None:
     with pytest.raises(ValueError, match="invalid experiment chat thread identity") as error:
-        ChatQuery(text="why?", thread_id=thread_id)
+        ChatQuery(timestamp=REQUEST_TIME, text="why?", thread_id=thread_id)
 
     assert repr(thread_id) in str(error.value)

@@ -471,6 +471,18 @@ def test_wire_run_failure_is_the_core_contract() -> None:
 def test_thread_creation_request_no_longer_accepts_a_driver() -> None:
     """The wire request names provider and model only; ``driver`` is an unknown key."""
     request = TypeAdapter(ProtocolRequest)
-    request.validate_python({"type": "query.chat_thread_create", "provider": "codex"})
+    request.validate_python(
+        {
+            "type": "query.chat_thread_create",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "provider": "codex",
+        }
+    )
     with pytest.raises(ValidationError, match="driver"):
-        request.validate_python({"type": "query.chat_thread_create", "driver": "agentshim"})
+        request.validate_python(
+            {
+                "type": "query.chat_thread_create",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "driver": "agentshim",
+            }
+        )

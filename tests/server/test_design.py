@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 import pytest
-from tests.server.support import agent_descriptor, build_server_parts, run_record
+from tests.server.support import REQUEST_TIME, agent_descriptor, build_server_parts, run_record
 from tests.support import run_test_command
 from tests.support.multi_search import SearchRecord
 
@@ -620,7 +620,7 @@ def test_service_builds_design_from_workspace_history(tmp_path: Path) -> None:
         project.state.log_directory(run_id), record=run_record(project, run_id)
     )
 
-    response = parts.api.execute(DesignQuery())
+    response = parts.api.execute(DesignQuery(timestamp=REQUEST_TIME))
 
     assert response.design_ready is True
     (entry,) = response.design
@@ -651,10 +651,12 @@ def test_service_serves_patches_for_published_design_ranges(tmp_path: Path) -> N
         project.state.log_directory(run_id), record=run_record(project, run_id)
     )
 
-    (entry,) = parts.api.execute(DesignQuery()).design
+    (entry,) = parts.api.execute(DesignQuery(timestamp=REQUEST_TIME)).design
     assert (entry.base, entry.commit) == (baseline, first)
     # The client echoes the published range back; use the same values here.
-    response = parts.api.execute(DesignPatchQuery(base=baseline, head=first, path="ring.rs"))
+    response = parts.api.execute(
+        DesignPatchQuery(timestamp=REQUEST_TIME, base=baseline, head=first, path="ring.rs")
+    )
 
     assert response.ok is True
     patch = response.design_patch
@@ -667,7 +669,9 @@ def test_service_serves_patches_for_published_design_ranges(tmp_path: Path) -> N
 def test_service_reports_no_design_patch_before_attach(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
 
-    response = parts.api.execute(DesignPatchQuery(base="a" * 40, head="b" * 40, path="ring.rs"))
+    response = parts.api.execute(
+        DesignPatchQuery(timestamp=REQUEST_TIME, base="a" * 40, head="b" * 40, path="ring.rs")
+    )
 
     assert response.ok is True
     assert response.design_patch is None
@@ -704,8 +708,8 @@ def test_service_reuses_one_design_projection_per_run(tmp_path: Path) -> None:
     )
     parts = build_server_parts(project.state.log_directory(run_id), record=record)
 
-    first_response = parts.api.execute(DesignQuery())
-    second_response = parts.api.execute(DesignQuery())
+    first_response = parts.api.execute(DesignQuery(timestamp=REQUEST_TIME))
+    second_response = parts.api.execute(DesignQuery(timestamp=REQUEST_TIME))
 
     assert first_response.design == second_response.design
     assert record.workspace_change_requests == [(baseline, first)]
@@ -714,7 +718,7 @@ def test_service_reuses_one_design_projection_per_run(tmp_path: Path) -> None:
 def test_service_reports_design_not_ready_before_attach(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
 
-    response = parts.api.execute(DesignQuery())
+    response = parts.api.execute(DesignQuery(timestamp=REQUEST_TIME))
 
     assert response.design == []
     assert response.design_ready is False

@@ -6,6 +6,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
+from tests.server.support import REQUEST_TIME
 
 from server.api.protocol import Response
 from server.api.schema import fully_populated_response
@@ -39,7 +40,11 @@ def test_the_reader_recovers_the_envelope_of_a_payload_carrying_response(
 
 
 def test_the_reader_still_validates_the_envelope_fields() -> None:
-    line = Response(request_id="r").model_dump_json().replace('"ok":true', '"ok":"maybe"')
+    line = (
+        Response(timestamp=REQUEST_TIME, request_id="r")
+        .model_dump_json()
+        .replace('"ok":true', '"ok":"maybe"')
+    )
 
     with pytest.raises(ValidationError, match="ok"):
         ResponseEnvelopeReader.model_validate_json(line)

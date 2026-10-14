@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from inspect import signature
 from typing import TYPE_CHECKING, cast
 
-from tests.server.support import build_server_parts
+from tests.server.support import REQUEST_TIME, build_server_parts
 from websockets.asyncio.client import connect
 
 from server.api.protocol import EventBatchMessage, SubscribeRequest
@@ -62,7 +62,11 @@ def test_one_event_past_the_peer_frame_cap_arrives_cut_and_the_socket_stays_open
     ) -> tuple[str, EventBatchMessage, EventBatchMessage]:
         origin = f"http://127.0.0.1:{gateway.bound_port}"
         async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-            await websocket.send(SubscribeRequest(client_id="large-event-client").model_dump_json())
+            await websocket.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME, client_id="large-event-client"
+                ).model_dump_json()
+            )
             assert json.loads(await _next_frame(websocket))["type"] == "subscribed"
             first_frame = await _next_frame(websocket)
             first = EventBatchMessage.model_validate_json(first_frame)

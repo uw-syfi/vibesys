@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from tests.server.support import build_server_parts
+from tests.server.support import REQUEST_TIME, build_server_parts
 
 from server.api.protocol import IterationQuery, SubscribeRequest
 from server.events import EventType, RunEvent, RunStartedData
@@ -41,7 +41,12 @@ def _subscribed(
         client.settimeout(HANG_GUARD_S)
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
-            stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            stream.write(
+                SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
+                .model_dump_json()
+                .encode()
+                + b"\n"
+            )
             stream.flush()
             yield lambda: json.loads(stream.readline())
 
@@ -67,7 +72,13 @@ def test_iteration_query_follows_the_subscribed_store_across_control_sockets(
         bootstrap = read()
         original_store = bootstrap["store_id"]
         assert isinstance(original_store, str)
-        assert _request(socket_path, IterationQuery(expected_store_id=original_store))["ok"] is True
+        assert (
+            _request(
+                socket_path,
+                IterationQuery(timestamp=REQUEST_TIME, expected_store_id=original_store),
+            )["ok"]
+            is True
+        )
         assert read()["store_id"] == original_store
 
         parts.attach(_write_log(tmp_path / "logs"))
@@ -76,8 +87,12 @@ def test_iteration_query_follows_the_subscribed_store_across_control_sockets(
         assert isinstance(replacement_store, str)
         assert replacement_store != original_store
 
-        stale = _request(socket_path, IterationQuery(expected_store_id=original_store))
-        current = _request(socket_path, IterationQuery(expected_store_id=replacement_store))
+        stale = _request(
+            socket_path, IterationQuery(timestamp=REQUEST_TIME, expected_store_id=original_store)
+        )
+        current = _request(
+            socket_path, IterationQuery(timestamp=REQUEST_TIME, expected_store_id=replacement_store)
+        )
 
     assert stale["ok"] is False
     diagnostic = stale["diagnostic"]

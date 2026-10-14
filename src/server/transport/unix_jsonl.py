@@ -14,7 +14,6 @@ from server.api.protocol import (
     Response,
     SubscribedMessage,
     SubscribeRequest,
-    decode_request,
 )
 from server.transport.subscriptions import SubscriptionTracker
 from vs_sim.api import OsThreads, UnixNetwork
@@ -102,9 +101,9 @@ class _ClientSession:
         api = self._api
         for line in self._lines():
             request = (
-                Response.from_exception("unknown", RequestLineTooLongError())
+                api.failure("unknown", "", RequestLineTooLongError())
                 if line is None
-                else decode_request(line)
+                else api.decode_request(line)
             )
             if isinstance(request, Response):
                 self._write_message(request)
@@ -121,11 +120,7 @@ class _ClientSession:
                     return
                 response = api.execute(request)
             except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010253 [BLE001]; the socket boundary converts request failures into typed protocol responses.
-                response = Response.from_exception(
-                    request.request_id,
-                    exc,
-                    operation="Request",
-                ).model_copy(update={"client_id": request.client_id})
+                response = api.failure(request.request_id, request.client_id, exc)
             self._write_message(response)
 
     def _lines(self) -> Iterator[bytes | None]:

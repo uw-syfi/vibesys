@@ -470,7 +470,7 @@ def _run(
         # Nothing listens on the simulated network, so every stop falls back
         # to the signal path, as it does for a server that does not answer.
         effects=StopEffects(
-            ControlSocketStopRequester(SimNetwork(SimThreads())),
+            ControlSocketStopRequester(SimNetwork(SimThreads()), clock=ManualClock()),
             FakeProcessSignaller(set()),
             clock,
             clock.advance,

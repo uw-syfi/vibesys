@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.server.support import (
+    REQUEST_TIME,
     ServerParts,
     agent_descriptor,
     auxiliary_agent_providers,
@@ -472,7 +473,7 @@ def test_attach_run_installs_chat_with_isolated_session_state(tmp_path: Path) ->
         AgentSelection(provider="codex", model="gpt-test"),
         project.state.log_directory(run_id),
     )
-    response = parts.api.execute(ChatQuery(text="what improved?"))
+    response = parts.api.execute(ChatQuery(timestamp=REQUEST_TIME, text="what improved?"))
 
     assert response.chat is not None
     assert response.chat.answer == "It improved in round 2."
@@ -514,7 +515,11 @@ def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ValueError, match="is not supported"):
-        parts.api.execute(ChatThreadCreateQuery(provider="not-a-provider", model="gpt-test"))
+        parts.api.execute(
+            ChatThreadCreateQuery(
+                timestamp=REQUEST_TIME, provider="not-a-provider", model="gpt-test"
+            )
+        )
     parts.integration.close()
     assert auxiliary.closed
 
@@ -548,6 +553,7 @@ def test_chat_thread_uses_snapshotted_provider_support_and_free_text_model(
 
     response = parts.api.execute(
         ChatThreadCreateQuery(
+            timestamp=REQUEST_TIME,
             provider="claude",
             model="future-free-text-model",
         )
@@ -583,9 +589,13 @@ def test_chat_thread_transcript_stays_in_the_project_chat_namespace(tmp_path: Pa
         project.state.log_directory(run_id),
     )
 
-    created = parts.api.execute(ChatThreadCreateQuery())
+    created = parts.api.execute(ChatThreadCreateQuery(timestamp=REQUEST_TIME))
     assert created.chat_thread is not None
-    parts.api.execute(ChatQuery(text="what changed?", thread_id=created.chat_thread.thread_id))
+    parts.api.execute(
+        ChatQuery(
+            timestamp=REQUEST_TIME, text="what changed?", thread_id=created.chat_thread.thread_id
+        )
+    )
 
     chat_namespace = project.state.local_namespace(run_id, "server").external_directory("chat")
     transcript = chat_namespace / "threads" / created.chat_thread.thread_id / "conversation.jsonl"
@@ -629,7 +639,7 @@ def test_chat_thread_rejects_a_symlinked_transcript_parent(tmp_path: Path) -> No
     )
 
     with pytest.raises(ValueError, match="symlink"):
-        parts.api.execute(ChatThreadCreateQuery())
+        parts.api.execute(ChatThreadCreateQuery(timestamp=REQUEST_TIME))
 
     assert built_agents == 1
     assert list(outside.iterdir()) == []
@@ -660,7 +670,7 @@ def test_chat_thread_first_write_does_not_follow_a_late_transcript_parent_symlin
         AgentSelection(provider="codex", model="gpt-test"),
         project.state.log_directory(run_id),
     )
-    created = parts.api.execute(ChatThreadCreateQuery())
+    created = parts.api.execute(ChatThreadCreateQuery(timestamp=REQUEST_TIME))
     assert created.chat_thread is not None
     chat_namespace = project.state.local_namespace(run_id, "server").external_directory("chat")
     threads = chat_namespace / "threads"
@@ -668,7 +678,9 @@ def test_chat_thread_first_write_does_not_follow_a_late_transcript_parent_symlin
     threads.symlink_to(outside, target_is_directory=True)
 
     response = parts.api.execute(
-        ChatQuery(text="what changed?", thread_id=created.chat_thread.thread_id)
+        ChatQuery(
+            timestamp=REQUEST_TIME, text="what changed?", thread_id=created.chat_thread.thread_id
+        )
     )
 
     assert response.chat is not None
@@ -706,10 +718,12 @@ def test_new_chat_thread_retains_the_attached_project_namespace_after_replacemen
     outside.mkdir()
     server_namespace.symlink_to(outside, target_is_directory=True)
 
-    created = parts.api.execute(ChatThreadCreateQuery())
+    created = parts.api.execute(ChatThreadCreateQuery(timestamp=REQUEST_TIME))
     assert created.chat_thread is not None
     response = parts.api.execute(
-        ChatQuery(text="what changed?", thread_id=created.chat_thread.thread_id)
+        ChatQuery(
+            timestamp=REQUEST_TIME, text="what changed?", thread_id=created.chat_thread.thread_id
+        )
     )
 
     assert response.chat is not None
@@ -751,7 +765,7 @@ def test_chat_thread_append_does_not_follow_a_transcript_file_symlink(tmp_path: 
         AgentSelection(provider="codex", model="gpt-test"),
         project.state.log_directory(run_id),
     )
-    created = parts.api.execute(ChatThreadCreateQuery())
+    created = parts.api.execute(ChatThreadCreateQuery(timestamp=REQUEST_TIME))
     assert created.chat_thread is not None
     chat_namespace = project.state.local_namespace(run_id, "server").external_directory("chat")
     state_dir = chat_namespace / "threads" / created.chat_thread.thread_id
@@ -759,7 +773,9 @@ def test_chat_thread_append_does_not_follow_a_transcript_file_symlink(tmp_path: 
     (state_dir / "conversation.jsonl").symlink_to(outside)
 
     response = parts.api.execute(
-        ChatQuery(text="what changed?", thread_id=created.chat_thread.thread_id)
+        ChatQuery(
+            timestamp=REQUEST_TIME, text="what changed?", thread_id=created.chat_thread.thread_id
+        )
     )
 
     assert response.chat is not None

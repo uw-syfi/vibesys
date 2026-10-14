@@ -14,7 +14,7 @@ from typing import Literal, Never, TypedDict, Unpack
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.server.support import ServerParts, Task, build_server_parts
+from tests.server.support import REQUEST_TIME, ServerParts, Task, build_server_parts
 
 from server.api.protocol import (
     EventsQuery,
@@ -192,7 +192,9 @@ def test_subscription_replays_requested_history(tmp_path: Path, tail: int | None
     parts = _attach(tmp_path, _round_log(200))
     latest = parts.api.snapshot().sequence
 
-    subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=tail))
+    subscribed, batch = _subscribe(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=tail)
+    )
 
     assert subscribed["type"] == "subscribed"
     floor = 0 if tail is None else latest - tail
@@ -207,7 +209,9 @@ def test_tail_replays_pre_floor_run_spine_in_order(tmp_path: Path) -> None:
     latest = parts.api.snapshot().sequence
     floor = latest - 40
 
-    _subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=40))
+    _subscribed, batch = _subscribe(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=40)
+    )
 
     sequences = [event["sequence"] for event in batch["events"]]
     assert sequences == sorted(sequences)
@@ -229,7 +233,9 @@ def test_tail_without_spine_events_delivers_only_suffix(tmp_path: Path) -> None:
     parts = _attach(tmp_path, events)
     latest = parts.api.snapshot().sequence
 
-    _subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=20))
+    _subscribed, batch = _subscribe(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=20)
+    )
 
     assert [event["sequence"] for event in batch["events"]] == list(range(latest - 19, latest + 1))
 
@@ -259,7 +265,9 @@ def test_bootstrap_tail_stays_bounded_when_events_land_mid_bootstrap(
 
     monkeypatch.setattr(parts.api, "subscription_bootstrap", bursty_bootstrap)
 
-    subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=tail))
+    subscribed, batch = _subscribe(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=tail)
+    )
 
     floor = batch["history_after_sequence"]
     through = batch["through_sequence"]
@@ -290,7 +298,9 @@ def test_bootstrap_failure_surfaces_after_the_handshake(
 
     monkeypatch.setattr(parts.api, "subscription_bootstrap", failing_bootstrap)
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+    with _live_subscription(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=40)
+    ) as read:
         subscribed = read()
         failure = read()
 
@@ -340,7 +350,9 @@ def test_bootstrap_tail_stays_bounded_under_concurrent_appends(tmp_path: Path) -
     writer = threading.Thread(target=append_live_output)
     writer.start()
     try:
-        _subscribed, batch = _subscribe(parts.api, SubscribeRequest(after_sequence=0, tail=tail))
+        _subscribed, batch = _subscribe(
+            parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=tail)
+        )
     finally:
         stop.set()
         join_or_fail(writer)
@@ -370,14 +382,18 @@ def test_checkpoint_parses_only_tail_and_spine(
 
 def test_events_query_is_half_open_and_backfills_without_gaps(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(200))
-    response = parts.api.execute(EventsQuery(after_sequence=50, before_sequence=60))
+    response = parts.api.execute(
+        EventsQuery(timestamp=REQUEST_TIME, after_sequence=50, before_sequence=60)
+    )
     assert [event.sequence for event in response.events] == list(range(51, 60))
 
     floor = 150
     collected: list[int] = []
     while floor > 0:
         after = max(0, floor - 40)
-        response = parts.api.execute(EventsQuery(after_sequence=after, before_sequence=floor + 1))
+        response = parts.api.execute(
+            EventsQuery(timestamp=REQUEST_TIME, after_sequence=after, before_sequence=floor + 1)
+        )
         collected = [event.sequence for event in response.events] + collected
         floor = after
     assert collected == list(range(1, 151))
@@ -396,6 +412,7 @@ def test_events_query_store_fence_rejects_a_replaced_sequence_space(
     with pytest.raises(RuntimeError) as failure:
         parts.api.execute(
             EventsQuery(
+                timestamp=REQUEST_TIME,
                 expected_store_id=first_store,
                 after_sequence=0,
                 before_sequence=10,
@@ -406,13 +423,15 @@ def test_events_query_store_fence_rejects_a_replaced_sequence_space(
 
     # The optional fence preserves standalone history consumers, while a
     # request naming the replacement reads only that replacement.
-    unfenced = parts.api.execute(EventsQuery()).events
-    matching = parts.api.execute(EventsQuery(expected_store_id=second_store)).events
+    unfenced = parts.api.execute(EventsQuery(timestamp=REQUEST_TIME)).events
+    matching = parts.api.execute(
+        EventsQuery(timestamp=REQUEST_TIME, expected_store_id=second_store)
+    ).events
     assert unfenced == matching
     assert [
         event.sequence
         for event in parts.api.execute(
-            EventsQuery(expected_store_id=second_store, before_sequence=10)
+            EventsQuery(timestamp=REQUEST_TIME, expected_store_id=second_store, before_sequence=10)
         ).events
     ] == list(range(1, 10))
 
@@ -431,6 +450,7 @@ def test_waiting_events_query_rejects_when_its_store_is_replaced(tmp_path: Path)
             threads,
             lambda: parts.api.execute(
                 EventsQuery(
+                    timestamp=REQUEST_TIME,
                     expected_store_id=first_store,
                     after_sequence=cursor,
                     timeout_ms=30_000,
@@ -460,7 +480,9 @@ def test_unfenced_waiting_events_query_finishes_on_the_retired_store(tmp_path: P
         cursor = parts.api.latest_sequence
         pending = Task(
             threads,
-            lambda: parts.api.execute(EventsQuery(after_sequence=cursor, timeout_ms=30_000)),
+            lambda: parts.api.execute(
+                EventsQuery(timestamp=REQUEST_TIME, after_sequence=cursor, timeout_ms=30_000)
+            ),
             name="unfenced-events-query",
         )
 
@@ -478,13 +500,13 @@ def test_unfenced_waiting_events_query_finishes_on_the_retired_store(tmp_path: P
 @pytest.mark.parametrize("before_sequence", [0, -1])
 def test_events_query_rejects_meaningless_upper_bound(before_sequence: int) -> None:
     with pytest.raises(ValueError, match="greater than or equal to 1"):
-        EventsQuery(after_sequence=0, before_sequence=before_sequence)
+        EventsQuery(timestamp=REQUEST_TIME, after_sequence=0, before_sequence=before_sequence)
 
 
 def test_snapshot_reconstructs_chat_threads_from_full_history(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(200, with_threads=True))
 
-    response = parts.api.execute(SnapshotQuery())
+    response = parts.api.execute(SnapshotQuery(timestamp=REQUEST_TIME))
 
     assert response.snapshot is not None
     assert [(thread.thread_id, thread.title) for thread in response.snapshot.chat_threads] == [
@@ -499,19 +521,27 @@ def test_snapshot_store_fence_rejects_a_replaced_sequence_space(tmp_path: Path) 
 
     # None is the backward-compatible unfenced query. The empty pre-attach
     # store remains independently fenceable rather than being treated as None.
-    assert parts.api.execute(SnapshotQuery()).snapshot is not None
-    assert parts.api.execute(SnapshotQuery(expected_store_id=bootstrap_store)).snapshot is not None
+    assert parts.api.execute(SnapshotQuery(timestamp=REQUEST_TIME)).snapshot is not None
+    assert (
+        parts.api.execute(
+            SnapshotQuery(timestamp=REQUEST_TIME, expected_store_id=bootstrap_store)
+        ).snapshot
+        is not None
+    )
 
     parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
     replacement_store = parts.journal.store_id_locked()
     assert replacement_store != bootstrap_store
 
     with pytest.raises(RuntimeError) as failure:
-        parts.api.execute(SnapshotQuery(expected_store_id=bootstrap_store))
+        parts.api.execute(SnapshotQuery(timestamp=REQUEST_TIME, expected_store_id=bootstrap_store))
     assert getattr(failure.value, "diagnostic_code", None) == "snapshot_store_replaced"
-    assert parts.api.execute(SnapshotQuery()).snapshot is not None
+    assert parts.api.execute(SnapshotQuery(timestamp=REQUEST_TIME)).snapshot is not None
     assert (
-        parts.api.execute(SnapshotQuery(expected_store_id=replacement_store)).snapshot is not None
+        parts.api.execute(
+            SnapshotQuery(timestamp=REQUEST_TIME, expected_store_id=replacement_store)
+        ).snapshot
+        is not None
     )
 
 
@@ -520,7 +550,9 @@ def test_iteration_store_fence_rejects_a_replaced_sequence_space(tmp_path: Path)
     bootstrap_store = parts.journal.store_id_locked()
 
     assert (
-        parts.api.execute(IterationQuery(expected_store_id=bootstrap_store)).iterations_ready
+        parts.api.execute(
+            IterationQuery(timestamp=REQUEST_TIME, expected_store_id=bootstrap_store)
+        ).iterations_ready
         is False
     )
 
@@ -529,10 +561,12 @@ def test_iteration_store_fence_rejects_a_replaced_sequence_space(tmp_path: Path)
     assert replacement_store != bootstrap_store
 
     with pytest.raises(RuntimeError) as failure:
-        parts.api.execute(IterationQuery(expected_store_id=bootstrap_store))
+        parts.api.execute(IterationQuery(timestamp=REQUEST_TIME, expected_store_id=bootstrap_store))
     assert getattr(failure.value, "diagnostic_code", None) == "iteration_store_replaced"
     assert (
-        parts.api.execute(IterationQuery(expected_store_id=replacement_store)).iterations_ready
+        parts.api.execute(
+            IterationQuery(timestamp=REQUEST_TIME, expected_store_id=replacement_store)
+        ).iterations_ready
         is False
     )
 
@@ -540,7 +574,9 @@ def test_iteration_store_fence_rejects_a_replaced_sequence_space(tmp_path: Path)
 def test_late_attach_rebootstraps_at_fresh_tail_with_spine(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "server")
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+    with _live_subscription(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=40)
+    ) as read:
         assert read()["type"] == "subscribed"
         bootstrap = read()
         parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
@@ -569,7 +605,9 @@ def test_late_attach_rebootstraps_a_run_log_shorter_than_the_tail(tmp_path: Path
     parts = build_server_parts(tmp_path / "server")
     tail = 1_000
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=tail)) as read:
+    with _live_subscription(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=tail)
+    ) as read:
         assert read()["type"] == "subscribed"
         bootstrap = read()
         parts.attach(_write_log(tmp_path / "logs", _round_log(200)))
@@ -595,7 +633,9 @@ def test_resume_across_a_store_swap_rebootstraps(tmp_path: Path) -> None:
     # since the whole durable log fits inside the tail the boot dialed.
     parts = build_server_parts(tmp_path / "server")
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=1_000)) as read:
+    with _live_subscription(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=1_000)
+    ) as read:
         assert read()["type"] == "subscribed"
         bootstrap = read()
     cursor = bootstrap["through_sequence"]
@@ -605,7 +645,10 @@ def test_resume_across_a_store_swap_rebootstraps(tmp_path: Path) -> None:
     assert latest < 1_000
 
     subscribed, batch = _subscribe(
-        parts.api, SubscribeRequest(after_sequence=cursor, store_id=bootstrap["store_id"])
+        parts.api,
+        SubscribeRequest(
+            timestamp=REQUEST_TIME, after_sequence=cursor, store_id=bootstrap["store_id"]
+        ),
     )
 
     assert subscribed["type"] == "subscribed"
@@ -627,14 +670,16 @@ def test_resume_within_the_same_store_extends_from_the_cursor(tmp_path: Path) ->
     # reconnect with no swap streams incrementally rather than re-bootstrapping.
     parts = _attach(tmp_path, _round_log(50))
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=1_000)) as read:
+    with _live_subscription(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=1_000)
+    ) as read:
         assert read()["type"] == "subscribed"
         bootstrap = read()
     store = bootstrap["store_id"]
     cursor = bootstrap["through_sequence"]
 
     subscribed, batch = _subscribe(
-        parts.api, SubscribeRequest(after_sequence=cursor, store_id=store)
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=cursor, store_id=store)
     )
 
     assert subscribed["type"] == "subscribed"
@@ -649,7 +694,9 @@ def test_attach_into_an_empty_log_keeps_the_subscription_streaming(tmp_path: Pat
     # the store keeps its identity and the stream stays incremental.
     parts = build_server_parts(tmp_path / "server")
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+    with _live_subscription(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=40)
+    ) as read:
         assert read()["type"] == "subscribed"
         bootstrap = read()
         parts.attach(tmp_path / "logs")
@@ -664,7 +711,9 @@ def test_attach_into_an_empty_log_keeps_the_subscription_streaming(tmp_path: Pat
 def test_live_batches_carry_the_store_they_were_read_from(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(50))
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+    with _live_subscription(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=40)
+    ) as read:
         read()
         bootstrap = read()
         parts.journal.publish_output("stdout", "one more line")
@@ -700,7 +749,9 @@ def test_late_attach_does_not_parse_skipped_history(
     parts = build_server_parts(tmp_path / "server")
     attach_only = EventStore(log_dir / "run-events.jsonl", run_id="persisted-run")
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+    with _live_subscription(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=40)
+    ) as read:
         read()
         read()
         parsed_count = _track_event_parses(monkeypatch)
@@ -716,7 +767,9 @@ def test_live_append_keeps_existing_tail_floor(tmp_path: Path) -> None:
     parts = _attach(tmp_path, _round_log(200))
     floor = parts.api.snapshot().sequence - 40
 
-    with _live_subscription(parts.api, SubscribeRequest(after_sequence=0, tail=40)) as read:
+    with _live_subscription(
+        parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=40)
+    ) as read:
         read()
         read()
         parts.journal.publish_output("stdout", "one more line")
@@ -731,7 +784,7 @@ def test_disconnect_wait_blocks_until_last_subscriber_closes(
 ) -> None:
     parts = build_server_parts(tmp_path / "logs")
     socket_path = socket_dir / "server.sock"
-    request = SubscribeRequest(after_sequence=0)
+    request = SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
 
     with UnixJsonlServer(socket_path, parts.api) as server:
         with _subscribed_client(socket_path, request) as read:
@@ -788,7 +841,7 @@ def test_an_idle_stream_paces_itself_through_the_injected_threads(tmp_path: Path
     parts = _attach(tmp_path, _round_log(10))
     threads = _PacedThreads()
     socket_path = Path(tempfile.gettempdir()) / f"vibesys-test-{uuid.uuid4().hex}.sock"
-    request = SubscribeRequest(after_sequence=0, tail=None)
+    request = SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=None)
 
     with (
         UnixJsonlServer(socket_path, parts.api, threads=threads),
@@ -831,6 +884,7 @@ def test_a_store_swap_mid_stream_replays_the_new_store_from_its_start(
         network = SimNetwork(threads)
         first_store = parts.journal.store_id_locked()
         request = SubscribeRequest(
+            timestamp=REQUEST_TIME,
             after_sequence=after_sequence,
             tail=tail,
             store_id=first_store if request_store == "named" else "",

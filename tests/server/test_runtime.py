@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from tests.server.support import REQUEST_TIME
 from websockets.sync.client import connect
 
 from launch import default_runs
@@ -100,7 +101,12 @@ def _subscription(socket_path: Path) -> Generator[Callable[[], dict]]:
         client.settimeout(_DEADLOCK_GUARD_SECONDS)
         client.connect(str(socket_path))
         with client.makefile("rwb") as stream:
-            stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            stream.write(
+                SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
+                .model_dump_json()
+                .encode()
+                + b"\n"
+            )
             stream.flush()
             yield lambda: json.loads(stream.readline())
 
@@ -192,7 +198,7 @@ def _web_subscription(page_url: str, origin: str) -> Generator[Callable[[], dict
         open_timeout=_DEADLOCK_GUARD_SECONDS,
         close_timeout=_DEADLOCK_GUARD_SECONDS,
     ) as browser:
-        browser.send(SubscribeRequest(after_sequence=0).model_dump_json())
+        browser.send(SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json())
         yield lambda: json.loads(browser.recv(timeout=_DEADLOCK_GUARD_SECONDS))
 
 
@@ -204,7 +210,7 @@ def _web_request(page_url: str, origin: str) -> dict[str, Any]:
         open_timeout=_DEADLOCK_GUARD_SECONDS,
         close_timeout=_DEADLOCK_GUARD_SECONDS,
     ) as browser:
-        browser.send(SnapshotQuery().model_dump_json())
+        browser.send(SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json())
         return cast("dict[str, Any]", json.loads(browser.recv(timeout=_DEADLOCK_GUARD_SECONDS)))
 
 
@@ -247,7 +253,7 @@ def test_runtime_snapshots_namespace_client_state_by_project(tmp_path: Path) -> 
         clock=ManualClock(),
     )
 
-    response = runtime.api.execute(SnapshotQuery())
+    response = runtime.api.execute(SnapshotQuery(timestamp=REQUEST_TIME))
     expected = hashlib.sha256(project_root.resolve().as_posix().encode()).hexdigest()
     assert response.snapshot is not None
     assert response.snapshot.project_scope == expected
@@ -264,7 +270,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
             del project_root, task
 
         def listening(self) -> None:
-            response = runtime.api.execute(StopCommand())
+            response = runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
             assert response.ack is not None
             assert (response.ack.action, response.ack.status) == ("stop", "pending")
 
@@ -301,16 +307,18 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
     assert stop_reached_session is True
     assert control.stop_calls == 1
     with pytest.raises(RunControlUnavailableError, match="after the run session ends"):
-        runtime.api.execute(StopCommand())
+        runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
 
 
 @pytest.mark.parametrize(
     "command",
     [
-        pytest.param(PauseCommand(), id="pause"),
-        pytest.param(ResumeCommand(), id="resume"),
-        pytest.param(ResumeCommand(fallback=True), id="resume-with-fallback"),
-        pytest.param(SteerCommand(text="inspect startup"), id="steer"),
+        pytest.param(PauseCommand(timestamp=REQUEST_TIME), id="pause"),
+        pytest.param(ResumeCommand(timestamp=REQUEST_TIME), id="resume"),
+        pytest.param(
+            ResumeCommand(timestamp=REQUEST_TIME, fallback=True), id="resume-with-fallback"
+        ),
+        pytest.param(SteerCommand(timestamp=REQUEST_TIME, text="inspect startup"), id="steer"),
     ],
 )
 def test_startup_rejects_commands_that_require_an_active_session(

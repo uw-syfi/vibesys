@@ -16,9 +16,10 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 from server.control_envelope import ResponseEnvelopeReader, StopCommand
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
-    from vs_sim.api import Connection, Network
+    from vs_sim.api import Clock, Connection, Network
 
 CONTROL_REPLY_TIMEOUT_SECONDS = 5.0
 """How long a stop request waits to connect and for the server's acknowledgment."""
@@ -34,9 +35,15 @@ class ControlSocketStopRequester:
     inside the ``0700`` registry root.
     """
 
-    def __init__(self, network: Network, *, timeout: float = CONTROL_REPLY_TIMEOUT_SECONDS) -> None:
-        """Dial through ``network``; wait at most ``timeout`` to connect and for the reply."""
+    def __init__(
+        self, network: Network, *, clock: Clock, timeout: float = CONTROL_REPLY_TIMEOUT_SECONDS
+    ) -> None:
+        """Dial through ``network``; wait at most ``timeout`` to connect and for the reply.
+
+        ``clock`` counts seconds since the epoch and stamps the stop request.
+        """
         self._network = network
+        self._clock = clock
         self._timeout = timeout
 
     def request_stop(self, socket_path: str) -> bool:
@@ -46,7 +53,9 @@ class ControlSocketStopRequester:
         except OSError:
             return False
         try:
-            connection.send(StopCommand().model_dump_json().encode() + b"\n")
+            connection.send(
+                StopCommand(timestamp=utc_datetime(self._clock)).model_dump_json().encode() + b"\n"
+            )
             line = _read_line(connection, self._timeout)
         except OSError:
             return False

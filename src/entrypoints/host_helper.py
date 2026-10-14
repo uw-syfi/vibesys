@@ -74,7 +74,7 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
             epoch,
         ),
         stop_effects=StopEffects(
-            requester=ControlSocketStopRequester(network),
+            requester=ControlSocketStopRequester(network, clock=epoch),
             signaller=PidfdProcessSignaller(),
             clock=threads,
             pause=threads.sleep,
