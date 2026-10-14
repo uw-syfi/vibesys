@@ -92,7 +92,8 @@ core; it owns sockets, timers and processes.
     focus and layout follow [references/tui-conventions.md](references/tui-conventions.md).
 11. **Build, check, test with Turborepo** (from the clients workspace root): `pnpm check:ts`,
     `pnpm check:ts-architecture`, `pnpm check:knip`, `pnpm check:clients`,
-    `pnpm test:clients`; `./scripts/check_ci.sh` runs the same groups.
+    `pnpm test:clients`. Run only the checks the change can affect; CI runs
+    the rest.
 
 ## Testing
 
@@ -111,8 +112,8 @@ core; it owns sockets, timers and processes.
   reaches it is stuck, not slow. Unenforced: the bound guards hangs only, so
   keep tests fast by driving time with a fake clock.
 - TUI layout bugs get a `createTestRenderer` test at a fixed size; app
-  journeys get Playwright tests in each app's end-to-end suite, run by
-  `./scripts/check_ci.sh`. Unenforced: which journeys need a browser test is
+  journeys get Playwright tests in each app's end-to-end suite, which CI
+  runs. Unenforced: which journeys need a browser test is
   review judgment.
 - A bug fix carries a regression test that fails at the merge base.
   Unenforced: CI runs only the head; state the merge-base result in the PR.
