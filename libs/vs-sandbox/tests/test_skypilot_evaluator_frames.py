@@ -23,11 +23,12 @@ import uuid
 from pathlib import Path
 
 import pytest
-from tests.support.skypilot_world import MemoryTransport, ScriptedBridge
 
 from vs_sandbox.skypilot_evaluator import (  # test-isolation: the remote helper is a standalone script run on the cluster; its entry point is not library API.
     run_evaluator,
 )
+
+from .skypilot_world import MemoryTransport, ScriptedBridge
 
 _MAX_FRAME_BYTES = 1024 * 1024
 _REMOTE_ARTIFACT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-010213 [S108]; the bridge protocol requires this fixed remote artifact path.

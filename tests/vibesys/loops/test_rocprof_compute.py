@@ -3,7 +3,7 @@
 That module is a standalone, stdlib-only CLI (see its module docstring): no
 vibesys imports, staged verbatim into the agent workspace as
 ``rocprof_profiler/compute.py``. It is loaded here by file path, the same
-way ``tests/profilers/test_profiler_mcp.py`` loads the sibling nsys/torch
+way ``tests/vibesys/loops/test_profiler_mcp.py`` loads the sibling nsys/torch
 profiler modules, so these tests stay decoupled from sys.path/package state.
 
 Every external-tool interaction here goes through the module's injectable
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
 _MODULE_NAME = "rocprof_compute_under_test"
 _MODULE_PATH = (
-    Path(__file__).resolve().parents[2] / "resources" / "profilers" / "rocprof" / "compute.py"
+    Path(__file__).resolve().parents[3] / "resources" / "profilers" / "rocprof" / "compute.py"
 )
 # Real MI210 (gfx90a), rocprof-compute 3.1.0 output, trimmed -- see
 # amd-profiler-samples/FINDINGS.md ("3. rocprof-compute").

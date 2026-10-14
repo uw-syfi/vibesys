@@ -14,12 +14,12 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.multi._host import MultiHost
 from tests.vibesys.orchestration.multi._host import config as multi_config
 from tests.vibesys.orchestration.single._host import SingleHost
 from tests.vibesys.orchestration.single._host import config as single_config
 from tests.vibesys.serial_search._host import assert_flow_closed
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vs_core.api import Finish, RequestTurn, StartAttempt, Wait
 from vs_sim.api.testing import examples

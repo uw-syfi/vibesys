@@ -3,8 +3,8 @@
 ``resources/profilers/rocprof/capture.py`` is a standalone module (stdlib
 plus its sibling analyzer CLIs) staged alongside every profiler plugin, so it
 is loaded by file path here rather than imported as a package, mirroring
-``tests/profilers/test_capture_runtime.py`` and
-``tests/profilers/test_profiler_mcp.py``.
+``tests/vibesys/loops/test_capture_runtime.py`` and
+``tests/vibesys/loops/test_profiler_mcp.py``.
 
 No GPU/ROCm is available in this dev sandbox, so every ``rocprofv3``/
 ``rocminfo``/``rocprof-compute`` invocation is faked with small, real
@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.profiler_process_world import ScriptedHost, always, exits, prints, serves
+from tests.vibesys.loops.profiler_process_world import ScriptedHost, always, exits, prints, serves
 
 from vs_sim.api.testing import HANG_GUARD_S, examples
 
@@ -50,9 +50,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType
 
-    from tests.support.profiler_process_world import FakeProcess
+    from tests.vibesys.loops.profiler_process_world import FakeProcess
 
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[3]
 _ROCPROF_DIR = _REPO / "resources" / "profilers" / "rocprof"
 _COMMON_DIR = _REPO / "resources" / "profilers" / "_common"
 _ROCPROF_FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"

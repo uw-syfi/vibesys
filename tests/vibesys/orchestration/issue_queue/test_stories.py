@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.issue_queue._host import (
     FACTS,
     IMPLEMENTER,
@@ -25,6 +24,7 @@ from tests.vibesys.orchestration.issue_queue._replies import (
     implemented,
     judged,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.issue_queue.search.api import issue_queue
 from vs_issue_tracker.api import ReadBoard

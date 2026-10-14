@@ -11,7 +11,6 @@ candidate, or an input that was measured.
 from __future__ import annotations
 
 import pytest
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -25,6 +24,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vs_core.api import Finish, Measure, ProposeWinner, Retained, RevisionRef, StartAttempt, Wait

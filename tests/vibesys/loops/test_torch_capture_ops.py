@@ -16,7 +16,7 @@ Guarantees under test:
   arms nothing and still finds a trace the command wrote; with no GPU it fails with a typed
   ``no_trace`` error.
 
-Processes are scripted on a virtual clock (``tests/support/profiler_process_world.py``); the
+Processes are scripted on a virtual clock (``tests/vibesys/loops/profiler_process_world.py``); the
 real injection's behaviour in real processes is checked in
 ``tests/e2e/test_torch_inject_processes_e2e.py``.
 """
@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.profiler_process_world import (
+from tests.vibesys.loops.profiler_process_world import (
     ScriptedHost,
     always,
     exits,
@@ -48,9 +48,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType
 
-    from tests.support.profiler_process_world import FakeProcess
+    from tests.vibesys.loops.profiler_process_world import FakeProcess
 
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[3]
 _TORCH_DIR = _REPO / "resources" / "profilers" / "torch"
 
 FAST = settings(

@@ -27,7 +27,7 @@ from typing import Protocol
 
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
-from tests.support.profiler_process_world import ScriptedHost
+from tests.vibesys.loops.profiler_process_world import ScriptedHost
 
 
 class _ToolInfo(Protocol):
@@ -64,7 +64,7 @@ def _load_module(name: str, path: Path) -> ModuleType:
     return module
 
 
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[3]
 
 
 @pytest.fixture(scope="module")
@@ -1186,7 +1186,7 @@ def _rocprof_kernel_trace_dir(tmp_path: Path) -> Path:
 
 # A minimal fake rocprofv3 for the MCP-layer profile_timeline smoke test below
 # (the deep behavior coverage for capture.py's profile_* tools lives in
-# tests/profilers/test_rocprof_capture.py -- this only proves server.py's
+# tests/vibesys/loops/test_rocprof_capture.py -- this only proves server.py's
 # wiring reaches capture.py correctly). No SIGINT handling is needed here:
 # the smoke test uses a trivial bounded command with no load_command.
 _FAKE_ROCPROFV3_TIMELINE_SOURCE = textwrap.dedent(
@@ -1454,7 +1454,7 @@ class TestRocprofMcpServer:
         assert "DECISIVE" in out
 
     # -- new curated-surface smoke tests: prove server.py's wiring, not the
-    # -- deep capture.py behavior (that's tests/profilers/test_rocprof_capture.py) --
+    # -- deep capture.py behavior (that's tests/vibesys/loops/test_rocprof_capture.py) --
 
     @pytest.mark.usefixtures("no_host_tools")
     def test_profiling_capabilities_tool_smoke(self, rocprof_server_mod):  # noqa: ANN001, ANN201  # LW-910202; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; this function's return type is intentionally left loose; annotating it now is separate cleanup work

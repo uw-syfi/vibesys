@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from hypothesis import example, given, note, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.issue_queue._host import (
     Host,
     assert_flow_closed,
@@ -20,6 +19,7 @@ from tests.vibesys.orchestration.issue_queue._host import (
     suspending_view,
 )
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, judged
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vs_core.api import Finish, StartAttempt, Wait
 from vs_sim.api.testing import examples

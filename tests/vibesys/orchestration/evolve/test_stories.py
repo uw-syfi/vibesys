@@ -10,8 +10,8 @@ decided.
 
 from __future__ import annotations
 
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.evolve._host import Host, begin, config
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.evolve.search.api import (
     ExportPatch,

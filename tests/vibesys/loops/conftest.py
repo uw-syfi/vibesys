@@ -8,9 +8,15 @@ different count passes its own ``settings(max_examples=examples(...))``.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+import pytest
 from hypothesis import HealthCheck, settings
 
 from vs_sim.api.testing import examples
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 settings.register_profile(
     "profilers",
@@ -19,4 +25,12 @@ settings.register_profile(
     database=None,
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
-settings.load_profile("profilers")
+
+
+@pytest.fixture(autouse=True)
+def _profiler_examples() -> Iterator[None]:
+    """Use the profilers' example count for these tests only, not for the rest of the session."""
+    previous = settings.get_current_profile_name()
+    settings.load_profile("profilers")
+    yield
+    settings.load_profile(previous)

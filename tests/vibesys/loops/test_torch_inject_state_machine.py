@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.support.profiler_torch_fixtures import INJECT_DIR
+from tests.vibesys.loops.profiler_torch_fixtures import INJECT_DIR
 
 from vs_sim.api.testing import examples
 

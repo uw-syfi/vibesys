@@ -53,7 +53,7 @@
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/examples/test_qwen35_mi210_bundle.py", "rule": "patch", "count": 5}
 {"path": "tests/packaging/test_installed_release_verifier.py", "rule": "patch", "count": 14}
-{"path": "tests/profilers/test_rocprof_compute.py", "rule": "timeout_verdict", "count": 1}
+{"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "timeout_verdict", "count": 1}
 {"path": "tests/server/test_api_transport.py", "rule": "patch", "count": 1}
 {"path": "tests/server/test_event_store.py", "rule": "patch", "count": 2}
 {"path": "tests/server/test_event_store_index.py", "rule": "patch", "count": 13}

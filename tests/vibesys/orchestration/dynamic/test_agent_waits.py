@@ -9,8 +9,8 @@ checkpoint, ask again after a backoff) is core's own: `test_agent_turn_runs.py`,
 
 from __future__ import annotations
 
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, Host, begin, config
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.search.api import ROLES, dynamic
 from vs_core.api import Capabilities, LifecycleCapability, RequestTurn

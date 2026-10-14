@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -18,6 +17,7 @@ from tests.vibesys.orchestration.dynamic._host import (
     begin,
     config,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vs_core.api import Finish, RequestTurn, StartAttempt, Wait
 from vs_sim.api.testing import examples

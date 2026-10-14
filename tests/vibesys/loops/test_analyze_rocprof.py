@@ -69,7 +69,7 @@ from resources.profilers.rocprof.analyze_rocprof import (
     discover,
     resolve_window,
 )
-from tests.support.profiler_strategies import (
+from tests.vibesys.loops.profiler_strategies import (
     FAST,
     FEWER,
     case_variant,

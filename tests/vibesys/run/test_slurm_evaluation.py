@@ -10,7 +10,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.support.vibesys_grid import diagonal
+from tests.vibesys.vibesys_grid import diagonal
 
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_evaluation.api import (

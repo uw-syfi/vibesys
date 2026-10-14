@@ -3,7 +3,7 @@
 That module is a standalone, stdlib-only CLI + library (see its module
 docstring): no vibesys imports, staged verbatim into the agent workspace as
 ``rocprof_profiler/kernel_bench.py``. It is loaded here by file path, the
-same way ``tests/profilers/test_profiler_mcp.py`` loads the sibling
+same way ``tests/vibesys/loops/test_profiler_mcp.py`` loads the sibling
 nsys/torch profiler modules, so these tests stay decoupled from
 sys.path/package state.
 
@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
 _MODULE_NAME = "rocprof_kernel_bench_under_test"
 _MODULE_PATH = (
-    Path(__file__).resolve().parents[2] / "resources" / "profilers" / "rocprof" / "kernel_bench.py"
+    Path(__file__).resolve().parents[3] / "resources" / "profilers" / "rocprof" / "kernel_bench.py"
 )
 
 

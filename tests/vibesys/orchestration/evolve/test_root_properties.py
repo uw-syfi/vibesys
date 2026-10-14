@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from hypothesis import given, note, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.evolve._host import (
     Host,
     assert_flow_closed,
     begin,
     config,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vs_core.api import Finish, StartAttempt, Wait
 from vs_sim.api.testing import examples

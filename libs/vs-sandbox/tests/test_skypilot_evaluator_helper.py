@@ -30,7 +30,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.skypilot_world import MemoryTransport, ScriptedBridge
 
 import vs_sandbox.skypilot_evaluator as helper_module  # test-isolation: failure injection exercises the private remote helper process boundary.
 from vs_sandbox.api.skypilot import (
@@ -44,6 +43,8 @@ from vs_sandbox.api.skypilot import (
 from vs_sandbox.skypilot_evaluator import (  # test-isolation: the remote helper is a standalone script run on the cluster; its entry point is not library API.
     run_evaluator,
 )
+
+from .skypilot_world import MemoryTransport, ScriptedBridge
 
 if TYPE_CHECKING:
     from vs_sandbox.api.skypilot import ResponseFrame

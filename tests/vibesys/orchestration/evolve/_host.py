@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
-from tests.support.vibesys_flows import start_flow
+from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.metrics import EvidenceReading, MetricRow, MetricSpace
 from vibesys.orchestration.evolve.models import JudgeResponse, MutatorResponse

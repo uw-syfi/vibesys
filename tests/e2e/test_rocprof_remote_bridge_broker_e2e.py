@@ -3,7 +3,7 @@
 Guarantee: a capture requested from inside a candidate worktree reaches the scheduler (an
 ``sbatch`` is issued through the real Slurm process broker), and cancelling it cancels the
 job. The bridge's own logic is covered in-process, against a fake cluster, in
-``tests/profilers/test_rocprof_remote_bridge.py``; this is the one test that puts a real
+``tests/vibesys/loops/test_rocprof_remote_bridge.py``; this is the one test that puts a real
 broker socket and a real connector process under it.
 """
 

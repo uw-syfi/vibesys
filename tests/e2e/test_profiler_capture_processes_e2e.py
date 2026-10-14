@@ -1,6 +1,6 @@
 """The profiler capture lifecycle against real processes, signals and files.
 
-The unit tests (``tests/profilers``) run the lifecycle on a scripted host and a virtual clock.
+The unit tests (``tests/vibesys/loops``) run the lifecycle on a scripted host and a virtual clock.
 This is the one place that checks the real host does what the script says it does:
 
 * A bounded target that outlives its budget is killed along with a descendant that started its
@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.profiler_torch_fixtures import write_fake_torch
+from tests.vibesys.loops.profiler_torch_fixtures import write_fake_torch
 
 from vs_sim.api.testing import HANG_GUARD_S
 

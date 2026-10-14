@@ -17,7 +17,7 @@ Guarantees under test:
   redacted; capture and load windows are stamped in order.
 * The capture store resolves absolute roots, unique ids, ids and paths, newest first.
 
-The lifecycle runs on a scripted ``ProcessHost`` (``tests/support/profiler_process_world.py``)
+The lifecycle runs on a scripted ``ProcessHost`` (``tests/vibesys/loops/profiler_process_world.py``)
 and a virtual clock, so no test spawns a process, signals one or sleeps. That the real host
 behaves the same is checked once in ``tests/e2e/test_profiler_capture_processes_e2e.py``.
 """
@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.profiler_process_world import (
+from tests.vibesys.loops.profiler_process_world import (
     ScriptedHost,
     always,
     exits,
@@ -49,9 +49,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType, SimpleNamespace
 
-    from tests.support.profiler_process_world import FakeProcess, Script
+    from tests.vibesys.loops.profiler_process_world import FakeProcess, Script
 
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[3]
 _MODULE_PATH = _REPO / "resources" / "profilers" / "_common" / "capture_runtime.py"
 
 FAST = settings(max_examples=examples(pr=6, nightly=100), deadline=None)

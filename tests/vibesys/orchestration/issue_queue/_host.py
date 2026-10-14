@@ -15,8 +15,8 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
-from tests.support.vibesys_flows import start_flow
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, implemented, judged
+from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.metrics import EvidenceReading
 from vibesys.orchestration.issue_queue.search.api import (

@@ -15,7 +15,6 @@ import re
 
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._evidence_host import (
     EvidenceHost,
     begin_with_evidence,
@@ -30,6 +29,7 @@ from tests.vibesys.orchestration.dynamic._host import (
 )
 from tests.vibesys.orchestration.dynamic._replies import implement
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.search.api import (
     PartialRow,

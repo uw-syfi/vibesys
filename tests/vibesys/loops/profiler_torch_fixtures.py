@@ -46,7 +46,7 @@ from typing import IO
 
 from vs_sim.api.testing import join_or_fail
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 INJECT_DIR = REPO_ROOT / "resources" / "profilers" / "torch" / "inject"
 
 _FAKE_TORCH_INIT_SOURCE = textwrap.dedent(

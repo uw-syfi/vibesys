@@ -22,7 +22,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from vs_sim.api.testing import examples
 
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[3]
 _SUCCESS = {"ok", "killed_after_grace"}
 
 

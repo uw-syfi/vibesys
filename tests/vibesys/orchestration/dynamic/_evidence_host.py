@@ -11,9 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Unpack
 
-from tests.support.vibesys_flows import start_flow
 from tests.vibesys.orchestration.dynamic._host import FACTS, PLANNER_LABEL, Host, World
 from tests.vibesys.orchestration.dynamic._replies import implemented, plan_reply, reviewed
+from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import dynamic

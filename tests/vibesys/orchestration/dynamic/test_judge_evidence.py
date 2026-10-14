@@ -15,7 +15,6 @@ import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -29,6 +28,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     reviewed,
 )
 from tests.vibesys.orchestration.dynamic._values import evidence_ref, revision
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import InterpretEvidence, ReviewPrompt

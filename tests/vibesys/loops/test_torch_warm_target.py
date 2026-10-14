@@ -17,7 +17,7 @@ Guarantees under test:
   and nothing is left running.
 
 The target is a scripted process speaking the injection's file protocol on a virtual clock
-(``tests/support/profiler_process_world.py``); that the real injection speaks the same protocol
+(``tests/vibesys/loops/profiler_process_world.py``); that the real injection speaks the same protocol
 is checked against real processes in ``tests/e2e/test_profiler_capture_processes_e2e.py``.
 """
 
@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.profiler_process_world import (
+from tests.vibesys.loops.profiler_process_world import (
     ScriptedHost,
     exits,
     torch_target,
@@ -43,9 +43,9 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from types import ModuleType
 
-    from tests.support.profiler_process_world import FakeProcess
+    from tests.vibesys.loops.profiler_process_world import FakeProcess
 
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[3]
 _TORCH_DIR = _REPO / "resources" / "profilers" / "torch"
 _TRACE_JSON = (
     Path(__file__).parent / "fixtures" / "torch" / "eager_trimmed.pt.trace.json"

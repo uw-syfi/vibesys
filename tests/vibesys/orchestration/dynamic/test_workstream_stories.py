@@ -13,7 +13,6 @@ from __future__ import annotations
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     INPUT_THROUGHPUT,
     PLANNER_LABEL,
@@ -29,6 +28,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     profile,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ProfilerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (

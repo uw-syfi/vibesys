@@ -9,8 +9,8 @@ Guarantees under test (through ``FastMCP.call_tool``, the same entry the MCP cli
 * Cancelling the awaiting call stops the target process, and the worker releases the capture
   slot; nothing outlives the cancellation.
 
-Everything else the server does is covered in-process in ``tests/profilers/test_profiler_mcp.py``;
-the capture lifecycle itself runs on a scripted host in ``tests/profilers/test_capture_runtime.py``.
+Everything else the server does is covered in-process in ``tests/vibesys/loops/test_profiler_mcp.py``;
+the capture lifecycle itself runs on a scripted host in ``tests/vibesys/loops/test_capture_runtime.py``.
 These three need a real worker thread blocked on a real child process, so they live in a real tier.
 """
 
@@ -33,7 +33,7 @@ from vs_sim.api import Event, OsThreads
 from vs_sim.api.testing import wait_or_fail
 
 _REPO = Path(__file__).resolve().parents[2]
-_ROCPROF_FIXTURES = _REPO / "tests" / "profilers" / "fixtures" / "rocprof"
+_ROCPROF_FIXTURES = _REPO / "tests" / "vibesys" / "loops" / "fixtures" / "rocprof"
 
 
 class _McpServer(Protocol):

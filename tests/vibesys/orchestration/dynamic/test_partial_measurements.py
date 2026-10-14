@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import FACTS, PLANNER_LABEL, Host, config
 from tests.vibesys.orchestration.dynamic._replies import implement, implemented, plan_reply
 from tests.vibesys.orchestration.dynamic._slots import (
@@ -22,6 +21,7 @@ from tests.vibesys.orchestration.dynamic._slots import (
     planner_context,
     turn_about,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.metrics import EvidenceReading, PartialRow
 from vibesys.orchestration.dynamic.models import ImplementerResult

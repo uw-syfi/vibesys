@@ -1,6 +1,6 @@
 """The torch.profiler injection (``resources/profilers/torch/inject/sitecustomize.py``) in real Python processes.
 
-The injection's state machine runs in process in ``tests/profilers/test_torch_inject_state_machine.py``.
+The injection's state machine runs in process in ``tests/vibesys/loops/test_torch_inject_state_machine.py``.
 What only real processes show is checked here: interpreter startup (``sitecustomize``
 auto-import and chaining), signal delivery and process exit.
 
@@ -16,7 +16,7 @@ Guarantees under test:
   start handler (deferred, not deadlocked).
 * A multi-process program writes exactly one trace per process.
 
-Each program blocks on the fake torch's call log (``tests/support/profiler_torch_fixtures.py``)
+Each program blocks on the fake torch's call log (``tests/vibesys/loops/profiler_torch_fixtures.py``)
 instead of sleeping a guessed time.
 """
 
@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.profiler_torch_fixtures import (
+from tests.vibesys.loops.profiler_torch_fixtures import (
     base_env,
     parse_call_log,
     run_python,

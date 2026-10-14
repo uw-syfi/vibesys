@@ -11,13 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
-from tests.support.vibesys_flows import start_flow
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
     plan_reply,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.metrics import EvidenceReading
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult

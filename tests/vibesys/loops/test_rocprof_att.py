@@ -60,7 +60,7 @@ from resources.profilers.rocprof.att import (
 from resources.profilers.rocprof.att import (
     main as att_main,
 )
-from tests.support.profiler_strategies import FAST, FEWER, buffer_size_input
+from tests.vibesys.loops.profiler_strategies import FAST, FEWER, buffer_size_input
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "rocprof"
 

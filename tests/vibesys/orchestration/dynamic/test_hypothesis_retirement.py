@@ -12,7 +12,6 @@ import json
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import (
     PLANNER_LABEL,
     Host,
@@ -26,6 +25,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     plan_reply,
     reviewed,
 )
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.hypothesis import HypothesisStrategy
 from vibesys.orchestration.dynamic.models import (

@@ -14,7 +14,6 @@ from dataclasses import dataclass
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, begin
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
@@ -31,6 +30,7 @@ from tests.vibesys.orchestration.dynamic._values import (
     run_record,
 )
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.metrics import MetricRow
 from vibesys.orchestration.dynamic.models import ImplementerResult, ProfilerResult, ReviewResult

@@ -3,7 +3,7 @@
 ``resources/profilers/torch/analyze_torch_profile.py`` is a standalone script
 (no ``vibesys`` imports — it is copied into the agent's workspace as
 ``torch_profiler/``), so it is loaded by file path here rather than imported
-as a package, mirroring ``tests/profilers/test_profiler_mcp.py``.
+as a package, mirroring ``tests/vibesys/loops/test_profiler_mcp.py``.
 
 These tests exercise the analyzer's own functions directly (certify,
 gemm-shapes, roofline, and the Chrome-trace -> summarized-report conversion
@@ -41,12 +41,12 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
-from tests.support.profiler_strategies import FAST, FEWER
+from tests.vibesys.loops.profiler_strategies import FAST, FEWER
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-_REPO = Path(__file__).resolve().parents[2]
+_REPO = Path(__file__).resolve().parents[3]
 _TORCH_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "torch"
 
 

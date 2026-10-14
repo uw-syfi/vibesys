@@ -85,7 +85,7 @@ from resources.profilers.rocprof.counters import (
     plan_passes,
     resource_occupancy,
 )
-from tests.support.profiler_strategies import (
+from tests.vibesys.loops.profiler_strategies import (
     FAST,
     FEWER,
     arch_name,

@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Unpack
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from tests.support.vibesys_flows import across_restarts
 from tests.vibesys.orchestration.single._host import (
     IMPLEMENTER,
     PLANNER,
@@ -28,6 +27,7 @@ from tests.vibesys.serial_search._host import (
     assert_flow_closed,
 )
 from tests.vibesys.serial_search._replies import plan_reply
+from tests.vibesys.vibesys_flows import across_restarts
 
 from vs_core.api import (
     CheckpointDecline,
