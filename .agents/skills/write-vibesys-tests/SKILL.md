@@ -83,7 +83,8 @@ conformance corpus.
 ## Testing
 
 - Run the narrowest target first (`uv run pytest <test file> -k <name>`), then
-  the package, then `./scripts/check_ci.sh` before the PR.
+  the package. Run only the checks the change can affect; CI runs the rest.
+  Unenforced: which checks a change can affect is judgment.
 - For a change to recovery, the shell, or a contract suite, also run the
   nightly depth over the libraries and the system and product test layers
   (command in [references/python.md](references/python.md)).
