@@ -13,8 +13,9 @@ import json
 import shlex
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from vs_decode.api import Unreadable, decode_json
 from vs_evaluation.api import EvidenceMetric, ExecutorRejectedError, ProfileField
 from vs_slurm.api import PORT_PLACEHOLDER, shell_join_with_port, unframed_output
 
@@ -185,14 +186,33 @@ class ProfileCaptureDescriptor(BaseModel):
 
 
 _REQUEST: TypeAdapter[dict[str, Any]] = TypeAdapter(dict[str, Any])
-"""A capture request this module serialized; parsed back with pydantic's bounded parser."""
+"""A capture request this module serialized."""
+_MAX_PROFILE_LINE_BYTES = 1024 * 1024
+"""The largest capture request or profile statistics line decoded."""
+
+
+class ProfileCaptureDecodeError(ValueError):
+    """A capture request or statistics line that is not valid; names problems, not input."""
+
+    def __init__(self, unreadable: Unreadable) -> None:
+        """Describe the unreadable document."""
+        super().__init__(f"malformed {unreadable.source}: {len(unreadable.problems)} problem(s)")
+
+
+def _capture_request(encoded: str) -> dict[str, Any]:
+    request = decode_json(
+        encoded, _REQUEST, source="capture request", max_bytes=_MAX_PROFILE_LINE_BYTES
+    )
+    if isinstance(request, Unreadable):
+        raise ProfileCaptureDecodeError(request)
+    return request
 
 
 def profile_capture_descriptor(command: tuple[str, ...] | None) -> ProfileCaptureDescriptor:
     """Derive support from the capture request actually selected by wiring."""
     if command is None or "--request-json" not in command:
         return ProfileCaptureDescriptor()
-    request = _REQUEST.validate_json(command[command.index("--request-json") + 1])
+    request = _capture_request(command[command.index("--request-json") + 1])
     if request.get("kind") == "timeline":
         return ProfileCaptureDescriptor(supported_fields=(ProfileField.HIP_API_TIMING,))
     return ProfileCaptureDescriptor()
@@ -212,7 +232,7 @@ def require_profile_fields(
         message = "configured capture cannot supply fields: " + ", ".join(sorted(missing))
         raise ExecutorRejectedError(message)
     index = command.index("--request-json") + 1
-    request = _REQUEST.validate_json(command[index])
+    request = _capture_request(command[index])
     request["options"]["hip_api"] = True
     request["required_fields"] = sorted(set(fields))
     return (
@@ -285,11 +305,15 @@ def split_profile_stats(stdout: str) -> tuple[str, ProfileStats | None]:
         if not line.startswith(PROFILE_STATS_PREFIX):
             kept.append(line)
             continue
-        try:
-            stats = ProfileStats.model_validate_json(line[len(PROFILE_STATS_PREFIX) :])
-        except ValidationError as exc:
-            message = f"malformed profile statistics line: {exc.error_count()} invalid field(s)"
-            raise ValueError(message) from exc
+        decoded = decode_json(
+            line[len(PROFILE_STATS_PREFIX) :],
+            ProfileStats,
+            source="profile statistics line",
+            max_bytes=_MAX_PROFILE_LINE_BYTES,
+        )
+        if isinstance(decoded, Unreadable):
+            raise ProfileCaptureDecodeError(decoded)
+        stats = decoded
     return "".join(kept), stats
 
 

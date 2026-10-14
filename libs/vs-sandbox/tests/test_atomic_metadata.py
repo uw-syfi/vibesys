@@ -11,6 +11,7 @@ import pytest
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
+    SlurmCapturePlanError,
     read_slurm_capture_plan,
     write_slurm_capture_plan,
 )
@@ -30,6 +31,15 @@ def test_capture_plan_interrupted_at_every_byte_remains_readable(tmp_path: Path)
             write_slurm_capture_plan(path, new)
         assert read_slurm_capture_plan(path) == old
         assert not list(path.parent.glob(".*.tmp"))
+
+
+def test_a_capture_plan_that_is_not_a_regular_file_is_invalid_not_a_hang(tmp_path: Path) -> None:
+    # Reading a FIFO blocks until a writer appears; the reader must refuse it instead.
+    path = tmp_path / "capture.json"
+    os.mkfifo(path)
+
+    with pytest.raises(SlurmCapturePlanError, match="invalid Slurm capture plan"):
+        read_slurm_capture_plan(path)
 
 
 def test_docker_metadata_interrupted_at_every_byte_preserves_last_document(

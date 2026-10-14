@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Literal, Protocol
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 
+from vs_decode.api import Unreadable, read_json
 from vs_sandbox.lifecycle import BeforeReadyContext, SandboxLifecycleHooks
 
 #: What one tool command returns: captured text streams and an exit status.
@@ -717,17 +718,20 @@ def _installed_binary_hashes(root: Path, spec: CargoGitToolSpec) -> dict[str, st
     return hashes
 
 
+_MAX_RECEIPT_BYTES = 1024 * 1024
+"""The largest installed-tool receipt read back."""
+
+
 def _verified_install(root: Path, spec: CargoGitToolSpec) -> bool:
     if root.is_symlink():
         return False
     receipt_path = root / "receipt.json"
     if receipt_path.is_symlink():
         return False
-    try:
-        receipt = _EvaluatorToolReceipt.model_validate_json(
-            receipt_path.read_text(encoding="utf-8")
-        )
-    except (OSError, ValidationError):
+    receipt = read_json(
+        receipt_path, _EvaluatorToolReceipt, max_bytes=_MAX_RECEIPT_BYTES, follow_symlinks=False
+    )
+    if isinstance(receipt, Unreadable):
         return False
     hashes = _installed_binary_hashes(root, spec)
     return receipt.spec == spec and hashes is not None and receipt.binaries == hashes

@@ -22,7 +22,9 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter
+
+from vs_decode.api import decode_json
 
 if TYPE_CHECKING:
     from vs_sandbox.docker_cli import DockerCli
@@ -62,6 +64,8 @@ NESTED_DAEMON_READY_SCRIPT = (
 
 
 _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_RUNTIME_LISTING_BYTES = 1024 * 1024
+"""The largest ``docker info`` runtime listing read."""
 """Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
@@ -133,12 +137,12 @@ def require_sysbox_runtime(docker: DockerCli) -> None:
         raise ContainerRuntimeUnavailableError.runtime_unreadable(
             result.stderr.strip() or f"exit {result.returncode}"
         )
-    try:
-        runtimes = _ANY_JSON.validate_json(result.stdout.strip() or "null")
-    except ValidationError as exc:
-        raise ContainerRuntimeUnavailableError.runtime_listing_unparseable(
-            result.stdout.strip()
-        ) from exc
+    runtimes = decode_json(
+        result.stdout.strip() or "null",
+        _ANY_JSON,
+        source="docker info Runtimes",
+        max_bytes=_MAX_RUNTIME_LISTING_BYTES,
+    )
     if not isinstance(runtimes, dict):
         raise ContainerRuntimeUnavailableError.runtime_listing_unparseable(result.stdout.strip())
     if SYSBOX_DOCKER_RUNTIME not in runtimes:

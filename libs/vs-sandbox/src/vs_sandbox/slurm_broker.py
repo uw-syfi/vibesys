@@ -9,6 +9,7 @@ import threading
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
+from vs_decode.api import Unreadable, decode_json
 from vs_sandbox.slurm_broker_protocol import (
     MAX_FRAME_BYTES,
     BrokerRan,
@@ -88,11 +89,22 @@ class _BrokerHandler(socketserver.StreamRequestHandler):
         self.wfile.write(payload.model_dump_json().encode() + b"\n")
 
 
+class BrokerRequestError(ValueError):
+    """A request frame that is not a valid call; names the problems, never the input."""
+
+    def __init__(self, unreadable: Unreadable) -> None:
+        """Describe the unreadable frame."""
+        super().__init__(str(unreadable))
+
+
 def _parse_call(frame: bytes) -> ProcessCall:
     if not frame or len(frame) > MAX_FRAME_BYTES or not frame.endswith(b"\n"):
         message = "invalid Slurm broker request"
         raise ValueError(message)
-    return ProcessCall.model_validate_json(frame)
+    call = decode_json(frame, ProcessCall, source="Slurm broker request", max_bytes=MAX_FRAME_BYTES)
+    if isinstance(call, Unreadable):
+        raise BrokerRequestError(call)
+    return call
 
 
 class SlurmProcessBroker:

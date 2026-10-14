@@ -11,8 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
-
+from vs_decode.api import Unreadable, decode_json
 from vs_sandbox.slurm_broker_protocol import (
     BROKER_REPLY,
     MAX_FRAME_BYTES,
@@ -43,9 +42,9 @@ class BrokerReplyError(ConnectionError):
         return cls(f"Slurm broker reply is longer than {MAX_FRAME_BYTES} bytes")
 
     @classmethod
-    def malformed(cls, error: ValidationError) -> BrokerReplyError:
+    def malformed(cls, reply: Unreadable) -> BrokerReplyError:
         """The reply line is not a broker reply."""
-        return cls(f"Slurm broker reply is malformed: {error.error_count()} errors")
+        return cls(f"Slurm broker reply is malformed: {len(reply.problems)} errors")
 
 
 @dataclass(frozen=True)
@@ -91,10 +90,11 @@ class BrokeredProcesses:
             raise FileNotFoundError(str(error)) from error
         except TimeoutError:
             return ProcessTimedOut(timeout, b"", b"")
-        try:
-            reply = BROKER_REPLY.validate_json(line)
-        except ValidationError as error:
-            raise BrokerReplyError.malformed(error) from error
+        reply = decode_json(
+            line, BROKER_REPLY, source="Slurm broker reply", max_bytes=MAX_FRAME_BYTES
+        )
+        if isinstance(reply, Unreadable):
+            raise BrokerReplyError.malformed(reply)
         if isinstance(reply, BrokerRefused):
             raise PermissionError(reply.error)
         return ProcessOutcome(

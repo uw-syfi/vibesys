@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import JsonValue, TypeAdapter
+
+from vs_decode.api import decode_json
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -37,6 +39,8 @@ def translate_command_arguments(
 
 
 _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_NESTED_ARGV_BYTES = 1024 * 1024
+"""The largest argv item parsed as a serialized nested argv."""
 """Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
@@ -47,10 +51,9 @@ def _translate_command_argument(
     """Translate paths in one argv item, including serialized nested argv."""
     if not any(source in argument for source, _ in replacements):
         return argument
-    try:
-        nested = _ANY_JSON.validate_json(argument)
-    except ValidationError:
-        nested = None
+    nested = decode_json(
+        argument, _ANY_JSON, source="command argument", max_bytes=_MAX_NESTED_ARGV_BYTES
+    )
     if isinstance(nested, list) and all(isinstance(item, str) for item in nested):
         _reject_semantic_tokens_in_source(nested, replacements)
         translated: list[str] = []

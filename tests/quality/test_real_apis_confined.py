@@ -797,7 +797,6 @@ FILE_IO_EDGE_MODULES: dict[str, str] = {
     "libs/vs-sandbox/src/vs_sandbox/skypilot_config.py": "operator config loader: SkyPilot settings",
     "libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py": "store implementation: SkyPilot evaluator state files",
     "libs/vs-sandbox/src/vs_sandbox/skypilot_runner.py": "edge adapter: the task file the sky CLI reads, and its output",
-    "libs/vs-sandbox/src/vs_sandbox/slurm_capture_plan.py": "store implementation: the Slurm capture plan",
     "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": "store implementation: durable Slurm evaluation records",
     "libs/vs-sandbox/src/vs_sandbox/slurm_gpu_alias.py": "operator config loader: the deprecated slurm-gpu file",
     "libs/vs-sandbox/src/vs_sandbox/slurm_policy.py": "operator config loader: the Slurm operator file",

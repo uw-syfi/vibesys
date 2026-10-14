@@ -20,11 +20,11 @@ from pydantic import (
     Field,
     JsonValue,
     TypeAdapter,
-    ValidationError,
     field_validator,
     model_validator,
 )
 
+from vs_decode.api import decode_json
 from vs_sim.api import (
     MergedOutputProcess,
     MergedOutputProcessLauncher,
@@ -240,14 +240,15 @@ def read_windows(
     )
     if completed is None or completed.returncode != 0:
         return None
-    try:
-        report = _ANY_JSON.validate_json(completed.stdout)
-    except ValidationError:
-        return None
+    report = decode_json(
+        completed.stdout, _ANY_JSON, source="agent GPU window report", max_bytes=_MAX_REPORT_BYTES
+    )
     return report if isinstance(report, dict) else None
 
 
 _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_REPORT_BYTES = 1024 * 1024
+"""The largest window report read from the operator's command."""
 """Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
