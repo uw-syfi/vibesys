@@ -42,6 +42,78 @@ export class ConnectionError extends Error {
   }
 }
 
+type InputCompletion = (error: ConnectionError | null) => void;
+
+/**
+ * The acknowledged input side of one helper process. Node may report a rejected write by throwing,
+ * by passing an error to its completion, or by emitting `error`; this adapter turns all three into
+ * one terminal `ConnectionError` and settles every accepted operation exactly once.
+ */
+class ProcessInput {
+  readonly #stream: SpawnedProcess['stdin'];
+  readonly #failed: (error: ConnectionError) => void;
+  readonly #pending = new Set<InputCompletion>();
+  #failure: ConnectionError | null = null;
+
+  constructor(stream: SpawnedProcess['stdin'], failed: (error: ConnectionError) => void) {
+    this.#stream = stream;
+    this.#failed = failed;
+    stream.on('error', error => this.#fail(error));
+  }
+
+  write(chunk: string | Buffer, completion: InputCompletion): void {
+    this.#operate(completion, done => this.#stream.write(chunk, done));
+  }
+
+  end(completion: InputCompletion): void {
+    this.#operate(completion, done => this.#stream.end(done));
+  }
+
+  destroy(): void {
+    this.#stream.destroy();
+  }
+
+  #operate(
+    completion: InputCompletion,
+    start: (done: (error?: Error | null) => void) => void,
+  ): void {
+    if (this.#failure !== null) {
+      completion(this.#failure);
+      return;
+    }
+    if (this.#stream.destroyed || this.#stream.writableEnded) {
+      completion(this.#fail(new Error('the process input is already closed')));
+      return;
+    }
+    let settled = false;
+    const settle: InputCompletion = error => {
+      if (settled) return;
+      settled = true;
+      this.#pending.delete(settle);
+      completion(error);
+    };
+    this.#pending.add(settle);
+    try {
+      start(error => {
+        if (error != null) this.#fail(error);
+        else settle(null);
+      });
+    } catch (error) {
+      this.#fail(error);
+    }
+  }
+
+  #fail(cause: unknown): ConnectionError {
+    if (this.#failure !== null) return this.#failure;
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    const failure = new ConnectionError('link', `the host helper input failed: ${detail}`, {cause});
+    this.#failure = failure;
+    for (const settle of [...this.#pending]) settle(failure);
+    this.#failed(failure);
+    return failure;
+  }
+}
+
 /** A request the helper answered with an error (`HelperError`), named by its code and path. */
 export class HelperRequestError extends Error {
   readonly code: HelperError['code'];
@@ -106,6 +178,7 @@ interface Pending {
 
 export class HelperChannel implements AsyncDisposable {
   readonly #process: SpawnedProcess;
+  readonly #input: ProcessInput;
   readonly #options: ChannelOptions;
   readonly #pending = new Map<string, Pending>();
   readonly #pushes = new Set<(push: InstancesChanged) => void>();
@@ -116,6 +189,8 @@ export class HelperChannel implements AsyncDisposable {
   #nextId = 1;
   #relay: RunStream | null = null;
   #failure: ConnectionError | null = null;
+  /** Recorded separately so an already-started process exit can remain authoritative. */
+  #inputFailure: ConnectionError | null = null;
   #retirement: ProcessRetirement | null = null;
   /** What `hello` settled: the versions, the negotiated features, and the checkout. */
   hello: HelloReply | null = null;
@@ -130,6 +205,7 @@ export class HelperChannel implements AsyncDisposable {
   private constructor(process: SpawnedProcess, options: ChannelOptions) {
     this.#process = process;
     this.#options = options;
+    this.#input = new ProcessInput(process.stdin, error => this.#inputFailed(error));
     process.stdout.on('data', (chunk: Buffer) => this.#data(chunk));
     process.stderr.setEncoding('utf8');
     process.stderr.on('data', (chunk: string) => {
@@ -139,7 +215,7 @@ export class HelperChannel implements AsyncDisposable {
     options.signal.addEventListener('abort', abort, {once: true});
     this.ended = process.exit.then(code => {
       options.signal.removeEventListener('abort', abort);
-      const failure = this.#failure ?? this.#exitFailure(code);
+      const failure = this.#failure ?? this.#exitFailure(code) ?? this.#inputFailure;
       this.#rejectAll(failure ?? new ConnectionError('link', 'the helper ended'));
       return failure;
     });
@@ -189,7 +265,8 @@ export class HelperChannel implements AsyncDisposable {
     body: Body & {readonly type: T},
     accept: (reply: ReplyOf<T>) => Result,
   ): Promise<Result> {
-    if (this.#failure !== null) return Promise.reject(this.#failure);
+    const terminal = this.#failure ?? this.#inputFailure;
+    if (terminal !== null) return Promise.reject(terminal);
     const required = helperFeatureForRequest(body.type);
     if (this.hello !== null && required !== null && !this.hello.features.includes(required)) {
       return Promise.reject(
@@ -249,14 +326,15 @@ export class HelperChannel implements AsyncDisposable {
         reply => {
           // This callback runs synchronously while #line owns the reply. Transfer the complete
           // remainder before #data can interpret another newline as a helper control message.
-          const stream = new RunStream(
-            this.#process,
-            this.#buffer,
-            this.ended,
-            () => this.#stderr,
-            () => this.#retire(),
-            () => this.#unconfirmedTerminationError(),
-          );
+          const stream = new RunStream({
+            process: this.#process,
+            input: this.#input,
+            first: this.#buffer,
+            ended: this.ended,
+            stderr: () => this.#stderr,
+            retire: () => this.#retire(),
+            unconfirmedTerminationError: () => this.#unconfirmedTerminationError(),
+          });
           this.#buffer = Buffer.alloc(0);
           this.#relay = stream;
           return {runId: reply.run_id, stream};
@@ -279,7 +357,9 @@ export class HelperChannel implements AsyncDisposable {
   }
 
   #write(message: Record<string, unknown>): void {
-    this.#process.stdin.write(`${JSON.stringify(message)}\n`);
+    // The input adapter's one terminal callback owns channel failure; this per-write completion is
+    // deliberately empty so the same fault cannot take a second path into channel retirement.
+    this.#input.write(`${JSON.stringify(message)}\n`, () => {});
   }
 
   #data(chunk: Buffer): void {
@@ -358,8 +438,20 @@ export class HelperChannel implements AsyncDisposable {
     this.#retire();
   }
 
+  #inputFailed(error: ConnectionError): void {
+    this.#inputFailure = error;
+    if (this.#process.running) {
+      this.#fail(error);
+      return;
+    }
+    // Preserve buffered bootstrap/exit evidence when the process had already begun ending: its
+    // status is more specific than the secondary write rejection. `ended` rejects work already in
+    // flight with that evidence; new requests see this input failure through `#inputFailure`.
+    this.#retire();
+  }
+
   #retire(): ProcessRetirement {
-    this.#process.stdin.destroy();
+    this.#input.destroy();
     if (this.#retirement === null) {
       this.#retirement = retireProcess(this.#process, this.#options.scheduleTimeout);
       void this.#retirement.outcome.then(outcome => {
@@ -455,30 +547,35 @@ function relayEnd(
   }
 }
 
+interface RunStreamOptions {
+  readonly process: SpawnedProcess;
+  readonly input: ProcessInput;
+  readonly first: Buffer;
+  readonly ended: Promise<ConnectionError | null>;
+  readonly stderr: () => string;
+  readonly retire: () => ProcessRetirement;
+  readonly unconfirmedTerminationError: () => ConnectionError;
+}
+
 /**
  * A relayed run channel as a byte stream: stdin is its writable side, stdout its readable side. It
  * ends normally on an ordinary end and is destroyed with a `ConnectionError` naming why otherwise.
  */
 export class RunStream extends Duplex {
   readonly #process: SpawnedProcess;
+  readonly #input: ProcessInput;
   readonly #retire: () => ProcessRetirement;
   readonly #unconfirmedTerminationError: () => ConnectionError;
 
-  constructor(
-    process: SpawnedProcess,
-    first: Buffer,
-    ended: Promise<ConnectionError | null>,
-    stderr: () => string,
-    retire: () => ProcessRetirement,
-    unconfirmedTerminationError: () => ConnectionError,
-  ) {
+  constructor(options: RunStreamOptions) {
     super({allowHalfOpen: false});
-    this.#process = process;
-    this.#retire = retire;
-    this.#unconfirmedTerminationError = unconfirmedTerminationError;
-    if (first.length > 0) this.push(first);
-    void Promise.all([process.exit, ended]).then(([code, failure]) => {
-      const error = relayEnd(code, stderr(), failure);
+    this.#process = options.process;
+    this.#input = options.input;
+    this.#retire = options.retire;
+    this.#unconfirmedTerminationError = options.unconfirmedTerminationError;
+    if (options.first.length > 0) this.push(options.first);
+    void Promise.all([options.process.exit, options.ended]).then(([code, failure]) => {
+      const error = relayEnd(code, options.stderr(), failure);
       if (error === null) this.push(null);
       else this.destroy(error);
     });
@@ -493,14 +590,16 @@ export class RunStream extends Duplex {
     this.#process.stdout.resume();
   }
 
-  override _write(chunk: Buffer, _encoding: BufferEncoding, callback: () => void): void {
-    // A channel that ended reports why through its exit, not through this write.
-    this.#process.stdin.write(chunk, () => callback());
+  override _write(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: (error?: Error | null) => void,
+  ): void {
+    this.#input.write(chunk, error => callback(error));
   }
 
-  override _final(callback: () => void): void {
-    this.#process.stdin.end();
-    callback();
+  override _final(callback: (error?: Error | null) => void): void {
+    this.#input.end(error => callback(error));
   }
 
   override _destroy(error: Error | null, callback: (error: Error | null) => void): void {

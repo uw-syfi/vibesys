@@ -148,8 +148,9 @@ export function fromChild(child: ChildProcess): SpawnedProcess {
           resolve(code);
         });
       });
-  // A process that exits before reading its input makes a later write fail with EPIPE; the exit
-  // code reports that outcome, so the write error carries nothing more.
+  // Keep an absorber across the gap before a helper channel owns this stream, and for short ssh
+  // commands that never acquire its acknowledged-input adapter. A helper channel adds its own
+  // listener; EventEmitter delivers the error to both, so that owner still reports the write fault.
   child.stdin?.on('error', () => {});
   return {
     // `stdio: 'pipe'` guarantees all three streams.
