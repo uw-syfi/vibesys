@@ -19,14 +19,16 @@ from typing import TYPE_CHECKING, Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from tests.server.support import build_server_parts
+from tests.server.support import REQUEST_TIME, build_server_parts
 
 from server.api.protocol import (
+    ChatQuery,
     EventBatchMessage,
     ProtocolRequest,
     Response,
     SubscribedMessage,
 )
+from server.chat.manager import ChatAnswer
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import MAX_REQUEST_LINE_BYTES as MAX
 from server.transport.unix_jsonl import UnixJsonlServer
@@ -266,6 +268,7 @@ def test_closing_the_server_hangs_up_on_every_client_however_far_it_got(
         server = UnixJsonlServer(socket_path, parts.api, tracker, threads, network)
         server.start()
         done: list[tuple[_Fault, list[bytes]]] = []
+        clients_done = threads.event()
         for index, fault in enumerate(faults):
             client = network.connect(str(socket_path))
 
@@ -277,6 +280,8 @@ def test_closing_the_server_hangs_up_on_every_client_however_far_it_got(
                     if f.duplicate:
                         c.send(frame)
                 done.append((f, _read_until_hangup(c)))
+                if len(done) == len(faults):
+                    clients_done.set()
 
             threads.spawn(run, name=f"client-{index}", daemon=False)
 
@@ -288,17 +293,106 @@ def test_closing_the_server_hangs_up_on_every_client_however_far_it_got(
         threads.spawn(publish, name="publisher", daemon=False)
         threads.sleep(close_after)
         server.close()
-        settled = threads.event()
-
-        def drained() -> None:
-            tracker.wait_for_none_active(settle_seconds=0)
-            settled.set()
-
-        threads.spawn(drained, name="drained")
-        assert settled.wait(HANG_GUARD_S), "a stream outlived the server's close"
+        assert clients_done.wait(HANG_GUARD_S), "a client did not observe the server's close"
+        tracker.wait_for_none_active(settle_seconds=0)
+        assert len(done) == len(faults)
         for fault, lines in done:
             whole = [line for line in lines if line.endswith(b"\n")]
             _check_answers(fault, whole[: 1 if fault.kind == "subscribe" else len(whole)])
+
+    threads.run(main)
+
+
+def test_close_drains_a_started_request_before_returning(tmp_path: Path) -> None:
+    """Closing a connection does not abandon synchronous API work already in flight."""
+    threads = SimThreads(schedule_seed=0)
+    socket_path = tmp_path / "control.sock"
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        network = SimNetwork(threads)
+        entered = threads.event()
+        release = threads.event()
+        finished = threads.event()
+
+        def answer(_question: str) -> ChatAnswer:
+            entered.set()
+            assert release.wait(HANG_GUARD_S), "the test did not release the chat request"
+            # Keep the handler unfinished for one virtual instant after release.
+            # A close that merely drops the connection remains runnable and
+            # therefore returns before simulated time can advance to this work.
+            threads.sleep(1)
+            finished.set()
+            return ChatAnswer(text="finished", invocation_id="chat-1")
+
+        parts.chat.install_default_handler(answer)
+        server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+        server.start()
+        client = network.connect(str(socket_path))
+        client.send(
+            ChatQuery(timestamp=REQUEST_TIME, text="finish before close").model_dump_json().encode()
+            + b"\n"
+        )
+        assert entered.wait(HANG_GUARD_S), "the chat request did not start"
+        closed = threads.event()
+
+        def close_server() -> None:
+            server.close()
+            assert finished.is_set(), "close abandoned an admitted request worker"
+            closed.set()
+
+        threads.spawn(close_server, name="closer", daemon=False)
+        assert client.recv(1, HANG_GUARD_S) == b""
+        release.set()
+        assert closed.wait(HANG_GUARD_S), "the server did not finish closing"
+        client.close()
+        server.close()  # idempotent after every owned worker has ended
+        parts.close()
+
+    threads.run(main)
+
+
+def test_close_called_by_requests_does_not_cross_join_their_workers(tmp_path: Path) -> None:
+    """Concurrent reentrant closes initiate shutdown without joining each other."""
+    threads = SimThreads(schedule_seed=0)
+    socket_path = tmp_path / "control.sock"
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        network = SimNetwork(threads)
+        server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+        arrived: list[str] = []
+        all_entered = threads.event()
+        returns: list[str] = []
+        returned = threads.event()
+
+        def answer(question: str) -> ChatAnswer:
+            arrived.append(question)
+            if len(arrived) == 2:
+                all_entered.set()
+            assert all_entered.wait(HANG_GUARD_S), "both close requests did not enter"
+            server.close()
+            returns.append(question)
+            if len(returns) == 2:
+                returned.set()
+            return ChatAnswer(text="closed", invocation_id=question)
+
+        parts.chat.install_default_handler(answer)
+        server.start()
+        clients = [network.connect(str(socket_path)) for _ in range(2)]
+        for index, client in enumerate(clients):
+            client.send(
+                ChatQuery(timestamp=REQUEST_TIME, text=f"close {index}").model_dump_json().encode()
+                + b"\n"
+            )
+
+        assert returned.wait(HANG_GUARD_S), "reentrant closes joined request workers"
+        for client in clients:
+            assert client.recv(1, HANG_GUARD_S) == b""
+            client.close()
+        server.close()
+        server.close()
+        parts.close()
 
     threads.run(main)
 
@@ -445,6 +539,9 @@ class _RelabeledErrorListener:
 
     def accept(self, timeout: float | None = None) -> Connection:
         self.calls += 1
+        if self.calls > 1:
+            message = "the accept loop retried after its listener was deliberately closed"
+            raise AssertionError(message)
         try:
             return self._inner.accept(timeout)
         except OSError:
@@ -452,6 +549,34 @@ class _RelabeledErrorListener:
 
     def close(self) -> None:
         self._inner.close()
+
+
+class _DeferredCloseListener:
+    """A listener whose close is observed only by a bounded ``accept``.
+
+    Some Unix kernels do not interrupt a syscall in one thread when another
+    thread closes its descriptor. This faithful boundary case keeps the inner
+    listener open until its current bounded accept times out, then turns the
+    requested close into the normal closed-listener error.
+    """
+
+    def __init__(self, inner: Listener) -> None:
+        self._inner = inner
+        self._closing = False
+        self.accept_timeouts: list[float | None] = []
+
+    def accept(self, timeout: float | None = None) -> Connection:
+        self.accept_timeouts.append(timeout)
+        try:
+            return self._inner.accept(timeout)
+        except TimeoutError:
+            if not self._closing:
+                raise
+            self._inner.close()
+            raise OSError(errno.EBADF, "listener closed") from None
+
+    def close(self) -> None:
+        self._closing = True
 
 
 class _ListenerSwapNetwork:
@@ -530,11 +655,28 @@ def test_closing_the_server_ends_the_accept_loop_even_through_an_emfile_shaped_o
         server.start()
         server.close()
         assert isinstance(network.listener, _RelabeledErrorListener)
-        # Exactly the one accept() that was blocked when ``close`` ran: a loop
-        # that mistook the close for a transient failure would have retried
-        # (after its backoff sleep) against an already-closed listener, which
-        # keeps raising, so this would be well over 1 by the time the bounded
-        # ``join`` inside ``close`` gave up.
+        # Exactly the one accept() that was blocked when ``close`` ran. The
+        # fixture raises a non-transport error on a retry, so a regression
+        # fails deterministically instead of leaving ``close`` joined forever.
         assert network.listener.calls == 1
+
+    threads.run(main)
+
+
+def test_close_drains_accept_when_listener_close_does_not_interrupt_it(tmp_path: Path) -> None:
+    """The accept poll bounds shutdown even when close cannot wake the syscall."""
+    threads = SimThreads(schedule_seed=0)
+    socket_path = tmp_path / "control.sock"
+    network = _ListenerSwapNetwork(SimNetwork(threads), _DeferredCloseListener)
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+        server.start()
+        server.close()
+        assert isinstance(network.listener, _DeferredCloseListener)
+        assert network.listener.accept_timeouts
+        assert all(timeout is not None for timeout in network.listener.accept_timeouts)
+        parts.close()
 
     threads.run(main)
