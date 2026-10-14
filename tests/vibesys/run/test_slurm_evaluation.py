@@ -388,10 +388,15 @@ async def test_semantic_executor_preserves_infrastructure_failure_provenance(
     run = _World(tmp_path / "project")
     snapshot = await run.workspaces.root.snapshot("candidate")
     config = _config()
+    # A profile capture that ran to its end prints its end line; without it the output
+    # did not arrive whole and the evidence fails, whatever the exit codes say.
+    stdout = "retained diagnostic\n"
+    if kind is EvidenceKind.PROFILE:
+        stdout += f"{PROFILE_END}\n"
     stage = SlurmBatchStageResult(
         name=kind.value,
         exit_code=stage_exit_code,
-        stdout="retained accuracy diagnostic",
+        stdout=stdout,
         stderr="retained server diagnostic",
         elapsed_seconds=1.0,
         skipped=False,
