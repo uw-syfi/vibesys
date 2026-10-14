@@ -31,7 +31,13 @@ from tests.support.session_world import (
 
 from vs_agent.api import AgentSessionState, DurableSessionStore
 from vs_agent.api.testing import FakeAgentSessions
-from vs_core.api import ContinuationId, ObservationStatus, SessionObserved, TurnObserved
+from vs_core.api import (
+    ContinuationId,
+    DecisionId,
+    ObservationStatus,
+    SessionObserved,
+    TurnObserved,
+)
 from vs_project.api import Project
 from vs_runtime.api.core import (
     ExecutionResult,
@@ -249,6 +255,19 @@ async def test_a_cancel_answered_as_nothing_held_is_never_followed_by_a_provider
             assert len(w.host.turns) == 1
 
 
+@pytest.mark.asyncio
+async def test_cancels_of_an_undispatched_invocation_under_two_identities_both_hold_nothing() -> (
+    None
+):
+    """The first cancellation fences the invocation; a second one finds the fence and agrees."""
+    async with world() as w:
+        await w.execute(ensure_request())
+        first = await w.execute(cancel_request("req-c1", invocation="inv-9"))
+        second = await w.execute(cancel_request("req-c2", invocation="inv-9"))
+        assert holds_nothing(first)
+        assert holds_nothing(second)
+
+
 # CloseSession
 
 
@@ -280,6 +299,46 @@ async def test_close_of_a_session_that_was_never_ensured_is_rejected() -> None:
         assert released_keys(w.host) == 0
         # Proof that nothing is held: a closing session in core ends on it instead of waiting.
         assert holds_nothing(closed)
+
+
+_CLOSE_STEPS = ("ensure", "close")
+
+
+@pytest.mark.asyncio
+@settings(max_examples=8, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(order=st.permutations(_CLOSE_STEPS), again=st.booleans())
+async def test_a_close_answered_as_nothing_held_is_never_followed_by_a_binding(
+    order: list[str], *, again: bool
+) -> None:
+    """In either order of ensure and close of one episode, each a fresh host over the same disk.
+
+    A close that finds nothing bound fences the episode: an ensure of that episode arriving
+    later is refused, so no turn ever runs in the session, and a second close under another
+    identity agrees. A later episode still acquires the session, because the fence names the
+    episode, never the session alone. A close after the ensure releases what it bound.
+    """
+    async with world() as w:
+        answers = {
+            step: await w.execute(ensure_request() if step == "ensure" else close_request())
+            for step in order
+        }
+        close = answers["close"]
+        if again:
+            other = await w.execute(close_request("req-close-2"))
+            assert holds_nothing(other) == holds_nothing(close)
+        if holds_nothing(close):
+            assert order == ["close", "ensure"]
+            assert status(answers["ensure"]) is ObservationStatus.REJECTED
+            refused = await w.execute(dispatch_request("req-d", "inv-1"))
+            assert status(refused) is ObservationStatus.REJECTED
+            assert w.host.turns == []
+            later = ensure_request("req-ensure-2").model_copy(
+                update={"admission_id": DecisionId(root="episode-2")}
+            )
+            assert status(await w.execute(later)) is ObservationStatus.SUCCEEDED
+        else:
+            assert order == ["ensure", "close"]
+            assert close.observation.observation.released
 
 
 def holds_nothing(result: ExecutionResult) -> bool:
@@ -403,6 +462,26 @@ async def test_a_continuation_has_one_successor() -> None:
         assert status(other) is ObservationStatus.REJECTED
         assert other.observation.observation.terminal
         assert len(w.host.turns) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_resume_refused_before_dispatch_releases_the_turn_and_never_the_session() -> None:
+    """The refusal proves this turn holds nothing; the session it would continue stays held.
+
+    So the answer names no resource: core reads a released answer that names the session's
+    resource as that session's release.
+    """
+    async with world() as w:
+        await w.execute(ensure_request())
+        nothing_to_resume = await w.execute(resume_request("req-a"))
+        await w.started()
+        assert status(await w.execute(resume_request("req-b"))) is ObservationStatus.SUCCEEDED
+        second_successor = await w.execute(resume_request("req-c", invocation="inv-3"))
+        for refused in (nothing_to_resume, second_successor):
+            observed = refused.observation.observation
+            assert observed.status is ObservationStatus.REJECTED
+            assert holds_nothing(refused)
+            assert observed.resource_id is None, observed.diagnostic
 
 
 @pytest.mark.asyncio

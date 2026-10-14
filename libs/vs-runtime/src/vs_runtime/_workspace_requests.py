@@ -119,10 +119,17 @@ class _Facts:
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
 
 
-def _rejected(diagnostic: str, *, resource_id: ResourceId | None = None) -> _Facts:
+def _rejected(diagnostic: str) -> _Facts:
+    """A refusal decided before the request did anything: it holds nothing, now or later.
+
+    The refusal is sealed, so a replay answers the same and the request never acts afterwards.
+    Like ``ObservationFacts.never_held`` it names no resource, so core never reads it as the
+    release of a workspace that the attempt (or another one) still holds.
+    """
     return _Facts(
         ObservationStatus.REJECTED,
-        resource_id=resource_id,
+        released=True,
+        children_complete=True,
         diagnostic=diagnostic,
         setup_failure=SetupFailureKind.PERMANENT,
     )
@@ -142,6 +149,7 @@ def _retryable(diagnostic: str, resource_id: ResourceId | None) -> _Facts:
 
 
 _RUN_OWNER = "run"
+_WITHDRAWN = "the attempt's workspace was withdrawn before any ensure bound it"
 _HANDLED = (EnsureWorkspace, RestoreRevision, SnapshotAndRetain, RetainRevision, DiscardWorkspace)
 
 
@@ -303,17 +311,35 @@ class RuntimeWorkspaceRequests:
             owner=_RUN_OWNER,
         )
 
+    async def _withdraw_or_discard(self, request: DiscardWorkspace, *, resumed: bool) -> _Facts:
+        """Discard the attempt's workspace, or fence a generation that never bound one."""
+        bound = self._receipts.withdraw_unbound(request.attempt)
+        if bound is not None:
+            return await self._discard(request, bound, resumed=resumed)
+        # No ensure can bind any more. One that stopped between creating its worktree and
+        # binding it left the worktree behind: remove it, so "nothing held" is true now.
+        member = candidate_member_id(request.attempt)
+        leftover = self._workspaces.live_candidate(member)
+        if leftover is None:
+            leftover = await self._workspaces.reattach_candidate(member)
+        if leftover is not None:
+            try:
+                await leftover.discard()
+            except (OSError, BaseExceptionGroup) as error:
+                return _unknown(f"an unbound worktree of the attempt was not removed: {error}")
+        return _rejected(_WITHDRAWN)
+
     async def _attempt_request(
         self,
         request: RestoreRevision | RetainRevision | SnapshotAndRetain | DiscardWorkspace,
         *,
         resumed: bool,
     ) -> _Facts:
+        if isinstance(request, DiscardWorkspace):
+            return await self._withdraw_or_discard(request, resumed=resumed)
         binding = self._receipts.load_binding(request.attempt)
         if binding is None:
             return _rejected("no workspace was ensured for this attempt")
-        if isinstance(request, DiscardWorkspace):
-            return await self._discard(request, binding, resumed=resumed)
         workspace = await self._bound_workspace(request.attempt, binding)
         if isinstance(workspace, _Facts):
             return workspace
@@ -342,7 +368,7 @@ class RuntimeWorkspaceRequests:
         """Return the attempt's live workspace, reopening it from disk after a restart."""
         found = await find_attempt_workspace(self._workspaces, self._receipts, attempt, binding)
         if isinstance(found, str):
-            return _rejected(found, resource_id=binding.resource_id)
+            return _rejected(found)
         return found
 
     async def _known_revision(
@@ -416,10 +442,7 @@ class RuntimeWorkspaceRequests:
         attempt = request.attempt
         existing = self._receipts.load_binding(attempt)
         if existing is not None and (existing.mode, existing.base) != (plan.mode, plan.base):
-            return _rejected(
-                "attempt is already bound to another workspace plan",
-                resource_id=existing.resource_id,
-            )
+            return _rejected("attempt is already bound to another workspace plan")
         base = await self._known_revision(
             plan.base,
             owner=attempt_key(attempt),
@@ -463,7 +486,8 @@ class RuntimeWorkspaceRequests:
                 )
                 if failure is not None:
                     return failure
-            self._bind(attempt, request, resource_id, None)
+            if self._bind(attempt, request, resource_id, None) is None:
+                return _rejected(_WITHDRAWN)
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
@@ -499,7 +523,9 @@ class RuntimeWorkspaceRequests:
             live = await self._workspaces.reattach_candidate(member)
         if live is None:
             if existing is not None:
-                return _rejected("attempt workspace was released", resource_id=existing.resource_id)
+                return _rejected("attempt workspace was released")
+            if self._receipts.is_released(attempt):
+                return _rejected(_WITHDRAWN)
             try:
                 live = await self._workspaces.create_candidate(base, member_id=member)
             except (RuntimeContractError, WorkspaceRestoreError) as error:
@@ -511,6 +537,14 @@ class RuntimeWorkspaceRequests:
             else ResourceId(root=f"workspace:{attempt_key(attempt)}:{request.request_id.root}")
         )
         binding = self._bind(attempt, request, resource_id, live.id)
+        if binding is None:
+            # Withdrawn after this ensure created or reopened the worktree: remove it, so the
+            # discard that withdrew the generation stays the truth.
+            try:
+                await live.discard()
+            except (OSError, BaseExceptionGroup) as error:
+                return _unknown(f"withdrawn workspace not removed: {error}")
+            return _rejected(_WITHDRAWN)
         return _Facts(
             ObservationStatus.SUCCEEDED,
             accepted=True,
@@ -525,7 +559,7 @@ class RuntimeWorkspaceRequests:
         request: EnsureWorkspace,
         resource_id: ResourceId,
         workspace_id: str | None,
-    ) -> AttemptBinding:
+    ) -> AttemptBinding | None:
         assert request.request_id is not None  # noqa: S101  # lint-waiver: LW-402302 [S101]; execute() rejects a missing identity.
         return self._receipts.bind(
             attempt,
@@ -547,10 +581,7 @@ class RuntimeWorkspaceRequests:
             extra=commit_of(binding.base),
         )
         if commit is None:
-            return _rejected(
-                "revision is not a revision this attempt may restore",
-                resource_id=binding.resource_id,
-            )
+            return _rejected("revision is not a revision this attempt may restore")
         # Restore is idempotent, so a resumed request only repeats it when the tree differs.
         if not await workspace.matches_revision(commit):
             failure = await self._materialize(workspace, commit, resource_id=binding.resource_id)
@@ -573,10 +604,7 @@ class RuntimeWorkspaceRequests:
             extra=commit_of(binding.base),
         )
         if commit is None:
-            return _rejected(
-                "revision is not a revision this attempt may retain",
-                resource_id=binding.resource_id,
-            )
+            return _rejected("revision is not a revision this attempt may retain")
         assert request.request_id is not None  # noqa: S101  # lint-waiver: LW-402303 [S101]; execute() rejects a missing identity.
         # Retention is an idempotent ref update under a per-request label.
         await workspace.retain(commit, label=f"{request.retention}:{request.request_id.root}")
@@ -631,8 +659,7 @@ class RuntimeWorkspaceRequests:
                 case RootRelease.NOT_HOLDER:
                     return _rejected(
                         "this attempt generation never ended its hold and a newer generation"
-                        " holds the exclusive root; nothing was released",
-                        resource_id=binding.resource_id,
+                        " holds the exclusive root; nothing was released"
                     )
                 case RootRelease.ALREADY_RELEASED:
                     diagnostic = "the exclusive root hold had already ended; nothing released now"

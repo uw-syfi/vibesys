@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import itertools
 import shutil
 import threading
 import weakref
@@ -90,7 +91,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import examples, wait_or_fail, wait_until_started
+from vs_sim.api.testing import examples, swept, wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
@@ -429,6 +430,7 @@ class _FailingStore(ReceiptStore):
         super().__init__(namespace)
         self.fail_done = False
         self.fail_release_mark = False
+        self.fail_bind = False
 
     def replace(self, family: str, part: str, key: str, receipt: BaseModel) -> None:
         if self.fail_done and family == "executions":
@@ -438,6 +440,19 @@ class _FailingStore(ReceiptStore):
             message = "host died before recording the release"
             raise OSError(message)
         super().replace(family, part, key, receipt)
+
+    def modify[ReceiptT: BaseModel, ResultT](
+        self,
+        family: str,
+        part: str,
+        key: str,
+        model: type[ReceiptT],
+        decide: Callable[[ReceiptT | None], tuple[ReceiptT | None, ResultT]],
+    ) -> ResultT:
+        if self.fail_bind and family == "workspace-bindings":
+            message = "host died before binding the workspace"
+            raise OSError(message)
+        return super().modify(family, part, key, model, decide)
 
 
 def _failing(env: _Env) -> _FailingStore:
@@ -1483,6 +1498,65 @@ def test_f8_a_release_by_anyone_else_does_not_claim_completeness(tmp_path: Path)
             observation = (await _run(restarted, discard, epoch=2)).observation.observation
             assert observation.released
             assert not observation.children_complete
+
+        asyncio.run(exercise())
+
+
+_WITHDRAW_CASES = tuple(
+    itertools.product(
+        (WorkspaceMode.ISOLATED_CHILD, WorkspaceMode.EXCLUSIVE_ROOT),
+        (("ensure", "discard"), ("discard", "ensure")),
+        (False, True),  # the first ensure's host dies after making the workspace, before binding
+        (False, True),  # the ensure is retried at the end
+    )
+)
+
+
+def test_a_discard_answered_as_nothing_held_is_never_followed_by_a_workspace(
+    tmp_path: Path,
+) -> None:
+    """Every order of ensure and discard of one attempt, over the same disk.
+
+    A discard that finds no binding fences the generation and removes any worktree an
+    interrupted ensure left: it holds nothing, and an ensure that arrives later is refused.
+    A discard after a bound ensure releases what it bound. Either way no worktree survives.
+    Each case runs on its own attempt of one run: a pull request samples six evenly spaced
+    cases (both modes, both orders, with and without the crash), nightly runs all sixteen.
+    """
+    with _env(tmp_path) as env:
+
+        async def case(
+            index: int, mode: WorkspaceMode, order: tuple[str, ...], *, crash: bool, retry: bool
+        ) -> None:
+            attempt = _attempt(f"a{index}")
+            ensure = _ensure(env.hosts[0], attempt, f"e{index}", mode)
+            discard = DiscardWorkspace(**_common(attempt, f"d{index}"), attempt=attempt)
+            answers: dict[str, ExecutionResult] = {}
+            host = env.hosts[-1]
+            for step in (*order, *(("retry",) if retry else ())):
+                store = _failing(env)
+                store.fail_bind = crash and step == "ensure"
+                executor, _ = _executor(host, store)
+                try:
+                    answers[step] = await _run(executor, discard if step == "discard" else ensure)
+                except OSError:
+                    assert store.fail_bind
+                    host = env.start_host()  # the host died: the next step runs on a new one
+            withdrawn = answers["discard"].observation.observation
+            if withdrawn.status is ObservationStatus.REJECTED:
+                assert (withdrawn.released, withdrawn.children_complete) == (True, True)
+                assert withdrawn.resource_id is None
+                ensures = (answer for step, answer in answers.items() if step != "discard")
+                assert all(_status(answer) is ObservationStatus.REJECTED for answer in ensures)
+            else:
+                assert _status(answers["ensure"]) is ObservationStatus.SUCCEEDED
+                assert withdrawn.released
+            assert _worktree_paths(env.hosts[-1]) == set()
+
+        async def exercise() -> None:
+            for index in swept(len(_WITHDRAW_CASES), 6):
+                mode, order, crash, retry = _WITHDRAW_CASES[index]
+                await case(index, mode, order, crash=crash, retry=retry)
 
         asyncio.run(exercise())
 

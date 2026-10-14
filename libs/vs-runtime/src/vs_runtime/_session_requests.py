@@ -113,7 +113,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_agent.api import AgentSessions, AgentSessionSpec, ClientAgentSessions, InvocationOutcome
-    from vs_core.api import Continuation, InvocationId, Observation, RequestBase
+    from vs_core.api import Continuation, DecisionId, InvocationId, Observation, RequestBase
     from vs_prompts.api import RenderedPrompt
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
@@ -122,6 +122,7 @@ if TYPE_CHECKING:
 _BINDINGS = "session-bindings"
 _DISPATCHES = "session-dispatches"
 _WITHDRAWN = "session-withdrawn"
+_WITHDRAWN_SESSIONS = "session-withdrawn-episodes"
 
 
 def session_binding_key(request: RequestBase, session_id: SessionId) -> str:
@@ -157,6 +158,53 @@ class WithdrawnInvocation(BaseModel):
     request_id: CoreRequestId
 
 
+class WithdrawnSession(BaseModel):
+    """Written when a session is closed before any ensure of its episode bound it: none will."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    request_id: CoreRequestId
+
+
+def _withdrawn_session_key(bkey: str, episode: DecisionId | None) -> str:
+    """The fence of one admission episode of a session.
+
+    A later episode reattaches the same session under the same binding key, so the fence
+    names the episode the close ended, never the session alone.
+    """
+    return f"{bkey}/run" if episode is None else f"{bkey}/episode:{episode.root}"
+
+
+def _record_first(store: ReceiptStore, family: str, key: str, receipt: BaseModel) -> None:
+    """Record a fence unless one is recorded; the first withdrawing request keeps it."""
+    store.modify(
+        family,
+        "withdrawn",
+        key,
+        type(receipt),
+        lambda stored: (receipt if stored is None else None, None),
+    )
+
+
+def withdraw_unbound_session(
+    store: ReceiptStore, bkey: str, episode: DecisionId | None, request_id: CoreRequestId
+) -> SessionBinding | None:
+    """The session's binding, or ``None`` after fencing an episode that bound nothing.
+
+    ``_bind`` stores a binding only when no fence of its episode is recorded, both under the
+    store's lock, so a ``None`` answer proves the episode holds no session now and never will.
+    """
+    with store.exclusive():
+        binding = load_session_binding(store, bkey)
+        if binding is None:
+            _record_first(
+                store,
+                _WITHDRAWN_SESSIONS,
+                _withdrawn_session_key(bkey, episode),
+                WithdrawnSession(request_id=request_id),
+            )
+        return binding
+
+
 def withdraw_undispatched(
     store: ReceiptStore, bkey: str, invocation_id: InvocationId, request_id: CoreRequestId
 ) -> bool:
@@ -170,7 +218,7 @@ def withdraw_undispatched(
     with store.exclusive():
         if store.load(_DISPATCHES, "dispatch", key, DispatchRecord) is not None:
             return False
-        store.record_once(_WITHDRAWN, "withdrawn", key, WithdrawnInvocation(request_id=request_id))
+        _record_first(store, _WITHDRAWN, key, WithdrawnInvocation(request_id=request_id))
         return True
 
 
@@ -608,7 +656,7 @@ class RuntimeSessionRequests:
             session_key=self._conversation_key(request, spec),
             turn_timeout_seconds=None if timeout is None else timeout.total_seconds(),
         )
-        binding = self._bind(key, wanted, required)
+        binding = self._bind(key, wanted, required, request.admission_id)
         if not _same_session(binding.spec, spec):
             raise _RefusalError(
                 _rejected("session identity is bound to another spec", binding.resource_id)
@@ -626,9 +674,16 @@ class RuntimeSessionRequests:
         return _Facts(ObservationStatus.SUCCEEDED, accepted=True, resource_id=binding.resource_id)
 
     def _bind(
-        self, key: str, wanted: SessionBinding, required: ResourceId | None
+        self,
+        key: str,
+        wanted: SessionBinding,
+        required: ResourceId | None,
+        episode: DecisionId | None,
     ) -> SessionBinding:
-        """The session's binding: created for a fresh identity, never for a required reattach."""
+        """The session's binding: created for a fresh identity, never for a required reattach.
+
+        Nor for an episode whose close found nothing bound (`withdraw_unbound_session`).
+        """
         if required is not None and wanted.spec.policy != "reuse":
             raise _RefusalError(_rejected("a required resource needs the reuse policy", required))
 
@@ -643,6 +698,9 @@ class RuntimeSessionRequests:
                         required,
                     )
                 )
+            fence = _withdrawn_session_key(key, episode)
+            if self._store.load(_WITHDRAWN_SESSIONS, "withdrawn", fence, WithdrawnSession):
+                raise _RefusalError(_rejected("the session was closed before this ensure bound it"))
             return wanted, wanted
 
         return self._store.modify(_BINDINGS, "binding", key, SessionBinding, decide)

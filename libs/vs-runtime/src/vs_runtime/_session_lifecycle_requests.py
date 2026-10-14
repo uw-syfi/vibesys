@@ -36,7 +36,6 @@ observation. Only terminal observations are stored.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol, assert_never
 
 from pydantic import BaseModel, ConfigDict
@@ -93,6 +92,7 @@ from vs_runtime._session_requests import (
     load_dispatch_record,
     load_session_binding,
     session_binding_key,
+    withdraw_unbound_session,
     withdraw_undispatched,
 )
 
@@ -141,9 +141,13 @@ def _rejected(diagnostic: str, binding: SessionBinding | None = None) -> Observa
 
 
 def _refused_before_dispatch(facts: ObservationFacts) -> ObservationFacts:
-    """Facts of a resume that ended before its dispatch: a terminal refusal holds nothing."""
+    """Facts of a resume that ended before its dispatch: a terminal refusal holds nothing.
+
+    The refusal proves only that this turn holds nothing. The session it names stays held,
+    so the answer drops the session's resource rather than report it released.
+    """
     if facts.terminal and facts.status is ObservationStatus.REJECTED:
-        return replace(facts, released=True, children_complete=True)
+        return ObservationFacts.never_held(facts.diagnostic)
     return facts
 
 
@@ -461,8 +465,12 @@ class SessionLifecycleRequests:
     # close
 
     def _close(self, request: CloseSession) -> ObservationFacts:
-        binding = self._binding(request, request.session_id)
+        bkey = session_binding_key(request, request.session_id)
+        binding = withdraw_unbound_session(
+            self._store, bkey, request.episode, core_identity(request)
+        )
         if binding is None:
+            # Fenced: an ensure of this episode still in flight can never bind afterwards.
             return ObservationFacts.never_held("no ensured session to close")
         try:
             self._sessions.release(AgentSessionKey.parse(binding.session_key))

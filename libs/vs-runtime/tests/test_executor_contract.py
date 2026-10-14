@@ -100,22 +100,8 @@ async def test_a_kind_acts_once_under_its_lease_and_its_identity_and_core_accept
         assert_core_accepts([done, other], expect_retry=False)
 
 
-# The workspace executor rejects a request on a never-ensured workspace without proving
-# release. Claiming it needs a fence first: an EnsureWorkspace still in flight could bind the
-# workspace after the answer (the session lifecycle fences CancelTurn this way). Strict, so
-# fixing one fails here until its entry is removed.
-_HOLDING_UNPROVEN = frozenset(
-    {"ensure", "restore", "snapshot", "retain", "discard", "adopt", "verify"}
-)
 NEVER_SEEDED = [
-    pytest.param(
-        case,
-        scenario,
-        id=f"{case.name}-{scenario.name}",
-        marks=pytest.mark.xfail(strict=True, reason="workspace rejections prove no release")
-        if case.name == "workspaces" and scenario.name in _HOLDING_UNPROVEN
-        else (),
-    )
+    pytest.param(case, scenario, id=f"{case.name}-{scenario.name}")
     for case in CASES
     for scenario in case.scenarios
 ]
