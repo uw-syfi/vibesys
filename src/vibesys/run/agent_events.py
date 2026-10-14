@@ -6,6 +6,8 @@ import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from pydantic_core import from_json
+
 from vibesys.events import (
     AgentOutputChannel,
     AgentOutputChunkData,
@@ -46,10 +48,15 @@ def _json_safe(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _classify_tool_result(content: str) -> ToolResultPayload | None:
-    """Preserve JSON-shaped tool results alongside their raw text."""
+    """Preserve JSON-shaped tool results alongside their raw text.
+
+    The content is whatever the tool printed, so it is parsed by pydantic's
+    parser, which reports deep nesting as a ``ValueError``; ``json.loads``
+    raised ``RecursionError`` out of the agent's callback.
+    """
     try:
-        value = json.loads(content)
-    except (json.JSONDecodeError, TypeError):
+        value = from_json(content)
+    except (ValueError, TypeError):
         return None
     if isinstance(value, (dict, list)):
         return JsonResultPayload(value=value)

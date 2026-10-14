@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import json
 from enum import StrEnum
 from typing import Annotated, Literal, NoReturn
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
 
 from vs_evaluator_protocol.errors import ReasonCode, reject
+
+# Parses untrusted JSON with nesting bounded, failing as a ValueError.
+_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 PROTOCOL_VERSION: int = 2
 
@@ -142,10 +144,15 @@ def parse_records(text: str) -> list[Record]:
 
 
 def _parse_line(line: str, number: int) -> Record:
-    """Parse one non-blank line into the record its `kind` names."""
+    """Parse one non-blank line into the record its `kind` names.
+
+    The line comes from the evaluator, so ``_JSON`` parses it: pydantic's parser
+    bounds nesting and reports it as a ``ValueError``, where ``json.loads``
+    recurses per level and raised ``RecursionError`` past every caller's handler.
+    """
     try:
-        payload = json.loads(line)
-    except json.JSONDecodeError:
+        payload = _JSON.validate_json(line)
+    except ValueError:
         reject(ReasonCode.MALFORMED_LINE, f"line {number} is not valid JSON")
     if not isinstance(payload, dict):
         reject(ReasonCode.MALFORMED_LINE, f"line {number} is not a JSON object")

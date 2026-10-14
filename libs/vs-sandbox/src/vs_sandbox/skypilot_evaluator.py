@@ -27,6 +27,11 @@ _FRAMEWORK_ARGUMENT_COUNT = 2
 # This helper is mounted alone and cannot import the protocol, so it restates the
 # result vocabulary of ``vs_sandbox.skypilot_states.JobStatus``;
 # ``tests/test_skypilot_states.py`` pins the two together.
+# What ``json.loads`` raises on a hostile frame: ``ValueError`` covers invalid
+# JSON and invalid UTF-8, and ``RecursionError`` deep nesting. This helper is
+# mounted alone with the standard library only, so it cannot use pydantic's
+# depth-bounded parser as the host side does.
+_UNPARSABLE = (ValueError, RecursionError)
 RESULT_STATUSES = frozenset({"COMPLETED", "APPLICATION_FAILED", "CANCELLED"})
 _CANCELLED_EXIT_STATUS = 130
 
@@ -72,7 +77,7 @@ def _decode_frame(payload: bytes, stderr: TextIO) -> dict[str, object] | None:
         return None
     try:
         frame = json.loads(payload)
-    except json.JSONDecodeError:
+    except _UNPARSABLE:
         print("SkyPilot bridge returned invalid JSON", file=stderr)
         return None
     if not isinstance(frame, dict) or frame.get("version") != _PROTOCOL_VERSION:
@@ -175,7 +180,7 @@ def _acknowledge_result(session: _BridgeSession) -> bool:
     acknowledgement = session.reader.readline(_MAX_FRAME_BYTES + 1)
     try:
         acked = json.loads(acknowledgement)
-    except json.JSONDecodeError:
+    except _UNPARSABLE:
         return False
     return acked == {
         "version": _PROTOCOL_VERSION,

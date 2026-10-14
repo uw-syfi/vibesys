@@ -58,7 +58,15 @@ def test_parse_records_rejects_an_unknown_key_inside_a_metric_spec() -> None:
     assert "scale" in str(rejection.value)
 
 
-@pytest.mark.parametrize("line", ["not json at all", '["kind","result"]'])
+@pytest.mark.parametrize(
+    "line",
+    [
+        "not json at all",
+        '["kind","result"]',
+        pytest.param("[" * 100_000, id="nested-past-the-recursion-limit"),
+        pytest.param('{"kind":"result","values":' + "[" * 100_000, id="nested-object"),
+    ],
+)
 def test_parse_records_rejects_a_line_that_is_not_a_json_object(line: str) -> None:
     with pytest.raises(ProtocolError) as rejection:
         parse_records(f"{HELLO_LINE}\n{line}")

@@ -6,7 +6,6 @@ import asyncio
 import base64
 import binascii
 import contextlib
-import json
 import math
 import shlex
 import threading
@@ -16,7 +15,16 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    JsonValue,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from vs_core.api import EvidenceKind
 from vs_evaluator_protocol.api import (
@@ -39,6 +47,9 @@ from vs_runtime._failure_classification import (
 from vs_runtime._model_requests import ModelRequestError
 from vs_runtime.contracts import BenchmarkFailureKind
 from vs_sandbox.api import CommandResult
+
+# Parses untrusted JSON with nesting bounded, failing as a ValueError.
+_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -695,7 +706,7 @@ def decode_trusted_benchmark_run(
         return TrustedBenchmarkDecoding(passed=False, record=kind)
     try:
         row, metrics = decode_trusted_benchmark_output(framed, contract, required_metrics)
-    except (ProtocolError, ValueError, TypeError, json.JSONDecodeError) as error:
+    except (ProtocolError, ValueError, TypeError) as error:
         return TrustedBenchmarkDecoding(passed=False, violation=str(error), record=kind)
     return TrustedBenchmarkDecoding(passed=True, row=row, metrics=metrics, record=kind)
 
@@ -772,7 +783,7 @@ def decode_trusted_benchmark_output(
     if isinstance(contract, ScalarBenchmarkContract):
         try:
             value = _parse_scalar(encoded, contract.metric)
-        except (ValueError, TypeError, json.JSONDecodeError) as error:
+        except (ValueError, TypeError) as error:
             raise _BenchmarkResultError.scalar(error) from error
         return {contract.metric: value}, {}
     hello: Hello | None = None
@@ -819,7 +830,9 @@ def _decode_benchmark_failure(
 
 
 def _parse_scalar(encoded: str, metric: str) -> float:
-    payload = json.loads(encoded.strip())
+    # Evaluator output: pydantic's parser bounds nesting as a ValueError, where
+    # ``json.loads`` raises RecursionError past the callers' handlers.
+    payload = _JSON.validate_json(encoded.strip())
     values = (
         [payload[metric]]
         if isinstance(payload, dict) and metric in payload

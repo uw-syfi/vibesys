@@ -95,10 +95,15 @@ def test_reconcile_rejects_malformed_manifest(
         reconciler.reconcile(tmp_path)
 
 
-def test_reconcile_rejects_invalid_json_with_manifest_path(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "content",
+    [b"{not json", b"[" * 100_000, b'{"models": ["\xff"]}'],
+    ids=["not-json", "nested-past-the-recursion-limit", "invalid-utf8"],
+)
+def test_reconcile_rejects_invalid_json_with_manifest_path(tmp_path: Path, content: bytes) -> None:
     path = tmp_path / MODEL_MANIFEST_RELPATH
     path.parent.mkdir(parents=True)
-    path.write_text("{not json")
+    path.write_bytes(content)
     reconciler = create_model_request_reconciler(
         provisioner=FakeModelVolumeProvisioner(), environment={}
     )

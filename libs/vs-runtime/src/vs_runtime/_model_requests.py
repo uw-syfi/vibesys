@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -12,10 +11,15 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     StrictStr,
+    TypeAdapter,
     ValidationError,
     field_validator,
 )
+
+# Parses untrusted JSON with nesting bounded, failing as a ValueError.
+_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -29,7 +33,7 @@ class ModelRequestError(ValueError):
     """A model-request manifest is malformed or operator-disallowed."""
 
     @classmethod
-    def invalid_json(cls, error: json.JSONDecodeError) -> ModelRequestError:
+    def invalid_json(cls, error: ValueError) -> ModelRequestError:
         return cls(f"{MODEL_MANIFEST_RELPATH} is not valid JSON: {error}")
 
     @classmethod
@@ -131,8 +135,11 @@ def _read_model_requests(workspace: Path) -> tuple[_ModelRequest, ...]:
     if not path.exists():
         return ()
     try:
-        raw = json.loads(path.read_text())
-    except json.JSONDecodeError as exc:
+        # The agent writes this manifest: pydantic's parser reports invalid UTF-8
+        # and deep nesting as ``ValueError``, where ``read_text`` and
+        # ``json.loads`` raised ``UnicodeDecodeError`` and ``RecursionError``.
+        raw = _JSON.validate_json(path.read_bytes())
+    except ValueError as exc:
         raise ModelRequestError.invalid_json(exc) from exc
 
     entries = raw.get("models") if isinstance(raw, dict) else raw

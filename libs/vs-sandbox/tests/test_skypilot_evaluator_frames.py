@@ -101,6 +101,8 @@ def _run(
         pytest.param([b'{"version":2}'], "invalid frame", id="unterminated"),
         pytest.param([b"x" * (_MAX_FRAME_BYTES + 1) + b"\n"], "invalid frame", id="oversized"),
         pytest.param([b"{not json\n"], "invalid JSON", id="not-json"),
+        pytest.param([b"[" * 100_000 + b"\n"], "invalid JSON", id="nested-past-recursion-limit"),
+        pytest.param([b'"\xff"\n'], "invalid JSON", id="invalid-utf8"),
         pytest.param([b"[1]\n"], "protocol version mismatch", id="not-an-object"),
         pytest.param([b'{"version":1}\n'], "protocol version mismatch", id="old-version"),
         pytest.param([_line({"type": "unknown"})], "invalid frame", id="unknown-type"),

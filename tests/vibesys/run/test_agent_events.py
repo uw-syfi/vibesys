@@ -140,6 +140,17 @@ def test_explicit_tool_result_payload_is_preserved(tmp_path: Path) -> None:
     assert event.data.is_error is True
 
 
+def test_a_tool_result_nested_past_the_recursion_limit_is_kept_as_text(tmp_path: Path) -> None:
+    journal, sink = _attached_sink(tmp_path, "run-1")
+    content = "[" * 100_000 + "]" * 100_000
+
+    sink.tool_result("shell", content)
+
+    event = journal.read()[0]
+    assert isinstance(event.data, ToolResultData)
+    assert event.data.payload is None
+
+
 def test_adapters_are_isolated_by_their_injected_run_journals(tmp_path: Path) -> None:
     first_journal, first_sink = _attached_sink(tmp_path, "run-1")
     second_journal, second_sink = _attached_sink(tmp_path, "run-2")
