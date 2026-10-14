@@ -30,7 +30,6 @@
 {"path": "libs/vs-project/tests/test_state_store_contract.py", "rule": "executor", "count": 2}
 {"path": "libs/vs-project/tests/test_state_store_contract.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-runtime/src/vs_runtime/_artifact_store.py", "rule": "fs_sync", "count": 5}
-{"path": "libs/vs-runtime/src/vs_runtime/_fallback.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-runtime/src/vs_runtime/_linux_cpu_profiler.py", "rule": "subprocess", "count": 9}
 {"path": "libs/vs-runtime/src/vs_runtime/_macos_cpu_profiler.py", "rule": "subprocess", "count": 12}
 {"path": "libs/vs-runtime/src/vs_runtime/_receipt_store.py", "rule": "fs_sync", "count": 2}

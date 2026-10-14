@@ -377,7 +377,9 @@ class _ProductHostFactory:
             client,
             control=self.integration.control,
             events=events,
-            handling=CapacityHandling.for_policy(self.request.config.agent.quota.to_policy()),
+            handling=CapacityHandling.for_policy(
+                self.request.config.agent.quota.to_policy(), self.integration.threads
+            ),
             clock=self.timing.clock,
         )
         # Every core session shares one run-scoped journal, named by a fixed member key.

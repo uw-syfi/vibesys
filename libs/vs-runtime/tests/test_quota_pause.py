@@ -28,6 +28,7 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
+    ProviderFallback,
     QuotaAction,
     QuotaPolicy,
     RunControlChannel,
@@ -111,7 +112,7 @@ class _Run:
             client,
             control=control,
             events=self.sink,
-            handling=CapacityHandling(self.policy, self.timer),
+            handling=CapacityHandling(self.policy, ProviderFallback(None, OsThreads()), self.timer),
             clock=self.clock,
         )
         return [

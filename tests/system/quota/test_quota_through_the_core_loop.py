@@ -39,6 +39,7 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, drive_core
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
+    ProviderFallback,
     QuotaAction,
     QuotaPolicy,
     RunControlTransition,
@@ -118,7 +119,7 @@ async def _play(
             client,
             control=channel,
             events=played.sink,
-            handling=CapacityHandling(policy, played.timer),
+            handling=CapacityHandling(policy, ProviderFallback(None, OsThreads()), played.timer),
             clock=ManualClock(),
         )
         resolver = CandidateResolver(

@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vs_agent.api import Attribution, CapacityGated, ProviderSwitch, QuotaPlan
 from vs_runtime._fallback import ProviderFallback
 from vs_runtime._quota_policy import (
-    PAUSE_FOR_OPERATOR,
     GiveUp,
     QuotaPolicy,
     Switch,
@@ -28,7 +27,7 @@ if TYPE_CHECKING:
         ProviderSwitchReason,
     )
     from vs_runtime._run_control import RunControlChannel
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 
 class CapacityTimer(Protocol):
@@ -72,20 +71,19 @@ class CapacityHandling:
     from the run's control channel.
     """
 
-    policy: QuotaPolicy = PAUSE_FOR_OPERATOR
+    policy: QuotaPolicy
+    fallback: ProviderFallback
     timer: CapacityTimer | None = None
-    fallback: ProviderFallback = field(default_factory=lambda: ProviderFallback(None))
 
     @classmethod
     def for_policy(
-        cls, policy: QuotaPolicy, timer: CapacityTimer | None = None
+        cls, policy: QuotaPolicy, threads: Threads, timer: CapacityTimer | None = None
     ) -> CapacityHandling:
-        """Handling for ``policy``, with a fallback state holding its target."""
-        return cls(policy, timer, ProviderFallback(policy.fallback))
+        """Handling for ``policy``, with a fallback state holding its target.
 
-
-PAUSE_ONLY = CapacityHandling()
-"""Pause for the operator, with the production timer and no fallback."""
+        ``threads`` makes the fallback state's lock.
+        """
+        return cls(policy, ProviderFallback(policy.fallback, threads), timer)
 
 
 class PolicyCapacityGate:
