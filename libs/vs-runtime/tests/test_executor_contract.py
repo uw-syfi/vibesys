@@ -131,6 +131,39 @@ def request_key(request: RequestBase) -> str:
     return request.request_id.root
 
 
+@pytest.mark.parametrize(
+    ("case", "scenario"),
+    [
+        pytest.param(case, scenario, id=scenario.name)
+        for case in CASES
+        if case.name == "operations"
+        for scenario in case.scenarios
+    ],
+)
+async def test_an_operation_inspected_after_a_crash_at_any_boundary_rejects_holding_nothing(
+    case: ExecutorCase, scenario: Scenario
+) -> None:
+    """Kill the process at every durable boundary of an operation, then inspect it.
+
+    An inspection that answers "never started" (REJECTED) proves release: core ends the
+    owning record on that answer alone and never inspects again, so a bare rejection
+    strands it. The sweep below covers every kind but tries every boundary only at nightly
+    depth; registered operations are cheap enough to try every one on each pull request.
+    """
+    async with case.world() as probe:
+        request = await probe.prepare(scenario)
+        await probe.execute(request, lease=RevocableLease(), crash_at=None)
+        boundaries = 2 * probe.writes()
+    for crash_at in range(boundaries):
+        async with case.world() as world:
+            request = await world.prepare(scenario)
+            with contextlib.suppress(ProcessKilledError):
+                await world.execute(request, lease=RevocableLease(), crash_at=crash_at)
+            answer = _answer(await inspect_request_of(world, request))
+            if answer.status is ObservationStatus.REJECTED:
+                assert _holds_nothing(answer), f"boundary {crash_at}: {answer.diagnostic}"
+
+
 @pytest.mark.parametrize(("case", "scenario"), PARAMS)
 async def test_crash_at_every_durable_boundary_recovers_once_and_core_accepts(
     case: ExecutorCase, scenario: Scenario

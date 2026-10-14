@@ -111,19 +111,22 @@ class RegisteredOperationRequests:
 
         ``own_effect`` is true when a receipt proves the subject's own outcome. Only
         a proven terminal result claims acceptance and release, because Unknown never
-        does. The sequence is per subject, so an Inspect of a target continues the
-        target's own history.
+        does. A terminal rejection that names no resource proves the effect never began
+        and never will (`ObservationFacts.never_held`), so it holds nothing; a cancel
+        names the resource it leaves owned and never claims its release. The sequence is
+        per subject, so an Inspect of a target continues the target's own history.
         """
         terminal = own_effect and status is not ObservationStatus.UNKNOWN
         accepted = terminal and status in (ObservationStatus.SUCCEEDED, ObservationStatus.FAILED)
+        never_held = terminal and status is ObservationStatus.REJECTED and resource_id is None
         return self._observations.observe(
             ObservationSubject.of(request, request_id=subject),
             ObservationFacts(
                 status=status,
                 terminal=terminal,
                 accepted=accepted,
-                released=accepted,
-                children_complete=accepted,
+                released=accepted or never_held,
+                children_complete=accepted or never_held,
                 resource_id=resource_id,
                 diagnostic=detail,
             ),
