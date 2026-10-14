@@ -150,6 +150,7 @@ def board_entries(resources: OwnedOperationResources) -> tuple[OperationEntry, .
         view_sink=mirror,
         github_cli=resources.github,
         clock=resources.clock,
+        threads=resources.threads,
     )
     owner = IssueBoardOwner(
         session.tracker, session.progress, IssueQueueTexts(resources.variables), publish=mirror

@@ -17,7 +17,6 @@
 {"path": "libs/vs-faults/src/vs_faults/tools.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-faults/tests/test_faults.py", "rule": "process", "count": 2}
 {"path": "libs/vs-faults/tests/test_faults.py", "rule": "subprocess", "count": 2}
-{"path": "libs/vs-issue-tracker/src/vs_issue_tracker/core.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-project/src/vs_project/_fake_git_state.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-project/src/vs_project/_framework_writes.py", "rule": "threading", "count": 1}
 {"path": "libs/vs-project/src/vs_project/_logger.py", "rule": "threading", "count": 1}

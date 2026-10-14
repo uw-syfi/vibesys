@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_github.api import GitHubClient
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 _TYPE_PREFIX = "vibesys:type/"
 _STATUS_PREFIX = "vibesys:status/"
@@ -457,14 +457,15 @@ def open_issue_tracker(  # noqa: PLR0913  # lint-waiver: LW-261401 [PLR0913]; ea
     on_change: Callable[[], None] | None = None,
     github: GitHubClient | None = None,
     clock: Clock,
+    threads: Threads,
 ) -> IssueTracker:
     """Construct the selected issue tracker behind the IssueTracker contract.
 
     ``github`` reaches GitHub; the GitHub backend requires it. ``clock`` (epoch seconds)
-    stamps the events the tracker writes.
+    stamps the events the tracker writes, and ``threads`` makes the local board's lock.
     """
     if backend == "local":
-        return IssueBoard(local_path, on_change=on_change, clock=clock)
+        return IssueBoard(local_path, on_change=on_change, clock=clock, threads=threads)
     if repository is None:
         raise ValueError("repository is required for the GitHub issue backend")  # noqa: TRY003  # lint-waiver: LW-771017 [TRY003]; name the missing backend configuration field.
     if github is None:

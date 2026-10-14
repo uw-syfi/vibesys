@@ -25,7 +25,7 @@ from vs_issue_tracker.api import (
     IssueTracker,
     IssueType,
 )
-from vs_sim.api.testing import ManualClock, examples
+from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -34,8 +34,10 @@ if TYPE_CHECKING:
 type Factory = Callable[[Path, ManualClock], IssueTracker]
 
 IMPLEMENTATIONS: dict[str, Factory] = {
-    "fake": lambda _path, clock: FakeIssueTracker(clock=clock),
-    "board": lambda path, clock: IssueBoard(path / "issues.json", clock=clock),
+    "fake": lambda _path, clock: FakeIssueTracker(clock=clock, threads=SimThreads()),
+    "board": lambda path, clock: IssueBoard(
+        path / "issues.json", clock=clock, threads=SimThreads()
+    ),
     "github": lambda _path, clock: GitHubIssueTracker(
         "owner/repo", cli=FakeGitHubClient(), clock=clock
     ),
@@ -262,7 +264,7 @@ def test_the_fake_can_lose_an_acknowledgement_after_the_write_landed() -> None:
             message = "connection lost"
             raise ConnectionError(message)
 
-    tracker = FakeIssueTracker(faults=lose_the_answer, clock=ManualClock())
+    tracker = FakeIssueTracker(faults=lose_the_answer, clock=ManualClock(), threads=SimThreads())
     with pytest.raises(ConnectionError):
         tracker.create(
             type=IssueType.BUG,
@@ -282,7 +284,7 @@ def test_the_fake_can_fail_before_the_write_lands() -> None:
             message = "unavailable"
             raise ConnectionError(message)
 
-    tracker = FakeIssueTracker(faults=refuse, clock=ManualClock())
+    tracker = FakeIssueTracker(faults=refuse, clock=ManualClock(), threads=SimThreads())
     with pytest.raises(ConnectionError):
         tracker.create(
             type=IssueType.BUG, title="t", description="d", created_by="t", iteration=1, key="k"

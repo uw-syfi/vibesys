@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable
 
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 type FaultPhase = Literal["before", "after"]
 type FaultHook = Callable[[str, FaultPhase], None]
@@ -27,22 +27,23 @@ type FaultHook = Callable[[str, FaultPhase], None]
 class FakeIssueTracker(_MemoryBoard):
     """An in-memory `IssueTracker` whose operations can fail on either side of their effect."""
 
-    def __init__(self, *, clock: Clock, faults: FaultHook | None = None) -> None:
+    def __init__(self, *, clock: Clock, threads: Threads, faults: FaultHook | None = None) -> None:
         """Open an empty board; ``faults`` is consulted around every operation.
 
-        ``clock`` (epoch seconds) stamps every event; copies share it.
+        ``clock`` (epoch seconds) stamps every event and ``threads`` makes the board's lock;
+        copies share both.
         """
-        super().__init__(clock=clock)
+        super().__init__(clock=clock, threads=threads)
         self.faults = faults
 
     def __deepcopy__(self, memo: dict[int, object]) -> FakeIssueTracker:
-        """An independent board with the same issues; the lock is new and the clock shared."""
+        """An independent board with the same issues; the lock is new, the clock and threads shared."""
         clone = type(self).__new__(type(self))
         memo[id(self)] = clone
         for name, value in vars(self).items():
             if name == "_lock":
-                setattr(clone, name, type(value)())
-            elif name == "_clock":
+                setattr(clone, name, self._threads.rlock())
+            elif name in {"_clock", "_threads"}:
                 setattr(clone, name, value)
             else:
                 setattr(clone, name, copy.deepcopy(value, memo))

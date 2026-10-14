@@ -16,7 +16,7 @@ from vs_issue_tracker.api import (
     IssueStatus,
     IssueType,
 )
-from vs_sim.api.testing import ManualClock, hostile_json_frames
+from vs_sim.api.testing import ManualClock, SimThreads, hostile_json_frames
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,7 +31,7 @@ class _CreateOptions(TypedDict, total=False):
 
 
 def _make_store(tmp_path: Path) -> IssueBoard:
-    return IssueBoard(tmp_path / "issues.json", clock=ManualClock())
+    return IssueBoard(tmp_path / "issues.json", clock=ManualClock(), threads=SimThreads())
 
 
 def _create(store: IssueBoard, **options: Unpack[_CreateOptions]) -> Issue:
@@ -107,7 +107,7 @@ class TestLoadCorrupt:
             path.write_bytes(frame)
 
             with pytest.raises(IssueBoardLoadError):
-                IssueBoard(path, clock=ManualClock())
+                IssueBoard(path, clock=ManualClock(), threads=SimThreads())
             assert path.read_bytes() == frame, name
 
     def test_load_corrupt_json_raises_without_replacing_file(self, tmp_path: Path) -> None:
@@ -116,7 +116,7 @@ class TestLoadCorrupt:
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match="invalid JSON"):
-            IssueBoard(path, clock=ManualClock())
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -126,7 +126,7 @@ class TestLoadCorrupt:
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match="unsupported version 999"):
-            IssueBoard(path, clock=ManualClock())
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -141,7 +141,7 @@ class TestLoadCorrupt:
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match="invalid store structure"):
-            IssueBoard(path, clock=ManualClock())
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -176,7 +176,7 @@ class TestLoadCorrupt:
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match=message):
-            IssueBoard(path, clock=ManualClock())
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -191,7 +191,7 @@ class TestLoadCorrupt:
         self, tmp_path: Path, mutate: Callable[[dict[str, Any]], None]
     ) -> None:
         path = tmp_path / "issues.json"
-        board = IssueBoard(path, clock=ManualClock())
+        board = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(board, title="existing")
         payload = json.loads(path.read_text())
         mutate(payload)
@@ -199,7 +199,7 @@ class TestLoadCorrupt:
         original = path.read_bytes()
 
         with pytest.raises(IssueBoardLoadError, match="invalid store structure"):
-            IssueBoard(path, clock=ManualClock())
+            IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert path.read_bytes() == original
 
@@ -207,7 +207,7 @@ class TestLoadCorrupt:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         path = tmp_path / "issues.json"
-        writer = IssueBoard(path, clock=ManualClock())
+        writer = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(writer, title="existing")
         original_read_text = Path.read_text
         wrote_concurrently = False
@@ -223,10 +223,13 @@ class TestLoadCorrupt:
             return content
 
         monkeypatch.setattr(Path, "read_text", read_then_write)
-        opened = IssueBoard(path, clock=ManualClock())
+        opened = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
 
         assert [issue.title for issue in opened.list()] == ["existing", "concurrent"]
-        assert [issue.title for issue in IssueBoard(path, clock=ManualClock()).list()] == [
+        assert [
+            issue.title
+            for issue in IssueBoard(path, clock=ManualClock(), threads=SimThreads()).list()
+        ] == [
             "existing",
             "concurrent",
         ]
@@ -259,7 +262,7 @@ class TestReload:
         self, tmp_path: Path
     ) -> None:
         path = tmp_path / "issues.json"
-        store = IssueBoard(path, clock=ManualClock())
+        store = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(store, title="last valid")
         path.write_text("not json", encoding="utf-8")
         corrupt = path.read_bytes()
@@ -273,7 +276,7 @@ class TestReload:
 
     def test_reload_wrong_version_raises_without_modifying_the_file(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
-        store = IssueBoard(path, clock=ManualClock())
+        store = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(store, title="last valid")
         path.write_text(
             json.dumps({"version": 2, "next_id": 1, "issues": []}),
@@ -290,7 +293,7 @@ class TestReload:
 
     def test_reload_missing_file_raises(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
-        store = IssueBoard(path, clock=ManualClock())
+        store = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         _create(store, title="last valid")
         path.unlink()
 
@@ -348,7 +351,9 @@ class TestList:
         refetched = store.get(created.id)
         assert refetched is not None
         assert refetched.title == "original"
-        reloaded_board = IssueBoard(store.path, clock=ManualClock()).get(created.id)
+        reloaded_board = IssueBoard(store.path, clock=ManualClock(), threads=SimThreads()).get(
+            created.id
+        )
         assert reloaded_board is not None
         assert reloaded_board.title == "original"
 
@@ -511,7 +516,7 @@ class TestNextOpen:
 
     def test_next_open_fifo_within_type(self, tmp_path: Path) -> None:
         clock = ManualClock()
-        store = IssueBoard(tmp_path / "issues.json", clock=clock)
+        store = IssueBoard(tmp_path / "issues.json", clock=clock, threads=SimThreads())
         a = _create(store, type=IssueType.BUG, title="first bug")
         clock.advance(1)
         b = _create(store, type=IssueType.BUG, title="second bug")
@@ -629,7 +634,7 @@ class TestEventPayload:
             ),
             encoding="utf-8",
         )
-        store = IssueBoard(path, clock=ManualClock())
+        store = IssueBoard(path, clock=ManualClock(), threads=SimThreads())
         issue = store.get(1)
         assert issue is not None
         assert len(issue.history) == 1
@@ -705,7 +710,9 @@ class TestReopenBlocked:
 
     def test_reopen_blocked_no_blocked_is_noop(self, tmp_path: Path) -> None:
         cb = Mock()
-        store = IssueBoard(tmp_path / "issues.json", on_change=cb, clock=ManualClock())
+        store = IssueBoard(
+            tmp_path / "issues.json", on_change=cb, clock=ManualClock(), threads=SimThreads()
+        )
         reopened = store.reopen_blocked(actor="loop:resume", iteration=1)
         assert reopened == []
         # No mutation -> no callback fired (and importantly no save).
@@ -739,7 +746,9 @@ class TestReopenBlocked:
 class TestOnChangeCallback:
     def test_callback_fires_on_each_mutation(self, tmp_path: Path) -> None:
         cb = Mock()
-        store = IssueBoard(tmp_path / "issues.json", on_change=cb, clock=ManualClock())
+        store = IssueBoard(
+            tmp_path / "issues.json", on_change=cb, clock=ManualClock(), threads=SimThreads()
+        )
         # Bootstrap save in __init__ must NOT fire the callback.
         assert cb.call_count == 0
 
@@ -764,7 +773,7 @@ class TestOnChangeCallback:
     def test_callback_failure_does_not_corrupt_store(self, tmp_path: Path) -> None:
         path = tmp_path / "issues.json"
         cb = Mock(side_effect=RuntimeError("renderer exploded"))
-        store = IssueBoard(path, on_change=cb, clock=ManualClock())
+        store = IssueBoard(path, on_change=cb, clock=ManualClock(), threads=SimThreads())
         # The mutation must still succeed even though the callback raises.
         issue = _create(store, title="resilient")
         assert cb.call_count == 1

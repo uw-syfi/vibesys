@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from vs_github.api import GitHubClient
     from vs_issue_tracker.core import Issue, IssueTracker
     from vs_issue_tracker.progress import ProgressLog
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 
 class IssueTrackerConfig(BaseModel):
@@ -111,11 +111,12 @@ def open_issue_tracker_session(  # noqa: PLR0913  # lint-waiver: LW-920430 [PLR0
     view_sink: Callable[[list[Issue]], None] | None = None,
     github_cli: GitHubClient | None = None,
     clock: Clock,
+    threads: Threads,
 ) -> IssueTrackerSession:
     """Open issue and progress persistence selected by ``config``.
 
     ``github_cli`` reaches GitHub; the GitHub backend requires it. ``clock`` (epoch seconds)
-    stamps the events the tracker writes.
+    stamps the events the tracker writes, and ``threads`` makes the local board's lock.
     """
     tracker: IssueTracker
     if config.backend == "local":
@@ -128,6 +129,7 @@ def open_issue_tracker_session(  # noqa: PLR0913  # lint-waiver: LW-920430 [PLR0
             local_store_path,
             on_change=publish_local_view if view_sink is not None else None,
             clock=clock,
+            threads=threads,
         )
         progress: ProgressLog = FileProgressLog(local_progress_path)
     else:

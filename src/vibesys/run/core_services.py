@@ -429,6 +429,7 @@ def _catalog(
                 variables=plan.prompt_variables,
                 templates=policy.prompt_templates,
                 clock=resources.clock,
+                threads=resources.threads,
                 github=resources.github,
             )
         )
