@@ -745,6 +745,7 @@ _FILE_IO_PREFILTER = re.compile(
 # per module saying which kind of edge it is.
 FILE_IO_EDGE_MODULES: dict[str, str] = {
     "libs/vs-agent/src/vs_agent/cli_common.py": "agent workspace: installs skill trees where the agent CLI reads them",
+    "libs/vs-agent/src/vs_agent/images.py": "docker image builder: content-addresses the build context it hands to docker build",
     "libs/vs-agent/src/vs_agent/usage_records.py": "log sink: the append-only agent usage log",
     "libs/vs-decode/src/vs_decode/_decode.py": "the decode function's bounded file read, used by stores and edge adapters",
     "libs/vs-evaluation/src/vs_evaluation/filesystem_store.py": "store implementation: the file-backed EvaluationStore",
