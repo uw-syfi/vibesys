@@ -290,3 +290,39 @@ def test_closing_the_server_hangs_up_on_every_client_however_far_it_got(
             _check_answers(fault, whole[: 1 if fault.kind == "subscribe" else len(whole)])
 
     threads.run(main)
+
+
+def test_a_subscriber_that_wrote_after_subscribing_is_seen_hanging_up_on_an_idle_run(
+    tmp_path: Path,
+) -> None:
+    """Bytes a subscriber sends after ``subscribe`` cannot hide its hangup.
+
+    A subscription reads no further requests, and a peer that closed with
+    bytes still unread is not yet at end of stream. With nothing to publish
+    the stream never writes, so no failed write ends it either: before this
+    was handled, the stream stayed counted for ever and blocked the server's
+    teardown, which waits for every subscription to end.
+    """
+    threads = SimThreads(schedule_seed=0)
+    socket_path = tmp_path / "control.sock"
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        network = SimNetwork(threads)
+        tracker = SubscriptionTracker(threads=threads)
+        with UnixJsonlServer(socket_path, parts.api, tracker, threads, network):
+            client = network.connect(str(socket_path))
+            client.send(_frame("subscribe"))
+            assert tracker.wait_for_subscriber(HANG_GUARD_S)
+            client.send(_frame("query.snapshot"))
+            client.close()
+            settled = threads.event()
+
+            def drained() -> None:
+                tracker.wait_for_none_active(settle_seconds=0)
+                settled.set()
+
+            threads.spawn(drained, name="drained")
+            assert settled.wait(HANG_GUARD_S), "the stream outlived its client"
+
+    threads.run(main)

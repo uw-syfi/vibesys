@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
     from server.api.service import RunApi, SubscriptionBootstrap
     from server.transport.subscriptions import StreamDelivery
-    from vs_sim.api import Connection, Listener, Network, Threads, Worker
+    from vs_sim.api import Connection, Event, Listener, Network, Threads, Worker
 
 # Polling slack on the teardown path. After the last client hangs up, the
 # server exits only once the stream loop notices the closed peer and the
@@ -163,9 +163,13 @@ class _ClientSession:
         )
         cursor, reported_floor, store_id = self._write_bootstrap(request, bootstrap)
         delivery.delivered(cursor)
+        hung_up = self._threads.event()
+        self._threads.spawn(
+            partial(self._watch_for_hangup, hung_up), name="vibesys-server-jsonl-hangup"
+        )
         while True:
             if not api.wait_for_change(cursor, timeout=_DISCONNECT_POLL_SECONDS):
-                if self._connection.peer_closed():
+                if hung_up.is_set():
                     return
                 self._threads.sleep(_IDLE_BACKOFF_SECONDS)
                 continue
@@ -201,6 +205,22 @@ class _ClientSession:
             )
             cursor = checkpoint.through_sequence
             delivery.delivered(cursor)
+
+    def _watch_for_hangup(self, hung_up: Event) -> None:
+        """Read and discard what the client sends after subscribing; set ``hung_up`` at its end.
+
+        A subscription owns its connection and reads no further requests. The
+        bytes still have to be read: a peer that closed with bytes unread is
+        not yet at end of stream, so an idle stream that only checked for end
+        of stream would never see the hangup, and an idle run writes nothing
+        that could fail instead.
+        """
+        try:
+            while self._connection.recv(_RECV_BYTES):
+                pass
+        except OSError:
+            pass
+        hung_up.set()
 
     def _rebootstrap(self, request: SubscribeRequest) -> tuple[int, int, str]:
         """Restart this subscription's replay against the journal's live state."""
