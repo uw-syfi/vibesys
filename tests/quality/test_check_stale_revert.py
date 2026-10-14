@@ -178,3 +178,94 @@ def test_moving_a_file_back_after_a_rename_passes_when_it_names_the_rename() -> 
     # Both halves of the move undo #9: the file put back, and the file it created removed.
     assert [stale.path for stale in undeclared] == ["new/name.py", "old/name.py"]
     assert declared == []
+
+
+def _numbered(prefix: str, count: int) -> str:
+    return "".join(f"{prefix} line {index}\n" for index in range(count))
+
+
+def _recent_addition(root: Path, before: str, after: str) -> str:
+    """A base with ``before``, then a commit (#50) that makes ``mod.py`` ``after``; its sha."""
+    _repository(root)
+    _commit(root, {"mod.py": before, "other.py": "other\n"}, "base")
+    sha = _commit(root, {"mod.py": after}, "feat: the addition (#50)")
+    _git(root, "checkout", "-q", "-b", "change")
+    return sha
+
+
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
+@given(
+    added=st.integers(10, 30),
+    own_edit=st.booleans(),
+    declaration=st.sampled_from(
+        [None, "Reverts #50", "Reland #50", "Restores #50", "Reverts o/r#50"]
+    ),
+)
+def test_a_stale_copy_of_a_file_that_also_carries_an_edit_is_flagged_unless_declared(
+    added: int, *, own_edit: bool, declaration: str | None
+) -> None:
+    """The old-worktree mistake: the file lacks a recent addition, plus one intended edit."""
+    before = "header\n" + _numbered("body", 5)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        sha = _recent_addition(root, before, before + _numbered("added", added))
+        stale = ("header edited\n" if own_edit else "header\n") + _numbered("body", 5)
+        message = "change: edit the header" + (f"\n\n{declaration}" if declaration else "")
+        _commit(root, {"mod.py": stale}, message)
+
+        found = stale_files(root, "main")
+
+    if declaration is None:
+        # With no edit of its own the file is an exact old version: the whole-file check's catch.
+        lines = added if own_edit else 0
+        assert [(s.path, s.undone, s.lines) for s in found] == [("mod.py", sha, lines)]
+    else:
+        assert found == []
+
+
+def test_a_change_that_puts_back_the_lines_a_recent_commit_replaced_is_flagged() -> None:
+    old = "".join(f"old {index}\n" for index in range(6))
+    new = "".join(f"new {index}\n" for index in range(6))
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        sha = _recent_addition(root, "top\n" + old, "top\n" + new)
+        _commit(root, {"mod.py": "top edited\n" + old}, "change: edit the top")
+
+        found = stale_files(root, "main")
+
+    assert [(s.path, s.undone) for s in found] == [("mod.py", sha)]
+
+
+@settings(max_examples=examples(pr=6, nightly=100), deadline=None)
+@given(added=st.integers(5, 30), replaced=st.integers(1, 30))
+def test_rewriting_a_recently_added_block_with_new_code_is_not_an_undo(
+    added: int, replaced: int
+) -> None:
+    before = "header\n"
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        _recent_addition(root, before, before + _numbered("added", added))
+        _commit(
+            root, {"mod.py": before + _numbered("rewritten", added + replaced)}, "change: rewrite"
+        )
+
+        assert stale_files(root, "main") == []
+
+
+def test_loose_declarations_do_not_exempt_a_stale_copy() -> None:
+    before = "header\n"
+    loose = [
+        "I restore the addition from #50",
+        "This reverts commit " + "a" * 7,
+        "Please revert #50 and reland it",
+        "unrestores #50",
+    ]
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        _recent_addition(root, before, before + _numbered("added", 12))
+        _git(root, "branch", "base-of-change")
+        for text in loose:
+            _git(root, "checkout", "-q", "-B", "attempt", "base-of-change")
+            _commit(root, {"mod.py": before}, f"change: drop it\n\n{text}")
+
+            assert [s.path for s in stale_files(root, "main")] == ["mod.py"], text
