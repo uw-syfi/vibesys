@@ -792,6 +792,10 @@ class PurityVisitor(ast.NodeVisitor):
 #: on the decorated function, at import time); nothing else in the pure scope may use `setattr`.
 MODULE_EXEMPTIONS = {
     "libs/vs-core/src/vs_core/flows/_defs.py": frozenset({("builtin", "setattr")}),
+    # `vs_core.flows._workspaces._workspace` is an async generator that must let `GeneratorExit`
+    # pass untouched: when the flow is discarded nothing can serve a settlement, and the generic
+    # `except BaseException` below it would otherwise try to settle (and await) during close.
+    "libs/vs-core/src/vs_core/flows/_workspaces.py": frozenset({("builtin", "GeneratorExit")}),
     "libs/vs-core/src/vs_core/_values.py": frozenset(
         {
             ("banned-import", "weakref"),

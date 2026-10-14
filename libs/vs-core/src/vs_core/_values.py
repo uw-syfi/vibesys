@@ -8,7 +8,7 @@ import weakref
 from enum import Enum
 from functools import cache
 from hashlib import sha256
-from types import MemberDescriptorType, UnionType
+from types import UnionType
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -180,9 +180,11 @@ def recall[Fact](model: BaseModel, slot: str) -> Fact | None:
 @cache
 def _memoizes(model_type: type[BaseModel]) -> bool:
     """Whether instances of this class have the slots that hold remembered facts."""
-    return all(
-        isinstance(getattr(model_type, slot, None), MemberDescriptorType) for slot in _MEMO_SLOTS
-    )
+    declared: set[str] = set()
+    for cls in model_type.__mro__:
+        slots = getattr(cls, "__slots__", ())
+        declared.update((slots,) if isinstance(slots, str) else slots)
+    return declared >= _MEMO_SLOTS
 
 
 def keep(model: BaseModel, slot: str, fact: object) -> None:

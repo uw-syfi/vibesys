@@ -1,6 +1,5 @@
 """Published pure lifecycle API. Area implementations land in wave 1."""
 
-from importlib import import_module
 from typing import TYPE_CHECKING
 
 from vs_core._attempt_track import (
@@ -643,35 +642,49 @@ if TYPE_CHECKING:
 # Declarative reducer traces are test data whose schema spans every signal and area state, so
 # building their models costs about a third of a second of every process that imports this
 # API. They load on first use; `from vs_core.api import ReducerTrace` still works.
-_LAZY_EXPORTS = {
-    "operation_trace": "vs_core.testing.operations",
-    **dict.fromkeys(
-        (
-            "AttemptsChange",
-            "EvaluationChange",
-            "RecordsChange",
-            "ReducerTrace",
-            "SchedulingChange",
-            "SessionsChange",
-            "SettlementChange",
-            "TraceChange",
-            "TraceFrame",
-            "trace_step",
-        ),
-        "vs_core.testing.traces",
-    ),
-}
+_LAZY_TRACE_NAMES = frozenset(
+    {
+        "AttemptsChange",
+        "EvaluationChange",
+        "RecordsChange",
+        "ReducerTrace",
+        "SchedulingChange",
+        "SessionsChange",
+        "SettlementChange",
+        "TraceChange",
+        "TraceFrame",
+        "trace_step",
+    }
+)
 
 
 def __getattr__(name: str) -> object:
     """Load a lazily exported name from its module on first use."""
-    module = _LAZY_EXPORTS.get(name)
-    if module is None:
-        message = f"module {__name__!r} has no attribute {name!r}"
-        raise AttributeError(message)
-    value = getattr(import_module(module), name)
-    globals()[name] = value
-    return value
+    if name == "operation_trace":
+        from vs_core.testing.operations import (  # noqa: PLC0415  # lint-waiver: LW-209131 [PLC0415]; the reducer-trace models cost about a third of a second to build, so they load on first use instead of with every import of this API.
+            operation_trace,
+        )
+
+        return operation_trace
+    if name in _LAZY_TRACE_NAMES:
+        from vs_core.testing import (  # noqa: PLC0415  # lint-waiver: LW-209132 [PLC0415]; the reducer-trace models cost about a third of a second to build, so they load on first use instead of with every import of this API.
+            traces,
+        )
+
+        return {
+            "AttemptsChange": traces.AttemptsChange,
+            "EvaluationChange": traces.EvaluationChange,
+            "RecordsChange": traces.RecordsChange,
+            "ReducerTrace": traces.ReducerTrace,
+            "SchedulingChange": traces.SchedulingChange,
+            "SessionsChange": traces.SessionsChange,
+            "SettlementChange": traces.SettlementChange,
+            "TraceChange": traces.TraceChange,
+            "TraceFrame": traces.TraceFrame,
+            "trace_step": traces.trace_step,
+        }[name]
+    message = f"module 'vs_core.api' has no attribute {name!r}"
+    raise AttributeError(message)
 
 
 __all__ = [
