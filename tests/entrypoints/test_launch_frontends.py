@@ -10,6 +10,7 @@ import pytest
 from tests.support.core_plugins import failing_plugin
 from tests.support.task_project import write_task
 
+from entrypoints.headless import print_uncaught
 from entrypoints.run import run_headless
 from launch import LaunchSettings, default_runs
 from server.runtime import ServerRuntime
@@ -28,6 +29,7 @@ from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
     from vibesys.api import Runs
@@ -102,20 +104,27 @@ class _CoreRejectedError(Exception):
     """A typed failure standing in for a run-halting core error."""
 
 
+# Every C0 and C1 control but tab and newline, which a terminal only lays out.
+_CONTROLS = "".join(chr(code) for code in [*range(0x09), *range(0x0B, 0x20), *range(0x7F, 0xA0)])
+
+
 def _rejecting_plan(_context: CoreRunContext) -> CorePlan:
     message = "core rejected\nthe observation"
     raise _CoreRejectedError(message)
 
 
-def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def _plan_rejecting_with(message: str) -> Callable[[CoreRunContext], CorePlan]:
+    def plan(_context: CoreRunContext) -> CorePlan:
+        raise _CoreRejectedError(message)
+
+    return plan
+
+
+def _rejecting_runs(plan: Callable[[CoreRunContext], CorePlan]) -> Runs:
     registry = OrchestrationRegistry()
     plugin = failing_plugin("launch-test")
-    registry.register_plugin(
-        replace(plugin, core=replace(plugin.core, plan=_rejecting_plan)),
-    )
-    runs = default_runs(
+    registry.register_plugin(replace(plugin, core=replace(plugin.core, plan=plan)))
+    return default_runs(
         LaunchSettings(
             registry=registry,
             agent_client_factory=_fake_agent,
@@ -123,6 +132,33 @@ def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
             git_repository=FakeGitRepositories().repository,
         )
     )
+
+
+def test_the_run_failed_line_and_traceback_show_control_characters_instead_of_sending_them(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Run errors carry agent and tool text; none of its control characters reaches stderr raw.
+
+    The ``run failed`` line collapsed whitespace but passed an escape sequence,
+    a bell, or a C1 control through, and so did the interpreter's traceback.
+    """
+    runs = _rejecting_runs(_plan_rejecting_with(f"core rejected {_CONTROLS} the observation"))
+    with pytest.raises(_CoreRejectedError) as raised:
+        run_headless(_request(tmp_path / "project"), runs)
+    print_uncaught(raised.type, raised.value, raised.tb)
+
+    err = capsys.readouterr().err
+    assert [char for char in err if char in _CONTROLS] == []
+    failed = [line for line in err.splitlines() if line.startswith("run failed")]
+    assert len(failed) == 1
+    assert "\\x1b" in failed[0]
+    assert err.count("\\x9b") == 2
+
+
+def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    runs = _rejecting_runs(_rejecting_plan)
     with pytest.raises(Exception, match="core rejected"):
         run_headless(_request(tmp_path / "project"), runs)
 

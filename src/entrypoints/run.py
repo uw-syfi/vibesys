@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from functools import partial
 from typing import TYPE_CHECKING
 
+from headless import printable
 from headless import run as render_run
 from vibesys.api import RunStopped
 from vs_sim.api import LoopSignalSource
@@ -167,7 +168,7 @@ def run_headless(request: RunRequest, runs: Runs) -> RunResult:
         raise
     except Exception as error:
         # The traceback still follows; this is the one line a reader of the output needs.
-        sys.stderr.write(f"run failed: {failure_reason(error)}\n")
+        sys.stderr.write(f"run failed: {printable(failure_reason(error))}\n")
         raise
 
 

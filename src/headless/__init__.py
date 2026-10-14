@@ -3,6 +3,6 @@
 from __future__ import annotations
 
 from headless.execute import run
-from headless.render import HeadlessRenderer, TodoDisplay
+from headless.render import HeadlessRenderer, TodoDisplay, printable
 
-__all__ = ["HeadlessRenderer", "TodoDisplay", "run"]
+__all__ = ["HeadlessRenderer", "TodoDisplay", "printable", "run"]

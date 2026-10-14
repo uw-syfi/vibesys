@@ -42,7 +42,7 @@ _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
-def _printable(text: str) -> str:
+def printable(text: str) -> str:
     r"""Show the control characters in untrusted *text* instead of sending them.
 
     Each becomes its ``\xNN`` spelling, so the reader still sees that it was
@@ -81,7 +81,7 @@ class TodoDisplay:
         if not todos:
             return
         indicators = _COLOR_STATUS_INDICATORS if self._color else _PLAIN_STATUS_INDICATORS
-        items = [f"│ {indicators.get(t.status, '?')} {_printable(t.content)}" for t in todos]
+        items = [f"│ {indicators.get(t.status, '?')} {printable(t.content)}" for t in todos]
         width = max(len(self._strip_ansi(line)) for line in items) + 2
         width = max(width, len("─ Todo ─") + 4)
 
@@ -180,8 +180,8 @@ class HeadlessRenderer:
         if self._at_line_start:
             prefix = format_status_prefix(data.status)
             if prefix:
-                out.write(_printable(prefix))
-        content = _printable(data.content)
+                out.write(printable(prefix))
+        content = printable(data.content)
         out.write(content)
         out.flush()
         self._at_line_start = content.endswith("\n")
@@ -189,7 +189,7 @@ class HeadlessRenderer:
     def _render_line(self, text: str) -> None:
         """Write one line of event text; every line the renderer writes, but the todo box."""
         self._break_line()
-        text = _printable(text)
+        text = printable(text)
         out = self._out
         out.write(text)
         if not text.endswith("\n"):
