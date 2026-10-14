@@ -25,6 +25,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, Fake
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 
@@ -71,7 +72,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(clock, 60.0),
+            timing=RunTiming(clock, 60.0, OsThreads()),
             agent_client_factory=lambda **_: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True)
             ),

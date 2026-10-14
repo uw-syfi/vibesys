@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, cast
 
 from launch.agents import BuiltInSessionAgents
@@ -20,7 +21,6 @@ from vibesys.api.wiring import SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
 from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, build_agent_client
 from vs_project.api import generate_run_id
-from vs_runtime.api.core import RunTiming
 from vs_runtime.api.wiring import InProcessRuns
 from vs_sandbox.api import create_compute_backend
 from vs_sim.api import utc_datetime
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from vibesys.api.wiring import ProfilerPreflight, SessionAgents
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSessionKey
     from vs_project.api import GitRepositoryFactory, Project, StateStoreFactory
+    from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
     from vs_slurm.api import SlurmProcess
@@ -51,12 +52,13 @@ if TYPE_CHECKING:
 class LaunchSettings:
     """Implementations selected once at the application wiring boundary."""
 
+    timing: RunTiming
+    """The run's time sources and lease; the entrypoint builds them from real or simulated time."""
     registry: OrchestrationRegistry | None = None
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None
     backend_factory: Callable[..., ComputeBackendImpl] | None = None
     stop_timer: StopTimer | None = None
     """Times a stop's grace period; ``None`` sleeps on the run's clock."""
-    timing: RunTiming | None = None
     agents: SessionAgents | None = None
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None = (
         None
@@ -75,22 +77,21 @@ def create_session(
     request: RunRequest,
     *,
     sink: EventSink,
+    settings: LaunchSettings,
     registry: OrchestrationRegistry | None = None,
-    settings: LaunchSettings | None = None,
 ) -> RunSession:
     """Compose a session with built-ins or an explicitly supplied catalog."""
-    selected = LaunchSettings() if settings is None else settings
-    selected_registry = _catalog(registry if registry is not None else selected.registry)
+    selected_registry = _catalog(registry if registry is not None else settings.registry)
+    timing = settings.timing
     client_factory = (
-        build_agent_client
-        if selected.agent_client_factory is None
-        else selected.agent_client_factory
+        partial(build_agent_client, threads=timing.threads)
+        if settings.agent_client_factory is None
+        else settings.agent_client_factory
     )
     backend_factory = (
-        create_compute_backend if selected.backend_factory is None else selected.backend_factory
+        create_compute_backend if settings.backend_factory is None else settings.backend_factory
     )
-    timing = RunTiming.production() if selected.timing is None else selected.timing
-    agents = BuiltInSessionAgents(client_factory) if selected.agents is None else selected.agents
+    agents = BuiltInSessionAgents(client_factory) if settings.agents is None else settings.agents
 
     def publish(event: CoreEvent) -> None:
         # Pre-attachment observations have no durable journal identity yet.
@@ -105,43 +106,41 @@ def create_session(
         implementations=SessionImplementations(
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
-            profiler_preflight=selected.profiler_preflight,
+            profiler_preflight=settings.profiler_preflight,
             agents=agents,
-            stop_timer=timing.clock.sleep if selected.stop_timer is None else selected.stop_timer,
+            stop_timer=timing.clock.sleep if settings.stop_timer is None else settings.stop_timer,
             timing=timing,
             invocation_store_factory=(
                 _durable_invocation_store
-                if selected.invocation_store_factory is None
-                else selected.invocation_store_factory
+                if settings.invocation_store_factory is None
+                else settings.invocation_store_factory
             ),
             stateless_tool_servers=STATELESS_TOOL_SERVERS,
-            git_repository=selected.git_repository,
-            slurm_process=selected.slurm_process,
-            state_stores=selected.state_stores,
+            git_repository=settings.git_repository,
+            slurm_process=settings.slurm_process,
+            state_stores=settings.state_stores,
             agent_providers=tuple(sorted(SHIPPED_PROVIDERS)),
         ),
     )
 
 
-def default_runs(settings: LaunchSettings | None = None) -> Runs:
+def default_runs(settings: LaunchSettings) -> Runs:
     """Assemble the in-process launcher using the VibeSys built-in catalog.
 
     Config remains part of each RunRequest. LaunchSettings selects alternate
     implementations without changing the launch or frontend contracts.
     """
-    selected = LaunchSettings() if settings is None else settings
-    registry = _catalog(selected.registry)
+    registry = _catalog(settings.registry)
 
     def session_factory(request: RunRequest, sink: Callable[[CoreEvent], None]) -> RunSession:
         return create_session(
-            request, sink=cast("EventSink", sink), registry=registry, settings=selected
+            request, sink=cast("EventSink", sink), registry=registry, settings=settings
         )
 
     def prepare(request: RunRequest) -> RunRequest:
         if request.resume is not None or request.run_id is not None:
             return request
-        timing = RunTiming.production() if selected.timing is None else selected.timing
-        run_id = generate_run_id(request.resolved_run_id, now=utc_datetime(timing.clock))
+        run_id = generate_run_id(request.resolved_run_id, now=utc_datetime(settings.timing.clock))
         return request.model_copy(update={"run_id": run_id})
 
     runs: InProcessRuns[RunRequest, CoreEvent, RunResult, RunSession] = InProcessRuns(

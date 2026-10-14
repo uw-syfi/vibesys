@@ -36,6 +36,7 @@ from vs_core.api import (
 from vs_runtime.api import CoreOperation
 from vs_runtime.api.core import EVALUATION_TOOL_ID, OperationRole, RunTiming
 from vs_runtime.api.testing import FakeStopTimer
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -91,7 +92,7 @@ def _services(tmp_path: Path) -> CoreServices:
                 integration,
                 plugin=plugin,
                 options=EmptyOptions(),
-                timing=RunTiming(clock, 60.0),
+                timing=RunTiming(clock, 60.0, OsThreads()),
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),

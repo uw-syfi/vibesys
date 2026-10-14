@@ -51,7 +51,6 @@ from vs_core.api import (
 )
 from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
-from vs_sim.api import SleepingClock, SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -60,6 +59,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
     from vs_runtime._core_requests import ExecutorRefusal
     from vs_runtime._run_control import RunControlChannel
+    from vs_sim.api import SleepingClock, Threads
 
 
 type ControlAction = Literal["pause", "resume", "stop", "steer"]
@@ -80,21 +80,23 @@ PRODUCTION_LEASE_SECONDS = 60.0
 
 @dataclass(frozen=True)
 class RunTiming:
-    """The time source and lease length one run is composed with."""
+    """The time sources and lease length one run is composed with.
+
+    ``clock`` is the run's epoch timeline for the core loop and its timestamps;
+    ``threads`` is the blocking time (monotonic reads, sleeps, locks) that code on
+    worker threads, such as an agent turn, waits on. A production entrypoint builds
+    both from the real implementations; a simulated run builds them from one simulation.
+    """
 
     clock: SleepingClock
     lease_seconds: float
+    threads: Threads
 
     def __post_init__(self) -> None:
         """Reject a lease that could never be held."""
         if self.lease_seconds <= 0:
             message = "lease_seconds must be positive"
             raise ValueError(message)
-
-    @classmethod
-    def production(cls) -> RunTiming:
-        """Wall time and the production lease."""
-        return cls(SystemClock(), PRODUCTION_LEASE_SECONDS)
 
 
 class NextWake(Protocol):

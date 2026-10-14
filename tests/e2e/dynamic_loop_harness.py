@@ -36,6 +36,7 @@ from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.loop_spec import loop_spec
 from tests.support.slurm_environment import with_fake_image_build
 from tests.support.task_project import write_task
+from tests.support.timing import real_timing
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
@@ -63,6 +64,7 @@ from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import FakeStateStores, Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import run_virtual
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, FakeConnector, recorded_commands
 
@@ -643,7 +645,11 @@ def run_request(  # noqa: PLR0913
             agent_client_factory=client_factory or agents.client,
             backend_factory=backend_factory or host_container_backend,
             stop_timer=stop_timer or FakeStopTimer(),
-            timing=None if clock is None else RunTiming(clock, PRODUCTION_LEASE_SECONDS),
+            timing=(
+                real_timing()
+                if clock is None
+                else RunTiming(clock, PRODUCTION_LEASE_SECONDS, OsThreads())
+            ),
             # The agent's container mounts the repository's `.git` read-only, so the
             # repository must exist on disk: these runs use the product's real Git.
             git_repository=None,

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from entrypoints.detached_run import RecordPublisher
-from launch import default_runs
+from entrypoints.production import production_runs
 from server.host_api import (
     InstanceStatus,
     LiveInstanceRecord,
@@ -111,7 +111,7 @@ def _serve(
                 )
                 runtime = ServerRuntime(
                     run_id="run-1",
-                    runs=default_runs(),
+                    runs=production_runs(),
                     socket_path=socket_path,
                     detach=True,
                     observer=publisher,

@@ -35,6 +35,7 @@ from vs_runtime.api import AgentWorkspaceRouteError
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -82,7 +83,7 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(clock, 60.0),
+            timing=RunTiming(clock, 60.0, OsThreads()),
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
@@ -156,7 +157,11 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
     clients: list[AgentClientProtocol] = []
 
     def client_factory(**kwargs: object) -> AgentClientProtocol:
-        client = build_agent_client(executor_factory=lambda: executor, **kwargs)  # ty: ignore[invalid-argument-type]
+        client = build_agent_client(
+            executor_factory=lambda: executor,
+            threads=OsThreads(),
+            **kwargs,  # ty: ignore[invalid-argument-type]
+        )
         clients.append(client)
         return client
 
@@ -186,7 +191,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(clock, 60.0),
+            timing=RunTiming(clock, 60.0, OsThreads()),
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),

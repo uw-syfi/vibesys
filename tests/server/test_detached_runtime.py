@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, build_server_parts
 
-from launch import default_runs
+from entrypoints.production import production_runs
 from server.api.protocol import SnapshotQuery, StopCommand, SubscribeRequest
 from server.events import EventType
 from server.runtime import ServerRuntime
@@ -58,7 +58,7 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
 
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=socket_path,
         detach=True,
         observer=Observer(),
@@ -138,7 +138,7 @@ def test_detached_runtime_unwinds_callback_failures_without_shutdown(
     """
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,
         clock=ManualClock(),

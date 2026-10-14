@@ -24,6 +24,7 @@ from tests.support.skeleton_strategy import (
     SkeletonStrategy,
 )
 from tests.support.task_project import write_task
+from tests.support.timing import real_timing
 
 from entrypoints.run import supervise
 from headless import run as render_run
@@ -223,6 +224,7 @@ def _execute(
     )
     runs = default_runs(
         LaunchSettings(
+            timing=real_timing(),
             registry=registry,
             agent_client_factory=lambda **_: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True)

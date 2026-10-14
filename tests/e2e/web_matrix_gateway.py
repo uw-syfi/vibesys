@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from launch import default_runs
+from entrypoints.production import production_runs
 from server.runtime import ServerRuntime
 from vs_sim.api import SystemClock
 
@@ -43,7 +43,7 @@ def main() -> int:
     stopped = threading.Event()
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=arguments.store_directory / "control.sock",
         web=True,
         web_port=arguments.port,

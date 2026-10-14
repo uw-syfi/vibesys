@@ -14,8 +14,9 @@ from entrypoints.cli.environment import (
 from entrypoints.cli.errors import _configuration_error
 from entrypoints.cli.inputs import _standalone_input_dests_set, _validate_target_inputs
 from entrypoints.cli.remote import _clone_project, _is_remote_project
+from entrypoints.production import production_runs
 from entrypoints.run import run_headless
-from launch import default_runs, validate_descriptor, validate_run_request
+from launch import validate_descriptor, validate_run_request
 from vibesys.api import (
     DomainName,
     OrchestrationDescriptor,
@@ -369,7 +370,7 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
 
 def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:
     request = _build_run_request(args)
-    result = _execute_run_request(request, default_runs() if runs is None else runs)
+    result = _execute_run_request(request, production_runs() if runs is None else runs)
     if result.succeeded:
         sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
     else:

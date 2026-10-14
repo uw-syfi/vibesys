@@ -19,7 +19,7 @@ import pytest
 from tests.server.support import REQUEST_TIME
 from websockets.sync.client import connect
 
-from launch import default_runs
+from entrypoints.production import production_runs
 from server.api.protocol import (
     PauseCommand,
     ResumeCommand,
@@ -227,7 +227,7 @@ def _error_chain(error: BaseException) -> tuple[BaseException, ...]:
 def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=tmp_path / "control.sock",
         clock=ManualClock(),
     )
@@ -248,7 +248,7 @@ def test_runtime_snapshots_namespace_client_state_by_project(tmp_path: Path) -> 
     runtime = ServerRuntime(
         run_id="shared",
         project_root=project_root,
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=tmp_path / "control.sock",
         clock=ManualClock(),
     )
@@ -285,7 +285,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
 
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,
         observer=Observer(),
@@ -350,7 +350,7 @@ def test_startup_rejects_commands_that_require_an_active_session(
     observer = Observer()
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,
         observer=observer,
@@ -383,7 +383,7 @@ def test_a_web_only_subscriber_decides_a_web_runs_whole_lifetime(tmp_path: Path)
     instance_path = tmp_path / "state" / "web-gateway.json"
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=socket_path,
         web=True,
         instance_path=instance_path,
@@ -442,7 +442,7 @@ def test_the_web_gateway_receives_its_assets_origins_and_instance_path(tmp_path:
     declared_origin = "http://vibesys.test:4173"
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=socket_path,
         web=True,
         web_assets=assets,
@@ -508,7 +508,7 @@ def test_the_runtime_composes_no_web_gateway_unless_web_is_requested(tmp_path: P
     instance_path = tmp_path / "state" / "web-gateway.json"
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=socket_path,
         web_assets=tmp_path / "web-dist",
         web_origins=("http://vibesys.test:4173",),
@@ -560,7 +560,7 @@ def test_the_web_gateway_binds_the_configured_port(tmp_path: Path) -> None:
     with socket.create_server(("127.0.0.1", 0)) as held:
         runtime = ServerRuntime(
             run_id="run-1",
-            runs=default_runs(),
+            runs=production_runs(),
             socket_path=socket_path,
             web=True,
             web_port=held.getsockname()[1],

@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.task_project import write_task
+from tests.support.timing import real_timing
 
 from launch import LaunchSettings, create_session, default_runs
 from launch.agents import BuiltInSessionAgents
@@ -127,6 +128,7 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
 def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
     return LaunchSettings(
+        timing=real_timing(),
         agents=FakeSessionAgents() if request.param else None,
         backend_factory=host_container_backend,
     )
@@ -163,7 +165,7 @@ def _session(tmp_path: Path, settings: LaunchSettings | None = None) -> _LocalRu
             request,
             sink=cast("EventSink", lambda _event: None),
             registry=registry,
-            settings=settings,
+            settings=LaunchSettings(timing=real_timing()) if settings is None else settings,
         ),
     )
 
@@ -371,7 +373,7 @@ def test_auxiliary_selection_rejected_before_environment_acquisition(
     launch = AuxiliaryAgentLaunch.model_validate(
         _launch(evidence).model_dump() | {"provider": provider}
     )
-    agents = agent_settings.agents or BuiltInSessionAgents()
+    agents = agent_settings.agents or BuiltInSessionAgents(client_factory=_resumable_client)
 
     with pytest.raises(ValueError, match=provider):
         agents.create_agent(launch, resources, NULL_AGENT_EVENT_SINK)
@@ -400,6 +402,7 @@ def test_independent_auxiliary_scope_survives_session_close(
 
     async def execute() -> None:
         settings = LaunchSettings(
+            timing=real_timing(),
             registry=registry,
             backend_factory=host_container_backend,
             agents=agent_settings.agents,

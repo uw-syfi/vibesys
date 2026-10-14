@@ -14,6 +14,7 @@ from pathlib import Path
 
 from tests.support.docker_environment import host_container_backend
 from tests.support.skeleton_strategy import SkeletonStrategy
+from tests.support.timing import real_timing
 from tests.vibesys.orchestration.plugin import capability_plugin
 
 from entrypoints.run import supervise
@@ -60,6 +61,7 @@ def main(project_root: Path, slurm_config: Path) -> None:
     )
     runs = default_runs(
         LaunchSettings(
+            timing=real_timing(),
             registry=registry,
             agent_client_factory=_resumable_client,
             backend_factory=host_container_backend,

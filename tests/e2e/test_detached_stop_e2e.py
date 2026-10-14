@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 from tests.server.support import REQUEST_TIME
 
-from launch import default_runs
+from entrypoints.production import production_runs
 from server.api.protocol import SubscribeRequest
 from server.host_api import (
     InstanceStatus,
@@ -151,7 +151,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     registry = LiveRegistry(FileInstanceStore(root), SystemClock())
     runtime = ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=socket_path,
         detach=True,
         clock=SystemClock(),

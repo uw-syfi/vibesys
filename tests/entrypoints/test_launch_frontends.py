@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.core_plugins import failing_plugin
 from tests.support.task_project import write_task
+from tests.support.timing import real_timing
 
 from entrypoints.headless import print_uncaught
 from entrypoints.run import run_headless
@@ -79,6 +80,7 @@ def _runs(clients: list[FakeAgentClient] | None = None, *, real_git: bool = Fals
 
     return default_runs(
         LaunchSettings(
+            timing=real_timing(),
             registry=registry,
             agent_client_factory=agent_factory,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
@@ -127,6 +129,7 @@ def _rejecting_runs(plan: Callable[[CoreRunContext], CorePlan]) -> Runs:
     registry.register_plugin(replace(plugin, core=replace(plugin.core, plan=plan)))
     return default_runs(
         LaunchSettings(
+            timing=real_timing(),
             registry=registry,
             agent_client_factory=_fake_agent,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
@@ -182,10 +185,7 @@ def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> N
         runtime.integration.close()
 
 
-@pytest.mark.parametrize("settings", [None, LaunchSettings(agent_client_factory=_fake_agent)])
-def test_launch_rejects_invalid_builtin_options_before_execution(
-    settings: LaunchSettings | None, tmp_path: Path
-) -> None:
+def test_launch_rejects_invalid_builtin_options_before_execution(tmp_path: Path) -> None:
     request = _request(tmp_path / "project").model_copy(
         update={
             "orchestration": OrchestrationDescriptor(
@@ -195,7 +195,7 @@ def test_launch_rejects_invalid_builtin_options_before_execution(
     )
 
     async def execute() -> None:
-        runs = default_runs(settings)
+        runs = default_runs(LaunchSettings(timing=real_timing(), agent_client_factory=_fake_agent))
         with pytest.raises(ValueError, match="unknown_launch_option"):
             runs.start(request)
         assert runs.list_active() == ()

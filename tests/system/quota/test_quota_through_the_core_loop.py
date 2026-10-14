@@ -114,6 +114,7 @@ async def _play(
             control=channel,
             events=played.sink,
             handling=CapacityHandling(policy, played.timer),
+            clock=ManualClock(),
         )
         resolver = CandidateResolver(
             root,

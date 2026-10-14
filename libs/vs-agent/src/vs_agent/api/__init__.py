@@ -152,7 +152,7 @@ if TYPE_CHECKING:
     from vs_agent.orphans import OrphanReapError, reap_orphaned_agents
     from vs_agent.shim_turns import native_schema, native_schema_problems
     from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 __all__ = [
     "BASE_ENV_ALLOWLIST",
@@ -343,6 +343,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
     agent_homes_dir: Path | None = None,
     clock: Clock,
+    threads: Threads,
 ) -> AgentClientProtocol:
     """Build an agent service through the application composition module."""
     from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010116 [PLC0415]; Keep build_agent_client as build lazy in build_agent_client so unused providers and import cycles stay unloaded.
@@ -366,4 +367,5 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
         events=events,
         agent_homes_dir=agent_homes_dir,
         clock=clock,
+        threads=threads,
     )

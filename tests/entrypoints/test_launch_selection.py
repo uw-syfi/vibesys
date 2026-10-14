@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.entrypoints.test_launch_frontends import _request
 from tests.support.core_plugins import failing_plugin
+from tests.support.timing import real_timing
 
 from launch import (
     LaunchSettings,
@@ -112,6 +113,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
     backend_factory = FalseyFakeBackendFactory()
     agents = FalseyFakeSessionAgents(agents_factory)
     settings = FalseyLaunchSettings(
+        timing=real_timing(),
         registry=registry,
         agent_client_factory=agents_factory,
         backend_factory=backend_factory,
@@ -182,6 +184,7 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
     request = _request(tmp_path / "project")
     runs = default_runs(
         LaunchSettings(
+            timing=real_timing(),
             registry=registry,
             agent_client_factory=lambda **_kwargs: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True)

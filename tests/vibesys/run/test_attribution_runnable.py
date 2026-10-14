@@ -20,6 +20,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.docker_environment import host_container_backend
 from tests.support.task_project import write_task
+from tests.support.timing import real_timing
 
 from launch import LaunchSettings, create_session, validate_run_request
 from vibesys.api import Config, ConfigurationError, OrchestrationDescriptor, RunRequest
@@ -164,7 +165,7 @@ def test_session_construction_refuses_a_host_command_whose_interpreter_is_missin
         create_session(
             request,
             sink=record,
-            settings=LaunchSettings(backend_factory=host_container_backend),
+            settings=LaunchSettings(timing=real_timing(), backend_factory=host_container_backend),
         )
     assert error.value.diagnostic.code == "attribution_command_unavailable"
     assert not events

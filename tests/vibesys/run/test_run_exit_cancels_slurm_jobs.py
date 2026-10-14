@@ -27,7 +27,7 @@ from vs_core.api import StopMode
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, RunStopped
-from vs_sim.api import SystemClock
+from vs_sim.api import OsThreads, SystemClock
 from vs_sim.api.testing import ManualClock
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
@@ -118,7 +118,7 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
                 ),
                 backend_factory=host_container_backend,
                 stop_timer=SystemClock().sleep,
-                timing=RunTiming(SystemClock(), 60.0),
+                timing=RunTiming(SystemClock(), 60.0, OsThreads()),
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
             )
         )

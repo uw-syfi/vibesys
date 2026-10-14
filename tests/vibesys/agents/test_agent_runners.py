@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -56,6 +57,7 @@ def _build_client(
     return cast(
         "AgentClient",
         build_agent_client(
+            threads=OsThreads(),
             spec=spec,
             backends=kwargs.get("backends"),
             skill_source_dirs=kwargs.get("skill_source_dirs") or [],

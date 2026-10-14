@@ -35,6 +35,7 @@ from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import AgentRole, CorePlan, CoreRunContext, OrchestrationPlugin, RunStatus
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -102,7 +103,7 @@ def _run(
                 integration,
                 plugin=plugin,
                 options=EmptyOptions(),
-                timing=RunTiming(clock, 60.0),
+                timing=RunTiming(clock, 60.0, OsThreads()),
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import EventSink
     from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec
     from vs_project.api import GitRepositoryFactory, StateStoreFactory
+    from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
     from vs_slurm.api import SlurmProcess
@@ -30,6 +31,7 @@ def create_session(  # noqa: PLR0913
     request: RunRequest,
     *,
     sink: EventSink,
+    timing: RunTiming,
     registry: OrchestrationRegistry,
     agent_client_factory: Callable[..., AgentClientProtocol],
     backend_factory: Callable[..., ComputeBackendImpl],
@@ -43,6 +45,7 @@ def create_session(  # noqa: PLR0913
         request,
         sink=sink,
         settings=LaunchSettings(
+            timing,
             registry,
             agent_client_factory,
             backend_factory,

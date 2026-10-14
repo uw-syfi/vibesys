@@ -48,6 +48,7 @@ from vs_runtime.api import (
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
@@ -152,7 +153,7 @@ def _open(
                 integration,
                 plugin=_plugin(templates),
                 options=EmptyOptions(),
-                timing=RunTiming(clock, 60.0),
+                timing=RunTiming(clock, 60.0, OsThreads()),
                 agent_client_factory=client_factory,
                 backend_factory=host_container_backend,
                 invocation_store_factory=(
@@ -183,7 +184,7 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
                 integration,
                 plugin=_plugin(templates, profile_capture_withheld=profile_capture_withheld),
                 options=EmptyOptions(),
-                timing=RunTiming(clock, 60.0),
+                timing=RunTiming(clock, 60.0, OsThreads()),
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
@@ -398,7 +399,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
             agent_client_factory=_resumable_client,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
             stop_timer=clock.sleep,
-            timing=RunTiming(clock, 60.0),
+            timing=RunTiming(clock, 60.0, OsThreads()),
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
         )
         return end.status

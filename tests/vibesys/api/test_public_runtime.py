@@ -25,7 +25,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import SystemClock
+from vs_sim.api import OsThreads, SystemClock
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -128,7 +128,7 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
                 integration,
                 plugin=_PLUGIN,
                 options=EmptyOptions(),
-                timing=RunTiming(SystemClock(), 60.0),
+                timing=RunTiming(SystemClock(), 60.0, OsThreads()),
                 backend_factory=backend_factory,
                 stop_timer=FakeStopTimer(),
             ):

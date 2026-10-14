@@ -14,9 +14,9 @@ from tests.support.task_project import write_task
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.headless import main as headless_main
+from entrypoints.production import production_runs
 from entrypoints.run import run_headless
 from entrypoints.server import main as server_main
-from launch import default_runs
 from vibesys.api import ConfigurationError
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
@@ -153,7 +153,7 @@ def test_the_session_guards_a_request_that_skipped_validation(
     )
 
     with pytest.raises(ConfigurationError) as raised:
-        run_headless(request, default_runs())
+        run_headless(request, production_runs())
 
     assert raised.value.diagnostic.code == _CODE
     assert _RUN_ID in raised.value.diagnostic.message

@@ -8,7 +8,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vs_agent.api import AgentSessionKey, SessionScope, build_agent_client
+from vs_agent.api import AgentSessionKey, SessionScope
 from vs_project.api import RunLogger
 
 if TYPE_CHECKING:
@@ -169,7 +169,7 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
     log_directory: Path,
     agent_events: AgentEventSink,
     additional_host_resources: tuple[HostResource, ...] = (),
-    client_factory: Callable[..., AgentClientProtocol] = build_agent_client,
+    client_factory: Callable[..., AgentClientProtocol],
     agent_homes_directory: Path | None = None,
     clock: Clock,
 ) -> ManagedConversation:

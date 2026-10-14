@@ -17,7 +17,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.server.support import REQUEST_TIME
 
-from launch import default_runs
+from entrypoints.production import production_runs
 from server.api.protocol import StopCommand, SubscribeRequest
 from server.runtime import ServerRuntime
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -132,7 +132,7 @@ def test_a_subscriber_reads_the_event_that_ends_the_run_before_the_server_closes
         network = SimNetwork(threads)
         runtime = ServerRuntime(
             run_id="run-1",
-            runs=default_runs(),
+            runs=production_runs(),
             socket_path=socket_path,
             detach=ending.detach,
             threads=threads,
@@ -229,7 +229,7 @@ def _on_sim(seed: int, body: Callable[[SimThreads, SimNetwork], None]) -> None:
 def _runtime(socket_path: Path, threads: SimThreads, network: SimNetwork) -> ServerRuntime:
     return ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=socket_path,
         threads=threads,
         network=network,

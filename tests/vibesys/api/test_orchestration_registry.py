@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.task_project import write_task
+from tests.support.timing import real_timing
 
 from launch import LaunchSettings, built_in_orchestrations, create_session
 from vibesys.api import (
@@ -67,7 +68,9 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 
 
 _SETTINGS = LaunchSettings(
-    backend_factory=host_container_backend, agent_client_factory=_resumable_client
+    timing=real_timing(),
+    backend_factory=host_container_backend,
+    agent_client_factory=_resumable_client,
 )
 
 
@@ -193,7 +196,7 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
     session = create_session(
         request,
         sink=_discard_event,
-        settings=LaunchSettings(backend_factory=host_container_backend),
+        settings=LaunchSettings(timing=real_timing(), backend_factory=host_container_backend),
     )
 
     # A core strategy runs durable, resumable sessions; the stub backend offers none, so the

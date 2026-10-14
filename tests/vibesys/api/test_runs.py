@@ -12,6 +12,7 @@ from tests.support.core_plugins import capability_plugin, failing_plugin
 from tests.support.docker_environment import fake_docker_environment
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
+from tests.support.timing import real_timing
 
 from entrypoints.run import supervise
 from launch import LaunchSettings, default_runs
@@ -72,6 +73,7 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     registry.register_plugin(failing_plugin("identity-test"))
     runs = default_runs(
         LaunchSettings(
+            timing=real_timing(),
             registry=registry,
             agent_client_factory=_fake_agent,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
@@ -165,6 +167,7 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     )
     runs = default_runs(
         LaunchSettings(
+            timing=real_timing(),
             registry=registry,
             agent_client_factory=_fake_agent,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),

@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
 from entrypoints.main_thread_interrupt import MainThreadInterrupt
+from entrypoints.production import production_runs
 from entrypoints.web_assets import WebAssetBundle
-from launch import default_runs
 from server.host_api import (
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
@@ -1066,7 +1066,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
-                runs=default_runs() if runs is None else runs,
+                runs=production_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,
                 tui_defaults=_tui_defaults_from_argv(arguments),
@@ -1083,7 +1083,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
         else:
             runtime = server_runtime(
                 socket_path=control_socket,
-                runs=default_runs() if runs is None else runs,
+                runs=production_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,
                 tui_defaults=_tui_defaults_from_argv(arguments),

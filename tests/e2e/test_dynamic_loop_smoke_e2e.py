@@ -49,6 +49,7 @@ from tests.support.loop_invariants import (
     terminal_event,
 )
 from tests.support.slurm_environment import with_fake_image_build
+from tests.support.timing import real_timing
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
@@ -789,7 +790,11 @@ def test_core_path_runs_the_fake_slurm_search(
     )
     request = with_fake_image_build(request)
     runs = launch.default_runs(
-        LaunchSettings(agent_client_factory=_core_agents, backend_factory=host_container_backend)
+        LaunchSettings(
+            timing=real_timing(),
+            agent_client_factory=_core_agents,
+            backend_factory=host_container_backend,
+        )
     )
 
     renderer = _RecordingRenderer()

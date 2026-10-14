@@ -9,7 +9,6 @@ from vs_agent.shim_clock import ThreadsClock
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.spec import AgentBackend
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -24,7 +23,7 @@ if TYPE_CHECKING:
     from vs_agent.skills import SkillSelection
     from vs_agent.spec import AgentSpec
     from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 
 def agent_supports_tool_servers(spec: AgentSpec) -> bool | None:
@@ -62,6 +61,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
     agent_homes_dir: Path | None = None,
     clock: Clock,
+    threads: Threads,
 ) -> AgentClientProtocol:
     """Build the configured application-level agent service from ``spec``.
 
@@ -69,6 +69,8 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     (``Project.agent_homes_directory_for``); without it a provider that can
     only isolate through such a home runs with the operator's configuration.
     ``clock`` counts seconds since the epoch; it times turns and stamps usage rows.
+    ``threads`` is the blocking time agent turns wait on: the session launcher's locks and
+    agentshim's clock.
     """
     host_resources = tuple(host_resources)
     backend = spec.backend
@@ -127,7 +129,8 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         log=diagnostic_log,
         agent_homes=agent_homes_dir,
         env_passthrough=spec.env_passthrough,
-        clock=ThreadsClock(OsThreads()),
+        threads=threads,
+        clock=ThreadsClock(threads),
     )
 
     return AgentClient(
@@ -151,4 +154,5 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         event_sink=events,
         check_readiness=True,
         clock=clock,
+        threads=threads,
     )
