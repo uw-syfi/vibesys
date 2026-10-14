@@ -30,7 +30,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import FakeSignalSource, ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -103,7 +103,7 @@ def test_headless_entry_starts_and_renders_launch_run(
 ) -> None:
     # The one launch run over the real Git CLI: the default wiring of the repository.
     runs = _runs(real_git=True)
-    result = run_headless(_request(tmp_path / "project"), runs)
+    result = run_headless(_request(tmp_path / "project"), runs, FakeSignalSource())
 
     assert result.run_id.endswith("launch-test")
     assert not result.succeeded
@@ -160,7 +160,7 @@ def test_the_run_failed_line_and_traceback_show_control_characters_instead_of_se
     """
     runs = _rejecting_runs(_plan_rejecting_with(f"core rejected {_CONTROLS} the observation"))
     with pytest.raises(_CoreRejectedError) as raised:
-        run_headless(_request(tmp_path / "project"), runs)
+        run_headless(_request(tmp_path / "project"), runs, FakeSignalSource())
     print_uncaught(raised.type, raised.value, raised.tb)
 
     err = capsys.readouterr().err
@@ -176,7 +176,7 @@ def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
 ) -> None:
     runs = _rejecting_runs(_rejecting_plan)
     with pytest.raises(Exception, match="core rejected"):
-        run_headless(_request(tmp_path / "project"), runs)
+        run_headless(_request(tmp_path / "project"), runs, FakeSignalSource())
 
     lines = [line for line in capsys.readouterr().err.splitlines() if line.startswith("run failed")]
     assert lines == ["run failed: _CoreRejectedError: core rejected the observation"]

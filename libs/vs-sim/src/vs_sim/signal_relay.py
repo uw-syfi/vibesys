@@ -12,15 +12,17 @@ from __future__ import annotations
 
 import signal
 import socket
+import threading
 from contextlib import contextmanager
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
-
-from vs_sim.api import OsThreads, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
     from contextlib import AbstractContextManager
     from types import FrameType
+
+    from vs_sim.concurrency import Threads
 
 
 def _ignore(_signum: int, _frame: FrameType | None) -> None:
@@ -44,9 +46,9 @@ class SignalRelay(Protocol):
 class WakeupFdSignalRelay:
     """:class:`SignalRelay` over the interpreter's wakeup file descriptor."""
 
-    def __init__(self, threads: Threads | None = None) -> None:
-        """Run the relay thread on *threads* (operating-system threads by default)."""
-        self._threads: Threads = threads or OsThreads()
+    def __init__(self, threads: Threads) -> None:
+        """Run the relay thread on *threads*."""
+        self._threads = threads
 
     @contextmanager
     def relay(self, numbers: Iterable[int], on_signal: Callable[[int], None]) -> Iterator[None]:
@@ -75,8 +77,37 @@ class WakeupFdSignalRelay:
             reader.close()
 
 
-def relay_signals(
-    numbers: Iterable[int], on_signal: Callable[[int], None]
-) -> AbstractContextManager[None]:
-    """Relay *numbers* to *on_signal* through the process's real signals; see :class:`SignalRelay`."""
-    return WakeupFdSignalRelay().relay(numbers, on_signal)
+class MainThreadWake(Protocol):
+    """How another thread makes the main thread run a callback, ending the wait it is blocked in."""
+
+    def armed(self, on_wake: Callable[[], None]) -> AbstractContextManager[Callable[[], None]]:
+        """Arm the wake for the block; it yields the call that wakes the main thread.
+
+        Must be entered on the main thread. The yielded call is safe from any thread and
+        makes *on_wake* run on the main thread; *on_wake* may raise there (for example
+        ``KeyboardInterrupt``) to end what the main thread was doing. A wake may land
+        before the main thread blocks and so end nothing; callers resend until answered.
+        Leaving the block restores what the process had before.
+        """
+        ...
+
+
+class SignalMainThreadWake:
+    """:class:`MainThreadWake` through a private signal sent to the main thread alone."""
+
+    def __init__(self, number: signal.Signals = signal.SIGUSR1) -> None:
+        """Wake with *number*, which nothing else in the process may use while armed."""
+        self._number = number
+
+    @contextmanager
+    def armed(self, on_wake: Callable[[], None]) -> Iterator[Callable[[], None]]:
+        """Install the wake signal's handler; it is restored on exit."""
+
+        def handler(_signum: int, _frame: FrameType | None) -> None:
+            on_wake()
+
+        previous = signal.signal(self._number, handler)
+        try:
+            yield partial(signal.pthread_kill, threading.get_ident(), self._number)
+        finally:
+            signal.signal(self._number, previous)

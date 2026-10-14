@@ -21,9 +21,11 @@ from vibesys.api import ConfigurationError
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
+from vs_sim.api.testing import FakeSignalSource
 
 if TYPE_CHECKING:
     from pathlib import Path
+
 
 _RUN_ID = "20260811-120000-11111111-dynamic"
 _NOW = datetime(2026, 8, 11, 12, tzinfo=UTC)
@@ -153,7 +155,7 @@ def test_the_session_guards_a_request_that_skipped_validation(
     )
 
     with pytest.raises(ConfigurationError) as raised:
-        run_headless(request, production_runs())
+        run_headless(request, production_runs(), FakeSignalSource())
 
     assert raised.value.diagnostic.code == _CODE
     assert _RUN_ID in raised.value.diagnostic.message

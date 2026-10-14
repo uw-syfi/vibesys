@@ -39,9 +39,7 @@ import json
 import os
 import re
 import shutil
-import signal
 import sys
-import threading
 import tomllib
 from dataclasses import dataclass, field
 from functools import partial
@@ -55,6 +53,7 @@ from vs_sim.api import (
     LoopSignalSource,
     MonotonicClock,
     ProcessSpec,
+    Signals,
     SubprocessLauncher,
     SystemClock,
 )
@@ -139,8 +138,8 @@ class LauncherHost:
     """Starts the engine or TUI that shares this terminal."""
     clock: Clock = field(default_factory=MonotonicClock)
     """Times the dependency install and the TUI rebuild for the messages."""
-    signals: SignalSource | None = None
-    """Where this process's signals arrive; ``None`` is the process's own, on the main thread."""
+    signals: SignalSource = field(default_factory=LoopSignalSource)
+    """Where this process's signals arrive."""
 
 
 @dataclass(frozen=True)
@@ -247,15 +246,15 @@ def _run_headless(args: list[str], host: LauncherHost) -> int:
 
 # Signals a supervisor or a closed terminal sends to this process alone; the
 # child must see them too, or it runs on (SIGTERM) or is never told to stop.
-_FORWARDED_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
+_FORWARDED_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP)
 
 
 def call_child(
     argv: list[str],
     *,
     env: dict[str, str] | None = None,
-    children: ForegroundLauncher | None = None,
-    signals: SignalSource | None = None,
+    children: ForegroundLauncher,
+    signals: SignalSource,
 ) -> int:
     """Run *argv* until it exits and return its exit status.
 
@@ -267,9 +266,9 @@ def call_child(
     SIGTERM and SIGHUP are forwarded to the child. A child killed by a signal
     reports ``128 + signal``, as a shell does.
 
-    *children* starts the child (one that shares this terminal by default) and
-    *signals* is where this process's signals arrive (its own, on the main
-    thread, by default); a test passes Fakes of both and delivers by hand.
+    *children* starts the child (in production, one that shares this terminal) and
+    *signals* is where this process's signals arrive (in production, its own, which
+    only the main thread takes); a test passes Fakes of both and delivers by hand.
     """
     return asyncio.run(run_child(argv, env=env, children=children, signals=signals))
 
@@ -278,37 +277,32 @@ async def run_child(
     argv: list[str],
     *,
     env: dict[str, str] | None = None,
-    children: ForegroundLauncher | None = None,
-    signals: SignalSource | None = None,
+    children: ForegroundLauncher,
+    signals: SignalSource,
 ) -> int:
     """:func:`call_child` on the running event loop, for a caller that drives the loop."""
-    launcher = InheritedStdioLauncher() if children is None else children
     started: list[ForegroundChild] = []
 
-    def forward(number: signal.Signals) -> None:
+    def forward(number: Signals) -> None:
         for child in started:
             child.send_signal(number)
 
     def wait_for_child() -> None:
         """The terminal already delivered SIGINT to the child; keep waiting."""
 
-    source = LoopSignalSource() if signals is None else signals
-    # Only the main thread can take the process's own signals.
-    installable = signals is not None or threading.current_thread() is threading.main_thread()
-    installed: list[signal.Signals] = []
+    installed: list[Signals] = []
     try:
-        if installable:
-            source.add_handler(signal.SIGINT, wait_for_child)
-            installed.append(signal.SIGINT)
-            for number in _FORWARDED_SIGNALS:
-                source.add_handler(number, partial(forward, number))
-                installed.append(number)
-        child = await launcher.start(argv, env)
+        signals.add_handler(Signals.SIGINT, wait_for_child)
+        installed.append(Signals.SIGINT)
+        for number in _FORWARDED_SIGNALS:
+            signals.add_handler(number, partial(forward, number))
+            installed.append(number)
+        child = await children.start(argv, env)
         started.append(child)
         returncode = await child.wait()
     finally:
         for number in installed:
-            source.remove_handler(number)
+            signals.remove_handler(number)
     return 128 - returncode if returncode < 0 else returncode
 
 

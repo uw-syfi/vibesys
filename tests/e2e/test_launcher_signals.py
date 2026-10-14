@@ -29,6 +29,7 @@ import pytest
 from entrypoints.launcher import call_child
 from entrypoints.launcher import main as launcher_main
 from vibesys.api import boot_trace
+from vs_sim.api import InheritedStdioLauncher, LoopSignalSource
 from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, run_in_child
 
 if TYPE_CHECKING:
@@ -260,7 +261,11 @@ sys.exit(7)
 
 
 def _call_signalling_child(name: str, mode: str) -> int:
-    return call_child([sys.executable, "-c", _SIGNAL_PARENT, name, mode])
+    return _call_real_child([sys.executable, "-c", _SIGNAL_PARENT, name, mode])
+
+
+def _call_real_child(argv: list[str]) -> int:
+    return call_child(argv, children=InheritedStdioLauncher(), signals=LoopSignalSource())
 
 
 @pytest.mark.parametrize(
@@ -279,7 +284,7 @@ def test_call_child_waits_through_sigint_and_forwards_termination(
 
 
 def test_call_child_reports_a_signal_death_as_a_shell_does() -> None:
-    status = call_child(
+    status = _call_real_child(
         [sys.executable, "-c", "import os, signal; os.kill(os.getpid(), signal.SIGKILL)"]
     )
 
@@ -289,7 +294,9 @@ def test_call_child_reports_a_signal_death_as_a_shell_does() -> None:
 def test_call_child_from_a_worker_thread_only_waits() -> None:
     statuses: list[int] = []
     worker = threading.Thread(
-        target=lambda: statuses.append(call_child([sys.executable, "-c", "raise SystemExit(3)"]))
+        target=lambda: statuses.append(
+            _call_real_child([sys.executable, "-c", "raise SystemExit(3)"])
+        )
     )
     worker.start()
     join_or_fail(worker)

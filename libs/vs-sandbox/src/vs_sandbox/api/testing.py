@@ -36,11 +36,9 @@ from vs_sandbox.fake_docker_confinement import FakeDockerConfinement
 from vs_sandbox.fake_docker_engine import FakeContainer, FakeDockerEngine
 from vs_sandbox.fake_gpu_telemetry import FakeGpuTelemetry
 from vs_sandbox.fake_host_container import HostExecutedContainer, HostExecutedContainerBackend
-from vs_sandbox.fake_signal_relay import FakeSignalRelay
 from vs_sandbox.fake_stoppable_process import FakeStoppableProcess, StoppableScript
 from vs_sandbox.gpu_telemetry_contracts import GpuTelemetryContract, TelemetryHarness
 from vs_sandbox.process_contracts import ProcessHarness, StoppableProcessContract
-from vs_sandbox.signal_relay_contracts import RelayUnderTest, SignalRelayContract
 
 __all__ = [
     "DEFAULT_RESULT",
@@ -61,15 +59,12 @@ __all__ = [
     "FakeGpuTelemetry",
     "FakeLifecycleRunner",
     "FakeRunnerCreation",
-    "FakeSignalRelay",
     "FakeStoppableProcess",
     "GpuTelemetryContract",
     "HostExecutedContainer",
     "HostExecutedContainerBackend",
     "ProcessHarness",
-    "RelayUnderTest",
     "ScriptedDockerCli",
-    "SignalRelayContract",
     "StoppableProcessContract",
     "StoppableScript",
     "TelemetryHarness",

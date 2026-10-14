@@ -115,7 +115,6 @@ if TYPE_CHECKING:
     from vs_sandbox.local_shell import LocalShellRunner
     from vs_sandbox.modal_model_setup import ensure_model_volume
     from vs_sandbox.rocm_backend import RocmBackend
-    from vs_sandbox.signal_relay import SignalRelay, WakeupFdSignalRelay, relay_signals
     from vs_sandbox.toolchain_features import (
         CONTAINER_RUNTIME_TOOLCHAIN,
         DOCKER_COMPOSE_VERSION,
@@ -206,11 +205,9 @@ __all__ = [
     "SandboxSession",
     "SandboxUnavailableError",
     "SeatbeltSandbox",
-    "SignalRelay",
     "SubprocessDockerCli",
     "SystemAcceleratorDiscovery",
     "TrainiumBackend",
-    "WakeupFdSignalRelay",
     "WorkspaceSandbox",
     "backend_is_host_only",
     "build_feature_image",
@@ -231,7 +228,6 @@ __all__ = [
     "pick_gpu",
     "plan_feature_build",
     "register_compute_backend",
-    "relay_signals",
     "released",
     "require_sysbox_runtime",
     "start_sandbox",
@@ -330,9 +326,6 @@ _LAZY_EXPORTS = {
     "HostSandbox": ("host_sandbox", "HostSandbox"),
     "LandlockSandbox": ("host_sandbox", "LandlockSandbox"),
     "LinuxBackend": ("host_sandbox", "LinuxBackend"),
-    "SignalRelay": ("signal_relay", "SignalRelay"),
-    "WakeupFdSignalRelay": ("signal_relay", "WakeupFdSignalRelay"),
-    "relay_signals": ("signal_relay", "relay_signals"),
     "SANDBOX_DISABLE_ENV": ("host_sandbox", "DISABLE_ENV"),
     "SANDBOX_GPU_DEVICES_ENV": ("host_sandbox", "GPU_DEVICES_ENV"),
     "SandboxUnavailableError": ("host_sandbox", "SandboxUnavailableError"),

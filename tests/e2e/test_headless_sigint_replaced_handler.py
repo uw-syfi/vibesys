@@ -16,6 +16,7 @@ from typing import cast
 from entrypoints.run import supervise
 from vibesys.api import RunResult, RunSession, RunStatus
 from vibesys.api.testing import FakeRunHandle
+from vs_sim.api import LoopSignalSource
 from vs_sim.api.testing import run_in_child
 
 
@@ -56,7 +57,7 @@ def _drain_after_real_sigint() -> tuple[RunStatus, int, bool]:
         handle = FakeRunHandle("signalled")
         handle.bind(cast("RunSession", session))
         handle.start()
-        return (await supervise(handle)).status
+        return (await supervise(handle, signals=LoopSignalSource())).status
 
     status = asyncio.run(execute())
     return status, session.stop_calls, signal.getsignal(signal.SIGINT) is _replacement_handler

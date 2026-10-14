@@ -75,7 +75,14 @@ from vs_agent.api.testing import (
 )
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
 from vs_project.api import Project, StoredEnvelope
-from vs_sim.api import MonotonicClock, OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import (
+    LoopSignalSource,
+    MonotonicClock,
+    OsThreads,
+    SystemClock,
+    ThreadBlockingRunner,
+    UnixNetwork,
+)
 from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
@@ -734,7 +741,9 @@ def _run_headless_recording(
 
     async def execute() -> RunResult:
         handle = runs.start(request)
-        return await supervise(handle, render_run(handle, renderer=renderer))
+        return await supervise(
+            handle, render_run(handle, renderer=renderer), signals=LoopSignalSource()
+        )
 
     return asyncio.run(execute())
 

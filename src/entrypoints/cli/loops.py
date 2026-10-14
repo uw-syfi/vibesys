@@ -37,7 +37,7 @@ from vibesys.api.request import (
 )
 from vs_issue_tracker.api import IssueTrackerConfig
 from vs_project.api import Git, Project, ProjectLayoutError
-from vs_sim.api import OsProcesses
+from vs_sim.api import LoopSignalSource, OsProcesses
 
 if TYPE_CHECKING:
     import argparse
@@ -403,5 +403,5 @@ def describe_failure(failure: RunFailure) -> str:
 
 
 def _execute_run_request(request: RunRequest, runs: Runs) -> RunResult:
-    """Run *request* to completion via `headless.run`."""
-    return run_headless(request, runs)
+    """Run *request* to completion via `headless.run`, handling the process's own signals."""
+    return run_headless(request, runs, LoopSignalSource())

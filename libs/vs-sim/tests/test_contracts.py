@@ -64,6 +64,7 @@ from vs_sim.api.testing import (
     StreamingCommandContract,
     StreamingUnderTest,
     VirtualClock,
+    run_in_child,
     run_virtual,
     stop_process,
 )
@@ -176,6 +177,46 @@ class TestLoopSignalSource(SignalSourceContract):
             deliver=lambda number: os.kill(os.getpid(), number),
             isolate=True,
         )
+
+
+def _restores_the_earlier_handler() -> bool:
+    def earlier(_number: int, _frame: object) -> None:
+        return None
+
+    signal.signal(signal.SIGUSR2, earlier)
+    source = LoopSignalSource()
+
+    async def scope() -> bool:
+        source.add_handler(signal.SIGUSR2, lambda: None)
+        source.add_handler(signal.SIGUSR2, lambda: None)
+        return source.remove_handler(signal.SIGUSR2)
+
+    removed = asyncio.run(scope())
+    return removed and signal.getsignal(signal.SIGUSR2) is earlier
+
+
+def _off_main_thread_installs_nothing() -> tuple[bool, object]:
+    source = LoopSignalSource()
+    before = signal.getsignal(signal.SIGUSR2)
+    outcome: list[bool] = []
+
+    async def scope() -> None:
+        source.add_handler(signal.SIGUSR2, lambda: None)
+        outcome.append(source.remove_handler(signal.SIGUSR2))
+
+    worker = OsThreads().spawn(lambda: asyncio.run(scope()), name="off-main")
+    worker.join(HANG_GUARD_S)
+    return (outcome == [False], signal.getsignal(signal.SIGUSR2) is before)
+
+
+class TestLoopSignalSourceScope:
+    """The real source leaves the process's signal dispositions as it found them."""
+
+    def test_removing_restores_the_handler_installed_before(self) -> None:
+        assert run_in_child(_restores_the_earlier_handler)
+
+    def test_off_the_main_thread_it_installs_nothing(self) -> None:
+        assert run_in_child(_off_main_thread_installs_nothing) == (True, True)
 
 
 def _assert_running(process: subprocess.Popen[bytes]) -> None:

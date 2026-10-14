@@ -31,7 +31,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
-from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import LoopSignalSource, OsThreads, ThreadBlockingRunner, UnixNetwork
 
 PLUGIN_ID = "slurm-signal"
 
@@ -77,7 +77,7 @@ def main(project_root: Path, slurm_config: Path) -> None:
 
     async def execute() -> None:
         handle = runs.start(request)
-        await supervise(handle, render_run(handle))
+        await supervise(handle, render_run(handle), signals=LoopSignalSource())
 
     asyncio.run(execute())
 

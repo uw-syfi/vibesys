@@ -1,4 +1,4 @@
-"""An in-memory :class:`~vs_sandbox.signal_relay.SignalRelay` whose signals a test delivers by hand."""
+"""In-memory signal relay and main-thread wake whose arrivals a test delivers by hand."""
 
 from __future__ import annotations
 
@@ -38,4 +38,37 @@ class FakeSignalRelay:
         if self._active is None or int(number) not in self._active[0]:
             return False
         self._active[1](int(number))
+        return True
+
+
+class FakeMainThreadWake:
+    """Counts wakes; ``answer`` stands in for the main thread taking one."""
+
+    def __init__(self) -> None:
+        """Start disarmed with no wake sent."""
+        self._on_wake: Callable[[], None] | None = None
+        self.sent = 0
+
+    @property
+    def active(self) -> bool:
+        """Whether an ``armed`` block is open."""
+        return self._on_wake is not None
+
+    @contextmanager
+    def armed(self, on_wake: Callable[[], None]) -> Iterator[Callable[[], None]]:
+        """Arm until the block ends; the yielded call records a wake."""
+        self._on_wake = on_wake
+        try:
+            yield self._send
+        finally:
+            self._on_wake = None
+
+    def _send(self) -> None:
+        self.sent += 1
+
+    def answer(self) -> bool:
+        """Run the armed callback as the main thread would; whether one was armed."""
+        if self._on_wake is None:
+            return False
+        self._on_wake()
         return True

@@ -7,12 +7,10 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import webbrowser
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import partial
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol
@@ -55,8 +53,15 @@ from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
 from vs_github.api import GitHubCLI, GitHubCLIError
 from vs_project.api import Project
-from vs_sandbox.api import relay_signals
-from vs_sim.api import OsProcesses, OsThreads, SystemClock, utc_datetime
+from vs_sim.api import (
+    OsProcesses,
+    OsThreads,
+    SignalMainThreadWake,
+    Signals,
+    SystemClock,
+    WakeupFdSignalRelay,
+    utc_datetime,
+)
 
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
@@ -66,8 +71,6 @@ GATEWAY_STOP_TIMEOUT_SECONDS = WEBSOCKET_CLOSE_TIMEOUT_SECONDS + _GATEWAY_STOP_G
 """Transport close bound plus grace to observe the released instance files."""
 _DETACHED_POLL_SECONDS = 0.05
 _DETACHED_LOG_TAIL_BYTES = 4_096
-_INTERRUPT_SIGNAL = signal.SIGUSR1
-"""Private signal that wakes the main thread; only the relay sends it."""
 
 if TYPE_CHECKING:
     import argparse
@@ -76,7 +79,7 @@ if TYPE_CHECKING:
 
     from server.runtime import ServerLifecycleObserver, ServerRuntime
     from vibesys.api import Config, Runs
-    from vs_sim.api import Threads
+    from vs_sim.api import MainThreadWake, SignalRelay, Threads
 
 
 def _report_stuck_main_thread(waited: float) -> None:
@@ -87,37 +90,33 @@ def _report_stuck_main_thread(waited: float) -> None:
 
 
 @contextmanager
-def _termination_signal(runtime: ServerRuntime) -> Iterator[None]:
+def _termination_signal(
+    runtime: ServerRuntime, relay: SignalRelay, wake: MainThreadWake, threads: Threads
+) -> Iterator[None]:
     """Forward launcher termination into the server's cleanup boundary.
 
     The kernel may hand a process-directed SIGTERM to a transport thread, while
     CPython runs Python handlers on the main thread only, so a handler installed
-    for SIGTERM is not run while the main thread is blocked in the run. The
-    relay observes SIGTERM on whichever thread took it, then interrupts the main
-    thread with a private wake signal that is always delivered to it, resent
-    until the main thread has taken it (see ``MainThreadInterrupt``).
+    for SIGTERM is not run while the main thread is blocked in the run. *relay*
+    observes SIGTERM on whichever thread took it, then *wake* interrupts the main
+    thread, resent until the main thread has taken it (see ``MainThreadInterrupt``).
     """
-    interrupt = MainThreadInterrupt(
-        partial(signal.pthread_kill, threading.get_ident(), _INTERRUPT_SIGNAL),
-        OsThreads(),
-        _report_stuck_main_thread,
-    )
 
-    def on_interrupt_signal(signum: int, frame: object) -> None:
-        del signum, frame
+    def on_wake() -> None:
+        # Bound below, before the relay that alone requests a wake is entered.
         interrupt.take()
 
-    def terminate(signum: int) -> None:
-        del signum
-        runtime.shutdown()
-        interrupt.request()
+    with ExitStack() as scope:
+        send = scope.enter_context(wake.armed(on_wake))
+        interrupt = MainThreadInterrupt(send, threads, _report_stuck_main_thread)
 
-    previous = signal.signal(_INTERRUPT_SIGNAL, on_interrupt_signal)
-    try:
-        with relay_signals([signal.SIGTERM], terminate):
-            yield
-    finally:
-        signal.signal(_INTERRUPT_SIGNAL, previous)
+        def terminate(signum: int) -> None:
+            del signum
+            runtime.shutdown()
+            interrupt.request()
+
+        scope.enter_context(relay.relay([Signals.SIGTERM], terminate))
+        yield
 
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:
@@ -1091,7 +1090,10 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 observer=observer,
                 clock=SystemClock(),
             )
-        with _termination_signal(runtime):
+        threads = OsThreads()
+        with _termination_signal(
+            runtime, WakeupFdSignalRelay(threads), SignalMainThreadWake(), threads
+        ):
             result = runtime.run(lambda: None if request is None else runtime.drive(request))
     finally:
         if temp_socket_dir is not None:

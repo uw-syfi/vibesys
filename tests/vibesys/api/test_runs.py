@@ -185,7 +185,7 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     )
     handle = runs.start(request_template)
     handle.stop()
-    result = await supervise(handle, handle_signals=False)
+    result = await supervise(handle, signals=None)
     assert result.status is ProductRunStatus.STOPPED
     assert not result.succeeded
     events = [event async for event in handle.events()]

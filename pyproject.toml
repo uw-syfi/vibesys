@@ -309,6 +309,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 "libs/vs-sandbox/src/vs_sandbox/*_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/concurrency_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-sim/src/vs_sim/signal_relay_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-runtime/src/vs_runtime/api/*_contracts.py" = ["S101", "PLR2004"]
 # Scenario and fixture builders for the runtime's own test suites, moved out of tests/support
 # (where D, S101 and PLR2004 were already waived) so every consumer reaches them through
