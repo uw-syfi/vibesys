@@ -19,6 +19,8 @@ Engineering judgment that holds in any well-run codebase.
 
 How to make one kind of change in this repository.
 
+- [add-agent-provider](add-agent-provider/SKILL.md): add or change an agent CLI
+  provider, upgrade agentshim, or bump a pinned CLI version.
 - [add-bundled-skill](add-bundled-skill/SKILL.md): add or change a bundled
   product skill, its sidecar selection rules, platform references or its
   vendoring update script.

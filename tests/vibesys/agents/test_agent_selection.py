@@ -73,7 +73,7 @@ def test_agentshim_is_the_default_driver() -> None:
     assert client.provider == "codex"
 
 
-@pytest.mark.parametrize("provider", ["claude", "gemini", "codex", "opencode"])
+@pytest.mark.parametrize("provider", sorted(SHIPPED_PROVIDERS))
 def test_default_driver_supports_all_agentshim_providers(provider: str) -> None:
     client = _build(_config(backend="cli", cli_provider=provider))
 
