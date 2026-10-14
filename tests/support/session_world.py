@@ -57,7 +57,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.testing import FakeWorkspace
 from vs_runtime.contracts import WorkspaceAccess
-from vs_sim.api import ThreadBlockingRunner
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -291,7 +291,7 @@ class SessionHost:
         """A freshly started host over the same journal and provider conversation."""
         resolver: SessionResolver = self.resolver
         return RuntimeSessionRequests(
-            FakeAgentSessions(self.client, self.journal),
+            FakeAgentSessions(self.client, self.journal, threads=OsThreads()),
             resolver,
             store,
             yields=None,
@@ -300,7 +300,7 @@ class SessionHost:
 
     def sessions(self) -> FakeAgentSessions:
         """A freshly started journal reader, for assertions on durable facts."""
-        return FakeAgentSessions(self.client, self.journal)
+        return FakeAgentSessions(self.client, self.journal, threads=OsThreads())
 
     async def run(
         self,
@@ -357,8 +357,8 @@ def open_host(
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
 
-    driver = FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn)
-    client = AgentClient(driver, clock=ManualClock())
+    driver = FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn, threads=OsThreads())
+    client = AgentClient(driver, clock=ManualClock(), threads=OsThreads())
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),
         client,

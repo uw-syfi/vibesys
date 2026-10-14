@@ -70,6 +70,7 @@ from vs_agent.contracts import (
 )
 from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeDockerConfinement
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock, start_thread
 
 if TYPE_CHECKING:
@@ -205,6 +206,7 @@ def _launcher(
         # Zero waits keep the retry tests instant; the schedule is the knob.
         transient_retry_delays=options.get("transient_retry_delays", (0.0, 0.0)),
         clock=FakeClock(),
+        threads=OsThreads(),
     )
     return launcher, fake
 
@@ -1499,7 +1501,11 @@ def test_an_agent_client_keeps_the_conversation_through_a_schema_failure(
     workspace.mkdir()
     key = AgentSessionKey(SessionScope.MEMBER, "planner:p")
     with AgentClient(
-        launcher, provider="claude", event_sink=NULL_AGENT_EVENT_SINK, clock=ManualClock()
+        launcher,
+        provider="claude",
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=OsThreads(),
     ) as client:
 
         def turn(prompt: str) -> str:
@@ -1886,7 +1892,7 @@ def test_the_shipped_providers_are_the_ones_the_launcher_accepts() -> None:
 
 def test_an_unknown_provider_is_rejected_by_name() -> None:
     with pytest.raises(ValueError, match="nonesuch"):
-        subject.ConfinedSessionLauncher(provider="nonesuch", clock=FakeClock())
+        subject.ConfinedSessionLauncher(provider="nonesuch", clock=FakeClock(), threads=OsThreads())
 
 
 @pytest.mark.parametrize("provider", SCRIPTED_PROVIDERS)
@@ -2101,6 +2107,7 @@ def test_a_session_finds_the_run_skills_where_its_provider_looks(
         skills=[tmp_path / "skills"],
         event_sink=NULL_AGENT_EVENT_SINK,
         clock=ManualClock(),
+        threads=OsThreads(),
     )
     with client:
         client.invoke_text(
@@ -2239,6 +2246,7 @@ def test_a_container_launcher_reports_no_config_isolation_even_with_a_run_home(
         docker_sandboxes=sandboxes,
         agent_homes=tmp_path / "agent-homes",
         clock=FakeClock(),
+        threads=OsThreads(),
     )
 
     assert launcher.capabilities.config_isolation is False
@@ -2291,8 +2299,15 @@ def test_process_spawn_os_errors_are_retryable_typed_faults(
             executor_factory=lambda: executor,
             launcher_env=dict,
             clock=FakeClock(),
+            threads=OsThreads(),
         )
-        client = AgentClient(launcher, provider="claude", containerized=True, clock=ManualClock())
+        client = AgentClient(
+            launcher,
+            provider="claude",
+            containerized=True,
+            clock=ManualClock(),
+            threads=OsThreads(),
+        )
         try:
             with pytest.raises(RuntimeError, match="could not start") as raised:
                 client.invoke_text(

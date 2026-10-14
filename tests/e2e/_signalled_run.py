@@ -31,13 +31,15 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
-from vs_sim.api import ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 
 PLUGIN_ID = "slurm-signal"
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 def main(project_root: Path, slurm_config: Path) -> None:

@@ -445,7 +445,7 @@ def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:
         resource = "agent client"
         raise CoreCompositionError(resource, detail)
     reported = report_turns(client, resources.agent_lifecycle)
-    return ClientAgentSessions(reported, resources.invocation_slot)
+    return ClientAgentSessions(reported, resources.invocation_slot, threads=resources.threads)
 
 
 def agent_session_spec(

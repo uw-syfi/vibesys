@@ -22,6 +22,7 @@ from vs_agent.api import AgentClient, native_schema_problems
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
 from vs_core.api import WaitableReply
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -175,9 +176,11 @@ def test_waitable_replies_reach_codex_as_native_schemas(
     tmp_path: Path, model: type[BaseModel], payload: dict[str, object]
 ) -> None:
     executor = FakeExecutor(scripted_turn("codex", structured_output=payload))
-    launcher = fake_agentshim_launcher(provider="codex", executor=executor)
+    launcher = fake_agentshim_launcher(provider="codex", executor=executor, threads=OsThreads())
 
-    with AgentClient(launcher, provider="codex", clock=ManualClock()) as client:
+    with AgentClient(
+        launcher, provider="codex", clock=ManualClock(), threads=OsThreads()
+    ) as client:
         result = client.invoke(
             kind="implementer",
             workspace=tmp_path,

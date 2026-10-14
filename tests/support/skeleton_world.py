@@ -472,7 +472,11 @@ class CandidateResolver(FakeSessionResolver):
 
 def _open_agents(root: Path) -> SessionHost:
     writer = CandidateWriter(root)
-    client = AgentClient(FakeProvider(answer=writer.answer, on_turn=writer), clock=ManualClock())
+    client = AgentClient(
+        FakeProvider(answer=writer.answer, on_turn=writer, threads=OsThreads()),
+        clock=ManualClock(),
+        threads=OsThreads(),
+    )
     resolver = CandidateResolver(
         root,
         TemplateRenderer(root),

@@ -32,6 +32,7 @@ from vs_faults.api import (
     FaultPlan,
     FaultRule,
 )
+from vs_sim.api import OsThreads
 
 
 class _Step(BaseModel):
@@ -70,7 +71,9 @@ def test_a_plan_without_agent_rules_passes_every_turn_through(seed: int, turns: 
     plan = FaultPlan.generate(
         seed, targets={Boundary.TOOL_CALL: ("x",), Boundary.CLUSTER: ()}, faults=3
     )
-    client = FaultyAgentClient(FakeAgentClient().set_response(_KIND, _ANSWER), plan)
+    client = FaultyAgentClient(
+        FakeAgentClient(threads=OsThreads()).set_response(_KIND, _ANSWER), plan, threads=OsThreads()
+    )
 
     assert [_turn(client) for _ in range(turns)] == [_ANSWER] * turns
     assert client.injected == []
@@ -79,8 +82,8 @@ def test_a_plan_without_agent_rules_passes_every_turn_through(seed: int, turns: 
 @pytest.mark.parametrize("fault", list(AgentFault))
 def test_an_agent_fault_fires_on_its_turn_only(fault: AgentFault) -> None:
     rule = FaultRule(boundary=Boundary.AGENT_TURN, target=_KIND, at=2, fault=fault)
-    inner = FakeAgentClient().set_response(_KIND, _ANSWER)
-    client = FaultyAgentClient(inner, FaultPlan(seed=7, rules=(rule,)))
+    inner = FakeAgentClient(threads=OsThreads()).set_response(_KIND, _ANSWER)
+    client = FaultyAgentClient(inner, FaultPlan(seed=7, rules=(rule,)), threads=OsThreads())
 
     assert _turn(client) == _ANSWER
     expected = {
@@ -152,7 +155,11 @@ def _shape(signature: inspect.Signature) -> tuple[object, ...]:
 
 def test_a_wrapped_turn_executor_stays_a_turn_executor() -> None:
     """The runtime refuses a durable turn on a client that is not an AgentTurnExecutor."""
-    client = FaultyAgentClient(FakeAgentClient().set_response(_KIND, _ANSWER), FaultPlan(seed=1))
+    client = FaultyAgentClient(
+        FakeAgentClient(threads=OsThreads()).set_response(_KIND, _ANSWER),
+        FaultPlan(seed=1),
+        threads=OsThreads(),
+    )
 
     assert isinstance(client, AgentTurnExecutor)
     assert _as_protocols(client) == (client, client)
@@ -162,8 +169,8 @@ def test_a_wrapped_turn_executor_stays_a_turn_executor() -> None:
 @pytest.mark.parametrize("fault", list(AgentFault))
 def test_an_agent_fault_fires_on_a_durable_turn_too(fault: AgentFault) -> None:
     rule = FaultRule(boundary=Boundary.AGENT_TURN, target=_KIND, at=2, fault=fault)
-    inner = FakeAgentClient().set_response(_KIND, _ANSWER)
-    client = FaultyAgentClient(inner, FaultPlan(seed=7, rules=(rule,)))
+    inner = FakeAgentClient(threads=OsThreads()).set_response(_KIND, _ANSWER)
+    client = FaultyAgentClient(inner, FaultPlan(seed=7, rules=(rule,)), threads=OsThreads())
 
     assert _raw_turn(client) == _ANSWER
     # A raw turn returns text; the caller parses it, so output faults surface as parse errors.
@@ -207,7 +214,9 @@ class _Report(BaseModel):
 
 def test_generated_replies_are_reproducible_from_the_seed() -> None:
     def replies(seed: int) -> list[str]:
-        client = FakeAgentClient().set_response(_KIND, generated_replies(FaultPlan(seed=seed)))
+        client = FakeAgentClient(threads=OsThreads()).set_response(
+            _KIND, generated_replies(FaultPlan(seed=seed), threads=OsThreads())
+        )
         return [_turn(client).model_dump_json() for _ in range(4)]
 
     assert replies(3) == replies(3)

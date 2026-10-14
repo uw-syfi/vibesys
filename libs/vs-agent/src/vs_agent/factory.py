@@ -11,7 +11,7 @@ from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.spec import AgentBackend
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
     from typing import TextIO
 
@@ -60,6 +60,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
     agent_homes_dir: Path | None = None,
+    launcher_env: Callable[[], Mapping[str, str]] | None = None,
     clock: Clock,
     threads: Threads,
 ) -> AgentClientProtocol:
@@ -69,6 +70,9 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
     (``Project.agent_homes_directory_for``); without it a provider that can
     only isolate through such a home runs with the operator's configuration.
     ``clock`` counts seconds since the epoch; it times turns and stamps usage rows.
+    ``launcher_env`` reads the environment VibeSys was launched with; ``None`` reads the
+    interactive login shell's, which agentshim caches once per process, so a test that
+    controls the provider's ``PATH`` passes its own.
     ``threads`` is the blocking time agent turns wait on: the session launcher's locks and
     agentshim's clock.
     """
@@ -87,7 +91,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
             StubAgentClient,
         )
 
-        return StubAgentClient(event_sink=events)
+        return StubAgentClient(event_sink=events, threads=threads)
 
     if backend != AgentBackend.CLI:
         message = f"unknown agent backend: {backend.value!r}"
@@ -117,6 +121,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
             raise SystemExit(message)
         docker_sandboxes = backends
     from vs_agent.session_launch import (  # noqa: PLC0415  # lint-waiver: LW-010176 [PLC0415]; Keep ConfinedSessionLauncher lazy in build_agent_client so unused providers and import cycles stay unloaded.
+        LAUNCH_SHELL_ENVIRONMENT,
         ConfinedSessionLauncher,
     )
 
@@ -129,6 +134,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-010172 [PLR0913]; Pr
         log=diagnostic_log,
         agent_homes=agent_homes_dir,
         env_passthrough=spec.env_passthrough,
+        launcher_env=LAUNCH_SHELL_ENVIRONMENT if launcher_env is None else launcher_env,
         threads=threads,
         clock=ThreadsClock(threads),
     )

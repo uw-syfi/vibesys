@@ -130,8 +130,11 @@ class Run:
         )
         client = report_turns(
             AgentClient(
-                FakeProvider(answer={"value": 7}, on_turn=self.provider.on_turn),
+                FakeProvider(
+                    answer={"value": 7}, on_turn=self.provider.on_turn, threads=OsThreads()
+                ),
                 clock=ManualClock(),
+                threads=OsThreads(),
             ),
             self.lifecycle,
         )
@@ -141,6 +144,7 @@ class Run:
             invocation_slot=self.journal,
             store=store,
             blocking=ThreadBlockingRunner(),
+            threads=OsThreads(),
         )
 
     def dispatch(self) -> DispatchTurn:

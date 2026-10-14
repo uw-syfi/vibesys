@@ -53,7 +53,7 @@ if TYPE_CHECKING:
     from vs_runtime._workspaces import RuntimeWorkspaces
     from vs_runtime.api.infrastructure import AgentConfigurationResolver
     from vs_runtime.contracts import AgentRole
-    from vs_sim.api import BlockingRunner
+    from vs_sim.api import BlockingRunner, Threads
 
 type SessionSpecFactory = Callable[[AgentRole, Path], AgentSessionSpec]
 """Provider session configuration for one role in one workspace directory."""
@@ -231,7 +231,7 @@ class SessionExecutors:
     """CancelTurn, CloseSession and ResumeSessionTurn."""
 
 
-def open_session_requests(  # noqa: PLR0913  # lint-waiver: LW-260142 [PLR0913]; the resolver inputs, the agent client, its journal, the shared store, the blocking runner and the yields.
+def open_session_requests(  # noqa: PLR0913  # lint-waiver: LW-260142 [PLR0913]; the resolver inputs, the agent client, its journal, the shared store, the run's threads, the blocking runner and the yields.
     # > Each is owned by a different part of the run; a parameter object would have this
     # > one user and only rename the arguments, and ``ResolverInputs`` describes what a
     # > session may do, not where its blocking calls run.
@@ -240,6 +240,7 @@ def open_session_requests(  # noqa: PLR0913  # lint-waiver: LW-260142 [PLR0913];
     client: AgentTurnExecutor,
     invocation_slot: AgentInvocationStore,
     store: ReceiptStore,
+    threads: Threads,
     blocking: BlockingRunner,
     yields: TurnYields | None = None,
 ) -> SessionExecutors:
@@ -253,7 +254,7 @@ def open_session_requests(  # noqa: PLR0913  # lint-waiver: LW-260142 [PLR0913];
     exist without it.
     """
     return session_executors(
-        ClientAgentSessions(client, invocation_slot),
+        ClientAgentSessions(client, invocation_slot, threads=threads),
         ProductionSessionResolver(inputs),
         store,
         yields,

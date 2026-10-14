@@ -27,7 +27,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from vs_agent.session_key import AgentSessionKey
 from vs_project.api import ProjectError
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -168,12 +167,12 @@ class DurableSessionStore:
         slot: StateSlot[AgentSessionState],
         *,
         log: Callable[[str], None] = _ignore_diagnostic,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Bind the store to a local-namespace ``sessions.json`` slot."""
         self._slot = slot
         self._log = log
-        self._mutation_lock = (threads or OsThreads()).rlock()
+        self._mutation_lock = threads.rlock()
 
     def get(self, key: AgentSessionKey) -> ProviderSessionRecord | None:
         """Return the checkpoint for ``key``, or ``None``."""

@@ -55,7 +55,7 @@ from vs_runtime.api import (
     AgentRole,
     OrchestrationResumeDecision,
 )
-from vs_sim.api import ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -66,7 +66,9 @@ def _discard_event(event: CoreEvent) -> None:
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 _SETTINGS = LaunchSettings(

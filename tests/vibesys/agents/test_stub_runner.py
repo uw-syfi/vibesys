@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from vs_agent.api import AgentOutputSchemaError, AgentSessionKey, SessionScope
 from vs_agent.stub_runner import StubAgentClient
+from vs_sim.api import OsThreads
 
 
 class _Response(BaseModel):
@@ -12,7 +13,7 @@ class _Response(BaseModel):
 
 
 def test_stub_runner_reports_a_structured_turn_as_schema_failure(tmp_path: Path) -> None:
-    runner = StubAgentClient()
+    runner = StubAgentClient(threads=OsThreads())
 
     with pytest.raises(AgentOutputSchemaError, match="no structured output"):
         runner.invoke(
@@ -26,7 +27,7 @@ def test_stub_runner_reports_a_structured_turn_as_schema_failure(tmp_path: Path)
 
 
 def test_stub_runner_returns_plain_chat_text(tmp_path: Path) -> None:
-    runner = StubAgentClient()
+    runner = StubAgentClient(threads=OsThreads())
 
     answer = runner.invoke_text(
         kind="chat",
@@ -41,7 +42,7 @@ def test_stub_runner_returns_plain_chat_text(tmp_path: Path) -> None:
 
 
 def test_stub_runner_names_no_provider_conversation() -> None:
-    runner = StubAgentClient()
+    runner = StubAgentClient(threads=OsThreads())
     key = AgentSessionKey(SessionScope.CHAT, "thread-a")
 
     # The stub runs no provider, so nothing can be resumed or compared against.
@@ -50,7 +51,7 @@ def test_stub_runner_names_no_provider_conversation() -> None:
 
 
 def test_stub_runner_emulates_builtin_conversation_capabilities() -> None:
-    capabilities = StubAgentClient().capabilities
+    capabilities = StubAgentClient(threads=OsThreads()).capabilities
 
     assert capabilities.session_reuse
     assert capabilities.provider_session_resume

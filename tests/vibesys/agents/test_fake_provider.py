@@ -39,6 +39,7 @@ from vs_agent.api.testing import (
     usage as usage_event,
 )
 from vs_agent.contracts import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -74,6 +75,7 @@ def _invoke_plan(
         model_name="mock-model",
         event_sink=event_sink,
         clock=ManualClock(),
+        threads=OsThreads(),
     )
     return client.invoke(
         kind="orchestrator",
@@ -102,7 +104,9 @@ def _plan_answer(hypothesis_id: str = "H-01") -> OrchestratorPlan:
 
 def test_scripted_mode_answers_a_structured_turn(tmp_path: Path) -> None:
     plan = _invoke_plan(
-        FakeProvider(turn=[assistant_text("planning...")], answer=_plan_answer()),
+        FakeProvider(
+            turn=[assistant_text("planning...")], answer=_plan_answer(), threads=OsThreads()
+        ),
         tmp_path,
     )
 
@@ -134,7 +138,11 @@ def test_scripted_mode_publishes_the_whole_agent_event_vocabulary(
         + [usage_event(input_tokens=1200, output_tokens=300)] * usage_updates
     )
 
-    _invoke_plan(FakeProvider(turn=events, answer=_plan_answer()), tmp_path, events=sink_events)
+    _invoke_plan(
+        FakeProvider(turn=events, answer=_plan_answer(), threads=OsThreads()),
+        tmp_path,
+        events=sink_events,
+    )
 
     # The turn is structured, so its assistant text is the raw schema payload
     # and production routes it to the diagnostic channel, never the assistant one.
@@ -174,6 +182,7 @@ def test_scripted_tool_results_carry_the_configured_payload_size(
         FakeProvider(
             turn=[tool_call("Bash", {"command": "x"}), tool_result("y" * 4096)],
             answer=_plan_answer(),
+            threads=OsThreads(),
         ),
         tmp_path,
         events=sink_events,
@@ -196,7 +205,11 @@ def test_scripted_tool_calls_and_results_are_correlated(
         for event in (tool_call("Bash", {"command": f"cmd-{i}"}), tool_result(f"out-{i}"))
     ]
 
-    _invoke_plan(FakeProvider(turn=events, answer=_plan_answer()), tmp_path, events=sink_events)
+    _invoke_plan(
+        FakeProvider(turn=events, answer=_plan_answer(), threads=OsThreads()),
+        tmp_path,
+        events=sink_events,
+    )
 
     call_ids = [
         event.data.call_id
@@ -228,6 +241,7 @@ def test_scripted_todos_arrive_as_a_provider_plan_snapshot(
                 )
             ],
             answer=_plan_answer(),
+            threads=OsThreads(),
         ),
         tmp_path,
         events=sink_events,
@@ -247,6 +261,7 @@ def test_scripted_usage_reaches_the_sink_as_a_usage_update(
         FakeProvider(
             turn=[usage_event(input_tokens=1000, output_tokens=120)],
             answer=_plan_answer(),
+            threads=OsThreads(),
         ),
         tmp_path,
         events=sink_events,
@@ -264,6 +279,7 @@ def test_explicit_structured_answer_is_reused_across_turns(tmp_path: Path) -> No
     provider = FakeProvider(
         turn=[assistant_text("planning...")],
         answer=_plan_answer("configured"),
+        threads=OsThreads(),
     )
 
     first = _invoke_plan(provider, tmp_path, round_label="round 1")
@@ -280,6 +296,7 @@ def test_events_are_scoped_to_the_invoking_role_and_round(
         FakeProvider(
             turn=[tool_call("Bash", {"command": "x"}), tool_result("ok")],
             answer=_plan_answer(),
+            threads=OsThreads(),
         ),
         tmp_path,
         round_label="round 7",
@@ -297,7 +314,7 @@ def test_an_unscripted_response_schema_is_rejected_rather_than_faked(tmp_path: P
     class UnknownResponse(BaseModel):
         answer: str
 
-    provider = FakeProvider()
+    provider = FakeProvider(threads=OsThreads())
     session = provider.launch(
         AgentSessionSpec(
             role="orchestrator",
@@ -312,7 +329,7 @@ def test_an_unscripted_response_schema_is_rejected_rather_than_faked(tmp_path: P
 
 
 def test_cancel_is_idempotent_and_leaves_the_session_usable(tmp_path: Path) -> None:
-    provider = FakeProvider()
+    provider = FakeProvider(threads=OsThreads())
     session = provider.launch(
         AgentSessionSpec(
             role="orchestrator",
@@ -331,7 +348,7 @@ def test_cancel_is_idempotent_and_leaves_the_session_usable(tmp_path: Path) -> N
 
 
 def test_a_closed_provider_refuses_new_sessions(tmp_path: Path) -> None:
-    provider = FakeProvider()
+    provider = FakeProvider(threads=OsThreads())
     provider.close()
     provider.close()  # idempotent
 

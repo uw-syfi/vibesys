@@ -109,7 +109,11 @@ async def _play(
         writer = CandidateWriter(root)
         played.writer = writer
         script = FakeTurnScript(answers=(*([error] * stops), writer.answer))
-        client = AgentClient(FakeProvider(script=script, on_turn=writer), clock=ManualClock())
+        client = AgentClient(
+            FakeProvider(script=script, on_turn=writer, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
+        )
         install_capacity_gate(
             client,
             control=channel,

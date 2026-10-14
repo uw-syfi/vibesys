@@ -34,6 +34,7 @@ from vs_agent.api import (
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -112,6 +113,7 @@ def _turn(
         launcher_env=lambda: operator_env,
         log=logs.append,
         clock=FakeClock(),
+        threads=OsThreads(),
     )
     session = launcher.launch(spec)
     session.run_turn(AgentTurnRequest(message="go"))
@@ -243,7 +245,9 @@ def test_no_variable_outside_the_allowlist_or_the_run_reaches_a_session(
 
 def test_an_env_passthrough_entry_that_is_not_a_variable_name_is_rejected() -> None:
     with pytest.raises(ValueError, match="'BAD-NAME'"):
-        ConfinedSessionLauncher(provider="claude", env_passthrough=("BAD-NAME",), clock=FakeClock())
+        ConfinedSessionLauncher(
+            provider="claude", env_passthrough=("BAD-NAME",), clock=FakeClock(), threads=OsThreads()
+        )
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)
@@ -283,6 +287,7 @@ def test_the_dropped_launcher_variable_names_are_logged_once_and_never_their_val
         launcher_env=lambda: operator_env,
         log=logs.append,
         clock=FakeClock(),
+        threads=OsThreads(),
     )
 
     for _ in range(2):

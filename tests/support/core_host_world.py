@@ -31,7 +31,9 @@ if TYPE_CHECKING:
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 @asynccontextmanager

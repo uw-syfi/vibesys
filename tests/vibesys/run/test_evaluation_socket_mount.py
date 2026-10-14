@@ -77,7 +77,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             options=EmptyOptions(),
             timing=RunTiming(clock, 60.0, OsThreads()),
             agent_client_factory=lambda **_: FakeAgentClient(
-                capabilities=AgentCapabilities(provider_session_resume=True)
+                capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
             ),
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),

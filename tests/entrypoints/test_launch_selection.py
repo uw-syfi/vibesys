@@ -25,7 +25,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -56,7 +56,9 @@ class FalseyFakeAgentFactory:
 
     def __call__(self, **_kwargs: object) -> FakeAgentClient:
         client = FakeAgentClient(
-            session_reuse=True, capabilities=AgentCapabilities(provider_session_resume=True)
+            session_reuse=True,
+            capabilities=AgentCapabilities(provider_session_resume=True),
+            threads=OsThreads(),
         ).set_text(None, "selected fake")
         self.clients.append(client)
         return client
@@ -195,7 +197,7 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
             processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=lambda **_kwargs: FakeAgentClient(
-                capabilities=AgentCapabilities(provider_session_resume=True)
+                capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
             ),
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
             git_repository=FakeGitRepositories().repository,

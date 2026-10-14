@@ -596,7 +596,9 @@ class _SessionLifecycleWorld(_SessionsWorld):
     def __init__(self, base: Path) -> None:
         super().__init__(base)
         slot = self.real_namespace().slot("sessions.json", AgentSessionState)
-        self.host = open_lifecycle_host(base / "workspace", DurableSessionStore(slot))
+        self.host = open_lifecycle_host(
+            base / "workspace", DurableSessionStore(slot, threads=OsThreads())
+        )
 
     async def prepare(self, scenario: Scenario) -> RequestBase:
         await self._seed(ensure_request())

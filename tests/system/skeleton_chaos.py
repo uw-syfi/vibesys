@@ -400,14 +400,16 @@ class FaultedHost(SessionHost):
     def sessions(self) -> FakeAgentSessions:
         """Journal-backed sessions whose turns go through the fault wrapper."""
         assert self.faulty is not None
-        return FakeAgentSessions(self.faulty, self.journal)
+        return FakeAgentSessions(self.faulty, self.journal, threads=OsThreads())
 
 
 def _faulted_agents(plan: FaultPlan) -> Callable[[Path], SessionHost]:
     def open_agents(root: Path) -> SessionHost:
         writer = CandidateWriter(root)
         client = AgentClient(
-            FakeProvider(answer=writer.answer, on_turn=writer), clock=ManualClock()
+            FakeProvider(answer=writer.answer, on_turn=writer, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
         )
         resolver = CandidateResolver(
             root,
@@ -422,7 +424,7 @@ def _faulted_agents(plan: FaultPlan) -> Callable[[Path], SessionHost]:
             FakeAgentInvocationStore(),
             [],
             ProviderFaults(),
-            faulty=FaultyAgentClient(client, plan),
+            faulty=FaultyAgentClient(client, plan, threads=OsThreads()),
         )
 
     return open_agents

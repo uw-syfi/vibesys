@@ -42,6 +42,7 @@ from vs_agent.api import (
     SteerOutcome,
 )
 from vs_sandbox.api.testing import FakeDockerConfinement
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import HANG_GUARD_S, start_thread
 
 if TYPE_CHECKING:
@@ -131,6 +132,7 @@ def _launcher(
         transient_retry_delays=(),
         clock=FakeClock(),
         ids=SequentialIds(),
+        threads=OsThreads(),
     )
 
 

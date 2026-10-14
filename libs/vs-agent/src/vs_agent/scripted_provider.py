@@ -37,7 +37,6 @@ from vs_agent.contracts import (
 )
 from vs_agent.shim_translation import default_agent_path
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
-from vs_sim.api import OsThreads, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -47,6 +46,7 @@ if TYPE_CHECKING:
         AgentTurnRequest,
         AgentTurnResult,
     )
+    from vs_sim.api import Threads
 
 FAKE_CAPABILITIES = AgentCapabilities(
     tool_servers=True,
@@ -372,7 +372,7 @@ class FakeProvider:
         answer: BaseModel | Mapping[str, object] | str | None = None,
         script: FakeTurnScript | None = None,
         on_turn: Callable[[AgentTurnRequest], None] | None = None,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Create a provider whose sessions emit ``turn``/``turns`` and answer with ``answer``.
 
@@ -405,7 +405,7 @@ class FakeProvider:
             resolved_turns = ((),)
         if script is not None and answer is not None:
             raise FakeProviderError.conflicting_turn_inputs()
-        self._threads = threads or OsThreads()
+        self._threads = threads
         self._cancels = FakeCancels(self._threads)
         self._resumed: list[str] = []
         self._on_turn = on_turn
@@ -647,11 +647,8 @@ class HandSession(LaunchedSession):
     inert library session, so nothing runs unless a subclass says so.
     """
 
-    def __init__(
-        self, spec: AgentSessionSpec | None = None, *, threads: Threads | None = None
-    ) -> None:
+    def __init__(self, spec: AgentSessionSpec | None = None, *, threads: Threads) -> None:
         """Wrap an inert library session for ``spec`` (a placeholder when omitted)."""
-        threads = threads or OsThreads()
         resolved = spec if spec is not None else _placeholder_spec()
         profile = _profile(resolved.provider, None)
         steers = SteerLedger(threads)

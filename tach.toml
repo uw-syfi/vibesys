@@ -24,9 +24,11 @@
 # `entrypoints` and each `server.*` module. Order is enforced by the explicit
 # edges: `server.runtime` sits on top, then transport, api, integration, chat,
 # controller, execution, journal, events, diagnostics at the bottom; a lower
-# module must not list a higher one. `entrypoints` is the composition root: it reaches core only
-# through the `vibesys.api` facade, for both the server path and the headless
-# path, so it lists no core-internal module. Upward imports (core importing
+# module must not list a higher one. `entrypoints` builds the real implementations
+# (clocks, threads, run timing, sandboxes) from the libraries' public modules and
+# reaches the product core only through the `vibesys.api` facade, for both the
+# server path and the headless path, so it lists no `vibesys` module below that
+# facade. Upward imports (core importing
 # server/entrypoints, server importing entrypoints) fail because the edge is
 # undeclared.
 #

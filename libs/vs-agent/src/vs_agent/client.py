@@ -39,7 +39,7 @@ from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
-from vs_sim.api import OsThreads, utc_datetime
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -221,7 +221,7 @@ class AgentClient:
         session_store: SessionStore | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
         check_readiness: bool = False,
-        threads: Threads | None = None,
+        threads: Threads,
         clock: Clock,
     ) -> None:
         """Create a client that owns ``launcher`` and every session it opens.
@@ -263,7 +263,7 @@ class AgentClient:
         self._ready_roles: set[str] = set()
         self._closed = False
         self._cancelled = False
-        self._threads = threads or OsThreads()
+        self._threads = threads
         self._clock = clock
         self._active_lock = self._threads.lock()
         self._active_sessions: list[LaunchedSession] = []

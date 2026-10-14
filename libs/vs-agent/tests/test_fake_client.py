@@ -25,6 +25,7 @@ from vs_agent.fake_client import FakeAgentClient, FakeInvocation
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.sink import AgentEventSink
 from vs_mcp.api import StdioServerDescriptor
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentProgress
@@ -159,14 +160,14 @@ def _invoke_text(
 
 
 def test_unscripted_invoke_reports_a_schema_failure_naming_the_kind() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
 
     with pytest.raises(AgentOutputSchemaError, match="'judge'"):
         _invoke(client)
 
 
 def test_enqueue_pops_responses_in_order_then_falls_back_to_constant() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.enqueue("judge", _Response(verdict="first"), _Response(verdict="second"))
     client.set_response("judge", _Response(verdict="constant"))
 
@@ -177,14 +178,14 @@ def test_enqueue_pops_responses_in_order_then_falls_back_to_constant() -> None:
 
 
 def test_enqueue_accepts_a_callable_computed_from_the_invocation() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.enqueue("judge", lambda invocation: _Response(verdict=invocation.kind))
 
     assert _invoke(client, kind="judge").verdict == "judge"
 
 
 def test_enqueue_accepts_a_dict_validated_against_response_cls() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.enqueue("judge", {"verdict": "from-dict", "detail": "validated"})
 
     response = _invoke(client)
@@ -193,7 +194,7 @@ def test_enqueue_accepts_a_dict_validated_against_response_cls() -> None:
 
 
 def test_fail_raises_forever_when_times_is_none() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.fail("judge", RuntimeError("boom"))
 
     with pytest.raises(RuntimeError, match="boom"):
@@ -203,7 +204,7 @@ def test_fail_raises_forever_when_times_is_none() -> None:
 
 
 def test_fail_raises_exactly_times_then_resumes() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.fail("judge", RuntimeError("boom"), times=2)
     client.set_response("judge", _Response(verdict="resumed"))
 
@@ -215,7 +216,7 @@ def test_fail_raises_exactly_times_then_resumes() -> None:
 
 
 def test_set_attribution_overrides_only_given_fields() -> None:
-    client = FakeAgentClient(provider="fake", model="fake-model")
+    client = FakeAgentClient(provider="fake", model="fake-model", threads=OsThreads())
 
     client.set_attribution(provider="anthropic")
 
@@ -225,7 +226,7 @@ def test_set_attribution_overrides_only_given_fields() -> None:
 
 
 def test_set_model_for_kind_overrides_per_kind_falling_back_to_ctor_model() -> None:
-    client = FakeAgentClient(model="default-model")
+    client = FakeAgentClient(model="default-model", threads=OsThreads())
     client.set_model_for_kind({"judge": "judge-model"})
 
     assert client.model_for_kind("judge") == "judge-model"
@@ -233,7 +234,7 @@ def test_set_model_for_kind_overrides_per_kind_falling_back_to_ctor_model() -> N
 
 
 def test_calls_records_every_kwarg_and_calls_for_filters_by_kind() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.set_response("judge", _Response(verdict="pass"))
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 
@@ -272,7 +273,7 @@ def test_calls_records_every_kwarg_and_calls_for_filters_by_kind() -> None:
 
 
 def test_tool_server_descriptors_are_recorded_without_transport_types() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.set_response("judge", _Response(verdict="pass"))
     descriptor = StdioServerDescriptor(
         name="issues", command="python", args=("-m", "issues"), env=(("X", "1"),)
@@ -286,7 +287,7 @@ def test_tool_server_descriptors_are_recorded_without_transport_types() -> None:
 
 def test_stream_output_emits_through_the_event_sink() -> None:
     sink = _CapturingSink()
-    client = FakeAgentClient(event_sink=sink)
+    client = FakeAgentClient(event_sink=sink, threads=OsThreads())
     client.set_response("judge", _Response(verdict="pass"))
     client.stream_output("judge", ["chunk-one", "chunk-two"])
 
@@ -299,7 +300,7 @@ def test_stream_output_emits_through_the_event_sink() -> None:
 
 
 def test_on_invoke_callback_can_write_into_the_invocation_workspace(tmp_path: Path) -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.set_response("judge", _Response(verdict="pass"))
     written: list[Path] = []
 
@@ -324,7 +325,7 @@ def test_on_invoke_callback_can_write_into_the_invocation_workspace(tmp_path: Pa
 
 
 def test_session_mints_once_and_reuses_on_matching_key_when_enabled() -> None:
-    client = FakeAgentClient(session_reuse=True)
+    client = FakeAgentClient(session_reuse=True, threads=OsThreads())
     client.set_response("judge", _Response(verdict="pass"))
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 
@@ -341,14 +342,14 @@ def test_session_mints_once_and_reuses_on_matching_key_when_enabled() -> None:
 
 
 def test_session_stays_fresh_without_reuse_session_or_when_capability_disabled() -> None:
-    client = FakeAgentClient(session_reuse=False)
+    client = FakeAgentClient(session_reuse=False, threads=OsThreads())
     client.set_response("judge", _Response(verdict="pass"))
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
 
     _invoke(client, reuse_session=True, session_key=key)
     assert client.provider_session_id(key) is None
 
-    reusable_client = FakeAgentClient(session_reuse=True)
+    reusable_client = FakeAgentClient(session_reuse=True, threads=OsThreads())
     reusable_client.set_response("judge", _Response(verdict="pass"))
     _invoke(reusable_client, reuse_session=False, session_key=key)
     assert reusable_client.provider_session_id(key) is None
@@ -358,7 +359,7 @@ def test_session_stays_fresh_without_reuse_session_or_when_capability_disabled()
 
 
 def test_set_session_seeds_ids_without_an_invoke() -> None:
-    client = FakeAgentClient(session_reuse=True)
+    client = FakeAgentClient(session_reuse=True, threads=OsThreads())
     key = AgentSessionKey(SessionScope.CHAT, "thread-a")
 
     client.set_session(key, provider_session_id="seeded-id", last_turn="seeded-last")
@@ -368,14 +369,14 @@ def test_set_session_seeds_ids_without_an_invoke() -> None:
 
 
 def test_close_is_idempotent() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
 
     client.close()
     client.close()
 
 
 def test_invoke_text_default_and_enqueue() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
 
     assert _invoke_text(client) == "Fake agent inspected the trajectory."
 
@@ -391,7 +392,7 @@ def test_invoke_text_default_and_enqueue() -> None:
 
 
 def test_invoke_text_records_calls_and_can_fail() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.fail("chat", RuntimeError("text boom"), times=1)
 
     with pytest.raises(RuntimeError, match="text boom"):
@@ -401,7 +402,7 @@ def test_invoke_text_records_calls_and_can_fail() -> None:
 
 
 def test_close_is_observable_and_idempotent() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     assert client.closed is False
 
     client.close()
@@ -411,7 +412,7 @@ def test_close_is_observable_and_idempotent() -> None:
 
 
 def test_set_log_file_records_the_wired_streams() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     stream = object()
 
     client.set_log_file(stream)
@@ -421,13 +422,14 @@ def test_set_log_file_records_the_wired_streams() -> None:
 
 
 def test_capabilities_and_backend_name_are_configurable() -> None:
-    default = FakeAgentClient()
+    default = FakeAgentClient(threads=OsThreads())
     assert default.backend_name == "fake"
     assert default.capabilities.tool_servers is False
 
     client = FakeAgentClient(
         backend_name="cli",
         capabilities=AgentCapabilities(tool_servers=True, session_reuse=True),
+        threads=OsThreads(),
     )
     assert client.backend_name == "cli"
     assert client.capabilities.tool_servers is True
@@ -438,7 +440,7 @@ def test_capabilities_and_backend_name_are_configurable() -> None:
 
 
 def test_fail_can_raise_a_base_exception() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     client.fail("chat", KeyboardInterrupt(), times=1)
 
     with pytest.raises(KeyboardInterrupt):
@@ -448,7 +450,7 @@ def test_fail_can_raise_a_base_exception() -> None:
 
 
 def test_enqueue_parse_failure_raises_like_the_real_client_positionally() -> None:
-    client = FakeAgentClient()
+    client = FakeAgentClient(threads=OsThreads())
     # First judge turn succeeds; the second returns unparseable output, which
     # the real client reports as AgentOutputSchemaError. Both turns are recorded.
     client.enqueue("judge", _Response(verdict="pass"))
@@ -461,7 +463,7 @@ def test_enqueue_parse_failure_raises_like_the_real_client_positionally() -> Non
 
 
 def test_a_scripted_reply_that_does_not_validate_names_its_fields() -> None:
-    client = FakeAgentClient().enqueue("judge", {"verdict": 3})
+    client = FakeAgentClient(threads=OsThreads()).enqueue("judge", {"verdict": 3})
 
     with pytest.raises(AgentOutputSchemaError) as raised:
         _invoke(client)
@@ -476,7 +478,7 @@ class _OtherResponse(BaseModel):
 
 
 def test_a_scripted_model_of_the_wrong_type_fails_like_its_json_reply() -> None:
-    client = FakeAgentClient().enqueue("judge", _OtherResponse(summary="done"))
+    client = FakeAgentClient(threads=OsThreads()).enqueue("judge", _OtherResponse(summary="done"))
 
     with pytest.raises(AgentOutputSchemaError) as raised:
         _invoke(client)
@@ -485,7 +487,7 @@ def test_a_scripted_model_of_the_wrong_type_fails_like_its_json_reply() -> None:
 
 
 def test_evict_session_clears_a_seeded_conversation() -> None:
-    client = FakeAgentClient(session_reuse=True)
+    client = FakeAgentClient(session_reuse=True, threads=OsThreads())
     key = AgentSessionKey(SessionScope.CHAT, "thread-a")
     client.set_session(key, provider_session_id="session-1", last_turn="session-1")
     assert client.provider_session_id(key) == "session-1"
@@ -508,7 +510,7 @@ def test_every_dispatched_turn_records_one_usage_row_even_when_it_fails(
     usage = AgentUsage(input_tokens=7, output_tokens=3, total_cost_usd=0.25)
     with tempfile.TemporaryDirectory() as tmp:
         log_dir = Path(tmp)
-        client = FakeAgentClient(log_dir=log_dir).set_usage(usage)
+        client = FakeAgentClient(log_dir=log_dir, threads=OsThreads()).set_usage(usage)
         client.set_text("implementer", "done")
         for index, fails in enumerate(failures):
             if fails:
@@ -533,7 +535,7 @@ def test_every_dispatched_turn_records_one_usage_row_even_when_it_fails(
 
 
 def test_a_client_without_a_log_dir_writes_no_usage_row(tmp_path: Path) -> None:
-    FakeAgentClient().invoke_text(
+    FakeAgentClient(threads=OsThreads()).invoke_text(
         kind="judge",
         workspace=tmp_path,
         system_prompt="system",

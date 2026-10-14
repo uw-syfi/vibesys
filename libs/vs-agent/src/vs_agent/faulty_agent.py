@@ -12,7 +12,6 @@ whichever path the runtime dispatches it through.
 from __future__ import annotations
 
 import json
-import threading
 from collections import Counter
 from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
@@ -46,6 +45,7 @@ if TYPE_CHECKING:
     from vs_agent.progress import AgentProgress
     from vs_agent.session_key import AgentSessionKey
     from vs_mcp.api import ToolServerDescriptor
+    from vs_sim.api import Threads
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -87,17 +87,18 @@ class GeneratedReplies(Protocol):
         ...
 
 
-def generated_replies(plan: FaultPlan) -> GeneratedReplies:
+def generated_replies(plan: FaultPlan, threads: Threads) -> GeneratedReplies:
     """Return a Fake-client responder that answers every turn from its declared schema.
 
     Each turn draws from a generator seeded by the plan seed, the role, and
     the role's turn count, so a run's replies are reproducible from the seed
     as far as the run's own turn order is. Identifiers come from the prompt
     and from ``seen``, the ones the turn's own tool calls returned, so a
-    generated reply can cite evidence the way a correct agent does.
+    generated reply can cite evidence the way a correct agent does. ``threads`` makes
+    the lock that counts turns answered on different threads.
     """
     counts: Counter[str] = Counter()
-    lock = threading.Lock()
+    lock = threads.lock()
 
     def answer(invocation: FakeInvocation, seen: tuple[str, ...] = ()) -> BaseModel:
         if invocation.response_cls is None:
@@ -126,12 +127,12 @@ class FaultyAgentClient:
     when it names none. ``injected`` records each fault that fired.
     """
 
-    def __init__(self, inner: DurableAgentClient, plan: FaultPlan) -> None:
-        """Wrap ``inner``; ``plan`` decides which turns fail and how."""
+    def __init__(self, inner: DurableAgentClient, plan: FaultPlan, threads: Threads) -> None:
+        """Wrap ``inner``; ``plan`` decides which turns fail and how; ``threads`` makes its lock."""
         self._inner = inner
         self._plan = plan
         self._counts: Counter[str] = Counter()
-        self._lock = threading.Lock()
+        self._lock = threads.lock()
         self.injected: list[tuple[str, int, AgentFault]] = []
 
     @property

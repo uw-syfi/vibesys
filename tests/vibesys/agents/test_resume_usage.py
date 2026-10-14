@@ -27,6 +27,7 @@ from vs_agent.api.testing import (
 )
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, examples
 
 TOKEN_FIELDS = (
@@ -54,11 +55,18 @@ def _resumed_records(root: Path, *, cumulative: int, increment: int) -> list[dic
     )
     project.state.create_run(run)
     slot = project.state.local_namespace("run-1", "agent").slot("sessions.json", AgentSessionState)
-    store = DurableSessionStore(slot)
+    store = DurableSessionStore(slot, threads=OsThreads())
     key = AgentSessionKey(SessionScope.HYPOTHESIS, "H-01")
-    first_provider = FakeProvider(turn=[usage(input_tokens=100, output_tokens=0)])
+    first_provider = FakeProvider(
+        turn=[usage(input_tokens=100, output_tokens=0)], threads=OsThreads()
+    )
     with AgentClient(
-        first_provider, provider="codex", session_store=store, log_dir=root, clock=ManualClock()
+        first_provider,
+        provider="codex",
+        session_store=store,
+        log_dir=root,
+        clock=ManualClock(),
+        threads=OsThreads(),
     ) as client:
         _invoke(client, root, key)
     checkpoint = store.get(key)
@@ -74,9 +82,14 @@ def _resumed_records(root: Path, *, cumulative: int, increment: int) -> list[dic
             for count in (cumulative, cumulative + increment)
         ]
     )
-    launcher = fake_agentshim_launcher(provider="codex", executor=executor)
+    launcher = fake_agentshim_launcher(provider="codex", executor=executor, threads=OsThreads())
     with AgentClient(
-        launcher, provider="codex", session_store=store, log_dir=root, clock=ManualClock()
+        launcher,
+        provider="codex",
+        session_store=store,
+        log_dir=root,
+        clock=ManualClock(),
+        threads=OsThreads(),
     ) as client:
         _invoke(client, root, key)
         _invoke(client, root, key)

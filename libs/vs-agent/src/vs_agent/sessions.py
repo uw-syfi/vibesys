@@ -33,7 +33,6 @@ from vs_agent.session_errors import (
 from vs_agent.session_key import AgentSessionKey
 from vs_project.api import ProjectError
 from vs_prompts.api import RenderedPrompt
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -358,7 +357,7 @@ class ClientAgentSessions:
         client: AgentTurnExecutor,
         slot: AgentInvocationStore,
         *,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Preflight durable-resume capability and bind the exclusively owned ledger."""
         if not client.capabilities.provider_session_resume:
@@ -370,7 +369,7 @@ class ClientAgentSessions:
         self._active: set[str] = set()
         self._schema_rejections: set[str] = set()
         self._active_keys: set[AgentSessionKey] = set()
-        self._lock = (threads or OsThreads()).rlock()
+        self._lock = threads.rlock()
 
     @contextmanager
     def invocation_transaction(self) -> Iterator[AgentInvocationStore]:

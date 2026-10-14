@@ -117,7 +117,8 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
                 _PLUGIN,
                 EmptyOptions(),
                 agent_client_factory=lambda **_: FakeAgentClient(
-                    capabilities=AgentCapabilities(provider_session_resume=True)
+                    capabilities=AgentCapabilities(provider_session_resume=True),
+                    threads=OsThreads(),
                 ),
                 backend_factory=host_container_backend,
                 stop_timer=SystemClock().sleep,

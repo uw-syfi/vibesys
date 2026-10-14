@@ -63,14 +63,18 @@ DIGEST_LENGTH = 64
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 class _GateRecordingClient(FakeAgentClient):
     """A resumable fake client that remembers every capacity gate it was given."""
 
     def __init__(self) -> None:
-        super().__init__(capabilities=AgentCapabilities(provider_session_resume=True))
+        super().__init__(
+            capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+        )
         self.gates: list[CapacityGate] = []
 
     def set_capacity_gate(self, gate: CapacityGate) -> None:

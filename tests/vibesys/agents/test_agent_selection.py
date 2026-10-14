@@ -25,7 +25,7 @@ from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
 
     from vs_sandbox.api import HostResource
@@ -37,6 +37,7 @@ class _BuildOptions(TypedDict, total=False):
     use_docker: bool
     log_dir: Path | None
     host_resources: Iterable[HostResource]
+    launcher_env: Callable[[], Mapping[str, str]] | None
 
 
 def _config(**agent: object) -> Config:
@@ -57,6 +58,7 @@ def _build(
         use_docker=options.get("use_docker", False),
         log_dir=options.get("log_dir"),
         host_resources=options.get("host_resources", ()),
+        launcher_env=options.get("launcher_env"),
         clock=ManualClock(),
     )
     # Every case here selects the cli backend, whose concrete client is what
@@ -157,14 +159,19 @@ def test_built_client_reports_a_missing_provider_cli_before_its_first_turn(
     """The composed client probes readiness by default.
 
     The run's PATH holds no provider CLI, so the probe (not a turn) must fail
-    with the typed error that names the provider.
+    with the typed error that names the provider. The launch environment is
+    passed explicitly: agentshim caches the login shell's environment once per
+    process, so an earlier test would otherwise hand the probe the real PATH.
     """
     empty_bin = tmp_path / "bin"
     empty_bin.mkdir()
-    monkeypatch.setenv("PATH", str(empty_bin))
-    monkeypatch.setenv("HOME", str(tmp_path))
+    launch_environment = {"PATH": str(empty_bin), "HOME": str(tmp_path)}
+    for name, value in launch_environment.items():
+        monkeypatch.setenv(name, value)
     monkeypatch.setenv(SANDBOX_DISABLE_ENV, "off")
-    client = _build(_config(backend="cli", cli_provider=provider))
+    client = _build(
+        _config(backend="cli", cli_provider=provider), launcher_env=lambda: launch_environment
+    )
 
     with pytest.raises(ProviderNotReadyError) as raised:
         client.invoke_text(

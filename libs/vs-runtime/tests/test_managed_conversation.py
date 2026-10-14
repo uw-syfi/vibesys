@@ -86,7 +86,9 @@ def _spec() -> ManagedConversationSpec:
 
 
 def test_same_object_continues_context_and_close_releases_resources_in_reverse() -> None:
-    client = FakeAgentClient(session_reuse=True).enqueue_text("chat", "one", "two")
+    client = FakeAgentClient(session_reuse=True, threads=OsThreads()).enqueue_text(
+        "chat", "one", "two"
+    )
     close_order: list[str] = []
     conversation = create_managed_conversation(
         client,
@@ -118,7 +120,7 @@ def test_same_object_continues_context_and_close_releases_resources_in_reverse()
 
 
 def test_replaced_context_reasks_with_full_rules() -> None:
-    client = _ReplacingFakeAgentClient(session_reuse=True)
+    client = _ReplacingFakeAgentClient(session_reuse=True, threads=OsThreads())
     client.enqueue_text("chat", "established", "unsafe", "safe")
     conversation = create_managed_conversation(client, _spec(), resources=(), threads=OsThreads())
 
@@ -133,7 +135,7 @@ def test_replaced_context_reasks_with_full_rules() -> None:
 
 def test_closed_conversation_rejects_new_turns() -> None:
     conversation = create_managed_conversation(
-        FakeAgentClient(), _spec(), resources=(), threads=OsThreads()
+        FakeAgentClient(threads=OsThreads()), _spec(), resources=(), threads=OsThreads()
     )
     conversation.close()
 
@@ -141,12 +143,12 @@ def test_closed_conversation_rejects_new_turns() -> None:
         conversation.turn("inspect")
     with pytest.raises(ValueError, match="must not be empty"):
         create_managed_conversation(
-            FakeAgentClient(), _spec(), resources=(), threads=OsThreads()
+            FakeAgentClient(threads=OsThreads()), _spec(), resources=(), threads=OsThreads()
         ).turn("  ")
 
 
 def test_new_conversation_with_same_member_starts_fresh() -> None:
-    client = FakeAgentClient(session_reuse=True)
+    client = FakeAgentClient(session_reuse=True, threads=OsThreads())
     first = create_managed_conversation(client, _spec(), resources=(), threads=OsThreads())
     second = create_managed_conversation(client, _spec(), resources=(), threads=OsThreads())
 
@@ -176,7 +178,10 @@ def test_construction_failure_leaves_resources_with_caller() -> None:
 
     with pytest.raises(ValueError, match="role"):
         create_managed_conversation(
-            FakeAgentClient(), invalid, resources=(resource,), threads=OsThreads()
+            FakeAgentClient(threads=OsThreads()),
+            invalid,
+            resources=(resource,),
+            threads=OsThreads(),
         )
 
     assert close_order == []
@@ -189,7 +194,7 @@ def test_open_conversation_builds_client_and_owns_environment(tmp_path: Path) ->
         host_resources=(HostResource(tmp_path / "base"),),
     )
     additional = HostResource(tmp_path / "evidence")
-    client = FakeAgentClient(session_reuse=True).enqueue_text("chat", "answer")
+    client = FakeAgentClient(session_reuse=True, threads=OsThreads()).enqueue_text("chat", "answer")
     observed: list[dict[str, object]] = []
 
     def build_client(**kwargs: object) -> FakeAgentClient:

@@ -107,6 +107,7 @@ def test_a_confined_session_sees_the_project_and_not_the_operator(
         agent_homes=tmp_path / "agent-homes",
         launcher_env=lambda: environment,
         clock=ThreadsClock(OsThreads()),
+        threads=OsThreads(),
     )
     try:
         session = launcher.launch(

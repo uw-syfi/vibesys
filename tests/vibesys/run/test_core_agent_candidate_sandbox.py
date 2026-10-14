@@ -57,7 +57,9 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
 
     def client_factory(**kwargs: object) -> FakeAgentClient:
         given_to_client.update(kwargs)
-        return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+        return FakeAgentClient(
+            capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+        )
 
     def backend_factory(
         _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object

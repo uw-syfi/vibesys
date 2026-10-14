@@ -39,7 +39,7 @@ from vs_runtime.api.core import (
     SessionLifecycleRequests,
     SessionRequestRouter,
 )
-from vs_sim.api import ThreadBlockingRunner
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -58,7 +58,7 @@ class RecordingClient(AgentClient):
 
     def __init__(self, driver: FakeProvider, store: SessionStore) -> None:
         """Wrap the Fake driver; *store* keeps the checkpoint across a release."""
-        super().__init__(driver, session_store=store, clock=ManualClock())
+        super().__init__(driver, session_store=store, clock=ManualClock(), threads=OsThreads())
         self.cancelled: list[AgentSessionKey] = []
         self.released: list[AgentSessionKey] = []
 
@@ -108,7 +108,9 @@ def open_lifecycle_host(
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
 
-    client = RecordingClient(FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn), store)
+    client = RecordingClient(
+        FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn, threads=OsThreads()), store
+    )
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),
         client,
@@ -131,7 +133,7 @@ def lifecycle_executor(
     blocking calls somewhere other than worker threads (a simulation's threads).
     """
     resolver: SessionResolver = host.resolver
-    sessions = sessions or FakeAgentSessions(host.client, host.journal)
+    sessions = sessions or FakeAgentSessions(host.client, host.journal, threads=OsThreads())
     runner = blocking or ThreadBlockingRunner()
     turns = RuntimeSessionRequests(sessions, resolver, store, blocking=runner)
     return SessionRequestRouter(

@@ -29,7 +29,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -41,7 +41,9 @@ if TYPE_CHECKING:
 
 
 def _fake_agent(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 def _request(root: Path) -> RunRequest:
@@ -74,7 +76,9 @@ def _runs(clients: list[FakeAgentClient] | None = None, *, real_git: bool = Fals
 
     def agent_factory(**_kwargs: object) -> FakeAgentClient:
         client = FakeAgentClient(
-            session_reuse=True, capabilities=AgentCapabilities(provider_session_resume=True)
+            session_reuse=True,
+            capabilities=AgentCapabilities(provider_session_resume=True),
+            threads=OsThreads(),
         ).set_text(None, "retained chat answer")
         if clients is not None:
             clients.append(client)

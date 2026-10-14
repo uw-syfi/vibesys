@@ -107,7 +107,9 @@ def _agents(sent: Sent) -> Callable[[Path], SessionHost]:
             writer(request)
 
         client = AgentClient(
-            FakeProvider(answer=writer.answer, on_turn=on_turn), clock=ManualClock()
+            FakeProvider(answer=writer.answer, on_turn=on_turn, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
         )
         resolver = MessageResolver(
             root,

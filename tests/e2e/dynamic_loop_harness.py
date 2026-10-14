@@ -158,6 +158,7 @@ class _SharedCancelClient(FakeAgentClient):
             session_store=session_store,
             skill_selection=skill_selection,
             log_dir=log_dir,
+            threads=OsThreads(),
         )
         self._seen = seen
 

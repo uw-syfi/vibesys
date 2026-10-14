@@ -124,7 +124,9 @@ class _PreparedEnvironment:
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
@@ -134,7 +136,7 @@ def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
         network=UnixNetwork(),
         timing=real_timing(),
         processes=REAL_PROCESSES,
-        agents=FakeSessionAgents() if request.param else None,
+        agents=FakeSessionAgents(OsThreads()) if request.param else None,
         backend_factory=host_container_backend,
     )
 

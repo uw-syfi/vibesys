@@ -179,6 +179,7 @@ class _ProductHostFactory:
         session_store = DurableSessionStore(
             project.state.local("agent").slot("sessions.json", AgentSessionState),
             log=logger.lprint,
+            threads=self.timing.threads,
         )
         policy = self.plugin.core
         if policy is None:

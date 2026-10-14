@@ -145,7 +145,7 @@ class _SessionWorld(_ReleasesItself):
             "sessions.json", AgentSessionState
         )
         self.session_host: SessionHost = open_lifecycle_host(
-            base / "workspace", DurableSessionStore(slot)
+            base / "workspace", DurableSessionStore(slot, threads=OsThreads())
         )
 
     def _namespace(self) -> StateNamespace:

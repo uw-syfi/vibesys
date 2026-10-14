@@ -192,7 +192,9 @@ async def scenario(
         )
         resolvers.append(resolver)
         client = AgentClient(
-            FakeProvider(answer=writer.answer, on_turn=writer), clock=ManualClock()
+            FakeProvider(answer=writer.answer, on_turn=writer, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
         )
         return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 

@@ -212,7 +212,11 @@ async def scenario(
             writer=agent,
         )
         resolvers.append(resolver)
-        client = AgentClient(FakeProvider(answer=agent.answer, on_turn=agent), clock=ManualClock())
+        client = AgentClient(
+            FakeProvider(answer=agent.answer, on_turn=agent, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
+        )
         return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 
     def yields(workspaces: RuntimeWorkspaces, receipts: StateNamespace) -> TurnYields:

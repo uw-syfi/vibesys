@@ -54,6 +54,7 @@ from vs_project.api import (
     RunExecutionRecord,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock
 
 if TYPE_CHECKING:
@@ -121,7 +122,7 @@ class _Harness:
 
     def reconstruct(self) -> ClientAgentSessions:
         factory = FakeAgentSessions if self.implementation == "fake" else ClientAgentSessions
-        sessions = factory(self.client, self.ledger)
+        sessions = factory(self.client, self.ledger, threads=OsThreads())
         sessions.bind(KEY, self.spec, self.turn)
         return sessions
 
@@ -138,11 +139,14 @@ def harness(
         namespace.slot(
             "sessions.json",
             AgentSessionState,
-        )
+        ),
+        threads=OsThreads(),
     )
     boundary = _Boundary()
     if request.param == "fake":
-        launcher = FakeProvider(answer="done", on_turn=lambda _: boundary.accept())
+        launcher = FakeProvider(
+            answer="done", on_turn=lambda _: boundary.accept(), threads=OsThreads()
+        )
     else:
 
         def execute(_request: object) -> FakeRun:
@@ -151,11 +155,17 @@ def harness(
                 "codex", session_id="thread-1", text="done"
             )
 
-        launcher = fake_agentshim_launcher(provider="codex", executor=FakeExecutor(execute))
+        launcher = fake_agentshim_launcher(
+            provider="codex", executor=FakeExecutor(execute), threads=OsThreads()
+        )
 
     def new_client() -> AgentClient:
         return AgentClient(
-            launcher, provider="codex", session_store=checkpoints, clock=ManualClock()
+            launcher,
+            provider="codex",
+            session_store=checkpoints,
+            clock=ManualClock(),
+            threads=OsThreads(),
         )
 
     client = new_client()
@@ -175,7 +185,7 @@ def harness(
         else namespace.slot("invocations.json", AgentInvocationState)
     )
     factory = FakeAgentSessions if request.param == "fake" else ClientAgentSessions
-    sessions = factory(client, ledger)
+    sessions = factory(client, ledger, threads=OsThreads())
     sessions.bind(KEY, spec, turn)
     (tmp_path / "message.j2").write_text("{{ content }}", encoding="utf-8")
     message = TemplateRenderer(tmp_path).render_template("message.j2", content="trusted results")
@@ -320,7 +330,7 @@ def test_missing_checkpoint_refuses_dispatch(harness: _Harness) -> None:
 
 def test_changed_bound_configuration_and_checkpoint_never_start_fresh(harness: _Harness) -> None:
     drift = replace(harness.spec, model="different")
-    sessions = ClientAgentSessions(harness.client, harness.ledger)
+    sessions = ClientAgentSessions(harness.client, harness.ledger, threads=OsThreads())
     sessions.bind(KEY, drift, harness.turn)
     result = sessions.resume(KEY, harness.message, "resume-1")
     assert isinstance(result, Unknown)
@@ -339,7 +349,7 @@ def test_nondurable_key_is_configuration_error(harness: _Harness) -> None:
 def test_malformed_ledger_fails_typed_before_dispatch(harness: _Harness) -> None:
     slot = harness.namespace.slot("malformed.json", AgentInvocationState)
     harness.namespace.write_bytes("malformed.json", b'{"schema_version":2}')
-    sessions = ClientAgentSessions(harness.client, slot)
+    sessions = ClientAgentSessions(harness.client, slot, threads=OsThreads())
     sessions.bind(KEY, harness.spec, harness.turn)
     with pytest.raises(SessionPersistenceError, match="read invocation ledger"):
         sessions.resume(KEY, harness.message, "resume-1")
@@ -376,10 +386,14 @@ class _NoResumeProvider(FakeProvider):
 
 
 def test_unsupported_provider_is_typed_preflight_error() -> None:
-    client = AgentClient(_NoResumeProvider(answer="done"), clock=ManualClock())
+    client = AgentClient(
+        _NoResumeProvider(answer="done", threads=OsThreads()),
+        clock=ManualClock(),
+        threads=OsThreads(),
+    )
     try:
         with pytest.raises(SessionConfigurationError, match="provider_session_resume"):
-            ClientAgentSessions(client, FakeAgentInvocationStore())
+            ClientAgentSessions(client, FakeAgentInvocationStore(), threads=OsThreads())
     finally:
         client.close()
 
@@ -403,12 +417,12 @@ def test_commit_failure_never_authorizes_unsafe_replay(
     harness: _Harness, failing_save: int
 ) -> None:
     store = _CommitFailureStore(failing_save)
-    sessions = ClientAgentSessions(harness.client, store)
+    sessions = ClientAgentSessions(harness.client, store, threads=OsThreads())
     sessions.bind(KEY, harness.spec, harness.turn)
     with pytest.raises(SessionPersistenceError, match="commit invocation"):
         sessions.resume(KEY, harness.message, "resume-1")
     assert harness.boundary.calls == failing_save
-    recovered = ClientAgentSessions(harness.client, store)
+    recovered = ClientAgentSessions(harness.client, store, threads=OsThreads())
     recovered.bind(KEY, harness.spec, harness.turn)
     assert isinstance(recovered.inspect(KEY, "resume-1"), Unknown)
     if failing_save == 2:
@@ -419,7 +433,7 @@ def test_commit_failure_never_authorizes_unsafe_replay(
 def test_new_client_adopts_durable_provider_checkpoint(harness: _Harness) -> None:
     client = harness.new_client()
     try:
-        sessions = ClientAgentSessions(client, harness.ledger)
+        sessions = ClientAgentSessions(client, harness.ledger, threads=OsThreads())
         sessions.bind(KEY, harness.spec, harness.turn)
         result = sessions.resume(KEY, harness.message, "resume-1")
         assert isinstance(result, Completed)
@@ -432,7 +446,7 @@ def test_new_client_adopts_durable_provider_checkpoint(harness: _Harness) -> Non
 def test_new_client_configuration_drift_refuses_adoption(harness: _Harness) -> None:
     client = harness.new_client()
     try:
-        sessions = ClientAgentSessions(client, harness.ledger)
+        sessions = ClientAgentSessions(client, harness.ledger, threads=OsThreads())
         sessions.bind(KEY, replace(harness.spec, model="changed"), harness.turn)
         outcome = sessions.resume(KEY, harness.message, "resume-1")
         assert isinstance(outcome, Unknown)
@@ -457,9 +471,9 @@ def test_strict_turn_cannot_dispatch_without_adoption(tmp_path: Path, implementa
     fake_calls: list[AgentTurnRequest] = []
     executor = FakeExecutor(scripted_turn("codex", session_id="new-thread", text="done"))
     launcher = (
-        FakeProvider(answer="done", on_turn=fake_calls.append)
+        FakeProvider(answer="done", on_turn=fake_calls.append, threads=OsThreads())
         if implementation == "fake"
-        else fake_agentshim_launcher(provider="codex", executor=executor)
+        else fake_agentshim_launcher(provider="codex", executor=executor, threads=OsThreads())
     )
     spec = AgentSessionSpec(
         role="implementer",
@@ -496,9 +510,9 @@ def test_strict_turn_identity_matches_adoption_and_prior_turn(
         )
     )
     launcher = (
-        FakeProvider(answer="done", on_turn=fake_calls.append)
+        FakeProvider(answer="done", on_turn=fake_calls.append, threads=OsThreads())
         if implementation == "fake"
-        else fake_agentshim_launcher(provider="codex", executor=executor)
+        else fake_agentshim_launcher(provider="codex", executor=executor, threads=OsThreads())
     )
     spec = AgentSessionSpec(
         role="implementer",
@@ -557,9 +571,11 @@ def test_session_cannot_adopt_while_turn_is_in_flight(
         release.wait(HANG_GUARD_S)
 
     launcher = (
-        FakeProvider(answer="done", on_turn=block_fake_turn)
+        FakeProvider(answer="done", on_turn=block_fake_turn, threads=OsThreads())
         if implementation == "fake"
-        else fake_agentshim_launcher(provider="codex", executor=FakeExecutor(block_turn))
+        else fake_agentshim_launcher(
+            provider="codex", executor=FakeExecutor(block_turn), threads=OsThreads()
+        )
     )
     spec = AgentSessionSpec(
         role="implementer",
@@ -648,7 +664,7 @@ def test_schema_failure_at_store_boundary_is_typed_and_prevents_dispatch(
     harness: _Harness, operation: str
 ) -> None:
     store = _SchemaFailureStore(operation)
-    sessions = ClientAgentSessions(harness.client, store)
+    sessions = ClientAgentSessions(harness.client, store, threads=OsThreads())
     sessions.bind(KEY, harness.spec, harness.turn)
     with pytest.raises(SessionPersistenceError):
         sessions.resume(KEY, harness.message, "resume-1")
@@ -675,14 +691,19 @@ def test_initial_reply_replays_after_all_services_reconstructed(
 
     def reconstruct() -> tuple[AgentClient, ClientAgentSessions]:
         reopened = _namespace_existing(workspace)
-        checkpoints = DurableSessionStore(reopened.slot("sessions.json", AgentSessionState))
+        checkpoints = DurableSessionStore(
+            reopened.slot("sessions.json", AgentSessionState), threads=OsThreads()
+        )
         client = AgentClient(
-            FakeProvider(answer="waiting", on_turn=calls.append),
+            FakeProvider(answer="waiting", on_turn=calls.append, threads=OsThreads()),
             provider="codex",
             session_store=checkpoints,
             clock=ManualClock(),
+            threads=OsThreads(),
         )
-        return client, factory(client, reopened.slot("invocations.json", AgentInvocationState))
+        return client, factory(
+            client, reopened.slot("invocations.json", AgentInvocationState), threads=OsThreads()
+        )
 
     client, sessions = reconstruct()
     try:
@@ -735,9 +756,13 @@ def test_initial_schema_rejection_without_checkpoint_fences_live_and_recovered_c
             detail = "value must be an integer"
             raise AgentOutputSchemaError(detail)
 
-    client = AgentClient(FakeProvider(answer="done", on_turn=execute), clock=ManualClock())
+    client = AgentClient(
+        FakeProvider(answer="done", on_turn=execute, threads=OsThreads()),
+        clock=ManualClock(),
+        threads=OsThreads(),
+    )
     ledger = FakeAgentInvocationStore()
-    sessions = ClientAgentSessions(client, ledger)
+    sessions = ClientAgentSessions(client, ledger, threads=OsThreads())
     spec = AgentSessionSpec(
         role="worker",
         provider="fake",
@@ -749,7 +774,7 @@ def test_initial_schema_rejection_without_checkpoint_fences_live_and_recovered_c
         outcome = sessions.start(KEY, spec, initial)
         assert isinstance(outcome, InvalidResponse)
         assert "integer" in outcome.detail
-        recovered = ClientAgentSessions(client, ledger)
+        recovered = ClientAgentSessions(client, ledger, threads=OsThreads())
         with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):
             recovered.start(KEY, spec, replace(initial, invocation_id="initial/correction"))
         with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):

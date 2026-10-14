@@ -164,7 +164,11 @@ def _session(
 ) -> Iterator[LaunchedSession]:
     """Launch one session and close its launcher afterwards."""
     launcher = ConfinedSessionLauncher(
-        provider=provider, timeout=TURN_TIMEOUT_S, log=print, clock=ThreadsClock(OsThreads())
+        provider=provider,
+        timeout=TURN_TIMEOUT_S,
+        log=print,
+        clock=ThreadsClock(OsThreads()),
+        threads=OsThreads(),
     )
     session = launcher.launch(
         AgentSessionSpec(

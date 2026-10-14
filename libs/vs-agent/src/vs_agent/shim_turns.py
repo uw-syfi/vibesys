@@ -26,7 +26,6 @@ from vs_agent.contracts import (
 )
 from vs_agent.reply_limits import ReplyGuard, reply_breach
 from vs_agent.session_errors import SessionResumeError
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,9 +52,9 @@ class SteerLedger:
     caller's thread, the library's events on the turn's.
     """
 
-    def __init__(self, threads: Threads | None = None) -> None:
-        """Start with nothing outstanding; locks come from ``threads`` (OS threads by default)."""
-        self._lock = (threads or OsThreads()).lock()
+    def __init__(self, threads: Threads) -> None:
+        """Start with nothing outstanding; locks come from ``threads``."""
+        self._lock = threads.lock()
         self._waiting: dict[str, deque[Callable[[], None]]] = {}
 
     def expect(self, text: str, on_rejected: Callable[[], None]) -> None:

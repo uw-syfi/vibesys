@@ -125,7 +125,9 @@ def open_production(env: WorkspaceEnv, declared: AgentRole) -> Production:
         session_spec=spec,
     )
     client = AgentClient(
-        FakeProvider(answer={"value": 7}, on_turn=turns.append), clock=ManualClock()
+        FakeProvider(answer={"value": 7}, on_turn=turns.append, threads=OsThreads()),
+        clock=ManualClock(),
+        threads=OsThreads(),
     )
     requests = open_session_requests(
         inputs,
@@ -133,6 +135,7 @@ def open_production(env: WorkspaceEnv, declared: AgentRole) -> Production:
         invocation_slot=FakeAgentInvocationStore(),
         store=store,
         blocking=ThreadBlockingRunner(),
+        threads=OsThreads(),
     ).turns
     return Production(env, artifacts, ProductionSessionResolver(inputs), store, requests, turns)
 

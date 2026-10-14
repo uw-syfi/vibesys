@@ -65,7 +65,9 @@ class World:
         (base / "workspace").mkdir()
         self._project = Project.open(base / "project")
         sessions = self._project.state.state_store_namespace("sessions")
-        self.checkpoints = DurableSessionStore(sessions.slot("sessions.json", AgentSessionState))
+        self.checkpoints = DurableSessionStore(
+            sessions.slot("sessions.json", AgentSessionState), threads=OsThreads()
+        )
         self.sessions: FakeAgentSessions | None = None
         self.host: SessionHost = open_lifecycle_host(
             base / "workspace", self.checkpoints, gate=gate
@@ -139,7 +141,9 @@ async def test_cancel_of_an_interrupted_turn_releases_it_without_dispatching_aga
 async def test_cancel_of_a_running_turn_is_unknown_until_it_ends() -> None:
     gate = TurnGate()
     async with world(gate) as w:
-        w.sessions = FakeAgentSessions(w.host.client, w.host.journal)  # one live process
+        w.sessions = FakeAgentSessions(
+            w.host.client, w.host.journal, threads=OsThreads()
+        )  # one live process
         assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
         running = asyncio.create_task(w.execute(dispatch_request()))
         await wait_until_started(gate.started, running)
@@ -163,7 +167,7 @@ async def test_a_restarted_host_cannot_claim_a_cancelled_turn_it_never_ran() -> 
     gate = TurnGate()
     async with world(gate) as w:
         assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
-        w.sessions = FakeAgentSessions(w.host.client, w.host.journal)
+        w.sessions = FakeAgentSessions(w.host.client, w.host.journal, threads=OsThreads())
         running = asyncio.create_task(w.execute(dispatch_request()))
         await wait_until_started(gate.started, running)
         w.sessions = None  # the next call starts a new host over the same journal
@@ -599,7 +603,7 @@ async def test_run_snapshot_proof_accepts_a_released_turn_but_not_a_recovered_on
     gate = TurnGate()
     async with world(gate) as w:
         assert status(await w.execute(ensure_request())) is ObservationStatus.SUCCEEDED
-        sessions = FakeAgentSessions(w.host.client, w.host.journal)
+        sessions = FakeAgentSessions(w.host.client, w.host.journal, threads=OsThreads())
         proof = ReleasedRunInvocations(
             JournalRunInvocations(sessions, w.store()), sessions, w.store()
         )
@@ -615,7 +619,7 @@ async def test_run_snapshot_proof_accepts_a_released_turn_but_not_a_recovered_on
         await w.execute(ensure_request())
         w.host.faults.down = True
         await w.execute(dispatch_request())
-        sessions = FakeAgentSessions(w.host.client, w.host.journal)
+        sessions = FakeAgentSessions(w.host.client, w.host.journal, threads=OsThreads())
         proof = ReleasedRunInvocations(
             JournalRunInvocations(sessions, w.store()), sessions, w.store()
         )

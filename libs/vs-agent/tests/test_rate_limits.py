@@ -87,11 +87,13 @@ def _run_turn(info: dict[str, object], root: Path, home: Path) -> tuple[list[Cor
                 SANDBOX_DISABLE_ENV: "off",
             },
             clock=FakeClock(),
+            threads=OsThreads(),
         ),
         provider="claude",
         run_log_file=log,
         event_sink=CoreAgentEventSink(journal.record, clock=ManualClock()),
         clock=ManualClock(),
+        threads=OsThreads(),
     )
     client.invoke_text(
         kind="implementer",

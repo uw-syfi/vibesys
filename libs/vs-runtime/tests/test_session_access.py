@@ -150,7 +150,9 @@ class AccessWorld:
         sessions = self.env.project.state.local_namespace(RUN_ID, "sessions")
         host = open_lifecycle_host(
             self.root.path,
-            DurableSessionStore(sessions.slot("sessions.json", AgentSessionState)),
+            DurableSessionStore(
+                sessions.slot("sessions.json", AgentSessionState), threads=OsThreads()
+            ),
             answer=self.answer,
             effect=self.write,
         )

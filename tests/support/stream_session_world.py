@@ -28,6 +28,7 @@ from vs_agent.api.testing import (
 )
 from vs_faults.api import FaultPlan
 from vs_sandbox.api.testing import FakeDockerConfinement
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -78,13 +79,17 @@ def open_stream_host(
         FakeExecutor([], peers=peers.build),
         plan or FaultPlan(seed=0),
         on_container_replaced=peers.forget_conversations,
+        threads=OsThreads(),
     )
     sandbox = cast("DockerSandbox", FakeDockerConfinement(workspace=resolver.workspace))
     launcher = fake_stream_launcher(
         provider=provider,
         executor=executor,
         sandboxes=dict.fromkeys((role.root for role in resolver.roles), sandbox),
+        threads=OsThreads(),
     )
-    client = AgentClient(launcher, provider=provider, containerized=True, clock=ManualClock())
+    client = AgentClient(
+        launcher, provider=provider, containerized=True, clock=ManualClock(), threads=OsThreads()
+    )
     host = SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
     return StreamHost(host, executor, peers)

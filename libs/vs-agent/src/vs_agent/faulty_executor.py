@@ -15,7 +15,6 @@ assert on. An empty plan makes it a pass-through.
 
 from __future__ import annotations
 
-import threading
 from typing import TYPE_CHECKING, cast
 
 from vs_agent.fault_injection import (
@@ -30,6 +29,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_agent.fault_injection import CommandExecutor
+    from vs_sim.api import Threads
 
 __all__ = ["KILLED_STATUS", "MALFORMED_LINE", "FaultyExecutor"]
 
@@ -51,12 +51,15 @@ class FaultyExecutor(FaultingExecutor):
         *,
         name: str = "agent",
         on_container_replaced: Callable[[], None] | None = None,
+        threads: Threads,
     ) -> None:
         """Wrap ``inner``; ``name`` is the rules' target for this executor."""
-        super().__init__(inner, self._next_kind, on_container_replaced=on_container_replaced)
+        super().__init__(
+            inner, self._next_kind, on_container_replaced=on_container_replaced, threads=threads
+        )
         self._plan = plan
         self._name = name
-        self._count_lock = threading.Lock()
+        self._count_lock = threads.lock()
         self._lines = 0
         self.injected: list[tuple[int, ProcessFault]] = []
 

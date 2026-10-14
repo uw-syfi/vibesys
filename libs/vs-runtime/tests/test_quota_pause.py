@@ -133,7 +133,7 @@ def _quota(
 
 
 def _client(stops: int, error: AgentQuotaError) -> FakeAgentClient:
-    return FakeAgentClient().fail(ROLE, error, times=stops)
+    return FakeAgentClient(threads=OsThreads()).fail(ROLE, error, times=stops)
 
 
 def _prompts(client: FakeAgentClient) -> list[str]:

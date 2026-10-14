@@ -34,7 +34,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, ProjectStateError, validate_run_id
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -66,7 +66,9 @@ def request_template(tmp_path: Path) -> RunRequest:
 
 
 def _fake_agent(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 @pytest.mark.asyncio

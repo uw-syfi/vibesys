@@ -30,6 +30,7 @@ from vs_agent.api.testing import (
     fake_agentshim_launcher,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 
@@ -51,11 +52,13 @@ class _Execution:
 
 def _client(implementation: str, execution: _Execution) -> AgentClient:
     driver = (
-        FakeProvider(answer="done", on_turn=lambda _: execution.accept())
+        FakeProvider(answer="done", on_turn=lambda _: execution.accept(), threads=OsThreads())
         if implementation == "fake"
-        else fake_agentshim_launcher(provider="codex", executor=FakeExecutor(execution.execute))
+        else fake_agentshim_launcher(
+            provider="codex", executor=FakeExecutor(execution.execute), threads=OsThreads()
+        )
     )
-    return AgentClient(driver, provider="codex", clock=ManualClock())
+    return AgentClient(driver, provider="codex", clock=ManualClock(), threads=OsThreads())
 
 
 def _sessions(
@@ -74,7 +77,7 @@ def _sessions(
     if client.provider_session_id(key) is None:
         client.run(session_spec=spec, turn=AgentTurnRequest(message="initial"), session_key=key)
     factory = FakeAgentSessions if implementation == "fake" else ClientAgentSessions
-    sessions = factory(client, store)
+    sessions = factory(client, store, threads=OsThreads())
     sessions.bind(
         key,
         spec,
@@ -155,7 +158,7 @@ def test_generated_unknown_dispatch_remains_fenced_after_reconstruction(
                 policy=AgentExecutionPolicy(require_enforcement=False),
             )
             for _ in range(repetitions):
-                sessions = factory(client, store)
+                sessions = factory(client, store, threads=OsThreads())
                 sessions.bind(
                     key,
                     spec,

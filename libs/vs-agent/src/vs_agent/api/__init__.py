@@ -140,7 +140,7 @@ from vs_agent.spec import AgentBackend, AgentSpec
 from vs_agent.todos import todos_from_tool_call
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
     from typing import TextIO
 
@@ -342,6 +342,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
     agent_homes_dir: Path | None = None,
+    launcher_env: Callable[[], Mapping[str, str]] | None = None,
     clock: Clock,
     threads: Threads,
 ) -> AgentClientProtocol:
@@ -366,6 +367,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
         session_store=session_store,
         events=events,
         agent_homes_dir=agent_homes_dir,
+        launcher_env=launcher_env,
         clock=clock,
         threads=threads,
     )

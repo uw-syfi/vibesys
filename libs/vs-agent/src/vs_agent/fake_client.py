@@ -44,7 +44,7 @@ from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import append_usage_record
 from vs_mcp.api import StdioServerDescriptor
-from vs_sim.api import OsThreads, utc_datetime
+from vs_sim.api import utc_datetime
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -193,7 +193,7 @@ class FakeAgentClient:
         session_store: SessionStore | None = None,
         skill_selection: SkillSelection = NULL_SKILL_SELECTION,
         log_dir: Path | None = None,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Create a fake client; see the class docstring for defaults.
 
@@ -247,7 +247,6 @@ class FakeAgentClient:
         self._refuses_accepted_steers = False
         self._refusals: list[Callable[[], None]] = []
         self._turns_in_flight = 0
-        threads = threads or OsThreads()
         self._steer_lock = threads.lock()
 
         self._capacity_gate: CapacityGate | None = None
