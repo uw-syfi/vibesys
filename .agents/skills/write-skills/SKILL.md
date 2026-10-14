@@ -85,7 +85,12 @@ Unenforced: placement is judgment; reviewers apply this table.
 Every rule in a skill names its enforcing check (a test, a script, a lint rule
 code, a graph rule) or carries `Unenforced: <reason>`. In codebase skills this
 is checked for every top-level item under Steps, Testing and Known failure
-modes. To add enforcement for a rule, follow the `enforce-rules` skill; do not
+modes: the item must contain, in backticks, a tracked check (a file under a
+`tests` directory, any test file named by its runner's convention such as
+`test_*.py`, `*_test.py`, `*.test.ts` or `*.spec.ts`, anything under
+`scripts/`, `clients/tools/` or `.github/workflows/`, or `tach.toml`,
+`.repoctl/checks.toml` or `clients/.dependency-cruiser.mjs`), alone or as
+`path:symbol`, or a Ruff or Biome rule the configuration enables. To add enforcement for a rule, follow the `enforce-rules` skill; do not
 restate it here.
 
 ## Maintenance

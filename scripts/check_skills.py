@@ -42,7 +42,8 @@ Rules (the `Rule` enum):
         In a `codebase` skill, every top-level list item under
         `ENFORCED_SECTIONS` carries `Unenforced:` or a resolving enforcement
         reference: a tracked path in the enforcement area (`ENFORCEMENT_PREFIXES`,
-        `ENFORCEMENT_FILES`, or any path with a `tests` segment), alone or as
+        `ENFORCEMENT_FILES`, any path with a `tests` segment, or a test file
+        anywhere by its runner's naming convention, `TEST_FILE`), alone or as
         the path of a `path:symbol` citation, or a lint rule code that the
         repository's Ruff or Biome configuration enables.
     index
@@ -114,6 +115,12 @@ ENFORCED_SECTIONS = frozenset({"Steps", "Testing", "Known failure modes"})
 UNENFORCED_MARK = "Unenforced:"
 ENFORCEMENT_PREFIXES = ("scripts/", "clients/tools/", ".github/workflows/")
 ENFORCEMENT_FILES = frozenset({"tach.toml", ".repoctl/checks.toml", "clients/.dependency-cruiser.mjs"})
+# A test file wherever it lives, by the runners' naming conventions: pytest's
+# `test_*.py` and `*_test.py` (and `conftest.py`), and the `*.test.*` and
+# `*.spec.*` files that bun and Playwright collect beside client code.
+TEST_FILE = re.compile(
+    r"(?:^|/)(?:test_[^/]*\.py|[^/]+_test\.py|conftest\.py|[^/]+\.(?:test|spec)\.(?:[cm]?[jt]sx?))$"
+)
 RUNNER_ROOTS = ("tests/", ".github/", ".repoctl/")
 # Root files that name this repository's own setup rather than a language idiom.
 REPO_FILES = ("AGENTS.md", "CLAUDE.md", "tach.toml")
@@ -494,8 +501,13 @@ def is_enforcement_reference(span: str, index: RepoIndex, lint: LintIndex) -> bo
 
 
 def _in_enforcement_area(path: str) -> bool:
-    """Whether ``path`` is where checks live: tests, check scripts, lint rules, CI, graphs."""
-    return path in ENFORCEMENT_FILES or path.startswith(ENFORCEMENT_PREFIXES) or "tests" in path.split("/")
+    """Whether ``path`` is where checks live: tests (in a tests tree or named as one), check scripts, lint rules, CI, graphs."""
+    return (
+        path in ENFORCEMENT_FILES
+        or path.startswith(ENFORCEMENT_PREFIXES)
+        or "tests" in path.split("/")
+        or TEST_FILE.search(path) is not None
+    )
 
 
 def codebase_violations(skill: Skill, root: Path, index: RepoIndex, lint: LintIndex) -> list[Violation]:

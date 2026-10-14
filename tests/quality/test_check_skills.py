@@ -71,6 +71,12 @@ BASE_FILES = {
     "pyproject.toml": '[tool.ruff.lint]\nselect = ["TID", "E"]\nignore = ["E501"]\n',
     "tests/test_thing.py": "def test_thing() -> None:\n    pass\n",
     "scripts/check_thing.py": "def main() -> int:\n    return 0\n",
+    "libs/vs-thing/tests/test_store.py": "def test_store() -> None:\n    pass\n",
+    "src/pkg/parse_test.py": "def test_parse() -> None:\n    pass\n",
+    "src/pkg/parse.py": "def parse() -> None:\n    pass\n",
+    "clients/libs/run-state/src/fold.test.ts": "test('folds', () => {});\n",
+    "clients/apps/web/e2e/flow.spec.ts": "test('flows', () => {});\n",
+    "clients/libs/run-state/src/fold.ts": "export const fold = 1;\n",
 }
 
 
@@ -358,6 +364,13 @@ def test_codebase_sections_out_of_order_are_reported(tmp_path: Path) -> None:
     [
         ("Do it; `tests/test_thing.py` checks it.", True),
         ("Do it; `scripts/check_thing.py:main` checks it.", True),
+        ("Do it; `libs/vs-thing/tests/test_store.py` checks it.", True),
+        ("Do it; `src/pkg/parse_test.py:test_parse` checks it.", True),
+        ("Do it; `clients/libs/run-state/src/fold.test.ts` checks it.", True),
+        ("Do it; `clients/apps/web/e2e/flow.spec.ts` checks it.", True),
+        ("Do it; `clients/libs/run-state/src/fold.ts` holds it.", False),
+        ("Do it; `src/pkg/parse.py:parse` holds it.", False),
+        ("Do it; `clients/libs/run-state/src/gone.test.ts` checks it.", False),
         ("Do it. Unenforced: needs judgment.", True),
         ("Do it; `TID251` bans the rest.", True),
         ("Do it; `E501` would catch it.", False),
