@@ -10,9 +10,7 @@ ledger of ``n`` and of ``4 * n`` finished requests, so the check is exact and ne
 from __future__ import annotations
 
 import sys
-from collections import Counter
 from functools import cache
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from hypothesis import given
@@ -28,28 +26,21 @@ if TYPE_CHECKING:
 
 _EQUALITY = BaseModel.__eq__.__code__
 
-# test-isolation: recovery's child-ownership checks (`_request_recovery.py`) still scan the ledger
-# by equality; that module is being changed by another track. Remove this once it uses the index.
-_NOT_YET_INDEXED = frozenset({"_request_recovery.py"})
-
 
 def _comparisons(state: core.CoreState, event: core.CoreEvent) -> int:
-    """How many model comparisons ``core.step(state, event)`` makes outside the excluded files."""
-    counted: Counter[str] = Counter()
+    """How many model comparisons ``core.step(state, event)`` makes."""
+    counted = [0]
 
     def count(frame: FrameType, kind: str, _arg: object) -> None:
         if kind == "call" and frame.f_code is _EQUALITY:
-            caller = frame.f_back
-            while caller is not None and caller.f_code is _EQUALITY:
-                caller = caller.f_back
-            counted[Path(caller.f_code.co_filename).name if caller else ""] += 1
+            counted[0] += 1
 
     sys.setprofile(count)
     try:
         core.step(state, event)
     finally:
         sys.setprofile(None)
-    return sum(n for name, n in counted.items() if name not in _NOT_YET_INDEXED)
+    return counted[0]
 
 
 @cache

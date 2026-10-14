@@ -101,7 +101,7 @@ def _child_sources(child: ChildLease, state: RecordsState) -> Verdict[tuple[Obse
     if set(marks) != set(child.source_requests):
         return Mismatch(ProofField.REQUEST_ID)
     for source, observation in marks.items():
-        sources = tuple(record for record in state.records if record.request_id == source)
+        sources = state.find(source)
         if len(sources) != 1 or sources[0].request.scope != child.scope:
             return Mismatch(ProofField.REQUEST_ID)
         record = sources[0]
@@ -114,7 +114,7 @@ def _child_sources(child: ChildLease, state: RecordsState) -> Verdict[tuple[Obse
 
 
 def _child_query(state: RecordsState, event: RequestObserved) -> Verdict[RequestRecord]:
-    queries = tuple(row for row in state.records if row.request_id == event.observation.request_id)
+    queries = state.find(event.observation.request_id)
     if len(queries) > 1:
         return Mismatch(ProofField.REQUEST_ID)
     if not queries:
@@ -160,9 +160,7 @@ def _child_inspection_fact(
         ),
         None,
     )
-    source = next(
-        (row for row in state.records if row.request_id == target.observation.request_id), None
-    )
+    source = state.record(target.observation.request_id)
     if (
         lease is not None
         and not lease.watermark_history_complete
@@ -628,11 +626,10 @@ def _child_proven(child: ChildLease, state: RecordsState) -> bool:
 
 
 def _validate_children(state: RecordsState) -> None:
-    records = {record.request_id: record for record in state.records}
     for index, child in enumerate(state.children):
         admissions = set()
         for source in child.source_requests:
-            record = records.get(source)
+            record = state.record(source)
             if record is None or record.request.scope != child.scope:
                 raise ContractError(
                     ("children", index, "source_requests", source.root),
@@ -683,12 +680,10 @@ def _transfer_children(state: RecordsState, context: RecordsContext) -> RecordsS
             request_id = (
                 job.request_id if isinstance(job, RegisteredOwnedJob) else job.submission_id
             )
-            source = next(
-                (record for record in state.records if record.request_id == request_id), None
-            )
-            ancestor = next(
-                record for record in state.records if record.request_id == child.source_requests[0]
-            )
+            source = state.record(request_id)
+            ancestor = state.record(child.source_requests[0])
+            if ancestor is None:
+                raise ContractError(("children",), "child requires a canonical source")
             observation = job.observation
             if (
                 source is not None
@@ -918,9 +913,7 @@ def _merge_child(
 
 def _source_observation(state: RecordsState, event: RequestObserved) -> Observation:
     observation = event.target.observation if event.target is not None else event.observation
-    sources = tuple(
-        record for record in state.records if record.request_id == observation.request_id
-    )
+    sources = state.find(observation.request_id)
     if len(sources) != 1:
         raise ContractError(
             ("observation", "request_id"), "child ownership requires a unique canonical source"
@@ -994,9 +987,7 @@ def _observe_fact(state: RecordsState, event: RequestObserved) -> RecordsState:
             )
         )
     else:
-        record = next(
-            (row for row in state.records if row.request_id == observation.request_id), None
-        )
+        record = state.record(observation.request_id)
         if record is None or observation.scope != record.request.scope:
             raise ContractError(("observation",), "unknown canonical ownership source")
         canonical = record.observation
@@ -1080,7 +1071,7 @@ def _child_release_signals(
 
 
 def _inspection_exists(state: RecordsState, inspection: InspectRequest) -> bool:
-    previous = next((row for row in state.records if row.request_id == inspection.request_id), None)
+    previous = state.record(inspection.request_id)
     if previous is None:
         return False
     if not isinstance(previous.request, InspectRequest) or any(
@@ -1170,7 +1161,7 @@ def _observe(
     checks = []
     for check in pending_checks:
         # An old host's query can update ownership, but cannot open this epoch's gate.
-        record = next((row for row in state.records if row.request_id == check.target), None)
+        record = state.record(check.target)
         child_resource = event.target.target_resource if event.target is not None else None
         expected_child = (
             _child_inspection(record, child_resource, barrier.epoch).request_id
@@ -1226,7 +1217,7 @@ def _deadline_barrier(
         checks.append(replacement)
     else:
         checks[checks.index(check)] = replacement
-    existing = next((row for row in state.records if row.request_id == inspection.request_id), None)
+    existing = state.record(inspection.request_id)
     if existing is not None and (
         not isinstance(existing.request, InspectRequest)
         or existing.request.target != record.request_id
@@ -1246,9 +1237,7 @@ def _pending_cancellations(
 ) -> tuple[CancelOwnedResource, ...]:
     requests = []
     for cancellation in cancellations:
-        previous = next(
-            (row for row in state.records if row.request_id == cancellation.request_id), None
-        )
+        previous = state.record(cancellation.request_id)
         if previous is None:
             requests.append(cancellation)
         elif not isinstance(previous.request, CancelOwnedResource) or any(
@@ -1260,19 +1249,18 @@ def _pending_cancellations(
 
 
 def _deadline_target(state: RecordsState, request_id: RequestId) -> RequestRecord:
-    records = {record.request_id: record for record in state.records}
     seen = set()
     while True:
         if request_id in seen:
             raise ContractError(("request", "target"), "cyclic reconciliation command ancestry")
         seen.add(request_id)
-        record = records.get(request_id)
+        record = state.record(request_id)
         if record is None:
             raise ContractError(("request_id", request_id.root), "unknown reconciliation target")
         request = record.request
         if not isinstance(request, InspectRequest | CancelOwnedResource | BlockRequest):
             return record
-        target = records.get(request.target)
+        target = state.record(request.target)
         if target is None:
             raise ContractError(
                 ("request", "target", request.target.root),
@@ -1302,7 +1290,7 @@ def _awaiting_report(state: RecordsState, record: RequestRecord) -> float | None
     check = next((row for row in state.recovery.checks if row.target == record.request_id), None)
     if check is None or check.inspection is None or check.resolution != "pending":
         return None
-    inspection = next((row for row in state.records if row.request_id == check.inspection), None)
+    inspection = state.record(check.inspection)
     if inspection is None or inspection.observation is not None:
         return None
     return inspection.until.at
@@ -1338,7 +1326,7 @@ def _deadline(
     ):
         return AreaChange(state=state)
     block_id = RequestId(root=f"recovery:block:{state.recovery.epoch}:{record.request_id.root}")
-    previous_block = next((row for row in state.records if row.request_id == block_id), None)
+    previous_block = state.record(block_id)
     if previous_block is not None:
         request = previous_block.request
         if (

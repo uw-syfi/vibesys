@@ -529,14 +529,19 @@ def canonical(state: RecordsState, event: RequestObserved) -> RequestObserved:
 
 
 def _recorded(state: RecordsState, observation: Observation) -> Observation | None:
-    """The closed record's refined form of *observation*, when the ledger refined it."""
+    """The closed record's observation, when it differs from *observation*.
+
+    The ledger has already taken *observation* in (`_refine`): it either refined the stored
+    observation with what *observation* proves, or left it as it was because *observation*
+    proved nothing new. Either way the stored observation is the canonical fact, never the
+    executor's raw status.
+    """
     record = _unique(state, observation.request_id)
     stored = None if record is None else record.observation
     if (
         record is None
         or stored is None
         or record.phase != RequestPhase.COMPLETED
-        or stored.event_id != observation.event_id
         or stored == observation
     ):
         return None
