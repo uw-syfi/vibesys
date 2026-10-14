@@ -70,6 +70,7 @@ import hmac
 import os
 import uuid
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import TypeAdapter, ValidationError
@@ -124,9 +125,10 @@ from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._workspace_lookup import find_scope_workspace
 from vs_runtime._workspace_requests import revision_ref
+from vs_sim.api import OsThreads, UnixNetwork
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
     from pathlib import Path
 
     from vs_core.api import CoreEvent, CoreState, RequestId
@@ -136,7 +138,7 @@ if TYPE_CHECKING:
     from vs_runtime._workspace_receipts import WorkspaceReceipts
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_runtime.contracts import AgentRole
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Connection, Listener, Network, Threads
 
 EVALUATION_TOOL_ID = "evaluation"
 """The ``AgentRole.extra_tools`` id that asks for this bridge's tools."""
@@ -204,6 +206,22 @@ def _outcome(core: CoreState, request_id: RequestId) -> str | None:
                 seen = receipt.observation
                 return seen.status.value if seen is not None and seen.terminal else None
     return None
+
+
+def _read_frame(connection: Connection) -> bytes | None:
+    """One line with its newline, or what came before the peer closed.
+
+    ``None`` when the line outgrows ``_FRAME_LIMIT``: the call is dropped unanswered.
+    """
+    data = bytearray()
+    while (end := data.find(b"\n")) < 0:
+        if len(data) > _FRAME_LIMIT:
+            return None
+        chunk = connection.recv(_FRAME_LIMIT)
+        if not chunk:
+            return bytes(data)
+        data += chunk
+    return None if end > _FRAME_LIMIT else bytes(data[: end + 1])
 
 
 def _ignore_diagnostic(line: str) -> None:
@@ -374,17 +392,25 @@ class AgentEvaluationBridge:
     ``yielded`` as the session executor's ``TurnYields``.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-241401 [PLR0913]; the service's independent collaborators plus the network it serves on.
+        # > A parameter object for the path, network and threads would be a type with one
+        # > user that only renames three arguments; reading them off a module global would
+        # > hide from tests the seams that let them run the service in memory and seeded.
         self,
         socket_path: Path,
         policy: AgentEvaluationPolicy,
         workspaces: AgentWorkspaces,
         records: AgentEvaluationRecords,
         diagnostics: Callable[[str], None] = _ignore_diagnostic,
+        *,
+        network: Network | None = None,
+        threads: Threads | None = None,
     ) -> None:
         """Bind the socket path, the plan policy, the workspace lookup, the records and a log sink.
 
         ``diagnostics`` hears one line for each call refused as busy, for the run's journal.
+        ``network`` binds the socket path and ``threads`` reads each connection; both
+        default to the operating system's.
         """
         self._socket_path = socket_path
         self._policy = policy
@@ -399,7 +425,12 @@ class AgentEvaluationBridge:
         self._shell: AdmissionShell | None = None
         self._clock: Clock | None = None
         self._scopes: dict[str, _Scoped] = {}
-        self._server: asyncio.AbstractServer | None = None
+        self._network = network or UnixNetwork()
+        self._threads = threads or OsThreads()
+        self._listener: Listener | None = None
+        self._guard = self._threads.lock()
+        self._open: set[Connection] = set()
+        self._closing = False
         self._lock = asyncio.Lock()
 
     def attach(self, shell: AdmissionShell, clock: Clock) -> None:
@@ -435,44 +466,94 @@ class AgentEvaluationBridge:
 
         The bridge never creates that directory: a create that accepts an existing
         path would serve inside one another user planted, who could then replace
-        the socket and answer the agent's evaluation calls.
+        the socket and answer the agent's evaluation calls. Each connection is read
+        on its own worker thread; its call is answered on this event loop.
         """
         with contextlib.suppress(FileNotFoundError):
             self._socket_path.unlink()
-        self._server = await asyncio.start_unix_server(
-            self._client, path=str(self._socket_path), limit=_FRAME_LIMIT
+        loop = asyncio.get_running_loop()
+        listener = self._network.listen(str(self._socket_path))
+        self._listener = listener
+        self._threads.spawn(
+            partial(self._accept_loop, listener, loop), name="agent-evaluation-bridge"
         )
 
     async def close(self) -> None:
-        """Stop accepting calls and remove the socket."""
-        if self._server is not None:
-            self._server.close()
-            await self._server.wait_closed()
-            self._server = None
+        """Stop accepting calls, hang up on every open connection, and remove the socket.
+
+        A client that never finishes its call cannot hold the run open: hanging up wakes
+        the worker reading from it.
+        """
+        listener, self._listener = self._listener, None
+        with self._guard:
+            self._closing = True
+            open_connections, self._open = self._open, set()
+        if listener is not None:
+            listener.close()
+        for connection in open_connections:
+            connection.close()
         with contextlib.suppress(FileNotFoundError):
             self._socket_path.unlink()
 
-    async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        try:
-            frame = await reader.readline()
+    def _accept_loop(self, listener: Listener, loop: asyncio.AbstractEventLoop) -> None:
+        while True:
             try:
-                reply, acknowledge = await self.answer(frame)
+                connection = listener.accept()
+            except OSError:
+                return  # the listener was closed
+            with self._guard:
+                closing = self._closing
+                if not closing:
+                    self._open.add(connection)
+            if closing:
+                connection.close()
+                return
+            self._threads.spawn(
+                partial(self._client, connection, loop), name="agent-evaluation-call"
+            )
+
+    def _client(self, connection: Connection, loop: asyncio.AbstractEventLoop) -> None:
+        try:
+            frame = _read_frame(connection)
+            if frame is None:
+                return
+            answered = self._on_loop(loop, self.answer(frame))
+            if answered.cancelled():
+                return  # the loop is shutting down
+            try:
+                reply, acknowledge = answered.result()
             except Exception:
                 # Run state the bridge cannot trust: the shell's halt ends the run. Tell
                 # the agent to stop instead of retrying, then let the error surface.
-                writer.write(self._failure(ToolRefusal.RUN_FAILING) + b"\n")
-                await writer.drain()
+                connection.send(self._failure(ToolRefusal.RUN_FAILING) + b"\n")
                 raise
-            writer.write(reply + b"\n")
-            await writer.drain()
+            connection.send(reply + b"\n")
             # The client says it read the whole reply before it closes; an abandoned
             # connection ends without the line and leaves the submission owed.
-            if await reader.readline() == RECEIPT_LINE:
-                acknowledge()
-        except (ConnectionError, asyncio.LimitOverrunError, ValueError):
+            if _read_frame(connection) == RECEIPT_LINE:
+                loop.call_soon_threadsafe(acknowledge)
+        except OSError:
             pass
         finally:
-            writer.close()
+            with self._guard:
+                self._open.discard(connection)
+            connection.close()
+
+    def _on_loop[T](
+        self, loop: asyncio.AbstractEventLoop, work: Coroutine[object, object, T]
+    ) -> asyncio.Task[T]:
+        """Run ``work`` as a task on ``loop`` and wait, on this worker, until it is done."""
+        done = self._threads.event()
+        tasks: list[asyncio.Task[T]] = []
+
+        def start() -> None:
+            task = loop.create_task(work)
+            tasks.append(task)
+            task.add_done_callback(lambda _task: done.set())
+
+        loop.call_soon_threadsafe(start)
+        done.wait()
+        return tasks[0]
 
     async def answer(self, frame: bytes) -> tuple[bytes, Callable[[], None]]:
         """The reply to one frame, and the call that records that the agent received it.

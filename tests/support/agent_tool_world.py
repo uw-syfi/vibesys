@@ -54,7 +54,8 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
-from vs_sim.api import MonotonicClock, UnixNetwork
+from vs_sim.api import MonotonicClock, OsThreads
+from vs_sim.api.testing import SimNetwork
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -94,6 +95,8 @@ class ScriptedAgent(CandidateWriter):
     handles: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     waits_accepted: int = 0
+    network: SimNetwork = field(default_factory=lambda: SimNetwork(OsThreads()))
+    """The in-memory network the bridge listens on and the tool dials."""
 
     def __call__(self, request: AgentTurnRequest) -> None:
         """Commit one change, run this turn's program, and reply waiting if a wait was accepted."""
@@ -103,7 +106,7 @@ class ScriptedAgent(CandidateWriter):
             for tool in build_core_evaluation_tools(
                 socket_path=Path(self.env["VS_EVALUATION_SOCKET"]),
                 token=self.env["VS_EVALUATION_TOKEN"],
-                network=UnixNetwork(),
+                network=self.network,
                 clock=MonotonicClock(),
             )
         }
@@ -221,6 +224,7 @@ async def scenario(
                 OwedSubmissions(ReceiptStore(receipts)),
                 ReceiptEvidenceLedger(ReceiptStore(receipts)),
             ),
+            network=agents[0].network,
         )
         resolvers[0].bridge = bridge
         bridges.append(bridge)

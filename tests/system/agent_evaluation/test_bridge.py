@@ -1,8 +1,8 @@
 """An agent submits through the evaluation tool and core resumes it once, over the Fake cluster.
 
 The real shell, executors, Git workspaces and Fake Slurm cluster run one scripted attempt.
-The implementer's turn calls the core-path tool handlers over the bridge's unix socket, from
-the provider thread, as the MCP process would, then ends its turn waiting. Core must admit the
+The implementer's turn calls the core-path tool handlers over the bridge's in-memory
+network, from the provider thread, as the MCP process would, then ends its turn waiting. Core must admit the
 submission, run one measurement, and authorize exactly one resume of that turn.
 """
 
@@ -68,8 +68,8 @@ from vs_runtime.api.core import (
     handle_for,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
-from vs_sim.api import MonotonicClock, UnixNetwork
-from vs_sim.api.testing import VirtualClock, clock_from, examples, run_virtual
+from vs_sim.api import MonotonicClock, OsThreads
+from vs_sim.api.testing import SimNetwork, VirtualClock, clock_from, examples, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -103,6 +103,8 @@ class ToolUsingWriter(CandidateWriter):
     handles: list[str] = field(default_factory=list)
     refusals: list[str] = field(default_factory=list)
     descriptor_env: dict[str, str] = field(default_factory=dict)
+    network: SimNetwork = field(default_factory=lambda: SimNetwork(OsThreads()))
+    """The in-memory network the bridge listens on and the tool dials."""
 
     def __call__(self, request: AgentTurnRequest) -> None:
         """Commit one change; the first turn then submits and validates its wait."""
@@ -115,7 +117,7 @@ class ToolUsingWriter(CandidateWriter):
             for tool in build_core_evaluation_tools(
                 socket_path=Path(self.descriptor_env["VS_EVALUATION_SOCKET"]),
                 token=self.descriptor_env["VS_EVALUATION_TOKEN"],
-                network=UnixNetwork(),
+                network=self.network,
                 clock=MonotonicClock(),
             )
         }
@@ -194,6 +196,7 @@ async def scenario(
                 OwedSubmissions(ReceiptStore(receipts)),
                 ReceiptEvidenceLedger(ReceiptStore(receipts)),
             ),
+            network=writers[0].network,
         )
         resolvers[0].bridge = bridge
         bridges.append(bridge)
