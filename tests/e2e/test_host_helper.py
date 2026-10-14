@@ -49,7 +49,7 @@ _SCENARIOS = tuple(
         )
     )
 )
-_MODULE_CEILING = 340
+_MODULE_CEILING = 330
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
