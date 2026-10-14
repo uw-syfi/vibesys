@@ -150,7 +150,7 @@ def _origin(ctx: Flow, config: SkeletonConfig) -> float:
     return ctx.clock.now() if config.probe else 0.0
 
 
-async def _measure(
+async def measure(
     ctx: Flow,
     config: SkeletonConfig,
     revision: core.RevisionRef,
@@ -175,7 +175,7 @@ async def _measure(
 async def _probe(ctx: Flow, config: SkeletonConfig) -> None:
     """Submit the input-baseline measurement, then wait for the run to be ended."""
     async with ctx.group(limit=1) as group:
-        group.start("baseline", _measure, config, ctx.facts.baseline, "baseline")
+        group.start("baseline", measure, config, ctx.facts.baseline, "baseline")
         await ctx.first(ctx.stopped)
 
 
@@ -235,7 +235,7 @@ async def _attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
             return NoWinner(reason="the implementer turn produced no commit")
         candidate = core.RevisionRef.of_git_commit(commit)
         if config.measured and (
-            refused := await _measure(ctx, config, candidate, "official", workspace)
+            refused := await measure(ctx, config, candidate, "official", workspace)
         ):
             return refused
         if config.keeps_candidate:
@@ -262,7 +262,7 @@ async def _bare(ctx: Flow, config: SkeletonConfig) -> _Ended | None:
         await ctx.first(ctx.timer(config.wake_at))
         return _Ended(NoWinner(reason="woken"))
     if config.baseline_only:
-        refused = await _measure(ctx, config, ctx.facts.baseline, "baseline")
+        refused = await measure(ctx, config, ctx.facts.baseline, "baseline")
         return _Ended(refused or NoWinner(reason="the baseline is all there is"))
     return None
 
@@ -283,7 +283,7 @@ async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
         if config.measured:
             await _probe(ctx, config)
         return None
-    if config.measured and (refused := await _measure(ctx, config, ctx.facts.baseline, "baseline")):
+    if config.measured and (refused := await measure(ctx, config, ctx.facts.baseline, "baseline")):
         return refused
     if (refused := await _attempt(ctx, config)) is not None:
         return refused

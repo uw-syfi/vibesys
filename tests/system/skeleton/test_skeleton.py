@@ -16,8 +16,10 @@ merger removes it. The gap table is in the skeleton handoff.
 from __future__ import annotations
 
 import ast
+import functools
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from tests.support.session_world import (
@@ -31,7 +33,14 @@ from tests.support.session_world import (
     inspect_request,
     turn_spec,
 )
-from tests.support.skeleton_strategy import DECLARATION, DIGEST, SkeletonStrategy, measurement
+from tests.support.skeleton_strategy import (
+    DECLARATION,
+    DIGEST,
+    SkeletonConfig,
+    SkeletonStrategy,
+    measure,
+    measurement,
+)
 from tests.support.skeleton_world import (
     CrashPoint,
     Process,
@@ -56,6 +65,7 @@ from vs_core.api import (
     InvocationId,
     InvocationRef,
     LifecycleClass,
+    MeasurementResult,
     ObservationStatus,
     OperationSchemaRef,
     RequestId,
@@ -341,13 +351,38 @@ def test_a_declaration_requiring_an_unoffered_operation_is_refused_by_name() -> 
     assert "needs-this-operation" in str(refused.value)
 
 
+@pytest.mark.parametrize(
+    "status", [ObservationStatus.REJECTED, ObservationStatus.CANCELLED, ObservationStatus.FAILED]
+)
+async def test_a_measurement_that_is_not_evidence_is_the_reason_the_run_has_no_winner(
+    status: ObservationStatus,
+) -> None:
+    """A rejected or cancelled result may carry no typed failure; it still ends the run."""
+    result = MeasurementResult.model_construct(status=status, failure=None)
+
+    async def measure_it(*_args: object, **_kwargs: object) -> MeasurementResult:
+        return result
+
+    ctx = SimpleNamespace(evaluation=SimpleNamespace(measure=measure_it))
+    baseline = RevisionRef.of_git_commit("a" * 40)
+
+    refused = await measure(ctx, SkeletonConfig(), baseline, "baseline")  # ty: ignore[invalid-argument-type]
+
+    assert refused is not None
+    assert status.value in refused.reason
+
+
 def test_every_unproduced_request_kind_has_a_named_owner() -> None:
     """A request kind that core never emits and no marker above covers is a new gap."""
     assert not _unproduced() - ADOPTION - RETIREMENT
 
 
-def _kinds_constructed_by_core() -> set[str]:
-    """Names of every class that vs-core source calls as a constructor."""
+@functools.cache
+def _kinds_constructed_by_core() -> frozenset[str]:
+    """Names of every class that vs-core source calls as a constructor.
+
+    Parsing vs-core's source costs seconds, and the answer is fixed for the process.
+    """
     names: set[str] = set()
     for source in Path(vs_core.__file__).parent.rglob("*.py"):
         for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
@@ -356,4 +391,4 @@ def _kinds_constructed_by_core() -> set[str]:
                 for part in (node.func, *node.args):
                     if isinstance(part, ast.Name):
                         names.add(part.id)
-    return names
+    return frozenset(names)
