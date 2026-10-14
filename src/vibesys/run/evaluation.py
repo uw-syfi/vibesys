@@ -136,9 +136,19 @@ def emit_gate_finished(
 class CoreLocalValidationEvents:
     """Translate policy-neutral recipe observations to VibeSys gate events."""
 
-    def __init__(self, events: CoreEventWriter) -> None:
-        """Write every translated recipe observation to *events*."""
+    def __init__(self, events: CoreEventWriter, *, round_label: str | None = None) -> None:
+        """Write every translated recipe observation to *events*.
+
+        *round_label* groups every recipe this instance observes under the
+        same local-validation attempt (``GateFinishedData.round_label``).
+        Pass None when this instance's lifetime spans more than one attempt
+        (the parallel-candidate validation path builds one long-lived
+        instance for the whole run, so no single label identifies "one
+        attempt" for it; that path's gates stay ungrouped until it carries
+        its own per-attempt identity to pass in here).
+        """
         self._events = events
+        self._round_label = round_label
 
     def started(self, recipe: ValidationRecipe) -> None:
         """Publish one ``GATE_STARTED`` for a validation recipe about to run."""
@@ -159,6 +169,7 @@ class CoreLocalValidationEvents:
                 recipe=result.recipe.name,
                 reused=result.reused,
                 output_tail=None if failure is None else failure[-GATE_LOG_TAIL_CHARS:],
+                round_label=self._round_label,
             ),
             passed=result.passed,
         )
@@ -176,7 +187,7 @@ def recipe_input_error_feedback(detail: str) -> str:
 
 async def _validate_local(
     evaluation: RuntimeWorkspaceEvaluation,
-    events: CoreEventWriter,
+    local_validation_events: CoreLocalValidationEvents,
     workspace: Workspace,
     *,
     recipe_artifact: str,
@@ -188,7 +199,7 @@ async def _validate_local(
             workspace,
             recipe_artifact=recipe_artifact,
             report_location=report_location,
-            events=CoreLocalValidationEvents(events),
+            events=local_validation_events,
         )
     except LocalValidationRecipeError as error:
         # The recipe reference came from the agent's own reply, so this is an
@@ -351,7 +362,10 @@ class _EvaluationAdapter:
         """Run candidate-authored recipes while isolating workspace effects."""
         return await _validate_local(
             self._runtime_evaluation,
-            self._events,
+            CoreLocalValidationEvents(
+                self._events,
+                round_label=f"local-validation-{next(self._identifiers)}",
+            ),
             workspace,
             recipe_artifact=recipe_artifact,
             report_location=report_location,

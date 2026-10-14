@@ -410,6 +410,12 @@ class _ProductHostFactory:
                 evaluation_diagnostics=self._evaluation_diagnostic,
                 stateless_tool_servers=self._stateless_tool_servers(resources),
                 commands=agent_runtime.commands,
+                # No round_label: this instance is built once for the run and
+                # shared across every candidate's local-validation attempts,
+                # so no single label identifies "one attempt" for it (see
+                # CoreLocalValidationEvents.__init__). Its GATE_FINISHED
+                # events stay ungrouped until this path carries its own
+                # per-attempt identity to pass through here.
                 local_validation_events=CoreLocalValidationEvents(self.integration.events),
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
                 commit_observer=self.integration.core_commit_observer(
