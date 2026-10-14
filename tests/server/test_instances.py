@@ -1200,12 +1200,21 @@ def test_the_root_lives_under_the_runtime_directory_and_is_private(
     assert stat.S_IMODE(root.stat().st_mode) == 0o700
 
 
-def test_a_root_open_to_other_users_is_refused(tmp_path: Path) -> None:
+def test_a_root_others_can_write_is_refused(tmp_path: Path) -> None:
+    (tmp_path / "vibesys").mkdir(mode=0o775)
+    (tmp_path / "vibesys").chmod(0o775)
+
+    with pytest.raises(PermissionError, match="not writable by group or other"):
+        instance_root({"XDG_RUNTIME_DIR": str(tmp_path)}, os.getuid())
+
+
+def test_a_root_others_can_only_read_is_made_private(tmp_path: Path) -> None:
     (tmp_path / "vibesys").mkdir(mode=0o755)
     (tmp_path / "vibesys").chmod(0o755)
 
-    with pytest.raises(PermissionError, match="mode 0700"):
-        instance_root({"XDG_RUNTIME_DIR": str(tmp_path)}, os.getuid())
+    root = instance_root({"XDG_RUNTIME_DIR": str(tmp_path)}, os.getuid())
+
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
 
 
 def test_a_root_owned_by_another_user_is_refused(tmp_path: Path) -> None:

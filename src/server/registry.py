@@ -77,6 +77,7 @@ from server.host_api import (
     UnreadableRecord,
     parse_record,
 )
+from vs_project.api import ensure_private_directory, user_runtime_root
 from vs_sim.api import sync_descriptor
 
 if TYPE_CHECKING:
@@ -95,10 +96,6 @@ FLOCK_AVAILABLE = fcntl is not None
 _INSTANCE_ID = re.compile(INSTANCE_ID_PATTERN)
 _RECORD_SUFFIX = ".json"
 _LOCK_SUFFIX = ".lock"
-_PRIVATE_DIRECTORY = 0o700
-_GROUP_OR_OTHER = 0o077
-_FALLBACK_PARENT = Path("/tmp")  # noqa: S108  # lint-waiver: LW-178202 [S108]; the per-user runtime fallback must be a short, node-local, session-independent path; `tempfile.gettempdir()` follows `$TMPDIR`, which differs between macOS GUI and SSH sessions and can be long enough to break the Unix socket path limit
-"""Parent of the fallback root when ``$XDG_RUNTIME_DIR`` is unset."""
 _STOP_POLL_SECONDS = 0.05
 STOP_TIMEOUT_SECONDS = 10.0
 """How long ``stop`` waits for a stopped server to finish its run teardown."""
@@ -540,30 +537,13 @@ class StopRequester(Protocol):
 def instance_root(environ: Mapping[str, str], uid: int) -> Path:
     """Return this user's node-local runtime root, created private.
 
-    ``$XDG_RUNTIME_DIR/vibesys`` when set (systemd makes it per user, local and
-    private), else ``/tmp/vibesys-<uid>``. Never under ``$HOME``, which may be
-    on NFS where ``flock`` and sockets are unreliable. Both stay short enough
-    for a socket path below the Unix limit.
+    ``vs_project.api.user_runtime_root`` says where it is and
+    ``ensure_private_directory`` creates it and refuses one another user planted.
 
     Raises ``PermissionError`` if the directory exists but is a symlink, is not
-    owned by ``uid``, or is open to group or other: in a shared ``/tmp`` it may
-    have been planted by another user.
+    owned by ``uid``, or is writable by group or other.
     """
-    runtime = environ.get("XDG_RUNTIME_DIR", "")
-    root = (
-        Path(runtime) / "vibesys"
-        if runtime and Path(runtime).is_absolute()
-        else _FALLBACK_PARENT / f"vibesys-{uid}"
-    )
-    root.mkdir(mode=_PRIVATE_DIRECTORY, parents=False, exist_ok=True)
-    status = root.lstat()
-    if not stat.S_ISDIR(status.st_mode) or status.st_uid != uid or status.st_mode & _GROUP_OR_OTHER:
-        message = (
-            f"{root} must be a directory owned by uid {uid} with mode 0700; "
-            "refusing to use it for the live-instance registry"
-        )
-        raise PermissionError(message)
-    return root
+    return ensure_private_directory(user_runtime_root(environ, uid), uid)
 
 
 def instance_run_directory(root: Path, instance_id: str) -> Path:
@@ -943,7 +923,7 @@ class FileInstanceStore:
         """Use ``root/instances`` (created private) for locks and records."""
         self._root = root
         self._directory = root / "instances"
-        self._directory.mkdir(mode=_PRIVATE_DIRECTORY, exist_ok=True)
+        ensure_private_directory(self._directory, os.getuid())
 
     def ids(self) -> tuple[str, ...]:
         """List ids that have a lock or a record file."""

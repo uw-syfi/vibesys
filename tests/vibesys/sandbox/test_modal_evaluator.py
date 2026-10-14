@@ -252,30 +252,6 @@ def test_deployment_path_rejects_absolute_path(
     )
 
 
-def test_runtime_dir_is_per_user_without_xdg_runtime_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Public evaluation creates its lock under a uid-suffixed temp directory."""
-    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-    real_uid = os.getuid()
-    monkeypatch.setattr(modal_evaluator.os, "getuid", lambda: 1001)
-    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    first = _load_modal_evaluator(monkeypatch, "uid_1001")
-    monkeypatch.setattr(first.os, "getuid", lambda: real_uid)
-    assert first.run_evaluator(["true"], workspace=str(workspace), clock=AdvancingClock()) == 1
-    monkeypatch.setattr(modal_evaluator.os, "getuid", lambda: 1002)
-    second = _load_modal_evaluator(monkeypatch, "uid_1002")
-    monkeypatch.setattr(second.os, "getuid", lambda: real_uid)
-    assert second.run_evaluator(["true"], workspace=str(workspace), clock=AdvancingClock()) == 1
-
-    first_lock = tmp_path / "vibesys-1001" / "modal-evaluator.lock"
-    second_lock = tmp_path / "vibesys-1002" / "modal-evaluator.lock"
-    assert first_lock.exists()
-    assert second_lock.exists()
-
-
 def test_runtime_dir_prefers_xdg_runtime_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

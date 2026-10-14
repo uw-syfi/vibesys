@@ -34,7 +34,6 @@ import stat
 import subprocess
 import sys
 import tarfile
-import tempfile
 import threading
 import time
 import urllib.error
@@ -85,15 +84,17 @@ _KEEPWARM_INTERVAL_SECONDS = 30.0
 def _runtime_dir() -> Path:
     """Return this process's private per-user runtime directory.
 
-    Prefers ``XDG_RUNTIME_DIR``, which is already private per user by POSIX
-    convention; otherwise falls back to a uid-suffixed directory under the
-    system temp directory so unrelated users sharing a host cannot collide
-    on the evaluator's lock or lease files.
+    This helper is mounted alone into the agent container and cannot import
+    ``vs_project``, so it restates ``vs_project.api.user_runtime_root`` (an
+    absolute ``XDG_RUNTIME_DIR`` else ``/tmp/vibesys-<uid>``, never the
+    ``TMPDIR``-dependent temp directory) and ``ensure_private_directory`` (in
+    ``_ensure_runtime_dir``). ``tests/vibesys/sandbox/test_private_directory_rule.py``
+    runs both on the same directories and requires the same verdict.
     """
-    xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-    if xdg_runtime_dir:
+    xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "")
+    if xdg_runtime_dir and Path(xdg_runtime_dir).is_absolute():
         return Path(xdg_runtime_dir) / "vibesys"
-    return Path(tempfile.gettempdir()) / f"vibesys-{os.getuid()}"
+    return Path("/tmp") / f"vibesys-{os.getuid()}"  # noqa: S108  # lint-waiver: LW-178203 [S108]; a short, node-local, session-independent path, as `vs_project.api.user_runtime_root` fixes it; `tempfile.gettempdir()` follows `$TMPDIR`
 
 
 _LOCK_PATH = _runtime_dir() / "modal-evaluator.lock"

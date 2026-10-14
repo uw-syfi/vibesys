@@ -48,6 +48,11 @@ from vs_project._manifests import (
     RunExecutionRecord,
     RunResourceRequest,
 )
+from vs_project._private_directory import (
+    PrivateDirectoryError,
+    ensure_private_directory,
+    user_runtime_root,
+)
 from vs_project._run_logs import RunLogText, read_latest_run_log
 from vs_project._socket import (
     MAX_SOCKET_PATH_BYTES,
@@ -169,6 +174,7 @@ __all__ = [
     "OrchestrationRunManifest",
     "PatchStyle",
     "Pathspec",
+    "PrivateDirectoryError",
     "Project",
     "ProjectError",
     "ProjectGitIntegration",
@@ -212,6 +218,7 @@ __all__ = [
     "UnsafeProjectPathError",
     "atomic_write_bytes",
     "decode_state_document",
+    "ensure_private_directory",
     "generate_run_id",
     "is_project_state_path",
     "open_git_repository",
@@ -220,6 +227,7 @@ __all__ = [
     "run_git",
     "select_git_backend",
     "strip_ansi",
+    "user_runtime_root",
     "validate_run_id",
     "validate_socket_path",
     "validate_state_namespace",

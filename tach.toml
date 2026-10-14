@@ -138,7 +138,7 @@ depends_on = []
 # The per-user live registry: lifetime locks, records, listing, and the stop
 # decision. Light; the control-socket stop requester is server.instances.
 path = "server.registry"
-depends_on = ["server.host_api", "vs_sim.api"]
+depends_on = ["server.host_api", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The run protocol's control envelope: request and response framing and
@@ -357,7 +357,7 @@ depends_on = ["vibesys", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.e
 [[modules]]
 path = "vibesys.run.evaluation_socket"
 layer = "orchestration_host"
-depends_on = ["vs_sandbox"]
+depends_on = ["vs_project", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.run.core_services"

@@ -19,14 +19,13 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
-import stat
 import tempfile
 from pathlib import Path
 
+from vs_project.api import PrivateDirectoryError, ensure_private_directory
 from vs_sandbox.api import EnvironmentBindMount
 
 _SOCKET_NAME = "evaluation.sock"
-_PRIVATE_DIRECTORY = 0o700
 
 
 class EvaluationSocketDirectoryError(PermissionError):
@@ -65,12 +64,10 @@ def prepare_evaluation_socket(project_root: Path, run_id: str, *, owner: int | N
     """
     owner = os.geteuid() if owner is None else owner
     directory = evaluation_socket_directory(project_root, run_id)
-    directory.mkdir(mode=_PRIVATE_DIRECTORY, exist_ok=True)
-    status = directory.lstat()
-    if not stat.S_ISDIR(status.st_mode) or status.st_uid != owner or status.st_mode & 0o022:
-        raise EvaluationSocketDirectoryError.planted(directory, owner)
-    if stat.S_IMODE(status.st_mode) != _PRIVATE_DIRECTORY:
-        directory.chmod(_PRIVATE_DIRECTORY)
+    try:
+        ensure_private_directory(directory, owner)
+    except PrivateDirectoryError as error:
+        raise EvaluationSocketDirectoryError.planted(directory, owner) from error
     return directory / _SOCKET_NAME
 
 
