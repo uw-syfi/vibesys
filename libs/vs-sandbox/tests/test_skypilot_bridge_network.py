@@ -2,7 +2,7 @@
 
 Every handler is a simulated thread and the SkyPilot runner is a recording Fake, so
 the lifecycle and the framing run in one process without sockets or sleeps. The
-real Unix socket path is exercised by ``tests/vibesys/skypilot/test_bridge.py``.
+real Unix socket path is exercised by ``libs/vs-sandbox/tests/test_skypilot_bridge.py``.
 """
 
 from __future__ import annotations

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import base64
 import binascii
+import contextlib
 import hashlib
 import json
 import os
@@ -15,10 +16,10 @@ import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, TextIO
+from typing import TYPE_CHECKING, BinaryIO, Literal, Protocol, TextIO
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
 
 _PROTOCOL_VERSION = 2
 _MAX_FRAME_BYTES = 1024 * 1024
@@ -30,9 +31,36 @@ RESULT_STATUSES = frozenset({"COMPLETED", "APPLICATION_FAILED", "CANCELLED"})
 _CANCELLED_EXIT_STATUS = 130
 
 
+class BridgePeer(Protocol):
+    """The client end of a bridge connection: the part of a socket this helper uses."""
+
+    def sendall(self, data: bytes, /) -> None:
+        """Write all of ``data``."""
+        ...
+
+    def makefile(self, mode: Literal["rb"], /) -> BinaryIO:
+        """A buffered binary reader over the replies."""
+        ...
+
+    def close(self) -> None:
+        """Close the connection."""
+        ...
+
+
+def connect_unix(socket_path: Path) -> BridgePeer:
+    """Connect to the bridge's Unix socket; the default way ``run_evaluator`` dials."""
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        client.connect(str(socket_path))
+    except BaseException:
+        client.close()
+        raise
+    return client
+
+
 @dataclass(frozen=True)
 class _BridgeSession:
-    client: socket.socket
+    client: BridgePeer
     reader: BinaryIO
     invocation_id: str
     pending_path: Path
@@ -201,7 +229,7 @@ def _complete_result(
     return exit_status_of(status)
 
 
-# lint-waiver: LW-994577 [PLR0913]; this installed CLI helper takes the evaluator kind, bridge socket, arguments, caller state directory, and both output streams as separate caller controls.
+# lint-waiver: LW-994577 [PLR0913]; this installed CLI helper takes the evaluator kind, bridge socket, arguments, caller state directory, both output streams, and the dialer as separate caller controls.
 # > A request dataclass would only rename these six values for the one call site in main() and the tests.
 # > Defaulting state_dir to a shared temp path would reintroduce the collision this parameter removes.
 def run_evaluator(  # noqa: PLR0913
@@ -212,15 +240,16 @@ def run_evaluator(  # noqa: PLR0913
     state_dir: Path,
     stdout: TextIO,
     stderr: TextIO,
+    connect: Callable[[Path], BridgePeer] = connect_unix,
 ) -> int:
     """Request one trusted evaluator and relay its streamed output.
 
     ``state_dir`` is the caller-owned directory that keeps the pending token
     across helper restarts. It is never defaulted to a shared location.
+    ``connect`` dials the bridge; tests pass an in-memory dialer.
     """
     invocation_id, pending_path = _pending_invocation(kind, arguments, state_dir)
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.connect(str(socket_path))
+    with contextlib.closing(connect(socket_path)) as client:
         artifacts: tuple[str, ...] = ()
         if arguments:
             if (

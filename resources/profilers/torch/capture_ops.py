@@ -41,10 +41,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import os
-import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -256,7 +254,8 @@ def _await_ack(
     or *timeout_s* passes first. The timeout is a failure bound, not a
     guess at how long the step takes: success is decided only by the file.
     """
-    deadline = time.monotonic() + timeout_s
+    host = capture_runtime.host()
+    deadline = host.monotonic() + timeout_s
     while True:
         for name in names:
             path = ack_dir / name
@@ -268,9 +267,9 @@ def _await_ack(
             return None, "cancelled"
         if not capture_runtime.get_target(target).alive:
             return None, "target exited"
-        if time.monotonic() >= deadline:
+        if host.monotonic() >= deadline:
             return None, f"no acknowledgement within {timeout_s:g}s"
-        time.sleep(_ACK_POLL_S)
+        host.sleep(_ACK_POLL_S)
 
 
 # ---------------------------------------------------------------------------
@@ -291,13 +290,7 @@ _WINDOW_MARKER_GLOB = ".window-*-*.started"
 
 
 def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+    return capture_runtime.host().pid_alive(pid)
 
 
 def unfinished_windows(
@@ -337,12 +330,13 @@ def wait_for_started_windows(
     ``inject/sitecustomize.py``). *grace_s* is only a failure bound; returns
     the windows still unfinished when it ran out (empty on success).
     """
-    deadline = time.monotonic() + grace_s
+    host = capture_runtime.host()
+    deadline = host.monotonic() + grace_s
     while True:
         pending = unfinished_windows(out_dir, pid_alive=pid_alive)
-        if not pending or time.monotonic() >= deadline:
+        if not pending or host.monotonic() >= deadline:
             return pending
-        time.sleep(_WINDOW_POLL_S)
+        host.sleep(_WINDOW_POLL_S)
 
 
 def wait_for_additional_traces(out_dir: Path, *, grace_s: float) -> None:
@@ -381,14 +375,15 @@ def wait_for_additional_traces(out_dir: Path, *, grace_s: float) -> None:
     """
     if grace_s <= 0:
         return
-    deadline = time.monotonic() + grace_s
+    host = capture_runtime.host()
+    deadline = host.monotonic() + grace_s
     last_sizes: dict[Path, int] | None = None
-    while time.monotonic() < deadline:
+    while host.monotonic() < deadline:
         current = {p: p.stat().st_size for p in discover_traces(out_dir) if p.is_file()}
         if last_sizes is not None and current == last_sizes:
             return
         last_sizes = current
-        time.sleep(min(_POST_STOP_TRACE_POLL_S, max(0.0, deadline - time.monotonic())))
+        host.sleep(min(_POST_STOP_TRACE_POLL_S, max(0.0, deadline - host.monotonic())))
 
 
 def _kernel_count(path: Path) -> int | None:
@@ -499,21 +494,15 @@ def _run_load_command(
     script_path = log_path.parent / "load.sh"
     script_path.write_text("#!/usr/bin/env bash\n" + load_command)
     script_path.chmod(script_path.stat().st_mode | 0o111)
-    with log_path.open("wb") as handle:
-        proc = subprocess.Popen(  # noqa: S603  # LW-910111; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
-            ["bash", str(script_path)],  # noqa: S607  # LW-910112; the executable is resolved from the fixed rocprof/torch toolchain name, not a user-controlled path
-            cwd=cwd,
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    deadline = time.monotonic() + max(timeout_s, 0.0)
+    host = capture_runtime.host()
+    proc = host.spawn(["bash", str(script_path)], cwd=cwd, env=dict(os.environ), log_path=log_path)
+    deadline = host.monotonic() + max(timeout_s, 0.0)
     cancelled = False
     while True:
         if cancel_event is not None and cancel_event.is_set():
             cancelled = True
             break
-        remaining = deadline - time.monotonic()
+        remaining = deadline - host.monotonic()
         if remaining <= 0:
             break
         try:
@@ -522,15 +511,7 @@ def _run_load_command(
         except subprocess.TimeoutExpired:
             continue
     if proc.poll() is None:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-        try:
-            proc.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            with contextlib.suppress(ProcessLookupError):
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            with contextlib.suppress(subprocess.TimeoutExpired):
-                proc.wait(timeout=5.0)
+        host.process_group(proc).cleanup()
     return proc.returncode, _tail_text(log_path), cancelled
 
 

@@ -59,7 +59,7 @@ import types
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -77,11 +77,14 @@ __all__ = [
     "CommandRunner",
     "Lifecycle",
     "LinuxProcessTable",
+    "ManagedProcess",
+    "ProcessHost",
     "ProcessIdentity",
     "ProcessSnapshot",
     "ProcessTable",
     "StopResult",
     "SubprocessCaptureProcessGroup",
+    "SubprocessHost",
     "TargetInfo",
     "TraceCompletion",
     "acquire_capture_slot",
@@ -91,6 +94,7 @@ __all__ = [
     "format_result",
     "format_targets",
     "get_target",
+    "host",
     "list_captures",
     "list_targets",
     "load_manifest",
@@ -108,6 +112,7 @@ __all__ = [
     "stop_all_targets",
     "stop_capture",
     "stop_target",
+    "use_host",
     "workload_failure",
     "write_manifest",
 ]
@@ -319,7 +324,7 @@ def stop_capture(
     *,
     completion: TraceCompletion | None = None,
     cancel_event: threading.Event | None = None,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] | None = None,
 ) -> StopResult:
     """Stop a capture, retaining the full grace unless its backend proves completion.
 
@@ -335,6 +340,7 @@ def stop_capture(
     if completion is not None:
         completion.begin(group.members())
     group.stop(lifecycle.stop_signal)
+    monotonic = monotonic or host().monotonic
     deadline = monotonic() + max(lifecycle.grace_s, 0.0)
     while True:
         cancelled = cancel_event is not None and cancel_event.is_set()
@@ -603,6 +609,165 @@ class SubprocessCaptureProcessGroup:
         self.table.wait_for_death(self._owned() - {self.proc.pid}, _ESCALATION_WAIT_S)
 
 
+class ManagedProcess(Protocol):
+    """The slice of ``subprocess.Popen`` the lifecycle drives: a started, pollable child."""
+
+    pid: int
+    returncode: int | None
+
+    def poll(self) -> int | None: ...
+    def wait(self, timeout: float | None = None) -> int:
+        """Block up to *timeout*; raise ``subprocess.TimeoutExpired`` when it did not exit."""
+        ...
+
+
+class ProcessHost(Protocol):
+    """Everything the lifecycle needs from the operating system, as one injectable role.
+
+    The lifecycle (``run_capture``, warm targets) starts shell scripts, polls
+    readiness checks, supervises the started tree and waits against deadlines.
+    ``SubprocessHost`` does that with real processes and the real clock; a test
+    installs a scripted host with ``use_host`` so the same lifecycle runs on a
+    virtual clock with no process, signal or sleep.
+    """
+
+    def spawn(
+        self, argv: list[str], *, cwd: str | None, env: dict[str, str], log_path: Path
+    ) -> ManagedProcess:
+        """Start *argv* in its own session with stdout and stderr appended to *log_path*."""
+        ...
+
+    def check(
+        self, argv: list[str], *, cwd: str | None, env: dict[str, str], timeout_s: float
+    ) -> int | None:
+        """Run a short check to completion; its exit status, or ``None`` when it timed out."""
+        ...
+
+    def process_group(
+        self, proc: ManagedProcess, identities: dict[int, ProcessIdentity] | None = None
+    ) -> CaptureProcessGroup:
+        """The owned tree rooted at *proc*."""
+        ...
+
+    def probe(self, argv: list[str], *, timeout_s: float) -> tuple[int | None, str]:
+        """Run a short host-capability query; ``(status, stdout + stderr)``.
+
+        The status is ``None`` (with a reason as the text) when the program could not be
+        launched at all or timed out.
+        """
+        ...
+
+    def pid_alive(self, pid: int) -> bool:
+        """Whether process *pid* is running (a zombie is not)."""
+        ...
+
+    def monotonic(self) -> float:
+        """Seconds on a clock that never goes backwards."""
+        ...
+
+    def wall_time(self) -> float:
+        """Seconds since the epoch."""
+        ...
+
+    def sleep(self, seconds: float) -> None:
+        """Pause for *seconds*."""
+        ...
+
+
+class SubprocessHost:
+    """The production host: real subprocesses, ``/proc`` ownership and the real clock."""
+
+    def spawn(
+        self, argv: list[str], *, cwd: str | None, env: dict[str, str], log_path: Path
+    ) -> ManagedProcess:
+        """Start *argv* as a new session leader logging to *log_path*."""
+        with log_path.open("wb") as handle:
+            return subprocess.Popen(  # noqa: S603  # LW-910002; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+                argv,
+                cwd=cwd,
+                env=env,
+                stdout=handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+
+    def check(
+        self, argv: list[str], *, cwd: str | None, env: dict[str, str], timeout_s: float
+    ) -> int | None:
+        """Run *argv* to completion, discarding output."""
+        try:
+            result = subprocess.run(  # noqa: S603  # LW-910003; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+                argv,
+                cwd=cwd,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=max(timeout_s, 0.01),
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return None
+        return result.returncode
+
+    def process_group(
+        self, proc: ManagedProcess, identities: dict[int, ProcessIdentity] | None = None
+    ) -> CaptureProcessGroup:
+        """Own *proc*'s tree through ``/proc`` observations."""
+        return SubprocessCaptureProcessGroup(
+            cast("subprocess.Popen[bytes]", proc), identities=dict(identities or {})
+        )
+
+    def probe(self, argv: list[str], *, timeout_s: float) -> tuple[int | None, str]:
+        """Run *argv* to completion and return its status and combined output."""
+        try:
+            result = subprocess.run(  # noqa: S603  # LW-910048; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
+                argv, capture_output=True, text=True, timeout=timeout_s, check=False
+            )
+        except FileNotFoundError:
+            return None, "executable not found"
+        except OSError as exc:
+            return None, str(exc)
+        except subprocess.TimeoutExpired:
+            return None, "timed out"
+        return result.returncode, result.stdout + result.stderr
+
+    def pid_alive(self, pid: int) -> bool:
+        """Probe the real process table."""
+        return _alive(pid)
+
+    def monotonic(self) -> float:
+        """The real monotonic clock."""
+        return time.monotonic()
+
+    def wall_time(self) -> float:
+        """The real wall clock."""
+        return time.time()
+
+    def sleep(self, seconds: float) -> None:
+        """Really sleep."""
+        time.sleep(seconds)
+
+
+_host: ProcessHost = SubprocessHost()
+
+
+def host() -> ProcessHost:
+    """The host the lifecycle is currently running against."""
+    return _host
+
+
+@contextlib.contextmanager
+def use_host(replacement: ProcessHost) -> Iterator[None]:
+    """Run the lifecycle against *replacement* inside the block, restoring the real host after."""
+    global _host  # noqa: PLW0603  # LW-910399; the host is process-global like the capture slot and target registry it serves, and this context manager is the only writer
+    previous = _host
+    _host = replacement
+    try:
+        yield
+    finally:
+        _host = previous
+
+
 class CaptureFailedError(RuntimeError):
     """A capture ended without a profile of the requested workload.
 
@@ -707,7 +872,9 @@ def acquire_capture_slot(kind: str, capture_id: str) -> ActiveCapture:
     with _active_capture_lock:
         if _active_capture is not None:
             raise CaptureBusyError(_active_capture)
-        _active_capture = ActiveCapture(capture_id=capture_id, kind=kind, started_at=time.time())
+        _active_capture = ActiveCapture(
+            capture_id=capture_id, kind=kind, started_at=host().wall_time()
+        )
         return _active_capture
 
 
@@ -905,7 +1072,7 @@ def _effective_env(lifecycle: Lifecycle) -> dict[str, str]:
 
 
 def _remaining(start: float, timeout_s: float) -> float:
-    return max(0.0, timeout_s - (time.monotonic() - start))
+    return max(0.0, timeout_s - (host().monotonic() - start))
 
 
 def _tail(path: Path, *, max_chars: int = 4000) -> str:
@@ -969,21 +1136,13 @@ def _clock_stamps() -> dict[str, int]:
 
 def _start_process(
     lifecycle: Lifecycle, profiler_prefix: list[str], log_path: Path, script_path: Path
-) -> subprocess.Popen[bytes]:
+) -> ManagedProcess:
     argv = [*profiler_prefix, "bash", str(script_path)]
-    with log_path.open("wb") as handle:
-        return subprocess.Popen(  # noqa: S603  # LW-910002; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
-            argv,
-            cwd=lifecycle.cwd,
-            env=_effective_env(lifecycle),
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+    return host().spawn(argv, cwd=lifecycle.cwd, env=_effective_env(lifecycle), log_path=log_path)
 
 
 def _wait_with_cancel(
-    proc: subprocess.Popen[bytes], timeout: float, cancel_event: threading.Event | None
+    proc: ManagedProcess, timeout: float, cancel_event: threading.Event | None
 ) -> tuple[int | None, bool]:
     """Wait up to *timeout* for *proc* to exit, polling in ``_POLL_CHUNK_S`` chunks.
 
@@ -996,11 +1155,11 @@ def _wait_with_cancel(
     when *cancel_event* is ``None`` (every existing caller before this
     change), aside from the coarser-grained wakeups.
     """
-    deadline = time.monotonic() + max(timeout, 0.0)
+    deadline = host().monotonic() + max(timeout, 0.0)
     while True:
         if cancel_event is not None and cancel_event.is_set():
             return None, True
-        remaining = deadline - time.monotonic()
+        remaining = deadline - host().monotonic()
         if remaining <= 0:
             return proc.poll(), False
         try:
@@ -1010,7 +1169,7 @@ def _wait_with_cancel(
 
 
 def _run_no_load(
-    proc: subprocess.Popen[bytes],
+    proc: ManagedProcess,
     lifecycle: Lifecycle,
     start: float,
     cancel_event: threading.Event | None,
@@ -1027,23 +1186,16 @@ def _run_no_load(
 
 
 def _run_check(script_path: Path, lifecycle: Lifecycle, timeout: float) -> int | None:
-    try:
-        result = subprocess.run(  # noqa: S603  # LW-910003; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
-            ["bash", str(script_path)],  # noqa: S607  # LW-910004; the executable is resolved from the fixed rocprof/torch toolchain name, not a user-controlled path
-            cwd=lifecycle.cwd,
-            env=_effective_env(lifecycle),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=max(timeout, 0.01),
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return None
-    return result.returncode
+    return host().check(
+        ["bash", str(script_path)],
+        cwd=lifecycle.cwd,
+        env=_effective_env(lifecycle),
+        timeout_s=timeout,
+    )
 
 
 def _poll_ready(
-    proc: subprocess.Popen[bytes],
+    proc: ManagedProcess,
     lifecycle: Lifecycle,
     start: float,
     ready_script: Path,
@@ -1056,13 +1208,13 @@ def _poll_ready(
     caller can distinguish "cancelled" from a genuine not-ready/timeout.
     """
     assert lifecycle.ready_command is not None  # noqa: S101  # LW-910005; test code uses assert as the standard pytest assertion mechanism
-    ready_start = time.monotonic()
+    ready_start = host().monotonic()
     while True:
         if cancel_event is not None and cancel_event.is_set():
             return False, False
         if proc.poll() is not None:
             return False, True
-        elapsed_ready = time.monotonic() - ready_start
+        elapsed_ready = host().monotonic() - ready_start
         remaining_overall = _remaining(start, lifecycle.timeout_s)
         if elapsed_ready >= lifecycle.ready_timeout_s or remaining_overall <= 0:
             return False, False
@@ -1075,13 +1227,13 @@ def _poll_ready(
             return False, False
         sleep_for = min(
             lifecycle.ready_interval_s,
-            lifecycle.ready_timeout_s - (time.monotonic() - ready_start),
+            lifecycle.ready_timeout_s - (host().monotonic() - ready_start),
             _remaining(start, lifecycle.timeout_s),
         )
         if cancel_event is not None:
             sleep_for = min(sleep_for, _POLL_CHUNK_S)
         if sleep_for > 0:
-            time.sleep(sleep_for)
+            host().sleep(sleep_for)
 
 
 def _run_unprofiled_step(  # noqa: PLR0913  # LW-910006; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
@@ -1100,15 +1252,9 @@ def _run_unprofiled_step(  # noqa: PLR0913  # LW-910006; this function's paramet
     ``(returncode, log_tail, timed_out, cancelled)``.
     """
     log_path = out_dir / log_name
-    with log_path.open("wb") as handle:
-        proc = subprocess.Popen(  # noqa: S603  # LW-910007; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
-            ["bash", str(script)],  # noqa: S607  # LW-910008; the executable is resolved from the fixed rocprof/torch toolchain name, not a user-controlled path
-            cwd=lifecycle.cwd,
-            env=_effective_env(lifecycle),
-            stdout=handle,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+    proc = host().spawn(
+        ["bash", str(script)], cwd=lifecycle.cwd, env=_effective_env(lifecycle), log_path=log_path
+    )
     rc, cancelled = _wait_with_cancel(proc, max(timeout, 0.0), cancel_event)
     if cancelled:
         _escalate(proc)
@@ -1162,7 +1308,7 @@ def _stop_and_wait_grace(
     lifecycle: Lifecycle,
     cancel_event: threading.Event | None,
     completion: TraceCompletion | None = None,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] | None = None,
 ) -> tuple[bool, bool]:
     result = stop_capture(
         group,
@@ -1176,7 +1322,7 @@ def _stop_and_wait_grace(
 
 
 def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mirror an external tool's CLI/API surface and are not grouped further
-    proc: subprocess.Popen[bytes],
+    proc: ManagedProcess,
     lifecycle: Lifecycle,
     start: float,
     out_dir: Path,
@@ -1185,7 +1331,7 @@ def _run_with_load(  # noqa: PLR0913  # LW-910011; this function's parameters mi
     cancel_event: threading.Event | None,
     completion: TraceCompletion | None,
     group: CaptureProcessGroup,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] | None = None,
 ) -> _Outcome:
     ready, target_exited_early = _poll_ready(proc, lifecycle, start, ready_script, cancel_event)
     if target_exited_early:
@@ -1288,7 +1434,7 @@ def read_process_identity(pid: int, process_root: Path = Path("/proc")) -> Proce
         return None
 
 
-def _reap(proc: subprocess.Popen[bytes], timeout: float) -> bool:
+def _reap(proc: ManagedProcess, timeout: float) -> bool:
     """Wait for *proc* (our own child) to exit, reaping it. False on timeout.
 
     Reaping our own child through ``Popen.wait`` matters, not just signaling
@@ -1319,10 +1465,10 @@ def _wait_for_others_death(pids: set[int], timeout: float) -> bool:
 
 
 def _escalate(
-    proc: subprocess.Popen[bytes], *, identities: dict[int, ProcessIdentity] | None = None
+    proc: ManagedProcess, *, identities: dict[int, ProcessIdentity] | None = None
 ) -> None:
     """Use the same owned-tree cleanup on every capture and helper exit path."""
-    SubprocessCaptureProcessGroup(proc, identities=dict(identities or {})).cleanup()
+    host().process_group(proc, identities).cleanup()
 
 
 # -- warm targets: launch once, profile repeatedly, stop when done -------------
@@ -1352,8 +1498,8 @@ class _LiveTarget:
     started_at: float
     stop_signal: str
     grace_s: float
-    proc: subprocess.Popen[bytes]
-    group: SubprocessCaptureProcessGroup
+    proc: ManagedProcess
+    group: CaptureProcessGroup
     ready_achieved: bool | None
 
 
@@ -1432,7 +1578,7 @@ def start_target(  # noqa: PLR0913  # LW-910012; this function's parameters mirr
         timeout_s=max(timeout_s, 0.01),
         setup_command=setup_command,
     )
-    start = time.monotonic()
+    start = host().monotonic()
 
     if setup_command is not None:
         setup_script = _write_script(out_dir, _SETUP_SCRIPT_NAME, setup_command)
@@ -1462,7 +1608,7 @@ def start_target(  # noqa: PLR0913  # LW-910012; this function's parameters mirr
     )
     target_log_path = out_dir / _TARGET_LOG_NAME
     proc = _start_process(lifecycle, [], target_log_path, target_script)
-    group = SubprocessCaptureProcessGroup(proc)
+    group = host().process_group(proc)
 
     ready_achieved: bool | None = None
     if resolved_ready_command is not None:
@@ -1481,7 +1627,7 @@ def start_target(  # noqa: PLR0913  # LW-910012; this function's parameters mirr
             command=command,
             cwd=cwd,
             out_dir=out_dir,
-            started_at=time.time(),
+            started_at=host().wall_time(),
             stop_signal=stop_signal,
             grace_s=grace_s,
             proc=proc,
@@ -1671,8 +1817,8 @@ def _finish(  # noqa: PLR0913  # LW-910020; this function's parameters mirror an
     never starts the target at all (``target_log_path`` then names a file
     that was never created; ``_tail`` handles that by returning ``""``).
     """
-    timings["finished_at"] = time.time()
-    timings["duration_s"] = time.monotonic() - start
+    timings["finished_at"] = host().wall_time()
+    timings["duration_s"] = host().monotonic() - start
     capture_end = _clock_stamps()
 
     manifest = _build_manifest(
@@ -1719,10 +1865,8 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
     meta: dict[str, Any],
     cancel_event: threading.Event | None = None,
     completion: TraceCompletion | None = None,
-    group_factory: Callable[[subprocess.Popen[bytes]], CaptureProcessGroup] = (
-        SubprocessCaptureProcessGroup
-    ),
-    monotonic: Callable[[], float] = time.monotonic,
+    group_factory: Callable[[ManagedProcess], CaptureProcessGroup] | None = None,
+    monotonic: Callable[[], float] | None = None,
 ) -> CaptureResult:
     """Run one profiler-wrapped capture through its full lifecycle.
 
@@ -1787,9 +1931,9 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
     argv = [*profiler_prefix, "bash", str(target_script)]
     target_log_path = out_dir / _TARGET_LOG_NAME
 
-    start = time.monotonic()
+    start = host().monotonic()
     capture_start = _clock_stamps()
-    timings: dict[str, float] = {"started_at": time.time()}
+    timings: dict[str, float] = {"started_at": host().wall_time()}
 
     finish_kwargs: dict[str, Any] = {
         "capture_id": capture_id,
@@ -1828,7 +1972,7 @@ def run_capture(  # noqa: PLR0913  # LW-910021; this function's parameters mirro
             return _finish(outcome=outcome, **finish_kwargs)
 
     proc = _start_process(lifecycle, profiler_prefix, target_log_path, target_script)
-    group = group_factory(proc)
+    group = (group_factory or host().process_group)(proc)
 
     if lifecycle.load_command is None:
         outcome = _run_no_load(proc, lifecycle, start, cancel_event)

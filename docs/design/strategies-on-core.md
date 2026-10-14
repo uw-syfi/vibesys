@@ -967,7 +967,7 @@ mapping above, each deliberate:
   right track after a crash between them.
 - **Kept tests.** `multi/test_contracts.py`, `test_prompt_contracts.py`,
   `test_prompt_exact_text.py`, `test_goldens.py`, `test_profiler_template_contract.py`,
-  `test_profiler_engine_agnostic.py`, `test_interface_contracts.py`, `tests/vibesys/loops/
+  `test_profiler_engine_agnostic.py`, `test_interface_contracts.py`, `tests/profilers/
   test_profiler.py`. **Replaced:** `test_plugin.py`, `test_profile_plugin.py`,
   `test_persistence.py`, `test_infrastructure_failure.py`, `test_resilience.py`.
 - **Live run.** As 9.3 with `--inner-loop multi-agent`, with a profiler enabled, plain and

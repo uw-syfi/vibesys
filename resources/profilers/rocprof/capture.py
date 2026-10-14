@@ -137,17 +137,7 @@ def run_cli(fn: Callable[[types.SimpleNamespace], None], **kwargs: object) -> st
 
 def _run(argv: list[str], *, timeout: float = 10.0) -> tuple[int | None, str]:
     """Run a short-lived command; ``rc`` is ``None`` if it could not be launched at all."""
-    try:
-        result = subprocess.run(  # noqa: S603  # LW-910048; the subprocess argv is a fixed sequence built by this code, not attacker-controlled shell input
-            argv, capture_output=True, text=True, timeout=timeout, check=False
-        )
-    except FileNotFoundError:
-        return None, "executable not found"
-    except OSError as exc:
-        return None, str(exc)
-    except subprocess.TimeoutExpired:
-        return None, "timed out"
-    return result.returncode, result.stdout + result.stderr
+    return capture_runtime.host().probe(argv, timeout_s=timeout)
 
 
 def _parse_version(text: str) -> tuple[int, int, int] | None:

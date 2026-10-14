@@ -238,8 +238,8 @@ _WINDOW_STARTED_STATE = "started"
 _WINDOW_FAILED_STATE = "failed"
 
 
-def _window_marker(window: int, state: str) -> str:
-    return f".window-{os.getpid()}-{window}.{state}"
+def _window_marker(pid: int, window: int, state: str) -> str:
+    return f".window-{pid}-{window}.{state}"
 
 
 # Not part of the documented capture_ops.py contract: an internal knob so
@@ -320,6 +320,25 @@ def _write_marker(directory: Path | None, name: str, text: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+class _CaptureProcess:
+    """The process a capture speaks for: its pid and how it reaches ``torch``.
+
+    The pid names the window markers and trace files; ``import_module`` loads
+    ``torch``. Both default to this interpreter's; a test running several
+    captures in one interpreter gives each its own. (A plain class, not a
+    dataclass: this standalone script is loaded by file path, where the
+    dataclass machinery cannot find its module.)
+    """
+
+    def __init__(
+        self,
+        pid: int | None = None,
+        import_module: Callable[[str], ModuleType] = importlib.import_module,
+    ) -> None:
+        self.pid = os.getpid() if pid is None else pid
+        self.import_module = import_module
+
+
 class _Capture:
     """Owns the one ``torch.profiler.profile`` session this process may run."""
 
@@ -330,9 +349,11 @@ class _Capture:
         record_shapes: bool,
         sync_timeout_s: float = _DEFAULT_SYNCHRONIZE_TIMEOUT_S,
         control_dir: Path | None = None,
-        import_module: Callable[[str], ModuleType] = importlib.import_module,
+        process: _CaptureProcess | None = None,
     ) -> None:
-        self._import_module = import_module
+        process = process or _CaptureProcess()
+        self._import_module = process.import_module
+        self._pid = process.pid
         self._out_dir = out_dir
         self._record_shapes = record_shapes
         self._sync_timeout_s = sync_timeout_s
@@ -427,7 +448,9 @@ class _Capture:
                 f"profiling started (record_shapes={self._record_shapes}, "
                 f"window={self._window_index}, out_dir={out_dir})"
             )
-            _write_marker(out_dir, _window_marker(self._window_index, _WINDOW_STARTED_STATE), "")
+            _write_marker(
+                out_dir, _window_marker(self._pid, self._window_index, _WINDOW_STARTED_STATE), ""
+            )
             _write_marker(ack_dir, _ACK_STARTED_NAME, str(self._window_index))
 
     def stop_and_export(self) -> None:
@@ -460,7 +483,7 @@ class _Capture:
             _log(f"could not create output dir {out_dir}: {exc!r}")
             self._window_failed(out_dir, window, ack_dir, f"export: {exc!r}")
             return
-        pid = os.getpid()
+        pid = self._pid
         raw_path = out_dir / f"{pid}-{window}.pt.trace.json"
         gz_path = out_dir / f"{pid}-{window}.pt.trace.json.gz"
         # The final name appears only once complete (rename), so a reader
@@ -486,9 +509,8 @@ class _Capture:
         _write_marker(ack_dir, _ACK_EXPORTED_NAME, gz_path.name)
         self._bounded_synchronize()
 
-    @staticmethod
-    def _window_failed(out_dir: Path, window: int, ack_dir: Path | None, reason: str) -> None:
-        _write_marker(out_dir, _window_marker(window, _WINDOW_FAILED_STATE), reason)
+    def _window_failed(self, out_dir: Path, window: int, ack_dir: Path | None, reason: str) -> None:
+        _write_marker(out_dir, _window_marker(self._pid, window, _WINDOW_FAILED_STATE), reason)
         _write_marker(ack_dir, _ACK_FAILED_NAME, reason)
 
     def _bounded_synchronize(self) -> None:
