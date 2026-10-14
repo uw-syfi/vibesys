@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from pydantic_core import from_json
+from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic_core import to_jsonable_python
 
 from vibesys.events import (
     AgentOutputChannel,
@@ -41,11 +41,12 @@ if TYPE_CHECKING:
     )
 
 EventSink = Callable[[CoreEvent], object]
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 def _json_safe(args: dict[str, Any]) -> dict[str, Any]:
     """Coerce tool arguments to a JSON-serializable dictionary."""
-    return json.loads(json.dumps(args, default=repr))
+    return to_jsonable_python(args, fallback=repr)
 
 
 def _classify_tool_result(content: str) -> ToolResultPayload | None:
@@ -56,8 +57,8 @@ def _classify_tool_result(content: str) -> ToolResultPayload | None:
     raised ``RecursionError`` out of the agent's callback.
     """
     try:
-        value = from_json(content)
-    except (ValueError, TypeError):
+        value = _JSON_VALUE.validate_json(content)
+    except ValidationError:
         return None
     if isinstance(value, (dict, list)):
         return JsonResultPayload(value=value)

@@ -1,7 +1,6 @@
 """Explicit product composition for one canonical VibeSys run."""
 
 import shlex
-import shutil
 import sys
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
@@ -44,7 +43,7 @@ from vibesys.orchestration.skill_selection import (
 from vibesys.run.contracts import RunRequest
 from vibesys.run.environment import open_run_environment
 from vibesys.run.evaluation import trusted_evaluation_plan
-from vibesys.run.evaluation_socket import evaluation_socket_mount
+from vibesys.run.evaluation_socket import evaluation_socket_mount, remove_evaluation_socket
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
@@ -568,7 +567,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             if resolved_backend == AgentBackend.CLI:
                 # Agents run in containers that must reach the in-turn evaluation service.
                 socket_mount = evaluation_socket_mount(project_root, run_id)
-                ownership.callback(shutil.rmtree, socket_mount.host_path, ignore_errors=True)
+                ownership.callback(remove_evaluation_socket, project_root, run_id)
                 evaluation_socket_mounts = (socket_mount,)
 
             experiment_repository = ExperimentRepository(project_root, logger.lprint)

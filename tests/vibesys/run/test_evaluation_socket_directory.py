@@ -20,6 +20,7 @@ from vibesys.run.evaluation_socket import (
     evaluation_socket_directory,
     evaluation_socket_mount,
     prepare_evaluation_socket,
+    remove_evaluation_socket,
 )
 
 if TYPE_CHECKING:
@@ -119,3 +120,24 @@ def test_the_bridges_socket_is_refused_under_a_planted_symlink(tmp_path: Path, r
 
     with pytest.raises(EvaluationSocketDirectoryError):
         prepare_evaluation_socket(tmp_path, run_id)
+
+
+def test_removal_deletes_the_directory_and_its_contents(tmp_path: Path, run_id: str) -> None:
+    socket = prepare_evaluation_socket(tmp_path, run_id)
+    socket.with_name("stale").write_bytes(b"")
+
+    remove_evaluation_socket(tmp_path, run_id)
+    remove_evaluation_socket(tmp_path, run_id)
+
+    assert not socket.parent.exists()
+
+
+def test_removal_leaves_a_planted_symlink_and_its_target(tmp_path: Path, run_id: str) -> None:
+    target = tmp_path / "theirs"
+    target.mkdir()
+    (target / "kept").write_bytes(b"")
+    evaluation_socket_directory(tmp_path, run_id).symlink_to(target)
+
+    remove_evaluation_socket(tmp_path, run_id)
+
+    assert (target / "kept").exists()

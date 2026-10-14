@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING
+
+from pydantic import JsonValue, TypeAdapter
 
 from vibesys.run.contracts import (
     IterationKind,
@@ -17,6 +18,8 @@ from vs_issue_tracker.api import IssueStatus
 
 if TYPE_CHECKING:
     from vibesys.orchestration.issue_queue.search.api import IssueBrief, QueueSnapshot
+
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 def project_run_snapshot(snapshot: QueueSnapshot, *, experiment_revision: int) -> PluginProjection:
@@ -43,7 +46,9 @@ def project_run_snapshot(snapshot: QueueSnapshot, *, experiment_revision: int) -
                 "iteration": record.iteration,
                 "throughput_trend": record.primary_trend,
                 "latency_trend": record.secondary_trend,
-                "metrics": json.loads(record.metrics_json) if record.metrics_json else {},
+                "metrics": _JSON_VALUE.validate_json(record.metrics_json)
+                if record.metrics_json
+                else {},
                 "new_issue_ids": list(record.new_issues),
             }
             for record in snapshot.performance

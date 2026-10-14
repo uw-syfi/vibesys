@@ -765,11 +765,32 @@ def _read_input_manifest(manifest_path: Path, objective_path: Path) -> InputMani
     if not objective_path.is_file():
         message = f"OBJECTIVE.md not found: {objective_path}"
         raise FileNotFoundError(message)
+    return load_input_manifest(manifest_path)
+
+
+class InputManifestParseError(ValueError):
+    """An input manifest that is not TOML or does not match the manifest schema."""
+
+    def __init__(self, path: Path, cause: tomllib.TOMLDecodeError | ValidationError) -> None:
+        """Name the manifest and keep the parser's or validator's error."""
+        super().__init__(f"Invalid input manifest {path}: {cause}")
+        self.path = path
+        self.cause = cause
+
+
+def load_input_manifest(manifest_path: Path) -> InputManifest:
+    """Read, parse, and validate one input manifest file (``vibesys.toml``).
+
+    The one reader of the manifest format: a file that is not TOML or does not
+    match the schema raises ``InputManifestParseError``; an unreadable file
+    raises ``OSError``.
+    """
     try:
-        return InputManifest.model_validate(tomllib.loads(manifest_path.read_text()))
-    except ValidationError as exc:
-        message = f"Invalid input manifest {manifest_path}: {exc}"
-        raise ValueError(message) from exc
+        return InputManifest.model_validate(
+            tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        )
+    except (tomllib.TOMLDecodeError, ValidationError) as exc:
+        raise InputManifestParseError(manifest_path, exc) from exc
 
 
 def _validate_modal_entrypoint(root: Path, manifest: InputManifest) -> None:

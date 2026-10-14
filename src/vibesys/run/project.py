@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import tomllib
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
-from pydantic import ValidationError
-
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.inputs import (
     MANIFEST_NAME,
     InputManifest,
+    InputManifestParseError,
     WorkspaceSource,
+    load_input_manifest,
 )
 from vibesys.run.workspace_policy import materialization_source
 from vs_project.api import (
@@ -288,9 +287,9 @@ def _load_manifest(source: Path) -> InputManifest:
     if not path.is_file():
         raise ProjectProvisioningError.manifest_missing(path)
     try:
-        return InputManifest.model_validate(tomllib.loads(path.read_text()))
-    except (tomllib.TOMLDecodeError, ValidationError) as exc:
-        raise ProjectProvisioningError.invalid_manifest(path, exc) from exc
+        return load_input_manifest(path)
+    except InputManifestParseError as exc:
+        raise ProjectProvisioningError.invalid_manifest(path, exc.cause) from exc
 
 
 def _validate_materialization_contract(

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shutil
 import stat
 import tempfile
 from pathlib import Path
@@ -81,10 +82,20 @@ def evaluation_socket_mount(
     return EnvironmentBindMount(directory, str(directory), read_only=False)
 
 
+def remove_evaluation_socket(project_root: Path, run_id: str) -> None:
+    """Remove the socket's directory and anything in it, best effort, when the run ends.
+
+    A path that is a symlink is left alone (``rmtree`` refuses it), as is one that is
+    already gone.
+    """
+    shutil.rmtree(evaluation_socket_directory(project_root, run_id), ignore_errors=True)
+
+
 __all__ = [
     "EvaluationSocketDirectoryError",
     "evaluation_socket_directory",
     "evaluation_socket_mount",
     "evaluation_socket_path",
     "prepare_evaluation_socket",
+    "remove_evaluation_socket",
 ]

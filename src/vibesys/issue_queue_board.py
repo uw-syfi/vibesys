@@ -7,11 +7,12 @@ entries the strategy asks the board owner for, and builds the owner of the board
 
 from __future__ import annotations
 
-import json
 import re
 import unicodedata
-from pathlib import Path
-from typing import TYPE_CHECKING
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Protocol
+
+from pydantic import JsonValue, TypeAdapter
 
 from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vs_issue_tracker.api import (
@@ -34,6 +35,9 @@ _RENDERER = TemplateRenderer(
     Path(__file__).parent / "orchestration" / "issue_queue" / "core_policy" / "prompts"
 )
 _BOARD_DIRECTORY = "issue-board"
+_ISSUES_VIEW = PurePosixPath("board") / "issues"
+_ISSUE_FILE = re.compile(r"[0-9]{4}-.*\.md")
+_PAYLOAD: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 _STATUS_ORDER = (
     IssueStatus.IN_PROGRESS,
@@ -54,11 +58,20 @@ def _filename(issue: Issue) -> str:
     return f"{issue.id:04d}-{_slug(issue.title)}.md"
 
 
-def _write(path: Path, text: RenderedPrompt) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(text, encoding="utf-8")
-    temporary.replace(path)
+class BoardDocuments(Protocol):
+    """Where the Markdown mirror of the board is kept: named documents in one store."""
+
+    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
+        """Names directly inside one directory of the store."""
+        ...
+
+    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+        """Replace one document atomically."""
+        ...
+
+    def delete(self, relative_path: str | PurePosixPath) -> bool:
+        """Remove one document, returning whether it existed."""
+        ...
 
 
 def render_issue(issue: Issue) -> RenderedPrompt:
@@ -66,24 +79,30 @@ def render_issue(issue: Issue) -> RenderedPrompt:
     return _RENDERER.render_template("board/issue.j2", issue=issue)
 
 
-def render_all(directory: Path, source: IssueTracker | list[Issue]) -> None:
-    """Regenerate the derived Markdown view from an issue snapshot."""
+def render_all(source: IssueTracker | list[Issue]) -> dict[str, RenderedPrompt]:
+    """Render the derived Markdown view of an issue snapshot: file name to document."""
     issues = source if isinstance(source, list) else source.list()
-    directory.mkdir(parents=True, exist_ok=True)
-    expected = {_filename(issue) for issue in issues}
-    for stale in directory.glob("[0-9][0-9][0-9][0-9]-*.md"):
-        if stale.name not in expected:
-            stale.unlink()
-    for issue in issues:
-        _write(directory / _filename(issue), render_issue(issue))
+    documents = {_filename(issue): render_issue(issue) for issue in issues}
     groups = [
         (status, matching)
         for status in _STATUS_ORDER
         if (matching := [issue for issue in issues if issue.status is status])
     ]
     filenames = {issue.id: _filename(issue) for issue in issues}
-    index = _RENDERER.render_template("board/index.j2", groups=groups, filenames=filenames)
-    _write(directory / "INDEX.md", index)
+    documents["INDEX.md"] = _RENDERER.render_template(
+        "board/index.j2", groups=groups, filenames=filenames
+    )
+    return documents
+
+
+def publish_view(store: BoardDocuments, issues: list[Issue]) -> None:
+    """Replace the board's Markdown mirror in ``store`` with the view of ``issues``."""
+    documents = render_all(issues)
+    for name in store.entries(_ISSUES_VIEW):
+        if _ISSUE_FILE.fullmatch(name) and name not in documents:
+            store.delete(_ISSUES_VIEW / name)
+    for name, text in documents.items():
+        store.write_bytes(_ISSUES_VIEW / name, text.encode("utf-8"))
 
 
 class IssueQueueTexts:
@@ -99,7 +118,7 @@ class IssueQueueTexts:
 
     def progress_entry(self, request: LogProgress) -> str:
         """One human-readable progress entry for a turn's recorded reply."""
-        payload = json.loads(request.payload_json) if request.payload_json else {}
+        payload = _PAYLOAD.validate_json(request.payload_json) if request.payload_json else {}
         return _RENDERER.render_template(
             "board/progress.j2",
             iteration=request.iteration,
@@ -121,7 +140,7 @@ def board_entries(resources: OwnedOperationResources) -> tuple[OperationEntry, .
     directory = namespace.external_directory("board")
 
     def mirror(issues: list[Issue]) -> None:
-        render_all(directory / "issues", issues)
+        publish_view(namespace, issues)
 
     session = open_issue_tracker_session(
         options.tracker,
@@ -139,4 +158,11 @@ def board_entries(resources: OwnedOperationResources) -> tuple[OperationEntry, .
     )
 
 
-__all__ = ["IssueQueueTexts", "board_entries", "render_all", "render_issue"]
+__all__ = [
+    "BoardDocuments",
+    "IssueQueueTexts",
+    "board_entries",
+    "publish_view",
+    "render_all",
+    "render_issue",
+]

@@ -1,9 +1,9 @@
 """Tests for issue-queue policy artifacts."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Required, TypedDict, Unpack
 
-from vibesys.issue_queue_board import render_all, render_issue
+from vibesys.issue_queue_board import publish_view, render_all, render_issue
 from vs_issue_tracker.api import Issue, IssueBoard, IssueEvent, IssueStatus, IssueType
 
 
@@ -146,23 +146,43 @@ def test_render_all_projects_board_in_status_order_and_is_idempotent(tmp_path: P
         payload={"summary": "did stuff", "files_touched": ["s.py"], "self_check": "ok"},
     )
     board.update_status(blocked.id, IssueStatus.BLOCKED, actor="loop", iteration=1)
-    issues_dir = tmp_path / "nested" / "issues"
 
-    render_all(issues_dir, board)
-    first = {path.name: path.read_bytes() for path in issues_dir.glob("*.md")}
-    render_all(issues_dir, board)
-    second = {path.name: path.read_bytes() for path in issues_dir.glob("*.md")}
+    first = render_all(board)
+    second = render_all(board)
 
     assert first == second
     assert sorted(first) == ["0001-build-server.md", "0002-crash-startup.md", "INDEX.md"]
-    index = first["INDEX.md"].decode()
+    index = first["INDEX.md"]
     assert index.index("## in_progress") < index.index("## blocked")
     assert "Crash \\| startup" in index
-    assert "did stuff" in first["0001-build-server.md"].decode()
-    assert "`s.py`" in first["0001-build-server.md"].decode()
+    assert "did stuff" in first["0001-build-server.md"]
+    assert "`s.py`" in first["0001-build-server.md"]
 
 
-def test_render_all_removes_stale_derived_files(tmp_path: Path) -> None:
+class _MemoryDocuments:
+    """A ``BoardDocuments`` held in a dict keyed by store-relative path."""
+
+    def __init__(self, documents: dict[str, bytes] | None = None) -> None:
+        self.documents = dict(documents or {})
+
+    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
+        prefix = PurePosixPath(relative_directory)
+        return tuple(
+            sorted(
+                PurePosixPath(key).name
+                for key in self.documents
+                if PurePosixPath(key).parent == prefix
+            )
+        )
+
+    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+        self.documents[str(PurePosixPath(relative_path))] = contents
+
+    def delete(self, relative_path: str | PurePosixPath) -> bool:
+        return self.documents.pop(str(PurePosixPath(relative_path)), None) is not None
+
+
+def test_publish_view_removes_stale_issue_files_and_keeps_others(tmp_path: Path) -> None:
     board = IssueBoard(tmp_path / "issues.json")
     board.create(
         type=IssueType.BUG,
@@ -171,21 +191,21 @@ def test_render_all_removes_stale_derived_files(tmp_path: Path) -> None:
         created_by="judge",
         iteration=1,
     )
-    issues_dir = tmp_path / "issues"
-    issues_dir.mkdir()
-    stale = issues_dir / "0001-old-title.md"
-    stale.write_text("stale", encoding="utf-8")
+    store = _MemoryDocuments(
+        {"board/issues/0001-old-title.md": b"stale", "board/issues/notes.txt": b"kept"}
+    )
 
-    render_all(issues_dir, board)
+    publish_view(store, board.list())
 
-    assert not stale.exists()
-    assert (issues_dir / "0001-current-issue.md").is_file()
-    assert (issues_dir / "INDEX.md").is_file()
+    assert sorted(store.documents) == [
+        "board/issues/0001-current-issue.md",
+        "board/issues/INDEX.md",
+        "board/issues/notes.txt",
+    ]
+    assert store.documents["board/issues/INDEX.md"] == render_all(board)["INDEX.md"].encode()
 
 
 def test_render_all_writes_empty_index(tmp_path: Path) -> None:
     board = IssueBoard(tmp_path / "issues.json")
 
-    render_all(tmp_path / "issues", board)
-
-    assert "no issues yet" in (tmp_path / "issues" / "INDEX.md").read_text(encoding="utf-8")
+    assert "no issues yet" in render_all(board)["INDEX.md"]
