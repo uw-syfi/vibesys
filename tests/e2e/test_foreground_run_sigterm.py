@@ -30,14 +30,21 @@ requires_tgkill = pytest.mark.skipif(
 
 
 @requires_tgkill
-@pytest.mark.parametrize("target", [0, 1, 2], ids=["main", "relay", "transport"])
-def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(target: int) -> None:
+@pytest.mark.parametrize(
+    ("transports", "target"),
+    [(1, 0), (1, 1), (1, 2), (3, 3)],
+    # (3, 3) is the case that hung on main before #2349 (run 38539411846).
+    ids=["main", "relay", "transport", "third-of-three-transports"],
+)
+def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
+    transports: int, target: int
+) -> None:
     # The kernel may hand a process SIGTERM to any thread while CPython runs
     # handlers on the main thread, which is blocked driving the run. Aim it at
     # each thread the run owns. However late the main thread's wake signal
     # lands, the run ends interrupted (the interleavings are in
     # tests/entrypoints/test_main_thread_interrupt.py).
-    cleanups, ended = run_in_child(partial(interrupted_run, 1, target))
+    cleanups, ended = run_in_child(partial(interrupted_run, transports, target))
 
     assert ended == "interrupted"
     assert cleanups == [True]

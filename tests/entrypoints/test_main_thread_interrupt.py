@@ -6,7 +6,8 @@ blocking call never ended, the handler never ran, and the run hung until SIGKILL
 
 The main thread is a simulated thread blocked until a wake signal ends its wait, the way
 a system call ends on a signal. A lost wake is one that lands before the main thread
-blocks: it ends nothing. The real signals are in ``tests/e2e/test_foreground_run_sigterm.py``.
+blocks: it ends nothing. A main thread kept busy past ``STUCK_SECONDS`` (a native call
+that takes no signals) is reported as stuck, once. The real signals are in ``tests/e2e/test_foreground_run_sigterm.py``.
 """
 
 from __future__ import annotations
@@ -14,26 +15,29 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from entrypoints.main_thread_interrupt import MainThreadInterrupt
+from entrypoints.main_thread_interrupt import STUCK_SECONDS, MainThreadInterrupt
 from vs_sim.api.testing import SimThreads, examples, wait_or_fail
 
 
-def _interruptions(seed: int | None, lost: int, requests: int, busy: float) -> tuple[int, int]:
-    """How often the main thread was interrupted, and how many wake signals were sent."""
+def _interruptions(
+    seed: int | None, lost: int, requests: int, busy: float
+) -> tuple[int, int, list[float]]:
+    """How often the main thread was interrupted, how many wakes were sent, and the stuck reports."""
     threads = SimThreads(schedule_seed=seed)
 
-    def run() -> tuple[int, int]:
+    def run() -> tuple[int, int, list[float]]:
         woken = threads.event()
         first_interruption = threads.event()
         sent: list[None] = []
         interrupted: list[None] = []
+        stuck: list[float] = []
 
         def wake() -> None:
             sent.append(None)
             if len(sent) > lost:
                 woken.set()
 
-        interrupt = MainThreadInterrupt(wake, threads)
+        interrupt = MainThreadInterrupt(wake, threads, stuck.append)
 
         def main_thread() -> None:
             while True:
@@ -54,7 +58,7 @@ def _interruptions(seed: int | None, lost: int, requests: int, busy: float) -> t
         wait_or_fail(first_interruption, "the main thread's interruption")
         # Let every resend still on its way reach the main thread.
         threads.sleep(1.0)
-        return len(interrupted), len(sent)
+        return len(interrupted), len(sent), stuck
 
     return threads.run(run)
 
@@ -64,12 +68,18 @@ def _interruptions(seed: int | None, lost: int, requests: int, busy: float) -> t
     seed=st.one_of(st.none(), st.integers(0, 2**32)),
     lost=st.integers(0, 5),
     requests=st.integers(1, 3),
-    busy=st.sampled_from([0.0, 0.01, 0.2]),
+    busy=st.sampled_from([0.0, 0.01, 0.2, STUCK_SECONDS + 1.0]),
 )
 def test_every_request_ends_with_exactly_one_interruption_however_many_wakes_are_lost(
     seed: int | None, lost: int, requests: int, busy: float
 ) -> None:
-    interrupted, sent = _interruptions(seed, lost, requests, busy)
+    interrupted, sent, stuck = _interruptions(seed, lost, requests, busy)
 
     assert interrupted == 1
     assert sent > lost
+    # Lost wakes delay the take by at most lost * RESEND_SECONDS, far under STUCK_SECONDS.
+    if busy > STUCK_SECONDS:
+        assert len(stuck) == 1
+        assert stuck[0] >= STUCK_SECONDS
+    else:
+        assert stuck == []

@@ -79,6 +79,13 @@ if TYPE_CHECKING:
     from vs_sim.api import Threads
 
 
+def _report_stuck_main_thread(waited: float) -> None:
+    sys.stderr.write(
+        f"vibesys: the run has not stopped {waited:.0f} s after SIGTERM; its main thread "
+        "is not taking signals (blocked in a native call?). SIGKILL stops it.\n"
+    )
+
+
 @contextmanager
 def _termination_signal(runtime: ServerRuntime) -> Iterator[None]:
     """Forward launcher termination into the server's cleanup boundary.
@@ -91,7 +98,9 @@ def _termination_signal(runtime: ServerRuntime) -> Iterator[None]:
     until the main thread has taken it (see ``MainThreadInterrupt``).
     """
     interrupt = MainThreadInterrupt(
-        partial(signal.pthread_kill, threading.get_ident(), _INTERRUPT_SIGNAL), OsThreads()
+        partial(signal.pthread_kill, threading.get_ident(), _INTERRUPT_SIGNAL),
+        OsThreads(),
+        _report_stuck_main_thread,
     )
 
     def on_interrupt_signal(signum: int, frame: object) -> None:
