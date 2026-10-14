@@ -137,6 +137,13 @@ def write_for_agent(workspace: Path, relative: str, contents: bytes) -> None:
     atomic_write_bytes(path, contents)
 
 
+def file_fingerprint(path: Path) -> str | None:
+    """Return a SHA-256 of the regular file at *path*, or ``None`` if it is not one."""
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def hash_inputs(
     workspace: Path,
     relative_paths: Iterable[str],
@@ -194,6 +201,7 @@ __all__ = [
     "WorkspaceFileProblem",
     "WorkspaceFileProblemKind",
     "contained_path",
+    "file_fingerprint",
     "hash_inputs",
     "read_agent_json",
     "read_agent_model",

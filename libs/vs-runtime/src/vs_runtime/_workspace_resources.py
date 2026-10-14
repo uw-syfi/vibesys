@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
@@ -16,6 +15,7 @@ from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     create_trusted_evaluation_executor,
 )
+from vs_runtime._workspace_files import file_fingerprint
 from vs_runtime._workspace_receipts import BaselineEntry, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
@@ -57,13 +57,6 @@ class RootBaselineDrifted:
 
 type WorkspaceResourceEvent = WorkspaceRestoreFailed | RootBaselineDrifted
 type WorkspaceResourceEventSink = Callable[[WorkspaceResourceEvent], object]
-
-
-def _file_fingerprint(path: Path) -> str | None:
-    """Return a content hash of *path*, or ``None`` if it is not a regular file."""
-    if not path.is_file():
-        return None
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 class ModelRequestReconciler(Protocol):
@@ -354,7 +347,7 @@ class RuntimeWorkspaceResource:
         return tuple(
             BaselineEntry(
                 path=path,
-                fingerprint=None if path.endswith("/") else _file_fingerprint(self.path / path),
+                fingerprint=None if path.endswith("/") else file_fingerprint(self.path / path),
             )
             for path in paths
         )
@@ -374,7 +367,7 @@ class RuntimeWorkspaceResource:
                 if not target.is_dir():
                     removed.append(entry.path)
                 continue
-            fingerprint = _file_fingerprint(target)
+            fingerprint = file_fingerprint(target)
             if fingerprint is None:
                 removed.append(entry.path)
             elif fingerprint != entry.fingerprint:
