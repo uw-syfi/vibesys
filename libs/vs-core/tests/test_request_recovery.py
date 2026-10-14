@@ -112,6 +112,7 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
+    orphan_waits,
     project,
     step,
 )
@@ -338,6 +339,13 @@ def test_recovery_inspects_unfinished_authority_without_replaying_payload(
     assert isinstance(inspection, InspectRequest)
     assert inspection.target == original.request_id
     assert inspection.request_id == check.inspection
+    # The check records what re-resolves it (#2428): its inspection, and the target while open.
+    assert check.wait is not None
+    assert set(check.wait.requests) == (
+        {inspection.request_id}
+        if phase == RequestPhase.BLOCKED
+        else {inspection.request_id, original.request_id}
+    )
     assert result.state.records.records[0] == original
     assert result.state.run.status == RunStatus.PAUSED
     assert result.state.run.now_at == 12.0
@@ -397,6 +405,26 @@ def test_query_completion_without_target_proof_cannot_complete_recovery() -> Non
     assert result.state.records.recovery.checks[0].resolution == "pending"
     assert isinstance(result.requests[0], InspectRequest)
     assert result.state.records.records[0] == original
+
+
+def test_a_check_keeps_naming_its_inspection_while_that_is_in_flight() -> None:
+    """A later observation re-records the check's wait (#2428); an inspection the shell is
+    still answering stays named, though it is a reconciliation command, not a canonical
+    record."""
+    original = pending_record(phase=RequestPhase.RECONCILING)
+    started = step(recovering_state(original), RecoveryStarted(epoch=1, now_at=20.0))
+    (inspection,) = started.requests
+    assert inspection.request_id is not None
+    dispatched = step(started.state, DispatchAuthorized(request_id=inspection.request_id))
+    later = step(
+        reload(dispatched.state),
+        RequestObserved(observation=observed(original, sequence=2)),
+    )
+    (check,) = later.state.records.recovery.checks
+    assert check.resolution == "pending"
+    assert check.wait is not None
+    assert set(check.wait.requests) == {original.request_id, inspection.request_id}
+    assert orphan_waits(later.state) == ()
 
 
 def timed_out(record: RequestRecord) -> RequestRecord:

@@ -26,6 +26,7 @@ from ._proofs import (
 from ._registry import ContractError
 from ._request_forward import turn_of
 from ._session_scope import lost_turn_authority
+from ._waits import owned_job_subject
 from .types.attempts import (
     AttemptPhase,
     CloseAttemptScope,
@@ -83,6 +84,7 @@ from .types.sessions import (
     SessionPhase,
 )
 from .types.until import Failed, FailureReason, WhileAlive, WhileOpen
+from .types.waits import WaitOn
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
@@ -744,7 +746,95 @@ def _aggregate_resolution(
     return resolution
 
 
-def _finish(state: RecordsState, barrier: RecoveryBarrier) -> AreaChange[RecordsState]:
+#: The phases of a record whose answer is still to come, a reconciliation command's included.
+_IN_FLIGHT = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+
+
+def _check_wait(
+    state: RecordsState,
+    context: RecordsContext,
+    check: RecoveryCheck,
+    sent: frozenset[RequestId],
+    epoch: int,
+) -> WaitOn | None:
+    """What a pending check waits on now: the requests and jobs whose answer re-resolves it.
+
+    Any committed answer about the target re-resolves the check (``_observe``): the target
+    itself while it is open, and every inspection of it, the check's own, an earlier epoch's
+    sent again, and the inspections of the children it left. A child its typed job ledger
+    tracks settles when that job does, so the check names the job, but only when every child
+    has one: a child nobody answers for keeps the check from ever resolving. *sent* holds the
+    requests this transition sends. A check left with nothing keeps the wait it had, naming
+    what it waited on, so the run halts with it named.
+    """
+    if check.resolution != "pending":
+        return None
+    record = state.record(check.target)
+    children = [child for child in state.children if check.target in child.source_requests]
+    expected = [check.target, check.inspection]
+    if record is not None:
+        expected += [
+            _child_inspection(record, child.resource_id, epoch).request_id for child in children
+        ]
+    expected += [
+        row.request_id
+        for row in state.records
+        if isinstance(row.request, InspectRequest) and row.request.target == check.target
+    ]
+    requests = tuple(
+        dict.fromkeys(
+            request
+            for request in expected
+            if request is not None
+            and (
+                request in sent
+                or ((row := state.record(request)) is not None and row.phase in _IN_FLIGHT)
+            )
+        )
+    )
+    jobs = [
+        next(
+            (
+                job
+                for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
+                if job.wait is not None
+                and job.resource_id == child.resource_id
+                and job.scope == child.scope
+            ),
+            None,
+        )
+        for child in children
+    ]
+    subjects = (
+        tuple(dict.fromkeys(owned_job_subject(job) for job in jobs if job is not None))
+        if children and None not in jobs
+        else ()
+    )
+    if not requests and not subjects:
+        return check.wait
+    return WaitOn(requests=requests, subjects=subjects)
+
+
+def _finish(
+    state: RecordsState,
+    barrier: RecoveryBarrier,
+    context: RecordsContext,
+    sent: tuple[Outbound, ...] = (),
+) -> AreaChange[RecordsState]:
+    """*barrier* stored with its phase from its checks, each pending one naming its wait."""
+    sent_ids = frozenset(
+        outbound.request.request_id for outbound in sent if outbound.request.request_id is not None
+    )
+    barrier = barrier.model_copy(
+        update={
+            "checks": tuple(
+                check.model_copy(
+                    update={"wait": _check_wait(state, context, check, sent_ids, barrier.epoch)}
+                )
+                for check in barrier.checks
+            )
+        }
+    )
     ready = all(check.resolution not in ("pending", "blocked") for check in barrier.checks)
     phase = (
         RecoveryPhase.READY
@@ -850,7 +940,9 @@ def _start(
         # The run ended, so its closure already proved every owner released: there is nothing
         # left to inspect, and a terminal run may issue no request. A record core itself ended
         # (one blocked when the run closed) has no executor fact that would resolve it.
-        return _finish(state, RecoveryBarrier(epoch=event.epoch, phase=RecoveryPhase.RECOVERING))
+        return _finish(
+            state, RecoveryBarrier(epoch=event.epoch, phase=RecoveryPhase.RECOVERING), context
+        )
     updated = state
     for record in state.records:
         proof = observation_for(record, record.observation)
@@ -884,6 +976,7 @@ def _start(
                 target=record.request_id,
                 inspection=inspection.request_id if inspection is not None else None,
                 resolution=resolution,
+                wait=None,
             )
         )
         if inspection is not None:
@@ -896,6 +989,8 @@ def _start(
     change = _finish(
         updated,
         RecoveryBarrier(epoch=event.epoch, phase=RecoveryPhase.RECOVERING, checks=tuple(checks)),
+        context,
+        tuple(requests),
     )
     return change.model_copy(update={"requests": tuple(requests)})
 
@@ -1146,6 +1241,7 @@ def _pending_probes(
                 RecoveryCheck(
                     target=record.request_id,
                     inspection=inspection.request_id if inspection is not None else None,
+                    wait=None,
                 )
             )
             if inspection is not None and not _inspection_exists(state, inspection):
@@ -1243,7 +1339,9 @@ def _observe(
         ):
             resolution = "terminal"
         checks.append(_with_resolution(check, resolution))
-    change = _finish(updated, barrier.model_copy(update={"checks": tuple(checks)}))
+    change = _finish(
+        updated, barrier.model_copy(update={"checks": tuple(checks)}), context, requests
+    )
     return change.model_copy(
         update={"signals": (*release_signals, *change.signals), "requests": requests}
     )
@@ -1264,7 +1362,10 @@ def _deadline_barrier(
     checks = list(state.recovery.checks)
     check = next((check for check in checks if check.target == record.request_id), None)
     replacement = RecoveryCheck(
-        target=record.request_id, inspection=inspection.request_id, resolution="blocked"
+        target=record.request_id,
+        inspection=inspection.request_id,
+        resolution="blocked",
+        wait=None,
     )
     if check is None:
         checks.append(replacement)

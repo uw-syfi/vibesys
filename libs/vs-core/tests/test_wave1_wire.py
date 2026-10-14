@@ -270,13 +270,13 @@ def test_ready_recovery_requires_a_conclusive_target_receipt(epoch: int) -> None
             RecoveryBarrier(
                 epoch=epoch,
                 phase=RecoveryPhase.READY,
-                checks=(RecoveryCheck(target=target, resolution=resolution),),
+                checks=(RecoveryCheck(target=target, resolution=resolution, wait=None),),
             )
     for resolution in ("safe-prepared", "reattached", "terminal"):
         barrier = RecoveryBarrier(
             epoch=epoch,
             phase=RecoveryPhase.READY,
-            checks=(RecoveryCheck(target=target, resolution=resolution),),
+            checks=(RecoveryCheck(target=target, resolution=resolution, wait=None),),
         )
         assert RecoveryBarrier.model_validate_json(barrier.model_dump_json()) == barrier
 

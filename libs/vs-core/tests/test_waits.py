@@ -69,6 +69,7 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspacePlan,
     orphan_waits,
+    owned_job_subject,
     phase_waits,
     producers,
     step,
@@ -192,11 +193,31 @@ def test_a_terminal_run_waits_on_nothing() -> None:
 
 
 def _recovering(target: RequestRecord) -> CoreState:
+    """A pending check on *target*, recorded while the target was open (#2428)."""
     state = recovering_state(target)
     barrier = RecoveryBarrier(
         epoch=1,
         phase=RecoveryPhase.RECOVERING,
-        checks=(RecoveryCheck(target=target.request_id),),
+        checks=(
+            RecoveryCheck(target=target.request_id, wait=WaitOn(requests=(target.request_id,))),
+        ),
+    )
+    return state.model_copy(
+        update={"records": state.records.model_copy(update={"recovery": barrier})}
+    )
+
+
+def _check_naming(
+    state: CoreState, *requests: RequestId, subjects: tuple[WaitSubject, ...] = ()
+) -> CoreState:
+    """*state* with its one recovery check waiting on *requests* and *subjects* as well."""
+    (check,) = state.records.recovery.checks
+    assert check.wait is not None
+    wait = WaitOn(
+        requests=(*check.wait.requests, *requests), subjects=(*check.wait.subjects, *subjects)
+    )
+    barrier = state.records.recovery.model_copy(
+        update={"checks": (check.model_copy(update={"wait": wait}),)}
     )
     return state.model_copy(
         update={"records": state.records.model_copy(update={"recovery": barrier})}
@@ -220,6 +241,8 @@ def test_a_pending_recovery_check_with_its_inspection_in_flight_is_not_an_orphan
     inspection = pending_record(identity="inspection", phase=RequestPhase.PREPARED)
     check = done.records.recovery.checks[0].model_copy(update={"inspection": inspection.request_id})
     barrier = done.records.recovery.model_copy(update={"checks": (check,)})
+    done = _check_naming(done, inspection.request_id)
+    barrier = barrier.model_copy(update={"checks": done.records.recovery.checks})
     state = done.model_copy(
         update={
             "records": done.records.model_copy(
@@ -278,12 +301,15 @@ def _left_a_child(*, inspecting: bool, job_terminal: bool | None) -> CoreState:
                 )
             }
         )
-    return state.model_copy(
+    state = state.model_copy(
         update={
             "evaluation": evaluation,
             "records": state.records.model_copy(update={"records": records, "children": (lease,)}),
         }
     )
+    named = tuple(row.request_id for row in records[1:])
+    subjects = (owned_job_subject(job),) if job_terminal is not None else ()
+    return _check_naming(state, *named, subjects=subjects)
 
 
 @pytest.mark.parametrize("job_terminal", [None, False, True])
@@ -300,11 +326,12 @@ def test_a_recovery_check_waits_on_every_party_that_can_settle_the_child_its_tar
 
     found = [(wait.waiter, wait.producer) for wait in waits(state)]
 
+    # Both parties named: the report is the one that fires last, the job's poll timer.
     expected = (
-        Producer.PENDING_REQUEST
-        if inspecting
-        else Producer.TIMER
+        Producer.TIMER
         if job_terminal is False
+        else Producer.PENDING_REQUEST
+        if inspecting
         else None
     )
     assert (WaitKind.RECOVERY_CHECK, expected) in found
@@ -351,11 +378,28 @@ def _as_registered(state: CoreState) -> CoreState:
         resource_id=job.resource_id,
         wait=job.wait,
     )
+    barrier = state.records.recovery.model_copy(
+        update={
+            "checks": tuple(
+                check.model_copy(
+                    update={
+                        "wait": check.wait.model_copy(
+                            update={"subjects": (owned_job_subject(registered),)}
+                        )
+                    }
+                )
+                if check.wait is not None
+                else check
+                for check in state.records.recovery.checks
+            )
+        }
+    )
     return state.model_copy(
         update={
             "evaluation": state.evaluation.model_copy(
                 update={"jobs": (), "registered_jobs": (registered,)}
-            )
+            ),
+            "records": state.records.model_copy(update={"recovery": barrier}),
         }
     )
 
@@ -442,6 +486,7 @@ def test_a_check_on_several_left_jobs_waits_on_the_one_that_settles_last_in_any_
         leases.append(lease.model_copy(update={"resource_id": resource}))
     expected = Producer.TIMER if "timer" in kinds else Producer.PENDING_REQUEST
 
+    state = _check_naming(state, subjects=tuple(owned_job_subject(row) for row in jobs))
     for order in (leases, leases[::-1]):
         left = state.model_copy(
             update={

@@ -66,6 +66,7 @@ from .sessions import (
 )
 from .settlement import AdoptionRequest, AdoptRevision, VerifyAdoption
 from .until import Failed, FailureReason, FromDispatch, Inherited, ReplyError, Until, Watch, Within
+from .waits import WaitOn
 
 
 class InspectRequest(RequestBase):
@@ -324,6 +325,17 @@ class RecoveryCheck(Value):
     target: RequestId
     inspection: RequestId | None = None
     resolution: Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"] = "pending"
+    wait: WaitOn | None
+    """What a pending check waits on: its target while that is open, the inspections recovery
+    sent about the target and the children it left, and the owned jobs that settle children
+    their job ledger tracks. Only a pending check waits."""
+
+    @model_validator(mode="after")
+    def waits_only_while_pending(self) -> RecoveryCheck:
+        """A resolved or blocked check waits on nothing."""
+        if self.wait is not None and self.resolution != "pending":
+            raise ContractValidationError("wait", f"a {self.resolution} recovery check waits")
+        return self
 
 
 class RecoveryBarrier(Value):
