@@ -16,8 +16,9 @@ Skills (load them, in every language):
   instead of patching or mocks, favor property-based tests, and are never flaky
   (a test's result must never depend on timing; every wait needs a bound that
   only guards against hangs). Deterministic-tier tests and product code use no
-  real time, threads, processes, sockets, or signals outside `vs_sim`
-  (`tests/quality/test_real_apis_confined.py`); only the real tiers
+  real time, threads, processes, sockets, or signals outside `vs_sim`. Ruff
+  `TID251` bans time; `tests/quality/test_real_apis_confined.py` covers
+  threads, processes, sockets, and signals. Only the real tiers
   (`sim_real_tiers`: `tests/e2e`, `tests/slurm_cluster`,
   `tests/minimal_container`) drive real systems.
 
