@@ -1948,3 +1948,58 @@ async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recoverin
         assert ended.terminal.state is EvaluationState.FAILED
     finally:
         await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_that_proves_sbatch_never_arrived_ends_the_evaluation_durably(
+    tmp_path: Path,
+) -> None:
+    """A dispatch whose sbatch never reached the cluster, cancelled, polls ENDED for good.
+
+    The dispatch's own cleanup cannot reach the scheduler, so the evaluation stays
+    owned; the later cancel proves no job exists. That proof must be saved, or a
+    poll, which reads only the durable record and the cluster, asks the cluster
+    about a job that never existed and reads UNKNOWN forever.
+    """
+    config = _config()
+    unknown = ClusterUnknown(operation_id="eval-never-arrived", reason="ssh down")
+    runner = _TombstonedSubmissionCluster((unknown, None), notify_after=1)
+    runner.script("eval-never-arrived", on_dispatch=_drop_before_scheduler_acceptance)
+
+    def executor() -> SlurmEvaluationExecutor:
+        return SlurmEvaluationExecutor(
+            config,
+            workspace=_workspace(tmp_path),
+            setup_script=None,
+            service=None,
+            support_trees={},
+            handle_root=tmp_path / "handles",
+            cluster=runner,
+            pause=lambda _seconds: None,
+        )
+
+    first = executor()
+    try:
+        await first.submit(_request(), handle_id="eval-never-arrived")
+        await runner.schedule_consumed.wait()
+        await first.cancel("eval-never-arrived")
+
+        observed = await first.inspect("eval-never-arrived")
+        assert observed is not None
+        assert observed.state is EvaluationState.CANCELED
+        polled = await first.poll("eval-never-arrived")
+        assert polled.phase is PollPhase.ENDED
+        assert polled.terminal == ExecutorObservation(state=EvaluationState.CANCELED)
+    finally:
+        await first.close()
+
+    restarted = executor()
+    try:
+        polled = await restarted.poll("eval-never-arrived")
+        assert polled.phase is PollPhase.ENDED
+        assert polled.terminal == ExecutorObservation(state=EvaluationState.CANCELED)
+        recovered = await restarted.inspect("eval-never-arrived")
+        assert recovered == ExecutorObservation(state=EvaluationState.CANCELED)
+        await restarted.cancel("eval-never-arrived")
+    finally:
+        await restarted.close()

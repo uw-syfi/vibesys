@@ -265,9 +265,12 @@ class SharedSlurmAdmission:
 
 
 class _DurableEnd(StrEnum):
-    """How an evaluation ended without ever reaching the scheduler."""
+    """How an evaluation ended without a scheduler job."""
 
     CANCELLED_BEFORE_DISPATCH = "cancelled_before_dispatch"
+    # Dispatch started, but its sbatch never reached the scheduler: cancellation
+    # acknowledgements with no job, repeated, proved no job exists.
+    CANCELLED_WITHOUT_JOB = "cancelled_without_job"
 
 
 class _DurableSlurmEvaluation(BaseModel):
@@ -296,8 +299,11 @@ class _DurableSlurmEvaluation(BaseModel):
 
     @model_validator(mode="after")
     def _ended_before_dispatch_has_no_job(self) -> _DurableSlurmEvaluation:
-        if self.ended is not None and (self.handle is not None or self.dispatch_started):
-            message = "an evaluation ended before dispatch cannot have a job or a dispatch"
+        if self.ended is not None and self.handle is not None:
+            message = "an evaluation that ended without a job cannot have a job"
+            raise ValueError(message)
+        if self.ended is _DurableEnd.CANCELLED_BEFORE_DISPATCH and self.dispatch_started:
+            message = "an evaluation ended before dispatch cannot have a dispatch"
             raise ValueError(message)
         terminal_facts = sum(
             value is not None
@@ -611,7 +617,7 @@ class SlurmEvaluationExecutor:
         elif handle_id not in self._handles:
             raise ExecutorCancellationUnknownError(handle_id)
         if isinstance(outcome, _CancelConfirmed):
-            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+            self._end_cancelled(handle_id)
         # Otherwise the evaluation is CANCELING: the job is known and scancel was
         # acknowledged, so a later inspect or cancel reconciles it to CANCELED.
 
@@ -670,7 +676,7 @@ class SlurmEvaluationExecutor:
             if durable is not None and not durable.dispatch_started:
                 self._end_before_dispatch(handle_id, durable.request)
             elif await self._cancel_running_best_effort(handle_id):
-                self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+                self._end_cancelled(handle_id)
             raise
         except (SlurmSubmissionRejectedError, ExecutorRejectedError) as exc:
             # Definite nonacceptance disproves ownership of any allocation
@@ -1190,18 +1196,46 @@ class SlurmEvaluationExecutor:
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> ExecutorObservation:
         return self._lifecycle.publish(handle_id, observation)
 
+    def _end_cancelled(self, handle_id: str) -> None:
+        """Publish CANCELED for a confirmed cancel, saving the end when no job holds it.
+
+        A poll reads only the saved record and the cluster. When the record names a
+        job, the cluster reports that job's end. When it names none (the dispatch's
+        sbatch never reached the scheduler, and repeated cancel acknowledgements with
+        no job proved so), the cluster knows nothing, and only the saved end keeps a
+        poll from reading UNKNOWN forever.
+        """
+        durable = self._read_evaluation(handle_id)
+        if (
+            durable is not None
+            and durable.handle is None
+            and durable.dispatch_started
+            and durable.submission_rejection is None
+            and durable.terminal_failure is None
+            and durable.ended is None
+        ):
+            self._end_without_job(handle_id, durable, _DurableEnd.CANCELLED_WITHOUT_JOB)
+            return
+        self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+
     def _end_before_dispatch(self, handle_id: str, request: EvaluationRequest) -> None:
-        """End an evaluation that never reached the scheduler: save the end, then publish it.
+        """End an evaluation that was never dispatched."""
+        self._end_without_job(
+            handle_id,
+            _DurableSlurmEvaluation(handle=None, request=request, dispatch_started=False),
+            _DurableEnd.CANCELLED_BEFORE_DISPATCH,
+        )
+
+    def _end_without_job(
+        self, handle_id: str, durable: _DurableSlurmEvaluation, end: _DurableEnd
+    ) -> None:
+        """End an evaluation that has no scheduler job: save the end, then publish it.
 
         The record is written first, so a poll, a restart, or a second cancel can only
         ever see the end once it is durable, and nothing can dispatch the evaluation.
         """
-        record = _DurableSlurmEvaluation(
-            handle=None,
-            request=request,
-            dispatch_started=False,
-            ended=_DurableEnd.CANCELLED_BEFORE_DISPATCH,
-        )
+        record = durable.model_copy(update={"ended": end})
+        record = _DurableSlurmEvaluation.model_validate(record.model_dump())
         atomic_write_bytes(
             self._handle_root / f"{handle_id}.json", (record.model_dump_json() + "\n").encode()
         )
