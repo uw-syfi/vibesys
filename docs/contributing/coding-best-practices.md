@@ -56,6 +56,15 @@ significant, put it behind a focused Python interface. One-off calls stay local.
 
 - Test serialized contracts at the boundary: round-trip representative payloads
   and exercise each consumer, not only the producer.
+- Parse untrusted JSON (from a peer, an agent, an evaluator, or a file another
+  process may have torn) with pydantic's parser: a model's `validate_json`,
+  `TypeAdapter(JsonValue).validate_json`, or `pydantic_core.from_json`. It
+  bounds nesting and reports deep nesting and invalid UTF-8 as `ValueError`.
+  `json.loads` raises `RecursionError` and, on bytes, `UnicodeDecodeError`,
+  which escape a handler that catches decoding errors. Code that runs with the
+  standard library only catches `(ValueError, RecursionError)`. Add each such
+  decoder as a row of `tests/system/test_hostile_json.py`, which runs it
+  against the shared corpus `vs_sim.api.testing.hostile_json_frames`.
 
 ## Prompts, Templates, And Skills
 

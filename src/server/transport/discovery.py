@@ -21,6 +21,8 @@ from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
+from pydantic_core import from_json
+
 from server.registry import FLOCK_AVAILABLE, LockState, probe_lock, try_lock, unlock
 from vs_sim.api import PidfdProcessSignaller
 
@@ -645,7 +647,9 @@ def _holds_file(descriptors: tuple[Path, ...], device: int, inode: int) -> bool:
 
 def _read_record(path: Path) -> WebInstanceRecord | None:
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        # Pydantic's parser bounds nesting and reports it, and invalid UTF-8, as
+        # ``ValueError``; ``json.loads`` raised ``RecursionError`` past this handler.
+        raw = from_json(path.read_bytes())
         if not isinstance(raw, dict) or raw.get("version") != 1:
             return None
         return WebInstanceRecord(
@@ -661,7 +665,7 @@ def _read_record(path: Path) -> WebInstanceRecord | None:
                 else None
             ),
         )
-    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+    except (OSError, TypeError, ValueError, KeyError):
         return None
 
 

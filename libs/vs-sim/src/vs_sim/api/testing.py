@@ -58,6 +58,7 @@ from vs_sim.faults import CallCounter, ScheduledRule, fault_stream, match_rule
 from vs_sim.file_effects import file_size_limit
 from vs_sim.gate import Gate, arrival, start_thread, wait_until_started, wait_until_started_sync
 from vs_sim.host_clock import CrashableClock, HostCrashedError, ProbedClock, clock_from
+from vs_sim.hostile_input import DEEP_NESTING, OVERSIZED_BYTES, hostile_json_frames
 from vs_sim.manual import ManualClock
 from vs_sim.pairwise import pairwise_rows
 from vs_sim.seeds import (
@@ -93,7 +94,9 @@ from vs_sim.waits import (
 )
 
 __all__ = [
+    "DEEP_NESTING",
     "HANG_GUARD_S",
+    "OVERSIZED_BYTES",
     "SCHEDULE_SEED_OPTION",
     "SEED_OPTION",
     "TGKILL_SUPPORTED",
@@ -175,6 +178,7 @@ __all__ = [
     "file_size_limit",
     "first_of_each_kind",
     "get_or_fail",
+    "hostile_json_frames",
     "join_or_fail",
     "match_rule",
     "non_main_thread_ids",
