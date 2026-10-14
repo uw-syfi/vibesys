@@ -82,6 +82,7 @@ def proof_record(
         phase=core.RequestPhase.PREPARED if proof is None else core.RequestPhase.COMPLETED,
         observation=proof,
         until=core.Until(at=deadline),
+        addressed_by=(),
     )
 
 
@@ -1773,6 +1774,7 @@ def test_child_release_requires_complete_positive_history_from_every_source(
             phase=core.RequestPhase.COMPLETED,
             observation=mark,
             until=core.Until(at=state.run.deadline_at),
+            addressed_by=(),
         )
         for mark in (first, second)
     )
@@ -1859,6 +1861,7 @@ def test_unknown_scope_reopen_inspects_before_reacquisition_or_typed_outcome(
         phase=core.RequestPhase.RECONCILING,
         until=core.Until(at=state.run.deadline_at),
         observation=observed if canonical else None,
+        addressed_by=(),
     )
     state = with_owner(state, owner, records=changed(state.records, records=(record,)))
     signal = core.ScopeAdmissionReopened(
@@ -2056,6 +2059,7 @@ def test_scope_reopen_completion_requires_registered_exact_positive_outcome(
             phase=core.RequestPhase.COMPLETED,
             observation=observed,
             until=core.Until(at=state.run.deadline_at),
+            addressed_by=(),
         ),
         outcome_schema=None if outcome_identity == "missing" else schema.outcome_schema,
         outcome_json=None

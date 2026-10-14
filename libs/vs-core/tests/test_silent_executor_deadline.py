@@ -72,6 +72,7 @@ def _silent(phase: RequestPhase, status: ObservationStatus, *, terminal: bool) -
         sequence=0,
         observation=answered,
         until=Until(at=BOUND),
+        addressed_by=(),
     )
     return state.model_copy(
         update={

@@ -566,6 +566,7 @@ def judge_state() -> tuple[core.CoreState, core.Settlement]:
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.COMPLETED,
         until=core.Until(at=10.0),
+        addressed_by=(),
     )
     return state.model_copy(
         update={
@@ -820,6 +821,7 @@ def registered_judge_state() -> tuple[core.CoreState, core.Settlement, core.Oper
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.COMPLETED,
         until=core.Until(at=10.0),
+        addressed_by=(),
     )
     return (
         state.model_copy(

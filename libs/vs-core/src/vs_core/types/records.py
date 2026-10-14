@@ -188,6 +188,11 @@ class RequestRecord(OutcomeValue):
     """
     dispatched_at: Seconds | None = None
     """When the shell first dispatched a request whose limit counts from then, else None."""
+    addressed_by: tuple[RequestId, ...]
+    """The reconciliation commands (inspections, cancels, blocks) sent about this record.
+
+    Each is added when it is registered, so a blocked record names what can still end it.
+    """
 
     @property
     def retry_wait_until(self) -> float | None:

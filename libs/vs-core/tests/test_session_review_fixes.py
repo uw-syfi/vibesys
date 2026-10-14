@@ -111,6 +111,7 @@ def refund_state(
             phase=core.RequestPhase.COMPLETED,
             until=core.Until(at=100.0),
             observation=obs,
+            addressed_by=(),
         )
 
     records = (
@@ -220,6 +221,7 @@ def release_after_closure(
         phase=core.RequestPhase.COMPLETED,
         until=core.Until(at=100.0),
         observation=obs,
+        addressed_by=(),
     )
     closure = core.AttemptClosure(
         disposition=disposition,

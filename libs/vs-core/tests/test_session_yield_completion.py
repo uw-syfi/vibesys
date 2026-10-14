@@ -83,6 +83,7 @@ def yield_state(
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.DISPATCHED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     owner = core.AttemptView(
         attempt_id=attempt_id,

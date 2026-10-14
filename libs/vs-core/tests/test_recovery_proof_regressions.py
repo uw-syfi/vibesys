@@ -72,6 +72,7 @@ def _record(request: core.Request, lifecycle: core.LifecycleClass) -> core.Reque
             resource_id=core.ResourceId(root="resource"),
             children_complete=True,
         ),
+        addressed_by=(),
     )
 
 

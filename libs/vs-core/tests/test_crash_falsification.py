@@ -255,6 +255,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         sequence=yielded.sequence,
                         observation=yielded,
                         until=core.Until(at=100.0),
+                        addressed_by=(),
                     ),
                     core.RequestRecord(
                         request_id=job_request,
@@ -263,6 +264,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         lifecycle=core.LifecycleClass.OWNED_JOB,
                         phase=core.RequestPhase.DISPATCHED,
                         until=core.Until(at=10.0),
+                        addressed_by=(),
                     ),
                 ),
             ),

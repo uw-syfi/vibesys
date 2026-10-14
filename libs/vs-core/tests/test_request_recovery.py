@@ -120,7 +120,7 @@ from vs_core.api import downtime as downtime_of
 from vs_core.api.testing import sample_limits
 from vs_sim.api.testing import examples
 
-from .restart import restarts
+from .restart import restarts, unaddressed
 
 
 class RegisteredOutcome(Value):
@@ -194,6 +194,7 @@ def pending_record(
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=phase,
         until=Until(at=100.0),
+        addressed_by=(),
     )
 
 
@@ -346,7 +347,7 @@ def test_recovery_inspects_unfinished_authority_without_replaying_payload(
         if phase == RequestPhase.BLOCKED
         else {inspection.request_id, original.request_id}
     )
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
     assert result.state.run.status == RunStatus.PAUSED
     assert result.state.run.now_at == 12.0
     assert project(result.state).scheduling.charged == project(state).scheduling.charged
@@ -375,7 +376,7 @@ def test_startup_sequences_preserve_ownership_and_deduplicate_inspection(
         now_at = max(now_at, float(supplied_time))
         assert result.state.records.recovery.epoch == epoch
         assert result.state.run.now_at == now_at
-        kept = result.state.records.records[0]
+        kept = unaddressed(result.state.records.records[0])
         assert kept.model_copy(update={"until": original.until}) == original
         assert kept.until.at >= original.until.at
         assert result.state.run.status == RunStatus.PAUSED
@@ -404,7 +405,7 @@ def test_query_completion_without_target_proof_cannot_complete_recovery() -> Non
     assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
     assert result.state.records.recovery.checks[0].resolution == "pending"
     assert isinstance(result.requests[0], InspectRequest)
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
 
 
 def test_a_check_keeps_naming_its_inspection_while_that_is_in_flight() -> None:
@@ -492,7 +493,7 @@ def test_deadline_blocks_ambiguity_without_fabricating_terminal_ledger_fact(now_
     assert result.state.records.recovery.phase == RecoveryPhase.BLOCKED
     assert result.state.records.recovery.checks[0].resolution == "blocked"
     expected_failure = timed_out(original).failure
-    assert result.state.records.records[0] == timed_out(original)
+    assert unaddressed(result.state.records.records[0]) == timed_out(original)
     assert result.state.run.status == RunStatus.PAUSED
     blocks = [request for request in result.requests if isinstance(request, BlockRequest)]
     inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
@@ -556,7 +557,7 @@ def test_child_ownership_survives_parent_deadline_and_cleanup_requests() -> None
         if isinstance(request, CancelOwnedResource)
     }
     assert cancelled == {root, child}
-    assert result.state.records.records[0] == timed_out(original)
+    assert unaddressed(result.state.records.records[0]) == timed_out(original)
     assert result.state.run.status == RunStatus.PAUSED
     assert reload(result.state) == result.state
 
@@ -597,7 +598,7 @@ def test_unknown_acceptance_flags_never_replace_positive_recovery_proof(
     assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
     assert len(result.requests) == 1
     assert isinstance(result.requests[0], InspectRequest)
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
     assert result.state.records.children == state.records.children
     assert result.state.scheduling == state.scheduling
     assert result.state.attempts == state.attempts
@@ -645,7 +646,7 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
         )
         ended = ended or (kind == "deadline" and result.state.run.now_at >= limit.at and not asking)
         # A restart moves the limit later by its downtime, never earlier; nothing else changes.
-        kept = result.state.records.records[0]
+        kept = unaddressed(result.state.records.records[0])
         assert kept.until.at >= limit.at
         moved = original.model_copy(update={"until": kept.until})
         assert kept == (timed_out(moved) if ended else moved)
@@ -683,7 +684,7 @@ def test_user_request_identity_prefix_never_hides_unresolved_authority(suffix: s
         original.request_id,
         anchor.request_id,
     }
-    assert result.state.records.records[:2] == (original, anchor)
+    assert tuple(map(unaddressed, result.state.records.records[:2])) == (original, anchor)
 
 
 @pytest.mark.parametrize("released", [False, True])
@@ -710,7 +711,7 @@ def test_completed_but_live_session_with_incomplete_manifest_cannot_complete_rec
         isinstance(request, InspectRequest) and request.target == original.request_id
         for request in result.requests
     )
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
 
 
 def test_parent_release_does_not_hide_live_child_at_deadline() -> None:
@@ -750,7 +751,7 @@ def test_parent_release_does_not_hide_live_child_at_deadline() -> None:
     } == {child}
     assert result.state.records.children == (lease,)
     # The setup concluded and its owner heard; only its unreleased child is cleaned up.
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
     assert result.state.run.status == RunStatus.PAUSED
 
 
@@ -832,7 +833,7 @@ def test_session_turn_recovery_requires_exact_typed_owner(case: str) -> None:
     )
     assert check.resolution == ("reattached" if case == "exact" else "pending")
     assert result.state.sessions == state.sessions
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
     assert result.state.records.recovery.phase == RecoveryPhase.RECOVERING
     assert not any(isinstance(request, CancelOwnedResource) for request in result.requests)
 
@@ -884,7 +885,7 @@ def test_session_lease_reattachment_preserves_conversation_identity(case: str) -
     )
     assert check.resolution == ("reattached" if case in ("exact", "provisional") else "pending")
     assert result.state.sessions == state.sessions
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
 
 
 @given(
@@ -1041,7 +1042,9 @@ def test_recovery_reconstructs_shared_descendant_proofs_canonically(
             ResourceId(root=f"parent-resource-{index}") for index in parents
         )
         assert child.observation is None
-    assert result.state.records.records[: len(originals)] == tuple(record for record in originals)
+    assert tuple(map(unaddressed, result.state.records.records[: len(originals)])) == tuple(
+        record for record in originals
+    )
     inspections = [request for request in result.requests if isinstance(request, InspectRequest)]
     assert len(inspections) == len(originals) + sum(len(set(manifest)) for manifest in manifests)
     assert len({request.request_id for request in inspections}) == len(inspections)
@@ -1089,7 +1092,9 @@ def test_composite_resource_ids_cannot_alias_another_targets_cleanup(
         cancels.append(requests[0])
         state = reload(result.state)
     assert cancels[0].request_id != cancels[1].request_id
-    assert state.records.records[:2] == tuple(timed_out(record) for record in records)
+    assert tuple(map(unaddressed, state.records.records[:2])) == tuple(
+        timed_out(record) for record in records
+    )
 
 
 def with_sibling_history(state: CoreState, amounts: tuple[int, int]) -> CoreState:
@@ -1321,7 +1326,7 @@ def test_known_resource_deadline_requires_conclusive_release_before_skipping_can
         if isinstance(request, CancelOwnedResource)
     }
     assert resources == (set() if positive_release else {resource})
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
     assert result.state.sessions == state.sessions
     assert result.state.attempts == state.attempts
 
@@ -1356,7 +1361,7 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
     early = step(
         reload(result.state), ReconciliationDeadline(request_id=original.request_id, now_at=100.0)
     )
-    assert early.state.records.records[0] == original
+    assert unaddressed(early.state.records.records[0]) == original
     assert early.state.records.recovery.phase == RecoveryPhase.RECOVERING
     waited = float(logical_now) + state.run.limits.reconciliation_bound
     blocked = step(
@@ -1372,7 +1377,7 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
         )
         assert request_until(blocked.state, request) == waited + bound
     assert any(isinstance(request, CancelOwnedResource) for request in blocked.requests)
-    assert blocked.state.records.records[0] == timed_out(original)
+    assert unaddressed(blocked.state.records.records[0]) == timed_out(original)
 
 
 def registered_record(
@@ -1481,7 +1486,7 @@ def test_ambiguous_acceptance_never_replays_any_lifecycle_class(
         for request in result.requests
     )
     assert all(isinstance(request, InspectRequest) for request in result.requests)
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
     assert result.state.sessions == state.sessions
     assert result.state.attempts == state.attempts
     assert result.events == ()
@@ -1539,7 +1544,7 @@ def test_stale_retirement_recovery_cannot_release_newer_generation_or_episode(cl
         for request in blocked.requests
     )
     assert not non_diagnostic(blocked)
-    assert blocked.state.records.records[0] == timed_out(original)
+    assert unaddressed(blocked.state.records.records[0]) == timed_out(original)
 
 
 @given(
@@ -1770,7 +1775,7 @@ def test_discovered_child_transfers_only_to_an_exact_proven_typed_owner(case: st
                 for request in result.requests
             )
         assert result.state.evaluation == state.evaluation
-        assert result.state.records.records[:2] == (
+        assert tuple(map(unaddressed, result.state.records.records[:2])) == (
             parent,
             submission,
         )
@@ -1927,7 +1932,7 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
         assert result.state.attempts == state.attempts
         assert result.state.sessions == state.sessions
         assert result.state.scheduling == state.scheduling
-        assert result.state.records.records[0] == original
+        assert unaddressed(result.state.records.records[0]) == original
         assert result.state.records.records[0].outcome == outcome
         assert all(isinstance(request, InspectRequest) for request in result.requests)
         assert result.events == ()
@@ -1979,7 +1984,7 @@ def test_registered_job_can_reattach_to_its_provisional_owner_without_inventing_
     )
     assert check.resolution == ("reattached" if case == "exact" else "pending")
     assert result.state.evaluation == state.evaluation
-    assert result.state.records.records[0] == original
+    assert unaddressed(result.state.records.records[0]) == original
     assert result.events == ()
 
 
@@ -1998,7 +2003,7 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
         event = ReconciliationDeadline(request_id=selected.request_id, now_at=float(110 + index))
         result = step(reload(state), event)
         assert result == step(state, event)
-        assert result.state.records.records[0] == timed_out(original)
+        assert unaddressed(result.state.records.records[0]) == timed_out(original)
         assert result.state.records.records[1 : len(records)] == records[1:]
         assert result.state.records.recovery.phase == RecoveryPhase.BLOCKED
         assert {check.target for check in result.state.records.recovery.checks} == {
@@ -2069,7 +2074,7 @@ def test_late_child_cleanup_survives_previous_parent_block_and_cancel_requests()
     assert cleanup.resource_id == child
     assert cleanup.target == original.request_id
     assert result.state.records.children == (lease,)
-    assert result.state.records.records[0] == latest
+    assert unaddressed(result.state.records.records[0]) == unaddressed(latest)
     repeated = step(reload(result.state), event)
     assert repeated.requests == ()
     assert repeated.state.records == result.state.records
@@ -2186,7 +2191,7 @@ def test_a_request_proven_never_begun_is_prepared_again_and_recovery_resolves(
     reissued = next(
         row for row in result.state.records.records if row.request_id == original.request_id
     )
-    assert reissued == original.model_copy(update={"phase": RequestPhase.PREPARED})
+    assert unaddressed(reissued) == original.model_copy(update={"phase": RequestPhase.PREPARED})
     barrier = result.state.records.recovery
     assert [check.resolution for check in barrier.checks] == ["safe-prepared"]
     assert barrier.phase == RecoveryPhase.READY
@@ -2477,7 +2482,7 @@ def test_a_limit_that_passed_while_the_host_was_down_waits_for_the_executors_rep
 
     waiting = step(reload(started.state), deadline)
 
-    assert waiting.state.records.records[0] == original
+    assert unaddressed(waiting.state.records.records[0]) == original
     assert not waiting.events
     assert not [r for r in waiting.requests if isinstance(r, BlockRequest)]
     dispatched = step(waiting.state, DispatchAuthorized(request_id=inspection.request_id))

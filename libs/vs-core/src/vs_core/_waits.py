@@ -267,21 +267,6 @@ def _from_records(
     return frozenset(found)
 
 
-def _with_successors(
-    records: Sequence[RequestRecord], related: list[RequestRecord]
-) -> list[RequestRecord]:
-    """``related`` and the live requests that inspect, block or cancel one of them.
-
-    Recovery asks about a request a dead host left behind (and blocks it once its limit passed)
-    before the resource it serves moves on: a job is polled again, a session carried forward.
-    While that inspection is in flight it is what produces the waited-on fact.
-    """
-    return [
-        *related,
-        *(row for row in records if any(_addresses(row, item) for item in related)),
-    ]
-
-
 def _acquiring(sessions: SessionsState) -> tuple[Invocation, ...]:
     """The turns still acquiring: requested and charged or not, but with no result yet."""
     return tuple(row for row in sessions.invocations if turn_acquires(row))
@@ -718,15 +703,6 @@ def undispatchable_requests(state: CoreState) -> tuple[RequestId, ...]:
     )
 
 
-def _addresses(row: RequestRecord, record: RequestRecord) -> bool:
-    """Whether *row* is a live request that can still end *record*: a cancel or inspection of it."""
-    return (
-        record_waits(row.phase)
-        and row.request_id != record.request_id
-        and getattr(row.request, "target", None) == record.request_id
-    )
-
-
 def _blocked_records(core: CoreState) -> tuple[RequestRecord, ...]:
     """The blocked records a closing run holds closure on, whether or not anything addresses them.
 
@@ -744,13 +720,15 @@ def _blocked_records(core: CoreState) -> tuple[RequestRecord, ...]:
 
 
 def _blocked_producers(
-    records: Sequence[RequestRecord], outbox: frozenset[RequestId], record: RequestRecord
+    records: RecordsState, outbox: frozenset[RequestId], record: RequestRecord
 ) -> frozenset[Producer]:
-    return _from_records([row for row in records if _addresses(row, record)], outbox)
+    """What can end a blocked record: the reconciliation commands it recorded as sent about it."""
+    named = (records.record(request_id) for request_id in record.addressed_by)
+    return _from_records([row for row in named if row is not None], outbox)
 
 
 def stalled_blocked_records(core: CoreState) -> tuple[RequestId, ...]:
-    """The blocked records of a closing run that no live cancellation or inspection can end.
+    """The blocked records of a closing run that no command they name can still end.
 
     Each is a wait nothing produces: its bound passed and the close would sit on it forever, so
     the step ends it (``BlockedRecordStalled``).
@@ -758,7 +736,7 @@ def stalled_blocked_records(core: CoreState) -> tuple[RequestId, ...]:
     return tuple(
         record.request_id
         for record in _blocked_records(core)
-        if not _blocked_producers(core.records.records, frozenset(), record)
+        if not _blocked_producers(core.records, frozenset(), record)
     )
 
 
@@ -838,7 +816,7 @@ def _blocked_record_producers(
     core: CoreState, identity: str, outbox: frozenset[RequestId]
 ) -> frozenset[Producer]:
     record = next(row for row in core.records.records if row.request_id.root == identity)
-    return _blocked_producers(core.records.records, outbox, record)
+    return _blocked_producers(core.records, outbox, record)
 
 
 def _session_wait_producers(

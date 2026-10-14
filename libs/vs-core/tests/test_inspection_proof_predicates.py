@@ -47,6 +47,7 @@ def inspection_facts(draw: st.DrawFn) -> tuple[core.CoreState, core.RequestObser
             else core.LifecycleClass.IDEMPOTENT_WRITE,
             phase=core.RequestPhase.DISPATCHED,
             until=core.Until(at=100.0),
+            addressed_by=(),
         )
         for identity, request in ((source_id, source), (query_id, query))
     )
@@ -127,6 +128,7 @@ def test_registered_turn_inspection_requires_accepted_declared_normalized_origin
         lifecycle=core.LifecycleClass.QUERY,
         phase=core.RequestPhase.DISPATCHED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     event = core.RequestObserved(
         observation=core.Observation(

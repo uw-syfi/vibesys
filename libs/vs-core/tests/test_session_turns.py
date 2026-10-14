@@ -201,6 +201,7 @@ def carrying_request(spec: core.SessionSpec, scope: core.Scope) -> core.RequestR
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.DISPATCHED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
 
 
@@ -560,6 +561,7 @@ def with_record(state: core.CoreState, request: core.Request) -> core.CoreState:
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.DISPATCHED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     return state.model_copy(
         update={"records": state.records.model_copy(update={"records": (record,)})}

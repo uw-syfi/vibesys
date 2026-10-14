@@ -390,6 +390,7 @@ def test_reacquisition_readiness_requires_canonical_session_acquisition(
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.COMPLETED,
         until=Until(at=1000),
+        addressed_by=(),
     )
     observed = Observation(
         event_id=EventId(root="retained-proof"),

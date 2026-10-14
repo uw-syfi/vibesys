@@ -141,6 +141,7 @@ def test_snapshot_result_requires_exact_committed_checkpoint(
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.COMPLETED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     owner = owner.model_copy(
         update={

@@ -108,6 +108,7 @@ def pending_record(identity: str, phase: RequestPhase = RequestPhase.DISPATCHED)
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=phase,
         until=Until(at=100.0),
+        addressed_by=(),
     )
 
 

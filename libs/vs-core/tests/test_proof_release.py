@@ -134,6 +134,7 @@ def release_facts(
         phase=core.RequestPhase.COMPLETED,
         observation=observation,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     if kind == "job":
         assert isinstance(request, core.ExecuteRegisteredOperation)

@@ -111,6 +111,7 @@ def publication_state(*, facts: bool = True) -> tuple[core.CoreState, core.Conti
                 observation=job.observation,
                 evaluation_result=result,
                 until=core.Until(at=100.0),
+                addressed_by=(),
             )
         )
         identity = core.MeasurementIdentity(
@@ -182,6 +183,7 @@ def dispatch_publication(state: core.CoreState, wait: core.Continuation) -> core
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.PREPARED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     state = state.model_copy(
         update={
@@ -285,6 +287,7 @@ def test_second_yield_captures_previous_publication_separately_from_paid_cycle(
         phase=core.RequestPhase.COMPLETED,
         observation=observation,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     owner = state.attempts.attempts[0]
     checkpoint = owner.checkpoints[0].model_copy(update={"invocation": current.invocation})

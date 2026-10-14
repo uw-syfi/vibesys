@@ -44,7 +44,7 @@ from vs_core.api import (
 )
 from vs_sim.api.testing import examples
 
-from .restart import restarts
+from .restart import restarts, unaddressed
 
 OWED = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 
@@ -72,6 +72,7 @@ def pending_record(
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=phase,
         until=Until(at=100.0),
+        addressed_by=(),
     )
 
 
@@ -267,7 +268,7 @@ def test_a_passed_limit_ends_an_owed_root_even_when_reattached_and_cleans_its_ch
         else:
             # A record that already concluded keeps its result; only its child is cleaned up.
             record_after = record
-        assert after == record_after
+        assert unaddressed(after) == unaddressed(record_after)
     assert result.state.records.children == state.records.children
     if not child_pending:
         assert all(isinstance(value, BlockRequest) for value in result.requests)

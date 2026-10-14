@@ -324,6 +324,7 @@ def fixture(
         phase=core.RequestPhase.COMPLETED,
         observation=record.observation,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     state = state.model_copy(
         update={
@@ -602,6 +603,7 @@ def test_retirement_records_exact_park_authority_without_resume(
             lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
             phase=core.RequestPhase.PREPARED,
             until=core.Until(at=100.0),
+            addressed_by=(),
         )
         state = state.model_copy(
             update={
@@ -676,6 +678,7 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
             "outcome_schema": request.operation.schema_ref.outcome_schema,
             "outcome_json": codec.encode_outcome(request.operation.schema_ref, outcome),
             "until": core.Until(at=100.0),
+            "addressed_by": (),
         },
         context={"operation_registry": codec},
     )
@@ -1473,6 +1476,7 @@ def parked_fixture() -> tuple[core.CoreState, core.ContinuationReopenRequested]:
         phase=core.RequestPhase.COMPLETED,
         observation=close_proof,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     continuation = continuation.model_copy(
         update={

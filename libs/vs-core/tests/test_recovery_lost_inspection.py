@@ -56,6 +56,7 @@ def _session_record() -> RequestRecord:
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.DISPATCHED,
         until=Until(at=100.0),
+        addressed_by=(),
     )
 
 
@@ -73,6 +74,7 @@ def _lost_inspection(target: RequestRecord, phase: RequestPhase) -> RequestRecor
         lifecycle=LifecycleClass.QUERY,
         phase=phase,
         until=Until(at=100.0),
+        addressed_by=(),
     )
 
 

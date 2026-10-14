@@ -57,6 +57,7 @@ def test_registered_root_outcome_rejects_another_owner_descriptor(schema_field: 
         lifecycle=core.LifecycleClass.QUERY,
         phase=core.RequestPhase.DISPATCHED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     state = state.model_copy(
         update={

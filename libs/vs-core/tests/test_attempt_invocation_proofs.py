@@ -176,6 +176,7 @@ def invocation_fixture(
         phase=RequestPhase.COMPLETED,
         observation=observed if correlation == "exact" else None,
         until=Until(at=1000),
+        addressed_by=(),
     )
     decision = RequestTurn(decision_id=request.decision_id, scope=scope, turn=turn)
     if receipt_kind == "mismatched":

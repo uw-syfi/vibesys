@@ -30,6 +30,7 @@ def canonical_source(
         phase=core.RequestPhase.COMPLETED,
         observation=observation,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
 
 

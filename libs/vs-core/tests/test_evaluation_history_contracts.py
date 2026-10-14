@@ -476,6 +476,7 @@ def test_scientific_terminal_ingress_requires_positive_execution_source(
             lifecycle=LifecycleClass.OWNED_JOB,
             phase=RequestPhase.COMPLETED,
             until=Until(at=100.0),
+            addressed_by=(),
         )
         with pytest.raises(ValidationError, match="evaluation_result"):
             RequestRecord.model_validate({**payload, "observation": None})

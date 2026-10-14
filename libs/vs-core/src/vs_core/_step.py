@@ -102,8 +102,11 @@ from .types.kernel import (
 )
 from .types.records import (
     BlockedRecordStalled,
+    BlockRequest,
+    CancelOwnedResource,
     DispatchAuthorized,
     ExecuteRegisteredOperation,
+    InspectRequest,
     OperationResult,
     OperationRetireRequested,
     Outbound,
@@ -369,9 +372,11 @@ def register_requests(
                 phase=RequestPhase.PREPARED,
                 until=scheduled.until,
                 limit_from_dispatch=scheduled.limit_from_dispatch,
+                addressed_by=(),
             )
         )
         appended[request_id] = records[-1]
+        _address(records, appended, request)
         allocated.append(request)
         added.setdefault(request.decision_id, []).append(request_id)
     if not allocated:
@@ -396,6 +401,32 @@ def register_requests(
             "run": run,
         }
     ), tuple(allocated)
+
+
+def _address(
+    records: list[RequestRecord],
+    appended: dict[RequestId, RequestRecord],
+    request: Request,
+) -> None:
+    """Name a reconciliation command on the record it addresses, as the command is registered.
+
+    A command about a request core holds no record of has no waiter to name it.
+    """
+    if (
+        not isinstance(request, InspectRequest | CancelOwnedResource | BlockRequest)
+        or request.request_id is None
+    ):
+        return
+    for index, row in enumerate(records):
+        if row.request_id != request.target:
+            continue
+        if request.request_id not in row.addressed_by:
+            records[index] = row.model_copy(
+                update={"addressed_by": (*row.addressed_by, request.request_id)}
+            )
+            if row.request_id in appended:
+                appended[row.request_id] = records[index]
+        return
 
 
 def _with_requests(receipt: DecisionReceipt, request_ids: list[RequestId]) -> DecisionReceipt:

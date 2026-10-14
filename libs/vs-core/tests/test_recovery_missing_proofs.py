@@ -72,6 +72,8 @@ from vs_core.api import (
     step,
 )
 
+from .restart import unaddressed
+
 
 def fixture_digest(request: Value) -> str:
     return sha256(
@@ -100,6 +102,7 @@ def _state(record: RequestRecord) -> CoreState:
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.DISPATCHED,
         until=Until(at=100.0),
+        addressed_by=(),
     )
     return state.model_copy(
         update={
@@ -219,6 +222,7 @@ def test_accepted_resource_bearing_requests_need_identified_release(
         phase=RequestPhase.COMPLETED,
         until=Until(at=100.0),
         observation=observation,
+        addressed_by=(),
     )
     state = _state(record)
     result = step(state, RecoveryStarted(epoch=1, now_at=11.0))
@@ -231,7 +235,7 @@ def test_accepted_resource_bearing_requests_need_identified_release(
         isinstance(request, InspectRequest) and request.target == request_id
         for request in result.requests
     ) == (check.resolution == "pending")
-    assert result.state.records.records[0] == record
+    assert unaddressed(result.state.records.records[0]) == record
     assert result.state.sessions == state.sessions
 
 
@@ -290,6 +294,7 @@ def test_resource_free_query_and_proven_nonacceptance_remain_terminal(
             released=False,
             children_complete=True,
         ),
+        addressed_by=(),
     )
     result = step(_state(record), RecoveryStarted(epoch=1, now_at=11.0))
     check = next(
@@ -374,6 +379,7 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
             "lifecycle": LifecycleClass.IDEMPOTENT_WRITE,
             "phase": RequestPhase.COMPLETED,
             "until": {"at": 100.0},
+            "addressed_by": (),
             "outcome_schema": descriptor.outcome_schema,
             "outcome_json": codec.encode_outcome(wire.schema_ref, outcome),
             "observation": Observation(
@@ -458,7 +464,7 @@ def test_absent_scope_reopen_descriptor_never_proves_admission(
         isinstance(request, InspectRequest) and request.target == request_id
         for request in result.requests
     ) == (check.resolution == "pending")
-    assert result.state.records.records[0] == record
+    assert unaddressed(result.state.records.records[0]) == record
 
 
 @given(
@@ -522,6 +528,7 @@ def test_terminal_session_resource_matches_request_correlated_lease(
             released=True,
             children_complete=True,
         ),
+        addressed_by=(),
     )
     state = _state(record).model_copy(
         update={

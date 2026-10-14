@@ -178,6 +178,18 @@ _CASES = st.builds(
 )
 
 
+def _assert_records_name_what_addresses_them(state: core.CoreState) -> None:
+    """Each record names, in registration order, exactly the commands core sent about it."""
+    commands = (core.InspectRequest, core.CancelOwnedResource, core.BlockRequest)
+    for record in state.records.records:
+        expected = tuple(
+            row.request_id
+            for row in state.records.records
+            if isinstance(row.request, commands) and row.request.target == record.request_id
+        )
+        assert record.addressed_by == expected
+
+
 @given(case=_CASES)
 def test_a_closing_run_never_waits_on_a_blocked_record_nothing_can_end(case: _Case) -> None:
     """Every open record is a counted wait with a producer, and a closing run terminates."""
@@ -187,6 +199,7 @@ def test_a_closing_run_never_waits_on_a_blocked_record_nothing_can_end(case: _Ca
         state, restart=case.restart, late_by=case.late_by, stop_first=case.stop_first
     )
     assert core.orphan_waits(closed) == ()
+    _assert_records_name_what_addresses_them(closed)
     if lifecycle in _ENDS_WITH_RECORD or not (accepted or named):
         assert closed.run.status == core.RunStatus.TERMINAL
     record = _original(closed)

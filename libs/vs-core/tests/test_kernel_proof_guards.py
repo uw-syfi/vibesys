@@ -80,6 +80,7 @@ def test_dependency_dispatch_requires_exact_owner_receipt(defect: str, identity:
         lifecycle=core.LifecycleClass.QUERY,
         phase=core.RequestPhase.PREPARED,
         until=core.Until(at=20.0),
+        addressed_by=(),
     )
     ready = state.records.model_copy(
         update={
@@ -157,6 +158,7 @@ def test_kernel_event_cause_requires_the_recorded_observation_episode(
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.DISPATCHED,
         until=core.Until(at=10.0),
+        addressed_by=(),
     )
     state = state.model_copy(update={"records": core.RecordsState(hosts=(), records=(record,))})
     event = core.SessionObserved(
