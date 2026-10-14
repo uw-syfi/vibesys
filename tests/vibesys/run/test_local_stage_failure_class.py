@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 
 from vibesys.config import Config
@@ -50,6 +51,7 @@ from vs_project.api import (
     NullGitTrackerEvents,
     OrchestrationDescriptor,
     RunEnvironmentRecord,
+    git_repositories,
 )
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api import BenchmarkFailureKind, PollingEvaluationExecutor
@@ -223,7 +225,7 @@ def _measure_with_lost_command(
     root = tmp_path / "project"
     _write_project(root)
     sandbox = _LosesStageCommands(lost)
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     request = ProjectRunRequest(
         project_root=root,
         run_id=_RUN_ID,
@@ -241,6 +243,7 @@ def _measure_with_lost_command(
         log_emit=_emit,
         on_log_ready=lambda _path: None,
         clock=ManualClock(),
+        git_repository=git_repositories(REAL_GIT),
     )
     with (
         closing(integration),

@@ -14,8 +14,9 @@ from typing import TYPE_CHECKING
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.real_git import real_git_tracker
 
-from vs_project.api import GitTracker, NullGitTrackerEvents
+from vs_project.api import NullGitTrackerEvents
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,7 +49,7 @@ def test_tracker_commits_start_no_git_maintenance(
     trace = tmp_path_factory.mktemp("trace") / "git-trace2.json"
     monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
     (root / "main.py").write_text("VALUE = 0\n", encoding="utf-8")
-    tracker = GitTracker(root, run_id="maintenance-run", events=NullGitTrackerEvents())
+    tracker = real_git_tracker(root, run_id="maintenance-run", events=NullGitTrackerEvents())
 
     tracker.init(existing=False)
     for value, label in enumerate(labels, start=1):

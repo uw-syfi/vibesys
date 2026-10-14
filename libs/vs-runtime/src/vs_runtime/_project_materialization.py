@@ -16,12 +16,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vs_project.api import atomic_write_bytes, run_git
+from vs_project.api import atomic_write_bytes
 from vs_runtime._input_project import materialize_input_project
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
+    from vs_project.api import Git
     from vs_runtime._sdk_paths import SDKRoots
 
 
@@ -118,7 +119,7 @@ ProjectMaterializationStep = (
 class ProjectMaterializer:
     """Apply canonical filesystem materialization to one project root."""
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-011124 [PLR0913]; The destination, environment effects, log, SDK roots, exclusions, and injectable Git effect are independent runtime inputs.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-011124 [PLR0913]; The destination, environment effects, log, SDK roots, exclusions, and Git launcher are independent runtime inputs.
         self,
         root: Path,
         *,
@@ -126,7 +127,7 @@ class ProjectMaterializer:
         log: Callable[[str], None],
         sdk_roots: SDKRoots,
         excluded_dirs: Iterable[str],
-        git_runner: Callable[[Sequence[str], Path], str] | None = None,
+        git: Git,
     ) -> None:
         """Configure workspace population and path policy for one run."""
         self.root = root
@@ -134,7 +135,7 @@ class ProjectMaterializer:
         self._effects = effects
         self._log = log
         self._sdk_roots = sdk_roots
-        self._git_runner = git_runner or _run_git
+        self._git = git
 
     def create(self) -> None:
         """Create the workspace root directory if it does not exist."""
@@ -278,9 +279,9 @@ class ProjectMaterializer:
             raise ValueError(message)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
-        self._git_runner(["clone", "--no-checkout", source.repo, str(dest)], self.root)
-        self._git_runner(["checkout", "--detach", source.commit], dest)
-        actual = self._git_runner(["rev-parse", "HEAD"], dest).strip().lower()
+        self._checked_git(["clone", "--no-checkout", source.repo, str(dest)], self.root)
+        self._checked_git(["checkout", "--detach", source.commit], dest)
+        actual = self._checked_git(["rev-parse", "HEAD"], dest).strip().lower()
         expected = source.commit.lower()
         if actual != expected and not actual.startswith(expected):
             message = f"workspace source {name!r} checked out {actual}, expected {expected}"
@@ -491,10 +492,9 @@ class ProjectMaterializer:
         else:
             self._replace_external_symlinks(dst)
 
-    @staticmethod
-    def _source_gitignored_paths(src: Path) -> frozenset[tuple[str, ...]]:
+    def _source_gitignored_paths(self, src: Path) -> frozenset[tuple[str, ...]]:
         """Return untracked paths ignored by Git below ``src``."""
-        result = run_git(
+        result = self._git.run(
             [
                 "-C",
                 str(src),
@@ -515,12 +515,19 @@ class ProjectMaterializer:
             Path(os.fsdecode(raw).rstrip("/")).parts for raw in result.stdout.split(b"\0") if raw
         )
 
-    @staticmethod
-    def _is_git_worktree(path: Path) -> bool:
-        result = run_git(
-            ["-C", str(path), "rev-parse", "--is-inside-work-tree"], cwd=path, text=True
+    def _is_git_worktree(self, path: Path) -> bool:
+        result = self._git.run_text(
+            ["-C", str(path), "rev-parse", "--is-inside-work-tree"], cwd=path
         )
         return result.returncode == 0 and result.stdout.strip() == "true"
+
+    def _checked_git(self, args: Sequence[str], cwd: Path) -> str:
+        result = self._git.run_text(args, cwd=cwd)
+        if result.returncode != 0:
+            detail = result.stderr.strip() or result.stdout.strip()
+            message = f"git {' '.join(args)} failed: {detail}"
+            raise RuntimeError(message)
+        return result.stdout
 
     @staticmethod
     def _remove_path(path: Path) -> None:
@@ -528,15 +535,6 @@ class ProjectMaterializer:
             shutil.rmtree(path)
         elif path.exists() or path.is_symlink():
             path.unlink()
-
-
-def _run_git(args: Sequence[str], cwd: Path) -> str:
-    result = run_git(args, cwd=cwd, text=True)
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip()
-        message = f"git {' '.join(args)} failed: {detail}"
-        raise RuntimeError(message)
-    return result.stdout
 
 
 def copy_support_directories(project_root: Path, workspace: Path, names: Iterable[str]) -> None:

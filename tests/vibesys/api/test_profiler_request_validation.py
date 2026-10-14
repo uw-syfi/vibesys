@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 from tests.support.timing import real_timing
 
@@ -177,7 +178,9 @@ def test_profile_workload_requirement_precedes_provisioning(
                 request,
                 sink=record,
                 settings=LaunchSettings(
-                    timing=real_timing(), backend_factory=host_container_backend
+                    timing=real_timing(),
+                    processes=REAL_PROCESSES,
+                    backend_factory=host_container_backend,
                 ),
             )
         assert error.value.diagnostic.code == "profile_workload_invalid"
@@ -186,7 +189,11 @@ def test_profile_workload_requirement_precedes_provisioning(
         session = create_session(
             request,
             sink=record,
-            settings=LaunchSettings(timing=real_timing(), backend_factory=host_container_backend),
+            settings=LaunchSettings(
+                timing=real_timing(),
+                processes=REAL_PROCESSES,
+                backend_factory=host_container_backend,
+            ),
         )
         session.close()
     assert events == []
@@ -214,7 +221,11 @@ def test_incompatible_profiler_is_a_typed_early_configuration_failure(
         create_session(
             request,
             sink=discard,
-            settings=LaunchSettings(timing=real_timing(), backend_factory=host_container_backend),
+            settings=LaunchSettings(
+                timing=real_timing(),
+                processes=REAL_PROCESSES,
+                backend_factory=host_container_backend,
+            ),
         )
     assert error.value.diagnostic.code == "profiler_incompatible"
     assert error.value.diagnostic.stage == "profiler_validation"
@@ -239,6 +250,7 @@ def test_auto_native_preflight_failure_records_none_without_profiler_support(
         sink=record,
         settings=LaunchSettings(
             timing=real_timing(),
+            processes=REAL_PROCESSES,
             registry=_profiler_registry(),
             backend_factory=backend,
             git_repository=git.repository,
@@ -291,6 +303,7 @@ def test_auto_native_preflight_failure_through_default_launch_wiring(
         sink=discard,
         settings=LaunchSettings(
             timing=real_timing(),
+            processes=REAL_PROCESSES,
             registry=_profiler_registry(),
             backend_factory=_RecordingBackendFactory(),
             git_repository=FakeGitRepositories().repository,
@@ -320,6 +333,7 @@ def test_explicit_native_preflight_failure_precedes_backend_and_project_effects(
         sink=record,
         settings=LaunchSettings(
             timing=real_timing(),
+            processes=REAL_PROCESSES,
             registry=_profiler_registry(),
             backend_factory=backend,
             profiler_preflight=preflight,

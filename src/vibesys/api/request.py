@@ -30,10 +30,11 @@ from vibesys.repository import (
 )
 from vibesys.run.contracts import ProfilerKind, RunRequest
 from vibesys.run.core_run import ensure_not_legacy_resume
-from vibesys.run.experiment_repo import ExperimentRepository
+from vibesys.run.experiment_repo import origin_matches
 from vibesys.run.profilers import validate_run_request as validate_execution_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
 from vs_agent.api.images import build_task_image
+from vs_project.api import GitRemoteRepository
 from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,
     build_run_environment,
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.plugin_catalog import OrchestrationRegistry
-    from vs_project.api import OrchestrationDescriptor
+    from vs_project.api import Git, OrchestrationDescriptor
 
 
 def default_skill_roots() -> tuple[Path, ...]:
@@ -97,11 +98,13 @@ def validate_descriptor(
     registry.resolve(descriptor.id).parse_options(descriptor)
 
 
-def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry) -> None:
+def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry, git: Git) -> None:
     """Reject invalid execution settings and policy role keys before host probes."""
     registration = registry.resolve(request.orchestration.id)
     options = registration.parse_options(request.orchestration)
-    validate_execution_request(request, attribution_command=attribution_command_of(options))
+    validate_execution_request(
+        request, git=git, attribution_command=attribution_command_of(options)
+    )
     resolve_agent_specs(
         request.config,
         registration.plugin.agents,
@@ -128,12 +131,9 @@ def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | N
     return frozenset(ProfilerKind(profiler_id) for profiler_id in supported_ids)
 
 
-def experiment_origin_matches(destination: Path, repository: str) -> bool:
+def experiment_origin_matches(destination: Path, repository: str, *, git: Git) -> bool:
     """Return whether `destination`'s git `origin` remote already points at `repository`.
 
-    `repository` is a GitHub `OWNER/NAME` slug. Delegates to
-    `ExperimentRepository.origin_matches` with a no-op logger so callers get
-    the git-origin check without importing `ExperimentRepository` itself,
-    which also carries `push`/`create_remote`.
+    `repository` is a GitHub `OWNER/NAME` slug; `git` starts the Git command that reads it.
     """
-    return ExperimentRepository(destination, lambda _message: None).origin_matches(repository)
+    return origin_matches(GitRemoteRepository(destination, git=git), repository)

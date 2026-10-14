@@ -48,6 +48,7 @@ from tests.support.loop_invariants import (
     summarize,
     terminal_event,
 )
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.slurm_environment import with_fake_image_build
 from tests.support.timing import real_timing
 
@@ -792,6 +793,7 @@ def test_core_path_runs_the_fake_slurm_search(
     runs = launch.default_runs(
         LaunchSettings(
             timing=real_timing(),
+            processes=REAL_PROCESSES,
             agent_client_factory=_core_agents,
             backend_factory=host_container_backend,
         )

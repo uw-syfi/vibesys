@@ -20,7 +20,8 @@ from vibesys.api.store import open_run_store as _open_run_store
 from vibesys.api.wiring import SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
 from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, build_agent_client
-from vs_project.api import generate_run_id
+from vs_github.api import GitHubCLI
+from vs_project.api import Git, generate_run_id
 from vs_runtime.api.wiring import InProcessRuns
 from vs_sandbox.api import create_compute_backend
 from vs_sim.api import utc_datetime
@@ -45,6 +46,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
+    from vs_sim.api import Processes
     from vs_slurm.api import SlurmProcess
 
 
@@ -54,6 +56,8 @@ class LaunchSettings:
 
     timing: RunTiming
     """The run's time sources and lease; the entrypoint builds them from real or simulated time."""
+    processes: Processes
+    """Starts the run's Git and GitHub CLI commands; the entrypoint builds real or fake ones."""
     registry: OrchestrationRegistry | None = None
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None
     backend_factory: Callable[..., ComputeBackendImpl] | None = None
@@ -64,7 +68,7 @@ class LaunchSettings:
         None
     )
     git_repository: GitRepositoryFactory | None = None
-    """Builds the run's ``GitRepository`` implementations; ``None`` runs the Git CLI."""
+    """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
     slurm_process: SlurmProcess | None = None
     """Replaces the Slurm transport's process boundary; ``None`` runs the configured programs."""
     state_stores: StateStoreFactory | None = None
@@ -116,6 +120,8 @@ def create_session(
                 else settings.invocation_store_factory
             ),
             stateless_tool_servers=STATELESS_TOOL_SERVERS,
+            git=Git(settings.processes),
+            github=GitHubCLI(settings.processes),
             git_repository=settings.git_repository,
             slurm_process=settings.slurm_process,
             state_stores=settings.state_stores,
@@ -172,15 +178,17 @@ def validate_descriptor(
 
 
 def validate_run_request(
-    request: RunRequest, *, registry: OrchestrationRegistry | None = None
+    request: RunRequest, *, git: Git, registry: OrchestrationRegistry | None = None
 ) -> None:
-    """Validate execution settings and the selected built-in policy."""
-    _validate_run_request(request, registry=_catalog(registry))
+    """Validate execution settings and the selected built-in policy; ``git`` starts Git."""
+    _validate_run_request(request, registry=_catalog(registry), git=git)
 
 
-def open_run_store(project: Project, *, registry: OrchestrationRegistry | None = None) -> RunStore:
-    """Open recorded runs with the built-in policy projections."""
-    return _open_run_store(project, registry=_catalog(registry))
+def open_run_store(
+    project: Project, *, git: Git, registry: OrchestrationRegistry | None = None
+) -> RunStore:
+    """Open recorded runs with the built-in policy projections; ``git`` reads their history."""
+    return _open_run_store(project, registry=_catalog(registry), git=git)
 
 
 __all__ = [

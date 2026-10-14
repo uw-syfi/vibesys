@@ -78,7 +78,7 @@ from vibesys.run.workspace_policy import (
 )
 from vs_evaluation.api import ProfileField
 from vs_issue_tracker.api import Issue, IssueStatus, IssueType
-from vs_project.api import Project
+from vs_project.api import Git, Project
 from vs_prompts.api import reply_fields, resolve_free_variables
 from vs_runtime.api import LocalValidationEvaluation, RunFacts, SkillFact
 from vs_runtime.api.infrastructure import (
@@ -89,6 +89,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import FakeProjectMaterializationEffects
 from vs_sandbox.api import DockerSandbox, HostResourceAccess, host_resource_for_mount
+from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
     from tests.support.distribution_build import BuiltWheel, PrivatePackagingSource
@@ -722,6 +723,9 @@ def stage_prompt_workspace(
             checkout=installed / "vibesys" / "_sdk", packaged=installed / "vibesys" / "_sdk"
         ),
         excluded_dirs=EXCLUDED_WORKSPACE_DIRS,
+        # This module also runs in an isolated interpreter over the built wheel,
+        # where the tests package is not importable.
+        git=Git(OsProcesses()),
     )
     materializer.create()
     resource_roots = {source.name: source for source in skill_sources}

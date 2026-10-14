@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from tests.support.real_git import REAL_GIT
+
 from launch import open_run_store
 from server.api.service import RunApi, RunControlSlot
 from server.chat.manager import ChatManager
@@ -114,7 +116,7 @@ def auxiliary_agent_providers() -> tuple[str, ...]:
 
 def run_record(project: Project, run_id: str) -> RunRecord:
     """Open the semantic record used by server-facing integration tests."""
-    return open_run_store(project).get_record(run_id)
+    return open_run_store(project, git=REAL_GIT).get_record(run_id)
 
 
 @dataclass(frozen=True)

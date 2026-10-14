@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vibesys.run.contracts import RunRequest
+    from vs_project.api import Git
 
 
 WITHHELD_TOOLS_ENV = "VIBESYS_PROFILER_WITHHELD_TOOLS"
@@ -247,7 +248,7 @@ def _require_attribution_runnable(command: tuple[str, ...], environment: RunEnvi
 
 
 def validate_run_request(
-    request: RunRequest, *, attribution_command: tuple[str, ...] | None = None
+    request: RunRequest, *, git: Git, attribution_command: tuple[str, ...] | None = None
 ) -> None:
     """Validate placement, profiler policy, and workload before opening run resources.
 
@@ -256,7 +257,7 @@ def validate_run_request(
     """
     if request.runs_dir is not None:
         try:
-            Project.validate_collection_root(request.runs_dir)
+            Project.validate_collection_root(request.runs_dir, git=git)
         except ProjectLayoutError as exc:
             raise ConfigurationError(
                 ConfigurationDiagnostic(

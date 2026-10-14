@@ -11,6 +11,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
+from tests.support.real_git import REAL_GIT, real_git_tracker
 
 from vs_project.api import (
     CliGitRepository,
@@ -55,7 +56,7 @@ def _git(root: Path, *args: str) -> str:
 
 
 def _tracker(root: Path, run_id: str = "guard-run") -> GitTracker:
-    return GitTracker(root, run_id=run_id, events=NullGitTrackerEvents())
+    return real_git_tracker(root, run_id=run_id, events=NullGitTrackerEvents())
 
 
 def _committed_repository(root: Path) -> str:
@@ -122,7 +123,7 @@ def _project(root: Path, tracker: GitTracker) -> Project:
 @pytest.mark.parametrize("bad", ["/abs/path", "", ".", "a/../b", "../up"])
 def test_trusted_input_paths_must_be_normalized_relative(tmp_path: Path, bad: str) -> None:
     with pytest.raises(ValueError, match=r"project path must be a normalized relative path"):
-        GitTracker(
+        real_git_tracker(
             tmp_path,
             run_id="guard-run",
             events=NullGitTrackerEvents(),
@@ -165,7 +166,7 @@ def test_candidate_patch_requires_a_resolvable_baseline(tmp_path: Path) -> None:
         tmp_path,
         run_id="guard-run",
         events=events,
-        repository=_RepositoryWithoutRoots(tmp_path, faults=events),
+        repository=_RepositoryWithoutRoots(tmp_path, git=REAL_GIT, faults=events),
     )
     tracker.init(existing=False)
     sha = tracker.current_sha()
@@ -204,7 +205,7 @@ class _RepositoryWhoseRestoreReplacesMemory(CliGitRepository):
     """A repository whose worktree restore fails after replacing ``memory`` with a file."""
 
     def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
-        super().__init__(root, faults=faults)
+        super().__init__(root, git=REAL_GIT, faults=faults)
         self._memory = root / "memory"
 
     def restore_worktree(self, revision: str, exclude: Sequence[str] = ()) -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.skeleton_world import drive, open_skeleton_world
 from tests.support.workspace_world import RUN_ID
 
@@ -36,7 +37,7 @@ async def test_one_core_run_notifies_the_listener_per_commit_and_announces_its_w
 
     Budget: one skeleton run on real Git, the cheapest way to see the production loop's commits.
     """
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     heard: list[CoreEvent] = []
     integration.events.subscribe(heard.append)
     with open_skeleton_world(tmp_path) as world:

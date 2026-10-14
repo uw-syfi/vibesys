@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
-from vs_project._git_backend import open_git_repository
 from vs_project.api.git_repository import GitError, PatchStyle, StagingError
 from vs_project.project import Project
 
@@ -57,9 +56,8 @@ class GitTracker:
 
     The tracker holds policy only (what to snapshot, exclude, protect, and how a
     checkpoint is validated); every Git operation goes through ``repository``, a
-    :class:`~vs_project.api.git_repository.GitRepository`. Unless one is
-    injected, ``open_git_repository`` picks the implementation over ``root``
-    (see ``_git_backend``); it reports operational faults to ``events``.
+    :class:`~vs_project.api.git_repository.GitRepository` over ``root``; the wiring
+    code builds it, usually with ``open_git_repository`` (see ``_git_backend``).
     """
 
     # Compiled-accelerator artifacts an agent may emit into the workspace.
@@ -98,7 +96,7 @@ class GitTracker:
     # caller's thread (a frontend request thread, for instance) open forever.
     _READ_TIMEOUT_SECONDS = 10.0
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-415556 [PLR0913]; all but root are keyword-only and independently optional; grouping the two exclusion sets into a value object would change every caller for no added safety.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-415556 [PLR0913]; all but root are keyword-only; grouping the two exclusion sets into a value object would change every caller for no added safety.
         self,
         root: Path,
         *,
@@ -107,7 +105,7 @@ class GitTracker:
         excluded_dirs: Iterable[str] = (),
         excluded_files: Iterable[str] = (),
         trusted_input_paths: Iterable[str | Path] = (),
-        repository: GitRepository | None = None,
+        repository: GitRepository,
     ) -> None:
         self.root = root.expanduser().resolve()
         if not self.root.is_dir():
@@ -125,9 +123,7 @@ class GitTracker:
         self._state_integration: ProjectGitIntegration = Project.open(
             self.root
         ).state.git_integration(run_id)
-        self._git: GitRepository = (
-            repository if repository is not None else open_git_repository(self.root, faults=events)
-        )
+        self._git = repository
         self._work_tree: Path | None = None
 
     def init(self, *, existing: bool, trusted_input_baseline: str | None = None) -> None:

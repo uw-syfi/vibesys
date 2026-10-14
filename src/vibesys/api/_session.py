@@ -137,7 +137,7 @@ class _LocalRunSession:
         registry: OrchestrationRegistry,
         implementations: SessionImplementations,
     ) -> None:
-        validate_run_request(request)
+        validate_run_request(request, git=implementations.git)
         self._request = request
         self._implementations = implementations
         self._sink = sink
@@ -157,6 +157,8 @@ class _LocalRunSession:
             implementations.slurm_process,
             implementations.state_stores,
             clock=implementations.timing.clock,
+            git=implementations.git,
+            github=implementations.github,
         )
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -203,9 +205,7 @@ class _LocalRunSession:
     def _handle_resources(self, resources: RunResources) -> None:
         self._resources = resources
         if self._ready_listener is not None:
-            self._ready_listener(
-                _run_ready(resources, self._registry, self._implementations.agent_providers)
-            )
+            self._ready_listener(_run_ready(resources, self._registry, self._implementations))
 
     def _run_id(self) -> str:
         """Use the provisioned ID once a custom runtime has created its run."""
@@ -453,19 +453,20 @@ class InProcessAuxiliaryAgents:
 def _run_ready(
     resources: RunResources,
     registry: OrchestrationRegistry,
-    agent_providers: tuple[str, ...],
+    implementations: SessionImplementations,
 ) -> RunReady:
     """Project private resource facts to the narrow frontend contract."""
     project = resources.project_resources
     environment = resources.environment_resources
+    store = open_run_store(project.project, registry=registry, git=implementations.git)
     return RunReady(
-        record=open_run_store(project.project, registry=registry).get_record(project.state.run_id),
+        record=store.get_record(project.state.run_id),
         log_directory=environment.request.log_dir,
         frontend_state_directory=project.project.state.local_namespace(
             project.state.run_id, "server"
         ).external_directory(),
         agent_provider=resources.provider,
         agent_model=resources.model,
-        agent_providers=agent_providers,
+        agent_providers=implementations.agent_providers,
         role_models=resources.role_models,
     )

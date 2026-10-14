@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment
 from tests.support.host_environment import unconfined_host_spec
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import task_path, write_task
 
 from launch import built_in_orchestrations, open_run_store
@@ -216,7 +217,8 @@ def _create_context(
     try:
         prepared = open_run_resources(
             request,
-            options.get("integration") or LocalRunIntegration(clock=ManualClock()),
+            options.get("integration")
+            or LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB),
             ownership=ownership,
             agent_specs=resolve_agent_specs(
                 request.config,
@@ -477,7 +479,7 @@ def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: P
 def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     try:
         with _create_context(project, evaluator=evaluator, integration=integration) as ctx:
             changed = [
@@ -715,7 +717,7 @@ def test_agent_v5_run_resumes_only_with_the_options_it_started_with(tmp_path: Pa
     assert isinstance(stored, OrchestrationRunManifest)
     assert stored.orchestration.id == "multi-agent"
     assert stored.orchestration.options["max_rounds"] == 1
-    view = open_run_store(Project.open(project)).get_run(run_id)
+    view = open_run_store(Project.open(project), git=REAL_GIT).get_run(run_id)
     assert view.loop == "multi-agent"
     registration = built_in_orchestrations().resolve(stored.orchestration.id)
     assert registration.projector is not None
@@ -846,7 +848,7 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
     _git(project, "remote", "add", "origin", str(remote))
     _git(project, "push", "-q", "-u", "origin", f"vibesys-runs/{run_id}")
     published = _git(remote, "rev-parse", f"refs/heads/vibesys-runs/{run_id}")
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
 
     def reject_resources(_resources: object) -> None:
         message = "resource publication failed"

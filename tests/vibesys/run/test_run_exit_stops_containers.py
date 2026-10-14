@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 from tests.support.core_plugins import capability_plugin
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.skeleton_strategy import (
     ATTEMPT,
     IMPLEMENTER_ROLE,
@@ -225,6 +226,7 @@ def _execute(
     runs = default_runs(
         LaunchSettings(
             timing=real_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=lambda **_: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True)

@@ -61,6 +61,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
     from vs_core.api import CoreState, LifecycleCapability, RequestRetries, SearchDef
+    from vs_github.api import GitHubClient
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, Commands, CorePolicy, RunFacts
@@ -149,6 +150,8 @@ class CoreResources:
     session_spec: SessionSpecFactory
     clock: SleepingClock
     """The run's clock: it places the deadline and later paces the loop on one timeline."""
+    github: GitHubClient
+    """Reaches GitHub, for operation owners that keep their records there."""
     measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
     """Hears each measurement stage start and end, for the host's event stream."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
@@ -416,6 +419,7 @@ def _catalog(
                 variables=plan.prompt_variables,
                 templates=policy.prompt_templates,
                 clock=resources.clock,
+                github=resources.github,
             )
         )
     )

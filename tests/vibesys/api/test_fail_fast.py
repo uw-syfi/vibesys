@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 from tests.support.timing import real_timing
 
@@ -85,7 +86,11 @@ def test_incompatible_profiler_is_rejected_at_session_construction(
         create_session(
             request,
             sink=record,
-            settings=LaunchSettings(timing=real_timing(), backend_factory=host_container_backend),
+            settings=LaunchSettings(
+                timing=real_timing(),
+                processes=REAL_PROCESSES,
+                backend_factory=host_container_backend,
+            ),
         )
     assert raised.value.diagnostic.code == "profiler_incompatible"
     assert "--profiler" in str(raised.value)
@@ -138,7 +143,11 @@ def test_collection_in_repository_fails_before_session_start(
         create_session(
             request,
             sink=record,
-            settings=LaunchSettings(timing=real_timing(), backend_factory=host_container_backend),
+            settings=LaunchSettings(
+                timing=real_timing(),
+                processes=REAL_PROCESSES,
+                backend_factory=host_container_backend,
+            ),
         )
     assert raised.value.diagnostic.code == "invalid_runs_dir"
     assert str(containing) in str(raised.value)

@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.real_git import NO_GITHUB, REAL_GIT, real_git_tracker
 
 from vibesys.repository import RepositoryVisibility
 from vibesys.run.experiment_repo import ExperimentRepository
 from vs_github.api import GitHubCLI
 from vs_project.api import GitTracker, NullGitTrackerEvents
+from vs_sim.api.testing import FakeProcesses, ProcessScript
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,7 +38,7 @@ def _git(root: Path, *args: str) -> str:
 
 def _project(root: Path, run_id: str = "publish-test") -> GitTracker:
     (root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
-    tracker = GitTracker(root, run_id=run_id, events=NullGitTrackerEvents())
+    tracker = real_git_tracker(root, run_id=run_id, events=NullGitTrackerEvents())
     tracker.init(existing=False)
     return tracker
 
@@ -51,7 +52,7 @@ def test_push_publishes_exact_current_run_branch_without_authoring_history(
     remote = tmp_path / "remote.git"
     _git(tmp_path, "init", "--bare", "-q", str(remote))
     messages: list[str] = []
-    publisher = ExperimentRepository(project, messages.append)
+    publisher = ExperimentRepository(project, messages.append, git=REAL_GIT, github=NO_GITHUB)
     publisher.attach_remote(str(remote))
     before = tracker.current_sha()
 
@@ -74,7 +75,7 @@ def test_unarmed_publication_close_does_not_push(tmp_path: Path) -> None:
     _project(project)
     remote = tmp_path / "remote.git"
     _git(tmp_path, "init", "--bare", "-q", str(remote))
-    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher = ExperimentRepository(project, lambda _message: None, git=REAL_GIT, github=NO_GITHUB)
     publisher.attach_remote(str(remote))
     publisher.configure(
         None,
@@ -96,7 +97,7 @@ def test_armed_publication_close_pushes_exactly_once(tmp_path: Path) -> None:
     remote = tmp_path / "remote.git"
     _git(tmp_path, "init", "--bare", "-q", str(remote))
     messages: list[str] = []
-    publisher = ExperimentRepository(project, messages.append)
+    publisher = ExperimentRepository(project, messages.append, git=REAL_GIT, github=NO_GITHUB)
     publisher.attach_remote(str(remote))
     publisher.configure(
         None,
@@ -124,7 +125,7 @@ def test_armed_publication_close_pushes_exactly_once(tmp_path: Path) -> None:
 def test_origin_matches_requested_github_repository(tmp_path: Path, url: str) -> None:
     project = tmp_path / "project"
     project.mkdir()
-    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher = ExperimentRepository(project, lambda _message: None, git=REAL_GIT, github=NO_GITHUB)
     _git(project, "init", "-q")
     publisher.attach_remote(url)
 
@@ -135,7 +136,7 @@ def test_origin_matches_requested_github_repository(tmp_path: Path, url: str) ->
 def test_origin_rejects_non_github_lookalike(tmp_path: Path) -> None:
     project = tmp_path / "project"
     project.mkdir()
-    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher = ExperimentRepository(project, lambda _message: None, git=REAL_GIT, github=NO_GITHUB)
     _git(project, "init", "-q")
     publisher.attach_remote("https://evil.example/example/project.git")
 
@@ -148,7 +149,7 @@ def test_run_branch_tracking_origin_main_is_not_published(tmp_path: Path) -> Non
     tracker = _project(project)
     remote = tmp_path / "remote.git"
     _git(tmp_path, "init", "--bare", "-q", str(remote))
-    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher = ExperimentRepository(project, lambda _message: None, git=REAL_GIT, github=NO_GITHUB)
     publisher.attach_remote(str(remote))
     current_sha = tracker.current_sha()
     assert current_sha is not None
@@ -172,7 +173,7 @@ def test_push_publishes_retained_candidates_for_current_run(tmp_path: Path) -> N
     candidate_ref = tracker.retain_candidate("candidate-1", "HEAD")
     remote = tmp_path / "remote.git"
     _git(tmp_path, "init", "--bare", "-q", str(remote))
-    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher = ExperimentRepository(project, lambda _message: None, git=REAL_GIT, github=NO_GITHUB)
     publisher.attach_remote(str(remote))
 
     publisher.push()
@@ -188,7 +189,7 @@ def test_push_rejects_legacy_run_branch(tmp_path: Path) -> None:
     _git(project, "branch", "-m", legacy_branch)
     remote = tmp_path / "remote.git"
     _git(tmp_path, "init", "--bare", "-q", str(remote))
-    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher = ExperimentRepository(project, lambda _message: None, git=REAL_GIT, github=NO_GITHUB)
     publisher.attach_remote(str(remote))
 
     with pytest.raises(ValueError, match="current VibeSys run branch"):
@@ -201,7 +202,7 @@ def test_push_without_origin_is_a_noop(tmp_path: Path) -> None:
     _project(tmp_path)
     messages: list[str] = []
 
-    ExperimentRepository(tmp_path, messages.append).push()
+    ExperimentRepository(tmp_path, messages.append, git=REAL_GIT, github=NO_GITHUB).push()
 
     assert messages == []
 
@@ -214,7 +215,7 @@ def test_push_never_stages_or_commits_pending_worktree_changes(
     tracker = _project(project)
     remote = tmp_path / "remote.git"
     _git(tmp_path, "init", "--bare", "-q", str(remote))
-    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher = ExperimentRepository(project, lambda _message: None, git=REAL_GIT, github=NO_GITHUB)
     publisher.attach_remote(str(remote))
     before = tracker.current_sha()
     (project / "uncommitted.py").write_text("VALUE = 2\n", encoding="utf-8")
@@ -233,49 +234,38 @@ def test_push_rejects_non_run_branch(tmp_path: Path) -> None:
     _git(project, "switch", "main")
     remote = tmp_path / "remote.git"
     _git(tmp_path, "init", "--bare", "-q", str(remote))
-    publisher = ExperimentRepository(project, lambda _message: None)
+    publisher = ExperimentRepository(project, lambda _message: None, git=REAL_GIT, github=NO_GITHUB)
     publisher.attach_remote(str(remote))
 
     with pytest.raises(ValueError, match="current VibeSys run branch"):
         publisher.push()
 
 
-@dataclass(frozen=True)
-class _RecordingGitHub(GitHubCLI):
-    calls: list[tuple[str, str, Path]] = field(default_factory=list)
-
-    def create_repository(
-        self,
-        repository: str,
-        *,
-        visibility: str,
-        source: Path,
-        remote_name: str = "origin",
-    ) -> None:
-        del remote_name
-        self.calls.append((repository, visibility, source))
-
-
 def test_create_remote_delegates_creation_and_attachment(tmp_path: Path) -> None:
     _project(tmp_path)
-    github = _RecordingGitHub()
+    processes = FakeProcesses(lambda _spec: ProcessScript())
     messages: list[str] = []
-    publisher = ExperimentRepository(tmp_path, messages.append, github=github)
+    publisher = ExperimentRepository(
+        tmp_path, messages.append, git=REAL_GIT, github=GitHubCLI(processes)
+    )
 
     publisher.create_remote(
         "vibesys-playground/example",
         RepositoryVisibility.INTERNAL,
     )
 
-    assert github.calls == [
-        ("vibesys-playground/example", "internal", tmp_path),
-    ]
+    assert [spec.argv[1:3] for spec in processes.ran] == [("auth", "status"), ("repo", "create")]
+    created = processes.ran[1]
+    assert created.argv[3:5] == ("vibesys-playground/example", "--internal")
+    assert created.cwd == tmp_path
     assert messages == ["[repo] created GitHub repository vibesys-playground/example"]
 
 
 def test_create_rejects_existing_origin(tmp_path: Path) -> None:
     _project(tmp_path)
-    publisher = ExperimentRepository(tmp_path, lambda _message: None)
+    publisher = ExperimentRepository(
+        tmp_path, lambda _message: None, git=REAL_GIT, github=NO_GITHUB
+    )
     publisher.attach_remote("https://example.com/origin.git")
 
     with pytest.raises(ValueError, match="already has an origin"):

@@ -9,6 +9,8 @@ from tests.support import run_test_command
 from tests.support.example_materializer import check_copy_tracked_contract
 
 from entrypoints.examples import GitExampleMaterializer, default_checkout, run
+from vs_project.api import Git
+from vs_sim.api import OsProcesses
 from vs_sim.api.testing import HANG_GUARD_S
 
 
@@ -42,7 +44,10 @@ def test_git_materializer_passes_the_copy_contract(tmp_path: Path) -> None:
     _git(checkout, "commit", "--quiet", "--message", "catalog")
 
     check_copy_tracked_contract(
-        GitExampleMaterializer(), checkout, PurePosixPath("examples/demo"), tmp_path / "out"
+        GitExampleMaterializer(Git(OsProcesses())),
+        checkout,
+        PurePosixPath("examples/demo"),
+        tmp_path / "out",
     )
 
 
@@ -57,7 +62,7 @@ def test_untracked_files_stay_behind_and_the_copy_is_one_clean_commit(tmp_path: 
     (example / "build-output.so").write_text("untracked\n", encoding="utf-8")
     destination = tmp_path / "project"
 
-    GitExampleMaterializer().copy_tracked(
+    GitExampleMaterializer(Git(OsProcesses())).copy_tracked(
         checkout, PurePosixPath("examples/demo"), destination, message="Start"
     )
 

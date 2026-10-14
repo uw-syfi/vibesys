@@ -198,7 +198,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
     profiler_preflight: ProfilerPreflight | None = None,
 ) -> "_PreparedRun":
-    validate_run_request(request)
+    validate_run_request(request, git=integration.git)
     bundle = request.input_bundle
     exp_name = request.exp_name or request.resolved_run_id
     config = request.config
@@ -373,6 +373,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 environment=environment,
                 backend=backend_impl,
                 log=buffered_logs.append,
+                git=integration.git,
             )
             if copied_project:
                 source_reference = task_root / "reference"
@@ -570,7 +571,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 ownership.callback(remove_evaluation_socket, project_root, run_id)
                 evaluation_socket_mounts = (socket_mount,)
 
-            experiment_repository = ExperimentRepository(project_root, logger.lprint)
+            experiment_repository = ExperimentRepository(
+                project_root, logger.lprint, git=integration.git, github=integration.github
+            )
             experiment_repository.configure(
                 remote_repo,
                 repo_visibility,

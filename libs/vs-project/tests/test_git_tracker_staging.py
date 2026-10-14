@@ -18,6 +18,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
+from tests.support.real_git import REAL_GIT
 
 from vs_project.api import (
     CliGitRepository,
@@ -39,7 +40,7 @@ class _RecordingRepository(CliGitRepository):
     """The real CLI repository, remembering every ``stage_all`` request."""
 
     def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
-        super().__init__(root, faults=faults)
+        super().__init__(root, git=REAL_GIT, faults=faults)
         self.staged: list[tuple[str, ...]] = []
 
     def stage_all(self, pathspecs: Sequence[str], *, force: bool = False) -> None:
@@ -96,7 +97,7 @@ class _AlwaysUnreadable(CliGitRepository):
     """Staging that keeps reporting an unreadable file, remembering each request."""
 
     def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
-        super().__init__(root, faults=faults)
+        super().__init__(root, git=REAL_GIT, faults=faults)
         self.attempts: list[tuple[str, ...]] = []
         self.failing = False
 

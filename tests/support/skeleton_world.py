@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, cast
 
+from tests.support.real_git import REAL_GIT
 from tests.support.session_world import (
     FakeSessionResolver,
     ProviderFaults,
@@ -420,7 +421,7 @@ class CandidateWriter:
 
     def __post_init__(self) -> None:
         """Start on real Git, as a standalone writer would."""
-        self.vcs = CliWorldGit(self.root)
+        self.vcs = CliWorldGit(self.root, REAL_GIT)
 
     def use(self, vcs: WorldGit) -> None:
         """Commit through ``vcs``, the Git of the world this writer plays in."""

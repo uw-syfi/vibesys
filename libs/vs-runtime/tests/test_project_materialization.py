@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tests.support.real_git import REAL_GIT
 
 from vs_runtime.api.infrastructure import (
     FreshProjectError,
@@ -32,7 +33,7 @@ def _materializer(
         log=lambda _message: None,
         sdk_roots=SDKRoots(checkout=root.parent / "sdk", packaged=root.parent / "sdk"),
         excluded_dirs=excluded,
-        git_runner=git,
+        git=REAL_GIT if git is None else git.git(),
     )
 
 

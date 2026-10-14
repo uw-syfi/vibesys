@@ -11,12 +11,16 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from tests.support.real_git import REAL_GIT
+
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_project.api import (
+    Git,
     NullGitTrackerEvents,
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
+    git_repositories,
 )
 from vs_project.api.testing import FakeGitRepositories, GitKind, run_execution_record
 from vs_runtime.api.infrastructure import (
@@ -102,8 +106,8 @@ class WorkspaceEnv:
     project: Project
     factory: WorkspaceResourceProvider
     hosts: list[RuntimeWorkspaces] = field(default_factory=list)
-    git_disk: FakeGitRepositories | None = None
-    """The in-memory repositories of a world on ``GitKind.FAKE``; ``None`` on real Git."""
+    git_disk: FakeGitRepositories | Git = REAL_GIT
+    """The in-memory repositories of a world on ``GitKind.FAKE``; ``REAL_GIT`` on real Git."""
 
     def start_host(self, runner: BlockingRunner | None = None) -> RuntimeWorkspaces:
         """Start another host over the same disk state, as after a process restart.
@@ -124,10 +128,10 @@ class WorkspaceEnv:
 
 
 def _git_factory(
-    disk: FakeGitRepositories | None, wrap: Callable[[GitRepository], GitRepository] | None
-) -> GitRepositoryFactory | None:
-    if disk is None:
-        return None
+    disk: FakeGitRepositories | Git, wrap: Callable[[GitRepository], GitRepository] | None
+) -> GitRepositoryFactory:
+    if isinstance(disk, Git):
+        return git_repositories(disk)
     if wrap is None:
         return disk.repository
     return lambda root, faults: wrap(disk.repository(root, faults))
@@ -157,7 +161,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     ``events`` observes workspace resource events (for example a reported baseline drift);
     the default discards them.
     """
-    disk = FakeGitRepositories() if git is GitKind.FAKE else None
+    disk = FakeGitRepositories() if git is GitKind.FAKE else REAL_GIT
     root = tmp_path / "project"
     root.mkdir()
     (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")

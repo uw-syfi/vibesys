@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.real_git import REAL_GIT
 
 from vs_project.api import Project, ProjectLayoutError
 
@@ -27,7 +28,7 @@ def test_non_repository_git_marker_allows_collection(
         marker.write_text("not Git metadata\n")
     collection = parent.joinpath(*[f"missing-{number}" for number in range(depth)])
 
-    Project.validate_collection_root(collection)
+    Project.validate_collection_root(collection, git=REAL_GIT)
 
     assert marker.exists()
     assert collection.exists() == (depth == 0)
@@ -48,6 +49,6 @@ def test_invalid_inner_git_marker_cannot_hide_containing_repository(
         marker.write_text("not Git metadata\n")
 
     with pytest.raises(ProjectLayoutError, match=str(repository)):
-        Project.validate_collection_root(inner / "missing" / "collection")
+        Project.validate_collection_root(inner / "missing" / "collection", git=REAL_GIT)
 
     assert marker.exists()

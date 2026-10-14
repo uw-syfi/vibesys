@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.real_git import REAL_GIT
 
 from vs_project.api import (
     DEFAULT_GIT_BACKEND,
@@ -55,8 +56,12 @@ def test_an_unknown_name_is_an_error_that_names_the_variable_and_the_value(name:
 def test_the_configured_backend_builds_its_implementation(tmp_path: Path) -> None:
     faults = NullGitTrackerEvents()
 
-    cli = open_git_repository(tmp_path, faults=faults, environ={GIT_BACKEND_ENV: "cli"})
-    pygit2 = open_git_repository(tmp_path, faults=faults, environ={GIT_BACKEND_ENV: "pygit2"})
+    cli = open_git_repository(
+        tmp_path, git=REAL_GIT, faults=faults, environ={GIT_BACKEND_ENV: "cli"}
+    )
+    pygit2 = open_git_repository(
+        tmp_path, git=REAL_GIT, faults=faults, environ={GIT_BACKEND_ENV: "pygit2"}
+    )
 
     assert isinstance(cli, CliGitRepository)
     assert isinstance(pygit2, Pygit2GitRepository)
@@ -65,5 +70,5 @@ def test_the_configured_backend_builds_its_implementation(tmp_path: Path) -> Non
 def test_a_bad_configuration_fails_when_the_repository_is_opened(tmp_path: Path) -> None:
     with pytest.raises(GitBackendError):
         open_git_repository(
-            tmp_path, faults=NullGitTrackerEvents(), environ={GIT_BACKEND_ENV: "svn"}
+            tmp_path, git=REAL_GIT, faults=NullGitTrackerEvents(), environ={GIT_BACKEND_ENV: "svn"}
         )

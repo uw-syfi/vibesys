@@ -34,6 +34,7 @@ from pydantic import ValidationError
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.loop_spec import loop_spec
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.slurm_environment import with_fake_image_build
 from tests.support.task_project import write_task
 from tests.support.timing import real_timing
@@ -652,6 +653,7 @@ def run_request(  # noqa: PLR0913
             ),
             # The agent's container mounts the repository's `.git` read-only, so the
             # repository must exist on disk: these runs use the product's real Git.
+            processes=REAL_PROCESSES,
             git_repository=None,
             slurm_process=slurm_process,
             state_stores=state_stores,

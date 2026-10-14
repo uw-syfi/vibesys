@@ -15,12 +15,13 @@ from vs_project._git_backend import (
     GIT_BACKEND_ENV,
     GitBackend,
     GitBackendError,
+    git_repositories,
     open_git_repository,
     pygit2_installed,
     select_git_backend,
 )
 from vs_project._git_events import GitTrackerEvents, NullGitTrackerEvents
-from vs_project._git_process import run_git
+from vs_project._git_process import Git, GitText
 from vs_project._git_remote import GitRemoteRepository
 from vs_project._git_tracker import FrameworkSnapshotStatus, GitTracker
 from vs_project._layout import (
@@ -150,6 +151,7 @@ __all__ = [
     "FakeStateStore",
     "FakeStateStores",
     "FrameworkSnapshotStatus",
+    "Git",
     "GitBackend",
     "GitBackendError",
     "GitCommandError",
@@ -161,6 +163,7 @@ __all__ = [
     "GitRepositoryFactory",
     "GitSnapshotFile",
     "GitSnapshotPlan",
+    "GitText",
     "GitTimeoutError",
     "GitTracker",
     "GitTrackerEvents",
@@ -220,11 +223,11 @@ __all__ = [
     "decode_state_document",
     "ensure_private_directory",
     "generate_run_id",
+    "git_repositories",
     "is_project_state_path",
     "open_git_repository",
     "pygit2_installed",
     "read_latest_run_log",
-    "run_git",
     "select_git_backend",
     "strip_ansi",
     "user_runtime_root",

@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 from tests.support.timing import real_timing
 
@@ -129,6 +130,7 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
     return LaunchSettings(
         timing=real_timing(),
+        processes=REAL_PROCESSES,
         agents=FakeSessionAgents() if request.param else None,
         backend_factory=host_container_backend,
     )
@@ -165,7 +167,11 @@ def _session(tmp_path: Path, settings: LaunchSettings | None = None) -> _LocalRu
             request,
             sink=cast("EventSink", lambda _event: None),
             registry=registry,
-            settings=LaunchSettings(timing=real_timing()) if settings is None else settings,
+            settings=(
+                LaunchSettings(timing=real_timing(), processes=REAL_PROCESSES)
+                if settings is None
+                else settings
+            ),
         ),
     )
 
@@ -403,6 +409,7 @@ def test_independent_auxiliary_scope_survives_session_close(
     async def execute() -> None:
         settings = LaunchSettings(
             timing=real_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             backend_factory=host_container_backend,
             agents=agent_settings.agents,

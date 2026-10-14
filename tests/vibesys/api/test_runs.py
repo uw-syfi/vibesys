@@ -10,6 +10,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.support.core_plugins import capability_plugin, failing_plugin
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.support.timing import real_timing
@@ -74,6 +75,7 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     runs = default_runs(
         LaunchSettings(
             timing=real_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_fake_agent,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
@@ -168,6 +170,7 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     runs = default_runs(
         LaunchSettings(
             timing=real_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_fake_agent,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.real_git import real_git_tracker
 
 from vibesys.run.project_policy import trusted_project_input_paths
 from vs_project.api import (
@@ -44,7 +45,7 @@ def _git(root: Path, *args: str, check: bool = True) -> str:
 
 
 def _tracker(root: Path, run_id: str = "test-run") -> GitTracker:
-    return GitTracker(
+    return real_git_tracker(
         root,
         run_id=run_id,
         events=NullGitTrackerEvents(),
@@ -492,7 +493,7 @@ def test_repository_tasks_are_trusted_but_generated_state_is_not(tmp_path: Path)
     objective.write_text("original\n", encoding="utf-8")
     (task / "vibesys.input.toml").write_text("version = 1\n", encoding="utf-8")
     (tmp_path / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
-    tracker = GitTracker(
+    tracker = real_git_tracker(
         tmp_path,
         run_id="repository-task",
         events=NullGitTrackerEvents(),
@@ -578,7 +579,7 @@ class _RecordingEvents(NullGitTrackerEvents):
 def _recording_tracker(root: Path) -> tuple[GitTracker, _RecordingEvents]:
     (root / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
     events = _RecordingEvents()
-    tracker = GitTracker(root, run_id="test-run", events=events, excluded_dirs=())
+    tracker = real_git_tracker(root, run_id="test-run", events=events, excluded_dirs=())
     tracker.init(existing=False)
     return tracker, events
 

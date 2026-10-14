@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.docker_environment import host_container_backend
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import (
     _policy,
@@ -64,7 +65,7 @@ def _compose(
         options=EmptyOptions,
         core=_policy(templates),
     )
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> None:

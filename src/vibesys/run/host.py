@@ -412,6 +412,7 @@ class _ProductHostFactory:
                 invocation_slot=invocations,
                 configuration=configuration,
                 clock=self.timing.clock,
+                github=self.integration.github,
                 agent_lifecycle=self.integration.agent_execution_event,
                 evaluation_diagnostics=self._evaluation_diagnostic,
                 stateless_tool_servers=self._stateless_tool_servers(resources),

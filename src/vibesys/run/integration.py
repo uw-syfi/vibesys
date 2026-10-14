@@ -25,6 +25,7 @@ from vibesys.events import (
 )
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
+from vs_project.api import git_repositories
 from vs_runtime.api.core import RuntimeRecord, winner_selection
 from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
@@ -47,7 +48,8 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vs_agent.api import AgentEventSink
-    from vs_project.api import GitRepositoryFactory, Project, StateStoreFactory
+    from vs_github.api import GitHubCLI
+    from vs_project.api import Git, GitRepositoryFactory, Project, StateStoreFactory
     from vs_runtime.api.core import WinnerSelection
     from vs_runtime.api.infrastructure import (
         ProjectRunResources,
@@ -310,24 +312,31 @@ class LocalRunIntegration:
     `RunSession`.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-261402 [PLR0913]; each argument is an implementation the wiring code substitutes independently.
+        # > Bundling them would only rename the keywords every caller passes; building Git and
+        # > the GitHub CLI here from one process launcher would hand this class a primitive
+        # > instead of the two roles it passes on.
         self,
         git_repository: GitRepositoryFactory | None = None,
         slurm_process: SlurmProcess | None = None,
         state_stores: StateStoreFactory | None = None,
         *,
         clock: Clock,
+        git: Git,
+        github: GitHubCLI,
     ) -> None:
         """Compose a durable journal with direct invocation control.
 
-        ``git_repository`` builds the run's ``GitRepository`` implementations; ``None``
-        runs the Git CLI. ``slurm_process`` replaces the Slurm transport's process
+        ``git`` starts the run's Git commands and ``github`` its GitHub CLI commands. ``git_repository`` builds the run's
+        ``GitRepository`` implementations; ``None`` opens the configured one over ``git``. ``slurm_process`` replaces the Slurm transport's process
         boundary for the run's evaluations; ``None`` runs the configured programs.
         ``state_stores`` opens each run's ``StateStore``; ``None`` is the local
         crash-atomic one. ``clock`` counts seconds since the epoch; it stamps the
         run's events, names its logs, and times its boot.
         """
-        self.git_repository = git_repository
+        self.git = git
+        self.github = github
+        self.git_repository = git_repositories(git) if git_repository is None else git_repository
         self.slurm_process = slurm_process
         self.state_stores = state_stores
         self.clock = clock

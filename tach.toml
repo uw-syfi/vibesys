@@ -362,7 +362,7 @@ depends_on = ["vs_project", "vs_sandbox"]
 [[modules]]
 path = "vibesys.run.core_services"
 layer = "orchestration_host"
-depends_on = ["vibesys.run.evaluation_socket", "vs_agent", "vs_core", "vs_mcp", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime", "vs_sim.api"]
+depends_on = ["vibesys.run.evaluation_socket", "vs_agent", "vs_core", "vs_github", "vs_mcp", "vs_evaluation.api", "vs_project", "vs_prompts", "vs_runtime", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.measurement_events"
@@ -429,7 +429,7 @@ depends_on = ["vs_decode.api", "vs_evaluation", "vs_evaluation.api", "vs_project
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.api", "vs_core", "vs_decode.api", "vs_agent", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_async_ops.api", "vs_core", "vs_decode.api", "vs_agent", "vs_github", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_agent"
@@ -602,7 +602,7 @@ depends_on = []
 [[modules]]
 path = "vs_github"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_sim.api"]
 
 [[modules]]
 path = "vs_mcp"
@@ -1039,7 +1039,7 @@ from = ["vs_evaluation.state_namespace"]
 [[modules]]
 path = "launch"
 visibility = ["entrypoints", "tests", "scripts"]
-depends_on = ["vibesys.api", "vibesys.api.catalog", "vibesys.api.wiring", "vibesys.api.store", "vibesys.api.contracts", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_project", "vs_runtime", "vs_runtime.api.wiring", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
+depends_on = ["vibesys.api", "vibesys.api.catalog", "vibesys.api.wiring", "vibesys.api.store", "vibesys.api.contracts", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_github", "vs_project", "vs_runtime", "vs_runtime.api.wiring", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.api.runs"
@@ -1091,7 +1091,7 @@ expose = ["InProcessRuns", "TaskRunHandle"]
 
 [[modules]]
 path = "vibesys.api.assembly"
-depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vibesys.run.profilers", "vs_agent", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
+depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vibesys.run.profilers", "vs_agent", "vs_github", "vs_project", "vs_runtime", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
 
 [[interfaces]]
 from = ["vibesys.api.assembly"]

@@ -17,6 +17,7 @@ dependencies = [
     "vs-decode",
     "vs-evaluation",
     "vs-evaluator-protocol",
+    "vs-github",
     "vs-issue-tracker",
     "vs-mcp",
     "vs-project",
@@ -39,6 +40,7 @@ vs-core = { workspace = true }
 vs-decode = { workspace = true }
 vs-evaluation = { workspace = true }
 vs-evaluator-protocol = { workspace = true }
+vs-github = { workspace = true }
 vs-issue-tracker = { workspace = true }
 vs-mcp = { workspace = true }
 vs-project = { workspace = true }

@@ -6,6 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from vibesys.api import CoreEventType, RunStopped
 from vibesys.run.integration import LocalRunIntegration
@@ -19,7 +20,7 @@ if TYPE_CHECKING:
 def test_control_transitions_keep_the_existing_persisted_event_format(
     tmp_path: Path,
 ) -> None:
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     integration.attach(tmp_path, run_id="run-1")
     unsubscribe = integration.events.subscribe(
         lambda event: integration.control.resume() if event.type is CoreEventType.PAUSED else None

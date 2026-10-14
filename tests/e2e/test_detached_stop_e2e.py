@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.server.support import REQUEST_TIME
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
 from server.api.protocol import SubscribeRequest
@@ -156,7 +157,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         detach=True,
         clock=SystemClock(),
     )
-    integration = LocalRunIntegration(clock=SystemClock())
+    integration = LocalRunIntegration(clock=SystemClock(), git=REAL_GIT, github=NO_GITHUB)
     integration.events.subscribe(runtime.integration.project_event)
     threads = OsThreads()
     outcome: list[object] = []

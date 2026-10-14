@@ -13,17 +13,15 @@ from pathlib import Path
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from scripts.check_stale_revert import stale_files
+from tests.support.real_git import REAL_GIT
 
-from vs_project.api import run_git
 from vs_sim.api.testing import examples
 
 _TRAILER = "\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 
 def _git(root: Path, *args: str) -> str:
-    result = run_git(list(args), cwd=root, text=True)
-    result.check_returncode()
-    return result.stdout.strip()
+    return REAL_GIT.run_text(list(args), cwd=root).check().stdout.strip()
 
 
 def _commit(root: Path, files: dict[str, str], message: str) -> str:

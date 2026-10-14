@@ -3139,10 +3139,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-github" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
+]
 
 [[package]]
 name = "vs-issue-tracker"
@@ -3222,6 +3226,7 @@ dependencies = [
     { name = "vs-decode" },
     { name = "vs-evaluation" },
     { name = "vs-evaluator-protocol" },
+    { name = "vs-github" },
     { name = "vs-issue-tracker" },
     { name = "vs-mcp" },
     { name = "vs-project" },
@@ -3242,6 +3247,7 @@ requires-dist = [
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-evaluation", editable = "libs/vs-evaluation" },
     { name = "vs-evaluator-protocol", editable = "libs/vs-evaluator-protocol" },
+    { name = "vs-github", editable = "libs/vs-github" },
     { name = "vs-issue-tracker", editable = "libs/vs-issue-tracker" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },

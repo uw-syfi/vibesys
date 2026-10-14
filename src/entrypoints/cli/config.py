@@ -16,6 +16,7 @@ from vibesys.api.request import (
     resolve_skill_source_dirs,
 )
 from vs_github.api import GitHubCLI, GitHubCLIError
+from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
     import argparse
@@ -182,7 +183,7 @@ def _resolve_repository_owner(config: Config) -> str:
     if config.repository.owner is not None:
         return config.repository.owner
     try:
-        return GitHubCLI().current_user()
+        return GitHubCLI(OsProcesses()).current_user()
     except GitHubCLIError as exc:
         _configuration_error(
             str(exc),

@@ -8,17 +8,31 @@ from typing import TYPE_CHECKING
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.repository import REPOSITORY_SLUG, RepositoryVisibility
-from vs_github.api import GitHubCLI
 from vs_project.api import GitRemoteRepository
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+    from vs_github.api import GitHubCLI
+    from vs_project.api import Git
+
 _RUN_BRANCH_PREFIX = "vibesys-runs/"
 _GITHUB_ORIGIN = re.compile(
     r"^(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)"
     r"(?P<slug>[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$"
 )
+
+
+def origin_matches(remotes: GitRemoteRepository, repository: str) -> bool:
+    """Return whether the ``origin`` of ``remotes`` addresses the GitHub slug ``repository``."""
+    if not REPOSITORY_SLUG.fullmatch(repository):
+        return False
+    origin = remotes.origin_url()
+    if origin is None:
+        return False
+    match = _GITHUB_ORIGIN.fullmatch(origin)
+    return match is not None and match.group("slug") == repository
 
 
 @dataclass(slots=True)
@@ -31,7 +45,8 @@ class ExperimentRepository:
 
     root: Path
     log: Callable[[str], None]
-    github: GitHubCLI = field(default_factory=GitHubCLI)
+    git: Git
+    github: GitHubCLI
     _configured: bool = field(init=False, default=False, repr=False)
     _armed: bool = field(init=False, default=False, repr=False)
     _closed: bool = field(init=False, default=False, repr=False)
@@ -99,7 +114,7 @@ class ExperimentRepository:
 
     @property
     def _repository(self) -> GitRemoteRepository:
-        return GitRemoteRepository(self.root)
+        return GitRemoteRepository(self.root, git=self.git)
 
     def create_remote(self, slug: str, visibility: RepositoryVisibility) -> None:
         """Create a GitHub repository and attach it as ``origin``."""
@@ -129,13 +144,7 @@ class ExperimentRepository:
 
     def origin_matches(self, repository: str) -> bool:
         """Return whether ``origin`` addresses the requested GitHub slug."""
-        if not REPOSITORY_SLUG.fullmatch(repository):
-            return False
-        origin = self._repository.origin_url()
-        if origin is None:
-            return False
-        match = _GITHUB_ORIGIN.fullmatch(origin)
-        return match is not None and match.group("slug") == repository
+        return origin_matches(self._repository, repository)
 
     def current_run_branch_tracks_origin(self) -> bool:
         """Return whether the current run branch already tracks ``origin``."""

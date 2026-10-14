@@ -18,7 +18,10 @@ from pathlib import Path
 
 from scripts.ast_identity import node_identity
 from scripts.flow_code import async_allowed_paths
-from vs_project.api import run_git
+from vs_project.api import Git
+from vs_sim.api import OsProcesses
+
+_GIT = Git(OsProcesses())
 
 # Each export is reviewed as deterministic value construction or transformation.
 # Approving a module does not approve future exports or its imported dependencies.
@@ -917,28 +920,28 @@ def compare_baseline(
 
 def previous_baseline(root: Path, base_ref: str) -> frozenset[Violation] | None:
     """Require explicit valid merge-base context; allow only first introduction."""
-    shallow = run_git(["rev-parse", "--is-shallow-repository"], cwd=root, text=True)
-    shallow.check_returncode()
-    resolved = run_git(["rev-parse", "--verify", base_ref], cwd=root, text=True)
+    shallow = _GIT.run_text(["rev-parse", "--is-shallow-repository"], cwd=root)
+    shallow.check()
+    resolved = _GIT.run_text(["rev-parse", "--verify", base_ref], cwd=root)
     if base_ref.startswith("origin/") and (resolved.returncode or shallow.stdout.strip() == "true"):
         branch = base_ref.removeprefix("origin/")
         args = ["fetch", "--no-tags"]
         if shallow.stdout.strip() == "true":
             args.append("--unshallow")
         args.extend(["origin", f"+refs/heads/{branch}:refs/remotes/origin/{branch}"])
-        fetched = run_git(args, cwd=root, text=True)
-        fetched.check_returncode()
+        fetched = _GIT.run_text(args, cwd=root)
+        fetched.check()
     else:
-        resolved.check_returncode()
-    result = run_git(["merge-base", "HEAD", base_ref], cwd=root, text=True)
-    result.check_returncode()
+        resolved.check()
+    result = _GIT.run_text(["merge-base", "HEAD", base_ref], cwd=root)
+    result.check()
     base = result.stdout.strip()
-    listing = run_git(["ls-tree", "--name-only", base, BASELINE], cwd=root, text=True)
-    listing.check_returncode()
+    listing = _GIT.run_text(["ls-tree", "--name-only", base, BASELINE], cwd=root)
+    listing.check()
     if not listing.stdout.strip():
         return None
-    source = run_git(["show", f"{base}:{BASELINE}"], cwd=root, text=True)
-    source.check_returncode()
+    source = _GIT.run_text(["show", f"{base}:{BASELINE}"], cwd=root)
+    source.check()
     return read_baseline(source.stdout)
 
 

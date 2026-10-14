@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import ValidationError
 
-from vs_github.api import GitHubCLI, GitHubClient
 from vs_issue_tracker.core import (
     Issue,
     IssueBoard,
@@ -32,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vs_github.api import GitHubClient
     from vs_sim.api import Clock
 
 _TYPE_PREFIX = "vibesys:type/"
@@ -58,14 +58,14 @@ class GitHubIssueTracker(IssueTracker):
         self,
         repository: str,
         *,
-        cli: GitHubClient | None = None,
+        cli: GitHubClient,
         clock: Clock,
     ) -> None:
         """Authenticate, bind to a repository, and ensure metadata labels exist.
 
         ``clock`` (epoch seconds) stamps the events this tracker writes.
         """
-        self._cli = cli or GitHubCLI()
+        self._cli = cli
         self._clock = clock
         self._cli.ensure_authenticated()
         self.repository = repository
@@ -444,23 +444,30 @@ def _status_labels(status: IssueStatus) -> list[str]:
     return []
 
 
-def open_issue_tracker(
+def open_issue_tracker(  # noqa: PLR0913  # lint-waiver: LW-261401 [PLR0913]; each keyword is one backend's independent input.
+    # > A settings object would only rename the keywords every caller passes, and splitting
+    # > the factory per backend would duplicate the selection it exists to own.
     backend: Literal["local", "github"],
     *,
     local_path: Path,
     repository: str | None = None,
     on_change: Callable[[], None] | None = None,
+    github: GitHubClient | None = None,
     clock: Clock,
 ) -> IssueTracker:
     """Construct the selected issue tracker behind the IssueTracker contract.
 
-    ``clock`` (epoch seconds) stamps the events the tracker writes.
+    ``github`` reaches GitHub; the GitHub backend requires it. ``clock`` (epoch seconds)
+    stamps the events the tracker writes.
     """
     if backend == "local":
         return IssueBoard(local_path, on_change=on_change, clock=clock)
     if repository is None:
         raise ValueError("repository is required for the GitHub issue backend")  # noqa: TRY003  # lint-waiver: LW-771017 [TRY003]; name the missing backend configuration field.
-    return GitHubIssueTracker(repository, clock=clock)
+    if github is None:
+        message = "a GitHub client is required for the GitHub issue backend"
+        raise ValueError(message)
+    return GitHubIssueTracker(repository, cli=github, clock=clock)
 
 
 __all__ = ["GitHubIssueTracker", "open_issue_tracker"]

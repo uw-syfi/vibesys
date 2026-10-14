@@ -56,7 +56,7 @@ from vibesys.api.request import generate_experiment_name, repository_name_from_e
 from vs_github.api import GitHubCLI, GitHubCLIError
 from vs_project.api import Project
 from vs_sandbox.api import relay_signals
-from vs_sim.api import OsThreads, SystemClock, utc_datetime
+from vs_sim.api import OsProcesses, OsThreads, SystemClock, utc_datetime
 
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
@@ -251,7 +251,7 @@ def _suggest_repository_owner(config: Config) -> str | None:
     if repository.owner is not None:
         return str(repository.owner)
     try:
-        return GitHubCLI().current_user()
+        return GitHubCLI(OsProcesses()).current_user()
     except GitHubCLIError:
         return None
 

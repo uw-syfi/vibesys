@@ -28,7 +28,7 @@ from vs_runtime.contracts import OrchestrationResumeDecision
 from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
-    from vs_project.api import GitRepository, GitRepositoryFactory, StateStoreFactory
+    from vs_project.api import GitRepositoryFactory, StateStoreFactory
     from vs_runtime._project_materialization import ProjectMaterializer
     from vs_sim.api import Clock
 
@@ -128,22 +128,15 @@ class ProjectRunEffects:
     on_log_ready: LogReady
     clock: Clock
     """Seconds since the epoch: names log files and stamps new project and run manifests."""
-    git_repository: GitRepositoryFactory | None = None
+    git_repository: GitRepositoryFactory
     """Builds the ``GitRepository`` of the project root and of every candidate worktree.
 
-    ``None`` runs the Git CLI; tests pass a Fake so a run needs no Git process.
+    Production passes ``git_repositories(git)``; tests pass a Fake so a run needs no Git process.
     """
     state_stores: StateStoreFactory | None = None
     """Opens each run's ``StateStore``; ``None`` uses the project's crash-atomic local one."""
     resume_recovery: Callable[[], None] | None = None
     """Recover product resources after taking the run-host lock, before Git or state recovery."""
-
-
-def _repository(effects: ProjectRunEffects, root: Path) -> GitRepository | None:
-    """The injected ``GitRepository`` for ``root``, or ``None`` for the default CLI one."""
-    if effects.git_repository is None:
-        return None
-    return effects.git_repository(root, effects.git_events)
 
 
 @dataclass(slots=True)
@@ -219,7 +212,7 @@ class ProjectRunResources:
                 workspace,
                 run_id=self._request.run_id,
                 events=self._effects.git_events,
-                repository=_repository(self._effects, workspace),
+                repository=self._effects.git_repository(workspace, self._effects.git_events),
                 excluded_dirs=self._request.excluded_dirs,
                 excluded_files=self._request.excluded_files,
                 trusted_input_paths=self._request.trusted_input_paths,
@@ -346,7 +339,7 @@ def _assemble_project_run_resources(
             project.root,
             run_id=request.run_id,
             events=effects.git_events,
-            repository=_repository(effects, project.root),
+            repository=effects.git_repository(project.root, effects.git_events),
             excluded_dirs=request.excluded_dirs,
             excluded_files=request.excluded_files,
             trusted_input_paths=request.trusted_input_paths,

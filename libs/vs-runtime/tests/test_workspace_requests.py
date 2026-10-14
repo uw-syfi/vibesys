@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.real_git import REAL_GIT
 from tests.support.session_world import RunningRunInvocations, SettledRunInvocations
 
 from vs_agent.api import NULL_SKILL_SELECTION
@@ -58,7 +59,7 @@ from vs_project.api import (
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
-    run_git,
+    git_repositories,
 )
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api import RuntimeContractError
@@ -209,6 +210,7 @@ def _env(
         log_emit=_emit,
         on_log_ready=lambda _path: None,
         clock=ManualClock(),
+        git_repository=git_repositories(REAL_GIT),
     )
     with open_project_run_resources(
         request, effects=effects, resolve_resume=unexpected_resume
@@ -290,7 +292,7 @@ def _context(
 
 
 def _git(path: Path, *args: str) -> str:
-    result = run_git(list(args), cwd=path)
+    result = REAL_GIT.run(list(args), cwd=path)
     assert result.returncode == 0, result.stderr
     return result.stdout.decode().strip()
 

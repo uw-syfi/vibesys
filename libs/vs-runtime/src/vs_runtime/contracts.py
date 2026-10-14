@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         SearchDef,
     )
     from vs_core.api import RunFacts as CoreRunFacts
+    from vs_github.api import GitHubClient
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
     from vs_runtime._artifact_store import ArtifactStore
@@ -745,7 +746,8 @@ class OwnedOperationResources:
 
     ``variables`` are the plan's run-level template variables and ``templates`` is the
     directory of the policy's templates, the same two inputs the render operation reads.
-    ``clock`` is the run's clock, for owners that stamp what they record.
+    ``clock`` is the run's clock, for owners that stamp what they record. ``github`` reaches
+    GitHub, for owners that keep their records there.
     """
 
     run_id: str
@@ -754,6 +756,7 @@ class OwnedOperationResources:
     variables: Mapping[str, object]
     templates: Path
     clock: Clock
+    github: GitHubClient
 
 
 @dataclass(frozen=True, slots=True)

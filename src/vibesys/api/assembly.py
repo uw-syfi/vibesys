@@ -22,8 +22,9 @@ if TYPE_CHECKING:
         AgentInvocationStore,
         AgentSessionKey,
     )
+    from vs_github.api import GitHubCLI
     from vs_mcp.api import ToolServerDescriptor
-    from vs_project.api import GitRepositoryFactory, StateStoreFactory
+    from vs_project.api import Git, GitRepositoryFactory, StateStoreFactory
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
     from vs_sandbox.api import ComputeBackendImpl, HostResource
@@ -70,12 +71,16 @@ class SessionImplementations:
     stop_timer: StopTimer
     timing: RunTiming
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
+    git: Git
+    """Starts the run's Git commands."""
+    github: GitHubCLI
+    """Runs the run's GitHub CLI commands."""
     stateless_tool_servers: Mapping[str, Callable[[object], ToolServerDescriptor | None]] | None = (
         None
     )
     """The server of each tool that holds no run state, which a core run may offer a role."""
     git_repository: GitRepositoryFactory | None = None
-    """Builds the run's ``GitRepository`` implementations; ``None`` runs the Git CLI."""
+    """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
     threads: Threads | None = None
     """Locks for the session's shared state; ``None`` uses the operating system's."""
     slurm_process: SlurmProcess | None = None

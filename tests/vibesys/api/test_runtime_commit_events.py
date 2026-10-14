@@ -11,6 +11,7 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from vibesys.api import IterationKind, IterationStatus, IterationSummary, IterationTree
 from vibesys.events import CoreEvent, CoreEventType, IterationsChangedData
@@ -75,7 +76,7 @@ def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
 
 
 def test_commit_projection_preserves_semantics_and_publication_order() -> None:
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     order: list[str] = []
     captured: list[CoreEvent] = []
 
@@ -133,7 +134,7 @@ def test_commit_events_property_no_double_emission_and_semantic_changes(
             _FakeAgentState(round_numbers=tuple(round_numbers), active=active, revision=revision)
         )
 
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)
@@ -173,7 +174,7 @@ def test_commit_events_property_no_double_emission_and_semantic_changes(
 
 
 def test_a_commit_of_another_namespace_projects_nothing() -> None:
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)
     observer = integration.core_commit_observer("probe", _FakeProjector(), "other-namespace")

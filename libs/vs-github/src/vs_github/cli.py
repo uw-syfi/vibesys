@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import subprocess
-from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
 
+from vs_sim.api import ProcessOutcome, ProcessSpec
+
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
-Runner = Callable[..., subprocess.CompletedProcess[str]]
+    from vs_sim.api import Processes
 
 
 class GitHubCLIError(RuntimeError):
@@ -29,10 +30,10 @@ class GitHubAuthenticationError(GitHubCLIError):
 
 @dataclass(frozen=True)
 class GitHubCLI:
-    """Run authenticated GitHub repository operations through ``gh``."""
+    """Run authenticated GitHub repository operations through ``gh``, started by ``processes``."""
 
+    processes: Processes = field(repr=False, compare=False)
     hostname: str = "github.com"
-    _runner: Runner = field(default=subprocess.run, repr=False, compare=False)
 
     def ensure_authenticated(self) -> None:
         """Raise an actionable error unless ``gh`` is authenticated."""
@@ -185,16 +186,22 @@ class GitHubCLI:
         *,
         cwd: Path | None = None,
         check: bool = True,
-    ) -> subprocess.CompletedProcess[str]:
-        command = ["gh", *arguments]
+    ) -> _Output:
+        command = ("gh", *arguments)
         try:
-            result = self._runner(command, cwd=cwd, capture_output=True, text=True)
+            run = self.processes.run(ProcessSpec(command, cwd=cwd), timeout=None)
         except FileNotFoundError as exc:
             message = (
                 "GitHub CLI (`gh`) is required for remote experiment repositories. "
                 "Install it from https://cli.github.com/ and retry."
             )
             raise GitHubCLIUnavailableError(message) from exc
+        if not isinstance(run, ProcessOutcome):
+            message = f"GitHub CLI command did not end ({' '.join(command)})"
+            raise GitHubCLIError(message)
+        result = _Output(
+            run.returncode, run.stdout.decode(errors="replace"), run.stderr.decode(errors="replace")
+        )
         if check and result.returncode != 0:
             detail = _command_detail(result) or "unknown error"
             message = f"GitHub CLI command failed ({' '.join(command)}): {detail}"
@@ -202,8 +209,15 @@ class GitHubCLI:
         return result
 
 
-def _command_detail(result: subprocess.CompletedProcess[str]) -> str:
-    return (result.stderr or "").strip() or (result.stdout or "").strip()
+@dataclass(frozen=True)
+class _Output:
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _command_detail(result: _Output) -> str:
+    return result.stderr.strip() or result.stdout.strip()
 
 
 _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)

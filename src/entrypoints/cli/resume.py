@@ -17,13 +17,16 @@ from vibesys.api import ComputeBackend, ProfilerKind
 from vibesys.api.profilers import coerce_profiler_kind
 from vibesys.api.request import migrate_recorded_run_environment
 from vs_project.api import (
+    Git,
     GitError,
     GitTracker,
     NullGitTrackerEvents,
     OrchestrationRunManifest,
     Project,
     ProjectStateError,
+    open_git_repository,
 )
+from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
     import argparse
@@ -281,7 +284,9 @@ def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
     """Select the run branch before callers read committed project files."""
     if not (project_root / ".git").exists():
         return
-    tracker = GitTracker(project_root, events=NullGitTrackerEvents(), run_id=run_id)
+    events = NullGitTrackerEvents()
+    repository = open_git_repository(project_root, git=Git(OsProcesses()), faults=events)
+    tracker = GitTracker(project_root, events=events, run_id=run_id, repository=repository)
     try:
         tracker.init(existing=True)
     except (GitError, ValueError) as exc:

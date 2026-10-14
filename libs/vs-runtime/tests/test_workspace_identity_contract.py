@@ -15,6 +15,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
+from tests.support.real_git import REAL_GIT
 
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_core.api import HostFence, HostId, Until
@@ -23,6 +24,7 @@ from vs_project.api import (
     NullGitTrackerEvents,
     OrchestrationDescriptor,
     RunEnvironmentRecord,
+    git_repositories,
 )
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api import (
@@ -123,6 +125,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                         log_emit=_emit,
                         on_log_ready=lambda _path: None,
                         clock=ManualClock(),
+                        git_repository=git_repositories(REAL_GIT),
                     ),
                     resolve_resume=lambda _manifest: pytest.fail("unexpected resume"),
                 )

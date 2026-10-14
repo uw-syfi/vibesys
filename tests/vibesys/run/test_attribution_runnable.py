@@ -19,6 +19,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.docker_environment import host_container_backend
+from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
 from tests.support.timing import real_timing
 
@@ -119,10 +120,10 @@ def test_an_attribution_command_is_accepted_or_refused_by_name_at_start(
     inspectable = environment == "host" and os.sep not in command[0]
     present = inspectable and shutil.which(command[0]) is not None
     if not inspectable or present:
-        validate_run_request(request)
+        validate_run_request(request, git=REAL_GIT)
         return
     with pytest.raises(ConfigurationError) as error:
-        validate_run_request(request)
+        validate_run_request(request, git=REAL_GIT)
     diagnostic = error.value.diagnostic
     assert diagnostic.code == "attribution_command_unavailable"
     assert diagnostic.stage == "profiler_validation"
@@ -137,7 +138,7 @@ def test_a_stdlib_script_command_starts_under_every_slurm_mode(
     request = _request(
         tmp_path, environment, "profile-guided-single-agent", ["python3", "attribute.py"]
     )
-    validate_run_request(request)
+    validate_run_request(request, git=REAL_GIT)
 
 
 def test_a_host_run_refuses_a_command_whose_interpreter_is_missing(tmp_path: Path) -> None:
@@ -146,7 +147,7 @@ def test_a_host_run_refuses_a_command_whose_interpreter_is_missing(tmp_path: Pat
         tmp_path, "host", "profile-guided-single-agent", ["no-such-interpreter", "attribute.py"]
     )
     with pytest.raises(ConfigurationError, match="no-such-interpreter"):
-        validate_run_request(request)
+        validate_run_request(request, git=REAL_GIT)
 
 
 def test_session_construction_refuses_a_host_command_whose_interpreter_is_missing(
@@ -165,7 +166,11 @@ def test_session_construction_refuses_a_host_command_whose_interpreter_is_missin
         create_session(
             request,
             sink=record,
-            settings=LaunchSettings(timing=real_timing(), backend_factory=host_container_backend),
+            settings=LaunchSettings(
+                timing=real_timing(),
+                processes=REAL_PROCESSES,
+                backend_factory=host_container_backend,
+            ),
         )
     assert error.value.diagnostic.code == "attribution_command_unavailable"
     assert not events

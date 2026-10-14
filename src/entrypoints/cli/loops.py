@@ -36,7 +36,8 @@ from vibesys.api.request import (
     with_operator_constraints,
 )
 from vs_issue_tracker.api import IssueTrackerConfig
-from vs_project.api import Project, ProjectLayoutError
+from vs_project.api import Git, Project, ProjectLayoutError
+from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
     import argparse
@@ -69,7 +70,7 @@ def _normalize_runs_dir(args: argparse.Namespace) -> None:
             stage="argument_parsing",
         )
     try:
-        Project.validate_collection_root(runs_dir)
+        Project.validate_collection_root(runs_dir, git=Git(OsProcesses()))
     except ProjectLayoutError as exc:
         _configuration_error(
             f"--runs-dir: {exc}", code="invalid_runs_dir", stage="argument_parsing"
@@ -354,7 +355,7 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
         )
         # Both entrypoints use this builder. Validate the complete request
         # before GitHub account discovery or building a task Docker image.
-        validate_run_request(request)
+        validate_run_request(request, git=Git(OsProcesses()))
         _prepare_experiment_repository(args, config)
         run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
         if args.resume is not None:

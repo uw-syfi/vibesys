@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.real_git import REAL_GIT
 from tests.support.task_project import task_path, write_task
 
 from vibesys.inputs import InputManifest, WorkspaceSource, load_task
@@ -33,6 +34,7 @@ def _materializer(destination: Path) -> ProjectMaterializer:
         environment=unconfined_host_environment(),
         backend=FakeComputeBackend(),
         log=lambda _message: None,
+        git=REAL_GIT,
     )
 
 

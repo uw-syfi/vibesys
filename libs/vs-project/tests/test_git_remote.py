@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
+from tests.support.real_git import REAL_GIT
 
 from vs_project.api import GitRemoteRepository
 
@@ -38,7 +39,7 @@ def _repository(root: Path) -> GitRemoteRepository:
     (root / "tracked.txt").write_text("tracked\n", encoding="utf-8")
     _git(root, "add", "tracked.txt")
     _git(root, "commit", "-qm", "initial")
-    return GitRemoteRepository(root)
+    return GitRemoteRepository(root, git=REAL_GIT)
 
 
 def test_remote_repository_attaches_one_origin_at_the_repository_root(tmp_path: Path) -> None:
@@ -58,7 +59,9 @@ def test_remote_repository_attaches_one_origin_at_the_repository_root(tmp_path: 
     nested = root / "nested"
     nested.mkdir()
     with pytest.raises(ValueError, match="repository root"):
-        GitRemoteRepository(nested).attach_origin("https://example.com/owner/project.git")
+        GitRemoteRepository(nested, git=REAL_GIT).attach_origin(
+            "https://example.com/owner/project.git"
+        )
 
 
 def test_remote_repository_reports_refs_and_pushes_only_explicit_refspecs(

@@ -148,6 +148,7 @@ def board_entries(resources: OwnedOperationResources) -> tuple[OperationEntry, .
         local_progress_path=directory / "progress.md",
         run_id=resources.run_id,
         view_sink=mirror,
+        github_cli=resources.github,
         clock=resources.clock,
     )
     owner = IssueBoardOwner(

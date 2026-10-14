@@ -10,6 +10,7 @@ import pytest
 from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.core_plugins import core_policy
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
@@ -143,7 +144,7 @@ def _open(
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> CoreServices:
@@ -174,7 +175,7 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> str:
@@ -379,7 +380,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
     templates = tmp_path / "templates"
     templates.mkdir()
     _write_project(project_root)
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     clock = VirtualClock(at=0.0)
     request = _request(project_root).model_copy(update={"run_id": "core-run"})
     plugin = replace(

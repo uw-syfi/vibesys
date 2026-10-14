@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
+    from vs_sim.api import Processes
     from vs_slurm.api import SlurmProcess
 
 
@@ -36,6 +37,7 @@ def create_session(  # noqa: PLR0913
     agent_client_factory: Callable[..., AgentClientProtocol],
     backend_factory: Callable[..., ComputeBackendImpl],
     stop_timer: StopTimer,
+    processes: Processes,
     git_repository: GitRepositoryFactory | None = None,
     slurm_process: SlurmProcess | None = None,
     state_stores: StateStoreFactory | None = None,
@@ -45,11 +47,12 @@ def create_session(  # noqa: PLR0913
         request,
         sink=sink,
         settings=LaunchSettings(
-            timing,
-            registry,
-            agent_client_factory,
-            backend_factory,
-            stop_timer,
+            timing=timing,
+            processes=processes,
+            registry=registry,
+            agent_client_factory=agent_client_factory,
+            backend_factory=backend_factory,
+            stop_timer=stop_timer,
             git_repository=git_repository,
             slurm_process=slurm_process,
             state_stores=state_stores,

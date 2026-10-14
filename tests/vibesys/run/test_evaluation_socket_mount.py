@@ -12,6 +12,7 @@ import os
 import tempfile
 from pathlib import Path
 
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
@@ -53,7 +54,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             ),
         }
     )
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
     clock = VirtualClock(at=0.0)
 
     def reaches(run_id: str) -> list[bool]:

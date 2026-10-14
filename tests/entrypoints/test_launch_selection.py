@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.entrypoints.test_launch_frontends import _request
 from tests.support.core_plugins import failing_plugin
+from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 from tests.support.timing import real_timing
 
 from launch import (
@@ -114,6 +115,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
     agents = FalseyFakeSessionAgents(agents_factory)
     settings = FalseyLaunchSettings(
         timing=real_timing(),
+        processes=REAL_PROCESSES,
         registry=registry,
         agent_client_factory=agents_factory,
         backend_factory=backend_factory,
@@ -121,7 +123,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
         git_repository=FakeGitRepositories().repository,
     )
     validate_descriptor(request.orchestration, registry=registry)
-    validate_run_request(request, registry=registry)
+    validate_run_request(request, registry=registry, git=REAL_GIT)
 
     async def execute() -> None:
         handle = default_runs(settings).start(request)
@@ -150,7 +152,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
             assert not agents_factory.clients[0].closed
             assert agents_factory.clients[1].closed
             assert (
-                open_run_store(Project.open(request.project_root), registry=registry)
+                open_run_store(Project.open(request.project_root), registry=registry, git=REAL_GIT)
                 .get_run(result.run_id)
                 .run_id
                 == result.run_id
@@ -185,6 +187,7 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
     runs = default_runs(
         LaunchSettings(
             timing=real_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=lambda **_kwargs: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True)

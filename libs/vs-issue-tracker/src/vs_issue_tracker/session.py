@@ -114,7 +114,8 @@ def open_issue_tracker_session(  # noqa: PLR0913  # lint-waiver: LW-920430 [PLR0
 ) -> IssueTrackerSession:
     """Open issue and progress persistence selected by ``config``.
 
-    ``clock`` (epoch seconds) stamps the events the tracker writes.
+    ``github_cli`` reaches GitHub; the GitHub backend requires it. ``clock`` (epoch seconds)
+    stamps the events the tracker writes.
     """
     tracker: IssueTracker
     if config.backend == "local":
@@ -131,6 +132,9 @@ def open_issue_tracker_session(  # noqa: PLR0913  # lint-waiver: LW-920430 [PLR0
         progress: ProgressLog = FileProgressLog(local_progress_path)
     else:
         repository = cast("str", config.repository)
+        if github_cli is None:
+            message = "a GitHub client is required for the GitHub issue tracker backend"
+            raise ValueError(message)
         tracker = GitHubIssueTracker(repository, cli=github_cli, clock=clock)
         progress = GitHubProgressLog(repository, run_id, cli=github_cli)
 

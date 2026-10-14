@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.detached_run import RecordPublisher
 from entrypoints.production import production_runs
@@ -88,7 +89,7 @@ def _serve(
 
     def serve() -> None:
         hostname, version = host_facts()
-        integration = LocalRunIntegration(clock=clock)
+        integration = LocalRunIntegration(clock=clock, git=REAL_GIT, github=NO_GITHUB)
         try:
             with registry.register(instance_id) as hold:
                 publisher = RecordPublisher(

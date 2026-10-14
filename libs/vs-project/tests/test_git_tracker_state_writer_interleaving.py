@@ -22,6 +22,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
+from tests.support.real_git import REAL_GIT
 
 from vs_project.api import (
     CliGitRepository,
@@ -71,7 +72,7 @@ class _ScanRepository(CliGitRepository):
     def __init__(
         self, root: Path, *, faults: GitFaultSink, writer: _StoreWriter, temps: int
     ) -> None:
-        super().__init__(root, faults=faults)
+        super().__init__(root, git=REAL_GIT, faults=faults)
         self._root = root
         self._writer = writer
         self.temps = temps

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.core_host_world import open_core_host
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
@@ -117,7 +118,7 @@ def _candidate_container_counts(
         made.engine = engine
         return made
 
-    integration = LocalRunIntegration(clock=ManualClock())
+    integration = LocalRunIntegration(clock=ManualClock(), git=REAL_GIT, github=NO_GITHUB)
 
     async def exercise() -> tuple[bool, int, int, int]:
         async with open_core_host(
