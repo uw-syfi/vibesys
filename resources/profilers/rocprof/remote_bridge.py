@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from threading import Event
     from typing import TypeGuard
 
+    from vs_sim.api import Clock
     from vs_slurm.api import Cluster, ClusterInspectOutcome, SlurmProcess
 
 _CAPTURE_ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
@@ -105,16 +106,20 @@ class _CaptureResult(TypedDict):
 class RemoteCaptureBridge:
     """Run the existing capture lifecycle remotely and mirror its traces locally."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-960301 [PLR0913]; each keyword is an independent input: operator config, workspace, output root, time source, plan, cluster.
+        # > A settings object would group an injected effect (clock, cluster) with
+        # > operator paths into a shallow carrier that only this constructor reads.
         self,
         config_path: Path,
         workspace: Path,
         *,
         profile_root: Path,
+        clock: Clock,
         evaluator_plan: Path | None = None,
         cluster: Cluster | None = None,
     ) -> None:
-        """Bind one candidate workspace and external operator config."""
+        """Bind one candidate workspace and external operator config; ``clock`` times job deadlines."""
+        self._clock = clock
         self._config_path = config_path.expanduser()
         self._workspace = workspace.resolve(strict=True)
         self._profile_root = profile_root.expanduser().resolve()
@@ -143,7 +148,9 @@ class RemoteCaptureBridge:
                     )
 
             # Runtime grants the same durable root to the MCP process and broker.
-            transport = SlurmJobRunner(self._config, process=process, scratch_root=state_root)
+            transport = SlurmJobRunner(
+                self._config, process=process, scratch_root=state_root, clock=clock
+            )
             self._cluster = SlurmCluster(transport, state_root=state_root)
         self._capture_lock = Lock()
 
@@ -333,7 +340,7 @@ class RemoteCaptureBridge:
             raise
 
     def _wait_for_job(self, handle: SlurmJobHandle, cancel_event: Event | None) -> None:
-        deadline = time.monotonic() + self._config.job_timeout_seconds
+        deadline = self._clock.now() + self._config.job_timeout_seconds
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 raise SlurmError.cancelled(handle.job_id)
@@ -342,7 +349,7 @@ class RemoteCaptureBridge:
                 if observed.status is SlurmJobStatus.CANCELLED:
                     raise SlurmError.cancelled(handle.job_id)
                 return
-            remaining = deadline - time.monotonic()
+            remaining = deadline - self._clock.now()
             if remaining <= 0:
                 raise SlurmError.job_timed_out(handle.job_id)
             if cancel_event is not None:

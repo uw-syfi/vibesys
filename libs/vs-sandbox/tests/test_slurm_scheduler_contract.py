@@ -228,7 +228,7 @@ def _replay_world(
             transport=SlurmConnectorTransport(kind="connector", command=("trace-connector",)),
         ),
         process=faults,
-        clock=clock.now,
+        clock=clock,
         pause=clock.advance,
     )
     cluster = SlurmCluster(runner, state_root=root / "identity")
@@ -296,6 +296,9 @@ def _executor(
         cluster=world.cluster,
         pause=pause or world.clock.advance,
         cancel_confirmation_seconds=_CONFIRMATION_S,
+        # The job deadline is not under test here, and worlds leap the scheduler clock far
+        # past it; a separate clock that never moves keeps it out of every outcome.
+        clock=ManualClock(),
     )
 
 

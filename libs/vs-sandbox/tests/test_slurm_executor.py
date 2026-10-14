@@ -177,7 +177,9 @@ class _ScenarioCluster(FakeCluster):
                 "transport": SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
             }
         )
-        runner = SlurmJobRunner(config, process=FakeConnector(root / "scheduler"))
+        runner = SlurmJobRunner(
+            config, process=FakeConnector(root / "scheduler"), clock=ManualClock()
+        )
 
         # A missing exit code is injected into the collected raw record below;
         # the executing transport itself must receive a concrete process exit.
@@ -315,18 +317,27 @@ class _ScenarioCluster(FakeCluster):
 
 
 class _TimedOutCluster(_ScenarioCluster):
-    def __init__(self, config: SlurmConfig, *, already_waited: float) -> None:
+    """A job that stays in ``state`` (queued or running) until the job deadline passes."""
+
+    def __init__(
+        self,
+        config: SlurmConfig,
+        *,
+        already_waited: float,
+        state: SlurmJobStatus = SlurmJobStatus.RUNNING,
+    ) -> None:
         super().__init__(config)
         self._initial_waited_seconds = already_waited
         self.wait_timeouts: list[float] = []
-        self.deadline_clock = _DeadlineClock(1_000)
-        self._scheduler_states = (SlurmJobStatus.RUNNING,)
+        self.deadline_clock = ManualClock(1_000)
+        self._state = state
+        self._scheduler_states = (state,)
 
     def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
         observed = super().inspect(target, by_job_id=by_job_id)
         if (
             isinstance(observed, ClusterObservation)
-            and observed.status is SlurmJobStatus.RUNNING
+            and observed.status is self._state
             and not self.wait_timeouts
         ):
             assert self.handle is not None
@@ -391,17 +402,6 @@ class _UnreachableSchedulerCluster(_BlockingCluster):
     def cancel(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterCancelOutcome:
         cancelled = super().cancel(target, by_job_id=by_job_id)
         return ClusterUnknown(operation_id=cancelled.operation_id, reason="scancel unreachable")
-
-
-class _DeadlineClock:
-    def __init__(self, value: float) -> None:
-        self.value = value
-
-    def __call__(self) -> float:
-        return self.value
-
-    def advance(self, seconds: float) -> None:
-        self.value += seconds
 
 
 def _workspace(root: Path) -> Path:
@@ -510,6 +510,7 @@ async def test_executor_fuses_stages_and_preserves_execution_metadata(tmp_path: 
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
 
     await executor.submit(_request(), handle_id="eval-fused")
@@ -536,6 +537,7 @@ async def test_executor_rejects_malformed_stages_without_submitting(tmp_path: Pa
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     mixed = EvaluationRequest(
         key="mixed",
@@ -572,6 +574,7 @@ async def test_executor_maps_missing_stage_evidence_to_failed_collection(tmp_pat
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=_ScenarioCluster(config, fail_before_stage=True),
+        clock=ManualClock(),
     )
 
     await executor.submit(_request(), handle_id="eval-failed")
@@ -605,6 +608,7 @@ async def test_executor_never_invents_a_successful_exit_code(exit_code: int | No
             support_trees={},
             handle_root=tmp_path / "handles",
             cluster=runner,
+            clock=ManualClock(),
         )
         try:
             runner.benchmark_exit_code = exit_code
@@ -657,6 +661,7 @@ async def test_executor_preserves_steps_but_rejects_failed_batch(
             support_trees={},
             handle_root=tmp_path / "handles",
             cluster=runner,
+            clock=ManualClock(),
         )
         try:
             runner.job_exit_code = exit_code
@@ -702,6 +707,7 @@ async def test_executor_keeps_both_stage_streams_across_unknown_and_incomplete_o
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     try:
         await executor.submit(
@@ -750,6 +756,7 @@ async def test_failed_accuracy_skips_benchmark_when_requested(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     try:
         await executor.submit(_request(), handle_id="eval-accuracy-gate")
@@ -783,6 +790,7 @@ async def test_executor_preserves_both_stages_through_durable_coordinator_failur
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
         executor, FilesystemEvaluationStore(tmp_path / "coordinator"), ManualClock()
@@ -826,6 +834,7 @@ async def test_executor_reports_a_silent_failed_stage(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=_ScenarioCluster(config, benchmark_exit_code=exit_code, benchmark_stdout=""),
+        clock=ManualClock(),
     )
 
     await executor.submit(_request(), handle_id="eval-silent")
@@ -864,6 +873,7 @@ async def test_failed_stage_reports_the_server_log_tail(
             benchmark_stdout=benchmark_stdout,
             service_log_tail=server_log,
         ),
+        clock=ManualClock(),
     )
 
     await executor.submit(_request(), handle_id="eval-server-log")
@@ -889,6 +899,7 @@ async def test_executor_recovers_durable_handle_without_resubmission(tmp_path: P
         support_trees={},
         handle_root=handle_root,
         cluster=runner,
+        clock=ManualClock(),
     )
     await first.submit(_request(), handle_id="eval-resume")
     assert (await _terminal(first, "eval-resume")).state is EvaluationState.SUCCEEDED
@@ -901,6 +912,7 @@ async def test_executor_recovers_durable_handle_without_resubmission(tmp_path: P
         support_trees={},
         handle_root=handle_root,
         cluster=runner,
+        clock=ManualClock(),
     )
     recovered = await resumed.inspect("eval-resume")
     assert recovered is not None
@@ -923,6 +935,7 @@ async def test_recovered_evaluation_never_reports_starting_after_running(tmp_pat
             support_trees={},
             handle_root=handle_root,
             cluster=runner,
+            clock=ManualClock(),
         )
 
     first = executor()
@@ -941,10 +954,14 @@ async def test_recovered_evaluation_never_reports_starting_after_running(tmp_pat
     assert (await _terminal(resumed, "eval-monotonic")).state is EvaluationState.SUCCEEDED
 
 
+@pytest.mark.parametrize("state", [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING])
 @pytest.mark.asyncio
-async def test_executor_enforces_one_persisted_wait_deadline(tmp_path: Path) -> None:
+async def test_executor_enforces_one_persisted_wait_deadline(
+    tmp_path: Path, state: SlurmJobStatus
+) -> None:
+    """A job still queued or running at its deadline, on the injected clock, is cancelled and fails."""
     config = _config().model_copy(update={"job_timeout_seconds": 10})
-    runner = _TimedOutCluster(config, already_waited=4.0)
+    runner = _TimedOutCluster(config, already_waited=4.0, state=state)
     handle_root = tmp_path / "handles"
     executor = SlurmEvaluationExecutor(
         config,
@@ -954,7 +971,7 @@ async def test_executor_enforces_one_persisted_wait_deadline(tmp_path: Path) -> 
         support_trees={},
         handle_root=handle_root,
         cluster=runner,
-        deadline_clock=runner.deadline_clock,
+        clock=runner.deadline_clock,
     )
 
     await executor.submit(_request(), handle_id="eval-timeout")
@@ -975,7 +992,7 @@ async def test_executor_enforces_one_persisted_wait_deadline(tmp_path: Path) -> 
         support_trees={},
         handle_root=handle_root,
         cluster=runner,
-        deadline_clock=runner.deadline_clock,
+        clock=runner.deadline_clock,
     )
     recovered = await resumed.inspect("eval-timeout")
     assert recovered == observed
@@ -990,7 +1007,7 @@ async def test_executor_recovers_deadline_persisted_before_interrupted_wait(
 ) -> None:
     config = _config().model_copy(update={"job_timeout_seconds": 10})
     runner = _BlockingCluster(config)
-    clock = _DeadlineClock(1_000)
+    clock = ManualClock(1_000)
     handle_root = tmp_path / "handles"
     first = SlurmEvaluationExecutor(
         config,
@@ -1000,7 +1017,7 @@ async def test_executor_recovers_deadline_persisted_before_interrupted_wait(
         support_trees={},
         handle_root=handle_root,
         cluster=runner,
-        deadline_clock=clock,
+        clock=clock,
     )
     try:
         await first.submit(_request(), handle_id="eval-crash-during-wait")
@@ -1016,7 +1033,7 @@ async def test_executor_recovers_deadline_persisted_before_interrupted_wait(
             support_trees={},
             handle_root=handle_root,
             cluster=runner,
-            deadline_clock=clock,
+            clock=clock,
         )
 
         observed = await _terminal(resumed, "eval-crash-during-wait")
@@ -1039,6 +1056,7 @@ async def test_executor_close_cancels_and_drains_background_execution(tmp_path: 
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     try:
         await executor.submit(_request(), handle_id="eval-close")
@@ -1075,6 +1093,7 @@ async def test_cancelling_the_execution_task_cancels_the_submitted_slurm_job(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     try:
         await executor.submit(_request(), handle_id="eval-interrupted")
@@ -1112,6 +1131,7 @@ async def test_a_cancelled_cancel_still_finishes_the_scancel_before_it_returns(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     try:
         await executor.submit(_request(), handle_id="eval-double-cancel")
@@ -1152,6 +1172,7 @@ async def test_a_failed_scancel_does_not_stop_the_cancellation_from_finishing(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     try:
         await executor.submit(_request(), handle_id="eval-unreachable")
@@ -1207,6 +1228,7 @@ async def test_scancel_acknowledgement_does_not_complete_release_or_suppress_ret
         handle_root=tmp_path / "handles",
         cluster=runner,
         cancel_confirmation_seconds=3 * config.poll_interval_seconds,
+        clock=ManualClock(),
     )
     try:
         await executor.submit(_request(), handle_id="eval-pending-cancel")
@@ -1254,7 +1276,7 @@ async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure
     """Stable no-job evidence closes an ambiguous dispatch instead of polling forever."""
     config = _config()
     runner = FakeCluster()
-    clock = _DeadlineClock(1_000)
+    clock = ManualClock(1_000)
     executor = SlurmEvaluationExecutor(
         config,
         workspace=_workspace(tmp_path),
@@ -1264,7 +1286,7 @@ async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure
         handle_root=tmp_path / "handles",
         cluster=runner,
         pause=clock.advance,
-        deadline_clock=clock,
+        clock=clock,
     )
     coordinator = EvaluationCoordinator(
         executor, FilesystemEvaluationStore(tmp_path / "coordinator"), ManualClock()
@@ -1282,7 +1304,7 @@ async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure
         assert "SlurmOutcomeUnknownError" in terminal.failure
         assert durable.status is EvaluationState.FAILED
         assert durable.failure == terminal.failure
-        assert clock.value == pytest.approx(1_000 + 2 * config.poll_interval_seconds)
+        assert clock.now() == pytest.approx(1_000 + 2 * config.poll_interval_seconds)
 
         observer = SlurmEvaluationExecutor(
             config,
@@ -1292,6 +1314,7 @@ async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure
             support_trees={},
             handle_root=tmp_path / "handles",
             cluster=runner,
+            clock=ManualClock(),
         )
         polled = await observer.poll(handle.id)
         assert polled.phase is PollPhase.ENDED
@@ -1317,6 +1340,7 @@ async def test_late_job_identity_switches_ambiguous_cleanup_to_job_confirmation(
         handle_root=tmp_path / "handles",
         cluster=runner,
         pause=lambda _seconds: None,
+        clock=ManualClock(),
     )
     terminal_wait = asyncio.create_task(_terminal(executor, "eval-late-job"))
     try:
@@ -1337,6 +1361,7 @@ async def test_late_job_identity_switches_ambiguous_cleanup_to_job_confirmation(
             support_trees={},
             handle_root=tmp_path / "handles",
             cluster=runner,
+            clock=ManualClock(),
         )
         polled = await observer.poll("eval-late-job")
         assert polled.phase is PollPhase.ENDED
@@ -1369,6 +1394,7 @@ async def test_unknown_during_absence_confirmation_keeps_ambiguous_submission_ow
         handle_root=tmp_path / "handles",
         cluster=runner,
         pause=lambda _seconds: None,
+        clock=ManualClock(),
     )
     terminal_wait = asyncio.create_task(_terminal(executor, "eval-unknown"))
     try:
@@ -1408,10 +1434,10 @@ async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
         }
     )
     cluster = SlurmCluster(
-        SlurmJobRunner(config, process=connector),
+        SlurmJobRunner(config, process=connector, clock=ManualClock()),
         state_root=tmp_path / "cluster-state",
     )
-    clock = _DeadlineClock(1_000)
+    clock = ManualClock(1_000)
     executor = SlurmEvaluationExecutor(
         config,
         workspace=_workspace(tmp_path),
@@ -1421,7 +1447,7 @@ async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
         handle_root=tmp_path / "handles",
         cluster=cluster,
         pause=clock.advance,
-        deadline_clock=clock,
+        clock=clock,
     )
     coordinator = EvaluationCoordinator(
         executor, FilesystemEvaluationStore(tmp_path / "coordinator"), ManualClock()
@@ -1439,7 +1465,7 @@ async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
         assert "SlurmOutcomeUnknownError" in terminal.failure
         assert durable.status is EvaluationState.FAILED
         assert durable.failure == terminal.failure
-        assert clock.value == pytest.approx(1_000 + 2 * config.poll_interval_seconds)
+        assert clock.now() == pytest.approx(1_000 + 2 * config.poll_interval_seconds)
 
         observer = SlurmEvaluationExecutor(
             config,
@@ -1449,6 +1475,7 @@ async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
             support_trees={},
             handle_root=tmp_path / "handles",
             cluster=cluster,
+            clock=ManualClock(),
         )
         polled = await observer.poll(handle.id)
         assert polled.phase is PollPhase.ENDED
@@ -1472,6 +1499,7 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     store = evaluation_testing.InMemoryEvaluationStore()
     coordinator = EvaluationCoordinator(executor, store, ManualClock())
@@ -1497,6 +1525,7 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     restored = EvaluationCoordinator(resumed, store, ManualClock())
     with pytest.raises(ExecutorCancellationUnknownError, match="unknown external identity"):
@@ -1530,6 +1559,7 @@ async def test_known_staging_rejection_is_failed_and_cleanup_needs_no_external_i
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
         executor, evaluation_testing.InMemoryEvaluationStore(), ManualClock()
@@ -1570,6 +1600,7 @@ async def test_cancellation_during_rejected_staging_preserves_definite_failure(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     try:
         await executor.submit(_request(), handle_id="staging-cancel")
@@ -1626,6 +1657,7 @@ async def test_executor_rejects_missing_or_blank_commands_before_acceptance(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=cluster,
+        clock=ManualClock(),
     )
     request = EvaluationRequest(
         key="invalid-command",
@@ -1659,6 +1691,7 @@ async def test_executor_rejects_invalid_identity_before_persistence(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=cluster,
+        clock=ManualClock(),
     )
     try:
         for operation, error in (
@@ -1690,6 +1723,7 @@ async def test_inactive_executor_cancels_prepared_intent_without_external_identi
         handle_root=tmp_path / "handles",
         cluster=cluster,
         admission=admission,
+        clock=ManualClock(),
     )
     inactive = SlurmEvaluationExecutor(
         _config(),
@@ -1700,6 +1734,7 @@ async def test_inactive_executor_cancels_prepared_intent_without_external_identi
         handle_root=tmp_path / "handles",
         cluster=cluster,
         admission=admission,
+        clock=ManualClock(),
     )
     try:
         async with admission.lease("occupied"):
@@ -1753,7 +1788,8 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         )
         cluster = SlurmCluster(
-            SlurmJobRunner(config, process=connector), state_root=tmp_path / "cluster-identity"
+            SlurmJobRunner(config, process=connector, clock=ManualClock()),
+            state_root=tmp_path / "cluster-identity",
         )
     owner = SlurmEvaluationExecutor(
         config,
@@ -1763,6 +1799,7 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
         support_trees={},
         handle_root=tmp_path / "owner-handles",
         cluster=cluster,
+        clock=ManualClock(),
     )
     conflicting = SlurmEvaluationExecutor(
         config,
@@ -1772,6 +1809,7 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
         support_trees={},
         handle_root=tmp_path / "conflict-handles",
         cluster=cluster,
+        clock=ManualClock(),
     )
     reopened = SlurmEvaluationExecutor(
         config,
@@ -1781,6 +1819,7 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
         support_trees={},
         handle_root=tmp_path / "conflict-handles",
         cluster=cluster,
+        clock=ManualClock(),
     )
     request = EvaluationRequest(
         key="claimed",
@@ -1842,6 +1881,7 @@ async def test_read_only_restart_inspection_never_resumes_or_cancels_work(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     await first.submit(_request(), handle_id="inspect-only")
     assert (await _terminal(first, "inspect-only")).state is EvaluationState.SUCCEEDED
@@ -1855,6 +1895,7 @@ async def test_read_only_restart_inspection_never_resumes_or_cancels_work(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     result = await resumed.inspect_only("inspect-only")
     if status in {SlurmJobStatus.FAILED, SlurmJobStatus.COMPLETED, SlurmJobStatus.UNKNOWN}:
@@ -1881,6 +1922,7 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=runner,
+        clock=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
         executor, FilesystemEvaluationStore(tmp_path / "records"), ManualClock()
@@ -1923,7 +1965,8 @@ async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recoverin
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         )
         cluster = SlurmCluster(
-            SlurmJobRunner(config, process=connector), state_root=tmp_path / "cluster-identity"
+            SlurmJobRunner(config, process=connector, clock=ManualClock()),
+            state_root=tmp_path / "cluster-identity",
         )
     executor = SlurmEvaluationExecutor(
         config,
@@ -1933,6 +1976,7 @@ async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recoverin
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=cluster,
+        clock=ManualClock(),
     )
     try:
         assert (await executor.poll(operation_id)).phase is PollPhase.UNSUBMITTED
@@ -1976,6 +2020,7 @@ async def test_a_cancel_that_proves_sbatch_never_arrived_ends_the_evaluation_dur
             handle_root=tmp_path / "handles",
             cluster=runner,
             pause=lambda _seconds: None,
+            clock=ManualClock(),
         )
 
     first = executor()

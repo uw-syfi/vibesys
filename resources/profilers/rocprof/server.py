@@ -1098,6 +1098,7 @@ def main(argv: list[str] | None = None) -> None:  # noqa: D103  # LW-910106; thi
             Path(config_path),
             _HERE.parent,
             profile_root=capture_runtime.profiles_root(),
+            clock=importlib.import_module("vs_sim.api").MonotonicClock(),
             evaluator_plan=Path(plan_path) if plan_path else None,
         )
     mcp = build_server(

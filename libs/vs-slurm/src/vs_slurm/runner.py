@@ -58,6 +58,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
     from threading import Event
 
+    from vs_sim.api import Clock
+
 # The whole line, newline included: an answer cut off mid-number ("Submitted batch
 # job 50" of job 5000) would otherwise name another job.
 _JOB_ID = re.compile(r"^Submitted batch job ([0-9]+)\r?\n", re.MULTILINE)
@@ -547,7 +549,7 @@ class SlurmJobRunner:
         config: SlurmConfig,
         *,
         process: SlurmProcess | None = None,
-        clock: Callable[[], float] = time.monotonic,
+        clock: Clock,
         pause: Callable[[float], None] | None = None,
         invocation_id: Callable[[], str] = lambda: uuid.uuid4().hex,
         scratch_root: Path | None = None,
@@ -555,14 +557,12 @@ class SlurmJobRunner:
     ) -> None:
         """Create a runner with injectable process, clock, and identity effects.
 
-        ``host_environment`` returns this process's environment, from which the
-        local transport takes its login-like one (``login_environment``); this
-        process's own when omitted.
-
-        ``pause`` replaces the pause between polls wholesale (tests advance a
-        virtual clock with it). Left unset, a wait that has a ``cancel_event``
-        pauses on that event, so a cancel ends the pause at once, and a wait
-        without one sleeps.
+        ``clock`` times staging, submission and the job deadline. ``host_environment``
+        returns this process's environment, from which the local transport takes its
+        login-like one (``login_environment``); this process's own when omitted.
+        ``pause`` replaces the pause between polls wholesale (tests advance a virtual
+        clock with it). Left unset, a wait that has a ``cancel_event`` pauses on that
+        event, so a cancel ends the pause at once, and a wait without one sleeps.
 
         ``scratch_root`` holds the runner's own transfer files (the job script,
         collected status, log, and batch results); the system temporary
@@ -650,7 +650,7 @@ class SlurmJobRunner:
             / _CONTENT_CACHE_ROOT
         )
 
-        staging_started = self._clock()
+        staging_started = self._clock.now()
         self._transport.exec(
             f"mkdir -p {shlex.quote(base.as_posix())} {shlex.quote(cache_root.as_posix())}"
         )
@@ -684,7 +684,7 @@ class SlurmJobRunner:
             if exc.recoverable:
                 raise SlurmError.content_cache_busy(str(exc)) from exc
             raise SlurmError.content_stage_failed() from exc
-        staging_seconds = max(0.0, self._clock() - staging_started)
+        staging_seconds = max(0.0, self._clock.now() - staging_started)
 
         with tempfile.TemporaryDirectory(prefix="vs-slurm-", dir=self._scratch_root) as temporary:
             temporary_path = Path(temporary)
@@ -752,7 +752,7 @@ class SlurmJobRunner:
             )
         except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError) as error:
             raise SlurmSubmissionRejectedError(str(error)) from error
-        started = self._clock()
+        started = self._clock.now()
         phase_root = PurePosixPath(_BATCH_RESULT_ROOT) / "phases"
         job = self._stage_and_submit(
             job_request,
@@ -783,7 +783,7 @@ class SlurmJobRunner:
                 )
                 for stage in stages
             ),
-            submission_seconds=max(0.0, self._clock() - started),
+            submission_seconds=max(0.0, self._clock.now() - started),
             stop_on_failure=request.stop_on_failure,
         )
 
@@ -814,9 +814,9 @@ class SlurmJobRunner:
         cancel_event: Event | None = None,
     ) -> SlurmBatchWaitResult:
         """Wait on a batch without changing its one-job lifecycle semantics."""
-        started = self._clock()
+        started = self._clock.now()
         result = self.wait(handle.job, timeout_seconds=timeout_seconds, cancel_event=cancel_event)
-        elapsed = max(0.0, self._clock() - started)
+        elapsed = max(0.0, self._clock.now() - started)
         updated = handle.model_copy(update={"waited_seconds": handle.waited_seconds + elapsed})
         return SlurmBatchWaitResult(
             handle=updated,
@@ -837,7 +837,7 @@ class SlurmJobRunner:
         scheduler query (two remote commands).
         """
         self._validate_batch_handle(handle)
-        collection_started = self._clock()
+        collection_started = self._clock.now()
         job_result = self.collect_evidence(handle.job, observed=observed)
         stage_results: list[SlurmBatchStageResult] = []
         timings: dict[str, float] = {
@@ -880,7 +880,7 @@ class SlurmJobRunner:
                     if job_result.exit_code == 0:
                         collection_failure = collection_failure or str(exc)
             service_log_tail = _distinct_tail(phase_root / _SERVICE_LOG_TAIL)
-        timings["collection"] = max(0.0, self._clock() - collection_started)
+        timings["collection"] = max(0.0, self._clock.now() - collection_started)
         return SlurmBatchResult(
             job_id=job_result.job_id,
             job_exit_code=job_result.exit_code,
@@ -981,14 +981,14 @@ class SlurmJobRunner:
         self, handle: SlurmJobHandle, timeout: float, cancel_event: Event | None
     ) -> SlurmJobWaitResult:
         """Poll until terminal or *timeout*; a set *cancel_event* raises, uncancelled."""
-        deadline = self._clock() + timeout
+        deadline = self._clock.now() + timeout
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 raise SlurmError.cancelled(handle.job_id)
             status = self.poll(handle)
             if status.terminal:
                 return SlurmJobWaitResult(handle=handle, status=status, timed_out=False)
-            remaining = deadline - self._clock()
+            remaining = deadline - self._clock.now()
             if remaining <= 0:
                 return SlurmJobWaitResult(handle=handle, status=status, timed_out=True)
             self._pause_between_polls(

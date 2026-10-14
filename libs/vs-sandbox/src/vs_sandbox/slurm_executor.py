@@ -8,7 +8,6 @@ import functools
 import logging
 import math
 import subprocess
-import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -71,6 +70,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
     from pathlib import Path
 
+    from vs_sim.api import Clock
     from vs_slurm.api import (
         Cluster,
         ClusterCollectOutcome,
@@ -332,14 +332,20 @@ class SlurmEvaluationExecutor:
         cluster: Cluster | None = None,
         process: SlurmProcess | None = None,
         pause: Callable[[float], None] | None = None,
-        deadline_clock: Callable[[], float] = time.time,
+        clock: Clock,
         cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
     ) -> None:
-        """Bind scheduler policy, durable intent, and the cluster interface."""
+        """Bind scheduler policy, durable intent, and the cluster interface.
+
+        ``clock`` times the job deadline and availability readings. The deadline is
+        persisted, so a production clock is :class:`vs_sim.api.SystemClock`.
+        """
         self._cluster = (
             cluster
             if cluster is not None
-            else make_cluster(config, state_root=handle_root / "cluster", process=process)
+            else make_cluster(
+                config, state_root=handle_root / "cluster", process=process, clock=clock
+            )
         )
         self._pause = pause
         self._poll_interval = config.poll_interval_seconds
@@ -348,7 +354,7 @@ class SlurmEvaluationExecutor:
         self._cancel_confirmations = max(
             1, math.ceil(cancel_confirmation_seconds / config.poll_interval_seconds)
         )
-        self._deadline_clock = deadline_clock
+        self._clock = clock
         self._job_timeout_seconds = config.job_timeout_seconds
         self._workspace = workspace
         self._setup_script = setup_script
@@ -389,7 +395,7 @@ class SlurmEvaluationExecutor:
             queue_depth=queued,
             reuse_status=ReuseStatus.UNKNOWN,
             cost_class=CostClass.UNKNOWN,
-            observed_at=time.monotonic(),
+            observed_at=self._clock.now(),
             fresh_for_s=1.0,
             supported_evidence_kinds=self._supported_evidence_kinds,
             supported_capabilities=("ordered_stages", "stop_on_failure", "shared_service"),
@@ -930,7 +936,7 @@ class SlurmEvaluationExecutor:
         wait_deadline_epoch_s = durable.wait_deadline_epoch_s if durable is not None else None
         if wait_deadline_epoch_s is None:
             remaining = self._job_timeout_seconds - handle.waited_seconds
-            wait_deadline_epoch_s = self._deadline_clock() + remaining
+            wait_deadline_epoch_s = self._clock.now() + remaining
             self._write_evaluation(
                 handle_id,
                 handle,
@@ -938,7 +944,7 @@ class SlurmEvaluationExecutor:
                 wait_deadline_epoch_s=wait_deadline_epoch_s,
             )
         else:
-            remaining = wait_deadline_epoch_s - self._deadline_clock()
+            remaining = wait_deadline_epoch_s - self._clock.now()
         if remaining <= 0:
             raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
         while True:
@@ -949,7 +955,7 @@ class SlurmEvaluationExecutor:
                 active = self._lifecycle_observation(handle_id, observed, request)
                 if active is not None:
                     self._publish(handle_id, active)
-            remaining = wait_deadline_epoch_s - self._deadline_clock()
+            remaining = wait_deadline_epoch_s - self._clock.now()
             if remaining <= 0:
                 raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
             await self._pace(min(self._poll_interval, remaining))

@@ -16,7 +16,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitted,
@@ -84,7 +84,7 @@ def _cluster(base: Path, cuts: dict[str, Kept]) -> tuple[SlurmCluster, SlurmJobR
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         ),
         process=connector,
-        clock=lambda: 0.0,
+        clock=ManualClock(),
     )
     cluster = SlurmCluster(runner, state_root=base / "identity")
     return cluster, SlurmJobRequest(workspace=workspace, command=("true",)), connector.state

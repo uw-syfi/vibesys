@@ -168,6 +168,7 @@ def _stack(
         # Pacing is the Fake's clock: waiting for the scheduler advances it.
         pause=cluster.advance,
         cancel_confirmation_seconds=_CONFIRMATION_S,
+        clock=ManualClock(),
     )
     store = evaluation_testing.InMemoryEvaluationStore()
     return executor, EvaluationCoordinator(executor, store, ManualClock())
@@ -271,6 +272,7 @@ def _parked_submitter(
         cluster=cluster,
         pause=pause,
         cancel_confirmation_seconds=_CONFIRMATION_S,
+        clock=ManualClock(),
     )
     store = evaluation_testing.InMemoryEvaluationStore()
     return executor, EvaluationCoordinator(executor, store, ManualClock()), idle, release

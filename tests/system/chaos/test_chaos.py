@@ -129,8 +129,8 @@ _CLUSTER_FAULTS = {
     # The baseline's job is submitted and then dies, so there is no baseline to compare with.
     ClusterFault.KILLED: ClusterOperation.SBATCH,
     ClusterFault.WRONG_STATE: ClusterOperation.SACCT,
-    # PENDING_FOREVER is left out until the run deadline cancels a job that never leaves the
-    # queue (#2322); today such a run never ends.
+    # The baseline's job never leaves the queue; the job deadline cancels it and it fails.
+    ClusterFault.PENDING_FOREVER: ClusterOperation.SBATCH,
     ClusterFault.ACCOUNTING_GAP: ClusterOperation.SACCT,
     ClusterFault.REQUEUED: ClusterOperation.SQUEUE,
     ClusterFault.TRUNCATED: ClusterOperation.SBATCH,
@@ -151,7 +151,7 @@ async def test_a_cluster_fault_is_injected_and_the_run_ends_as_that_fault_explai
 
     assert chaos.suffered.cluster == {fault}, chaos.report()
     assert chaos.violations == [], chaos.report()
-    if fault is ClusterFault.KILLED:
+    if fault in {ClusterFault.KILLED, ClusterFault.PENDING_FOREVER}:
         assert chaos.ending.startswith("failed"), chaos.report()
 
 

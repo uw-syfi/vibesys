@@ -16,7 +16,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     SlurmConfig,
     SlurmConnectorTransport,
@@ -87,21 +87,8 @@ class _Cluster:
         return subprocess.CompletedProcess(argv, 0, json.dumps(handle(self.state, request)))
 
 
-class _Clock:
-    """Time that advances only when the runner pauses."""
-
-    def __init__(self) -> None:
-        self.now = 0.0
-
-    def __call__(self) -> float:
-        return self.now
-
-    def pause(self, seconds: float) -> None:
-        self.now += seconds
-
-
-def _runner(cluster: _Cluster, clock: _Clock | None = None) -> SlurmJobRunner:
-    clock = clock or _Clock()
+def _runner(cluster: _Cluster, clock: ManualClock | None = None) -> SlurmJobRunner:
+    clock = clock or ManualClock()
     config = SlurmConfig(
         name="fake",
         remote_workspace_root="/remote/runs",
@@ -109,7 +96,7 @@ def _runner(cluster: _Cluster, clock: _Clock | None = None) -> SlurmJobRunner:
         poll_interval_seconds=10.0,
         job_timeout_seconds=60,
     )
-    return SlurmJobRunner(config, process=cluster.process, clock=clock, pause=clock.pause)
+    return SlurmJobRunner(config, process=cluster.process, clock=clock, pause=clock.advance)
 
 
 def _request(tmp_path: Path) -> SlurmJobRequest:

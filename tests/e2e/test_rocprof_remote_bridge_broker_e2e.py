@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge
 
 from vs_sandbox.api.slurm import SlurmCapturePlan, SlurmProcessBroker, write_slurm_capture_plan
+from vs_sim.api import MonotonicClock
 from vs_sim.api.testing import HANG_GUARD_S, start_thread
 from vs_slurm.api import SlurmError, load_slurm_config
 from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
@@ -97,7 +98,11 @@ remote_python = "/remote/venv/bin/python"
     state_root = tmp_path / "cluster-state"
     write_slurm_capture_plan(plan_path, SlurmCapturePlan(cluster_state_root=state_root))
     bridge = RemoteCaptureBridge(
-        config_path, workspace, profile_root=tmp_path / "profiles", evaluator_plan=plan_path
+        config_path,
+        workspace,
+        profile_root=tmp_path / "profiles",
+        evaluator_plan=plan_path,
+        clock=MonotonicClock(),
     )
     cancel = _cancel()
     failures: list[BaseException] = []

@@ -26,7 +26,13 @@ from vs_sandbox.api.slurm import (
     load_slurm_policy,
     write_slurm_capture_plan,
 )
-from vs_sim.api.testing import HANG_GUARD_S, start_thread, wait_or_fail, wait_until_started_sync
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    ManualClock,
+    start_thread,
+    wait_or_fail,
+    wait_until_started_sync,
+)
 from vs_slurm.api import (
     SlurmJobRequest,
     SlurmJobResult,
@@ -196,6 +202,7 @@ def _configured_bridge(tmp_path: Path, runner: _FakeCaptureCluster) -> RemoteCap
         profile_root=tmp_path / "configured-profiles",
         evaluator_plan=plan_path,
         cluster=runner,
+        clock=ManualClock(),
     )
 
 
@@ -235,6 +242,7 @@ def _bridge(tmp_path: Path, runner: _FakeCaptureCluster) -> RemoteCaptureBridge:
         workspace,
         profile_root=tmp_path / "profiles",
         cluster=runner,
+        clock=ManualClock(),
     )
 
 
@@ -347,4 +355,9 @@ def test_remote_capture_requires_explicit_durable_state_root(tmp_path: Path) -> 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     with pytest.raises(ValueError, match="cluster_state_root"):
-        RemoteCaptureBridge(_config_path(tmp_path), workspace, profile_root=tmp_path / "profiles")
+        RemoteCaptureBridge(
+            _config_path(tmp_path),
+            workspace,
+            profile_root=tmp_path / "profiles",
+            clock=ManualClock(),
+        )

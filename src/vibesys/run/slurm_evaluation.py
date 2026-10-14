@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from vs_runtime.api import Workspaces
     from vs_runtime.api.infrastructure import TrustedEvaluationPlan
     from vs_sandbox.api.slurm import SharedSlurmAdmission, SlurmEvaluationPlan, SlurmExecutionPolicy
+    from vs_sim.api import Clock
     from vs_slurm.api import Cluster, SlurmConfig, SlurmProcess
 
 
@@ -30,6 +31,7 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
         namespace: EvaluationStateNamespace,
         handle_root: Path,
         *,
+        clock: Clock,
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
         process: SlurmProcess | None = None,
@@ -44,6 +46,7 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
             namespace,
             handle_root,
             stage_failure_text=render_stage_failure,
+            clock=clock,
             admission=admission,
             cluster=cluster,
             process=process,

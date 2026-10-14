@@ -78,7 +78,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api.testing import clock_from
+from vs_sim.api.testing import ManualClock, clock_from
 from vs_slurm.api import (
     SlurmConfig,
     SlurmSshTransport,
@@ -110,6 +110,9 @@ if TYPE_CHECKING:
     from vs_sim.api import Clock, SleepingClock
 
 LEASE = 100.0
+# A Slurm job that has not ended this long after it was submitted is cancelled and fails: well
+# inside the run deadline (1000 s), so a job that never leaves the queue cannot outlive the run.
+JOB_TIMEOUT_S = 300
 
 
 @dataclass
@@ -180,6 +183,9 @@ class World:
     operations: OperationCatalog = field(default_factory=empty_catalog)
     """What the host offers the search: the skeleton's operations, rendered from ``templates``."""
     timed: tuple[Clock, float] | None = None
+    job_clock: Clock = field(default_factory=ManualClock)
+    """What Slurm job deadlines count on: by default a clock that never moves, so none expires.
+    A world on a virtual loop hands its run clock, so a job outliving ``JOB_TIMEOUT_S`` fails."""
     polls: list[str] = field(default_factory=list)
     during_submit: Callable[[], Awaitable[None]] | None = None
     limits: Limits = field(default_factory=lambda: sample_limits(reconciliation_bound=300.0))
@@ -234,6 +240,7 @@ class World:
                 name="test",
                 remote_workspace_root="/runs",
                 transport=SlurmSshTransport(host="test"),
+                job_timeout_seconds=JOB_TIMEOUT_S,
             ),
             SlurmExecutionPolicy(),
             SlurmEvaluationPlan(
@@ -252,6 +259,7 @@ class World:
             namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
             self.root / "handles",
             stage_failure_text=render_stage_failure,
+            clock=self.job_clock,
             cluster=self.cluster,
         )
         self.evaluations.append(evaluation)

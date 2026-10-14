@@ -26,7 +26,7 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
 )
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import ManualClock, wait_until_started
 from vs_slurm.api import (
     ClusterInspectOutcome,
     ClusterSubmitOutcome,
@@ -99,6 +99,7 @@ def _executor(root: Path, cluster: _GatedCluster) -> SlurmEvaluationExecutor:
         cluster=cluster,
         admission=SharedSlurmAdmission(1),
         pause=lambda _seconds: None,
+        clock=ManualClock(),
     )
 
 

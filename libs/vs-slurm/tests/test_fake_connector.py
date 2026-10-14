@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitted,
@@ -61,7 +62,7 @@ def _runner(state: Path, remote_root: str = "/remote/runs") -> SlurmJobRunner:
         remote_workspace_root=remote_root,
         transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
     )
-    return SlurmJobRunner(config, process=connector)
+    return SlurmJobRunner(config, process=connector, clock=ManualClock())
 
 
 def test_a_submitted_job_stays_pending_until_it_is_cancelled(tmp_path: Path) -> None:
@@ -159,7 +160,8 @@ def test_the_ssh_stand_in_answers_like_the_connector(tmp_path: Path) -> None:
             transport=SlurmSshTransport(
                 host="fake", ssh_command=(*program, "ssh"), rsync_command=(*program, "rsync")
             ),
-        )
+        ),
+        clock=ManualClock(),
     )
 
     job = runner.submit(SlurmJobRequest(workspace=workspace, command=("run-benchmark",)))
@@ -282,7 +284,8 @@ def test_ssh_cluster_preserves_operation_identity_with_both_fake_modes(
             transport=SlurmSshTransport(
                 host="fake", ssh_command=(*program, "ssh"), rsync_command=(*program, "rsync")
             ),
-        )
+        ),
+        clock=ManualClock(),
     )
     first = SlurmCluster(runner, state_root=tmp_path / "first-cache")
     second = SlurmCluster(runner, state_root=tmp_path / "second-cache")

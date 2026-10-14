@@ -28,6 +28,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationExecutor,
     SlurmStagePayload,
 )
+from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterSubmitOutcome,
     FakeCluster,
@@ -104,6 +105,7 @@ def _executor(root: Path, cluster: _QueuedCluster) -> SlurmEvaluationExecutor:
         admission=SharedSlurmAdmission(1),
         # Pacing is free: the holder's wait loop never sleeps on the wall clock.
         pause=lambda _seconds: None,
+        clock=ManualClock(),
     )
 
 

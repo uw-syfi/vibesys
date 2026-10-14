@@ -17,7 +17,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, precondition, rule
 
-from vs_sim.api.testing import examples, wait_until_started_sync
+from vs_sim.api.testing import ManualClock, examples, wait_until_started_sync
 from vs_slurm.api import (
     INITIAL_LIFE,
     AccountingRow,
@@ -137,7 +137,7 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         ),
         process=connector,
-        clock=lambda: 0.0,
+        clock=ManualClock(),
     )
 
     def script(operation_id: str, **values: Unpack[_ScriptOptions]) -> None:
@@ -299,7 +299,7 @@ def test_cancel_acknowledges_a_tombstoned_dispatch_with_no_scheduler_job(
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         )
         cluster = SlurmCluster(
-            SlurmJobRunner(config, process=connector),
+            SlurmJobRunner(config, process=connector, clock=ManualClock()),
             state_root=tmp_path / "cluster-state",
         )
 
@@ -899,6 +899,7 @@ def test_local_rejection_survives_lost_remote_rejection_publication(tmp_path: Pa
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         ),
         process=process,
+        clock=ManualClock(),
     )
     state = tmp_path / "state"
     request = SlurmJobRequest(workspace=workspace, command=("true",))
@@ -938,6 +939,7 @@ def test_fresh_operation_transport_failures_are_typed_unknown(
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         ),
         process=process,
+        clock=ManualClock(),
     )
     cluster = SlurmCluster(runner, state_root=tmp_path / "state")
     outcome = cluster.inspect("fresh") if action == "inspect" else cluster.cancel("fresh")

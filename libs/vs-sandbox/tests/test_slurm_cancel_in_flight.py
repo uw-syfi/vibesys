@@ -90,8 +90,10 @@ async def test_a_stop_during_sbatch_reply_cancels_the_submitted_job_once(tmp_pat
         support_trees={},
         handle_root=tmp_path / "handles",
         cluster=SlurmCluster(
-            SlurmJobRunner(config, process=connector), state_root=tmp_path / "identity"
+            SlurmJobRunner(config, process=connector, clock=ManualClock()),
+            state_root=tmp_path / "identity",
         ),
+        clock=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
         executor, evaluation_testing.InMemoryEvaluationStore(), ManualClock()

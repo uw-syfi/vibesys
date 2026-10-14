@@ -121,7 +121,6 @@
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "asyncio_sleep", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "executor", "count": 1}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "subprocess", "count": 1}
-{"path": "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "rule": "time", "count": 2}
 {"path": "libs/vs-sandbox/src/vs_sandbox/slurm_policy.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_agent_gpu.py", "rule": "process", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_agent_gpu.py", "rule": "threading", "count": 2}
@@ -154,7 +153,7 @@
 {"path": "libs/vs-slurm/src/vs_slurm/fake_connector.py", "rule": "subprocess", "count": 5}
 {"path": "libs/vs-slurm/src/vs_slurm/runner.py", "rule": "subprocess", "count": 7}
 {"path": "libs/vs-slurm/src/vs_slurm/runner.py", "rule": "threading", "count": 7}
-{"path": "libs/vs-slurm/src/vs_slurm/runner.py", "rule": "time", "count": 2}
+{"path": "libs/vs-slurm/src/vs_slurm/runner.py", "rule": "time", "count": 1}
 {"path": "libs/vs-slurm/src/vs_slurm/trace_replay.py", "rule": "subprocess", "count": 3}
 {"path": "libs/vs-slurm/tests/test_api.py", "rule": "process", "count": 3}
 {"path": "libs/vs-slurm/tests/test_api.py", "rule": "subprocess", "count": 20}

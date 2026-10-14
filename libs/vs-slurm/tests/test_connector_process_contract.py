@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     SlurmConfig,
     SlurmConnectorTransport,
@@ -52,6 +52,7 @@ def _real_runner(root: Path, remote: Path) -> SlurmJobRunner:
         _config(remote, SlurmConnectorTransport(kind="connector", command=command)),
         scratch_root=root / "scratch",
         invocation_id=lambda: "contract_01",
+        clock=ManualClock(),
     )
 
 
@@ -66,6 +67,7 @@ def _local_runner(root: Path, remote: Path) -> SlurmJobRunner:
         _config(remote, transport),
         scratch_root=root / "scratch",
         invocation_id=lambda: "contract_01",
+        clock=ManualClock(),
     )
 
 
@@ -77,6 +79,7 @@ def _fake_runner(root: Path, remote: Path) -> SlurmJobRunner:
         process=connector,
         scratch_root=root / "scratch",
         invocation_id=lambda: "contract_01",
+        clock=ManualClock(),
     )
 
 

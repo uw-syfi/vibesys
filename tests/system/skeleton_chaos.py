@@ -554,6 +554,7 @@ async def run_chaos(  # noqa: PLR0913  # LW-150102 [PLR0913]; the options are in
     with open_skeleton_world(base, strategy, cluster, agents=_faulted_agents(plan)) as world:
         turns = strategy.config.turns + strategy.config.peers
         world.limits = sample_limits(max_turns=4 * turns + 4, reconciliation_bound=300.0)
+        world.job_clock = clock
         process = world.runtime()
         host = CoreRunHost(
             process.shell, process.delivery, clock, RunControlBridge(channel, _NoSteers())

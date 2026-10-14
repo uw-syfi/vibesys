@@ -67,6 +67,7 @@ if TYPE_CHECKING:
 
     from vs_runtime.contracts import CandidateWorkspace, Workspaces
     from vs_sandbox.api.slurm import SlurmExecutionPolicy
+    from vs_sim.api import Clock
     from vs_slurm.api import Cluster, SlurmConfig, SlurmProcess
 
 _CLEANUP_FAILURE = "cleanup failed"
@@ -120,12 +121,14 @@ class SemanticSlurmEvaluationExecutor:
         handle_root: Path,
         *,
         stage_failure_text: StageFailureText,
+        clock: Clock,
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
         process: SlurmProcess | None = None,
     ) -> None:
-        """Bind external Slurm policy to semantic evaluation state."""
+        """Bind external Slurm policy to semantic evaluation state; ``clock`` times job deadlines."""
         self._stage_failure_text = stage_failure_text
+        self._clock = clock
         self._config = config
         self._policy = policy
         self._plan = plan
@@ -287,6 +290,7 @@ class SemanticSlurmEvaluationExecutor:
             support_trees=self._plan.support_paths,
             handle_root=self._handle_root,
             supported_evidence_kinds=self._supported_evidence_kinds(),
+            clock=self._clock,
             admission=self._admission,
             cluster=self._cluster,
             process=self._process,

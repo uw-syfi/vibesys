@@ -72,7 +72,7 @@ def _runner(
             transport=SlurmConnectorTransport(kind="connector", command=("trace-connector",)),
         ),
         process=connector,
-        clock=clock.now,
+        clock=clock,
         pause=clock.advance,
     )
     return runner, connector, clock

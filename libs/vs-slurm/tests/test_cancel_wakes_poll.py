@@ -18,7 +18,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     ClusterCancelRequested,
     ClusterSubmitted,
@@ -85,7 +85,7 @@ def _runner(cluster: _Cluster, poll_interval: float) -> SlurmJobRunner:
         poll_interval_seconds=poll_interval,
         job_timeout_seconds=_JOB_TIMEOUT_SECONDS,
     )
-    return SlurmJobRunner(config, process=cluster.process)
+    return SlurmJobRunner(config, process=cluster.process, clock=ManualClock())
 
 
 def _request(directory: Path) -> SlurmJobRequest:
@@ -201,7 +201,7 @@ def test_cancel_does_not_reuse_a_completed_inspection_read(tmp_path: Path) -> No
             transport=SlurmConnectorTransport(kind="connector", command=("fake",)),
         ),
         process=connector,
-        clock=lambda: 0.0,
+        clock=ManualClock(),
     )
     cluster = SlurmCluster(runner, state_root=tmp_path / "state")
     submitted = cluster.submit(_request(tmp_path), operation_id="crossing-cancel")

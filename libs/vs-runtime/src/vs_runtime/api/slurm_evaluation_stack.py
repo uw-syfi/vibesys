@@ -34,6 +34,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterSubmitOutcome,
     FakeCluster,
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime.contracts import CandidateWorkspace
+    from vs_sim.api import Clock
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 ADMISSION = DecisionId(root="admission-1")
@@ -172,8 +174,11 @@ async def build_stack(
     cluster: ScenarioCluster | None = None,
     *,
     profile_command: tuple[str, ...] | None = None,
+    clock: Clock | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
+
+    Job deadlines follow ``clock``; by default a clock that never moves, so none expires.
 
     With ``profile_command`` the run can capture a profile, whose stdout is
     ``cluster.profile_output``.
@@ -205,6 +210,7 @@ async def build_stack(
         namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
         root / "handles",
         stage_failure_text=render_stage_failure,
+        clock=clock if clock is not None else ManualClock(),
         cluster=cluster,
     )
     return Stack(executor, cluster, snapshot)
