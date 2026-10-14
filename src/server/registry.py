@@ -273,13 +273,13 @@ class Verdict(StrEnum):
     """What a lister may conclude from one observation."""
 
     LIVE = "live"
-    """The owner holds the lock and has published a valid record."""
+    """The owner holds the lock and has published a valid record that is not its tombstone."""
     UNREADABLE = "unreadable"
     """A record this reader cannot interpret, of a live owner or a newer checkout."""
     PENDING = "pending"
     """The owner holds the lock but has no record yet."""
     ENDED = "ended"
-    """No process holds the lock, and the owner left a tombstone younger than a day."""
+    """The owner has written its tombstone and is exiting, or left one younger than a day."""
     CRASHED = "crashed"
     """No process holds the lock, and the owner died without leaving a tombstone."""
     DEAD = "dead"
@@ -289,13 +289,23 @@ class Verdict(StrEnum):
 
 
 def judge(observation: InstanceObservation, now: float) -> Verdict:
-    """Decide one id from its observed lock state and record, at time ``now``."""
+    """Decide one id from its observed lock state and record, at time ``now``.
+
+    A held lock with a tombstone is ended, not live. The owner writes its
+    tombstone as its last act before it releases the lock, and an observation
+    reads the lock before the record, so an owner that ends between the two
+    reads is seen holding its lock with its tombstone published. The tombstone
+    is the later fact. It is reported ended whatever its age, since nothing of
+    a holder may be removed; once the lock drops it ages like any tombstone.
+    """
     record = observation.record
     match observation.lock:
         case LockState.HELD:
             match record:
-                case LiveInstanceRecord():
+                case LiveInstanceRecord(ended_at=None):
                     return Verdict.LIVE
+                case LiveInstanceRecord():
+                    return Verdict.ENDED
                 case UnreadableRecord():
                     return Verdict.UNREADABLE
                 case None:
@@ -1105,11 +1115,15 @@ class InstanceInspector:
 
 
 def _inspection_state(observation: InstanceObservation) -> InspectionState:
-    if observation.lock is LockState.HELD and isinstance(observation.record, LiveInstanceRecord):
-        return InspectionState.LIVE
-    if observation.lock in {LockState.HELD, LockState.UNKNOWN}:
-        return InspectionState.UNVERIFIED
-    return InspectionState.ENDED
+    match observation.lock, observation.record:
+        case LockState.HELD, LiveInstanceRecord(ended_at=None):
+            return InspectionState.LIVE
+        case LockState.HELD, LiveInstanceRecord():
+            return InspectionState.ENDED
+        case LockState.HELD | LockState.UNKNOWN, _:
+            return InspectionState.UNVERIFIED
+        case _:
+            return InspectionState.ENDED
 
 
 @dataclass(frozen=True)

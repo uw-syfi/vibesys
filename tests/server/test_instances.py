@@ -581,17 +581,22 @@ def test_only_a_held_lock_is_live_and_only_a_fresh_tombstone_is_ended(
     verdict = judge(InstanceObservation(IDS[0], lock, record), now)
     held = lock is LockState.HELD
     left = lock in {LockState.FREE, LockState.ABSENT}
+    tombstone = isinstance(record, LiveInstanceRecord) and record.ended_at is not None
 
-    assert (verdict is Verdict.LIVE) == (held and isinstance(record, LiveInstanceRecord))
+    assert (verdict is Verdict.LIVE) == (
+        held and isinstance(record, LiveInstanceRecord) and not tombstone
+    )
     assert (verdict is Verdict.UNVERIFIED) == (lock is LockState.UNKNOWN)
     assert (verdict is Verdict.CRASHED) == (
         left and isinstance(record, LiveInstanceRecord) and record.ended_at is None
     )
+    # A holder seen with its tombstone wrote it between the lock probe and the
+    # record read, on its way out; it is ended at any age while it holds.
     assert (verdict is Verdict.ENDED) == (
-        left
+        tombstone
         and isinstance(record, LiveInstanceRecord)
         and record.ended_at is not None
-        and now - record.ended_at < TOMBSTONE_RETENTION_SECONDS
+        and (held or (left and now - record.ended_at < TOMBSTONE_RETENTION_SECONDS))
     )
 
 
@@ -710,6 +715,8 @@ class RegistryInterleavings(RuleBasedStateMachine):
         self.crashed: set[str] = set()
         """Crashed after publishing; buried by the next listing."""
         self.ended: dict[str, tuple[float, RunPhase]] = {}
+        self.exiting: set[str] = set()
+        """Wrote a tombstone and still hold the lock."""
         self.started_at = 0.0
 
     def _fresh(self) -> list[str]:
@@ -755,8 +762,24 @@ class RegistryInterleavings(RuleBasedStateMachine):
                 update={"phase": phase, "ended_at": self.clock.now()}
             )
         )
-        hold.release()
+        self.exiting.add(instance_id)
         self.ended[instance_id] = (self.clock.now(), phase)
+
+    @precondition(lambda self: bool(self.exiting))
+    @rule(data=st.data(), crash=st.booleans())
+    def exit(self, data: st.DataObject, *, crash: bool) -> None:
+        """Drop the lock after the tombstone, as ``kill -9`` during cleanup would too.
+
+        Until this runs the server holds its lock with its tombstone published,
+        which is also what a lister sees when the server ends between the lock
+        probe and the record read.
+        """
+        instance_id = data.draw(st.sampled_from(sorted(self.exiting)))
+        self.exiting.discard(instance_id)
+        if crash:
+            self.holds[instance_id].crash()
+        else:
+            self.holds[instance_id].release()
 
     @rule(hours=st.integers(min_value=0, max_value=30))
     def time_passes(self, hours: int) -> None:
@@ -772,7 +795,7 @@ class RegistryInterleavings(RuleBasedStateMachine):
         self.ended = {
             instance_id: (ended_at, phase)
             for instance_id, (ended_at, phase) in self.ended.items()
-            if now - ended_at < TOMBSTONE_RETENTION_SECONDS
+            if instance_id in self.exiting or now - ended_at < TOMBSTONE_RETENTION_SECONDS
         }
 
         live = [record.id for record in listing.instances]
@@ -805,7 +828,7 @@ class RegistryInterleavings(RuleBasedStateMachine):
         expected_ended: dict[str, tuple[float | None, RunPhase]] = {
             instance_id: (ended_at, phase)
             for instance_id, (ended_at, phase) in self.ended.items()
-            if now - ended_at < TOMBSTONE_RETENTION_SECONDS
+            if instance_id in self.exiting or now - ended_at < TOMBSTONE_RETENTION_SECONDS
         }
         for instance_id in self.crashed:
             expected_ended[instance_id] = (None, RunPhase(status=RunStatus.FAILED, reason=CRASHED))
@@ -825,6 +848,8 @@ class RegistryInterleavings(RuleBasedStateMachine):
                 assert verdict is (
                     Verdict.LIVE if instance_id in self.published else Verdict.PENDING
                 )
+            elif instance_id in self.exiting:
+                assert verdict is Verdict.ENDED
             else:
                 assert verdict in {Verdict.ENDED, Verdict.CRASHED, Verdict.DEAD}
 
@@ -833,6 +858,68 @@ class RegistryInterleavings(RuleBasedStateMachine):
 
 
 TestRegistryInterleavings = RegistryInterleavings.TestCase
+
+
+class _EndsBetweenProbeAndRead:
+    """An ``InstanceStore`` whose one server ends between the lock probe and the record read.
+
+    ``FileInstanceStore.observe`` is two reads, the lock and then the record,
+    and nothing stops the owner from writing its tombstone in between. This
+    store composes the same two reads over a Fake and runs the owner's ending
+    between them on the first observation, so the race is a fixed schedule.
+    """
+
+    def __init__(self, store: FakeInstanceStore, ending: Callable[[], None]) -> None:
+        self._store = store
+        self._ending: Callable[[], None] | None = ending
+
+    def ids(self) -> tuple[str, ...]:
+        return self._store.ids()
+
+    def observe(self, instance_id: str) -> InstanceObservation:
+        lock = self._store.observe(instance_id).lock
+        ending, self._ending = self._ending, None
+        if ending is not None:
+            ending()
+        return InstanceObservation(instance_id, lock, self._store.observe(instance_id).record)
+
+    def reap(self, instance_id: str) -> bool:
+        return self._store.reap(instance_id)
+
+    def bury(self, record: LiveInstanceRecord) -> bool:
+        return self._store.bury(record)
+
+    def hold(self, instance_id: str) -> FakeInstanceHold:
+        return self._store.hold(instance_id)
+
+
+@pytest.mark.parametrize("ending", sorted(_ENDINGS))
+@pytest.mark.parametrize("reader", ["list", "read", "find", "inspect"])
+def test_a_server_that_ends_between_the_lock_probe_and_the_record_read_is_not_live(
+    ending: str, reader: str
+) -> None:
+    fake = FakeInstanceStore()
+    hold = fake.hold(IDS[0])
+    hold.publish(_record(IDS[0]))
+    tombstone = _record(IDS[0]).model_copy(
+        update={"phase": _ENDINGS[ending], "ended_at": CLOCK.now()}
+    )
+    store = _EndsBetweenProbeAndRead(fake, lambda: hold.publish(tombstone))
+    registry = LiveRegistry(store, CLOCK)
+
+    match reader:
+        case "list" | "read":
+            listing = registry.list() if reader == "list" else registry.read()
+            assert listing.instances == ()
+            assert listing.ended == (tombstone,)
+        case "find":
+            assert registry.find(IDS[0]) is None
+        case _:
+            inspection = InstanceInspector(
+                store, FakeInstanceLogs(), FakeInstanceMetadataStore()
+            ).inspect(IDS[0])
+            assert inspection.state is InspectionState.ENDED
+            assert inspection.record is None
 
 
 def test_an_unreadable_lock_is_reported_but_neither_trusted_nor_removed() -> None:
