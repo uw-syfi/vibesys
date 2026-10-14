@@ -44,6 +44,7 @@ from .types.common import (
     ReleaseDependency,
     RequestId,
     RevisionAuthority,
+    RunStatus,
     Scope,
 )
 from .types.evaluation import (
@@ -810,6 +811,11 @@ def _start(
         event.epoch == barrier.epoch and barrier.phase != RecoveryPhase.REQUIRED
     ):
         return AreaChange(state=state)
+    if context.run.status == RunStatus.TERMINAL:
+        # The run ended, so its closure already proved every owner released: there is nothing
+        # left to inspect, and a terminal run may issue no request. A record core itself ended
+        # (one blocked when the run closed) has no executor fact that would resolve it.
+        return _finish(state, RecoveryBarrier(epoch=event.epoch, phase=RecoveryPhase.RECOVERING))
     updated = state
     for record in state.records:
         proof = observation_for(record, record.observation)

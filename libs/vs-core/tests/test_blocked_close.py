@@ -264,3 +264,19 @@ def test_a_job_whose_poll_blocked_while_the_host_was_down_is_polled_again(down_f
     assert [
         wait for wait in core.orphan_waits(state) if wait.waiter == core.WaitKind.OWNED_JOB
     ] == []
+
+
+@given(case=_CASES)
+def test_a_host_that_restarts_a_run_closed_around_a_blocked_record_finds_nothing_to_do(
+    case: _Case,
+) -> None:
+    """The run ended, so the record's forced end is final: a new host only reloads the run."""
+    state = _record(case.lifecycle, case.answer, accepted=case.accepted, named=case.named)
+    closed = _close_after(
+        state, restart=case.restart, late_by=case.late_by, stop_first=case.stop_first
+    )
+    if closed.run.status != core.RunStatus.TERMINAL:
+        return
+    restarted = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
+    assert restarted.requests == ()
+    assert restarted.state.run.status == core.RunStatus.TERMINAL
