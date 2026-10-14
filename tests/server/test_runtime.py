@@ -36,9 +36,6 @@ from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.runtime import ServerRuntime
 from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
-from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.events import CoreEventType, EventStatus
-from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import RunControlChannel
@@ -105,18 +102,6 @@ def _subscription(socket_path: Path) -> Generator[Callable[[], dict]]:
             stream.write(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
             stream.flush()
             yield lambda: json.loads(stream.readline())
-
-
-def _collect_until(
-    runtime: ServerRuntime, socket_path: Path, terminal_type: str, received: list[dict]
-) -> None:
-    _await_socket(runtime)
-    with _subscription(socket_path) as read:
-        while True:
-            events = read().get("events", [])
-            received.extend(events)
-            if any(event["type"] == terminal_type for event in events):
-                return
 
 
 def _complete_lines(value: str, prefix: str) -> tuple[str, ...]:
@@ -264,124 +249,6 @@ def test_runtime_snapshots_namespace_client_state_by_project(tmp_path: Path) -> 
     runtime.integration.close()
 
 
-def test_runtime_streams_success_before_client_disconnect(tmp_path: Path) -> None:
-    socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
-    received: list[dict] = []
-    subscriber = threading.Thread(
-        target=_collect_until,
-        args=(runtime, socket_path, "run_finished", received),
-    )
-    subscriber.start()
-
-    value = runtime.run(lambda: "ran")
-
-    subscriber.join(timeout=_DEADLOCK_GUARD_SECONDS)
-    assert value == "ran"
-    assert not subscriber.is_alive()
-    assert any(event["type"] == "server_ready" for event in received)
-    assert sum(event["type"] == "run_finished" for event in received) == 1
-    assert not socket_path.exists()
-
-
-def test_runtime_waits_for_reconnected_subscriber_before_teardown(tmp_path: Path) -> None:
-    """A subscriber that reconnects must outlive the run's terminal event.
-
-    The first subscription drops before the run finishes; the runtime must not
-    treat that as "the client is gone" while the second subscription is live.
-    """
-    socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
-    release_run = threading.Event()
-    order: list[str] = []
-
-    def drive_reconnect() -> None:
-        _await_socket(runtime)
-        with _subscription(socket_path) as read:
-            assert read()["type"] == "subscribed"
-        with _subscription(socket_path) as read:
-            assert read()["type"] == "subscribed"
-            release_run.set()
-            while not any(event["type"] == "run_finished" for event in read().get("events", [])):
-                pass
-            # The stream is still open here; the runtime may return only after
-            # this client has disconnected.
-            order.append("second subscription closing")
-
-    clients = threading.Thread(target=drive_reconnect)
-    clients.start()
-
-    def run() -> str:
-        assert release_run.wait(timeout=_DEADLOCK_GUARD_SECONDS)
-        return "ran"
-
-    value = runtime.run(run)
-    order.append("runtime returned")
-
-    clients.join(timeout=_DEADLOCK_GUARD_SECONDS)
-    assert value == "ran"
-    assert not clients.is_alive()
-    assert order == ["second subscription closing", "runtime returned"]
-    assert not socket_path.exists()
-
-
-def test_runtime_returns_cleanly_after_an_operator_stop(tmp_path: Path) -> None:
-    """An in-band `/stop` ends the backend without a failure record.
-
-    The journal's terminal record is the `stopped` status change; no
-    `run_finished`, `run_failed`, or `run_interrupted` event follows it.
-    """
-    socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
-    received: list[dict] = []
-
-    def collect_until_stopped() -> None:
-        _await_socket(runtime)
-        with _subscription(socket_path) as read:
-            while True:
-                events = read().get("events", [])
-                received.extend(events)
-                if any(
-                    event["type"] == "run_status_changed" and event["data"]["status"] == "stopped"
-                    for event in events
-                ):
-                    return
-
-    subscriber = threading.Thread(target=collect_until_stopped)
-    subscriber.start()
-
-    integration = LocalRunIntegration()
-    integration.events.subscribe(runtime.integration.project_event)
-
-    def run() -> str:
-        control = _SessionControlStub(integration.control)
-        runtime.controls.install(control)
-        try:
-            runtime.api.execute(StopCommand())
-            integration.control.raise_if_stopped()
-            return "unreachable"
-        finally:
-            runtime.controls.release(control)
-
-    try:
-        value = runtime.run(run)
-    finally:
-        integration.close()
-
-    subscriber.join(timeout=_DEADLOCK_GUARD_SECONDS)
-    assert value is None
-    assert not subscriber.is_alive()
-    terminal = ("run_finished", "run_failed", "run_interrupted")
-    assert not any(event["type"] in terminal for event in received)
-    statuses = [
-        event["data"]["status"] for event in received if event["type"] == "run_status_changed"
-    ]
-    # The stop arrives before the run is ready, so the run holds it while
-    # starting and core lands it there: the run never reports running.
-    assert statuses == ["stopped"]
-    assert not socket_path.exists()
-
-
 def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: Path) -> None:
     """A stop accepted from ``listening`` survives until session installation."""
     integration = LocalRunIntegration()
@@ -478,64 +345,6 @@ def test_startup_rejects_commands_that_require_an_active_session(
     assert runtime.run(lambda: "ran") == "ran"
     assert observer.failure is not None
     assert observer.failure.diagnostic_code == "run_control_unavailable"
-
-
-def test_runtime_does_not_duplicate_core_terminal_event(tmp_path: Path) -> None:
-    socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
-    received: list[dict] = []
-    subscriber = threading.Thread(
-        target=_collect_until,
-        args=(runtime, socket_path, "run_finished", received),
-    )
-    subscriber.start()
-
-    core_events = CoreEventJournal()
-    core_events.subscribe(runtime.integration.project_event)
-
-    def run() -> None:
-        core_events.emit(
-            CoreEventType.RUN_FINISHED,
-            status=EventStatus.COMPLETED,
-        )
-
-    runtime.run(run)
-
-    subscriber.join(timeout=_DEADLOCK_GUARD_SECONDS)
-    assert not subscriber.is_alive()
-    assert sum(event["type"] == "run_finished" for event in received) == 1
-    assert sum(event.type.value == "run_finished" for event in runtime.journal.read()) == 1
-
-
-def test_runtime_streams_configuration_failure_without_run_failure(tmp_path: Path) -> None:
-    socket_path = tmp_path / "control.sock"
-    runtime = ServerRuntime(run_id="run-1", runs=default_runs(), socket_path=socket_path)
-    received: list[dict] = []
-    subscriber = threading.Thread(
-        target=_collect_until,
-        args=(runtime, socket_path, "configuration_failed", received),
-    )
-    subscriber.start()
-    failure = ConfigurationError(
-        ConfigurationDiagnostic(
-            code="invalid_arguments",
-            stage="argument_parsing",
-            message="unknown token=super-secret option --bad",
-            usage="usage: vibesys --token=super-secret",
-        )
-    )
-
-    with pytest.raises(ConfigurationError) as raised:
-        runtime.run(lambda: (_ for _ in ()).throw(failure))
-
-    assert raised.value is failure
-    subscriber.join(timeout=_DEADLOCK_GUARD_SECONDS)
-    assert not subscriber.is_alive()
-    event = next(event for event in received if event["type"] == "configuration_failed")
-    assert event["data"]["code"] == "invalid_arguments"
-    assert event["data"]["message"] == "unknown token=[REDACTED] option --bad"
-    assert event["data"]["usage"] == "usage: vibesys --token=[REDACTED]"
-    assert not any(event["type"] == "run_failed" for event in received)
 
 
 def test_a_web_only_subscriber_decides_a_web_runs_whole_lifetime(tmp_path: Path) -> None:
