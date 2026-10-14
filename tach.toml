@@ -541,7 +541,7 @@ depends_on = ["vs_evaluation.agent_models", "vs_evaluation.agent_wire", "vs_mcp"
 # Client side of the evaluation tool wire shared by both tool servers.
 path = "vs_evaluation.agent_wire"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_models", "vs_mcp", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_evaluation.agent_models", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 path = "vs_evaluation.agent_models"
@@ -567,7 +567,7 @@ depends_on = ["vs_evaluation.models"]
 [[modules]]
 path = "vs_evaluation.filesystem_store"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.coordinator", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_project"]
+depends_on = ["vs_decode.api", "vs_evaluation.coordinator", "vs_evaluation.lifecycle", "vs_evaluation.models", "vs_project"]
 
 [[modules]]
 path = "vs_evaluation.failure_signature"

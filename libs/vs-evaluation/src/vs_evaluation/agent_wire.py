@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from vs_decode.api import Unreadable, decode_json
 from vs_evaluation.agent_models import (
     RECEIPT_LINE,
     AgentEvaluationReply,
@@ -64,9 +65,9 @@ class EvaluationServiceClientError(RuntimeError):
         return cls("evaluation service closed without a complete reply")
 
     @classmethod
-    def malformed(cls, error: ValidationError) -> EvaluationServiceClientError:
+    def malformed(cls, reply: Unreadable) -> EvaluationServiceClientError:
         """Build the error for a whole reply line that is not a valid wire reply."""
-        return cls(f"evaluation service sent a malformed reply: {error.error_count()} problem(s)")
+        return cls(f"evaluation service sent a malformed reply: {len(reply.problems)} problem(s)")
 
     @classmethod
     def invalid(cls, error: ValidationError) -> EvaluationServiceClientError:
@@ -109,14 +110,24 @@ class SocketClient:
             # A stopped service, a dropped oversized frame, or a timeout: the
             # agent gets the typed tool error, never a raw socket exception.
             raise EvaluationServiceClientError.unavailable(error) from error
-        try:
-            decoded = _REPLY.validate_json(response)
-            if isinstance(decoded, SocketFailure):
-                raise EvaluationServiceClientError.rejected(decoded.error)
-            reply = _TOOL_REPLY.validate_json(json.dumps(decoded.result))
-        except ValidationError as error:
+        decoded = decode_json(
+            response, _REPLY, source="evaluation service reply", max_bytes=_MAX_REPLY_BYTES
+        )
+        if isinstance(decoded, SocketFailure):
+            raise EvaluationServiceClientError.rejected(decoded.error)
+        reply = (
+            decoded
+            if isinstance(decoded, Unreadable)
+            else decode_json(
+                json.dumps(decoded.result),
+                _TOOL_REPLY,
+                source="evaluation service reply result",
+                max_bytes=_MAX_REPLY_BYTES,
+            )
+        )
+        if isinstance(reply, Unreadable):
             # A version-skewed or broken service: still the typed tool error.
-            raise EvaluationServiceClientError.malformed(error) from error
+            raise EvaluationServiceClientError.malformed(reply)
         return reply.model_dump_json()
 
     def _remaining(self, deadline: float) -> float:

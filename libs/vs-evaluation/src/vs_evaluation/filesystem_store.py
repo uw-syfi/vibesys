@@ -9,8 +9,7 @@ import asyncio
 import fcntl
 from typing import TYPE_CHECKING, TypeVar
 
-from pydantic import ValidationError
-
+from vs_decode.api import Unreadable, UnreadableKind, read_json
 from vs_evaluation.coordinator import (
     EvaluationKeyConflictError,
     RevisionConflictError,
@@ -26,6 +25,8 @@ if TYPE_CHECKING:
 
 T = TypeVar("T")
 _HANDLE_ID_LENGTH = len("eval_") + 64
+_MAX_RECORD_BYTES = 16 * 1024 * 1024
+"""The largest evaluation record this store reads back."""
 
 
 class EvaluationStoreCorruptionError(RuntimeError):
@@ -146,14 +147,11 @@ class FilesystemEvaluationStore:
 
     @staticmethod
     def _read_path(path: Path) -> StoredEvaluation | None:
-        try:
-            contents = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-        try:
-            record = StoredEvaluation.model_validate_json(contents)
-        except ValidationError as error:
-            raise EvaluationStoreCorruptionError(path, error) from error
+        record = read_json(path, StoredEvaluation, max_bytes=_MAX_RECORD_BYTES)
+        if isinstance(record, Unreadable):
+            if record.kind is UnreadableKind.MISSING:
+                return None
+            raise EvaluationStoreCorruptionError(path, ValueError(str(record)))
         if path.name != f"{record.handle_id}.json":
             raise EvaluationStoreCorruptionError(path)
         if stable_handle_id(record.request.key) != record.handle_id:

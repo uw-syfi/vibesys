@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -666,3 +667,14 @@ async def test_external_submit_observes_durable_dispatch_authorization() -> None
     handle = await service.submit(request("authorized-before-effect"))
     assert len(executor.submissions) == 1
     await handle.cancel()
+
+
+@pytest.mark.asyncio
+async def test_a_record_that_is_not_a_regular_file_is_corrupt_not_a_hang(tmp_path: Path) -> None:
+    # Reading a FIFO blocks until a writer appears; the store must refuse it instead.
+    store = FilesystemEvaluationStore(tmp_path)
+    os.mkfifo(tmp_path / f"eval_{'0' * 64}.json")
+
+    with pytest.raises(RuntimeError, match="invalid evaluation record") as raised:
+        await store.records()
+    assert "not a regular file" in str(raised.value.__cause__)
