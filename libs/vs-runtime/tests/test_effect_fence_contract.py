@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.fence_cases import FENCE_PAIRS
 
+from vs_runtime.api.core import FenceKind
 from vs_runtime.api.fence_contracts import HostRun, run_schedule
 from vs_sim.api.testing import Sim, SimBlockingRunner, examples
 
@@ -49,6 +50,11 @@ def _run(pair: FencePair, runs: tuple[HostRun, ...], schedule_seed: int) -> Sche
             return await run_schedule(world, runs, SimBlockingRunner(threads))
 
     return simulation.run(main(), threads=threads)
+
+
+def test_every_fence_kind_has_exactly_one_pair() -> None:
+    """A new `FenceKind` fails here until its executor pair joins the contract."""
+    assert sorted(pair.kind for pair in FENCE_PAIRS) == sorted(FenceKind)
 
 
 @pytest.mark.parametrize("pair", FENCE_PAIRS, ids=lambda pair: pair.name)

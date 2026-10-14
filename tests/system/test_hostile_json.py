@@ -25,7 +25,7 @@ import json
 from contextlib import redirect_stdout, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -54,6 +54,7 @@ from vs_runtime.api.infrastructure import (
     ModelRequestError,
     ProtocolBenchmarkContract,
     ScalarBenchmarkContract,
+    TrustedBenchmarkContract,
     create_model_request_reconciler,
     decode_trusted_benchmark_run,
 )
@@ -123,7 +124,13 @@ def _model_manifest(frame: bytes, workspace: Path) -> None:
     ).reconcile(workspace)
 
 
-def _benchmark_result(contract: ProtocolBenchmarkContract | ScalarBenchmarkContract) -> _Decoder:
+_BENCHMARK_CONTRACTS: tuple[TrustedBenchmarkContract, ...] = (
+    ProtocolBenchmarkContract(),
+    ScalarBenchmarkContract(output_argument="--out", metric="tok_s"),
+)
+
+
+def _benchmark_result(contract: TrustedBenchmarkContract) -> _Decoder:
     def decode(frame: bytes, _: Path) -> None:
         framed = (
             "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n"
@@ -291,10 +298,10 @@ _DECODERS = {
     "evaluator-records": _Decoder(
         lambda frame, _: parse_records(frame.decode("utf-8", "replace")), (ProtocolError,)
     ),
-    "protocol-benchmark-result": _benchmark_result(ProtocolBenchmarkContract()),
-    "scalar-benchmark-result": _benchmark_result(
-        ScalarBenchmarkContract(output_argument="--out", metric="tok_s")
-    ),
+    **{
+        f"{type(contract).__name__}-result": _benchmark_result(contract)
+        for contract in _BENCHMARK_CONTRACTS
+    },
     "model-manifest": _Decoder(_model_manifest, (ModelRequestError,)),
     "agent-tool-result": _Decoder(_tool_result),
     "local-validation-report": _Decoder(_validation_report),
@@ -307,6 +314,12 @@ _DECODERS = {
     "rocprof-counters": _Decoder(_rocprof_counters, (_capture_runtime.CaptureFailedError,)),
     "rocprof-thread-trace": _Decoder(_rocprof_thread_trace, (att.AttOutputNotFoundError,)),
 }
+
+
+def test_every_benchmark_contract_has_a_decoder_row() -> None:
+    """A new `TrustedBenchmarkContract` member fails here until `_BENCHMARK_CONTRACTS` lists it."""
+    members = set(get_args(TrustedBenchmarkContract.__value__))
+    assert {type(contract) for contract in _BENCHMARK_CONTRACTS} == members
 
 
 @pytest.mark.parametrize("decoder", list(_DECODERS.values()), ids=list(_DECODERS))

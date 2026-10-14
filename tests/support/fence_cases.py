@@ -11,7 +11,8 @@ Each pair is one executor's create and release requests over real disk and Fakes
 * ``operation-inspect``: ExecuteRegisteredOperation runs an owner's effect, and an
   InspectRequest of it that seals "never ran" is the release.
 
-A new executor that creates and releases adds its pair to ``FENCE_PAIRS``.
+A new executor that creates and releases adds its pair to ``FENCE_PAIRS``, tagged with its
+``FenceKind``; the contract's coverage test fails until every kind has exactly one pair.
 """
 
 from __future__ import annotations
@@ -68,6 +69,7 @@ from vs_project.api.testing import world_git
 from vs_runtime.api.core import (
     Applied,
     ExecutionResult,
+    FenceKind,
     MeasurementRequests,
     NamespaceOperationReceipts,
     NotApplied,
@@ -202,6 +204,7 @@ class _TurnCancelWorld(_SessionWorld):
 class _SessionPair:
     name: str
     world_type: type[_SessionCloseWorld | _TurnCancelWorld]
+    kind: FenceKind
 
     @asynccontextmanager
     async def world(self) -> AsyncIterator[FenceWorld]:
@@ -272,6 +275,7 @@ class _WorkspaceWorld(_ReleasesItself):
 
 class _WorkspacePair:
     name = "workspace-discard"
+    kind = FenceKind.ATTEMPT_WORKSPACE
 
     @asynccontextmanager
     async def world(self) -> AsyncIterator[FenceWorld]:
@@ -400,6 +404,7 @@ class _EvaluationWorld(_ReleasesItself):
 class _EvaluationPair:
     name: str
     cancel: bool
+    kind: FenceKind
 
     @asynccontextmanager
     async def world(self) -> AsyncIterator[FenceWorld]:
@@ -519,6 +524,7 @@ class _OperationWorld:
 
 class _OperationPair:
     name = "operation-inspect"
+    kind = FenceKind.OPERATION
 
     @asynccontextmanager
     async def world(self) -> AsyncIterator[FenceWorld]:
@@ -527,11 +533,11 @@ class _OperationPair:
 
 
 FENCE_PAIRS = (
-    _SessionPair("session-close", _SessionCloseWorld),
-    _SessionPair("turn-cancel", _TurnCancelWorld),
+    _SessionPair("session-close", _SessionCloseWorld, FenceKind.SESSION_EPISODE),
+    _SessionPair("turn-cancel", _TurnCancelWorld, FenceKind.INVOCATION),
     _WorkspacePair(),
-    _EvaluationPair("scope-close", cancel=False),
-    _EvaluationPair("job-cancel", cancel=True),
+    _EvaluationPair("scope-close", cancel=False, kind=FenceKind.SCOPE_EPISODE),
+    _EvaluationPair("job-cancel", cancel=True, kind=FenceKind.MEASUREMENT_JOB),
     _OperationPair(),
 )
 
