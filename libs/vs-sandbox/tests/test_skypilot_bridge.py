@@ -69,7 +69,7 @@ from vs_sandbox.api.skypilot import (
     encode_message,
 )
 from vs_sim.api import ProcessTimeoutError, Threads
-from vs_sim.api.testing import HANG_GUARD_S, FakePipedProcessLauncher, SimThreads
+from vs_sim.api.testing import HANG_GUARD_S, FakePipedProcessLauncher, SimNetwork, SimThreads
 
 from .skypilot_world import MemoryTransport
 
@@ -117,6 +117,8 @@ class FakeRunner(SkyPilotJobRunner):
         self.workdirs: list[Path] = []
         self.commands: list[tuple[str, ...]] = []
         self.cluster_life: ClusterLife | None = ClusterUp()
+        self.before_start: Callable[[], None] = lambda: None
+        """Runs before the job starts, as a remote queue or a launch would delay it."""
 
     def ensure_cluster(
         self,
@@ -166,6 +168,7 @@ class FakeRunner(SkyPilotJobRunner):
         assert not (workdir / "private").exists()
         assert (workdir / "candidate.py").read_text() == "candidate"
         assert (workdir / ".vibesys-evaluator-package" / "checker.py").exists()
+        self.before_start()
         job_started(9)
         artifact_script = next(
             (argument for argument in command if "__VIBESYS_SKYPILOT_ARTIFACT_BEGIN_" in argument),
@@ -1663,3 +1666,54 @@ def test_a_unix_socket_bridge_serves_an_evaluation_with_a_private_socket_file(
         assert not socket_path.exists()
     finally:
         shutil.rmtree(short_dir, ignore_errors=True)
+
+
+@pytest.mark.parametrize("extra", [b"", b"x", b"more than nothing\n"], ids=["none", "byte", "line"])
+def test_a_client_that_sent_extra_bytes_and_hung_up_is_seen_disconnected(
+    tmp_path: Path, extra: bytes
+) -> None:
+    """Bytes a client leaves unread after its request cannot hide its hangup.
+
+    The monitor asked ``peer_closed``, which is false while unread data
+    remains, so a client that wrote anything past its request and then hung
+    up was never seen as gone (the flaw #2323 fixed in the Unix transport).
+    """
+    threads = SimThreads(schedule_seed=0)
+    logs: list[str] = []
+    socket_path = Path(tempfile.mkdtemp(prefix="vs-sky-")) / "bridge.sock"
+
+    def main() -> None:
+        network = SimNetwork(threads)
+        workspace, package = _staging_fixture(tmp_path)
+        runner = FakeRunner()
+        runner.before_start = lambda: threads.sleep(5.0)
+        bridge = SkyPilotBridge(
+            runner=runner,
+            cluster_name="lease",
+            resources=_resources(),
+            workspace=workspace,
+            evaluator_package_root=package,
+            hidden_paths=(Path("private"),),
+            commands={"benchmark": ("python", ".vibesys-evaluator-package/checker.py")},
+            benchmark_output_argument="--output-json",
+            state_namespace=_namespace(tmp_path),
+            socket_path=socket_path,
+            network=network,
+            threads=threads,
+            log=logs.append,
+        )
+        bridge.start()
+        try:
+            client = network.connect(str(socket_path), HANG_GUARD_S)
+            request = EvaluationRequest(kind="benchmark", invocation_id="2" * 32)
+            client.send(encode_message(request))
+            threads.sleep(1.0)  # the bridge has read the request and is running it
+            if extra:
+                client.send(extra)
+            client.close()
+            threads.sleep(30.0)
+        finally:
+            bridge.close()
+
+    threads.run(main)
+    assert any("client disconnected" in line for line in logs), logs

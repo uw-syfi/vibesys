@@ -99,6 +99,29 @@ class _Wire:
         self._connection = connection
         self._buffer = b""
 
+    def has_room(self, limit: int) -> bool:
+        """Whether fewer than ``limit`` bytes are buffered."""
+        return len(self._buffer) < limit
+
+    def read_ahead(self, limit: int, timeout: float) -> bool:
+        """Buffer what the peer sends within ``timeout``, up to ``limit`` bytes; ``False`` once it hung up.
+
+        Reads rather than peeks: a peer that closed with bytes still unread is not
+        at end of stream, so only reading past those bytes reveals the hangup.
+        What is read stays buffered for ``readline``; check ``has_room`` first so
+        a flooding peer cannot grow the buffer past ``limit``.
+        """
+        try:
+            chunk = self._connection.recv(limit - len(self._buffer), timeout)
+        except TimeoutError:
+            return True
+        except OSError:
+            chunk = b""
+        if not chunk:
+            return False
+        self._buffer += chunk
+        return True
+
     def readline(self, limit: int) -> bytes:
         """Up to ``limit`` bytes, ending at the first newline; fewer when the peer closes first."""
         while b"\n" not in self._buffer[:limit] and len(self._buffer) < limit:
@@ -575,11 +598,15 @@ class SkyPilotBridge:
         finished = self._threads.event()
 
         def monitor_disconnect() -> None:
-            while not finished.wait(0.1):
+            # The only reader of the connection until ``finished``: ``_deliver`` reads
+            # the acknowledgement after this monitor is joined.
+            while not finished.is_set():
                 if self._closing.is_set():
                     disconnected.set()
                     return
-                if connection.peer_closed():
+                if not reader.has_room(_MAX_REQUEST_BYTES + 1):
+                    finished.wait(0.1)
+                elif not reader.read_ahead(_MAX_REQUEST_BYTES + 1, 0.1):
                     disconnected.set()
                     return
 
