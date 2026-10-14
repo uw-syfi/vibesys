@@ -18,7 +18,7 @@ import {
   nativeTheme,
   type WebContentsView,
 } from 'electron';
-import {APP_ENTRY_URL} from './app-assets.js';
+import {APP_ENTRY_URL, WELCOME_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
 import {bindRunIpc, type PendingRunPort} from './run-ipc.js';
 import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
@@ -29,8 +29,6 @@ import {
   type WelcomePageLoss,
 } from './welcome-page-lifecycle.js';
 import {TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
-
-export const WELCOME_URL = 'app://vibesys/welcome.html';
 
 export interface AppWindowDeps {
   readonly log: (message: string) => void;

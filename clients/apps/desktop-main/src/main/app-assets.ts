@@ -14,6 +14,8 @@ const APP_HOST = 'vibesys';
 const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
 /** The page the window opens. */
 export const APP_ENTRY_URL = `${APP_ORIGIN}/desktop.html`;
+/** The stable welcome surface that may invoke welcome IPC. */
+export const WELCOME_URL = `${APP_ORIGIN}/welcome.html`;
 
 /**
  * Same-origin scripts, styles, and images only; no connections of any kind. React's inline style

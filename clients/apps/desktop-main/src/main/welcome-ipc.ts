@@ -57,14 +57,16 @@ function failure(error: unknown): WelcomeResult<never> {
 /**
  * Answer every welcome channel with `answer`, for `welcome` (the welcome view's web contents on
  * `url`) only; any other sender is refused. Each request carries the invoking Electron frame's
- * process/routing identity. A replacement document cannot issue work until `retire` has settled
- * every operation belonging to the prior identities.
+ * process/routing identity. `revoke` synchronously removes each replaced document's authority;
+ * a replacement document cannot issue work until `retire` has settled every asynchronous cleanup
+ * belonging to the prior identities.
  */
 export function bindWelcomeIpc(
   ipc: WelcomeIpc,
   welcome: WelcomeDocument,
   url: string,
   answer: (request: WelcomeRequest, rendererGeneration: string) => Promise<unknown>,
+  revoke: (rendererGeneration: string) => void,
   retire: (rendererGeneration: string) => Promise<void>,
 ): void {
   let alive = true;
@@ -78,7 +80,10 @@ export function bindWelcomeIpc(
     if (retiringGeneration !== null) activeGenerations.add(retiringGeneration);
     const retiring = [...activeGenerations];
     activeGenerations = new Set();
-    for (const generation of retiring) retiredGenerations.add(generation);
+    for (const generation of retiring) {
+      retiredGenerations.add(generation);
+      revoke(generation);
+    }
     retirement = retirement.then(async () => {
       await Promise.all(retiring.map(generation => retire(generation)));
     });

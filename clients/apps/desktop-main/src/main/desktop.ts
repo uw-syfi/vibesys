@@ -16,19 +16,47 @@ import {
 } from '@vibesys/ipc';
 import type {RecentRun} from '@vibesys/runs';
 import type {RecentFile, SettingsStore} from '@vibesys/settings';
-import {ipcMain} from 'electron';
+import {WELCOME_URL} from './app-assets.js';
 import type {LaunchPlan} from './launch-args.js';
 import type {WelcomeFeed} from './welcome-feed.js';
-import {bindWelcomeIpc, rendererGeneration} from './welcome-ipc.js';
+import {bindWelcomeIpc, type WelcomeIpc} from './welcome-ipc.js';
 import type {AppWindow} from './window.js';
-import {WELCOME_URL} from './window.js';
 
 export interface DesktopDeps {
-  readonly window: AppWindow;
-  readonly welcome: WelcomeFeed;
-  readonly hosts: Hosts;
-  readonly runs: RunControl;
-  readonly settings: SettingsStore;
+  readonly window: Pick<AppWindow, 'focus' | 'mode' | 'sendWelcome' | 'setMode' | 'welcome'>;
+  readonly welcome: Pick<WelcomeFeed, 'chrome' | 'recent' | 'showHost' | 'snapshot'>;
+  readonly hosts: Pick<
+    Hosts,
+    | 'aliases'
+    | 'cancelCheckout'
+    | 'cancelCheckoutOwner'
+    | 'cancelInspection'
+    | 'cancelInspectionOwner'
+    | 'complete'
+    | 'host'
+    | 'inspect'
+    | 'recent'
+    | 'retireInspectionOwner'
+    | 'retireOwner'
+    | 'setCheckout'
+    | 'settingsProblem'
+    | 'signIn'
+    | 'tasks'
+  >;
+  readonly runs: Pick<
+    RunControl,
+    | 'attach'
+    | 'attached'
+    | 'cancelStart'
+    | 'resume'
+    | 'retireStartOwner'
+    | 'retry'
+    | 'start'
+    | 'stop'
+    | 'stops'
+  >;
+  readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recent'>;
+  readonly welcomeIpc: WelcomeIpc;
   readonly log: (message: string) => void;
 }
 
@@ -58,27 +86,18 @@ export class Desktop {
       void this.#watchRecent(recent, generation);
     });
     bindWelcomeIpc(
-      {
-        handle: (channel, listener) =>
-          ipcMain.handle(channel, (event, ...args) =>
-            listener(
-              {
-                senderId: event.sender.id,
-                senderUrl: event.senderFrame?.url ?? null,
-                rendererGeneration: rendererGeneration(event.senderFrame),
-              },
-              ...args,
-            ),
-          ),
-      },
+      deps.welcomeIpc,
       deps.window.welcome,
       WELCOME_URL,
       (request, rendererGeneration) => this.#answer(request, rendererGeneration),
-      async rendererGeneration => {
-        // Inspection writes are independently guarded, so revoke them before awaiting checkout
-        // teardown. A pending checkout must not extend a replaced document's commit authority.
+      rendererGeneration => {
+        // Renderer-owned writes and starts lose authority in the navigation turn itself. A late
+        // launch continuation must see cancellation before asynchronous retirement can begin.
         deps.hosts.retireInspectionOwner(rendererGeneration);
+        deps.runs.retireStartOwner(rendererGeneration);
         if (this.#welcomeRenderer === rendererGeneration) this.#welcomeRenderer = null;
+      },
+      async rendererGeneration => {
         try {
           await Promise.all([
             deps.hosts.cancelCheckoutOwner(rendererGeneration),
@@ -201,15 +220,12 @@ export class Desktop {
         return null;
       case 'start':
         // The start-run feature owns the run arguments' syntax.
-        return runs.start(
-          request.host,
-          request.project,
-          request.task,
-          shellWords(request.args),
-          request.start,
-        );
+        return runs.start(request.host, request.project, request.task, shellWords(request.args), {
+          owner: rendererGeneration,
+          sequence: request.start,
+        });
       case 'cancel-start':
-        runs.cancelStart(request.start);
+        runs.cancelStart({owner: rendererGeneration, sequence: request.start});
         return null;
       case 'resume':
         await runs.resume(request.host, request.project, request.run);

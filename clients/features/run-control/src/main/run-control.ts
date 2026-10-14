@@ -80,6 +80,12 @@ interface StartIntent {
   cancelled: boolean;
 }
 
+/** One welcome document's start request, unique across renderer-document lifetimes. */
+export interface StartIdentity {
+  readonly owner: string;
+  readonly sequence: number;
+}
+
 /** The concrete server the latest navigation intent is trying to select. */
 interface IntendedTarget {
   readonly generation: number;
@@ -99,8 +105,8 @@ type Resume = {readonly run_id: ResumeRunId} | null;
 export class RunControl {
   readonly #deps: RunControlDeps;
   readonly #stops: StopController;
-  /** Starts the welcome view asked for, by token; true once cancelled. */
-  readonly #starts = new Map<number, StartIntent>();
+  /** Starts the welcome view asked for, by document owner and renderer-local sequence. */
+  readonly #starts = new Map<string, Map<number, StartIntent>>();
   /** The latest attachment-changing intent. Public detach claims a generation too. */
   #generation = 0;
   /** Its intended server, once known, including while host lookup or recent persistence waits. */
@@ -202,25 +208,37 @@ export class RunControl {
     project: string,
     task: string | null,
     args: readonly string[],
-    token: number | null = null,
+    identity: StartIdentity | null = null,
   ): Promise<StartOutcome> {
-    if (token !== null && this.#starts.has(token))
+    if (identity !== null && this.#startIntent(identity) !== undefined)
       throw new Error('that start was already asked for');
     const cancel: StartIntent = {generation: this.#claim(), cancelled: false};
-    if (token !== null) this.#starts.set(token, cancel);
+    if (identity !== null) this.#setStartIntent(identity, cancel);
     try {
       return await this.#launch(id, project, task, args, null, cancel);
     } finally {
-      if (token !== null) this.#starts.delete(token);
+      if (identity !== null) this.#deleteStartIntent(identity, cancel);
     }
   }
 
-  /** Cancel the start named `token`; a start that already ended has nothing to cancel. */
-  cancelStart(token: number): void {
-    const cancel = this.#starts.get(token);
+  /** Cancel the start named by `identity`; a start that already ended has nothing to cancel. */
+  cancelStart(identity: StartIdentity): void {
+    const cancel = this.#startIntent(identity);
     if (cancel === undefined) return;
     cancel.cancelled = true;
     if (this.#owns(cancel.generation)) this.#claim();
+  }
+
+  /** Revoke every pending start owned by a renderer document that went away. */
+  retireStartOwner(owner: string): void {
+    const starts = this.#starts.get(owner);
+    if (starts === undefined) return;
+    let ownsNavigation = false;
+    for (const start of starts.values()) {
+      start.cancelled = true;
+      if (this.#owns(start.generation)) ownsNavigation = true;
+    }
+    if (ownsNavigation) this.#claim();
   }
 
   /** Resume run `run` of `project` on `id` and attach. */
@@ -601,6 +619,23 @@ export class RunControl {
 
   #active(intent: StartIntent): boolean {
     return !intent.cancelled && this.#owns(intent.generation);
+  }
+
+  #startIntent(identity: StartIdentity): StartIntent | undefined {
+    return this.#starts.get(identity.owner)?.get(identity.sequence);
+  }
+
+  #setStartIntent(identity: StartIdentity, intent: StartIntent): void {
+    const starts = this.#starts.get(identity.owner) ?? new Map<number, StartIntent>();
+    starts.set(identity.sequence, intent);
+    this.#starts.set(identity.owner, starts);
+  }
+
+  #deleteStartIntent(identity: StartIdentity, intent: StartIntent): void {
+    const starts = this.#starts.get(identity.owner);
+    if (starts?.get(identity.sequence) !== intent) return;
+    starts.delete(identity.sequence);
+    if (starts.size === 0) this.#starts.delete(identity.owner);
   }
 
   #phase(binding: Binding, phase: Phase): void {

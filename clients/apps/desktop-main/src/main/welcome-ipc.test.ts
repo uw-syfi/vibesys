@@ -127,6 +127,7 @@ describe('bindWelcomeIpc', () => {
         answered.push(generation);
         return null;
       },
+      () => undefined,
       async () => undefined,
     );
 
@@ -166,6 +167,7 @@ describe('bindWelcomeIpc', () => {
     const firstReply = new Deferred();
     const retirement = new Deferred();
     const answered: Array<{readonly generation: string; readonly change: number}> = [];
+    const revoked: string[] = [];
     const retired: string[] = [];
     bindWelcomeIpc(
       ipc,
@@ -176,6 +178,9 @@ describe('bindWelcomeIpc', () => {
         answered.push({generation, change: request.change});
         if (answered.length === 1) await firstReply.promise;
         return '/checkout';
+      },
+      generation => {
+        revoked.push(generation);
       },
       async generation => {
         retired.push(generation);
@@ -188,6 +193,8 @@ describe('bindWelcomeIpc', () => {
     expect(answered).toEqual([{generation: '10:100', change: 1}]);
 
     document.navigate('10:100');
+    expect(revoked).toEqual(['10:100']);
+    expect(retired).toEqual([]);
     const replacement = ipc.invokeFrom('11:101', WELCOME_CHANNELS.setCheckout, 'local', '/new', 1);
     await spin();
     expect(retired).toEqual(['10:100']);
@@ -215,6 +222,7 @@ describe('bindWelcomeIpc', () => {
         answered.push(generation);
         return null;
       },
+      () => undefined,
       async () => undefined,
     );
 
@@ -243,6 +251,7 @@ describe('bindWelcomeIpc', () => {
       document,
       'app://vibesys/welcome.html',
       async () => null,
+      () => undefined,
       async generation => {
         retired.push(generation);
       },
@@ -271,6 +280,7 @@ describe('bindWelcomeIpc', () => {
         answered.push(generation);
         return null;
       },
+      () => undefined,
       async generation => {
         retired.push(generation);
       },

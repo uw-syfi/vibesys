@@ -308,6 +308,84 @@ async function observeListing(
 }
 
 describe('RunControl over the FakeHelper', () => {
+  test('retiring a start owner stops a late launch without opening its page', async () => {
+    const w = world();
+    const delayed = w.link.helper.deferNext('run.start');
+    const starting = w.runs.start(HOST, '/p', 'spsc', [], {
+      owner: '10:100',
+      sequence: 1,
+    });
+    await delayed.received;
+
+    w.runs.retireStartOwner('10:100');
+    delayed.release();
+
+    expect(await starting).toBe('cancelled');
+    expect(w.runs.attached()).toBeNull();
+    expect(w.pages).toMatchObject({opened: 0, closed: 0});
+    expect(w.link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
+    expect(w.link.helper.host.instances).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('equal start sequences from different owners are independent', async () => {
+    const w = world();
+    const olderReply = w.link.helper.deferNext('run.start');
+    const older = w.runs.start(HOST, '/p', 'spsc', [], {owner: '10:100', sequence: 1});
+    await olderReply.received;
+    const newerReply = w.link.helper.deferNext('run.start');
+    const newer = w.runs.start(HOST, '/p', 'spsc', [], {owner: '11:101', sequence: 1});
+    await newerReply.received;
+
+    w.runs.retireStartOwner('10:100');
+    newerReply.release();
+    expect(await newer).toBe('started');
+    const selected = w.runs.attached()?.instanceId;
+    olderReply.release();
+    expect(await older).toBe('cancelled');
+
+    expect(selected).toBe('000000000002');
+    expect(w.runs.attached()?.instanceId).toBe(selected);
+    expect(w.link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
+    expect(w.pages).toMatchObject({opened: 1, closed: 0});
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a successor cancellation cannot cancel a predecessor with the same sequence', async () => {
+    const w = world();
+    const delayed = w.link.helper.deferNext('run.start');
+    const starting = w.runs.start(HOST, '/p', 'spsc', [], {
+      owner: '10:100',
+      sequence: 1,
+    });
+    await delayed.received;
+
+    w.runs.cancelStart({owner: '11:101', sequence: 1});
+    delayed.release();
+
+    expect(await starting).toBe('started');
+    expect(w.pages).toMatchObject({opened: 1, closed: 0});
+    expect(w.link.helper.stops).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('duplicate start identities within one owner remain rejected', async () => {
+    const w = world();
+    const delayed = w.link.helper.deferNext('run.start');
+    const identity = {owner: '10:100', sequence: 1};
+    const first = w.runs.start(HOST, '/p', 'spsc', [], identity);
+    await delayed.received;
+
+    await expect(w.runs.start(HOST, '/p', 'spsc', [], identity)).rejects.toThrow(
+      'that start was already asked for',
+    );
+
+    w.runs.cancelStart(identity);
+    delayed.release();
+    expect(await first).toBe('cancelled');
+    await w.connection[Symbol.asyncDispose]();
+  });
+
   test('regression: a start while the host listing is already held binds the run, not an ended one', async () => {
     const w = world();
     // The connection already holds a listing from before the start published its record.
