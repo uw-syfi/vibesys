@@ -40,5 +40,7 @@ Tasks around the code.
 - [triage-prs](triage-prs/SKILL.md): triage open pull requests into a
   maintainer queue.
 - [vs-meta-opt](vs-meta-opt/SKILL.md): run and audit meta-optimization campaigns.
+- [write-docs](write-docs/SKILL.md): decide what belongs in docs, write it in
+  the house style, and move or delete pages safely.
 - [write-skills](write-skills/SKILL.md): the convention for skills in this
   directory, and how to apply it.
