@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from .fake_connector import REQUESTS_FILE, FakeConnector, sacct_row
+from .scheduler_read import split_framed
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -210,11 +211,8 @@ class TraceConnector:
     ) -> subprocess.CompletedProcess[str]:
         """Answer one connector request; scheduler commands come from the traces."""
         request = json.loads(stdin) if stdin else {}
-        tokens = (
-            shlex.split(str(request.get("command", "")))
-            if request.get("operation") == "exec"
-            else []
-        )
+        query, end = split_framed(str(request.get("command", "")))
+        tokens = shlex.split(query) if request.get("operation") == "exec" else []
         try:
             answer = self._answer(request, tokens)
         except _SchedulerRefused as refusal:
@@ -236,7 +234,7 @@ class TraceConnector:
             completed = subprocess.CompletedProcess(
                 argv,
                 0,
-                json.dumps({"version": 1, "returncode": 0, "stdout": answer, "stderr": ""}),
+                json.dumps({"version": 1, "returncode": 0, "stdout": answer + end, "stderr": ""}),
                 "",
             )
         self.clock.advance(self._command_seconds)

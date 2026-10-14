@@ -34,6 +34,7 @@ from vs_slurm.api import (
     SlurmTreeArtifact,
     load_slurm_config,
     runtime_content_identity,
+    split_framed_scheduler_query,
 )
 
 # test-isolation: the public Fake connector's sacct renderer keeps this stub's rows realistic.
@@ -178,7 +179,11 @@ class _FakeConnector:
                     value + ("\n" if value else ""), encoding="utf-8"
                 )
 
-    def _execute(self, command: str) -> str:
+    def _execute(self, framed: str) -> str:
+        command, end = split_framed_scheduler_query(framed)
+        return self._answer(command) + end
+
+    def _answer(self, command: str) -> str:
         tokens = shlex.split(command)
         cache_response = self._content_cache_response(tokens)
         if cache_response is not None:
@@ -423,7 +428,7 @@ class _FakeSshProcess:
         self.environments.append(environment)
         self.calls.append((command, stdin, timeout))
         if command[0] == self._program:
-            remote_command = command[-1]
+            remote_command, end = split_framed_scheduler_query(command[-1])
             if "sbatch" in remote_command:
                 stdout = "Submitted batch job 4567\n"
             elif remote_command.startswith("sacct"):
@@ -434,7 +439,7 @@ class _FakeSshProcess:
                 stdout = "MISSING"
             else:
                 stdout = ""
-            return subprocess.CompletedProcess(argv, 0, stdout, "")
+            return subprocess.CompletedProcess(argv, 0, stdout + end, "")
         source, destination = command[-2:]
         if source.endswith("exit-code.txt"):
             Path(destination).write_text("0\n", encoding="utf-8")

@@ -37,6 +37,7 @@ from .remote_operations import (
     RemoteOperations,
     operation_job_name,
 )
+from .scheduler_read import framed, unframed
 from .scheduler_states import (
     INITIAL_LIFE,
     JobLife,
@@ -446,8 +447,8 @@ class SlurmError(RuntimeError):
 
     @classmethod
     def truncated_output(cls) -> SlurmError:
-        """Describe a scheduler answer whose last line was cut off."""
-        return cls("Slurm scheduler output ended mid-line")
+        """Describe a scheduler answer that lost its end line in transit."""
+        return cls("Slurm scheduler output did not arrive whole")
 
     @classmethod
     def job_timed_out(cls, job_id: str) -> SlurmError:
@@ -1240,16 +1241,15 @@ class SlurmJobRunner:
             return self._whole_reading(command)
 
     def _whole_reading(self, command: str) -> str:
-        """Stdout of ``command``, refused when its last line is cut off.
+        """Stdout of ``command``, refused unless its end line arrived (`scheduler_read`).
 
-        ``squeue`` and ``sacct`` end every line with a newline. Output that stops
-        mid-line lost its tail in transit, and a cut job id or state would read as
-        another job's or as a different state.
+        An empty answer means "no such job" only when it provably arrived
+        whole; a lost or cut answer is unknown, never an absent job.
         """
-        stdout = self._transport.exec(command).stdout
-        if stdout and not stdout.endswith("\n"):
+        body = unframed(self._transport.exec(framed(command)).stdout)
+        if body is None:
             raise SlurmError.truncated_output()
-        return stdout.strip()
+        return body.strip()
 
     def collect_evidence(
         self, handle: SlurmJobHandle, *, observed: SlurmJobStatus | None = None

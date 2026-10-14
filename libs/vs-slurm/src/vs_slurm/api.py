@@ -64,6 +64,8 @@ from .runner import (
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
+from .scheduler_read import READ_END as SCHEDULER_READ_END
+from .scheduler_read import split_framed as split_framed_scheduler_query
 from .scheduler_states import (
     INITIAL_LIFE,
     AccountingRow,
@@ -110,6 +112,7 @@ __all__ = [
     "LIFETIMES",
     "PORT_PLACEHOLDER",
     "REQUESTS_FILE",
+    "SCHEDULER_READ_END",
     "SERVICE_NOT_READY_EXIT_CODE",
     "AccountingRow",
     "Cluster",
@@ -189,6 +192,7 @@ __all__ = [
     "phase_of",
     "runtime_content_identity",
     "shell_join_with_port",
+    "split_framed_scheduler_query",
     "status_of",
     "tree_content_identity",
     "validate_cluster_operation_id",

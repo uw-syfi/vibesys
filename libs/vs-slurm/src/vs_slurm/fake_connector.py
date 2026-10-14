@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from . import fake_shell
+from .scheduler_read import split_framed
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -388,7 +389,21 @@ def _executing(state: Path, request: dict[str, object]) -> dict[str, object]:
 
 
 def handle(state: Path, request: dict[str, object]) -> dict[str, object]:
-    """Record one connector request and return its protocol response."""
+    """Record one connector request and return its protocol response.
+
+    A framed scheduler query (`scheduler_read`) is answered like the bare query,
+    with the end line after its output when it succeeds, as a remote shell does.
+    """
+    query, end = split_framed(str(request.get("command", "")))
+    if not end:
+        return _handle(state, request)
+    response = _handle(state, {**request, "command": query})
+    if response["returncode"] == 0:
+        response = {**response, "stdout": str(response["stdout"]) + end}
+    return response
+
+
+def _handle(state: Path, request: dict[str, object]) -> dict[str, object]:
     with (state / REQUESTS_FILE).open("a", encoding="utf-8") as log:
         log.write(json.dumps(request) + "\n")
     if (state / RUN_FILE).exists():
@@ -566,14 +581,17 @@ class FakeConnector:
         return subprocess.CompletedProcess(argv, 0, json.dumps(response), "")
 
     def _answer(self, request: dict[str, object]) -> dict[str, object]:
-        tokens = shlex.split(str(request.get("command", "")))
+        query, end = split_framed(str(request.get("command", "")))
+        tokens = shlex.split(query)
         self._before_dispatch(tokens)
         response = self._scheduler(tokens) if request["operation"] == "exec" else None
         if response is None:
             response = handle(self.state, request)
         else:
             with (self.state / REQUESTS_FILE).open("a", encoding="utf-8") as log:
-                log.write(json.dumps(request) + "\n")
+                log.write(json.dumps({**request, "command": query}) + "\n")
+            if response["returncode"] == 0:
+                response = {**response, "stdout": str(response["stdout"]) + end}
         if response["stdout"] == "CREATED" and tokens[:2] == ["mkdir", "-p"]:
             plan = self._plans.get(hashlib.sha256(Path(tokens[2]).name.encode()).hexdigest()[:32])
             if plan is not None and plan.lost_claim_reply:
