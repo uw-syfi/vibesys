@@ -106,6 +106,16 @@ from vs_runtime._core_wiring import (
     empty_catalog,
     new_core_state,
 )
+from vs_runtime._effect_fence import (
+    EffectFences,
+    Entered,
+    Fenced,
+    FenceKey,
+    FenceKind,
+    MayHold,
+    NothingHeld,
+    StillCreatingError,
+)
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._evaluation_requests import JobRecord, MeasurementRequests
 from vs_runtime._evidence_ledger import (
@@ -269,6 +279,8 @@ __all__ = [
     "Declined",
     "DispatchCapExceededError",
     "DispatchProgress",
+    "EffectFences",
+    "Entered",
     "EvaluationRequests",
     "EvidenceEntry",
     "EvidenceLookup",
@@ -281,6 +293,9 @@ __all__ = [
     "ExecutorRefusal",
     "ExecutorRole",
     "ExportPatchOwner",
+    "FenceKey",
+    "FenceKind",
+    "Fenced",
     "IgnoreCommits",
     "IgnoreMeasurement",
     "Indeterminate",
@@ -294,6 +309,7 @@ __all__ = [
     "JournalSemanticEvents",
     "LeaseUnavailableError",
     "LifecycleReportingExecutor",
+    "MayHold",
     "MeasurementObserver",
     "MeasurementRequests",
     "MeasurementServices",
@@ -301,6 +317,7 @@ __all__ = [
     "NeverBegun",
     "NextWake",
     "NotApplied",
+    "NothingHeld",
     "ObservationFactory",
     "ObservationFacts",
     "ObservationLedgerCorruptError",
@@ -378,6 +395,7 @@ __all__ = [
     "StallNotes",
     "StatelessToolServers",
     "SteerArtifacts",
+    "StillCreatingError",
     "StoreWorkspaceReceipts",
     "ToolServerSource",
     "Transient",

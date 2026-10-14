@@ -90,6 +90,7 @@ from vs_runtime._access_settlement import (
 )
 from vs_runtime._core_identity import CoreRequestId, ReceiptKey, core_identity, core_named
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
+from vs_runtime._effect_fence import EffectFences, Entered, Fenced, FenceKey, FenceKind
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -106,6 +107,7 @@ from vs_runtime._receipt_store import (
     owner_key,
 )
 from vs_runtime._session_operation import await_session_operation
+from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -118,11 +120,10 @@ if TYPE_CHECKING:
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspace_access import AccessGrant, AccessGuardedWorkspace
+    from vs_sim.api import BlockingRunner
 
 _BINDINGS = "session-bindings"
 _DISPATCHES = "session-dispatches"
-_WITHDRAWN = "session-withdrawn"
-_WITHDRAWN_SESSIONS = "session-withdrawn-episodes"
 
 
 def session_binding_key(request: RequestBase, session_id: SessionId) -> str:
@@ -151,86 +152,21 @@ def load_dispatch_record(
     return store.load(_DISPATCHES, "dispatch", f"{bkey}/{invocation_id.root}", DispatchRecord)
 
 
-class WithdrawnInvocation(BaseModel):
-    """Written when an invocation is cancelled before it was dispatched: it never will be."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    request_id: CoreRequestId
+def invocation_fence(bkey: str, invocation_id: str) -> FenceKey:
+    """The fence of one invocation's provider turn: DispatchTurn enters it, CancelTurn closes it."""
+    return FenceKey(FenceKind.INVOCATION, f"{bkey}/{invocation_id}")
 
 
-class WithdrawnSession(BaseModel):
-    """Written when a session is closed before any ensure of its episode bound it: none will."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-    request_id: CoreRequestId
-
-
-def _withdrawn_session_key(bkey: str, episode: DecisionId | None) -> str:
-    """The fence of one admission episode of a session.
+def episode_fence(bkey: str, episode: DecisionId | None) -> FenceKey:
+    """The fence of one admission episode of a session: EnsureSession enters it, CloseSession closes it.
 
     A later episode reattaches the same session under the same binding key, so the fence
     names the episode the close ended, never the session alone.
     """
-    return f"{bkey}/run" if episode is None else f"{bkey}/episode:{episode.root}"
-
-
-def _record_first(store: ReceiptStore, family: str, key: str, receipt: BaseModel) -> None:
-    """Record a fence unless one is recorded; the first withdrawing request keeps it."""
-    store.modify(
-        family,
-        "withdrawn",
-        key,
-        type(receipt),
-        lambda stored: (receipt if stored is None else None, None),
+    return FenceKey(
+        FenceKind.SESSION_EPISODE,
+        f"{bkey}/run" if episode is None else f"{bkey}/episode:{episode.root}",
     )
-
-
-def withdraw_unbound_session(
-    store: ReceiptStore, bkey: str, episode: DecisionId | None, request_id: CoreRequestId
-) -> SessionBinding | None:
-    """The session's binding, or ``None`` after fencing an episode that bound nothing.
-
-    ``_bind`` stores a binding only when no fence of its episode is recorded, both under the
-    store's lock, so a ``None`` answer proves the episode holds no session now and never will.
-    """
-    with store.exclusive():
-        binding = load_session_binding(store, bkey)
-        if binding is None:
-            _record_first(
-                store,
-                _WITHDRAWN_SESSIONS,
-                _withdrawn_session_key(bkey, episode),
-                WithdrawnSession(request_id=request_id),
-            )
-        return binding
-
-
-def withdraw_undispatched(
-    store: ReceiptStore, bkey: str, invocation_id: InvocationId, request_id: CoreRequestId
-) -> bool:
-    """Fence an invocation that was never dispatched so it never is; False if it was.
-
-    The dispatch record is written before any provider call and only when no withdrawal is
-    recorded (`_claim_dispatch`), both under the store's lock, so a True answer proves
-    the invocation holds nothing now and never will.
-    """
-    key = f"{bkey}/{invocation_id.root}"
-    with store.exclusive():
-        if store.load(_DISPATCHES, "dispatch", key, DispatchRecord) is not None:
-            return False
-        _record_first(store, _WITHDRAWN, key, WithdrawnInvocation(request_id=request_id))
-        return True
-
-
-def _claim_dispatch(store: ReceiptStore, key: str, link: DispatchRecord) -> bool:
-    """Record the dispatch unless the invocation was withdrawn first; False if it was."""
-    with store.exclusive():
-        if store.load(_DISPATCHES, "dispatch", key, DispatchRecord) is None and store.load(
-            _WITHDRAWN, "withdrawn", key, WithdrawnInvocation
-        ):
-            return False
-        store.record_once(_DISPATCHES, "dispatch", key, link)
-        return True
 
 
 class SessionResolver(Protocol):
@@ -440,6 +376,13 @@ class _Dispatch:
     grant: AccessGrant
 
 
+_WITHDRAWN = "the invocation was withdrawn before dispatch"
+
+
+class _WithdrawnError(Exception):
+    """A cancel closed the invocation's fence before the provider call began."""
+
+
 class _RefusalError(Exception):
     """A validation step ended the request with these terminal or unknown facts."""
 
@@ -481,12 +424,18 @@ class RuntimeSessionRequests:
         resolver: SessionResolver,
         store: ReceiptStore,
         yields: TurnYields | None = None,
+        blocking: BlockingRunner | None = None,
     ) -> None:
-        """Bind the durable agent sessions and the run's resolver to the shared store."""
+        """Bind the durable agent sessions and the run's resolver to the shared store.
+
+        *blocking* runs the journal and provider calls (a worker thread each by default).
+        """
         self._sessions = sessions
         self._resolver = resolver
         self._store = store
+        self._fences = EffectFences(store)
         self._yields = yields
+        self._blocking = blocking or ThreadBlockingRunner()
         self.settlement = AccessSettlement(store, resolver.workspace_for)
         resolver.guard_snapshots(self.settlement.fenced_by)
         """Judges each invocation's writes; the lifecycle executors share it."""
@@ -636,7 +585,7 @@ class RuntimeSessionRequests:
 
     async def _perform(self, call: _Call) -> _Facts:
         if isinstance(call.request, EnsureSession):
-            return await self._ensure(call.request, call.canonical)
+            return await self._ensure(call.request, call)
         return await self._dispatch(call.request, call)
 
     @staticmethod
@@ -653,7 +602,8 @@ class RuntimeSessionRequests:
             )
         )
 
-    async def _ensure(self, request: EnsureSession, request_id: RequestId) -> _Facts:
+    async def _ensure(self, request: EnsureSession, call: _Call) -> _Facts:
+        request_id = call.canonical
         spec = request.spec
         if not self._resolver.knows_role(spec.role_id):
             return _rejected(f"role {spec.role_id.root} is not declared")
@@ -669,7 +619,7 @@ class RuntimeSessionRequests:
             session_key=self._conversation_key(request, spec),
             turn_timeout_seconds=None if timeout is None else timeout.total_seconds(),
         )
-        binding = self._bind(key, wanted, required, request.admission_id)
+        binding = self._bind(key, wanted, required, episode_fence(key, request.admission_id), call)
         if not _same_session(binding.spec, spec):
             raise _RefusalError(
                 _rejected("session identity is bound to another spec", binding.resource_id)
@@ -691,19 +641,20 @@ class RuntimeSessionRequests:
         key: str,
         wanted: SessionBinding,
         required: ResourceId | None,
-        episode: DecisionId | None,
+        fence: FenceKey,
+        call: _Call,
     ) -> SessionBinding:
         """The session's binding: created for a fresh identity, never for a required reattach.
 
-        Nor for an episode whose close found nothing bound (`withdraw_unbound_session`).
+        The binding is written in the same locked step as the ensure enters its episode's
+        fence, so a close of the episode either comes first and no binding is ever made for
+        it, or comes after and finds the binding to release.
         """
         if required is not None and wanted.spec.policy != "reuse":
             raise _RefusalError(_rejected("a required resource needs the reuse policy", required))
-
-        def decide(stored: SessionBinding | None) -> tuple[SessionBinding | None, SessionBinding]:
-            if stored is not None:
-                return None, stored
-            if required is not None:
+        with self._store.exclusive():
+            stored = load_session_binding(self._store, key)
+            if stored is None and required is not None:
                 raise _RefusalError(
                     _rejected(
                         "no durable correspondence for the required session resource; "
@@ -711,18 +662,22 @@ class RuntimeSessionRequests:
                         required,
                     )
                 )
-            fence = _withdrawn_session_key(key, episode)
-            if self._store.load(_WITHDRAWN_SESSIONS, "withdrawn", fence, WithdrawnSession):
+            admission = self._fences.enter(fence, by=call.canonical, host=call.context.fence)
+            if isinstance(admission, Fenced) and not (
+                admission.entered_before and stored is not None
+            ):
                 raise _RefusalError(_rejected("the session was closed before this ensure bound it"))
-            return wanted, wanted
-
-        return self._store.modify(_BINDINGS, "binding", key, SessionBinding, decide)
+            if stored is None:
+                self._store.replace(_BINDINGS, "binding", key, wanted)
+                stored = wanted
+            self._fences.leave(fence, by=call.canonical)
+            return stored
 
     async def _require_checkpoint(self, binding: SessionBinding) -> None:
         """Raise unless the provider conversation of an established session is present."""
         key = AgentSessionKey.parse(binding.session_key)
         try:
-            await asyncio.to_thread(self._sessions.checkpoint, key)
+            await self._blocking.run(self._sessions.checkpoint, key)
         except SessionResumeError as error:
             raise _RefusalError(
                 _rejected(
@@ -795,10 +750,15 @@ class RuntimeSessionRequests:
                 self.settlement.require_clear(dispatch.workspace.path, access_key)
             except AccessSettlementError as error:
                 return _retryable(str(error), binding.resource_id)
+        fence = invocation_fence(bkey, dispatch.invocation)
         ended = await self._admit(request, call, bkey, binding, dispatch)
         if ended is not None:
             return ended
-        return await self._run_turn(request, bkey, binding, dispatch)
+        try:
+            return await self._run_turn(request, bkey, binding, dispatch, call)
+        finally:
+            # Whatever this delivery started is in the journal now: a cancel may judge it.
+            self._fences.leave(fence, by=call.canonical)
 
     async def _settle_ended_peers(self, workspace: Path, key: AccessKey) -> None:
         """Judge the unsettled turns of this workspace whose journal proves they ended.
@@ -812,7 +772,7 @@ class RuntimeSessionRequests:
             if binding is None:
                 continue
             try:
-                outcome, never_journaled = await asyncio.to_thread(
+                outcome, never_journaled = await self._blocking.run(
                     self._inspect_peer, AgentSessionKey.parse(binding.session_key), peer.invocation
                 )
             except (
@@ -844,7 +804,12 @@ class RuntimeSessionRequests:
         return state is None or invocation_id not in state.invocations
 
     async def _run_turn(
-        self, request: DispatchTurn, bkey: str, binding: SessionBinding, dispatch: _Dispatch
+        self,
+        request: DispatchTurn,
+        bkey: str,
+        binding: SessionBinding,
+        dispatch: _Dispatch,
+        call: _Call,
     ) -> _Facts:
         turn = request.turn
         access_key = AccessKey(binding=bkey, invocation=dispatch.invocation)
@@ -855,8 +820,29 @@ class RuntimeSessionRequests:
         except AccessSettlementError as error:
             # The baseline was refused, so no provider call began: ask again, do not inspect.
             return _retryable(str(error), binding.resource_id)
+        outcome = await self._judged_outcome(access_key, bkey, binding, dispatch, call)
+        if isinstance(outcome, _Facts):
+            return outcome
+        return await self._finish(outcome, bkey, binding, dispatch, turn.output_schema)
+
+    async def _judged_outcome(
+        self,
+        access_key: AccessKey,
+        bkey: str,
+        binding: SessionBinding,
+        dispatch: _Dispatch,
+        call: _Call,
+    ) -> InvocationOutcome | _Facts:
+        """The dispatch's journal outcome, or the facts of a dispatch that ended without one."""
         try:
-            outcome = await self._outcome(bkey, binding, dispatch)
+            return await self._outcome(bkey, binding, dispatch, call)
+        except _WithdrawnError:
+            # Cancelled before the provider call: no turn ran, so it wrote nothing to judge.
+            try:
+                await self.settlement.settle(access_key)
+            except AccessSettlementError as error:
+                return _unknown(str(error), binding.resource_id)
+            return _rejected(_WITHDRAWN, binding.resource_id)
         except InvocationConflictError as error:
             self.settlement.fence(access_key)
             return _rejected(f"invocation conflicts with its journal: {error}", binding.resource_id)
@@ -866,17 +852,18 @@ class RuntimeSessionRequests:
         except (SessionPersistenceError, SessionResumeError) as error:
             self.settlement.fence(access_key)
             return _unknown(f"dispatch state is unreadable: {error}", binding.resource_id)
-        return await self._finish(outcome, bkey, binding, dispatch, turn.output_schema)
 
     async def _outcome(
-        self, bkey: str, binding: SessionBinding, dispatch: _Dispatch
+        self, bkey: str, binding: SessionBinding, dispatch: _Dispatch, call: _Call
     ) -> InvocationOutcome:
         """The journal's outcome for the invocation, dispatching it only if it never ended.
 
         A turn that already ended is read back: dispatching it through the other of
-        start and resume would look like a changed payload to the journal.
+        start and resume would look like a changed payload to the journal. Just before the
+        provider call the dispatch enters its fence again, so a cancel that closed it in
+        the meantime stops the call (``_WithdrawnError``).
         """
-        recorded = await asyncio.to_thread(
+        recorded = await self._blocking.run(
             self._sessions.inspect, dispatch.key, dispatch.invocation
         )
         if isinstance(recorded, (Completed, InvalidResponse)):
@@ -884,9 +871,18 @@ class RuntimeSessionRequests:
         established = await self._established(bkey, excluding=dispatch.invocation)
         if established:
             await self._require_checkpoint(binding)
+        fence = invocation_fence(bkey, dispatch.invocation)
+        if isinstance(
+            self._fences.enter(fence, by=call.canonical, host=call.context.fence), Fenced
+        ):
+            if self._never_journaled(dispatch.invocation):
+                raise _WithdrawnError
+            return await self._blocking.run(
+                self._sessions.inspect, dispatch.key, dispatch.invocation
+            )
         return await await_session_operation(
             asyncio.create_task(
-                asyncio.to_thread(self._start_or_resume, dispatch, established=established)
+                self._blocking.run(self._start_or_resume, dispatch, established=established)
             ),
             stop=lambda: self._sessions.cancel(dispatch.key, dispatch.invocation),
         )
@@ -896,7 +892,7 @@ class RuntimeSessionRequests:
         binding = load_session_binding(self._store, bkey)
         if binding is None:
             return False
-        return await asyncio.to_thread(
+        return await self._blocking.run(
             conversation_established, self._sessions, binding, excluding=excluding
         )
 
@@ -959,12 +955,32 @@ class RuntimeSessionRequests:
                 return _rejected("the turn deadline passed before dispatch", binding.resource_id)
             # A recorded dispatch may have started: replay what the journal proves, never reject.
             return await self._after_deadline(bkey, binding, dispatch, turn.output_schema)
-        # Written before any provider call: its absence later proves no dispatch began.
-        if not _claim_dispatch(self._store, record_key, link):
-            # Cancelled before it was dispatched: no provider call began, and none will.
-            return _rejected("the invocation was withdrawn before dispatch", binding.resource_id)
+        # The dispatch enters the invocation's fence and records itself in one locked step,
+        # before any provider call: a cancel either came first and no call ever begins, or
+        # finds this record and judges the turn.
+        fence = invocation_fence(bkey, dispatch.invocation)
+        with self._store.exclusive():
+            admission = self._fences.enter(fence, by=call.canonical, host=call.context.fence)
+            if isinstance(admission, Entered):
+                self._store.record_once(_DISPATCHES, "dispatch", record_key, link)
+        if isinstance(admission, Fenced):
+            return await self._after_cancel(admission, bkey, binding, dispatch, turn.output_schema)
         self._note_dispatch(bkey, dispatch.invocation)
         return None
+
+    async def _after_cancel(
+        self,
+        admission: Fenced,
+        bkey: str,
+        binding: SessionBinding,
+        dispatch: _Dispatch,
+        ref: SchemaRef,
+    ) -> _Facts:
+        """A dispatch a cancel fenced off: report what the journal holds, start nothing."""
+        if not admission.entered_before or self._never_journaled(dispatch.invocation):
+            # No provider call began before the cancel, and none will.
+            return _rejected(_WITHDRAWN, binding.resource_id)
+        return await self._after_deadline(bkey, binding, dispatch, ref)
 
     async def _after_deadline(
         self, bkey: str, binding: SessionBinding, dispatch: _Dispatch, ref: SchemaRef
@@ -1116,7 +1132,7 @@ class RuntimeSessionRequests:
         seen = self._observations.observe(
             ObservationSubject.of(request, request_id=core_named(request.dispatch)),
             # A turn that never reached the provider holds nothing: nothing is left to release.
-            ObservationFacts.never_held("no dispatch record: the turn never reached the provider"),
+            ObservationFacts.not_begun("no dispatch record: the turn never reached the provider"),
             observed_at=context.now_at,
         )
         return ExecutionResult(

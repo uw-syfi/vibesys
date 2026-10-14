@@ -517,7 +517,7 @@ class _WorkspacesCase:
     async def world(self) -> AsyncIterator[_WorkspacesWorld]:
         with (
             tempfile.TemporaryDirectory() as raw,
-            _state_home(Path(raw) / "operator-state"),
+            state_home(Path(raw) / "operator-state"),
             open_workspace_env(Path(raw)) as env,
         ):
             try:
@@ -653,7 +653,7 @@ class _SessionLifecycleCase:
 
 
 @contextmanager
-def _state_home(path: Path) -> Iterator[None]:
+def state_home(path: Path) -> Iterator[None]:
     """Point the Project state home at *path* for one world (restored on exit)."""
     previous = os.environ.get("VIBESYS_STATE_HOME")
     os.environ["VIBESYS_STATE_HOME"] = str(path)

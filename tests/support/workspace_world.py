@@ -56,6 +56,7 @@ if TYPE_CHECKING:
         WorkspaceResourceProvider,
     )
     from vs_sandbox.api import CommandRunner, ComputeBackendImpl
+    from vs_sim.api import BlockingRunner
 
 RUN_ID = "workspace-requests"
 
@@ -102,11 +103,14 @@ class WorkspaceEnv:
     git_disk: FakeGitRepositories | None = None
     """The in-memory repositories of a world on ``GitKind.FAKE``; ``None`` on real Git."""
 
-    def start_host(self) -> RuntimeWorkspaces:
-        """Start another host over the same disk state, as after a process restart."""
+    def start_host(self, runner: BlockingRunner | None = None) -> RuntimeWorkspaces:
+        """Start another host over the same disk state, as after a process restart.
+
+        *runner* runs the host's blocking operations (worker threads by default).
+        """
         runtime = create_workspace_runtime(
             workspace_resources=self.factory,
-            blocking=BlockingOperations(),
+            blocking=BlockingOperations(runner),
             validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)

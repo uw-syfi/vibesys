@@ -8,18 +8,23 @@ and lease check, sealed result) and reports through the shared ``ObservationFact
 
 Mechanisms:
 
-* **CancelTurn** never assumes a stop. It asks ``AgentSessions.cancel`` to stop the
-  turn this instance runs, then reads the invocation's journal row. A ``Pending`` row
-  means the dispatch call has not returned, here or in an earlier host that a restart
-  replaced: Unknown, because a new host cannot prove the old provider process
-  stopped. A ``Completed`` or ``InvalidResponse`` row shows the turn ended. An
-  ``Unknown`` row was written by a dispatch call that returned, so the key is
-  released with ``release_interrupted``, which itself refuses an active invocation.
-  An invocation that was never dispatched is REJECTED.
-* **CloseSession** releases the key's live provider resources with
-  ``AgentSessions.release`` and keeps the binding and the provider checkpoint, so a
-  reused conversation is reattached and resumed later. An active invocation makes it
-  Unknown: the shell cancels first.
+* **CancelTurn** first closes the invocation's effect fence (``EffectFences``), which
+  every dispatch enters before its provider call: no dispatch can begin afterwards. A
+  fence no dispatch entered proves nothing is held. Otherwise it never assumes a stop.
+  It asks ``AgentSessions.cancel`` to stop the turn this instance runs, then reads the
+  invocation's journal row. No row: a dispatch still inside the fence on this host may
+  journal and call yet (Unknown), and one that left or whose host was replaced never
+  will. A ``Pending`` row means the dispatch call has not returned, here or in an
+  earlier host that a restart replaced: Unknown, because a new host cannot prove the
+  old provider process stopped. A ``Completed`` or ``InvalidResponse`` row shows the
+  turn ended. An ``Unknown`` row was written by a dispatch call that returned, so the
+  key is released with ``release_interrupted``, which itself refuses an active
+  invocation.
+* **CloseSession** first closes the episode's fence, which every EnsureSession enters
+  in the same locked step as it binds, then releases the key's live provider resources
+  with ``AgentSessions.release`` and keeps the binding and the provider checkpoint, so
+  a reused conversation is reattached and resumed later. An active invocation makes it
+  Unknown: the shell cancels first. No binding proves nothing is held.
 * **ResumeSessionTurn** continues the retained conversation and never substitutes a
   fresh one. The first resume of a continuation binds it to one successor invocation
   and to the retained provider conversation; another successor, or another
@@ -35,7 +40,6 @@ observation. Only terminal observations are stored.
 
 from __future__ import annotations
 
-import asyncio
 from typing import TYPE_CHECKING, Protocol, assert_never
 
 from pydantic import BaseModel, ConfigDict
@@ -71,6 +75,7 @@ from vs_runtime._access_settlement import (
 )
 from vs_runtime._core_identity import CoreRequestId, core_identity
 from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome, ExecutionResult
+from vs_runtime._effect_fence import EffectFences, MayHold, NothingHeld
 from vs_runtime._observation_factory import (
     ObservationFactory,
     ObservationFacts,
@@ -89,12 +94,12 @@ from vs_runtime._receipt_store import (
 from vs_runtime._session_requests import (
     SessionBinding,
     conversation_established,
-    load_dispatch_record,
+    episode_fence,
+    invocation_fence,
     load_session_binding,
     session_binding_key,
-    withdraw_unbound_session,
-    withdraw_undispatched,
 )
+from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationRecord, AgentSessionCheckpoint, AgentSessions
@@ -102,6 +107,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_requests import OwnerEvent, SessionRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspace_requests import RunInvocationProof
+    from vs_sim.api import BlockingRunner
 
 _CONTINUATIONS = "session-continuations"
 _HANDLED = (CancelTurn, CloseSession, ResumeSessionTurn)
@@ -147,7 +153,7 @@ def _refused_before_dispatch(facts: ObservationFacts) -> ObservationFacts:
     so the answer drops the session's resource rather than report it released.
     """
     if facts.terminal and facts.status is ObservationStatus.REJECTED:
-        return ObservationFacts.never_held(facts.diagnostic)
+        return ObservationFacts.refused(facts.diagnostic)
     return facts
 
 
@@ -259,15 +265,19 @@ class SessionLifecycleRequests:
         dispatcher: TurnDispatcher,
         store: ReceiptStore,
         settlement: AccessSettlement,
+        blocking: BlockingRunner | None = None,
     ) -> None:
         """Bind the durable agent sessions, the turn dispatcher, the store and its settlement.
 
-        *settlement* is the instance the turn dispatcher records receipts with.
+        *settlement* is the instance the turn dispatcher records receipts with; *blocking*
+        runs the journal reads and provider calls off the event loop.
         """
         self._sessions = sessions
         self._dispatcher = dispatcher
         self._store = store
         self._settlement = settlement
+        self._blocking = blocking or ThreadBlockingRunner()
+        self._fences = EffectFences(store)
         self._observations = ObservationFactory(store)
 
     async def execute(
@@ -348,7 +358,7 @@ class SessionLifecycleRequests:
     ) -> ExecutionResult:
         match request:
             case CancelTurn():
-                facts = await asyncio.to_thread(self._cancel, request)
+                facts = await self._blocking.run(self._cancel, request, context)
                 facts = await self._settled(
                     facts,
                     request,
@@ -356,7 +366,7 @@ class SessionLifecycleRequests:
                     request.invocation.invocation_id.root,
                 )
             case CloseSession():
-                facts = await asyncio.to_thread(self._close, request)
+                facts = await self._blocking.run(self._close, request, context)
                 facts = await self._settled(facts, request, request.session_id, None)
             case ResumeSessionTurn():
                 return await self._resume(request, request_id, context)
@@ -411,43 +421,48 @@ class SessionLifecycleRequests:
             receipt = self._settlement.receipt(access_key)
             if receipt is None or receipt.settled:
                 continue
-            row = await asyncio.to_thread(_journal_row, self._sessions, key, invocation_id)
+            row = await self._blocking.run(_journal_row, self._sessions, key, invocation_id)
             if (_call_returned if closed else _writer_ended)(row):
                 await self._settlement.settle(access_key)
 
     # cancel
 
-    def _cancel(self, request: CancelTurn) -> ObservationFacts:
+    def _cancel(self, request: CancelTurn, context: ExecutionContext) -> ObservationFacts:
+        """Close the invocation's fence, then stop and judge whatever its dispatches began."""
         invocation = request.invocation
         bkey = session_binding_key(request, invocation.session_id)
-        binding = self._binding(request, invocation.session_id)
-        if (
-            binding is None
-            or load_dispatch_record(self._store, bkey, invocation.invocation_id) is None
-        ):
-            # Never dispatched: fence it so a dispatch still in flight can never begin, and
-            # the answer proves nothing is held now or later.
-            if withdraw_undispatched(
-                self._store, bkey, invocation.invocation_id, core_identity(request)
-            ):
-                return ObservationFacts.never_held("the invocation was never dispatched")
-            if binding is None:
-                return _unknown("the invocation was dispatched without a session binding", None)
+        with self._store.exclusive():
+            closure = self._fences.close(
+                invocation_fence(bkey, invocation.invocation_id.root),
+                by=core_identity(request),
+                host=context.fence,
+            )
+            binding = self._binding(request, invocation.session_id)
+        if isinstance(closure, NothingHeld):
+            # No dispatch entered the fence, and none can now: no provider call ever begins.
+            return ObservationFacts.never_held(closure, "the invocation was never dispatched")
+        if binding is None:
+            return _unknown("the invocation was dispatched without a session binding", None)
+        return self._stop(closure, binding, invocation.invocation_id.root)
+
+    def _stop(
+        self, closure: MayHold, binding: SessionBinding, invocation_id: str
+    ) -> ObservationFacts:
+        """Stop the turn this instance runs, then judge it from its journal row."""
         key = AgentSessionKey.parse(binding.session_key)
-        invocation_id = invocation.invocation_id.root
         try:
             self._sessions.cancel(key, invocation_id)
             record = _journal_row(self._sessions, key, invocation_id)
-            if record is not None and isinstance(record.outcome, Pending):
+            if record is None:
+                return self._never_journaled(closure, binding)
+            if isinstance(record.outcome, Pending):
                 # Pending: the dispatch call has not returned, here or in an earlier
                 # host. Only this instance can reach a turn it runs, so a restarted
-                # host cannot prove the provider process stopped. A turn with no row at all
-                # never began (the dispatch intent is journaled before any provider call),
-                # so a refused dispatch leaves nothing to stop.
+                # host cannot prove the provider process stopped.
                 return _unknown(
                     "the turn is not proven stopped: its dispatch has not returned", binding
                 )
-            if record is not None and isinstance(record.outcome, (Completed, InvalidResponse)):
+            if isinstance(record.outcome, (Completed, InvalidResponse)):
                 return _released(
                     ObservationStatus.CANCELLED,
                     binding,
@@ -460,16 +475,39 @@ class SessionLifecycleRequests:
             return _unknown(f"the invocation cannot be settled: {error}", binding)
         return _released(ObservationStatus.CANCELLED, binding)
 
+    def _never_journaled(self, closure: MayHold, binding: SessionBinding) -> ObservationFacts:
+        """A dispatched invocation with no journal row: no provider call began, yet.
+
+        The dispatch intent is journaled before any provider call. A dispatch that entered
+        the fence and has not left may still journal and call; one that left, or whose host
+        a restart replaced, never will, because the closed fence refuses its next entry.
+        """
+        if closure.live:
+            return _unknown("a dispatch of the turn is in flight and may still start", binding)
+        # Every dispatch ended without a provider call (refused, or its host replaced), and
+        # none can start any more: the cancel ended the turn.
+        self._fences.cleared(closure)
+        return _released(
+            ObservationStatus.CANCELLED, binding, "the turn was cancelled before it began"
+        )
+
     # close
 
-    def _close(self, request: CloseSession) -> ObservationFacts:
+    def _close(self, request: CloseSession, context: ExecutionContext) -> ObservationFacts:
+        """Close the episode's fence, then release the session an ensure bound, if any."""
         bkey = session_binding_key(request, request.session_id)
-        binding = withdraw_unbound_session(
-            self._store, bkey, request.episode, core_identity(request)
-        )
+        with self._store.exclusive():
+            closure = self._fences.close(
+                episode_fence(bkey, request.episode), by=core_identity(request), host=context.fence
+            )
+            binding = load_session_binding(self._store, bkey)
         if binding is None:
-            # Fenced: an ensure of this episode still in flight can never bind afterwards.
-            return ObservationFacts.never_held("no ensured session to close")
+            # An ensure binds in the same locked step as it enters, so an entered fence
+            # without a binding only has entries that refused: nothing was bound.
+            if isinstance(closure, MayHold) and closure.live:
+                return _unknown("an ensure of the session is in flight")
+            proof = closure if isinstance(closure, NothingHeld) else self._fences.cleared(closure)
+            return ObservationFacts.never_held(proof, "no ensured session to close")
         try:
             self._sessions.release(AgentSessionKey.parse(binding.session_key))
         except InvocationConflictError as error:
@@ -490,15 +528,15 @@ class SessionLifecycleRequests:
             return self._result(
                 request,
                 context,
-                ObservationFacts.never_held("a resume turn needs charge class resume"),
+                ObservationFacts.refused("a resume turn needs charge class resume"),
             )
         if turn.continuation_id != request.continuation_id:
             return self._result(
                 request,
                 context,
-                ObservationFacts.never_held("the turn names another continuation than the request"),
+                ObservationFacts.refused("the turn names another continuation than the request"),
             )
-        problem = await asyncio.to_thread(self._bind_continuation, request)
+        problem = await self._blocking.run(self._bind_continuation, request)
         if problem is not None:
             return self._result(request, context, _refused_before_dispatch(problem))
         superseded = await self._settle_superseded(request)

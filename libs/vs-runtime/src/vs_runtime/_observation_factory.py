@@ -41,6 +41,7 @@ from vs_runtime._receipt_store import ReceiptCorruptError
 
 if TYPE_CHECKING:
     from vs_core.api import RequestBase
+    from vs_runtime._effect_fence import NothingHeld
     from vs_runtime._receipt_store import ReceiptStore
 
 
@@ -82,14 +83,39 @@ class ObservationFacts:
         return cls(status=ObservationStatus.REJECTED, diagnostic=PAYLOAD_CONFLICT)
 
     @classmethod
-    def never_held(cls, diagnostic: str) -> ObservationFacts:
-        """A terminal refusal of a request proven to hold nothing, now or later.
+    def never_held(cls, proof: NothingHeld, diagnostic: str) -> ObservationFacts:
+        """A terminal answer that what the request names holds nothing, now or later.
 
-        Every executor answers this way when it can prove the effect never began and never
-        will (no binding, no begun marker, no dispatch record under a fence). Core ends an
-        owning record only on a proven release, so a bare rejection there would leave it
-        waiting for an answer that never comes.
+        Only a closed effect fence proves it (``EffectFences.close`` or ``cleared``): a
+        cancel, close or discard of something no request entered the fence to create, or
+        whose entries the closer removed. Core ends an owning record only on a proven
+        release, so a bare rejection there would leave it waiting for an answer that never
+        comes.
         """
+        del proof  # its existence is the proof; core needs only the facts
+        return cls._holding_nothing(diagnostic)
+
+    @classmethod
+    def refused(cls, diagnostic: str) -> ObservationFacts:
+        """A terminal refusal of a request by itself, decided before it created anything.
+
+        The refusal is sealed with the request's identity, so the request never acts later
+        and holds nothing. It is never an answer about what another request created: that
+        is ``never_held``, which needs a closed fence.
+        """
+        return cls._holding_nothing(diagnostic)
+
+    @classmethod
+    def not_begun(cls, diagnostic: str) -> ObservationFacts:
+        """An inspection's answer that the inspected request's effect has not begun.
+
+        Core sends that request again under the same identity, so whatever it later holds
+        is reported under that identity and an earlier delivery cannot act twice.
+        """
+        return cls._holding_nothing(diagnostic)
+
+    @classmethod
+    def _holding_nothing(cls, diagnostic: str) -> ObservationFacts:
         return cls(
             status=ObservationStatus.REJECTED,
             released=True,

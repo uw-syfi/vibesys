@@ -68,18 +68,11 @@ class WorkspaceReceipts(Protocol):
 
     def load_binding(self, attempt: AttemptRef) -> AttemptBinding | None: ...
 
-    def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding | None:
+    def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding:
         """Store the binding if absent; return the binding that won.
 
-        ``None`` when the generation was withdrawn first (`withdraw_unbound`): it never binds.
-        """
-        ...
-
-    def withdraw_unbound(self, attempt: AttemptRef) -> AttemptBinding | None:
-        """The generation's binding, or ``None`` after ending a generation that bound nothing.
-
-        The check and the release mark are one step under the store's lock, as is ``bind``,
-        so a ``None`` answer proves the generation holds no workspace now and never will.
+        The caller holds the attempt's workspace fence (``EffectFences``): a discard that
+        closed it first is what keeps a withdrawn generation from binding.
         """
         ...
 
@@ -164,24 +157,13 @@ class StoreWorkspaceReceipts:
     def load_binding(self, attempt: AttemptRef) -> AttemptBinding | None:
         return self._store.load(_BINDINGS, "binding", attempt_key(attempt), AttemptBinding)
 
-    def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding | None:
-        def decide(
-            stored: AttemptBinding | None,
-        ) -> tuple[AttemptBinding | None, AttemptBinding | None]:
-            if stored is not None:
-                return None, stored
-            return (None, None) if self.is_released(attempt) else (binding, binding)
+    def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding:
+        def decide(stored: AttemptBinding | None) -> tuple[AttemptBinding | None, AttemptBinding]:
+            return (None, stored) if stored is not None else (binding, binding)
 
         return self._store.modify(
             _BINDINGS, "binding", attempt_key(attempt), AttemptBinding, decide
         )
-
-    def withdraw_unbound(self, attempt: AttemptRef) -> AttemptBinding | None:
-        with self._store.exclusive():
-            binding = self.load_binding(attempt)
-            if binding is None:
-                self.mark_released(attempt)
-            return binding
 
     def acquire_root(self, attempt: AttemptRef) -> RootGrant:
         def decide(holder: AttemptRef | None) -> tuple[AttemptRef | None, RootGrant]:
