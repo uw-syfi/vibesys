@@ -197,6 +197,7 @@ async def test_cancel_of_an_undispatched_invocation_or_unknown_session_is_reject
     async with world() as w:
         never_ensured = await w.execute(cancel_request("req-a"))
         assert status(never_ensured) is ObservationStatus.REJECTED
+        assert holds_nothing(never_ensured)
         await w.execute(ensure_request())
         undispatched = await w.execute(cancel_request("req-b", invocation="inv-9"))
         assert status(undispatched) is ObservationStatus.REJECTED
@@ -233,6 +234,14 @@ async def test_close_of_a_session_that_was_never_ensured_is_rejected() -> None:
         assert status(closed) is ObservationStatus.REJECTED
         assert closed.observation.observation.terminal
         assert released_keys(w.host) == 0
+        # Proof that nothing is held: a closing session in core ends on it instead of waiting.
+        assert holds_nothing(closed)
+
+
+def holds_nothing(result: ExecutionResult) -> bool:
+    """The answer proves release of an identity under which nothing was ever ensured."""
+    observed = result.observation.observation
+    return observed.released and observed.children_complete and not observed.accepted
 
 
 def in_episode[R: RequestBase](request: R, generation: int) -> R:

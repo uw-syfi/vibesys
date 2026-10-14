@@ -138,6 +138,20 @@ def _rejected(diagnostic: str, binding: SessionBinding | None = None) -> Observa
     )
 
 
+def _nothing_held(diagnostic: str) -> ObservationFacts:
+    """No session was ever ensured under the identity, so the request leaves nothing held.
+
+    Core ends a closing session only on a proven release; a bare rejection is no proof, and
+    nothing would ever answer again, so the session would wait forever.
+    """
+    return ObservationFacts(
+        status=ObservationStatus.REJECTED,
+        released=True,
+        children_complete=True,
+        diagnostic=diagnostic,
+    )
+
+
 def _unknown(diagnostic: str, binding: SessionBinding | None = None) -> ObservationFacts:
     return ObservationFacts(
         status=ObservationStatus.UNKNOWN,
@@ -410,7 +424,7 @@ class SessionLifecycleRequests:
         invocation = request.invocation
         binding = self._binding(request, invocation.session_id)
         if binding is None:
-            return _rejected("no ensured session for this invocation")
+            return _nothing_held("no ensured session for this invocation")
         link = load_dispatch_record(
             self._store,
             session_binding_key(request, invocation.session_id),
@@ -450,7 +464,7 @@ class SessionLifecycleRequests:
     def _close(self, request: CloseSession) -> ObservationFacts:
         binding = self._binding(request, request.session_id)
         if binding is None:
-            return _rejected("no ensured session to close")
+            return _nothing_held("no ensured session to close")
         try:
             self._sessions.release(AgentSessionKey.parse(binding.session_key))
         except InvocationConflictError as error:
