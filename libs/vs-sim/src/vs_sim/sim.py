@@ -11,7 +11,7 @@ from vs_sim.os_platform import Platform
 from vs_sim.randomness import SeededRandom, derive_seed
 from vs_sim.sim_network import SimNetwork
 from vs_sim.sim_threads import SimBlockingRunner, SimThreads
-from vs_sim.virtual import VirtualClock, run_virtual
+from vs_sim.virtual import VirtualClock, WallClockView, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -90,15 +90,28 @@ class Sim:
         """Simulated threads on this simulation's clock, schedule seed and trace."""
         return SimThreads(self.clock, schedule_seed=self.schedule_seed, trace=self.trace)
 
+    @property
+    def wall_clock(self) -> WallClockView:
+        """This simulation's timeline read as wall-clock time: seconds since the epoch.
+
+        It ticks with :attr:`clock` (near zero) and :meth:`SimThreads.now` (near
+        ``SIM_MONOTONIC_ORIGIN``) but reads near ``SIM_WALL_EPOCH``, so code that mixes a
+        timestamp with a monotonic reading is off by decades here instead of passing by
+        coincidence.
+        """
+        return WallClockView(self.clock)
+
     def platform(
         self, threads: SimThreads, *, processes: Processes, signaller: ProcessSignaller
     ) -> Platform:
-        """A :class:`Platform` on this simulation's clock, over ``threads`` (from :meth:`threads`).
+        """A :class:`Platform` on this simulation's timeline, over ``threads`` (from :meth:`threads`).
 
-        Blocking calls and sockets run on ``threads``; processes and signals are the Fakes given.
+        Its clock is :attr:`wall_clock`; ``threads.now()`` is the monotonic reading of the same
+        timeline. Blocking calls and sockets run on ``threads``; processes and signals are the
+        Fakes given.
         """
         return Platform(
-            clock=self.clock,
+            clock=self.wall_clock,
             threads=threads,
             blocking=SimBlockingRunner(threads),
             processes=processes,

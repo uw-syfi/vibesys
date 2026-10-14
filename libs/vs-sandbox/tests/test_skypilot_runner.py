@@ -129,7 +129,7 @@ class _StuckDrainWorker:
     def join(self, timeout: float | None = None) -> None:
         self.join_timeouts.append(timeout)
         if self.is_alive() and timeout is not None:
-            self._threads.advance_to(self._threads.now() + timeout)
+            self._threads.advance(timeout)
 
 
 class _StuckDrainThreads:
@@ -162,13 +162,13 @@ class _StuckDrainThreads:
         return self._threads.local(initial)
 
     def sleep(self, seconds: float) -> None:
-        self.advance_to(self.now() + seconds)
+        self._threads.advance(seconds)
 
     def now(self) -> float:
         return self._threads.now()
 
-    def advance_to(self, instant: float) -> None:
-        self._threads.advance_to(instant)
+    def advance(self, seconds: float) -> None:
+        self._threads.advance(seconds)
 
     def release_drains(self) -> None:
         self.drains_released = True
@@ -189,7 +189,7 @@ class _StuckSkyPilotProcess:
         if timeout is None:
             raise AssertionError
         if len(self.wait_timeouts) > 1:
-            self._threads.advance_to(self._threads.now() + timeout)
+            self._threads.advance(timeout)
         raise ProcessTimeoutError(("sky",), timeout)
 
     def kill_group(self) -> None:
@@ -399,6 +399,7 @@ def test_subprocess_timeout_kills_the_group_and_bounds_all_cleanup_waits() -> No
         cleanup_timeout=7,
     )
 
+    started = threads.now()
     with pytest.raises(ProcessTimeoutError) as caught:
         runner.run(("sky", "status"), timeout=3)
 
@@ -406,7 +407,7 @@ def test_subprocess_timeout_kills_the_group_and_bounds_all_cleanup_waits() -> No
     assert process.group_kills == 1
     assert process.wait_timeouts == [3, 7]
     assert [worker.join_timeouts for worker in threads.workers] == [[0], [0]]
-    assert threads.now() == 8
+    assert threads.now() - started == 7
 
 
 def test_normal_exit_with_stuck_drains_reaps_workers_and_closes_pipes_after_group_kill() -> None:
@@ -418,6 +419,7 @@ def test_normal_exit_with_stuck_drains_reaps_workers_and_closes_pipes_after_grou
         cleanup_timeout=7,
     )
 
+    started = threads.now()
     with pytest.raises(SkyPilotCLIError, match="process group was killed"):
         runner.run(("sky", "status"))
 
@@ -427,7 +429,7 @@ def test_normal_exit_with_stuck_drains_reaps_workers_and_closes_pipes_after_grou
     assert all(not worker.is_alive() for worker in threads.workers)
     assert process.stdout.closed
     assert process.stderr.closed
-    assert threads.now() == 8
+    assert threads.now() - started == 7
 
 
 def test_timeout_cancels_blocked_bridge_sink_without_retaining_drain_workers_or_pipes() -> None:

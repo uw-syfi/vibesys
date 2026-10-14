@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Self, cast
 
 from vs_sim.concurrency import OsThreadLocal
 from vs_sim.randomness import SeededRandom
-from vs_sim.virtual import VirtualClock
+from vs_sim.virtual import SIM_MONOTONIC_ORIGIN, VirtualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -376,8 +376,13 @@ class SimThreads:
             self.block(me, f"sleep({seconds:g})", None, seconds)
 
     def now(self) -> float:
-        """Virtual seconds."""
-        return self.clock.now()
+        """Monotonic virtual seconds: the timeline plus ``SIM_MONOTONIC_ORIGIN``.
+
+        The offset keeps this reading apart from the timeline's own clock and from
+        ``WallClockView``, so code that compares a monotonic reading with a clock
+        reading is visibly wrong in simulation, as it is in production.
+        """
+        return SIM_MONOTONIC_ORIGIN + self.clock.now()
 
     # ----- driving -----
 
@@ -430,8 +435,15 @@ class SimThreads:
             heapq.heappop(self._timers)
         return None
 
+    def advance(self, seconds: float) -> None:
+        """Move the clock ``seconds`` forward and wake every thread whose timer is due by then."""
+        self.advance_to(self.clock.now() + max(0.0, seconds))
+
     def advance_to(self, instant: float) -> None:
-        """Move the clock to ``instant`` and wake every thread whose timer is due by then."""
+        """Move the clock to ``instant`` and wake every thread whose timer is due by then.
+
+        ``instant`` is on the clock's timeline (``clock.now()``), not on ``now()``'s.
+        """
         if self._trace is not None and instant > self.clock.at:
             self._trace.advance(self.clock.at, instant)
         self.clock.at = max(self.clock.at, instant)

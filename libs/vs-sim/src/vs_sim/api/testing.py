@@ -78,11 +78,14 @@ from vs_sim.states import Changes, wait_for_async_state, wait_for_state, yield_u
 from vs_sim.threads import TGKILL_SUPPORTED, non_main_thread_ids, send_to_thread
 from vs_sim.trace import EventTrace, TraceEvent
 from vs_sim.virtual import (
+    SIM_MONOTONIC_ORIGIN,
+    SIM_WALL_EPOCH,
     WORKER_GUARD_S,
     IdleDriver,
     VirtualClock,
     VirtualDeadlockError,
     VirtualTimeLimitError,
+    WallClockView,
     current_virtual_clock,
     run_virtual,
 )
@@ -101,6 +104,8 @@ __all__ = [
     "OVERSIZED_BYTES",
     "SCHEDULE_SEED_OPTION",
     "SEED_OPTION",
+    "SIM_MONOTONIC_ORIGIN",
+    "SIM_WALL_EPOCH",
     "TGKILL_SUPPORTED",
     "WORKER_GUARD_S",
     "WORLDS",
@@ -167,6 +172,7 @@ __all__ = [
     "VirtualClock",
     "VirtualDeadlockError",
     "VirtualTimeLimitError",
+    "WallClockView",
     "WorldFactory",
     "WorldRegistry",
     "accept_or_fail",

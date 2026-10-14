@@ -109,10 +109,10 @@ class _StuckWorker:
         if not self.is_alive() or timeout is None:
             return
         if self._threads.kill_requested and timeout >= self._threads.worker_settle_seconds:
-            self._threads.advance_to(self._threads.now() + self._threads.worker_settle_seconds)
+            self._threads.advance(self._threads.worker_settle_seconds)
             self._stopped = True
             return
-        self._threads.advance_to(self._threads.now() + timeout)
+        self._threads.advance(timeout)
 
 
 class _StuckThreads:
@@ -151,8 +151,8 @@ class _StuckThreads:
     def now(self) -> float:
         return self._threads.now()
 
-    def advance_to(self, instant: float) -> None:
-        self._threads.advance_to(instant)
+    def advance(self, seconds: float) -> None:
+        self._threads.advance(seconds)
 
     def request_kill(self) -> None:
         self.kill_requested = True

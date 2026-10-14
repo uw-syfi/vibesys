@@ -351,6 +351,39 @@ class VirtualClock:
         await asyncio.sleep(seconds)
 
 
+SIM_WALL_EPOCH = 1_700_000_000.0
+"""Where a simulated wall clock starts: 2023-11-14 UTC."""
+
+SIM_MONOTONIC_ORIGIN = 1_000_000.0
+"""Where simulated monotonic time (``SimThreads.now``) starts, like seconds since a boot.
+
+It differs from both the timeline (near zero) and ``SIM_WALL_EPOCH``, so a reading of one
+compared with another is off by days or decades in every simulated test.
+"""
+
+
+class WallClockView:
+    """A simulated timeline read as wall-clock time: the same ticks, offset by an epoch.
+
+    The timeline itself (``VirtualClock.now``) starts near zero and ``SimThreads.now`` near
+    ``SIM_MONOTONIC_ORIGIN``. This view is the wall-clock reading of the same timeline, so a
+    timestamp and a monotonic reading never agree by accident.
+    """
+
+    def __init__(self, timeline: VirtualClock, epoch: float = SIM_WALL_EPOCH) -> None:
+        """Read ``timeline`` as seconds since the Unix epoch, starting near ``epoch``."""
+        self._timeline = timeline
+        self._epoch = epoch
+
+    def now(self) -> float:
+        """Seconds since the Unix epoch on the simulated timeline."""
+        return self._epoch + self._timeline.now()
+
+    async def sleep(self, seconds: float) -> None:
+        """Sleep on the underlying timeline."""
+        await self._timeline.sleep(seconds)
+
+
 def current_virtual_clock() -> VirtualClock:
     """The clock of the virtual loop the caller is running on.
 
