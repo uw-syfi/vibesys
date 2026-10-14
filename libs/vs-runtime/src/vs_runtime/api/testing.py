@@ -25,6 +25,7 @@ from vs_runtime._shell_kit import (
     request_executors,
     scripted_host,
 )
+from vs_runtime._validation_passes import MemoryValidationPasses
 from vs_runtime.fake_docker_daemon import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_runtime.fakes import (
     FakeAccuracyCall,
@@ -99,6 +100,7 @@ __all__ = [
     "HostOptions",
     "InvalidReply",
     "Launch",
+    "MemoryValidationPasses",
     "ProbedRunClock",
     "RecordingSearch",
     "Run",

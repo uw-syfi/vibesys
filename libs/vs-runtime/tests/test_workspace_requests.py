@@ -89,6 +89,7 @@ from vs_runtime.api.infrastructure import (
     open_run_environment_resources,
 )
 from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 from vs_sim.api.testing import examples, swept, wait_or_fail, wait_until_started
@@ -156,7 +157,9 @@ class _Env:
     def start_host(self) -> RuntimeWorkspaces:
         """Start another host over the same disk state, as after a process restart."""
         runtime = create_workspace_runtime(
-            workspace_resources=self.factory, blocking=BlockingOperations()
+            workspace_resources=self.factory,
+            blocking=BlockingOperations(),
+            validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
         _ENVS[runtime.workspaces] = self

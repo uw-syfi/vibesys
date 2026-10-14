@@ -22,6 +22,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import (
     FakeWorkspace,
+    MemoryValidationPasses,
 )
 from vs_sandbox.api import CommandResult
 from vs_sim.api.testing import GatedBlockingRunner, arrival
@@ -233,7 +234,9 @@ def _runtime(provider: _Provider, runner: GatedBlockingRunner | None = None) -> 
         pytest.fail("workspace-only test opened an agent client")
 
     return create_workspace_runtime(
-        workspace_resources=provider, blocking=BlockingOperations(runner)
+        workspace_resources=provider,
+        blocking=BlockingOperations(runner),
+        validation_passes=MemoryValidationPasses(),
     )
 
 

@@ -77,7 +77,12 @@ from vs_runtime.api.slurm_evaluation_stack import (
     build_stack,
     submission,
 )
-from vs_runtime.api.testing import FakeEvidenceLedger, FakeWorkspace, FakeWorkspaces
+from vs_runtime.api.testing import (
+    FakeEvidenceLedger,
+    FakeWorkspace,
+    FakeWorkspaces,
+    MemoryValidationPasses,
+)
 from vs_sim.api.testing import examples
 
 pytestmark = pytest.mark.asyncio
@@ -592,6 +597,7 @@ async def test_a_strategy_requiring_interpretation_starts_and_runs_with_producti
             evidence=evidence,
             commit_of=commit_of,
             retention_label="verified",
+            validation_passes=MemoryValidationPasses(),
         )
         catalog = build_operation_catalog(registrations, production_owners(registrations, ports))
         catalog.require_owned(declaration)

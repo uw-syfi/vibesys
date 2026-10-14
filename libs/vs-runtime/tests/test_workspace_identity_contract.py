@@ -55,6 +55,7 @@ from vs_runtime.api.operation_fixtures import VerifyParentRevision as _VerifyReq
 from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaces,
+    MemoryValidationPasses,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 from vs_sim.api.testing import examples
@@ -153,7 +154,9 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                 events=lambda _event: None,
             )
             workspaces = create_workspace_runtime(
-                workspace_resources=resources, blocking=BlockingOperations()
+                workspace_resources=resources,
+                blocking=BlockingOperations(),
+                validation_passes=MemoryValidationPasses(),
             ).workspaces
         try:
             yield workspaces

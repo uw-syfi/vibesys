@@ -27,7 +27,6 @@ from vs_runtime._local_validation import (
     FrameworkValidationResult,
     LocalValidationRecipeError,
     check_recipe_artifact_path,
-    run_local_validation,
 )
 from vs_runtime._operation_catalog import Inspection, NotApplied
 
@@ -37,7 +36,8 @@ if TYPE_CHECKING:
     from vs_core.api import OperationRequest, RevisionRef
     from vs_runtime._artifact_store import ArtifactStore
     from vs_runtime._core_requests import ExecutionContext
-    from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
+    from vs_runtime._local_validation import LocalValidator
+    from vs_runtime.contracts import RevisionLedger, Workspaces
 
 # Where the report is written inside the throwaway workspace before it is stored.
 _REPORT_LOCATION = "validation-report.json"
@@ -56,14 +56,14 @@ class ValidateLocalOwner:
     def __init__(
         self,
         workspaces: Workspaces,
-        commands: Commands,
+        validator: LocalValidator,
         ledger: RevisionLedger,
         commit_of: Callable[[RevisionRef], str | None],
         store: ArtifactStore,
     ) -> None:
-        """Bind the workspaces, the command runner, the retention ledger, the encoding and the store."""
+        """Bind the workspaces, the recipe runner, the retention ledger, the encoding and the store."""
         self._workspaces = workspaces
-        self._commands = commands
+        self._validator = validator
         self._ledger = ledger
         self._commit_of = commit_of
         self._store = store
@@ -102,8 +102,7 @@ class ValidateLocalOwner:
         )
         try:
             try:
-                results = await run_local_validation(
-                    self._commands,
+                results = await self._validator.run(
                     candidate,
                     recipe_artifact=asked.recipe_artifact,
                     report_location=_REPORT_LOCATION,

@@ -53,6 +53,7 @@ from vs_runtime.api.core import (
     report_turns,
     revision_ref,
 )
+from vs_runtime.api.infrastructure import StateValidationPasses
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -400,6 +401,9 @@ def _catalog(
         variables=plan.prompt_variables,
         commands=resources.commands,
         replies=plan.search.reply_schemas,
+        validation_passes=StateValidationPasses(
+            resources.project.state.local_namespace(resources.run_id, "validation")
+        ),
     )
     owned = (
         ()

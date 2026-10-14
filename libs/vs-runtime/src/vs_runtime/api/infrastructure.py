@@ -88,8 +88,8 @@ from vs_runtime._local_validation import (
     LocalValidationEvents,
     LocalValidationRecipeError,
     LocalValidationRecipeErrorKind,
+    LocalValidator,
     ValidationRecipe,
-    run_local_validation,
 )
 from vs_runtime._macos_cpu_profiler import (
     Capability as MacOSProfilerCapability,
@@ -249,6 +249,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     remote_evaluator_setup_command,
     required_evaluator_tools_root,
 )
+from vs_runtime._validation_passes import StateValidationPasses, ValidationPasses
 from vs_runtime._workspace_resources import (
     WorkspaceResourceEvent,
     WorkspaceResourceEventSink,
@@ -291,14 +292,19 @@ def create_workspace_runtime(
     *,
     workspace_resources: WorkspaceResourceProvider,
     blocking: BlockingOperations,
+    validation_passes: ValidationPasses,
 ) -> WorkspaceRuntime:
-    """Create one owner for workspace handles and the commands and evaluation over them."""
+    """Create one owner for workspace handles and the commands and evaluation over them.
+
+    ``validation_passes`` is the runtime-owned record of trusted local-validation passes;
+    it must live outside every workspace.
+    """
     workspaces = RuntimeWorkspaces(workspace_resources, runner=blocking.runner)
     commands = RuntimeCommands(workspaces, blocking)
     return WorkspaceRuntime(
         workspaces=workspaces,
         commands=commands,
-        evaluation=RuntimeWorkspaceEvaluation(workspaces, commands),
+        evaluation=RuntimeWorkspaceEvaluation(workspaces, commands, validation_passes),
     )
 
 
@@ -467,6 +473,7 @@ __all__ = [
     "LocalValidationEvents",
     "LocalValidationRecipeError",
     "LocalValidationRecipeErrorKind",
+    "LocalValidator",
     "MacOSProfileResult",
     "MacOSProfilerCapability",
     "MacOSProfilerDiagnostic",
@@ -536,6 +543,7 @@ __all__ = [
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
     "StageFailureText",
+    "StateValidationPasses",
     "StopGraceError",
     "StopTimer",
     "Switch",
@@ -551,6 +559,7 @@ __all__ = [
     "TrustedEvaluationPlan",
     "TrustedEvaluatorRequirements",
     "TrustedMetricDeclaration",
+    "ValidationPasses",
     "ValidationRecipe",
     "WaitFor",
     "WorkspaceEvaluationSpec",
@@ -618,7 +627,6 @@ __all__ = [
     "resolve_sdk_source",
     "run_environment_deprecation",
     "run_environment_record",
-    "run_local_validation",
     "signal_of",
     "stop_gated_evaluation",
     "summarize_linux_profile",

@@ -67,6 +67,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
+from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 
@@ -274,7 +275,9 @@ def _measure_with_lost_command(
                 events=lambda _event: None,
             )
             runtime = create_workspace_runtime(
-                workspace_resources=factory, blocking=BlockingOperations()
+                workspace_resources=factory,
+                blocking=BlockingOperations(),
+                validation_passes=MemoryValidationPasses(),
             )
             evaluation = create_evaluation(
                 _RUN_ID, _run_request(root), runtime, integration.events, lambda _line: None

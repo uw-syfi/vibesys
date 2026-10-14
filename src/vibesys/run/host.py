@@ -34,6 +34,7 @@ from vs_runtime.api.infrastructure import (
     CapacityHandling,
     QuotaPolicy,
     RunHostComponents,
+    StateValidationPasses,
     WorkspaceResourceFactory,
     bounded_stop,
     create_model_request_reconciler,
@@ -200,7 +201,11 @@ class _ProductHostFactory:
         if offer.withheld:
             logger.lprint(f"[profiler] {offer.reason}.")
         agent_runtime = create_workspace_runtime(
-            workspace_resources=workspace_resources, blocking=blocking
+            workspace_resources=workspace_resources,
+            blocking=blocking,
+            validation_passes=StateValidationPasses(
+                project.project.state.local_namespace(project.state.run_id, "validation")
+            ),
         )
         workspaces = agent_runtime.workspaces
         evaluation = create_evaluation(

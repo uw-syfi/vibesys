@@ -48,14 +48,19 @@ from vs_evaluator_protocol.api import ProtocolError, parse_records
 from vs_runtime.api import CommandResult
 from vs_runtime.api.infrastructure import (
     LocalValidationRecipeError,
+    LocalValidator,
     ModelRequestError,
     ProtocolBenchmarkContract,
     ScalarBenchmarkContract,
     create_model_request_reconciler,
     decode_trusted_benchmark_run,
-    run_local_validation,
 )
-from vs_runtime.api.testing import FakeCommands, FakeModelVolumeProvisioner, FakeWorkspace
+from vs_runtime.api.testing import (
+    FakeCommands,
+    FakeModelVolumeProvisioner,
+    FakeWorkspace,
+    MemoryValidationPasses,
+)
 from vs_sim.api.testing import hostile_json_frames
 
 if TYPE_CHECKING:
@@ -212,8 +217,7 @@ def _local_validation(workspace: Path) -> tuple[object, ...]:
     commands = FakeCommands()
     commands.script(CommandResult(output="passed\n", exit_code=0))
     return asyncio.run(
-        run_local_validation(
-            commands,
+        LocalValidator(commands, MemoryValidationPasses()).run(
             FakeWorkspace(path=workspace),
             recipe_artifact="validation/recipes.json",
             report_location="validation/report.json",

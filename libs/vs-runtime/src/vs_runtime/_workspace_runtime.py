@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING, Protocol
 from vs_project.api import GitError
 from vs_runtime._local_validation import (
     LocalValidationEvents,
+    LocalValidator,
     check_recipe_artifact_path,
-    run_local_validation,
 )
 from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces, WorkspaceResource, run_sync
 from vs_runtime.contracts import (
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         TrustedBenchmarkContract,
         TrustedBenchmarkResult,
     )
+    from vs_runtime._validation_passes import ValidationPasses
 
 
 class CommandExecutionResult(Protocol):
@@ -188,9 +189,15 @@ class RuntimeCommands:
 class RuntimeWorkspaceEvaluation:
     """Own the complete trusted-evaluation lifecycle for live workspaces."""
 
-    def __init__(self, workspaces: RuntimeWorkspaces, commands: RuntimeCommands) -> None:
+    def __init__(
+        self,
+        workspaces: RuntimeWorkspaces,
+        commands: RuntimeCommands,
+        validation_passes: ValidationPasses,
+    ) -> None:
         self._workspaces = workspaces
         self._commands = commands
+        self._validator = LocalValidator(commands, validation_passes)
 
     def spec(self, workspace: Workspace) -> WorkspaceEvaluationSpec:
         return self._workspaces.resource_for(
@@ -301,8 +308,7 @@ class RuntimeWorkspaceEvaluation:
         check_recipe_artifact_path(recipe_artifact)
         validate_workspace_writable_paths(WorkspaceAccess.LIMITED, (report_location,))
         managed = self._workspaces.workspace_for(workspace)
-        return await run_local_validation(
-            self._commands,
+        return await self._validator.run(
             managed,
             recipe_artifact=recipe_artifact,
             report_location=report_location,

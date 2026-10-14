@@ -19,7 +19,12 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext, RunFacts
 from vs_runtime.api.core import OperationPorts
 from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView, TrustedEvaluationPlan
-from vs_runtime.api.testing import FakeEvidenceLedger, FakeWorkspace, FakeWorkspaces
+from vs_runtime.api.testing import (
+    FakeEvidenceLedger,
+    FakeWorkspace,
+    FakeWorkspaces,
+    MemoryValidationPasses,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -148,4 +153,5 @@ def ports(root: Path, run: ResolvedRun) -> OperationPorts:
         evidence=FakeEvidenceLedger(),
         commit_of=lambda revision: revision.git_commit,
         retention_label="verified",
+        validation_passes=MemoryValidationPasses(),
     )

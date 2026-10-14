@@ -14,7 +14,13 @@ from hypothesis import strategies as st
 from vs_core.api import HostFence, HostId, RevisionId, RevisionRef, Until, ValidateLocalBase
 from vs_runtime.api import CommandResult, member_workspace_id
 from vs_runtime.api.core import ExecutionContext, NotApplied, ValidateLocalOwner
-from vs_runtime.api.testing import FakeCommands, FakeWorkspace, FakeWorkspaces
+from vs_runtime.api.infrastructure import LocalValidator
+from vs_runtime.api.testing import (
+    FakeCommands,
+    FakeWorkspace,
+    FakeWorkspaces,
+    MemoryValidationPasses,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -85,7 +91,7 @@ def _owner(
     store = _Store()
     owner = ValidateLocalOwner(
         workspaces,
-        commands,
+        LocalValidator(commands, MemoryValidationPasses()),
         workspaces,
         _commit_of,
         cast("ArtifactStore", store),

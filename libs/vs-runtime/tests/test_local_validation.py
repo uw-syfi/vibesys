@@ -4,20 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING
+import tempfile
+from pathlib import Path
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from vs_runtime.api import CommandResult
 from vs_runtime.api.infrastructure import (
     LocalValidationRecipeError,
     LocalValidationRecipeErrorKind,
-    run_local_validation,
+    LocalValidator,
 )
-from vs_runtime.api.testing import FakeCommands, FakeWorkspace
-
-if TYPE_CHECKING:
-    from pathlib import Path
+from vs_runtime.api.testing import FakeCommands, FakeWorkspace, MemoryValidationPasses
+from vs_sim.api.testing import examples
 
 
 def _write_recipe(
@@ -53,15 +54,14 @@ def test_executes_trusted_recipe_and_reuses_exact_pass(tmp_path: Path) -> None:
         workspace = FakeWorkspace(path=tmp_path)
         commands = FakeCommands()
         commands.script(CommandResult(output="passed\n", exit_code=0))
-        first = await run_local_validation(
-            commands,
+        passes = MemoryValidationPasses()
+        first = await LocalValidator(commands, passes).run(
             workspace,
             recipe_artifact="validation/recipes.json",
             report_location="validation/report-1.json",
         )
         reused_commands = FakeCommands()
-        second = await run_local_validation(
-            reused_commands,
+        second = await LocalValidator(reused_commands, passes).run(
             workspace,
             recipe_artifact="validation/recipes.json",
             report_location="validation/report-2.json",
@@ -89,8 +89,7 @@ def test_workspace_mutation_fails_recipe_and_restores_entry_revision(tmp_path: P
         workspace.script_pending_changes(["queue.py"])
         commands = FakeCommands()
         commands.script(CommandResult(output="passed", exit_code=0))
-        run = await run_local_validation(
-            commands,
+        run = await LocalValidator(commands, MemoryValidationPasses()).run(
             workspace,
             recipe_artifact="validation/recipes.json",
             report_location="validation/report.json",
@@ -108,8 +107,8 @@ def test_changed_declared_input_prevents_pass_reuse(tmp_path: Path) -> None:
         workspace = FakeWorkspace(path=tmp_path)
         first_commands = FakeCommands()
         first_commands.script(CommandResult(output="first", exit_code=0))
-        await run_local_validation(
-            first_commands,
+        passes = MemoryValidationPasses()
+        await LocalValidator(first_commands, passes).run(
             workspace,
             recipe_artifact="validation/recipes.json",
             report_location="validation/report-1.json",
@@ -117,8 +116,7 @@ def test_changed_declared_input_prevents_pass_reuse(tmp_path: Path) -> None:
         (tmp_path / "queue.py").write_text("VALUE = 2\n")
         second_commands = FakeCommands()
         second_commands.script(CommandResult(output="second", exit_code=0))
-        await run_local_validation(
-            second_commands,
+        await LocalValidator(second_commands, passes).run(
             workspace,
             recipe_artifact="validation/recipes.json",
             report_location="validation/report-2.json",
@@ -136,8 +134,7 @@ def test_cancellation_restores_entry_revision_and_writes_no_report(tmp_path: Pat
         commands = FakeCommands()
         commands.script(asyncio.CancelledError())
         with pytest.raises(asyncio.CancelledError):
-            await run_local_validation(
-                commands,
+            await LocalValidator(commands, MemoryValidationPasses()).run(
                 workspace,
                 recipe_artifact="validation/recipes.json",
                 report_location="validation/report.json",
@@ -158,8 +155,7 @@ def test_rejects_duplicate_recipe_names_before_execution(tmp_path: Path) -> None
 
     async def exercise() -> None:
         with pytest.raises(LocalValidationRecipeError) as raised:
-            await run_local_validation(
-                FakeCommands(),
+            await LocalValidator(FakeCommands(), MemoryValidationPasses()).run(
                 FakeWorkspace(path=tmp_path),
                 recipe_artifact="validation/recipes.json",
                 report_location="validation/report.json",
@@ -177,8 +173,7 @@ def test_failed_report_replace_removes_temporary_artifact(tmp_path: Path) -> Non
         commands = FakeCommands()
         commands.script(CommandResult(output="passed", exit_code=0))
         with pytest.raises(IsADirectoryError):
-            await run_local_validation(
-                commands,
+            await LocalValidator(commands, MemoryValidationPasses()).run(
                 FakeWorkspace(path=tmp_path),
                 recipe_artifact="validation/recipes.json",
                 report_location="validation/report.json",
@@ -197,8 +192,7 @@ def test_parallel_runs_keep_workspace_identity_and_reports_separate(tmp_path: Pa
             workspace = FakeWorkspace(path=root, workspace_id=f"candidate-{index}")
             commands = FakeCommands()
             commands.script(CommandResult(output=f"ok-{index}", exit_code=0))
-            await run_local_validation(
-                commands,
+            await LocalValidator(commands, MemoryValidationPasses()).run(
                 workspace,
                 recipe_artifact="validation/recipes.json",
                 report_location="validation/report.json",
@@ -212,3 +206,72 @@ def test_parallel_runs_keep_workspace_identity_and_reports_separate(tmp_path: Pa
             assert report["results"][0]["output"] == f"ok-{index}"
 
     asyncio.run(exercise())
+
+
+def _learn_pass_report(root: Path) -> str:
+    """Run the recipe once in a scratch workspace and return the pass report it wrote."""
+    root.mkdir()
+    _write_recipe(root)
+    commands = FakeCommands()
+    commands.script(CommandResult(output="passed", exit_code=0))
+    asyncio.run(
+        LocalValidator(commands, MemoryValidationPasses()).run(
+            FakeWorkspace(path=root),
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report.json",
+        )
+    )
+    return (root / "validation" / "report.json").read_text()
+
+
+def _validate_with_planted(root: Path, planted: dict[str, str]) -> tuple[FakeCommands, bool]:
+    """Validate a workspace holding ``planted`` files, with no recorded passes; failing command."""
+    root.mkdir()
+    _write_recipe(root)
+    for relative, contents in planted.items():
+        (root / relative).parent.mkdir(parents=True, exist_ok=True)
+        (root / relative).write_text(contents)
+    commands = FakeCommands()
+    commands.script(CommandResult(output="failed", exit_code=1))
+    (result,) = asyncio.run(
+        LocalValidator(commands, MemoryValidationPasses()).run(
+            FakeWorkspace(path=root),
+            recipe_artifact="validation/recipes.json",
+            report_location="validation/report-2.json",
+        )
+    )
+    return commands, result.passed or result.reused
+
+
+def test_a_pass_report_in_the_workspace_is_never_reused(tmp_path: Path) -> None:
+    report = _learn_pass_report(tmp_path / "scratch")
+    commands, trusted = _validate_with_planted(
+        tmp_path / "candidate", {"validation/report-1.json": report}
+    )
+    assert len(commands.trusted_shell_calls) == 1
+    assert not trusted
+
+
+_REPORT_NAMES = st.from_regex(r"validation/[a-z0-9-]{1,12}\.json", fullmatch=True).filter(
+    lambda name: name not in {"validation/recipes.json", "validation/report-2.json"}
+)
+
+
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
+@given(
+    names=st.lists(_REPORT_NAMES, min_size=1, max_size=3, unique=True),
+    reported_digest=st.booleans(),
+    noise=st.text(max_size=40),
+)
+def test_no_workspace_file_turns_a_failing_recipe_into_a_pass(
+    names: list[str], *, reported_digest: bool, noise: str
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        payload = json.loads(_learn_pass_report(root / "scratch"))
+        if not reported_digest:
+            payload["results"][0]["input_digest"] = noise
+        planted = {name: json.dumps(payload) for name in names}
+        commands, trusted = _validate_with_planted(root / "candidate", planted)
+    assert len(commands.trusted_shell_calls) == 1
+    assert not trusted

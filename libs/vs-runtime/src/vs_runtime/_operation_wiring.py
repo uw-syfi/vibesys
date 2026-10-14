@@ -30,6 +30,7 @@ from vs_runtime._capture_command_operation import CaptureCommandOwner
 from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._export_patch_operation import ExportPatchOwner
+from vs_runtime._local_validation import LocalValidator
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, RefusalReason
 from vs_runtime._operation_receipts import NamespaceOperationReceipts
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_requests import RequestExecutors
     from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._operation_catalog import OperationOwner
+    from vs_runtime._validation_passes import ValidationPasses
     from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
 
 
@@ -130,6 +132,7 @@ class OperationPorts:
     evidence: EvidenceLookup
     commit_of: Callable[[RevisionRef], str | None]
     retention_label: str
+    validation_passes: ValidationPasses
     variables: Mapping[str, object] = field(default_factory=dict)
     commands: Commands | None = None
     replies: Mapping[SchemaRef, type[BaseModel]] = field(default_factory=dict)
@@ -144,7 +147,11 @@ def _command_owner(role: OperationRole, ports: OperationPorts) -> OperationOwner
     if not ports.workspaces.supports_parallel_candidates:
         return None
     return ValidateLocalOwner(
-        ports.workspaces, ports.commands, ports.ledger, ports.commit_of, ports.artifacts
+        ports.workspaces,
+        LocalValidator(ports.commands, ports.validation_passes),
+        ports.ledger,
+        ports.commit_of,
+        ports.artifacts,
     )
 
 

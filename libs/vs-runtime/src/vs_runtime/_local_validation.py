@@ -1,12 +1,18 @@
-"""Trusted local-validation recipe execution and durable result reuse."""
+"""Trusted local-validation recipe execution, reusing only passes the runtime recorded.
+
+The recipes and the report live in the agent's workspace: the recipes are read through
+``_workspace_files`` as a validated model, and the report is written there for the agent
+to read. Whether a recipe may be skipped is a trust decision, answered only by the
+runtime's own ``ValidationPasses`` store, never by a file in the workspace.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import json
 from enum import StrEnum
-from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Protocol
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol
 
 from pydantic import (
     BaseModel,
@@ -17,10 +23,20 @@ from pydantic import (
     field_validator,
 )
 
-from vs_project.api import atomic_write_bytes
+from vs_runtime._workspace_files import (
+    WorkspaceFileProblem,
+    WorkspaceFileProblemKind,
+    contained_path,
+    hash_inputs,
+    read_agent_model,
+    write_for_agent,
+)
 from vs_runtime.contracts import WorkspaceAccess, validate_workspace_writable_paths
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from vs_runtime._validation_passes import ValidationPasses
     from vs_runtime.contracts import Commands, Workspace
 
 _MAX_INPUT_FILES = 4096
@@ -44,11 +60,6 @@ ValidationRecipeArtifactPath = Annotated[
 
 
 _RECIPE_PATH_ADAPTER = TypeAdapter(ValidationRecipeArtifactPath)
-_ANY_JSON: TypeAdapter[Any] = TypeAdapter(Any)
-"""Pydantic's depth-bounded JSON parser: bad UTF-8, truncation and nesting past its bound
-are each a ``ValidationError`` (a ``ValueError``), where ``json`` would raise
-``RecursionError`` on deep nesting. The recipe and report files are in the candidate's
-workspace, so they may hold anything."""
 
 
 class ValidationRecipe(BaseModel):
@@ -222,38 +233,13 @@ def check_recipe_artifact_path(artifact: str) -> None:
         ) from error
 
 
-def _workspace_path(workspace: Path, relative: str, *, kind: str) -> Path:
-    root = workspace.resolve()
-    path = (workspace / relative).resolve()
-    if not path.is_relative_to(root):
-        raise LocalValidationRecipeError(
-            LocalValidationRecipeErrorKind.INVALID_ARTIFACT,
-            f"{kind} escapes the workspace",
-        )
-    return path
-
-
 def _load_recipes(workspace: Path, artifact: str) -> tuple[ValidationRecipe, ...]:
-    path = _workspace_path(workspace, artifact, kind="validation recipe artifact")
-    if not path.is_file():
+    loaded = read_agent_model(workspace, artifact, ValidationRecipeArtifact)
+    if isinstance(loaded, WorkspaceFileProblem):
         raise LocalValidationRecipeError(
-            LocalValidationRecipeErrorKind.INVALID_ARTIFACT,
-            f"validation recipe artifact does not exist: {artifact}",
+            LocalValidationRecipeErrorKind.INVALID_ARTIFACT, _recipe_problem(loaded)
         )
-    try:
-        payload = _ANY_JSON.validate_json(path.read_bytes())
-    except (OSError, ValueError) as exc:
-        raise LocalValidationRecipeError(
-            LocalValidationRecipeErrorKind.INVALID_ARTIFACT,
-            f"validation recipe artifact is not valid JSON: {exc}",
-        ) from exc
-    try:
-        recipes = ValidationRecipeArtifact.model_validate(payload).recipes
-    except (TypeError, ValueError) as exc:
-        raise LocalValidationRecipeError(
-            LocalValidationRecipeErrorKind.INVALID_ARTIFACT,
-            f"validation recipe artifact does not match version 1: {exc}",
-        ) from exc
+    recipes = loaded.recipes
     names = [recipe.name for recipe in recipes]
     if len(names) != len(set(names)):
         raise LocalValidationRecipeError(
@@ -263,74 +249,33 @@ def _load_recipes(workspace: Path, artifact: str) -> tuple[ValidationRecipe, ...
     return recipes
 
 
+def _recipe_problem(problem: WorkspaceFileProblem) -> str:
+    match problem.kind:
+        case WorkspaceFileProblemKind.ESCAPES:
+            return "validation recipe artifact escapes the workspace"
+        case WorkspaceFileProblemKind.MISSING:
+            return f"validation recipe artifact does not exist: {problem.relative_path}"
+        case WorkspaceFileProblemKind.TOO_LARGE:
+            return f"validation recipe artifact {problem.detail}"
+        case WorkspaceFileProblemKind.NOT_JSON:
+            return f"validation recipe artifact is not valid JSON: {problem.detail}"
+        case WorkspaceFileProblemKind.INVALID:
+            return f"validation recipe artifact does not match version 1: {problem.detail}"
+
+
 def _input_digest(workspace: Path, recipe: ValidationRecipe) -> str:
-    digest = hashlib.sha256()
-    root = workspace.resolve()
-    total_files = 0
-    total_bytes = 0
-    for relative in sorted(recipe.input_paths):
-        unresolved = workspace / relative
-        if unresolved.is_symlink():
-            message = f"validation input must not be a symlink: {relative}"
-            raise ValueError(message)
-        path = unresolved.resolve()
-        if not path.is_relative_to(root):
-            message = f"validation input escapes workspace: {relative}"
-            raise ValueError(message)
-        if not path.exists():
-            message = f"validation input does not exist: {relative}"
-            raise ValueError(message)
-        digest.update(relative.encode())
-        digest.update(b"\0dir\0" if path.is_dir() else b"\0file\0")
-        entries = [path]
-        if path.is_dir():
-            entries = sorted(candidate for candidate in path.rglob("*") if candidate.is_file())
-        for entry in entries:
-            if entry.is_symlink():
-                message = f"validation input must not be a symlink: {relative}"
-                raise ValueError(message)
-            total_files += 1
-            total_bytes += entry.stat().st_size
-            if total_files > _MAX_INPUT_FILES or total_bytes > _MAX_INPUT_BYTES:
-                message = "validation inputs exceed the 4096-file/256-MiB reuse-hash limit"
-                raise ValueError(message)
-            digest.update(entry.relative_to(root).as_posix().encode())
-            digest.update(b"\0")
-            digest.update(entry.read_bytes())
-            digest.update(b"\0")
+    inputs = hash_inputs(
+        workspace,
+        recipe.input_paths,
+        max_files=_MAX_INPUT_FILES,
+        max_bytes=_MAX_INPUT_BYTES,
+    )
+    digest = hashlib.sha256(inputs.encode())
+    digest.update(b"\0")
     digest.update(recipe.command.encode())
     digest.update(b"\0")
     digest.update(str(recipe.timeout_seconds).encode("ascii"))
     return digest.hexdigest()
-
-
-def _reusable_result(
-    report: Path,
-    recipe: ValidationRecipe,
-    input_digest: str,
-) -> FrameworkValidationResult | None:
-    if not report.parent.exists():
-        return None
-    for artifact in sorted(report.parent.glob("*.json"), reverse=True):
-        if artifact == report:
-            continue
-        # The report directory is in the candidate's workspace, so any file here may
-        # hold anything; one that is not a report is skipped, never raised.
-        try:
-            payload = _ANY_JSON.validate_json(artifact.read_bytes())
-        except (OSError, ValueError):
-            continue
-        raw_results = payload.get("results") if isinstance(payload, dict) else None
-        if not isinstance(raw_results, list):
-            continue
-        for raw in reversed(raw_results):
-            try:
-                result = FrameworkValidationResult.model_validate(raw)
-            except (TypeError, ValueError):
-                continue
-            if result.passed and result.input_digest == input_digest and result.recipe == recipe:
-                return result.model_copy(update={"reused": True})
-    return None
 
 
 async def _execute_recipe(
@@ -375,68 +320,88 @@ async def _execute_recipe(
     )
 
 
-def _write_report(path: Path, results: list[FrameworkValidationResult]) -> None:
+def _write_report(workspace: Path, location: str, results: list[FrameworkValidationResult]) -> None:
     payload = json.dumps(
         {"version": 1, "results": [item.model_dump(mode="json") for item in results]},
         indent=2,
     )
-    atomic_write_bytes(path, f"{payload}\n".encode())
+    write_for_agent(workspace, location, f"{payload}\n".encode())
 
 
-async def run_local_validation(
-    commands: Commands,
-    workspace: Workspace,
-    *,
-    recipe_artifact: str,
-    report_location: str,
-    events: LocalValidationEvents | None = None,
-) -> tuple[FrameworkValidationResult, ...]:
-    """Parse, execute, reuse, isolate, and persist trusted validation recipes."""
-    recipes = _load_recipes(workspace.path, recipe_artifact)
-    report = _workspace_path(
-        workspace.path,
-        report_location,
-        kind="local validation report location",
-    )
-    sink = events or _NoLocalValidationEvents()
-    results: list[FrameworkValidationResult] = []
-    restore_required = False
-    completed = False
-    entry_revision = await workspace.snapshot("framework-local-validation-input")
-    try:
-        for recipe in recipes:
-            try:
-                digest = _input_digest(workspace.path, recipe)
-            except (OSError, ValueError) as error:
-                results.append(
-                    FrameworkValidationResult(
-                        recipe=recipe,
-                        input_digest="",
-                        passed=False,
-                        error=str(error),
+class LocalValidator:
+    """Run trusted validation recipes, skipping only passes the runtime itself recorded."""
+
+    def __init__(self, commands: Commands, passes: ValidationPasses) -> None:
+        """Run recipes through ``commands``; remember and reuse passes in ``passes``.
+
+        ``passes`` must live outside every workspace: it is the only evidence a recipe
+        already passed.
+        """
+        self._commands = commands
+        self._passes = passes
+
+    async def run(
+        self,
+        workspace: Workspace,
+        *,
+        recipe_artifact: str,
+        report_location: str,
+        events: LocalValidationEvents | None = None,
+    ) -> tuple[FrameworkValidationResult, ...]:
+        """Parse, execute, isolate and report the recipes the agent wrote.
+
+        A recipe is skipped only when the pass store holds a pass of exactly it over
+        exactly its current inputs; every new pass is recorded there. The report written
+        at ``report_location`` is for the agent to read and is never read back.
+        """
+        recipes = _load_recipes(workspace.path, recipe_artifact)
+        if contained_path(workspace.path, report_location) is None:
+            raise LocalValidationRecipeError(
+                LocalValidationRecipeErrorKind.INVALID_ARTIFACT,
+                "local validation report location escapes the workspace",
+            )
+        sink = events or _NoLocalValidationEvents()
+        results: list[FrameworkValidationResult] = []
+        restore_required = False
+        completed = False
+        entry_revision = await workspace.snapshot("framework-local-validation-input")
+        try:
+            for recipe in recipes:
+                try:
+                    digest = _input_digest(workspace.path, recipe)
+                except (OSError, ValueError) as error:
+                    results.append(
+                        FrameworkValidationResult(
+                            recipe=recipe,
+                            input_digest="",
+                            passed=False,
+                            error=str(error),
+                        )
                     )
-                )
-                break
-            sink.started(recipe)
-            reused = _reusable_result(report, recipe, digest)
-            if reused is not None:
-                results.append(reused)
-                sink.finished(reused)
-                continue
-            result, mutated = await _execute_recipe(commands, workspace, recipe, digest)
-            restore_required = restore_required or mutated
-            results.append(result)
-            sink.finished(result)
-            if not result.passed:
-                break
-        completed = True
-    finally:
-        if restore_required or not completed:
-            await workspace.restore(entry_revision, clean=True)
+                    break
+                sink.started(recipe)
+                recorded = self._passes.find(recipe, digest)
+                if recorded is not None:
+                    reused = recorded.model_copy(update={"reused": True})
+                    results.append(reused)
+                    sink.finished(reused)
+                    continue
+                result, mutated = await _execute_recipe(self._commands, workspace, recipe, digest)
+                restore_required = restore_required or mutated
+                if result.passed:
+                    self._passes.record(result)
+                results.append(result)
+                sink.finished(result)
+                if not result.passed:
+                    break
+            completed = True
+        finally:
+            if restore_required or not completed:
+                await workspace.restore(entry_revision, clean=True)
 
-    _write_report(report, results)
-    await workspace.snapshot("framework-local-validation")
-    return tuple(results)
+        _write_report(workspace.path, report_location, results)
+        await workspace.snapshot("framework-local-validation")
+        return tuple(results)
 
 
 __all__ = [
@@ -445,9 +410,9 @@ __all__ = [
     "LocalValidationEvents",
     "LocalValidationRecipeError",
     "LocalValidationRecipeErrorKind",
+    "LocalValidator",
     "ValidationRecipe",
     "ValidationRecipeArtifact",
     "ValidationRecipeArtifactPath",
     "check_recipe_artifact_path",
-    "run_local_validation",
 ]
