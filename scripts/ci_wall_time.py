@@ -18,7 +18,7 @@ the summary and the annotation so contention is seen without failing the run.
 Usage:
     gh api "repos/$REPO/actions/runs/$RUN_ID/jobs?per_page=100" --paginate \\
         --jq '.jobs[]' > jobs.ndjson
-    python3 scripts/ci_wall_time.py jobs.ndjson --warn 360 --error 600
+    python3 scripts/ci_wall_time.py jobs.ndjson --warn 270 --error 300
 """
 
 from __future__ import annotations

@@ -473,7 +473,37 @@ class _Loop:
                     now_at=now,
                 )
             )
+        if self._recovery_cannot_open(core) and live:
+            events.append(
+                RunControlEvent(
+                    control=ControlInput(
+                        control_id=ControlId(root=_RECOVERY_BLOCKED),
+                        action="stop",
+                        mode=StopMode.CANCEL,
+                    ),
+                    result=RunResultProposal(
+                        outcome="blocked", reason="recovery blocked: outcome unknown"
+                    ),
+                    now_at=now,
+                )
+            )
         return tuple(events)
+
+    def _recovery_cannot_open(self, core: CoreState) -> bool:
+        """Whether recovery is blocked with nothing left that could unblock it.
+
+        A blocked check reopens only on an observation, and with nothing in flight and no
+        timer due none will come: the run would sit running until its deadline. So the loop
+        stops it with a ``blocked`` result that says why, as it stops a run at its deadline.
+        """
+        return (
+            core.records.recovery.phase == RecoveryPhase.BLOCKED
+            and core.run.result is None
+            and not self._shell.in_flight
+            and self._next_wake(core) is None
+            and self._shell.next_wake_at is None
+            and not any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+        )
 
     def _signature(self) -> object:
         """Everything that changes when work happened; time and the revision counter do not."""
@@ -549,6 +579,9 @@ class _Loop:
             await asyncio.gather(
                 *waiting[: len(waiting) - (self._lease is not None)], return_exceptions=True
             )
+
+
+_RECOVERY_BLOCKED = "recovery-blocked"
 
 
 def _noop() -> None:

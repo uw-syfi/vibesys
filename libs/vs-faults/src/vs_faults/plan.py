@@ -73,6 +73,10 @@ class ClusterFault(StrEnum):
     COMMAND_ERROR = "command_error"  # the Slurm command fails (controller timeout), nothing happens
     KILLED = "killed"  # sbatch: the job is submitted, then dies (OOM, preemption, node failure)
     WRONG_STATE = "wrong_state"  # squeue/sacct: the answer is garbage the parser has to reject
+    PENDING_FOREVER = "pending_forever"  # sbatch: the job is queued and never starts until scancel
+    ACCOUNTING_GAP = "accounting_gap"  # sacct: succeeds with no row (accounting lags or forgot it)
+    REQUEUED = "requeued"  # squeue/sacct: the job's node failed and Slurm requeued it
+    TRUNCATED = "truncated"  # the command succeeds, but its output is cut off mid-line
 
 
 class HostFault(StrEnum):
@@ -166,6 +170,15 @@ _CLUSTER_FAULTS: dict[ClusterFault, tuple[ClusterOperation, ...]] = {
     ),
     ClusterFault.KILLED: (ClusterOperation.SBATCH,),
     ClusterFault.WRONG_STATE: (ClusterOperation.SQUEUE, ClusterOperation.SACCT),
+    ClusterFault.PENDING_FOREVER: (ClusterOperation.SBATCH,),
+    ClusterFault.ACCOUNTING_GAP: (ClusterOperation.SACCT,),
+    ClusterFault.REQUEUED: (ClusterOperation.SQUEUE, ClusterOperation.SACCT),
+    ClusterFault.TRUNCATED: (
+        ClusterOperation.SBATCH,
+        ClusterOperation.SQUEUE,
+        ClusterOperation.SACCT,
+        ClusterOperation.EXEC,
+    ),
 }
 
 

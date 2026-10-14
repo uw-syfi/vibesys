@@ -17,9 +17,8 @@ import pytest
 from tests.support.crash_harness import (
     assert_converges,
     converges_after,
-    converges_after_one,
-    core_gap,
     crash_plan,
+    ends_as_it_must,
     run,
     straight_run,
 )
@@ -63,9 +62,8 @@ def test_every_kind_of_point_reaches_every_lifecycle_class_of_request() -> None:
 
 
 def _check(crossing: Crossing) -> None:
-    with core_gap(crossing):
-        converges_after_one(crossing)
-        assert run(crash_plan(crossing)).summary.status == RunStatus.TERMINAL
+    ends_as_it_must(crossing)
+    assert run(crash_plan(crossing)).summary.status == RunStatus.TERMINAL
 
 
 ONE_CRASH = (

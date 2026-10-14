@@ -14,6 +14,7 @@ from hypothesis import strategies as st
 from scripts.explore_changed_tests import (
     LISTED_UNEXPLORED,
     PYTEST_NO_TESTS_COLLECTED,
+    UNEXPLORED_WARNING_SHARE,
     Explored,
     changed_lines,
     function_spans,
@@ -22,6 +23,7 @@ from scripts.explore_changed_tests import (
     selected_ids,
     suite_pathspecs,
     summary,
+    unexplored_warning,
 )
 
 if TYPE_CHECKING:
@@ -161,6 +163,20 @@ def test_the_summary_names_every_failure_and_the_cut_tests_it_has_room_for(
     assert (f"and {len(unexplored) - LISTED_UNEXPLORED} more" in text) == (
         len(unexplored) > LISTED_UNEXPLORED
     )
+
+
+@given(_ROWS, st.floats(1, 600))
+def test_the_step_warns_exactly_when_most_changed_tests_went_unexplored(
+    rows: list[Explored], cap: float
+) -> None:
+    unexplored = sum(1 for row in rows if row.outcome == "not explored")
+    warning = unexplored_warning(rows, cap=cap)
+
+    expected = bool(rows) and unexplored > UNEXPLORED_WARNING_SHARE * len(rows)
+    assert (warning is not None) == expected
+    if warning is not None:
+        assert warning.startswith("::warning ")
+        assert f"left {unexplored} of {len(rows)} changed tests" in warning
 
 
 @given(code=st.integers(-9, 5), capped=st.booleans())
