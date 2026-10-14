@@ -216,7 +216,7 @@ def test_wire_protocol_cites_its_transport_symbols_by_complete_path() -> None:
     assert {
         "src/server/transport/websocket.py:WebSocketLimits",
         "src/server/transport/websocket.py:WebSocketGateway._serve_until_stopped",
-        "src/server/transport/unix_jsonl.py:_RequestHandler._write_message",
+        "src/server/transport/unix_jsonl.py:_ClientSession._write_message",
     } <= cited
 
 

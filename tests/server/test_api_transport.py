@@ -2,11 +2,12 @@
 
 import json
 import socket
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Never
 
 import pytest
-from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
+from tests.server.support import ServerParts, build_server_parts
 
 from server.api.protocol import (
     ChatQuery,
@@ -25,18 +26,61 @@ from server.transport.unix_jsonl import (
     UnixJsonlServer,
     validate_socket_path,
 )
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api import Connection
+from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
+
+type _Dial = Callable[[], Connection]
 
 
-def _request(socket_path: Path, request: Request | bytes) -> dict[str, Any]:
+def _served[T](
+    socket_dir: Path,
+    log_dir: Path | None,
+    body: Callable[[ServerParts, _Dial], T],
+    *,
+    prepare: Callable[[ServerParts], None] = lambda _parts: None,
+) -> T:
+    """Run ``body`` against a Unix JSONL server on the simulated network and threads."""
+    threads = SimThreads(schedule_seed=0)
+    socket_path = socket_dir / "server.sock"
+
+    def main() -> T:
+        parts = build_server_parts(log_dir, threads=threads)
+        network = SimNetwork(threads)
+        try:
+            prepare(parts)
+            server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+            server.start()
+            try:
+                return body(parts, lambda: network.connect(str(socket_path), HANG_GUARD_S))
+            finally:
+                server.close()
+        finally:
+            parts.close()
+
+    return threads.run(main)
+
+
+def _send(connection: Connection, request: Request | bytes) -> None:
     frame = request if isinstance(request, bytes) else request.model_dump_json().encode()
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(HANG_GUARD_S)
-        client.connect(str(socket_path))
-        stream = client.makefile("rwb")
-        stream.write(frame + b"\n")
-        stream.flush()
-        return json.loads(stream.readline())
+    connection.send(frame + b"\n")
+
+
+def _receive(connection: Connection) -> dict[str, Any]:
+    line = b""
+    while not line.endswith(b"\n"):
+        chunk = connection.recv(1, HANG_GUARD_S)
+        assert chunk, f"the server hung up mid-line after {line!r}"
+        line += chunk
+    return json.loads(line)
+
+
+def _request(dial: _Dial, request: Request | bytes) -> dict[str, Any]:
+    connection = dial()
+    try:
+        _send(connection, request)
+        return _receive(connection)
+    finally:
+        connection.close()
 
 
 def test_api_routes_chat_to_configured_handler(tmp_path: Path) -> None:
@@ -77,124 +121,94 @@ def test_api_fallback_explains_agent_availability(tmp_path: Path) -> None:
 
 def test_transport_round_trips_the_stop_command(socket_dir: Path) -> None:
     """`command.stop` parses off the wire, dispatches, and acks as pending."""
-    parts = build_server_parts(socket_dir / "logs")
-    socket_path = socket_dir / "server.sock"
 
-    try:
-        with UnixJsonlServer(socket_path, parts.api):
-            response = _request(socket_path, StopCommand(client_id="unix-client"))
+    def body(parts: ServerParts, dial: _Dial) -> None:
+        response = _request(dial, StopCommand(client_id="unix-client"))
 
         assert response["ok"] is True
         assert response["client_id"] == "unix-client"
         assert response["ack"] == {"action": "stop", "status": "pending"}
         assert parts.controller.run_status() is RunStatus.STOPPING
-    finally:
-        parts.close()
+
+    _served(socket_dir, socket_dir / "logs", body)
 
 
 def test_transport_supports_multiple_clients_and_replay(socket_dir: Path) -> None:
-    parts = build_server_parts(socket_dir / "logs")
-    socket_path = socket_dir / "server.sock"
+    status, replay = _served(
+        socket_dir,
+        socket_dir / "logs",
+        lambda _parts, dial: (
+            _request(dial, SnapshotQuery()),
+            _request(dial, EventsQuery(after_sequence=0)),
+        ),
+    )
 
-    try:
-        with UnixJsonlServer(socket_path, parts.api):
-            status = _request(socket_path, SnapshotQuery())
-            replay = _request(socket_path, EventsQuery(after_sequence=0))
-
-        assert status["ok"] is True
-        assert status["snapshot"]["status"] == "running"
-        sequences = [event["sequence"] for event in replay["events"]]
-        assert sequences == sorted(sequences)
-        assert len(sequences) == len(set(sequences))
-        assert any(event["type"] == "server_started" for event in replay["events"])
-    finally:
-        parts.close()
+    assert status["ok"] is True
+    assert status["snapshot"]["status"] == "running"
+    sequences = [event["sequence"] for event in replay["events"]]
+    assert sequences == sorted(sequences)
+    assert len(sequences) == len(set(sequences))
+    assert any(event["type"] == "server_started" for event in replay["events"])
 
 
 @pytest.mark.parametrize("frame", [b"[]", b"null", b'"text"', b"7", b"not json", b"\xff\xfe"])
 def test_transport_rejects_a_malformed_frame_as_invalid_input(
     socket_dir: Path, frame: bytes
 ) -> None:
-    parts = build_server_parts(socket_dir / "logs")
-    socket_path = socket_dir / "server.sock"
+    response = _served(socket_dir, socket_dir / "logs", lambda _parts, dial: _request(dial, frame))
 
-    try:
-        with UnixJsonlServer(socket_path, parts.api):
-            response = _request(socket_path, frame)
-
-        assert response["ok"] is False
-        assert response["request_id"] == "unknown"
-        assert response["error"] == "Request received invalid input"
-    finally:
-        parts.close()
+    assert response["ok"] is False
+    assert response["request_id"] == "unknown"
+    assert response["error"] == "Request received invalid input"
 
 
 def test_transport_returns_sanitized_request_errors(socket_dir: Path) -> None:
-    parts = build_server_parts(socket_dir / "logs")
 
     def fail_chat(question: str) -> ChatAnswer:
         _failure_message = f"token=super-secret Chat agent failed while answering: {question}"
         raise RuntimeError(_failure_message)
 
-    parts.chat.install_default_handler(fail_chat)
-    socket_path = socket_dir / "server.sock"
+    response = _served(
+        socket_dir,
+        socket_dir / "logs",
+        lambda _parts, dial: _request(dial, ChatQuery(text="what happened?")),
+        prepare=lambda parts: parts.chat.install_default_handler(fail_chat),
+    )
 
-    try:
-        with UnixJsonlServer(socket_path, parts.api):
-            response = _request(socket_path, ChatQuery(text="what happened?"))
-
-        assert response["ok"] is False
-        assert response["error"] == "Request failed"
-        assert response["diagnostic"]["scope"] == "request"
-        assert response["diagnostic"]["detail"] == (
-            "RuntimeError: token=[REDACTED] Chat agent failed while answering: what happened?"
-        )
-    finally:
-        parts.close()
+    assert response["ok"] is False
+    assert response["error"] == "Request failed"
+    assert response["diagnostic"]["scope"] == "request"
+    assert response["diagnostic"]["detail"] == (
+        "RuntimeError: token=[REDACTED] Chat agent failed while answering: what happened?"
+    )
 
 
 def test_subscription_streams_one_consistent_append_batch(socket_dir: Path) -> None:
-    parts = build_server_parts(socket_dir / "logs")
-    socket_path = socket_dir / "server.sock"
+    def body(parts: ServerParts, dial: _Dial) -> list[dict[str, Any]]:
+        client = dial()
+        _send(client, SubscribeRequest(after_sequence=0, client_id="unix-subscriber"))
+        subscribed = _receive(client)
+        replay = _receive(client)
+        with parts.condition:
+            parts.journal.record(EventType.CHAT, "hello", status="answered")
+            parts.journal.record(EventType.STATUS_QUERY, "/history")
+        streamed = _receive(client)
+        client.close()
+        return [subscribed, replay, streamed]
 
-    try:
-        with (
-            UnixJsonlServer(socket_path, parts.api),
-            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
-        ):
-            client.settimeout(DEADLOCK_GUARD_S)
-            client.connect(str(socket_path))
-            stream = client.makefile("rwb")
-            stream.write(
-                SubscribeRequest(after_sequence=0, client_id="unix-subscriber")
-                .model_dump_json()
-                .encode()
-                + b"\n"
-            )
-            stream.flush()
-            subscribed = json.loads(stream.readline())
-            replay = json.loads(stream.readline())
-            with parts.condition:
-                parts.journal.record(EventType.CHAT, "hello", status="answered")
-                parts.journal.record(EventType.STATUS_QUERY, "/history")
-            streamed = json.loads(stream.readline())
+    subscribed, replay, streamed = _served(socket_dir, socket_dir / "logs", body)
 
-        assert subscribed["type"] == "subscribed"
-        assert subscribed["client_id"] == "unix-subscriber"
-        assert replay["type"] == "event_batch"
-        assert streamed["type"] == "event_batch"
-        assert [event["type"] for event in streamed["events"]] == ["chat", "status_query"]
-        assert streamed["through_sequence"] == streamed["events"][-1]["sequence"]
-    finally:
-        parts.close()
+    assert subscribed["type"] == "subscribed"
+    assert subscribed["client_id"] == "unix-subscriber"
+    assert replay["type"] == "event_batch"
+    assert streamed["type"] == "event_batch"
+    assert [event["type"] for event in streamed["events"]] == ["chat", "status_query"]
+    assert streamed["through_sequence"] == streamed["events"][-1]["sequence"]
 
 
 def test_subscription_reports_structured_stream_failure(
     tmp_path: Path, socket_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    parts = build_server_parts(tmp_path / "logs")
-    socket_path = socket_dir / "server.sock"
-
     def fail_replay(
         after_sequence: int, *, store_id: str | None = None, bootstrap_spine: bool = False
     ) -> Never:
@@ -202,36 +216,32 @@ def test_subscription_reports_structured_stream_failure(
         _failure_message = "event store is unavailable"
         raise RuntimeError(_failure_message)
 
-    try:
-        monkeypatch.setattr(parts.api, "subscription_checkpoint", fail_replay)
-        with (
-            UnixJsonlServer(socket_path, parts.api),
-            socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client,
-        ):
-            client.settimeout(DEADLOCK_GUARD_S)
-            client.connect(str(socket_path))
-            stream = client.makefile("rwb")
-            stream.write(
-                SubscribeRequest(after_sequence=0, client_id="failing-unix-client")
-                .model_dump_json()
-                .encode()
-                + b"\n"
-            )
-            stream.flush()
-            subscribed = json.loads(stream.readline())
-            bootstrap = json.loads(stream.readline())
-            parts.journal.record(EventType.CHAT, "hello", status="answered")
-            failure = json.loads(stream.readline())
+    def body(parts: ServerParts, dial: _Dial) -> list[dict[str, Any]]:
+        client = dial()
+        _send(client, SubscribeRequest(after_sequence=0, client_id="failing-unix-client"))
+        subscribed = _receive(client)
+        bootstrap = _receive(client)
+        parts.journal.record(EventType.CHAT, "hello", status="answered")
+        failure = _receive(client)
+        client.close()
+        return [subscribed, bootstrap, failure]
 
-        assert subscribed["type"] == "subscribed"
-        assert bootstrap["type"] == "event_batch"
-        assert failure["type"] == "protocol_error"
-        assert failure["request_id"] == subscribed["request_id"]
-        assert failure["client_id"] == "failing-unix-client"
-        assert failure["code"] == "stream_failed"
-        assert failure["diagnostic"]["detail"] == "RuntimeError: event store is unavailable"
-    finally:
-        parts.close()
+    subscribed, bootstrap, failure = _served(
+        socket_dir,
+        tmp_path / "logs",
+        body,
+        prepare=lambda parts: monkeypatch.setattr(
+            parts.api, "subscription_checkpoint", fail_replay
+        ),
+    )
+
+    assert subscribed["type"] == "subscribed"
+    assert bootstrap["type"] == "event_batch"
+    assert failure["type"] == "protocol_error"
+    assert failure["request_id"] == subscribed["request_id"]
+    assert failure["client_id"] == "failing-unix-client"
+    assert failure["code"] == "stream_failed"
+    assert failure["diagnostic"]["detail"] == "RuntimeError: event store is unavailable"
 
 
 def test_socket_path_limit_matches_kernel(socket_dir: Path) -> None:

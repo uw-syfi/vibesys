@@ -245,7 +245,7 @@ class WebSocketLimits:
     Flow control. ``send_buffer_bytes`` is the transport high-water mark that
     makes an unread frame stall the producing coroutine instead of queueing
     without bound; it is the WebSocket equivalent of the blocking
-    ``wfile.write`` plus ``flush`` in ``unix_jsonl.py``'s ``_write_message``.
+    ``send`` in ``unix_jsonl.py``'s ``_write_message``.
     It is unrelated to ``receive_queue``, which bounds frames arriving *from*
     the peer. ``write_deadline_seconds`` bounds how long that stall may last
     before the peer is treated as gone; without it a peer that neither reads
@@ -603,7 +603,7 @@ class WebSocketGateway:
                 # Every bound below is stated, never inherited: see
                 # ``WebSocketLimits``. ``write_limit`` is the send-side high-water
                 # mark that makes an unread frame stall the producer, the analogue
-                # of ``unix_jsonl.py``'s blocking ``wfile.write``; ``max_queue``
+                # of ``unix_jsonl.py``'s blocking ``send``; ``max_queue``
                 # bounds the opposite direction, frames arriving from the peer, as
                 # does ``max_size``: it is the cap on what this gateway will
                 # *receive*, and says nothing about what a peer will accept from

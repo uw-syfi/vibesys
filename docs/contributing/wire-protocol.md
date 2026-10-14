@@ -104,7 +104,7 @@ mirrors the three sockets the Unix client opens today and needs no multiplexing.
 | chat | one `query.chat` on its own connection | one long-running request and its single response |
 
 On the Unix transport the control connection reads requests in a loop and writes one response per
-request (`unix_jsonl.py:_RequestHandler.handle`); a `subscribe` request takes over its connection
+request (`unix_jsonl.py:_ClientSession.handle`); a `subscribe` request takes over its connection
 and never returns to that loop (`unix_jsonl.py:_stream`). A transport must preserve this: a
 subscription owns its connection for the connection's life, and chat is isolated on its own
 connection so a long agent turn does not block control traffic behind it.
@@ -134,9 +134,11 @@ the frame and then close.
 
 ### WP-DISCONNECT: disconnect detection is transport specific and needs a liveness signal
 
-The Unix server notices a gone client with a non-blocking `recv(1, MSG_PEEK | MSG_DONTWAIT)` that
-returns empty on FIN (`unix_jsonl.py:_client_disconnected`), checked only while the stream is idle
-(`unix_jsonl.py:_stream`). That probe has no WebSocket equivalent, and a WebSocket that dies without
+The Unix server notices a gone client through the connection's non-blocking `peer_closed` check
+(`vs_sim/network.py:Connection.peer_closed`; on a real socket a `recv(1, MSG_PEEK | MSG_DONTWAIT)`
+that returns empty on FIN), made only while the stream is idle (`unix_jsonl.py:_stream`). A response
+written after the client hung up ends that client's session and nothing else
+(`unix_jsonl.py:UnixJsonlServer._serve`). That probe has no WebSocket equivalent, and a WebSocket that dies without
 a close (a slept laptop, a killed tab) leaves the server with no FIN to read. The disposition:
 
 - A clean browser close (tab closed, navigation) sends a WebSocket close frame, which the gateway
@@ -180,8 +182,8 @@ the send-side high-water mark, and it is the one that carries the contract below
 **The send-side overflow policy is to stall the producer, not to drop events and not to disconnect
 on the first slow read.** Past the high-water mark the producing coroutine suspends in the library's
 `drain()` until the peer catches up. This is deliberately the same shape as the Unix path, where
-`src/server/transport/unix_jsonl.py:_RequestHandler._write_message` does a blocking `wfile.write` plus
-`flush`, and it is what preserves burst batching on both transports: a stalled stream loop is not
+`src/server/transport/unix_jsonl.py:_ClientSession._write_message` does a blocking `send` of the
+whole line, and it is what preserves burst batching on both transports: a stalled stream loop is not
 reading the journal, so the next `subscription_checkpoint` coalesces the whole backlog into one
 `event_batch` instead of one frame per event. Slow consumers get fewer, larger batches rather than
 lost events.

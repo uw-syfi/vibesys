@@ -92,7 +92,7 @@ grows and then names unrelated code.
 - Write a citation as one inline code span, `<path>:<symbol>`
   (`unix_jsonl.py:_write_message`). The path may be the full repo-relative one
   or any unambiguous suffix of it, and the symbol may be qualified by its owner
-  (`unix_jsonl.py:_RequestHandler.handle`).
+  (`unix_jsonl.py:_ClientSession.handle`).
 - `scripts/check_doc_citations.py` enforces that the symbol is still defined in
   the cited file, and rejects a line-number citation outright. It gates the docs
   listed in its `GATED_DOCS`; add a doc there once its citations are swept.
