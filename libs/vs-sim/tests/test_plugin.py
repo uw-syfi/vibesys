@@ -219,7 +219,10 @@ def test_worlds_registered_by_a_project_are_built_once_per_test(suite: pytest.Py
             def __init__(self, clock):
                 self.clock = clock
 
-        WORLDS.register("cluster", lambda sim: Cluster(sim.clock))
+        # WORLDS is process-wide, and every in-process run of this test (seed exploration
+        # repeats it) imports this conftest again; a project's conftest is imported once.
+        if "cluster" not in WORLDS.names:
+            WORLDS.register("cluster", lambda sim: Cluster(sim.clock))
         """
     )
     suite.makepyfile(
