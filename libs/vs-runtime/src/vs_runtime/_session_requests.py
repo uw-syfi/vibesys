@@ -1002,9 +1002,12 @@ class RuntimeSessionRequests:
         )
         seen = self._observations.observe(
             ObservationSubject.of(request, request_id=core_named(request.dispatch)),
+            # A turn that never reached the provider holds nothing: nothing is left to release.
             ObservationFacts(
                 status=ObservationStatus.REJECTED,
                 terminal=True,
+                released=True,
+                children_complete=True,
                 diagnostic="no dispatch record: the turn never reached the provider",
             ),
             observed_at=context.now_at,

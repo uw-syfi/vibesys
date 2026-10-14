@@ -539,7 +539,9 @@ class _Driver[S: StrategyState]:
             status=ObservationStatus.REJECTED if terminal else ObservationStatus.UNKNOWN,
             accepted=False,
             terminal=terminal,
-            released=False,
+            # A request that never began holds nothing: nothing is left to release.
+            released=terminal,
+            children_complete=terminal,
             diagnostic="no sealed result for this request",
         )
 

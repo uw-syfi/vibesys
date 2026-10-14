@@ -114,6 +114,7 @@ class RecoverableExecutors(ScriptedExecutors):
             owner_events = sealed.owner_events
         else:
             sequence = self._next(target.root)
+            # An effect that never started holds nothing: there is nothing left to release.
             observation = Observation(
                 event_id=EventId(root=f"{target.root}:observation:{sequence}"),
                 request_id=target,
@@ -124,8 +125,8 @@ class RecoverableExecutors(ScriptedExecutors):
                 status=ObservationStatus.REJECTED,
                 accepted=False,
                 terminal=True,
-                released=False,
-                children_complete=False,
+                released=True,
+                children_complete=True,
             )
             facts = TargetObservation(observation=observation, reissue=ReissueProof.NEVER_BEGAN)
         own = self._observed(request, Succeeded(), context.now_at)

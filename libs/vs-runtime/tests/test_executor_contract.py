@@ -48,6 +48,11 @@ def _answer(result: ExecutionResult) -> Observation:
     return result.observation.target.observation
 
 
+def _holds_nothing(observation: Observation) -> bool:
+    """A "never started" answer proves release: core ends the owner without inspecting again."""
+    return observation.released and observation.children_complete and not observation.accepted
+
+
 @pytest.mark.parametrize(("case", "scenario"), PARAMS)
 async def test_a_kind_acts_once_under_its_lease_and_its_identity_and_core_accepts_every_answer(
     case: ExecutorCase, scenario: Scenario
@@ -132,10 +137,13 @@ async def test_crash_at_every_durable_boundary_recovers_once_and_core_accepts(
             if isinstance(request, (DispatchTurn, ResumeSessionTurn)):
                 dispatched = await inspect_dispatch_of(world, request)
                 assert _answer(dispatched).request_id == request.request_id, f"boundary {crash_at}"
+                if _answer(dispatched).status is ObservationStatus.REJECTED:
+                    assert _holds_nothing(_answer(dispatched)), f"boundary {crash_at}"
                 assert_core_accepts([dispatched], expect_retry=False)
             answer = await inspect_request_of(world, request)
             if _answer(answer).status is ObservationStatus.REJECTED:
                 assert world.effects() == before, f"boundary {crash_at}"
+                assert _holds_nothing(_answer(answer)), f"boundary {crash_at}"
             recovered = await world.execute(request, lease=RevocableLease(), crash_at=None)
             replayed = await world.execute(request, lease=RevocableLease(), crash_at=None)
             after = await inspect_request_of(world, request)
