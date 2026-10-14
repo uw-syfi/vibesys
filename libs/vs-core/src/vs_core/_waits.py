@@ -417,9 +417,7 @@ def _recovery_waits(core: CoreState) -> list[OpenWait]:
             subject=check.target.root,
             producer=Producer.PENDING_REQUEST
             if check.target in live or check.inspection in live or check.target in inspected
-            else Producer.TIMER
-            if _children_polled(core, check.target)
-            else None,
+            else _children_producer(core, check.target),
         )
         for check in barrier.checks
         if check.resolution == "pending"
@@ -439,18 +437,34 @@ def _with_successors(core: CoreState, related: list[RequestRecord]) -> list[Requ
     ]
 
 
-def _children_polled(core: CoreState, target: RequestId) -> bool:
-    """Whether every child resource *target* left is a live job its own ledger still polls.
+def _children_producer(core: CoreState, target: RequestId) -> Producer | None:
+    """What settles every child resource *target* left, when each is a job its ledger tracks.
 
     The job ledger is the other party that can settle such a child: once it observes the job
-    ended, recovery hands the child to it and re-resolves the check.
+    ended, recovery hands the child to it and re-resolves the check. So each child waits on
+    its job's own wait (``_job_waits``), over both ledgers; one child no job answers for, or a
+    job nothing will move, leaves the check an orphan.
     """
     children = [child for child in core.records.children if target in child.source_requests]
-    jobs = [job for job in core.evaluation.jobs if not job.terminal]
-    return bool(children) and all(
-        any(job.resource_id == child.resource_id and job.scope == child.scope for job in jobs)
+    jobs = {
+        (job.resource_id, job.scope): job.resource_id.root
+        for job in core.evaluation.jobs
+        if not job.terminal
+    } | {
+        (job.resource_id, job.scope): job.request_id.root
+        for job in core.evaluation.registered_jobs
+        if not job.terminal and job.resource_id is not None
+    }
+    producers = {wait.subject: wait.producer for wait in _job_waits(core, frozenset())}
+    found = [
+        producers.get(subject)
+        if (subject := jobs.get((child.resource_id, child.scope))) is not None
+        else None
         for child in children
-    )
+    ]
+    if not found or None in found:
+        return None
+    return found[0]
 
 
 def _job_waits(core: CoreState, outbox: frozenset[RequestId]) -> list[OpenWait]:

@@ -24,11 +24,14 @@ from vs_core.api import (
     Observation,
     ObservationStatus,
     ObservePacing,
+    OperationId,
     Outcome,
+    PoolId,
     Producer,
     RecoveryBarrier,
     RecoveryCheck,
     RecoveryPhase,
+    RegisteredOwnedJob,
     ReleaseDependency,
     RequestObserved,
     RequestPhase,
@@ -259,6 +262,43 @@ def test_a_recovery_check_waits_on_every_party_that_can_settle_the_child_its_tar
         else None
     )
     assert (WaitKind.RECOVERY_CHECK, expected) in found
+
+
+@pytest.mark.parametrize("ledger", ["jobs", "registered", "unpaced"])
+def test_a_check_on_a_left_job_waits_on_that_job_in_either_ledger_and_only_while_it_is_polled(
+    ledger: str,
+) -> None:
+    """A left job settles the check only through its own wait: polled, in either job ledger.
+
+    A registered job counts like a measurement job. A job nothing polls any more leaves the
+    check an orphan too, instead of a timer that never fires hiding it.
+    """
+    state = _left_a_child(inspecting=False, job_terminal=False)
+    job = state.evaluation.jobs[0]
+    if ledger == "registered":
+        registered = RegisteredOwnedJob(
+            operation_id=OperationId(root="left-operation"),
+            request_id=job.submission_id,
+            scope=job.scope,
+            resource_pool=PoolId(root="jobs"),
+            resource_id=job.resource_id,
+            pacing=job.pacing,
+        )
+        evaluation = state.evaluation.model_copy(
+            update={"jobs": (), "registered_jobs": (registered,)}
+        )
+    else:
+        pacing = ObservePacing() if ledger == "unpaced" else job.pacing
+        evaluation = state.evaluation.model_copy(
+            update={"jobs": (job.model_copy(update={"pacing": pacing}),)}
+        )
+    state = state.model_copy(update={"evaluation": evaluation})
+
+    found = {(wait.waiter, wait.producer) for wait in waits(state)}
+
+    expected = None if ledger == "unpaced" else Producer.TIMER
+    assert (WaitKind.RECOVERY_CHECK, expected) in found
+    assert (WaitKind.OWNED_JOB, expected) in found
 
 
 def test_a_fresh_run_has_no_waits() -> None:
