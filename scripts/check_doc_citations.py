@@ -318,7 +318,9 @@ def repo_index(root: Path, tracked: tuple[str, ...]) -> RepoIndex:
             parts = path.removeprefix(f"{source_root}/").split("/")
             if path.startswith(f"{source_root}/") and parts[1:] == ["__init__.py"]:
                 packages.setdefault(parts[0], []).append(source_root)
-    return RepoIndex(root, tracked, top_dirs, {name: tuple(roots) for name, roots in packages.items()})
+    return RepoIndex(
+        root, tracked, top_dirs, {name: tuple(roots) for name, roots in packages.items()}
+    )
 
 
 def is_dotted_name(text: str, index: RepoIndex) -> bool:

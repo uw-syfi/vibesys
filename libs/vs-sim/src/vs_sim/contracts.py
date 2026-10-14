@@ -540,6 +540,8 @@ class ProcessesUnderTest:
     """A command that leaves a descendant outside its group holding its output open."""
     missing_program: tuple[str, ...]
     """A command whose program does not exist."""
+    now: Callable[[], float]
+    """The time the implementation's runs take, in seconds."""
     release: Callable[[], None] = lambda: None
     """Ends what a run of ``survives_kill`` reported unreaped left running."""
 
@@ -593,6 +595,17 @@ class ProcessesContract:
         assert isinstance(run, ProcessTimedOut), run
         assert run.timeout == _SHORT_TIMEOUT_S
         assert written.startswith(run.stdout), run
+
+    def test_a_run_that_times_out_takes_at_least_its_timeout(self) -> None:
+        """A caller that retries until a deadline sees each timed-out run use up its timeout."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        started = subject.now()
+        run = subject.processes.run(
+            ProcessSpec(subject.outlives_timeout(b"")), timeout=_SHORT_TIMEOUT_S
+        )
+        elapsed = subject.now() - started
+        assert isinstance(run, ProcessTimedOut), run
+        assert elapsed >= _SHORT_TIMEOUT_S, elapsed
 
     def test_a_group_the_kill_cannot_end_is_reported_unreaped_not_timed_out(self) -> None:
         """A descendant that escaped the group and holds the output open is a distinct result.

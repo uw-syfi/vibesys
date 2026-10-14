@@ -13,7 +13,7 @@ from vibesys.repository import RepositoryVisibility
 from vibesys.run.experiment_repo import ExperimentRepository
 from vs_github.api import GitHubCLI
 from vs_project.api import GitTracker, NullGitTrackerEvents
-from vs_sim.api.testing import FakeProcesses, ProcessScript
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -243,7 +243,7 @@ def test_push_rejects_non_run_branch(tmp_path: Path) -> None:
 
 def test_create_remote_delegates_creation_and_attachment(tmp_path: Path) -> None:
     _project(tmp_path)
-    processes = FakeProcesses(lambda _spec: ProcessScript())
+    processes = FakeProcesses(lambda _spec: ProcessScript(), pass_time=ManualClock().advance)
     messages: list[str] = []
     publisher = ExperimentRepository(
         tmp_path, messages.append, git=REAL_GIT, github=GitHubCLI(processes)

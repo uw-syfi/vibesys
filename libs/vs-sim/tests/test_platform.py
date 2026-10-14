@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -9,13 +10,19 @@ from vs_sim.api import ProcessOutcome, ProcessSpec
 from vs_sim.api.testing import FakeProcesses, FakeProcessSignaller, ProcessScript, Sim
 
 
-@given(seconds=st.floats(min_value=0, max_value=3600), seed=st.integers(0, 2**16))
+@given(
+    seconds=st.floats(min_value=0, max_value=3600),
+    duration=st.floats(min_value=0, max_value=3600),
+    seed=st.integers(0, 2**16),
+)
 def test_blocking_work_on_a_simulated_platform_sleeps_in_virtual_time(
-    seconds: float, seed: int
+    seconds: float, duration: float, seed: int
 ) -> None:
     sim = Sim(seed=seed)
     threads = sim.threads()
-    processes = FakeProcesses(lambda _spec: ProcessScript(returncode=3))
+    processes = FakeProcesses(
+        lambda _spec: ProcessScript(returncode=3, duration_s=duration), pass_time=threads.sleep
+    )
     platform = sim.platform(threads, processes=processes, signaller=FakeProcessSignaller(set()))
     start = sim.clock.now()
 
@@ -29,4 +36,4 @@ def test_blocking_work_on_a_simulated_platform_sleeps_in_virtual_time(
         return await platform.blocking.run(work)
 
     assert sim.run(main(), threads=threads) == ProcessOutcome(3, b"", b"")
-    assert platform.clock.now() == start + seconds
+    assert platform.clock.now() == pytest.approx(start + seconds + duration)

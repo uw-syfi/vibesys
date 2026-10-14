@@ -163,19 +163,25 @@ class OsProcesses:
     def _kill(
         self, process: subprocess.Popen[bytes], group: _OwnedProcessGroup
     ) -> tuple[bytes, bytes] | str:
-        """Kill the group and drain its output within the cleanup bound; else say what failed."""
+        """Kill the group and drain its output within the cleanup bound; else say what failed.
+
+        A failed kill is reported even when the output then closes: the leader may have exited
+        on its own while other members of its group, which the kill did not reach, live on.
+        """
         problems: list[str] = []
         try:
             group.send_signal(signal.SIGKILL)
         except OSError as error:
             problems.append(f"killing process group {process.pid} failed: {error}")
         try:
-            return process.communicate(timeout=self._cleanup_timeout)
+            drained = process.communicate(timeout=self._cleanup_timeout)
         except subprocess.TimeoutExpired:
             problems.append(
                 f"the output of process group {process.pid} did not close within "
                 f"{self._cleanup_timeout:g} seconds of the kill"
             )
+        else:
+            return "; ".join(problems) if problems else drained
         for stream in (process.stdin, process.stdout, process.stderr):
             if stream is not None:
                 with suppress(OSError):

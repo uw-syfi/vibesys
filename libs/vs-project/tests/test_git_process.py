@@ -17,7 +17,7 @@ from tests.support.real_git import REAL_GIT
 
 from vs_project.api import Git, GitCommandError
 from vs_sim.api import ProcessTimeoutError
-from vs_sim.api.testing import FakeProcesses, ProcessScript
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
 _IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@local")
 
@@ -67,7 +67,7 @@ def test_a_command_that_ends_reports_its_exit_and_output(
     args: list[str], returncode: int, stdout: bytes, stderr: bytes
 ) -> None:
     script = ProcessScript(returncode=returncode, stdout=stdout, stderr=stderr)
-    processes = FakeProcesses(lambda _spec: script)
+    processes = FakeProcesses(lambda _spec: script, pass_time=ManualClock().advance)
     git = Git(processes)
 
     outcome = git.run(args, cwd=Path("/repo"))
@@ -101,11 +101,13 @@ def test_a_command_past_its_timeout_raises_and_says_what_is_left(
     *, args: list[str], survives_kill: bool, timeout: float
 ) -> None:
     script = ProcessScript(runs_until_signalled=True, survives_kill=survives_kill)
-    git = Git(FakeProcesses(lambda _spec: script))
+    clock = ManualClock()
+    git = Git(FakeProcesses(lambda _spec: script, pass_time=clock.advance))
 
     with pytest.raises(ProcessTimeoutError) as raised:
         git.run(args, cwd=Path("/repo"), timeout=timeout)
 
     assert raised.value.timeout == timeout
+    assert clock.now() == timeout
     notes = getattr(raised.value, "__notes__", [])
     assert bool(notes) == survives_kill

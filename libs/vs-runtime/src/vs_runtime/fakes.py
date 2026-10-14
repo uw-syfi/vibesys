@@ -6,7 +6,7 @@ import asyncio
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Literal, Never, TypeAlias, TypeVar
 
 from pydantic import BaseModel
 
@@ -233,6 +233,11 @@ class FakeProjectMaterializationEffects:
         return self.removes_children
 
 
+def _answers_take_no_time(seconds: float) -> Never:
+    message = f"an in-memory Git answer took {seconds:g} s"
+    raise AssertionError(message)
+
+
 class FakeGitRunner:
     """Git for pinned project-source checkouts, answered in memory: ``git()`` starts no process.
 
@@ -247,7 +252,7 @@ class FakeGitRunner:
 
     def git(self) -> Git:
         """A ``Git`` whose every command this Fake answers."""
-        return Git(FakeProcesses(self._answer))
+        return Git(FakeProcesses(self._answer, pass_time=_answers_take_no_time))
 
     def _answer(self, spec: ProcessSpec) -> ProcessScript:
         """Apply clone/checkout/rev-parse semantics without a subprocess."""

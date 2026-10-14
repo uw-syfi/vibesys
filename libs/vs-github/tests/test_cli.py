@@ -12,7 +12,7 @@ from vs_github.api import (
     GitHubCLIError,
     GitHubCLIUnavailableError,
 )
-from vs_sim.api.testing import FakeProcesses, ProcessScript
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 def _scripted(results: list[ProcessScript]) -> FakeProcesses:
     """Processes that end each run in turn as ``results`` say, recording what ran."""
     remaining = iter(results)
-    return FakeProcesses(lambda _spec: next(remaining))
+    return FakeProcesses(lambda _spec: next(remaining), pass_time=ManualClock().advance)
 
 
 def _calls(processes: FakeProcesses) -> list[tuple[list[str], Path | None]]:
@@ -101,7 +101,7 @@ def test_missing_gh_has_install_guidance() -> None:
         raise FileNotFoundError("gh")
 
     with pytest.raises(GitHubCLIUnavailableError, match=r"https://cli\.github\.com"):
-        GitHubCLI(FakeProcesses(missing)).ensure_authenticated()
+        GitHubCLI(FakeProcesses(missing, pass_time=ManualClock().advance)).ensure_authenticated()
 
 
 def test_issue_operations_use_explicit_repository_and_preserve_json() -> None:

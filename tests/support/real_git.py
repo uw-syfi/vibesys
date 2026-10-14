@@ -28,7 +28,12 @@ def _refuse(spec: ProcessSpec) -> Never:
     raise AssertionError(message)
 
 
-NO_GITHUB = GitHubCLI(FakeProcesses(_refuse))
+def _no_time(seconds: float) -> Never:
+    message = f"a refused GitHub CLI command took {seconds:g} s"
+    raise AssertionError(message)
+
+
+NO_GITHUB = GitHubCLI(FakeProcesses(_refuse, pass_time=_no_time))
 """A GitHub CLI for a run that never reaches GitHub; any command fails the test."""
 
 

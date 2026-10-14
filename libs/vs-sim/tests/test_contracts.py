@@ -19,6 +19,7 @@ from vs_sim.api import (
     LoopSignalSource,
     MonotonicClock,
     OsProcesses,
+    OsThreads,
     PidfdProcessSignaller,
     ProbeResult,
     SubprocessLauncher,
@@ -440,6 +441,7 @@ class TestOsProcesses(ProcessesContract):
                 str(HANG_GUARD_S),
             ),
             missing_program=("/nonexistent/vs-sim-no-such-program",),
+            now=OsThreads().now,
             release=held.unlink,
         )
 
@@ -464,14 +466,16 @@ def _processes_script(spec: ProcessSpec) -> ProcessScript:
 class TestFakeProcesses(ProcessesContract):
     def processes_under_test(self, *, cleanup_timeout: float) -> ProcessesUnderTest:
         del cleanup_timeout
+        clock = ManualClock()
         return ProcessesUnderTest(
-            FakeProcesses(_processes_script),
+            FakeProcesses(_processes_script, pass_time=clock.advance),
             exit_with=lambda status, out, err: ("exit", str(status), out.hex(), err.hex()),
             echo_stdin=("cat",),
             print_cwd_and_env=lambda name: ("pwd-env", name),
             outlives_timeout=lambda written: ("block", written.hex()),
             survives_kill=("escape",),
             missing_program=("no-such-program",),
+            now=clock.now,
         )
 
 
