@@ -447,7 +447,12 @@ def test_cached_old_epoch_inspection_cannot_recertify_missing_history(
     state = state.model_copy(
         update={
             "records": state.records.model_copy(
-                update={"children": (legacy,), "recovery": core.RecoveryBarrier(epoch=epoch - 1)}
+                update={
+                    "children": (legacy,),
+                    "recovery": core.RecoveryBarrier(epoch=epoch - 1),
+                    # A log ending at another epoch than the barrier's is refused on reload.
+                    "hosts": (),
+                }
             )
         }
     )
