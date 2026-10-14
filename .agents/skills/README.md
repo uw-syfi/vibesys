@@ -19,6 +19,9 @@ Engineering judgment that holds in any well-run codebase.
 
 How to make one kind of change in this repository.
 
+- [add-bundled-skill](add-bundled-skill/SKILL.md): add or change a bundled
+  skill in `resources/skills/`, its sidecar selection rules, platform
+  references or `update.sh`.
 - [build-client-feature](build-client-feature/SKILL.md): add or change a
   feature in the TypeScript clients: package placement, machines and folds,
   run-session wiring, cancellation and bounded waits.

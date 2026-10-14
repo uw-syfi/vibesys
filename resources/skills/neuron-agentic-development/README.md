@@ -7,7 +7,7 @@ licensed under **Apache-2.0** (see `LICENSE.txt` / `NOTICE`).
 They teach an agent to author, debug, and profile **NKI** (Neuron Kernel
 Interface) kernels for AWS Trainium / Inferentia. VibeSys surfaces them
 automatically when running with `--backend trainium` (see `.vibesys.toml` and
-`docs/skill-metadata.md`), so the implementer can write custom NeuronCore
+`docs/contributing/skill-metadata.md`), so the implementer can write custom NeuronCore
 kernels instead of treating the device as a black box.
 
 ## What's vendored
