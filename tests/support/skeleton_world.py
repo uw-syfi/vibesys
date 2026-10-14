@@ -201,6 +201,10 @@ class World:
     gate: FaultGate | None = None
     git: WorldGit | None = None
     """The Git the world runs on, as the scripted agent and the assertions see it."""
+    store: StateStore | None = None
+    """The run's state store, shared by every host the world starts as the disk is; None opens
+    the project's store on disk. A memory store spares a test that restarts the host many
+    times the store's file writes and directory syncs."""
     evaluations: list[SemanticSlurmEvaluationExecutor] = field(default_factory=list)
     """The evaluation executor of every process started, which a host closes at exit."""
 
@@ -299,7 +303,7 @@ class World:
         bindings = self.bindings()
         if self.commits is not None:
             bindings = dataclasses.replace(bindings, commits=self.commits)
-        store: StateStore = self.env.project.state_store(RUN_ID)
+        store = self.store if self.store is not None else self.env.project.state_store(RUN_ID)
         if self.gate is not None:
             store = FaultingStore(store, self.gate)
         shell = CoreRuntime(

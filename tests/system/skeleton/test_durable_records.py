@@ -25,7 +25,6 @@ from tests.support.workspace_world import RUN_ID
 from vs_core.api import FlowState, RunStatus
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import RuntimeRecord
-from vs_sim.api.testing import Depth, depth
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -64,16 +63,17 @@ _STRATEGIES = {
 }
 
 
-# A pull request plays the measured search across a restart, which reaches every record kind
-# but the cancelled close; the nightly job plays every search both ways.
 _CASES = [
     pytest.param(name, crash, id=f"{name}-{'straight' if crash is None else 'restart'}")
     for name in _STRATEGIES
     for crash in (None, CrashPoint.AFTER_OBSERVATION)
-    if depth() is Depth.NIGHTLY or (name, crash) == ("measured", CrashPoint.AFTER_OBSERVATION)
 ]
 
 
+# The nightly job plays every search both ways. A pull request already holds the property for a
+# run that only advances its clock (`libs/vs-runtime/tests/test_core_shell.py`), and its other
+# skeleton tests commit to and restart from this disk store.
+@pytest.mark.slow
 @pytest.mark.parametrize(("strategy", "crash"), _CASES)
 async def test_every_committed_record_reads_back_as_itself(
     tmp_path: Path, strategy: str, crash: CrashPoint | None

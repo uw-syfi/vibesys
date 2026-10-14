@@ -2,8 +2,8 @@
 
 ``simulate`` plays the scripted run on the composed world. Each time the plan crashes the host
 (a ``HostCrashError`` from the faulting executors or the faulting store), the clock moves past
-the dead host's lease and a fresh shell starts over the same Project, the same Fake cluster and
-the same agent journal, exactly as a restart would. Once the plan is spent the last host runs
+the dead host's lease and a fresh shell starts over the same Project, the same state store (in
+memory), the same Fake cluster and the same agent journal, exactly as a restart would. Once the plan is spent the last host runs
 fault-free to the end (heal, then liveness). The ``Summary`` is what must not depend on where the
 host died: the terminal result, the adopted tree, and the external effects by idempotency key.
 """
@@ -25,6 +25,7 @@ from tests.support.skeleton_world import (
 
 from vs_core.api import RequestPhase, RunStatus
 from vs_faults.api import FaultGate, FaultPlan, HostCrashError
+from vs_project.api import FakeStateStore
 from vs_project.api.testing import GitKind
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sim.api.testing import current_virtual_clock
@@ -94,6 +95,9 @@ async def simulate(
     cluster = CountingCluster()
     with open_skeleton_world(root, strategy or SkeletonStrategy(), cluster, git=git) as world:
         world.gate = gate
+        # Every restart reads what the dead host committed from this one store. The disk store's
+        # own durability is `test_durable_records`'s; here it would only cost the sweeps time.
+        world.store = FakeStateStore()
         now = 0.0
         crashes = 0
         for _ in range(len(plan.rules) + 1):
