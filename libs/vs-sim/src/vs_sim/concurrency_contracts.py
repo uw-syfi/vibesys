@@ -80,6 +80,32 @@ class ThreadsContract:
 
             assert sorted(subject.run(program)) == list(range(count)), seed
 
+    def test_each_thread_sees_its_own_local_value(self) -> None:
+        """A thread's writes to its local value are invisible to every other thread."""
+        for seed in range(_CASES):
+            subject = self.threads_under_test(seed)
+            count = SeededRandom(seed).randint(1, 6)
+
+            def program(subject: ThreadsUnderTest = subject, count: int = count) -> list[list[int]]:
+                local = subject.threads.local(list[int])
+                local.get().append(-1)
+                seen: dict[int, list[int]] = {}
+
+                def work(i: int) -> None:
+                    local.get().append(i)
+                    seen[i] = list(local.get())
+
+                workers = [
+                    subject.threads.spawn(lambda i=i: work(i), name=f"w{i}") for i in range(count)
+                ]
+                for worker in workers:
+                    _join(worker)
+                return [local.get(), *(seen[i] for i in range(count))]
+
+            mine, *theirs = subject.run(program)
+            assert mine == [-1], seed
+            assert theirs == [[i] for i in range(count)], seed
+
     def test_a_worker_keeps_its_name(self) -> None:
         """The handle reports the name the thread was spawned with."""
         subject = self.threads_under_test(0)

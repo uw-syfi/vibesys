@@ -632,7 +632,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.network", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
+depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.network", "vs_sim.os_platform", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
 
 [[modules]]
 path = "vs_sim.api.testing"
@@ -702,6 +702,11 @@ layer = "prompts_and_lower_libs"
 depends_on = []
 
 [[modules]]
+path = "vs_sim.os_platform"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.network", "vs_sim.processes", "vs_sim.signals"]
+
+[[modules]]
 path = "vs_sim.child"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.waits"]
@@ -714,7 +719,7 @@ depends_on = ["vs_sim.concurrency", "vs_sim.network", "vs_sim.randomness", "vs_s
 [[modules]]
 path = "vs_sim.contracts"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.child", "vs_sim.clock", "vs_sim.gate", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals", "vs_sim.streaming"]
+depends_on = ["vs_sim.blocking", "vs_sim.child", "vs_sim.clock", "vs_sim.gate", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals", "vs_sim.streaming", "vs_sim.waits"]
 
 [[modules]]
 path = "vs_sim.crash"
@@ -774,7 +779,7 @@ depends_on = ["vs_sim.randomness"]
 [[modules]]
 path = "vs_sim.sim"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.child", "vs_sim.gate", "vs_sim.randomness", "vs_sim.sim_threads", "vs_sim.trace", "vs_sim.virtual"]
+depends_on = ["vs_sim.child", "vs_sim.gate", "vs_sim.os_platform", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signals", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.trace", "vs_sim.virtual"]
 
 [[modules]]
 path = "vs_sim.sim_network"

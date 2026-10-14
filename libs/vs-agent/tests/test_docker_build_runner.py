@@ -35,7 +35,7 @@ from vs_sim.api.testing import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sim.api import Condition, Event, Lock, Worker
+    from vs_sim.api import Condition, Event, Lock, ThreadLocal, Worker
 
 
 class _FakePipedProcess:
@@ -141,6 +141,9 @@ class _StuckThreads:
 
     def event(self) -> Event:
         return self._threads.event()
+
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        return self._threads.local(initial)
 
     def sleep(self, seconds: float) -> None:
         self._threads.sleep(seconds)

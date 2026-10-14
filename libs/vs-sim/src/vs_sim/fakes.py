@@ -14,8 +14,10 @@ from vs_sim.processes import (
     ForegroundChild,
     MergedOutputProcess,
     PipedProcess,
+    ProcessGroupUnreaped,
     ProcessOutcome,
     ProcessSpec,
+    ProcessTimedOut,
     RunningProcess,
 )
 from vs_sim.states import Changes, wait_for_state
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
 
     from vs_sim.clock import Sleeper
     from vs_sim.probes import ProbeResult
+    from vs_sim.processes import ProcessRun
 
 
 class InlineBlockingRunner:
@@ -181,6 +184,8 @@ class ProcessScript:
     """Make stdout the process's input (a ``cat``), after ``stdout``."""
     runs_until_signalled: bool = False
     """Never ends by itself: only ``terminate`` or ``kill`` ends it."""
+    survives_kill: bool = False
+    """Something it started outlives a kill of its group, so a run that times out leaves it."""
 
 
 class _ScriptedProcess:
@@ -237,6 +242,39 @@ class FakeProcessLauncher:
         """Record ``spec`` and start the process the script describes for it."""
         self.started.append(spec)
         return _ScriptedProcess(spec, self.script(spec), self.clock)
+
+
+@dataclass
+class FakeProcesses:
+    """Runs scripted commands to completion; records every spec it was asked to run.
+
+    The script describes each command (:class:`ProcessScript`) or raises the ``OSError`` a
+    program that cannot start raises. No time passes: a command whose ``duration_s`` exceeds
+    the timeout, or one that ``runs_until_signalled``, times out as the real group would after
+    being killed, and one that ``survives_kill`` is left unreaped. A never-ending command
+    without a timeout would hang the caller, so the Fake refuses it.
+    """
+
+    script: Callable[[ProcessSpec], ProcessScript]
+    ran: list[ProcessSpec] = field(default_factory=list)
+    first_pid: int = 1000
+    """The process ID of the first run; each later run gets the next one."""
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        """Record ``spec`` and end it the way its script says."""
+        pid = self.first_pid + len(self.ran)
+        self.ran.append(spec)
+        script = self.script(spec)
+        endless = script.runs_until_signalled
+        if timeout is not None and (endless or script.duration_s > timeout):
+            if script.survives_kill:
+                return ProcessGroupUnreaped(timeout, pid, f"process {pid} survived the kill")
+            return ProcessTimedOut(timeout, script.stdout, script.stderr)
+        if endless:
+            message = f"{spec.argv[0]} never ends and the caller set no timeout"
+            raise AssertionError(message)
+        stdout = script.stdout + (spec.input if script.echo_input else b"")
+        return ProcessOutcome(script.returncode, stdout, script.stderr)
 
 
 @dataclass

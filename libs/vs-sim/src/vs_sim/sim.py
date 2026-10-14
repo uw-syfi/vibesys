@@ -7,13 +7,17 @@ from typing import TYPE_CHECKING, Any
 
 from vs_sim.child import run_in_child
 from vs_sim.gate import Gate
+from vs_sim.os_platform import Platform
 from vs_sim.randomness import SeededRandom, derive_seed
-from vs_sim.sim_threads import SimThreads
+from vs_sim.sim_network import SimNetwork
+from vs_sim.sim_threads import SimBlockingRunner, SimThreads
 from vs_sim.virtual import VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
+    from vs_sim.processes import Processes
+    from vs_sim.signals import ProcessSignaller
     from vs_sim.trace import EventTrace
 
 type WorldFactory = Callable[[Sim], object]
@@ -85,6 +89,22 @@ class Sim:
     def threads(self) -> SimThreads:
         """Simulated threads on this simulation's clock, schedule seed and trace."""
         return SimThreads(self.clock, schedule_seed=self.schedule_seed, trace=self.trace)
+
+    def platform(
+        self, threads: SimThreads, *, processes: Processes, signaller: ProcessSignaller
+    ) -> Platform:
+        """A :class:`Platform` on this simulation's clock, over ``threads`` (from :meth:`threads`).
+
+        Blocking calls and sockets run on ``threads``; processes and signals are the Fakes given.
+        """
+        return Platform(
+            clock=self.clock,
+            threads=threads,
+            blocking=SimBlockingRunner(threads),
+            processes=processes,
+            network=SimNetwork(threads),
+            signaller=signaller,
+        )
 
     def random(self, label: str = "") -> SeededRandom:
         """The random stream ``label`` draws from; independent of every other label."""

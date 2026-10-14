@@ -18,8 +18,9 @@ from typing import TYPE_CHECKING, Any
 
 from vs_sim.child import run_in_child
 from vs_sim.gate import Gate
-from vs_sim.processes import ProcessSpec
+from vs_sim.processes import ProcessGroupUnreaped, ProcessOutcome, ProcessSpec, ProcessTimedOut
 from vs_sim.randomness import SeededRandom
+from vs_sim.waits import HANG_GUARD_S
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from vs_sim.blocking import BlockingRunner
     from vs_sim.clock import Clock, Sleeper
     from vs_sim.probes import CommandProbe
-    from vs_sim.processes import ForegroundLauncher, ProcessLauncher, ProcessOutcome
+    from vs_sim.processes import ForegroundLauncher, Processes, ProcessLauncher
     from vs_sim.signals import ProcessSignaller, SignalSource
     from vs_sim.streaming import StreamingCommand
 
@@ -36,6 +37,10 @@ type Run = Callable[[Coroutine[Any, Any, Any]], Any]
 
 _CASES = 25
 """Seeded cases per property: the same draws every run."""
+_PROCESS_CASES = 4
+"""Seeded cases per process property: each starts a real interpreter in the real suite."""
+_SHORT_TIMEOUT_S = 0.2
+"""A timeout a command is meant to outlive."""
 
 
 @dataclass(frozen=True)
@@ -513,6 +518,113 @@ class ProcessLauncherContract:
             return
         message = "starting a missing program did not raise OSError"
         raise AssertionError(message)
+
+
+@dataclass(frozen=True)
+class ProcessesUnderTest:
+    """A :class:`~vs_sim.processes.Processes` and commands with known outcomes for it.
+
+    A real implementation gets Python one-liners, a Fake gets argvs its script recognises.
+    """
+
+    processes: Processes
+    exit_with: Callable[[int, bytes, bytes], tuple[str, ...]]
+    """A command that writes the first bytes to stdout, the second to stderr, and exits."""
+    echo_stdin: tuple[str, ...]
+    """A command that writes its stdin to stdout and exits 0."""
+    print_cwd_and_env: Callable[[str], tuple[str, ...]]
+    """A command that prints its working directory, a newline, and the named variable."""
+    outlives_timeout: Callable[[bytes], tuple[str, ...]]
+    """A command that writes the bytes to stdout, then never ends, with a descendant in its group."""
+    survives_kill: tuple[str, ...]
+    """A command that leaves a descendant outside its group holding its output open."""
+    missing_program: tuple[str, ...]
+    """A command whose program does not exist."""
+    release: Callable[[], None] = lambda: None
+    """Ends what a run of ``survives_kill`` reported unreaped left running."""
+
+
+class ProcessesContract:
+    """Cases for :class:`~vs_sim.processes.Processes`. Implement :meth:`processes_under_test`."""
+
+    def processes_under_test(self, *, cleanup_timeout: float) -> ProcessesUnderTest:
+        """A fresh implementation that waits ``cleanup_timeout`` for a killed group to end."""
+        raise NotImplementedError
+
+    def test_status_and_both_streams_come_back(self) -> None:
+        """The outcome carries the exit status, zero or not, and what each stream received."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        for seed in range(_PROCESS_CASES):
+            rng = SeededRandom(seed)
+            status = rng.randint(0, 100)
+            out, err = (_random_bytes(rng) for _ in "oe")
+            outcome = subject.processes.run(
+                ProcessSpec(subject.exit_with(status, out, err)), timeout=HANG_GUARD_S
+            )
+            assert outcome == ProcessOutcome(status, out, err), seed
+
+    def test_input_reaches_the_process(self) -> None:
+        """The spec's input is the process's stdin."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        for seed in range(_PROCESS_CASES):
+            data = _random_bytes(SeededRandom(seed))
+            spec = ProcessSpec(subject.echo_stdin, input=data)
+            assert subject.processes.run(spec, timeout=HANG_GUARD_S) == ProcessOutcome(
+                0, data, b""
+            ), seed
+
+    def test_the_command_runs_in_the_given_directory_and_environment(self) -> None:
+        """``cwd`` and ``env`` are the process's directory and its whole environment."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        cwd = Path(__file__).resolve().parent
+        spec = ProcessSpec(
+            subject.print_cwd_and_env("VS_SIM_CONTRACT"), cwd=cwd, env={"VS_SIM_CONTRACT": "x y"}
+        )
+        outcome = subject.processes.run(spec, timeout=HANG_GUARD_S)
+        assert outcome == ProcessOutcome(0, f"{cwd}\nx y".encode(), b"")
+
+    def test_a_command_that_outlives_the_timeout_times_out_once_its_group_is_gone(self) -> None:
+        """Past the timeout the whole group is killed, and what it wrote comes back."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        written = b"partial"
+        run = subject.processes.run(
+            ProcessSpec(subject.outlives_timeout(written)), timeout=_SHORT_TIMEOUT_S
+        )
+        assert isinstance(run, ProcessTimedOut), run
+        assert run.timeout == _SHORT_TIMEOUT_S
+        assert written.startswith(run.stdout), run
+
+    def test_a_group_the_kill_cannot_end_is_reported_unreaped_not_timed_out(self) -> None:
+        """A descendant that escaped the group and holds the output open is a distinct result.
+
+        A run that times out before the command started that descendant is a plain timeout,
+        so the timeout doubles until the command got that far.
+        """
+        subject = self.processes_under_test(cleanup_timeout=_SHORT_TIMEOUT_S)
+        timeout = _SHORT_TIMEOUT_S
+        run = subject.processes.run(ProcessSpec(subject.survives_kill), timeout=timeout)
+        while isinstance(run, ProcessTimedOut) and timeout < HANG_GUARD_S:
+            timeout *= 2
+            run = subject.processes.run(ProcessSpec(subject.survives_kill), timeout=timeout)
+        if isinstance(run, ProcessGroupUnreaped):
+            subject.release()
+        assert isinstance(run, ProcessGroupUnreaped), run
+        assert run.timeout == timeout
+        assert run.detail
+
+    def test_a_missing_program_fails_to_start(self) -> None:
+        """A program that does not exist raises ``OSError`` instead of returning an outcome."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        try:
+            subject.processes.run(ProcessSpec(subject.missing_program), timeout=HANG_GUARD_S)
+        except OSError:
+            return
+        message = "running a missing program did not raise OSError"
+        raise AssertionError(message)
+
+
+def _random_bytes(rng: SeededRandom) -> bytes:
+    return bytes(rng.randint(0, 255) for _ in range(rng.randint(0, 20)))
 
 
 @dataclass(frozen=True)

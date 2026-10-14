@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 # subprocess dependency behind the public process boundary.
 ProcessTimeoutError = subprocess.TimeoutExpired
 type PopenFactory = Callable[..., subprocess.Popen[bytes]]
+_CLEANUP_TIMEOUT_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -74,6 +75,116 @@ class ProcessLauncher(Protocol):
     async def start(self, spec: ProcessSpec) -> RunningProcess:
         """Start ``spec``; raises ``OSError`` when the program cannot be started."""
         ...
+
+
+@dataclass(frozen=True)
+class ProcessTimedOut:
+    """The command outlived its timeout; its whole group was then killed and reaped."""
+
+    timeout: float
+    stdout: bytes
+    """What the command wrote to stdout before it was killed."""
+    stderr: bytes
+
+
+@dataclass(frozen=True)
+class ProcessGroupUnreaped:
+    """The command outlived its timeout and killing its group did not end it.
+
+    Either the leader did not exit within the cleanup bound after ``SIGKILL``, or a descendant
+    that left the group still holds an output pipe open. Something the command started may
+    still be running, so this is not a plain timeout.
+    """
+
+    timeout: float
+    pid: int
+    """The process ID of the group's leader."""
+    detail: str
+    """What failed, in words, for a log line or error message."""
+
+
+type ProcessRun = ProcessOutcome | ProcessTimedOut | ProcessGroupUnreaped
+"""How a run to completion ended: exited, timed out and cleaned up, or timed out and left behind."""
+
+
+class Processes(Protocol):
+    """Runs a command to completion: the blocking counterpart of :class:`ProcessLauncher`.
+
+    The command runs without a shell in a process group of its own, with ``spec.input`` as its
+    stdin and both output streams captured. Raises ``OSError`` when the program cannot be
+    started. A command that outlives ``timeout`` has its whole group killed; the result says
+    whether that ended everything (:class:`ProcessTimedOut`) or not
+    (:class:`ProcessGroupUnreaped`).
+    """
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        """Run ``spec`` until it exits or ``timeout`` seconds pass (``None``: no limit)."""
+        ...
+
+
+class OsProcesses:
+    """Runs real operating-system processes, blocking the calling thread."""
+
+    def __init__(self, *, cleanup_timeout: float = _CLEANUP_TIMEOUT_S) -> None:
+        """Wait at most ``cleanup_timeout`` seconds for a killed group to release its output."""
+        self._cleanup_timeout = cleanup_timeout
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        """Start ``spec`` as a group leader, feed its input and collect its output."""
+        if os.name != "posix":
+            message = "owned process groups require a POSIX host"
+            raise OSError(message)
+        process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-731024 [S603]; the real adapter runs a caller-assembled argv vector without a shell.
+            # > Validating argv here would duplicate each caller's command contract, and a
+            # > shell would add the quoting hazards this interface exists to avoid.
+            spec.argv,
+            cwd=spec.cwd,
+            env=None if spec.env is None else dict(spec.env),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            process_group=0,
+        )
+        group = _OwnedProcessGroup(process)
+        try:
+            stdout, stderr = process.communicate(spec.input, timeout=timeout)
+        except subprocess.TimeoutExpired as expired:
+            match self._kill(process, group):
+                case (output, errors):
+                    return ProcessTimedOut(expired.timeout, output, errors)
+                case detail:
+                    return ProcessGroupUnreaped(expired.timeout, process.pid, detail)
+        except BaseException as failure:
+            if isinstance(detail := self._kill(process, group), str):
+                failure.add_note(detail)
+            raise
+        return ProcessOutcome(group.reap(timeout=None), stdout, stderr)
+
+    def _kill(
+        self, process: subprocess.Popen[bytes], group: _OwnedProcessGroup
+    ) -> tuple[bytes, bytes] | str:
+        """Kill the group and drain its output within the cleanup bound; else say what failed."""
+        problems: list[str] = []
+        try:
+            group.send_signal(signal.SIGKILL)
+        except OSError as error:
+            problems.append(f"killing process group {process.pid} failed: {error}")
+        try:
+            return process.communicate(timeout=self._cleanup_timeout)
+        except subprocess.TimeoutExpired:
+            problems.append(
+                f"the output of process group {process.pid} did not close within "
+                f"{self._cleanup_timeout:g} seconds of the kill"
+            )
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                with suppress(OSError):
+                    stream.close()
+        try:
+            group.reap(timeout=self._cleanup_timeout)
+        except subprocess.TimeoutExpired:
+            problems.append(f"process {process.pid} was not reaped")
+        return "; ".join(problems)
 
 
 class MergedOutputProcess(Protocol):

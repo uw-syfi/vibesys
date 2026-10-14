@@ -7,7 +7,9 @@ import os
 import signal
 import subprocess
 import sys
+import tempfile
 from io import BytesIO, StringIO
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -16,6 +18,7 @@ from vs_sim.api import (
     InheritedStdioLauncher,
     LoopSignalSource,
     MonotonicClock,
+    OsProcesses,
     PidfdProcessSignaller,
     ProbeResult,
     SubprocessLauncher,
@@ -31,6 +34,7 @@ from vs_sim.api.testing import (
     ClockUnderTest,
     CommandProbeContract,
     FakeForegroundLauncher,
+    FakeProcesses,
     FakeProcessLauncher,
     FakeProcessSignaller,
     FakeSignalSource,
@@ -41,6 +45,8 @@ from vs_sim.api.testing import (
     InlineBlockingRunner,
     ManualClock,
     ProbeUnderTest,
+    ProcessesContract,
+    ProcessesUnderTest,
     ProcessLauncherContract,
     ProcessScript,
     ProcessSignallerContract,
@@ -65,7 +71,6 @@ from vs_sim.api.testing import (
 from vs_sim.processes import _start_piped_process
 
 if TYPE_CHECKING:
-    from pathlib import Path
     from typing import IO
 
     from vs_sim.api import ProcessSpec
@@ -394,6 +399,79 @@ class TestSubprocessProbe(CommandProbeContract):
             ),
             blocks_forever=_python("import signal; signal.pause()"),
             missing_program=("/nonexistent/vs-sim-no-such-program",),
+        )
+
+
+class TestOsProcesses(ProcessesContract):
+    def processes_under_test(self, *, cleanup_timeout: float) -> ProcessesUnderTest:
+        held = Path(tempfile.mkdtemp()) / "held"
+        held.touch()
+        return ProcessesUnderTest(
+            OsProcesses(cleanup_timeout=cleanup_timeout),
+            exit_with=lambda status, out, err: _python(
+                "import sys; sys.stdout.buffer.write(bytes.fromhex(sys.argv[2])); "
+                "sys.stderr.buffer.write(bytes.fromhex(sys.argv[3])); sys.exit(int(sys.argv[1]))",
+                str(status),
+                out.hex(),
+                err.hex(),
+            ),
+            echo_stdin=_python("import sys; sys.stdout.buffer.write(sys.stdin.buffer.read())"),
+            print_cwd_and_env=lambda name: _python(
+                "import os, sys; sys.stdout.write(os.getcwd() + chr(10) + os.environ[sys.argv[1]])",
+                name,
+            ),
+            # The grandchild in the leader's group also holds stdout open, so the call returns
+            # only because the whole group is killed.
+            outlives_timeout=lambda written: _python(
+                "import subprocess, sys, signal; "
+                "sys.stdout.buffer.write(bytes.fromhex(sys.argv[1])); sys.stdout.flush(); "
+                "subprocess.Popen([sys.executable, '-c', 'import signal; signal.pause()']); "
+                "signal.pause()",
+                written.hex(),
+            ),
+            # The leader exits at once; its grandchild, in a session of its own, holds stdout
+            # while the file exists (at most for the hang guard).
+            survives_kill=_python(
+                "import subprocess, sys; subprocess.Popen([sys.executable, '-c', "
+                "'import os, sys, time; deadline = time.monotonic() + float(sys.argv[2])\\n"
+                "while os.path.exists(sys.argv[1]) and time.monotonic() < deadline: time.sleep(0.05)', "
+                "sys.argv[1], sys.argv[2]], start_new_session=True)",
+                str(held),
+                str(HANG_GUARD_S),
+            ),
+            missing_program=("/nonexistent/vs-sim-no-such-program",),
+            release=held.unlink,
+        )
+
+
+def _processes_script(spec: ProcessSpec) -> ProcessScript:
+    match spec.argv:
+        case ("exit", status, out, err):
+            return ProcessScript(int(status), bytes.fromhex(out), bytes.fromhex(err))
+        case ("cat",):
+            return ProcessScript(echo_input=True)
+        case ("pwd-env", name):
+            env = spec.env or {}
+            return ProcessScript(stdout=f"{spec.cwd}\n{env[name]}".encode())
+        case ("block", written):
+            return ProcessScript(stdout=bytes.fromhex(written), runs_until_signalled=True)
+        case ("escape",):
+            return ProcessScript(runs_until_signalled=True, survives_kill=True)
+        case _:
+            raise FileNotFoundError(spec.argv[0])
+
+
+class TestFakeProcesses(ProcessesContract):
+    def processes_under_test(self, *, cleanup_timeout: float) -> ProcessesUnderTest:
+        del cleanup_timeout
+        return ProcessesUnderTest(
+            FakeProcesses(_processes_script),
+            exit_with=lambda status, out, err: ("exit", str(status), out.hex(), err.hex()),
+            echo_stdin=("cat",),
+            print_cwd_and_env=lambda name: ("pwd-env", name),
+            outlives_timeout=lambda written: ("block", written.hex()),
+            survives_kill=("escape",),
+            missing_program=("no-such-program",),
         )
 
 

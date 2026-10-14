@@ -34,6 +34,7 @@ import threading
 from collections import deque
 from typing import TYPE_CHECKING, Self, cast
 
+from vs_sim.concurrency import OsThreadLocal
 from vs_sim.randomness import SeededRandom
 from vs_sim.virtual import VirtualClock
 
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from types import TracebackType
 
-    from vs_sim.concurrency import Lock
+    from vs_sim.concurrency import Lock, ThreadLocal
     from vs_sim.trace import EventTrace
 
 
@@ -362,6 +363,10 @@ class SimThreads:
     def event(self) -> SimEvent:
         """A new, cleared event."""
         return SimEvent(self)
+
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        """A per-thread value; each simulated thread runs on an OS thread of its own."""
+        return OsThreadLocal(initial)
 
     def sleep(self, seconds: float) -> None:
         """Block the calling simulated thread for ``seconds`` of virtual time."""

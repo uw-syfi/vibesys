@@ -52,7 +52,7 @@ from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from vs_sim.api import Condition, Event, Lock, Worker
+    from vs_sim.api import Condition, Event, Lock, ThreadLocal, Worker
 
 _GROUP_PERMISSION_ERROR = "process group is not signalable"
 
@@ -158,6 +158,9 @@ class _StuckDrainThreads:
     def event(self) -> Event:
         return self._threads.event()
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        return self._threads.local(initial)
+
     def sleep(self, seconds: float) -> None:
         self.advance_to(self.now() + seconds)
 
@@ -231,6 +234,9 @@ class _RecordingThreads:
 
     def event(self) -> Event:
         return self._threads.event()
+
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        return self._threads.local(initial)
 
     def sleep(self, seconds: float) -> None:
         self._threads.sleep(seconds)

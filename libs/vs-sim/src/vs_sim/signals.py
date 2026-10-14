@@ -13,6 +13,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+Signals = signal.Signals
+"""Signal numbers (``Signals.SIGTERM``), so callers name them without importing ``signal``."""
+
+
 class SignalSource(Protocol):
     """Where a process learns that a signal arrived."""
 
