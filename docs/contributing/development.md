@@ -8,7 +8,8 @@ bundles, and the TUI.
 
 - Load the `software-design` skill for every code change and the `testing` skill for
   any test work (see [Coding best practices](coding-best-practices.md) for where they
-  live and for size limits, lint waivers, and doc links).
+  live and for size limits, lint waivers, and doc links). The
+  [testing map](testing-map.md) says which layer a new test belongs in.
 - Adding or moving an example? Register it in `examples/registry.toml`; see
   [Adding an example](examples.md).
 - Keep changes within the owning package and preserve the framework boundaries.
