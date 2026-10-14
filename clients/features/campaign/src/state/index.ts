@@ -10,6 +10,9 @@ export {
   orderedMeasurements,
 } from './campaign.js';
 export {
+  type CampaignFoldError,
+  type CampaignFoldOutcome,
+  campaignFoldErrorMessage,
   type FoldState,
   foldCampaignFrame,
   foldFrames,

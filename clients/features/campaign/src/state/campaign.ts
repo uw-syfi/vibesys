@@ -2,6 +2,7 @@
 import {unprovided} from '@vibesys/machine';
 import {assign, fromCallback, setup} from 'xstate';
 import {
+  campaignFoldErrorMessage,
   type FoldState,
   foldCampaignFrame,
   foldStateToRecord,
@@ -159,6 +160,13 @@ export const campaignMachine = setup({
     hasRecord: ({context}) => context.record !== null,
     playing: ({event}) => event.type === 'play' && event.playing,
     atTail: ({context}) => context.ui.pointIndex >= tailIndex(context),
+    frameRejected: ({context, event}) =>
+      event.type === 'frame' && foldCampaignFrame(context.fold, event.frame).kind === 'rejected',
+    frameCompletes: ({context, event}) => {
+      if (event.type !== 'frame') return false;
+      const outcome = foldCampaignFrame(context.fold, event.frame);
+      return outcome.kind === 'applied' && outcome.state.status === 'completed';
+    },
   },
   actions: {
     navigate: assign(({context, event}) => ({ui: navigate(context, event)})),
@@ -166,11 +174,16 @@ export const campaignMachine = setup({
     tick: assign(({context}) => ({
       ui: {...context.ui, pointIndex: Math.min(tailIndex(context), context.ui.pointIndex + 1)},
     })),
-    frame: assign(({context, event}) =>
-      event.type === 'frame'
-        ? {fold: foldCampaignFrame(context.fold, event.frame), error: null}
-        : {},
-    ),
+    applyFrame: assign(({context, event}) => {
+      if (event.type !== 'frame') return {};
+      const outcome = foldCampaignFrame(context.fold, event.frame);
+      return outcome.kind === 'applied' ? {fold: outcome.state, error: null} : {};
+    }),
+    rejectFrame: assign(({context, event}) => {
+      if (event.type !== 'frame') return {};
+      const outcome = foldCampaignFrame(context.fold, event.frame);
+      return outcome.kind === 'rejected' ? {error: campaignFoldErrorMessage(outcome.error)} : {};
+    }),
   },
 }).createMachine({
   id: 'campaign',
@@ -243,21 +256,34 @@ export const campaignMachine = setup({
       },
     },
     live: {
-      invoke: {
-        id: 'stream',
-        src: 'stream',
-        onError: {
-          actions: assign(({event}) => ({
-            error: event.error instanceof Error ? event.error.message : String(event.error),
-          })),
-        },
-      },
+      initial: 'streaming',
       on: {
-        frame: {actions: 'frame'},
-        'stream-error': {actions: assign(({event}) => ({error: event.error}))},
         point: {actions: 'navigate'},
         metric: {actions: 'navigate'},
         play: {actions: 'navigate'},
+      },
+      states: {
+        streaming: {
+          invoke: {
+            id: 'stream',
+            src: 'stream',
+            onError: {
+              actions: assign(({event}) => ({
+                error: event.error instanceof Error ? event.error.message : String(event.error),
+              })),
+            },
+          },
+          on: {
+            frame: [
+              {guard: 'frameRejected', target: 'integrityFailed', actions: 'rejectFrame'},
+              {guard: 'frameCompletes', target: 'completed', actions: 'applyFrame'},
+              {actions: 'applyFrame'},
+            ],
+            'stream-error': {actions: assign(({event}) => ({error: event.error}))},
+          },
+        },
+        completed: {},
+        integrityFailed: {},
       },
     },
     closed: {type: 'final', entry: assign({loading: false})},

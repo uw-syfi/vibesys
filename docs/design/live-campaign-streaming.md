@@ -13,11 +13,22 @@ SSE message with `parseCampaignFrame`; the feature folds it into campaign state.
 
 The closed frame union consists of `campaign-init`, `agent-upsert`, `workstream-upsert`,
 `measurement`, `tokens`, and `status`. Sequence numbers make repeated frames
-idempotent. The cursor follows the tail until the user scrubs, while run status
-continues to come from the stream. Selecting the tail resumes following.
-The subscriber owns the SSE connection and closes it when released. A closed
-connection or malformed frame surfaces an error; a later valid frame clears it.
-A browser reconnect may replay earlier frames without duplicating state.
+idempotent only when the repeated payload is identical. The pure fold retains a
+canonical identity for each frame in the accepted prefix, so reusing an old
+sequence with different data is an integrity error rather than a silent replay.
+The identity ledger grows with that preview stream because evicting an old
+identity would make strict reconnect verification impossible without a
+producer-supplied digest chain. The first frame is `campaign-init` at sequence
+one; later applied frames are contiguous, another init is rejected, and
+completion is absorbing.
+The cursor follows the tail until the user scrubs, while run status continues to
+come from the stream. Selecting the tail resumes following. The subscriber owns
+the SSE connection and closes it when released or when the campaign completes.
+A closed connection or malformed frame surfaces an error. A newly applied frame
+can clear a transport error, but a duplicate cannot. An integrity error closes
+that subscription and remains visible because no later delta can prove that the
+accumulated prefix is authoritative. A browser reconnect may replay earlier
+frames without duplicating state.
 
 The committed campaign record does not contain token usage. `framesFromRecord`
 therefore emits no `tokens` frames, and the preview omits the Tokens column

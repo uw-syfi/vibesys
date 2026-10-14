@@ -109,26 +109,86 @@ test('history preserves navigation and inspection, plays on injected clock, and 
   store.close();
 });
 
-test('live follows frames, pins a scrub, recovers errors, and keeps completion independent of cursor', () => {
+test('live follows frames, pins a scrub, recovers transport errors, and releases on completion', () => {
   const stream = new FakeCampaignStream();
   const store = createLiveCampaignStore(stream);
   const frames = framesFromRecord(record);
-  for (const frame of frames) stream.emit(frame);
+  const completion = frames.at(-1);
+  expect(completion?.kind).toBe('status');
+  for (const frame of frames.slice(0, -1)) stream.emit(frame);
   expect(store.getState().campaign?.pointIndex).toBe(record.measurements.length - 1);
-  expect(store.getState().campaign?.status).toBe('completed');
+  expect(store.getState().campaign?.status).toBe('active');
   expect(store.getState().campaign?.workstreamTokenSpend).toEqual({});
   store.getState().campaign?.setPointIndex(12);
-  expect(store.getState().campaign?.status).toBe('completed');
   expect(store.getState().campaign?.playing).toBe(false);
   stream.fail();
   expect(store.getState().error).toBe('stream unreadable');
+  const replayedInit = frames[0];
+  if (replayedInit === undefined) throw new Error('fixture must contain an init frame');
+  stream.emit(replayedInit);
+  expect(store.getState().error).toBe('stream unreadable');
   for (const frame of frames) stream.emit(frame);
   expect(store.getState().error).toBeNull();
+  expect(store.getState().campaign?.status).toBe('completed');
   expect(store.getState().scenario?.measurements.length).toBe(record.measurements.length);
   expect(store.getState().campaign?.pointIndex).toBe(12);
   store.getState().campaign?.setPlaying(true);
   expect(store.getState().campaign?.pointIndex).toBe(record.measurements.length - 1);
+  expect(stream.releases).toBe(1);
+  stream.fail();
+  expect(store.getState().error).toBeNull();
   store.close();
+  store.close();
+  expect(stream.releases).toBe(1);
+});
+
+test('a sequence gap latches the first integrity error and releases the corrupt stream', () => {
+  const stream = new FakeCampaignStream();
+  const store = createLiveCampaignStore(stream);
+  const [init] = framesFromRecord(record);
+  expect(init?.kind).toBe('campaign-init');
+  if (init === undefined) throw new Error('expected campaign init frame');
+  stream.emit(init);
+  const beforeGap = store.getState().scenario;
+
+  stream.emit({kind: 'tokens', seq: 3, workstreamId: 'ws-1', tokens: 30});
+  expect(store.getState().error).toBe('campaign stream sequence gap: expected 2, received 3');
+  expect(store.getState().scenario).toEqual(beforeGap);
+  expect(stream.releases).toBe(1);
+
+  // A later expected frame cannot prove that the stream is authoritative
+  // again. The failed subscription is closed, so neither it nor subsequent
+  // frames can mutate data or clear the first integrity failure.
+  const firstAgent = record.agents[0];
+  if (firstAgent === undefined) throw new Error('fixture must contain an agent');
+  stream.emit({kind: 'agent-upsert', seq: 2, agent: firstAgent});
+  stream.emit({kind: 'tokens', seq: 3, workstreamId: 'ws-1', tokens: 30});
+  expect(store.getState().error).toBe('campaign stream sequence gap: expected 2, received 3');
+  expect(store.getState().scenario).toEqual(beforeGap);
+  expect(store.getState().scenario?.agents).toEqual([]);
+  store.close();
+  expect(stream.releases).toBe(1);
+});
+
+test('conflicting sequence reuse latches an error and releases the stream', () => {
+  const stream = new FakeCampaignStream();
+  const store = createLiveCampaignStore(stream);
+  const [init] = framesFromRecord(record);
+  if (init === undefined) throw new Error('fixture must contain an init frame');
+  stream.emit(init);
+  stream.emit({kind: 'tokens', seq: 2, workstreamId: 'ws-1', tokens: 100});
+  expect(store.getState().campaign?.workstreamTokenSpend).toEqual({'ws-1': 100});
+
+  stream.emit({kind: 'tokens', seq: 2, workstreamId: 'ws-1', tokens: 101});
+  const failure =
+    'campaign stream sequence 2 conflicts with its observed tokens frame; received tokens';
+  expect(store.getState().error).toBe(failure);
+  expect(store.getState().campaign?.workstreamTokenSpend).toEqual({'ws-1': 100});
+  expect(stream.releases).toBe(1);
+
+  stream.emit({kind: 'tokens', seq: 3, workstreamId: 'ws-1', tokens: 300});
+  expect(store.getState().error).toBe(failure);
+  expect(store.getState().campaign?.workstreamTokenSpend).toEqual({'ws-1': 100});
   store.close();
   expect(stream.releases).toBe(1);
 });

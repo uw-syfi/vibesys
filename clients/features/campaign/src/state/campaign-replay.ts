@@ -2,13 +2,15 @@
  * Turn a finished `CampaignRecord` into the ordered frame stream a live run
  * would have emitted. This is the single producer of frames for the prototype:
  * the dev SSE server calls it to replay a fixture "as if live", and the
- * round-trip test folds its output back to prove the projection is faithful
- * (`foldStateToRecord(foldFrames(framesFromRecord(r))) deep-equals r`).
+ * round-trip test folds its output back to prove the projection is faithful.
  *
  * Frames are time-ordered so a client watching them arrive sees workstreams
  * start, measurements stream in, and workstreams finish in the order they
  * happened. The record has no usage data, so replay preserves that absence;
  * only an authoritative live producer may emit token frames.
+ * The deterministic interleaving is part of the stream: the fold accepts only
+ * its contiguous sequence and rejects a missing or reordered frame rather
+ * than publishing a plausible partial campaign.
  */
 
 import type {CampaignFrame, CampaignHeader, FrameWorkstream} from './campaign-frames.js';

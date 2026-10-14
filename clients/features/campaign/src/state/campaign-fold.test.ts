@@ -2,8 +2,10 @@ import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import type {
+  CampaignFoldOutcome,
   CampaignFrame,
   CampaignHeader,
+  FoldState,
   FrameAgent,
   FrameMeasurement,
   FrameWorkstream,
@@ -106,15 +108,30 @@ function agent(overrides: Partial<FrameAgent> = {}): FrameAgent {
 
 const initFrame: CampaignFrame = {kind: 'campaign-init', seq: 1, header};
 
+function acceptedState(outcome: CampaignFoldOutcome): FoldState {
+  expect(outcome.kind).not.toBe('rejected');
+  if (outcome.kind === 'rejected') throw new Error(`unexpected ${outcome.error.kind}`);
+  return outcome.state;
+}
+
+function rejectedOutcome(
+  outcome: CampaignFoldOutcome,
+): Extract<CampaignFoldOutcome, {kind: 'rejected'}> {
+  expect(outcome.kind).toBe('rejected');
+  if (outcome.kind !== 'rejected') throw new Error('expected frame rejection');
+  return outcome;
+}
+
 test('folding a replayed record reconstructs the original record', () => {
   const frames = framesFromRecord(record);
-  const reconstructed = foldStateToRecord(foldFrames(frames), latestMoment(foldFrames(frames)));
+  const state = acceptedState(foldFrames(frames));
+  const reconstructed = foldStateToRecord(state, latestMoment(state));
   expect(reconstructed).not.toBeNull();
   expect(normalize(reconstructed as CampaignRecord)).toEqual(normalize(record));
 });
 
 test('the reconstruction does not depend on the projection clock once every workstream is settled', () => {
-  const state = foldFrames(framesFromRecord(record));
+  const state = acceptedState(foldFrames(framesFromRecord(record)));
   expect(normalize(foldStateToRecord(state, 0) as CampaignRecord)).toEqual(
     normalize(foldStateToRecord(state, Date.parse('2200-06-01T00:00:00Z')) as CampaignRecord),
   );
@@ -122,8 +139,8 @@ test('the reconstruction does not depend on the projection clock once every work
 
 test('replaying the log again is idempotent', () => {
   const frames = framesFromRecord(record);
-  const once = foldFrames(frames);
-  const twice = foldFrames([...frames, ...frames]);
+  const once = acceptedState(foldFrames(frames));
+  const twice = acceptedState(foldFrames([...frames, ...frames]));
   expect(twice.seq).toBe(once.seq);
   expect(normalize(foldStateToRecord(twice, 0) as CampaignRecord)).toEqual(
     normalize(foldStateToRecord(once, 0) as CampaignRecord),
@@ -153,7 +170,7 @@ test('measurements are projected in sequence order regardless of arrival order',
     {kind: 'measurement', seq: 3, measurement: measurement(1, 'm1')},
     {kind: 'measurement', seq: 4, measurement: measurement(2, 'm2')},
   ];
-  const projected = foldStateToRecord(foldFrames(frames), 0) as CampaignRecord;
+  const projected = foldStateToRecord(acceptedState(foldFrames(frames)), 0) as CampaignRecord;
   expect(projected.measurements.map(item => item.sequence)).toEqual([1, 2, 3]);
 });
 
@@ -163,26 +180,30 @@ test('a repeated measurement id upserts rather than duplicates', () => {
     {kind: 'measurement', seq: 2, measurement: measurement(5, 'm', 100)},
     {kind: 'measurement', seq: 3, measurement: measurement(5, 'm', 250)},
   ];
-  const projected = foldStateToRecord(foldFrames(frames), 0) as CampaignRecord;
+  const projected = foldStateToRecord(acceptedState(foldFrames(frames)), 0) as CampaignRecord;
   expect(projected.measurements).toHaveLength(1);
   expect(projected.measurements[0]?.values[0]?.value).toBe(250);
 });
 
 test('token frames carry the cumulative total per workstream', () => {
-  const state = foldFrames([
-    initFrame,
-    {kind: 'tokens', seq: 2, workstreamId: 'ws-1', tokens: 100},
-    {kind: 'tokens', seq: 3, workstreamId: 'ws-1', tokens: 250},
-    {kind: 'tokens', seq: 4, workstreamId: 'ws-2', tokens: 40},
-  ]);
+  const state = acceptedState(
+    foldFrames([
+      initFrame,
+      {kind: 'tokens', seq: 2, workstreamId: 'ws-1', tokens: 100},
+      {kind: 'tokens', seq: 3, workstreamId: 'ws-1', tokens: 250},
+      {kind: 'tokens', seq: 4, workstreamId: 'ws-2', tokens: 40},
+    ]),
+  );
   expect(Object.fromEntries(state.tokenSpend)).toEqual({'ws-1': 250, 'ws-2': 40});
 });
 
 test('the run status is active until a completed status frame arrives', () => {
   expect(initialFoldState().status).toBe('active');
-  const active = foldCampaignFrame(initialFoldState(), initFrame);
+  const active = acceptedState(foldCampaignFrame(initialFoldState(), initFrame));
   expect(active.status).toBe('active');
-  const done = foldCampaignFrame(active, {kind: 'status', seq: 2, status: 'completed'});
+  const done = acceptedState(
+    foldCampaignFrame(active, {kind: 'status', seq: 2, status: 'completed'}),
+  );
   expect(done.status).toBe('completed');
 });
 
@@ -209,8 +230,9 @@ test('an in-flight workstream is projected to end just after the current moment'
     },
     {kind: 'measurement', seq: 3, measurement: measurement(5, 'm5')},
   ];
-  const now = latestMoment(foldFrames(frames));
-  const projected = foldStateToRecord(foldFrames(frames), now) as CampaignRecord;
+  const state = acceptedState(foldFrames(frames));
+  const now = latestMoment(state);
+  const projected = foldStateToRecord(state, now) as CampaignRecord;
   const workstream = projected.workstreams[0];
   expect(workstream).toBeDefined();
   // Ends after "now" so the dashboard's cursor-vs-finishedAt test renders it active.
@@ -219,22 +241,23 @@ test('an in-flight workstream is projected to end just after the current moment'
 
 test('latestMoment is the newest measurement when there are no workstreams yet, else zero', () => {
   expect(latestMoment(initialFoldState())).toBe(0);
-  const withMeasurement = foldFrames([
-    initFrame,
-    {kind: 'measurement', seq: 2, measurement: measurement(9, 'm9')},
-  ]);
+  const withMeasurement = acceptedState(
+    foldFrames([initFrame, {kind: 'measurement', seq: 2, measurement: measurement(9, 'm9')}]),
+  );
   expect(latestMoment(withMeasurement)).toBe(Date.parse('2026-01-01T00:00:09Z'));
 });
 
 test('latestMoment falls back to the latest workstream start when there are no measurements yet', () => {
-  const state = foldFrames([
-    initFrame,
-    {
-      kind: 'workstream-upsert',
-      seq: 2,
-      workstream: workstream({startedAt: '2026-01-01T00:00:20Z'}),
-    },
-  ]);
+  const state = acceptedState(
+    foldFrames([
+      initFrame,
+      {
+        kind: 'workstream-upsert',
+        seq: 2,
+        workstream: workstream({startedAt: '2026-01-01T00:00:20Z'}),
+      },
+    ]),
+  );
   expect(latestMoment(state)).toBe(Date.parse('2026-01-01T00:00:20Z'));
 });
 
@@ -253,7 +276,7 @@ test('latestMoment also accounts for a workstream that starts after the latest m
       workstream: workstream({id: 'ws-late', startedAt: '2026-01-01T00:00:30Z'}),
     },
   ];
-  const state = foldFrames(frames);
+  const state = acceptedState(foldFrames(frames));
   const now = latestMoment(state);
   expect(now).toBe(Date.parse('2026-01-01T00:00:30Z'));
   const projected = foldStateToRecord(state, now) as CampaignRecord;
@@ -265,69 +288,83 @@ test('latestMoment also accounts for a workstream that starts after the latest m
 });
 
 test('latestMoment accounts for a workstream that settles after the latest measurement', () => {
-  const state = foldFrames([
-    initFrame,
-    {kind: 'measurement', seq: 2, measurement: measurement(1, 'm1')},
-    {
-      kind: 'workstream-upsert',
-      seq: 3,
-      workstream: workstream({
-        phase: 'evaluated',
-        active: false,
-        finishedAt: '2026-01-01T00:00:30Z',
-        lastSequence: 2,
-        outcome: 'accepted',
-      }),
-    },
-  ]);
+  const state = acceptedState(
+    foldFrames([
+      initFrame,
+      {kind: 'measurement', seq: 2, measurement: measurement(1, 'm1')},
+      {
+        kind: 'workstream-upsert',
+        seq: 3,
+        workstream: workstream({
+          phase: 'evaluated',
+          active: false,
+          finishedAt: '2026-01-01T00:00:30Z',
+          lastSequence: 2,
+          outcome: 'accepted',
+        }),
+      },
+    ]),
+  );
 
   expect(latestMoment(state)).toBe(Date.parse('2026-01-01T00:00:30Z'));
 });
 
 test('latestMoment never rewinds when an upsert replaces a previously observed timestamp', () => {
-  const parked = foldFrames([
-    initFrame,
-    {
+  const parked = acceptedState(
+    foldFrames([
+      initFrame,
+      {
+        kind: 'workstream-upsert',
+        seq: 2,
+        workstream: workstream({
+          phase: 'parked',
+          active: false,
+          finishedAt: '2026-01-01T00:00:30Z',
+          lastSequence: 2,
+        }),
+      },
+    ]),
+  );
+  const resumed = acceptedState(
+    foldCampaignFrame(parked, {
       kind: 'workstream-upsert',
-      seq: 2,
-      workstream: workstream({
-        phase: 'parked',
-        active: false,
-        finishedAt: '2026-01-01T00:00:30Z',
-        lastSequence: 2,
-      }),
-    },
-  ]);
-  const resumed = foldCampaignFrame(parked, {
-    kind: 'workstream-upsert',
-    seq: 3,
-    workstream: workstream(),
-  });
+      seq: 3,
+      workstream: workstream(),
+    }),
+  );
 
   expect(latestMoment(parked)).toBe(Date.parse('2026-01-01T00:00:30Z'));
   expect(latestMoment(resumed)).toBe(latestMoment(parked));
 });
 
 test('a repeated workstream upsert merges rather than duplicates', () => {
-  const state = foldFrames([
-    initFrame,
-    {kind: 'workstream-upsert', seq: 2, workstream: workstream({phase: 'pending', title: 'first'})},
-    {
-      kind: 'workstream-upsert',
-      seq: 3,
-      workstream: workstream({phase: 'implementing', title: 'second'}),
-    },
-  ]);
+  const state = acceptedState(
+    foldFrames([
+      initFrame,
+      {
+        kind: 'workstream-upsert',
+        seq: 2,
+        workstream: workstream({phase: 'pending', title: 'first'}),
+      },
+      {
+        kind: 'workstream-upsert',
+        seq: 3,
+        workstream: workstream({phase: 'implementing', title: 'second'}),
+      },
+    ]),
+  );
   expect(state.workstreams.size).toBe(1);
   expect(state.workstreams.get('ws-1')?.title).toBe('second');
 });
 
 test('a repeated agent upsert merges rather than duplicates', () => {
-  const state = foldFrames([
-    initFrame,
-    {kind: 'agent-upsert', seq: 2, agent: agent({name: 'first'})},
-    {kind: 'agent-upsert', seq: 3, agent: agent({name: 'second'})},
-  ]);
+  const state = acceptedState(
+    foldFrames([
+      initFrame,
+      {kind: 'agent-upsert', seq: 2, agent: agent({name: 'first'})},
+      {kind: 'agent-upsert', seq: 3, agent: agent({name: 'second'})},
+    ]),
+  );
   expect(state.agents.size).toBe(1);
   expect(state.agents.get('agent-1')?.name).toBe('second');
 });
@@ -350,7 +387,7 @@ test('a parked workstream still projects as live even once inactive with a real 
     },
   ];
   const now = Date.parse('2026-01-01T00:10:00Z');
-  const projected = foldStateToRecord(foldFrames(frames), now) as CampaignRecord;
+  const projected = foldStateToRecord(acceptedState(foldFrames(frames)), now) as CampaignRecord;
   const parked = projected.workstreams[0];
   expect(parked).toBeDefined();
   expect(Date.parse(parked?.finishedAt ?? '')).toBeGreaterThan(now);
@@ -358,4 +395,161 @@ test('a parked workstream still projects as live even once inactive with a real 
 
 test('the header must arrive before a record can be projected', () => {
   expect(foldStateToRecord(initialFoldState(), 0)).toBeNull();
+});
+
+test('the stream starts with campaign-init at sequence one', () => {
+  const initial = initialFoldState();
+  const framesBeforeInit: CampaignFrame[] = [
+    {kind: 'agent-upsert', seq: 1, agent: agent()},
+    {kind: 'tokens', seq: 1, workstreamId: 'ws-1', tokens: 10},
+    {kind: 'status', seq: 1, status: 'completed'},
+  ];
+  for (const frame of framesBeforeInit) {
+    const outcome = rejectedOutcome(foldCampaignFrame(initial, frame));
+    expect(outcome.error).toEqual({
+      kind: 'init-required',
+      actualKind: frame.kind,
+      actualSeq: 1,
+    });
+    expect(outcome.state).toBe(initial);
+  }
+
+  for (const seq of [-1, 0, 2, 20]) {
+    const outcome = rejectedOutcome(
+      foldCampaignFrame(initial, {kind: 'campaign-init', seq, header}),
+    );
+    expect(outcome.error).toEqual({kind: 'initial-sequence', actualSeq: seq});
+    expect(outcome.state).toBe(initial);
+  }
+});
+
+test('every forward sequence gap is rejected without mutating the authoritative prefix', () => {
+  let state = acceptedState(foldCampaignFrame(initialFoldState(), initFrame));
+  for (let expectedSeq = 2; expectedSeq < 20; expectedSeq++) {
+    for (const gap of [1, 2, 7]) {
+      const actualSeq = expectedSeq + gap;
+      const outcome = rejectedOutcome(
+        foldCampaignFrame(state, {
+          kind: 'tokens',
+          seq: actualSeq,
+          workstreamId: 'ws-1',
+          tokens: actualSeq,
+        }),
+      );
+      expect(outcome.error).toEqual({kind: 'sequence-gap', expectedSeq, actualSeq});
+      expect(outcome.state).toBe(state);
+    }
+    state = acceptedState(
+      foldCampaignFrame(state, {
+        kind: 'tokens',
+        seq: expectedSeq,
+        workstreamId: 'ws-1',
+        tokens: expectedSeq,
+      }),
+    );
+  }
+});
+
+test('a second init is rejected without mixing campaigns', () => {
+  const established = acceptedState(
+    foldFrames([initFrame, {kind: 'agent-upsert', seq: 2, agent: agent()}]),
+  );
+  const outcome = rejectedOutcome(
+    foldCampaignFrame(established, {
+      kind: 'campaign-init',
+      seq: 3,
+      header: {...header, id: 'another-campaign'},
+    }),
+  );
+  expect(outcome.error).toEqual({kind: 'unexpected-init', actualSeq: 3});
+  expect(outcome.state).toBe(established);
+  expect(foldStateToRecord(outcome.state, 0)?.id).toBe('c');
+  expect(outcome.state.agents.has('agent-1')).toBe(true);
+});
+
+test('exact replay is a distinct duplicate outcome and keeps the same state', () => {
+  const applied = foldCampaignFrame(initialFoldState(), initFrame);
+  expect(applied.kind).toBe('applied');
+  const state = acceptedState(applied);
+  const replay = foldCampaignFrame(state, {
+    ...initFrame,
+    header: {...header, objective: {...header.objective}},
+  });
+  expect(replay.kind).toBe('duplicate');
+  expect(acceptedState(replay)).toBe(state);
+});
+
+test('conflicting reuse of a token sequence is rejected without changing its first value', () => {
+  const state = acceptedState(
+    foldFrames([initFrame, {kind: 'tokens', seq: 2, workstreamId: 'ws-1', tokens: 100}]),
+  );
+  const outcome = rejectedOutcome(
+    foldCampaignFrame(state, {kind: 'tokens', seq: 2, workstreamId: 'ws-1', tokens: 101}),
+  );
+  expect(outcome.error).toEqual({
+    kind: 'sequence-conflict',
+    actualSeq: 2,
+    observedKind: 'tokens',
+    receivedKind: 'tokens',
+  });
+  expect(outcome.state).toBe(state);
+  expect(outcome.state.tokenSpend.get('ws-1')).toBe(100);
+});
+
+test('a conflicting old init is rejected instead of being mistaken for replay', () => {
+  const state = acceptedState(
+    foldFrames([initFrame, {kind: 'agent-upsert', seq: 2, agent: agent()}]),
+  );
+  const outcome = rejectedOutcome(
+    foldCampaignFrame(state, {
+      kind: 'campaign-init',
+      seq: 1,
+      header: {...header, id: 'another-campaign'},
+    }),
+  );
+  expect(outcome.error).toEqual({
+    kind: 'sequence-conflict',
+    actualSeq: 1,
+    observedKind: 'campaign-init',
+    receivedKind: 'campaign-init',
+  });
+  expect(outcome.state).toBe(state);
+  expect(foldStateToRecord(outcome.state, 0)?.id).toBe('c');
+});
+
+test('completion is absorbing while exact replay remains idempotent', () => {
+  const completed = acceptedState(
+    foldFrames([initFrame, {kind: 'status', seq: 2, status: 'completed'}]),
+  );
+  const replay = foldCampaignFrame(completed, {kind: 'status', seq: 2, status: 'completed'});
+  expect(replay.kind).toBe('duplicate');
+  expect(acceptedState(replay)).toBe(completed);
+
+  const laterFrames: CampaignFrame[] = [
+    {kind: 'status', seq: 3, status: 'active'},
+    {kind: 'agent-upsert', seq: 3, agent: agent()},
+    {kind: 'tokens', seq: 9, workstreamId: 'ws-1', tokens: 900},
+  ];
+  for (const frame of laterFrames) {
+    const outcome = rejectedOutcome(foldCampaignFrame(completed, frame));
+    expect(outcome.error).toEqual({
+      kind: 'campaign-completed',
+      actualKind: frame.kind,
+      actualSeq: frame.seq,
+    });
+    expect(outcome.state).toBe(completed);
+  }
+});
+
+test('foldFrames stops at the first rejected frame', () => {
+  const outcome = rejectedOutcome(
+    foldFrames([
+      initFrame,
+      {kind: 'tokens', seq: 3, workstreamId: 'ws-1', tokens: 30},
+      {kind: 'tokens', seq: 2, workstreamId: 'ws-1', tokens: 20},
+    ]),
+  );
+  expect(outcome.error).toEqual({kind: 'sequence-gap', expectedSeq: 2, actualSeq: 3});
+  expect(outcome.state.seq).toBe(1);
+  expect(outcome.state.tokenSpend.size).toBe(0);
 });
