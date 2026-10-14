@@ -9,8 +9,7 @@ metadata:
 
 Skills in `.agents/skills/` (`.claude/skills` is a symlink to it) guide agents
 that develop VibeSys. They are not the bundled product skills, which ship to
-optimization agents and follow
-[skill-metadata.md](../../../docs/contributing/skill-metadata.md) instead.
+optimization agents and follow the `add-bundled-skill` skill instead.
 
 Use this skill, not a personal skill-maintenance skill, for developer skills.
 `check_skills` enforces the rules marked checked; run

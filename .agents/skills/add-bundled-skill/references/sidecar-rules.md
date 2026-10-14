@@ -3,30 +3,18 @@
 VibeSys routing metadata for bundled skills lives in optional sidecar files
 named `.vibesys.toml`, never in `SKILL.md` frontmatter. Agent harnesses and
 skill loaders that do not know VibeSys ignore the sidecar, and vendored skills
-stay byte-identical to upstream. The parser is `load_sidecar_rules` in
-`src/vibesys/orchestration/skill_selection.py`.
+stay byte-identical to upstream. The sidecar parser lives with skill
+selection in the orchestration layer.
 
 ## Layout
 
-A vendored pack keeps its sidecar in a VibeSys-owned wrapper directory and
-points a rule at the vendored subtree:
-
-```text
-resources/skills/vendor-pack/
-├── .vibesys.toml
-├── update.sh
-└── skills/
-    ├── vendor-skill-a/
-    │   └── SKILL.md
-    └── vendor-skill-b/
-        └── SKILL.md
-```
-
-`resources/skills/neuron-agentic-development/.vibesys.toml` is the real
-example: one rule with `path = "skills"` scopes every vendored skill to one
-backend, and `update.sh` can delete and recreate `skills/` without touching
-it. First-party top-level skills share one sidecar at
-`resources/skills/.vibesys.toml`, with one rule per skill directory.
+A vendored pack keeps its sidecar in a VibeSys-owned wrapper directory, next
+to the update script and beside a subtree holding the vendored skills. One rule
+with `path` set to that subtree scopes every vendored skill (for example to one
+backend), and the update script can delete and recreate the subtree without
+touching the sidecar. An existing vendored pack is the model. First-party
+top-level skills share one sidecar at the root of the bundled tree, with one
+rule per skill directory.
 
 ## Rule semantics
 
@@ -41,8 +29,8 @@ A sidecar holds one or more `[[rule]]` tables, each with these keys:
   input bundle's `[agent].domain`. Absent means the rule does not constrain
   the domain.
 
-Both enums live in `vibesys.constants`; read the allowed values there, and
-do not copy them into docs. Duplicate values in a list are dropped, keeping
+Read the allowed values from the enums,
+and do not copy them into docs. Duplicate values in a list are dropped, keeping
 the first.
 
 Selection for one skill directory:
@@ -52,7 +40,7 @@ Selection for one skill directory:
   root, except sidecars inside a directory whose name starts with `.`.
 - A skill that no rule matches loads for every backend and domain.
 - When several rules match, the one whose resolved `path` has the most path
-  components wins (`SkillRule.specificity`).
+  components wins.
 - Rules tied at that depth must agree on both `backends` and `domains`;
   otherwise validation fails and names every conflicting rule.
 - The winning rule loads the skill only if the run's backend is in its
@@ -80,11 +68,10 @@ file or directory. A run fails before its first agent turn when:
   (the message lists the allowed values);
 - two equally specific matching rules disagree.
 
-The platform layout is checked only by `validate_skill_tree` in
-`src/vibesys/run/skill_sources.py`, not at run start. It fails when a directory
-`references/platforms/<backend>/` inside a skill is not named for a
-`ComputeBackend` value, or lacks a file from `PLATFORM_SKELETON`.
-`validate_skill_tree` also runs the sidecar and frontmatter checks; the test
-suite calls it on `resources/skills/`, so drift in the bundled tree fails in
+The platform layout is checked only by whole-tree validation in the run
+layer, not at run start. It fails when a platform directory inside a skill's
+references is not named for a `ComputeBackend` value, or lacks a file from the
+platform skeleton. Whole-tree validation also runs the sidecar and frontmatter checks; the test
+suite runs it on the bundled tree, so drift in the bundled tree fails in
 CI. A skill directory passed with `--skills-dir` gets only the run-start
 checks above.
