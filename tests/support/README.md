@@ -20,6 +20,8 @@ before application imports. Each worker owns its home and runtime directory,
 and each test gets a separate lazy state path beneath its pytest basetemp.
 Children inherit these defaults. Tests can still set explicit environment inputs.
 Process-owned directories are removed at pytest cleanup.
+It also turns off Git auto maintenance through `GIT_CONFIG_*`, as `run_git`
+does for product Git, so a test's commit never starts a background prune.
 
 Installed Rust toolchains remain available through explicit CARGO_HOME and
 RUSTUP_HOME paths. Go compiler caches default to a private controller-owned

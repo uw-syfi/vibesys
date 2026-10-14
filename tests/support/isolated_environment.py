@@ -38,6 +38,17 @@ class _SuiteEnvironment:
         # portable to macOS, so every test sees the strict tools first.
         shims = install_posix_tool_shims(root / "posix-bin")
         self.environment.setenv("PATH", f"{shims}{os.pathsep}{os.environ['PATH']}")
+        # A Git commit starts auto maintenance, detached from Git 2.47 on, and
+        # that maintenance prunes any worktree whose admin directory has no
+        # gitdir file yet. A test's next ``git worktree add`` is in exactly that
+        # state between creating ``.git/worktrees/<name>`` and locking it, so the
+        # background prune can delete it mid-command. ``run_git`` already
+        # disables maintenance for product Git; this covers every Git a test
+        # starts itself. Command-line config survives tests that replace HOME.
+        for index, (key, value) in enumerate((("maintenance.auto", "false"), ("gc.auto", "0"))):
+            self.environment.setenv(f"GIT_CONFIG_KEY_{index}", key)
+            self.environment.setenv(f"GIT_CONFIG_VALUE_{index}", value)
+        self.environment.setenv("GIT_CONFIG_COUNT", "2")
         for variable, name in (
             ("HOME", "home"),
             ("VIBESYS_STATE_HOME", "state"),
