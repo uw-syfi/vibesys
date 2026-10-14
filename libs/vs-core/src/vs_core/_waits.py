@@ -58,10 +58,14 @@ from .types.common import (
 )
 from .types.evaluation import ContinuationPhase, JobWaitLapsed, OwnedJob, RegisteredOwnedJob
 from .types.records import (
+    RecoveryCheckWaitLapsed,
     RecoveryPhase,
     RequestPhase,
+    reply_owed,
 )
 from .types.sessions import (
+    DispatchTurn,
+    ResumeSessionTurn,
     SessionPhase,
     SessionWaitLapsed,
     session_waits,
@@ -284,11 +288,12 @@ def stalled_acquisitions(
 #: Which kinds of waiter may name which kinds of waiting entity (I1 of #2428). The graph is
 #: acyclic, so following named entities always ends at requests and timers, and a waiter only
 #: names an entity whose progress carries it: an acquiring turn names its session, and a
-#: recovery check names the owned jobs whose ledger settles the children its target left.
+#: recovery check names the owned jobs whose ledger settles the children its target left and,
+#: for an ensure, the session that has yet to learn whether it holds the ensured resource.
 MAY_WAIT_ON: Mapping[WaitKind, frozenset[WaitKind]] = MappingProxyType(
     {
         WaitKind.TURN_ACQUISITION: frozenset({WaitKind.SESSION}),
-        WaitKind.RECOVERY_CHECK: frozenset({WaitKind.OWNED_JOB}),
+        WaitKind.RECOVERY_CHECK: frozenset({WaitKind.OWNED_JOB, WaitKind.SESSION}),
         **{
             kind: frozenset()
             for kind in WaitKind
@@ -296,6 +301,12 @@ MAY_WAIT_ON: Mapping[WaitKind, frozenset[WaitKind]] = MappingProxyType(
         },
     }
 )
+
+
+#: The kinds a queued answer cannot move, however they are reached. Core forwards a job's
+#: answer to the job in the step that records it, so an answer still queued in the shell
+#: belongs to a request core holds open anyway.
+_MOVED_ONLY_BY_OPEN_REQUESTS = frozenset({WaitKind.OWNED_JOB})
 
 
 def wait_producers(
@@ -333,7 +344,8 @@ def _live(
         found.add(Producer.OUTBOX_EVENT)
     for subject in wait.subjects:
         if (entity := named.get(subject)) is not None:
-            found |= _live(records, named, entity, queued, sent)
+            heard = frozenset() if subject.kind in _MOVED_ONLY_BY_OPEN_REQUESTS else queued
+            found |= _live(records, named, entity, heard, sent)
     if wait.timer is not None:
         found.add(Producer.TIMER)
     return frozenset(found)
@@ -456,6 +468,28 @@ def lapsed_job_waits(core: CoreState) -> tuple[JobWaitLapsed, ...]:
     )
 
 
+def lapsed_check_waits(core: CoreState) -> tuple[RecoveryCheckWaitLapsed, ...]:
+    """One wake per pending recovery check whose named entities settled and left it waiting.
+
+    An answer about a check's target re-resolves the check, so a check waiting only on
+    requests is moved by their answers. One that also waits on an entity (an ensure's session
+    still learning whether it holds the resource) heard its answer before that entity settled;
+    once nothing it names can move it, it is woken so recovery resolves it from the current
+    state (``RecoveryCheckWaitLapsed``).
+    """
+    if core.run.status == RunStatus.TERMINAL or not recovery_waits(core.records.recovery.phase):
+        return ()
+    named = dict(recorded_waits(core))
+    return tuple(
+        RecoveryCheckWaitLapsed(target=check.target)
+        for check in core.records.recovery.checks
+        if check.resolution == "pending"
+        and check.wait is not None
+        and check.wait.subjects
+        and not _live(core.records, named, check.wait, frozenset(), frozenset())
+    )
+
+
 def lapsed_session_waits(core: CoreState) -> tuple[SessionWaitLapsed, ...]:
     """One wake per waiting session whose wait names a request that is over.
 
@@ -470,7 +504,23 @@ def lapsed_session_waits(core: CoreState) -> tuple[SessionWaitLapsed, ...]:
         SessionWaitLapsed(session_id=SessionId(root=subject.identity), request_id=request_id)
         for subject, wait in _session_waits(core)
         for request_id in wait.requests
-        if _request_ended(core, request_id)
+        if _request_ended(core, request_id) and not _reply_in_transit(core, request_id)
+    )
+
+
+def _reply_in_transit(core: CoreState, request_id: RequestId) -> bool:
+    """Whether *request_id* is a turn whose reply its session's owner event still carries.
+
+    A plain turn's success carries its reply on the owner event the shell commits with the
+    observation and applies in the next step (``reply_owed``), so the session that names the
+    turn has not heard it yet and must keep naming it.
+    """
+    record = core.records.record(request_id)
+    return (
+        record is not None
+        and isinstance(record.request, DispatchTurn | ResumeSessionTurn)
+        and record.observation is not None
+        and reply_owed(record.observation, record)
     )
 
 
@@ -837,12 +887,6 @@ def _live_wait(
     return frozenset() if wait is None else wait_producers(core, wait, queued)
 
 
-#: The kinds a queued answer cannot move. Core forwards a job's answer to the job in the step
-#: that records it, so an answer still queued in the shell belongs to a request core holds
-#: open anyway; a recovery check is moved, like the jobs it names, only by what core holds open.
-_MOVED_ONLY_BY_OPEN_REQUESTS = frozenset({WaitKind.OWNED_JOB, WaitKind.RECOVERY_CHECK})
-
-
 def waits(core: CoreState, outbox: Sequence[CoreEvent] = ()) -> tuple[OpenWait, ...]:
     """Every wait in *core*, each with the producer that will end it, read from its record.
 
@@ -893,6 +937,7 @@ __all__ = [
     "WaitingPhase",
     "awaiting_refund",
     "draining_without_cancel",
+    "lapsed_check_waits",
     "lapsed_job_waits",
     "lapsed_session_waits",
     "orphan_waits",

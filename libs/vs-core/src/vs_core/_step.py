@@ -34,6 +34,7 @@ from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
 from ._values import digest, share_unchanged
 from ._waits import (
+    lapsed_check_waits,
     lapsed_job_waits,
     lapsed_session_waits,
     stalled_acquisitions,
@@ -690,7 +691,7 @@ def _stall_entries(
     request that can never be dispatched (``RequestUndispatchable``), and a blocked record a closing
     run waits on that no live request addresses (``BlockedRecordStalled``), and a job whose
     recorded wait names a request that ended without moving it (``JobWaitLapsed``), and the same
-    for a session (``SessionWaitLapsed``). A fired watch
+    for a session (``SessionWaitLapsed``) or a recovery check (``RecoveryCheckWaitLapsed``). A fired watch
     (``WhileOpen``, ``WhileAlive``) is also raised here, as the deadline of the waits that declared it. A signal already raised
     in this step is not raised again: if its reducer could not end the wait (an ambiguous
     record it refuses to act on), the wait stays visible to the orphan check instead of the
@@ -717,6 +718,7 @@ def _stall_entries(
         ),
         *lapsed_job_waits(state),
         *lapsed_session_waits(state),
+        *lapsed_check_waits(state),
         *watch_deadlines(state),
     )
     return [

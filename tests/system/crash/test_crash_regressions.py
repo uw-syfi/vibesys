@@ -102,3 +102,22 @@ def test_a_turn_whose_limit_passed_while_no_host_was_alive_still_runs() -> None:
         ),
     )
     assert_converges(run(plan).summary, f"replay with {plan.model_dump_json()}", crashes=4)
+
+
+def test_an_ensure_checked_before_its_session_is_known_resolves_when_the_session_is() -> None:
+    """The walk #2428 reports: the host dies as a turn's receipt begins, then as the turn goes out.
+
+    Recovery inspects the session's ensure while the session is still unknown, so the answer
+    cannot show the session holds the ensured resource. The check waits on the session; the
+    turn's reply makes the session known a step later (it rides the session's owner event), and
+    the check is resolved again then. Before, the check named only its answered inspection and
+    the run halted with an orphaned recovery-check wait.
+    """
+    plan = FaultPlan(
+        seed=2,
+        rules=(
+            rule(Crossing(Boundary.DURABLE_WRITE, RECEIPT_BEGUN, 6)),
+            rule(Crossing(Boundary.EXECUTOR_REQUEST, "dispatch_turn", 2)),
+        ),
+    )
+    assert_converges(run(plan).summary, f"replay with {plan.model_dump_json()}", crashes=2)

@@ -26,7 +26,7 @@ from ._proofs import (
 from ._registry import ContractError
 from ._request_forward import turn_of
 from ._session_scope import lost_turn_authority
-from ._waits import owned_job_subject
+from ._waits import owned_job_subject, recovery_waits
 from .types.attempts import (
     AttemptPhase,
     CloseAttemptScope,
@@ -66,6 +66,7 @@ from .types.records import (
     ReconciliationDeadline,
     RecoveryBarrier,
     RecoveryCheck,
+    RecoveryCheckWaitLapsed,
     RecoveryPhase,
     RecoveryReady,
     RecoveryStarted,
@@ -84,7 +85,7 @@ from .types.sessions import (
     SessionPhase,
 )
 from .types.until import Failed, FailureReason, WhileAlive, WhileOpen
-from .types.waits import WaitOn
+from .types.waits import WaitKind, WaitOn, WaitSubject
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
@@ -809,10 +810,54 @@ def _check_wait(
         tuple(dict.fromkeys(owned_job_subject(job) for job in jobs if job is not None))
         if children and None not in jobs
         else ()
-    )
+    ) + _owner_sessions(record, context)
     if not requests and not subjects:
         return check.wait
     return WaitOn(requests=requests, subjects=subjects)
+
+
+def _owner_sessions(
+    record: RequestRecord | None, context: RecordsContext
+) -> tuple[WaitSubject, ...]:
+    """The waiting sessions an ensure's check waits on to learn whether they own its resource.
+
+    An ensure resolves as reattached once its session is known to hold the resource it
+    reported (``_known_owner``). A session still settling its own state (unknown after a
+    crash, inspecting a turn) moves the check when it settles, so the check names it.
+    """
+    if record is None or not isinstance(record.request, EnsureSession):
+        return ()
+    request = record.request
+    return tuple(
+        WaitSubject(kind=WaitKind.SESSION, identity=session.spec.session_id.root)
+        for session in context.sessions.sessions
+        if session.wait is not None
+        and session.scope == request.scope
+        and session.spec == request.spec
+    )
+
+
+def _recheck(
+    state: RecordsState, context: RecordsContext, event: RecoveryCheckWaitLapsed
+) -> AreaChange[RecordsState]:
+    """Resolve a check again once nothing it named can move it, and name what it waits on now.
+
+    Its own inspection answered before what it waited on settled (an ensure inspected while
+    its session was still unknown), so the answer resolved nothing then. The target's
+    resolution reads the current state, so a check whose owner became known resolves now.
+    """
+    barrier = state.recovery
+    if not recovery_waits(barrier.phase):
+        return AreaChange(state=state)
+    checks = tuple(
+        _with_resolution(check, _aggregate_resolution(record, context, state))
+        if check.target == event.target
+        and check.resolution == "pending"
+        and (record := state.record(check.target)) is not None
+        else check
+        for check in barrier.checks
+    )
+    return _finish(state, barrier.model_copy(update={"checks": checks}), context)
 
 
 def _finish(
@@ -1704,6 +1749,8 @@ def advance(
             return _observe(state, context, event)
         case ReconciliationDeadline():
             return _deadline(state, context, event)
+        case RecoveryCheckWaitLapsed():
+            return _recheck(state, context, event)
         case RecoveryReady():
             if event.epoch != state.recovery.epoch:
                 return AreaChange(state=state)

@@ -41,6 +41,7 @@ from .types.evaluation import (
     RegisteredJobObserved,
     SubmitMeasurement,
 )
+from .types.records import reply_owed
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
 from .types.sessions import (
     CloseSession,
@@ -88,24 +89,6 @@ def records_own(descriptor: OperationDescriptor) -> bool:
         descriptor.lifecycle in (LifecycleClass.QUERY, LifecycleClass.IDEMPOTENT_WRITE)
         and descriptor.revision_authority == RevisionAuthority.NONE
         and descriptor.normalization != OperationNormalizationKind.SCOPE_REOPEN
-    )
-
-
-def success_without_reply(observation: Observation) -> bool:
-    """Whether a turn observation proves a success whose reply only its owner event carries."""
-    return (
-        observation.terminal
-        and observation.accepted
-        and observation.status == ObservationStatus.SUCCEEDED
-    )
-
-
-def reply_owed(observation: Observation, facts: Facts) -> bool:
-    """Whether a plain turn's observation proves a success whose reply only its owner event carries."""
-    return (
-        success_without_reply(observation)
-        and facts.suspension is None
-        and facts.outcome_json is None
     )
 
 

@@ -710,6 +710,20 @@ class BlockedRecordStalled(Value):
     request_id: RequestId
 
 
+class RecoveryCheckWaitLapsed(Value):
+    """Internal signal: nothing a pending recovery check names can still move it.
+
+    Raised by the step at quiescence while recovery waits on the check's target, when every
+    request the check names has ended and every entity it names stopped waiting. What the check
+    waited on may have settled its target meanwhile (a session it waited on became known), so
+    recovery resolves the check again from the current state and names what it waits on now.
+    Never shell input.
+    """
+
+    kind: Literal["recovery_check_wait_lapsed"] = "recovery_check_wait_lapsed"
+    target: RequestId
+
+
 class OperationRetireRequested(Value):
     """Explicit retirement of a registered owned operation, resolved by records."""
 
@@ -750,10 +764,34 @@ type RecordsEvent = Annotated[
     | RetryDue
     | RequestUndispatchable
     | BlockedRecordStalled
+    | RecoveryCheckWaitLapsed
     | OperationRetireRequested
     | HostRenewed,
     Field(discriminator="kind"),
 ]
+
+
+def success_without_reply(observation: Observation) -> bool:
+    """Whether a turn observation proves a success whose reply only its owner event carries."""
+    return (
+        observation.terminal
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+    )
+
+
+def reply_owed(
+    observation: Observation, facts: RequestObserved | TargetObservation | RequestRecord
+) -> bool:
+    """Whether a plain turn's observation proves a success whose reply only its owner event carries.
+
+    *facts* is the answer or the record that stored it: both hold the same suspension and output.
+    """
+    return (
+        success_without_reply(observation)
+        and facts.suspension is None
+        and facts.outcome_json is None
+    )
 
 
 def request_lifecycle(request: Request) -> LifecycleClass:

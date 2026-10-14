@@ -14,6 +14,7 @@ from .types.records import (
     HostRenewed,
     OperationRetireRequested,
     ReconciliationDeadline,
+    RecoveryCheckWaitLapsed,
     RecoveryReady,
     RecoveryStarted,
     RequestObserved,
@@ -68,6 +69,7 @@ EVENT_TO_SUBAREA: Mapping[type[RecordsEvent], Reducer] = MappingProxyType(
         RequestUndispatchable: _request_ledger.advance,
         BlockedRecordStalled: _request_ledger.advance,
         HostRenewed: _host_epochs.renewed,
+        RecoveryCheckWaitLapsed: _request_recovery.advance,
     }
 )
 
