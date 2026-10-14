@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAliasType
 
-from pydantic import Field, FiniteFloat, TypeAdapter
-from pydantic_core import from_json
+from pydantic import Field, FiniteFloat, JsonValue, TypeAdapter, ValidationError
 
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
 from server.chat.options import ChatOptions
@@ -540,6 +539,7 @@ class Response(ResponseEnvelope):
 
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 def decode_request(frame: str | bytes) -> ProtocolRequest | Response:
@@ -568,8 +568,8 @@ def decode_request(frame: str | bytes) -> ProtocolRequest | Response:
 
 def _frame_ids(frame: str | bytes) -> tuple[str, str]:
     try:
-        value = from_json(frame)
-    except ValueError:
+        value = _JSON_VALUE.validate_json(frame)
+    except ValidationError:
         return "unknown", ""
     if not isinstance(value, dict):
         return "unknown", ""

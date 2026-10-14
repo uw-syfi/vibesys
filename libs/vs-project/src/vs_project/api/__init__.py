@@ -2,7 +2,7 @@
 
 ``Project`` is the entry point for repository state. The exported records and
 errors describe its configuration, run state, Git integration, and task paths.
-``strip_ansi`` is also public for consumers of ``RunLogger`` output.
+``strip_ansi`` and ``read_latest_run_log`` are public for consumers of ``RunLogger`` output.
 
 Runs use one version 5 manifest containing an ``OrchestrationDescriptor``.
 """
@@ -48,6 +48,7 @@ from vs_project._manifests import (
     RunExecutionRecord,
     RunResourceRequest,
 )
+from vs_project._run_logs import RunLogText, read_latest_run_log
 from vs_project._socket import (
     MAX_SOCKET_PATH_BYTES,
     SocketPathTooLongError,
@@ -183,6 +184,7 @@ __all__ = [
     "Revision",
     "RunEnvironmentRecord",
     "RunExecutionRecord",
+    "RunLogText",
     "RunLogger",
     "RunResourceRequest",
     "SocketPathTooLongError",
@@ -214,6 +216,7 @@ __all__ = [
     "is_project_state_path",
     "open_git_repository",
     "pygit2_installed",
+    "read_latest_run_log",
     "run_git",
     "select_git_backend",
     "strip_ansi",

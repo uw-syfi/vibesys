@@ -35,8 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Final, assert_never
 
-from pydantic import ValidationError
-from pydantic_core import from_json
+from pydantic import JsonValue, TypeAdapter, ValidationError
 
 from server.host_api import (
     HELPER_REQUEST_FEATURES,
@@ -89,6 +88,7 @@ MAX_LINE_BYTES: Final = 1 << 20
 _READ_BYTES: Final = 64 * 1024
 _MAX_ERROR_DETAIL: Final = 2000
 _MAX_REQUEST_ID: Final = 128
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 # ----- the pure core: one channel -----
@@ -359,8 +359,8 @@ def _error(request_id: str | None, code: HelperErrorCode, message: str) -> Helpe
 def _request_id_of(line: bytes) -> str | None:
     """The ``request_id`` of a line that is not a valid request, when it carries a usable one."""
     try:
-        document = from_json(line)
-    except ValueError:
+        document = _JSON_VALUE.validate_json(line)
+    except ValidationError:
         return None
     value = document.get("request_id") if isinstance(document, dict) else None
     if isinstance(value, str) and 0 < len(value) <= _MAX_REQUEST_ID:

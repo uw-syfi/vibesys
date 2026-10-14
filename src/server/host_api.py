@@ -46,6 +46,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    JsonValue,
     NonNegativeInt,
     PositiveInt,
     StringConstraints,
@@ -54,7 +55,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_core import from_json
 
 PROTOCOL_VERSION = 1
 """The run protocol version a server speaks on its control socket.
@@ -302,6 +302,7 @@ class UnreadableRecord(BaseModel):
 
 
 _UPGRADED_RECORD_VERSION = 3
+_JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 """The earlier record version this reader still reads, through ``_upgrade_v3``."""
 
 
@@ -328,10 +329,10 @@ def parse_record(instance_id: str, raw: str | bytes) -> LiveInstanceRecord | Unr
     report no phase this reader could stand behind.
     """
     try:
-        document = from_json(raw)
-    except ValueError:
+        document = _JSON_OBJECT.validate_json(raw)
+    except ValidationError:
         return UnreadableRecord(id=instance_id, version=None)
-    version = document.get("version") if isinstance(document, dict) else None
+    version = document.get("version")
     if not isinstance(version, int) or isinstance(version, bool):
         return UnreadableRecord(id=instance_id, version=None)
     record: LiveInstanceRecord | None = None
