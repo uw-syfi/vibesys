@@ -63,16 +63,18 @@ _STRATEGIES = {
 }
 
 
+# A pull request plays the first case (see `sim_smoke_slow`): a cancelled attempt that restarts
+# from disk, about 2 s, where the measured search played straight takes about 5 s.
 _CASES = [
     pytest.param(name, crash, id=f"{name}-{'straight' if crash is None else 'restart'}")
-    for name in _STRATEGIES
-    for crash in (None, CrashPoint.AFTER_OBSERVATION)
+    for name in ("cancelled", "unmeasured", "discarded", "measured")
+    for crash in (CrashPoint.AFTER_OBSERVATION, None)
 ]
 
 
-# The nightly job plays every search both ways. A pull request already holds the property for a
-# run that only advances its clock (`libs/vs-runtime/tests/test_core_shell.py`), and its other
-# skeleton tests commit to and restart from this disk store.
+# The nightly job plays every search both ways. A pull request plays one case of it, and already
+# holds the property for a run that only advances its clock
+# (`libs/vs-runtime/tests/test_core_shell.py`).
 @pytest.mark.slow
 @pytest.mark.parametrize(("strategy", "crash"), _CASES)
 async def test_every_committed_record_reads_back_as_itself(
