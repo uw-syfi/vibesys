@@ -10,7 +10,24 @@
  * `parseCampaignFrame` validates once, here. Everything downstream (the fold and
  * the view) consumes typed values and never re-validates.
  */
-import type {CampaignRecord, WorkstreamOutcome} from './campaign-record.js';
+import {
+  booleanAt,
+  CampaignDecodeError,
+  enumAt,
+  exactKeys,
+  fail,
+  nullablePositiveIntegerAt,
+  nullableTimestampAt,
+  objectAt,
+  parseAgent,
+  parseCampaignHeader,
+  parseMeasurement,
+  positiveIntegerAt,
+  stringAt,
+  textAt,
+  timestampAt,
+} from './campaign-decoders.js';
+import type {CampaignHeaderRecord, CampaignRecord, WorkstreamOutcome} from './campaign-record.js';
 
 /** Workstream phases in the frontend-local replay preview contract. A production
  * campaign stream must use a backend-owned contract with generated client types. */
@@ -36,17 +53,7 @@ const WORKSTREAM_PHASES: readonly WorkstreamPhase[] = [
 ];
 
 /** The campaign-level data known at (or declared for) the start of a run. */
-export type CampaignHeader = Pick<
-  CampaignRecord,
-  | 'id'
-  | 'title'
-  | 'summary'
-  | 'provenance'
-  | 'objective'
-  | 'benchmarkVersions'
-  | 'benchmarkVersionBoundary'
-  | 'trajectories'
->;
+export type CampaignHeader = CampaignHeaderRecord;
 
 export type FrameAgent = CampaignRecord['agents'][number];
 export type FrameMeasurement = CampaignRecord['measurements'][number];
@@ -97,81 +104,8 @@ const FRAME_KINDS: readonly CampaignFrameKind[] = [
 
 class FrameError extends Error {}
 
-function fail(path: string, message: string): never {
-  throw new FrameError(`${path}: ${message}`);
-}
-
-/**
- * A parsed object with the frame fields declared, so property access reads as
- * `object.kind` rather than an index-signature lookup. Mirrors the `JsonObject`
- * approach in `replay-scenario.ts`.
- */
-type FrameObject = Record<string, unknown> & {
-  kind?: unknown;
-  seq?: unknown;
-  header?: unknown;
-  agent?: unknown;
-  workstream?: unknown;
-  measurement?: unknown;
-  workstreamId?: unknown;
-  tokens?: unknown;
-  status?: unknown;
-  id?: unknown;
-  title?: unknown;
-  hypothesis?: unknown;
-  startedAt?: unknown;
-  firstSequence?: unknown;
-  phase?: unknown;
-  active?: unknown;
-  finishedAt?: unknown;
-  lastSequence?: unknown;
-  outcome?: unknown;
-  outcomeSummary?: unknown;
-};
-
-function asObject(value: unknown, path: string): FrameObject {
-  if (typeof value !== 'object' || value === null || Array.isArray(value))
-    fail(path, 'expected an object');
-  return value as FrameObject;
-}
-
-function asString(value: unknown, path: string): string {
-  if (typeof value !== 'string') fail(path, 'expected a string');
-  return value;
-}
-
-function asNumber(value: unknown, path: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) fail(path, 'expected a finite number');
-  return value;
-}
-
-function asBoolean(value: unknown, path: string): boolean {
-  if (typeof value !== 'boolean') fail(path, 'expected a boolean');
-  return value;
-}
-
-function member<T extends string>(value: unknown, path: string, allowed: readonly T[]): T {
-  const text = asString(value, path);
-  if (!allowed.includes(text as T)) fail(path, `expected one of ${allowed.join(', ')}`);
-  return text as T;
-}
-
-function exactKeys(object: FrameObject, path: string, keys: readonly string[]): void {
-  for (const key of Object.keys(object))
-    if (!keys.includes(key)) fail(`${path}.${key}`, 'unexpected key');
-  for (const key of keys) if (!(key in object)) fail(`${path}.${key}`, 'missing key');
-}
-
-function nullableString(value: unknown, path: string): string | null {
-  return value === null ? null : asString(value, path);
-}
-
-function nullableNumber(value: unknown, path: string): number | null {
-  return value === null ? null : asNumber(value, path);
-}
-
 function parseWorkstream(value: unknown, path: string): FrameWorkstream {
-  const object = asObject(value, path);
+  const object = objectAt(value, path);
   exactKeys(object, path, [
     'id',
     'title',
@@ -185,43 +119,61 @@ function parseWorkstream(value: unknown, path: string): FrameWorkstream {
     'outcome',
     'outcomeSummary',
   ]);
+  const startedAt = timestampAt(object.startedAt, `${path}.startedAt`);
+  const firstSequence = positiveIntegerAt(object.firstSequence, `${path}.firstSequence`);
+  const finishedAt = nullableTimestampAt(object.finishedAt, `${path}.finishedAt`);
+  const lastSequence = nullablePositiveIntegerAt(object.lastSequence, `${path}.lastSequence`);
+  if (finishedAt !== null && Date.parse(finishedAt) < Date.parse(startedAt))
+    fail(`${path}.finishedAt`, 'must not precede startedAt');
+  if (lastSequence !== null && lastSequence < firstSequence)
+    fail(`${path}.lastSequence`, 'must not precede firstSequence');
   return {
-    id: asString(object.id, `${path}.id`),
-    title: asString(object.title, `${path}.title`),
-    hypothesis: asString(object.hypothesis, `${path}.hypothesis`),
-    startedAt: asString(object.startedAt, `${path}.startedAt`),
-    firstSequence: asNumber(object.firstSequence, `${path}.firstSequence`),
-    phase: member(object.phase, `${path}.phase`, WORKSTREAM_PHASES),
-    active: asBoolean(object.active, `${path}.active`),
-    finishedAt: nullableString(object.finishedAt, `${path}.finishedAt`),
-    lastSequence: nullableNumber(object.lastSequence, `${path}.lastSequence`),
+    id: stringAt(object.id, `${path}.id`),
+    title: stringAt(object.title, `${path}.title`),
+    hypothesis: stringAt(object.hypothesis, `${path}.hypothesis`),
+    startedAt,
+    firstSequence,
+    phase: enumAt(object.phase, `${path}.phase`, WORKSTREAM_PHASES),
+    active: booleanAt(object.active, `${path}.active`),
+    finishedAt,
+    lastSequence,
     outcome:
       object.outcome === null
         ? null
-        : member(object.outcome, `${path}.outcome`, ['accepted', 'rejected'] as const),
-    outcomeSummary: asString(object.outcomeSummary, `${path}.outcomeSummary`),
+        : enumAt(object.outcome, `${path}.outcome`, ['accepted', 'rejected'] as const),
+    outcomeSummary: textAt(object.outcomeSummary, `${path}.outcomeSummary`),
   };
 }
 
 /**
  * Validate an unknown value as a campaign frame, rejecting an unknown kind,
  * an unexpected or missing key, or a wrong type, and naming the offending path.
- * The payloads that are `CampaignRecord` sub-objects (`header`, `agent`,
- * `measurement`) are carried as-is and checked structurally at the top level;
- * the producer is the record validated by `parseReplayScenario`.
+ * Every nested field is decoded at this untrusted boundary. Relationships that
+ * require earlier frames are deliberately left to the ordered stream fold.
  */
 export function parseCampaignFrame(value: unknown): CampaignFrame {
-  const object = asObject(value, '$');
-  const kind = member(object.kind, '$.kind', FRAME_KINDS);
-  const seq = asNumber(object.seq, '$.seq');
+  try {
+    return decodeCampaignFrame(value);
+  } catch (error) {
+    if (error instanceof CampaignDecodeError) {
+      throw new FrameError(`${error.path}: ${error.reason}`, {cause: error});
+    }
+    throw error;
+  }
+}
+
+function decodeCampaignFrame(value: unknown): CampaignFrame {
+  const object = objectAt(value, '$');
+  const kind = enumAt(object.kind, '$.kind', FRAME_KINDS);
+  const seq = positiveIntegerAt(object.seq, '$.seq');
   switch (kind) {
     case 'campaign-init': {
       exactKeys(object, '$', ['kind', 'seq', 'header']);
-      return {kind, seq, header: asObject(object.header, '$.header') as unknown as CampaignHeader};
+      return {kind, seq, header: parseCampaignHeader(object.header, '$.header')};
     }
     case 'agent-upsert': {
       exactKeys(object, '$', ['kind', 'seq', 'agent']);
-      return {kind, seq, agent: asObject(object.agent, '$.agent') as unknown as FrameAgent};
+      return {kind, seq, agent: parseAgent(object.agent, '$.agent')};
     }
     case 'workstream-upsert': {
       exactKeys(object, '$', ['kind', 'seq', 'workstream']);
@@ -232,7 +184,7 @@ export function parseCampaignFrame(value: unknown): CampaignFrame {
       return {
         kind,
         seq,
-        measurement: asObject(object.measurement, '$.measurement') as unknown as FrameMeasurement,
+        measurement: parseMeasurement(object.measurement, '$.measurement'),
       };
     }
     case 'tokens': {
@@ -240,8 +192,8 @@ export function parseCampaignFrame(value: unknown): CampaignFrame {
       return {
         kind,
         seq,
-        workstreamId: asString(object.workstreamId, '$.workstreamId'),
-        tokens: asNumber(object.tokens, '$.tokens'),
+        workstreamId: stringAt(object.workstreamId, '$.workstreamId'),
+        tokens: positiveIntegerAt(object.tokens, '$.tokens', true),
       };
     }
     case 'status': {
@@ -249,7 +201,7 @@ export function parseCampaignFrame(value: unknown): CampaignFrame {
       return {
         kind,
         seq,
-        status: member(object.status, '$.status', ['active', 'completed'] as const),
+        status: enumAt(object.status, '$.status', ['active', 'completed'] as const),
       };
     }
   }
