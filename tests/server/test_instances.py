@@ -41,6 +41,7 @@ from server.host_api import (
 from server.instances import CONTROL_REPLY_TIMEOUT_SECONDS, ControlSocketStopRequester
 from server.registry import (
     CRASHED,
+    EXIT_GRACE_SECONDS,
     STOP_TIMEOUT_SECONDS,
     TOMBSTONE_RETENTION_SECONDS,
     FakeInstanceHold,
@@ -590,13 +591,15 @@ def test_only_a_held_lock_is_live_and_only_a_fresh_tombstone_is_ended(
     assert (verdict is Verdict.CRASHED) == (
         left and isinstance(record, LiveInstanceRecord) and record.ended_at is None
     )
-    # A holder seen with its tombstone wrote it between the lock probe and the
-    # record read, on its way out; it is ended at any age while it holds.
+    # A holder seen with its tombstone is on its way out (or wedged there):
+    # exiting at any age while it holds, so ``stop`` can still act on it.
+    assert (verdict is Verdict.EXITING) == (held and tombstone)
     assert (verdict is Verdict.ENDED) == (
         tombstone
         and isinstance(record, LiveInstanceRecord)
         and record.ended_at is not None
-        and (held or (left and now - record.ended_at < TOMBSTONE_RETENTION_SECONDS))
+        and left
+        and now - record.ended_at < TOMBSTONE_RETENTION_SECONDS
     )
 
 
@@ -797,17 +800,18 @@ class RegistryInterleavings(RuleBasedStateMachine):
             for instance_id, (ended_at, phase) in self.ended.items()
             if instance_id in self.exiting or now - ended_at < TOMBSTONE_RETENTION_SECONDS
         }
+        wedged = self._wedged(now)
 
         live = [record.id for record in listing.instances]
         ended = [record.id for record in listing.ended]
         unreadable = [record.id for record in listing.unreadable]
-        assert sorted(live) == sorted(self.alive & self.published)
-        assert sorted(ended) == sorted(self.ended)
+        assert sorted(live) == sorted((self.alive & self.published) | wedged)
+        assert sorted(ended) == sorted(set(self.ended) - wedged)
         assert sorted(unreadable) == sorted(self.foreign)
         assert len({*live, *ended, *unreadable}) == len(live) + len(ended) + len(unreadable)
         for record in (*listing.instances, *listing.ended):
             assert record.run_id == self.run_ids[record.id]
-        for record in listing.ended:
+        for record in (*listing.ended, *(r for r in listing.instances if r.id in wedged)):
             assert (record.ended_at, record.phase) == self.ended[record.id]
         # Listing keeps every live server and every fresh tombstone, and nothing else.
         assert set(self.store.ids()) == self.alive | self.foreign | set(self.ended)
@@ -832,8 +836,11 @@ class RegistryInterleavings(RuleBasedStateMachine):
         }
         for instance_id in self.crashed:
             expected_ended[instance_id] = (None, RunPhase(status=RunStatus.FAILED, reason=CRASHED))
+        wedged = self._wedged(now)
+        for instance_id in wedged:
+            del expected_ended[instance_id]
         assert sorted(record.id for record in listing.instances) == sorted(
-            self.alive & self.published
+            (self.alive & self.published) | wedged
         )
         assert {
             record.id: (record.ended_at, record.phase) for record in listing.ended
@@ -849,9 +856,17 @@ class RegistryInterleavings(RuleBasedStateMachine):
                     Verdict.LIVE if instance_id in self.published else Verdict.PENDING
                 )
             elif instance_id in self.exiting:
-                assert verdict is Verdict.ENDED
+                assert verdict is Verdict.EXITING
             else:
                 assert verdict in {Verdict.ENDED, Verdict.CRASHED, Verdict.DEAD}
+
+    def _wedged(self, now: float) -> set[str]:
+        """Holders still exiting past the grace: listed as live, so they can be stopped."""
+        return {
+            instance_id
+            for instance_id in self.exiting
+            if now - self.ended[instance_id][0] >= EXIT_GRACE_SECONDS
+        }
 
     def _record(self, instance_id: str) -> LiveInstanceRecord:
         return _record(instance_id, started_at=self.started_at, run_id=self.run_ids[instance_id])
@@ -1189,3 +1204,72 @@ def test_a_record_nested_past_the_recursion_limit_is_unreadable_not_a_crash(open
     """``json.loads`` recursed per level and raised ``RecursionError`` out of a listing."""
     raw = opening * 100_000
     assert parse_record(IDS[0], raw) == UnreadableRecord(id=IDS[0], version=None)
+
+
+@pytest.mark.parametrize("force", [False, True])
+@pytest.mark.parametrize(
+    "tombstone_age", [0.0, EXIT_GRACE_SECONDS, TOMBSTONE_RETENTION_SECONDS * 2]
+)
+def test_stop_signals_a_server_wedged_after_its_tombstone(
+    *, force: bool, tombstone_age: float
+) -> None:
+    """A holder that wrote its tombstone but never let go is still a process to stop.
+
+    Its control socket no longer serves, so ``stop`` waits out the stop bound
+    for it to let go by itself, then signals it; ``force`` signals at once.
+    Treating it as not running left no way to end it through the tool.
+    """
+    store = FakeInstanceStore()
+    hold = store.hold(IDS[0])
+    hold.publish(_ended(IDS[0], ended_at=0.0))
+    signaller = _ExitingSignaller(hold.release)
+    clock = ManualClock()
+    registry = LiveRegistry(store, ManualClock(tombstone_age))
+
+    result = registry.stop(
+        IDS[0], StopEffects(_UNANSWERED, signaller, clock, clock.advance), force=force
+    )
+
+    assert result.outcome is StopOutcome.STOPPED
+    assert result.route is StopRoute.SIGNAL
+    assert signaller.signalled == [4242]
+    if force:
+        assert clock.now() == 0.0
+    else:
+        assert clock.now() >= STOP_TIMEOUT_SECONDS
+
+
+def test_stop_lets_an_exiting_server_finish_without_a_signal() -> None:
+    """A holder that lets go within the stop bound stopped by itself."""
+    store = FakeInstanceStore()
+    hold = store.hold(IDS[0])
+    hold.publish(_ended(IDS[0], ended_at=0.0))
+    signaller = _ExitingSignaller(lambda: None)
+    clock = ManualClock()
+
+    def pause(seconds: float) -> None:
+        clock.advance(seconds)
+        hold.release()
+
+    result = LiveRegistry(store, CLOCK).stop(
+        IDS[0], StopEffects(_UNANSWERED, signaller, clock, pause)
+    )
+
+    assert result.outcome is StopOutcome.STOPPED
+    assert signaller.signalled == []
+
+
+@pytest.mark.parametrize(
+    ("age", "listed_live"),
+    [(0.0, False), (EXIT_GRACE_SECONDS - 0.001, False), (EXIT_GRACE_SECONDS, True), (3600.0, True)],
+)
+def test_a_holder_past_the_exit_grace_lists_as_live_again(*, age: float, listed_live: bool) -> None:
+    """Ended while it is plausibly exiting; past the grace, a wedged process the operator sees."""
+    store = FakeInstanceStore()
+    hold = store.hold(IDS[0])
+    hold.publish(_ended(IDS[0], ended_at=0.0))
+
+    listing = LiveRegistry(store, ManualClock(age)).read()
+
+    assert [record.id for record in listing.instances] == ([IDS[0]] if listed_live else [])
+    assert [record.id for record in listing.ended] == ([] if listed_live else [IDS[0]])

@@ -103,6 +103,12 @@ _FALLBACK_PARENT = Path("/tmp")  # noqa: S108  # lint-waiver: LW-178202 [S108]; 
 _STOP_POLL_SECONDS = 0.05
 STOP_TIMEOUT_SECONDS = 10.0
 """How long ``stop`` waits for a stopped server to finish its run teardown."""
+EXIT_GRACE_SECONDS = 10.0
+"""How long a holder may keep its lock after writing its tombstone and still list as ended.
+
+A server writes its tombstone as its last act and releases its lock at once,
+so a holder past this is wedged in its exit: it lists as live again, so an operator sees a process still holding the instance and can stop it.
+"""
 TOMBSTONE_RETENTION_SECONDS = 24 * 60 * 60
 """How long an ended server's record stays listed; the next listing after removes it."""
 CRASHED = FailureReason(
@@ -278,8 +284,10 @@ class Verdict(StrEnum):
     """A record this reader cannot interpret, of a live owner or a newer checkout."""
     PENDING = "pending"
     """The owner holds the lock but has no record yet."""
+    EXITING = "exiting"
+    """The owner holds the lock and has written its tombstone: it is ending, or wedged in its exit."""
     ENDED = "ended"
-    """The owner has written its tombstone and is exiting, or left one younger than a day."""
+    """The owner left a tombstone younger than a day and no longer holds the lock."""
     CRASHED = "crashed"
     """No process holds the lock, and the owner died without leaving a tombstone."""
     DEAD = "dead"
@@ -291,11 +299,13 @@ class Verdict(StrEnum):
 def judge(observation: InstanceObservation, now: float) -> Verdict:
     """Decide one id from its observed lock state and record, at time ``now``.
 
-    A held lock with a tombstone is ended, not live. The owner writes its
+    A held lock with a tombstone is exiting, not live. The owner writes its
     tombstone as its last act before it releases the lock, and an observation
     reads the lock before the record, so an owner that ends between the two
     reads is seen holding its lock with its tombstone published. The tombstone
-    is the later fact. It is reported ended whatever its age, since nothing of
+    is the later fact, but the process is still there: ``stop`` acts on an
+    exiting owner, and a listing reports it ended only within
+    ``EXIT_GRACE_SECONDS`` of its tombstone (``exited_in_grace``). Nothing of
     a holder may be removed; once the lock drops it ages like any tombstone.
     """
     record = observation.record
@@ -305,7 +315,7 @@ def judge(observation: InstanceObservation, now: float) -> Verdict:
                 case LiveInstanceRecord(ended_at=None):
                     return Verdict.LIVE
                 case LiveInstanceRecord():
-                    return Verdict.ENDED
+                    return Verdict.EXITING
                 case UnreadableRecord():
                     return Verdict.UNREADABLE
                 case None:
@@ -314,6 +324,11 @@ def judge(observation: InstanceObservation, now: float) -> Verdict:
             return Verdict.UNVERIFIED
         case LockState.FREE | LockState.ABSENT:
             return _judge_left_behind(record, now)
+
+
+def exited_in_grace(record: LiveInstanceRecord, now: float) -> bool:
+    """Whether an exiting holder's tombstone is recent enough to report it ended."""
+    return record.ended_at is not None and now - record.ended_at < EXIT_GRACE_SECONDS
 
 
 def _judge_left_behind(record: LiveInstanceRecord | UnreadableRecord | None, now: float) -> Verdict:
@@ -374,6 +389,8 @@ def survey(observations: Iterable[InstanceObservation], now: float) -> Survey:
         match judge(observation, now), record:
             case Verdict.LIVE, LiveInstanceRecord():
                 live.append(record)
+            case Verdict.EXITING, LiveInstanceRecord():
+                (ended if exited_in_grace(record, now) else live).append(record)
             case Verdict.ENDED, LiveInstanceRecord():
                 ended.append(record)
             case Verdict.CRASHED, LiveInstanceRecord():
@@ -1115,6 +1132,8 @@ class InstanceInspector:
 
 
 def _inspection_state(observation: InstanceObservation) -> InspectionState:
+    # A holder with its tombstone inspects as ended at any age: the record is
+    # the tombstone either way, and ``stop`` acts on it (``Verdict.EXITING``).
     match observation.lock, observation.record:
         case LockState.HELD, LiveInstanceRecord(ended_at=None):
             return InspectionState.LIVE
@@ -1196,16 +1215,30 @@ class LiveRegistry:
     ) -> InstanceStopResult:
         """Stop a live server and wait, at most ``STOP_TIMEOUT_SECONDS``, for its lock to drop.
 
-        The server is first asked over its control socket, which stops the run
+        A server that has written its tombstone but still holds its lock is
+        exiting: it is given ``STOP_TIMEOUT_SECONDS`` to let go, then (or at
+        once, under ``force``) sent SIGTERM, since its control socket no longer
+        serves. A live server is first asked over its control socket, which stops the run
         at its next safe boundary on every platform. Only a server that does
         not acknowledge (wedged, or still binding), or a ``force`` stop, is
         sent SIGTERM; the signal goes only while the lock is still held,
         through a stable process reference, so a reused pid is never hit.
         """
-        record = self.find(instance_id)
-        if record is None:
+        observation = self._store.observe(instance_id)
+        record = observation.record
+        verdict = judge(observation, self._clock.now())
+        if verdict not in {Verdict.LIVE, Verdict.EXITING} or not isinstance(
+            record, LiveInstanceRecord
+        ):
             return InstanceStopResult(id=instance_id, outcome=StopOutcome.NOT_RUNNING)
-        if not force and effects.requester.request_stop(record.socket_path):
+        if verdict is Verdict.EXITING and not force and self._await_release(instance_id, effects):
+            # It wrote its tombstone and let go: it stopped by itself.
+            return InstanceStopResult(id=instance_id, outcome=StopOutcome.STOPPED)
+        if (
+            verdict is Verdict.LIVE
+            and not force
+            and effects.requester.request_stop(record.socket_path)
+        ):
             released = self._await_release(instance_id, effects)
             return InstanceStopResult(
                 id=instance_id,
