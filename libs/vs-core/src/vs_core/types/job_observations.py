@@ -28,6 +28,22 @@ class JobProgress(Value):
     estimated_start_at: Seconds | None = None
 
 
+class WaitEnd(StrEnum):
+    """What ended a wait on a job: every wait ends by exactly one of these, or by a stop.
+
+    Closed. The bound of every wait is a time (``_wait_clock.Bound``), never absent; this
+    names the rule that set it.
+    """
+
+    LIMIT = "limit"
+    """The work's stated limit passed, counted from its job's start (plus the queue time
+    its fresh pending facts were credited)."""
+    QUEUE_BUDGET = "queue_budget"
+    """The job waited in its queue for the run's whole ``queue_wait_budget``."""
+    RUN_END = "run_end"
+    """The run's own deadline: only queue time can carry a limit past it."""
+
+
 class JobTimeout(Value):
     """Frozen progress of one unfinished dependency at its wait deadline."""
 
@@ -47,6 +63,8 @@ class TimedOut(Value):
     kind: Literal["timed_out"] = "timed_out"
     deadline_at: Seconds
     reached_at: Seconds
+    by: WaitEnd = WaitEnd.LIMIT
+    """Which bound ``deadline_at`` was: the wait's limit, a job's queue budget, or the run's end."""
     unfinished: tuple[JobTimeout, ...] = Field(min_length=1)
 
     @model_validator(mode="after")

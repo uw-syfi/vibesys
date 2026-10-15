@@ -62,6 +62,10 @@ class FailureReason(StrEnum):
     """The agent's turn asked to wait for evaluations and the run could not honor it;
     ``refusal`` says why."""
 
+    QUEUE_BUDGET_SPENT = "queue-budget-spent"
+    """Its job waited in the executor's queue for the run's whole ``queue_wait_budget``
+    without starting (``Failed.limit_at`` is when the budget ran out)."""
+
     OUT_OF_BUDGET = "out-of-budget"
     MEASUREMENT_UNTRUSTED = "measurement-untrusted"
 
@@ -215,7 +219,7 @@ class Failed(Value):
         """Refuse a field that does not belong to the reason, or a reason missing its field."""
         expected = {
             "watch": self.reason in (FailureReason.WORKSPACE_CLOSED, FailureReason.OWNER_GONE),
-            "limit_at": self.reason == FailureReason.TIMED_OUT,
+            "limit_at": self.reason in (FailureReason.TIMED_OUT, FailureReason.QUEUE_BUDGET_SPENT),
             "cause": self.reason == FailureReason.REFUSED,
             "errors": self.reason == FailureReason.INVALID_REPLY,
             "turn_failure": self.reason == FailureReason.TURN_FAILED,

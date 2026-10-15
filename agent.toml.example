@@ -46,6 +46,11 @@ name = "gpt-5.4"
 # after the job's state could not be read (at least the interval).
 # observe_interval_seconds = 10
 # observe_backoff_cap_seconds = 120
+# How long one measurement's job may wait in the executor's queue (Slurm PENDING)
+# before it is given up, and how often a job still queued is reported with its
+# pending reason. Queue time never counts against a measurement's own limit.
+# queue_wait_budget_seconds = 43200  # default 12 hours
+# queue_notice_interval_seconds = 600
 
 # [run]
 # Optional wall-clock budget for one run. Omitted means unbounded (the round
