@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import errno
 import os
-import secrets
 import shutil
 import stat
 from collections.abc import Callable, Collection
@@ -396,7 +395,7 @@ class _DirectoryAtomicWrite:
         del destination
         for _ in range(_TEMPORARY_ATTEMPTS):
             # Unpredictable, so the agent cannot plant every name the host tries first.
-            temporary = f".{self._name}.{secrets.token_hex(8)}.tmp"
+            temporary = f".{self._name}.{os.urandom(8).hex()}.tmp"
             try:
                 descriptor = os.open(temporary, _CREATE_FLAGS, 0o600, dir_fd=self._directory)
             except FileExistsError:
