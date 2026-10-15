@@ -4,20 +4,22 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from tests.support.task_project import write_task
 
 from vibesys.core_wiring import ResolvedRun
+from vibesys.dynamic_handoff import HandoffOwner
 from vibesys.orchestration.dynamic import PLUGIN
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
+from vibesys.orchestration.dynamic.search.api import HANDOFF
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vs_core.api import RequestRetries, RevisionRef
 from vs_project.api import Project
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api import ArtifactStore, CorePlan, CoreRunContext, RunFacts
-from vs_runtime.api.core import OperationPorts
+from vs_runtime.api.core import OperationEntry, OperationPorts
 from vs_runtime.api.infrastructure import AgentPaths, RunEnvironmentView, TrustedEvaluationPlan
 from vs_runtime.api.testing import (
     FakeEvidenceLedger,
@@ -142,6 +144,39 @@ def plan_of(
             max_run_seconds=max_run_seconds,
         )
     )
+
+
+class MemoryDocuments:
+    """Handoff documents kept in memory under the project-relative root a namespace would have."""
+
+    def __init__(self, root: str = ".vibesys/state/runs/run/orchestrator-handoff") -> None:
+        """An empty store whose documents an agent sees below ``root``."""
+        self.root = root
+        self.files: dict[str, bytes] = {}
+
+    def read_bytes(self, relative_path: str | PurePosixPath) -> bytes | None:
+        """One document's bytes, or None when it is absent."""
+        return self.files.get(str(relative_path))
+
+    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+        """Replace one document."""
+        self.files[str(relative_path)] = contents
+
+    def agent_visible_path(self, relative_path: str | PurePosixPath | None = None) -> str:
+        """The document's project-relative path."""
+        return self.root if relative_path is None else f"{self.root}/{relative_path}"
+
+    def entries(self, relative_directory: str | PurePosixPath) -> tuple[str, ...]:
+        """The names of the documents, sorted; the store has one directory."""
+        prefix = f"{relative_directory}/"
+        return tuple(
+            sorted(name.removeprefix(prefix) for name in self.files if name.startswith(prefix))
+        )
+
+
+def handoff() -> tuple[OperationEntry, ...]:
+    """The handoff write, owned by the production owner over in-memory documents."""
+    return (OperationEntry.owned(HANDOFF, HandoffOwner(MemoryDocuments())),)
 
 
 def ports(root: Path, run: ResolvedRun) -> OperationPorts:

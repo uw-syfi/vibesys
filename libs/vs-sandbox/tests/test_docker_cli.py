@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -10,6 +11,9 @@ from hypothesis import strategies as st
 
 from vs_sandbox.api import SubprocessDockerCli
 from vs_sim.api import (
+    DISCARD,
+    Capture,
+    OutputSink,
     OutputStream,
     ProcessOutputTooLarge,
     ProcessRun,
@@ -55,7 +59,7 @@ def test_a_finished_command_keeps_its_status_streams_and_arguments(
     script = ProcessScript(returncode, stdout.encode(), stderr.encode(), duration_s=2)
     docker, processes = _docker(script, clock)
 
-    result = docker.run(["docker", "version"], timeout_seconds=30)
+    result = docker.run(["docker", "version"], timeout_seconds=30, output=DISCARD)
 
     assert result.args == ["docker", "version"]
     assert result.returncode == returncode
@@ -63,6 +67,26 @@ def test_a_finished_command_keeps_its_status_streams_and_arguments(
     assert result.stderr == stderr.replace("\r\n", "\n").replace("\r", "\n")
     assert processes.ran == [ProcessSpec(("docker", "version"))]
     assert clock.now() == 2
+
+
+# A finished command's streams are decoded as strict UTF-8, as `subprocess.run(text=True)` does.
+_UTF8 = st.text(max_size=40).map(str.encode)
+
+
+@given(stdout=_UTF8, stderr=_UTF8, finishes=st.booleans())
+def test_every_byte_a_command_writes_reaches_the_output_whether_it_finishes_or_times_out(
+    stdout: bytes, stderr: bytes, *, finishes: bool
+) -> None:
+    script = ProcessScript(
+        stdout=stdout, stderr=stderr, duration_s=1, runs_until_signalled=not finishes
+    )
+    docker, _ = _docker(script, ManualClock())
+    output = Capture(limit=1 << 10)
+
+    with pytest.raises(ProcessTimeoutError) if not finishes else contextlib.nullcontext():
+        docker.run(["docker", "run", "-d", "image"], timeout_seconds=30, output=output)
+
+    assert (output.stdout, output.stderr) == (stdout, stderr)
 
 
 @given(timeout=_TIMEOUTS, stdout=st.binary(max_size=40), stderr=st.binary(max_size=40))
@@ -74,7 +98,7 @@ def test_a_timeout_raises_after_the_timeout_with_the_partial_output(
     docker, _ = _docker(script, clock)
 
     with pytest.raises(ProcessTimeoutError) as raised:
-        docker.run(["docker", "info"], timeout_seconds=timeout)
+        docker.run(["docker", "info"], timeout_seconds=timeout, output=DISCARD)
 
     assert raised.value.cmd == ["docker", "info"]
     assert raised.value.timeout == timeout
@@ -89,7 +113,7 @@ def test_a_group_the_kill_left_behind_is_a_timeout_that_says_so() -> None:
     docker, _ = _docker(script, clock)
 
     with pytest.raises(ProcessTimeoutError) as raised:
-        docker.run(["docker", "rm", "-f", "c"], timeout_seconds=3)
+        docker.run(["docker", "rm", "-f", "c"], timeout_seconds=3, output=DISCARD)
 
     assert raised.value.timeout == 3
     assert raised.value.__notes__ == ["process 1000 survived the kill"]
@@ -106,7 +130,7 @@ def test_a_docker_binary_that_cannot_start_raises_its_os_error() -> None:
     )
 
     with pytest.raises(FileNotFoundError) as raised:
-        docker.run(["docker", "version"], timeout_seconds=30)
+        docker.run(["docker", "version"], timeout_seconds=30, output=DISCARD)
 
     assert raised.value is missing
 
@@ -117,8 +141,8 @@ class _StoppedForOutput:
     def __init__(self, stopped: ProcessOutputTooLarge) -> None:
         self._stopped = stopped
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
-        del spec, timeout
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del spec, timeout, output
         return self._stopped
 
 
@@ -138,7 +162,7 @@ def test_a_run_stopped_for_too_much_output_raises_naming_the_stream_and_cap(
     with pytest.raises(
         OSError, match=f"docker logs wrote more than {limit} bytes to {stream}"
     ) as raised:
-        docker.run(["docker", "logs"], timeout_seconds=30)
+        docker.run(["docker", "logs"], timeout_seconds=30, output=DISCARD)
 
     assert getattr(raised.value, "__notes__", []) == ([detail] if detail else [])
 

@@ -458,6 +458,7 @@ def _run(
     metadata: FakeInstanceMetadataStore | None = None,
 ) -> tuple[int, str]:
     clock = ManualClock()
+    threads = SimThreads()
     return run(
         argv,
         registry=LiveRegistry(store, ManualClock()),
@@ -470,7 +471,9 @@ def _run(
         # Nothing listens on the simulated network, so every stop falls back
         # to the signal path, as it does for a server that does not answer.
         effects=StopEffects(
-            ControlSocketStopRequester(SimNetwork(SimThreads()), clock=ManualClock()),
+            ControlSocketStopRequester(
+                SimNetwork(threads), clock=ManualClock(), deadline_clock=threads
+            ),
             FakeProcessSignaller(set()),
             clock,
             clock.advance,

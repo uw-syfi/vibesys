@@ -1,0 +1,79 @@
+{
+  "id": "helper-logs-unknown",
+  "protocol": "host-helper",
+  "title": "Read logs of an unknown instance or stream",
+  "description": "logs.list and logs.read answer unknown_instance for an instance this host knows nothing of, and logs.read answers unknown_log_stream for a stream the instance does not have.",
+  "role": "logs",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "logs"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.list",
+        "request_id": "l",
+        "deadline_ms": 10000,
+        "instance_id": "ffffffffffff"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "l",
+        "code": "unknown_instance"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "r",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000099",
+        "start": {
+          "offset": 0
+        },
+        "max_bytes": 65536,
+        "wait_ms": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "r",
+        "code": "unknown_log_stream"
+      }
+    }
+  ]
+}

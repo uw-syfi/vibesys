@@ -21,6 +21,7 @@ from vs_sandbox.api.testing import FakeDockerEngine
 
 # test-isolation: the exit sweep's registry is the module's process-exit backstop.
 from vs_sandbox.docker_sandbox import _live_containers
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
 
 # One entry per `docker run` that loses its client after the daemon created the
@@ -80,7 +81,7 @@ def test_a_run_lost_after_the_daemon_created_the_container_is_removed() -> None:
         engine.runs_lost_after_creating([False])
 
         with pytest.raises(RuntimeError, match="Failed to start Docker container"):
-            _sandbox(base, engine).start()
+            _sandbox(base, engine).start(output=DISCARD)
 
         assert engine.containers() == ()
 
@@ -92,7 +93,7 @@ def test_a_run_that_times_out_after_the_daemon_created_the_container_is_removed(
         engine.runs_lost_after_creating([True])
 
         with pytest.raises(RuntimeError, match="Timed out starting Docker container"):
-            _sandbox(base, engine).start()
+            _sandbox(base, engine).start(output=DISCARD)
 
         assert engine.containers() == ()
 
@@ -138,7 +139,7 @@ def test_a_named_container_whose_removal_fails_is_reported_and_left_to_the_exit_
         sandbox = _sandbox(base, engine)
 
         with pytest.raises(RuntimeError) as raised:
-            sandbox.start()
+            sandbox.start(output=DISCARD)
 
         notes = "".join(getattr(raised.value, "__notes__", ()))
         if lost_removals < 3:

@@ -188,6 +188,11 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             Record(hypotheses=[hypothesis_record("a")]),
             "hypothesis_updates.0.hypothesis_id",
         ),
+        ViolationCode.EXPECTATION_UNKNOWN: (
+            portfolio(implement_entry("n"), expected=("n", "z")),
+            Record(),
+            "handoff.expectations.1.work_id",
+        ),
     }
 
 

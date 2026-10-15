@@ -30,8 +30,12 @@ _GATES = {"accuracy": GateKind.ACCURACY, "benchmark": GateKind.BENCHMARK}
 _PROCESS_KINDS = {GateKind.ACCURACY: "accuracy_checker", GateKind.BENCHMARK: "benchmark"}
 
 
-def _gate(purpose: str, stage_id: str) -> GateKind | None:
-    """The framework gate a stage is, or None for a stage that is no gate (profiling)."""
+def gate_of(purpose: str | None, stage_id: str) -> GateKind | None:
+    """The framework gate a stage of a job measured for ``purpose`` is, or None (profiling).
+
+    The one mapping from stages to gates: the gate events and the gate stages' log
+    streams both name a stage by it.
+    """
     gate = _GATES.get(stage_id)
     if gate is GateKind.ACCURACY and purpose == _LOCAL_VALIDATION:
         return GateKind.VALIDATION
@@ -47,7 +51,7 @@ class CoreMeasurementEvents:
 
     def stage_started(self, event: StageStarted) -> None:
         """One ``GATE_STARTED`` for a gate stage."""
-        gate = _gate(event.purpose, event.stage_id)
+        gate = gate_of(event.purpose, event.stage_id)
         if gate is None:
             return
         self._events.emit(
@@ -59,7 +63,7 @@ class CoreMeasurementEvents:
 
     def stage_settled(self, event: StageSettled) -> None:
         """The stage's output, then one ``GATE_FINISHED`` whose status says pass or fail."""
-        gate = _gate(event.purpose, event.stage_id)
+        gate = gate_of(event.purpose, event.stage_id)
         if gate is None:
             return
         passed = event.passed

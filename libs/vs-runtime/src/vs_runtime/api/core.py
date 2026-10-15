@@ -137,6 +137,8 @@ from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementObserver,
     StageMetric,
+    StageOutputOpener,
+    StageRun,
     StageSettled,
     StageStarted,
 )
@@ -409,6 +411,8 @@ __all__ = [
     "Settled",
     "SnapshotWorkspace",
     "StageMetric",
+    "StageOutputOpener",
+    "StageRun",
     "StageSettled",
     "StageStarted",
     "StallNotes",

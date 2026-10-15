@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 from tests.support.docker_environment import host_container_backend
+from tests.support.dynamic_script import REGISTRY
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.loop_spec import loop_spec
 from tests.support.real_git import REAL_PROCESSES
@@ -53,7 +54,6 @@ from vibesys.api import (
 from vibesys.candidates import api as candidates
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
 from vibesys.orchestration.dynamic.search.api import (
-    OPERATIONS,
     FinishedWork,
     HypothesisRecord,
     RunSnapshot,
@@ -134,10 +134,7 @@ def check(value):
 check(namespace["VALUE"])
 """
 
-_AGENT_CONFIG = (
-    '[model]\nname = "scripted"\n[evaluation]\n'
-    "observe_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n"
-)
+_AGENT_CONFIG = "[evaluation]\nobserve_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n"
 
 
 class _SharedCancelClient(FakeAgentClient):
@@ -407,11 +404,23 @@ def workstream(
 def portfolio(
     *workstreams: Mapping[str, object], updates: Iterable[Mapping[str, object]] = ()
 ) -> dict[str, object]:
-    """Return one planner reply."""
+    """Return one planner reply, with a handoff note expecting something of each workstream."""
     return {
         "reasoning": "Independent mechanisms limit throughput.",
         "workstreams": list(workstreams),
         "hypothesis_updates": list(updates),
+        "handoff": {
+            "expectations": [
+                {
+                    "work_id": item.get("hypothesis_id", item.get("profile_id")),
+                    "expected": "Throughput improves.",
+                    "if_it_succeeds": "Build on it.",
+                    "if_it_fails": "Try another mechanism.",
+                }
+                for item in workstreams
+            ],
+            "doubts": [],
+        },
     }
 
 
@@ -761,9 +770,7 @@ class CoreRecords:
         envelope = load_envelope(self.project, run_id)
         assert envelope is not None, f"no committed record for {run_id}"
         self.envelope: dict[str, Any] = envelope
-        decoded = OPERATIONS.registry().decode_envelope(
-            RunEnvelope[FlowState], json.dumps(envelope)
-        )
+        decoded = REGISTRY.decode_envelope(RunEnvelope[FlowState], json.dumps(envelope))
         published = FlowDriver.published(decoded.strategy, RunSnapshot)
         assert published is not None, "the search published no record"
         self.snapshot: RunSnapshot = published

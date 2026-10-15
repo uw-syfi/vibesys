@@ -20,6 +20,8 @@ from vibesys.orchestration.dynamic.models import (
 from vibesys.orchestration.dynamic.search._parents import ParentOption
 from vibesys.orchestration.dynamic.search._values import (
     Alternative,
+    Expectation,
+    HandoffNote,
     HypothesisRecord,
     PlanViolation,
     ViolationCode,
@@ -49,8 +51,14 @@ class PlanUpdate(Value):
 
 
 class PlanCheck(Value):
-    """The schedulable part of a portfolio and the violations that excluded the rest."""
+    """The schedulable part of a portfolio and the violations that excluded the rest.
 
+    ``reasoning`` and ``handoff`` are the reply's own, kept with what was accepted of it so the
+    handoff file of a scheduled plan says what that reply said.
+    """
+
+    reasoning: str
+    handoff: HandoffNote
     accepted: tuple[WorkPlan, ...] = ()
     updates: tuple[PlanUpdate, ...] = ()
     violations: tuple[PlanViolation, ...] = ()
@@ -308,4 +316,42 @@ def validate(
             violations.append(violation)
         elif len(accepted) < capacity:
             accepted.append(_work_plan(entry))
-    return PlanCheck(accepted=tuple(accepted), updates=updates, violations=tuple(violations))
+    note, unknown = _handoff_note(plan, accepted)
+    return PlanCheck(
+        reasoning=plan.reasoning,
+        handoff=note,
+        accepted=tuple(accepted),
+        updates=updates,
+        violations=(*violations, *unknown),
+    )
+
+
+def _handoff_note(
+    plan: PortfolioPlan, accepted: list[WorkPlan]
+) -> tuple[HandoffNote, tuple[PlanViolation, ...]]:
+    """The reply's note cut to the scheduled workstreams, and its expectations of no workstream.
+
+    An expectation of a workstream that was not scheduled is dropped (its ID is kept in
+    ``dropped``), so the handoff file never tells the next planner what to do after work that
+    never ran; one that names no workstream of the reply is also a violation to correct.
+    """
+    scheduled = {item.work_id for item in accepted}
+    replied = {planned_id(entry) for entry in plan.workstreams}
+    kept: list[Expectation] = []
+    dropped: list[str] = []
+    unknown: list[PlanViolation] = []
+    for position, item in enumerate(plan.handoff.expectations):
+        if item.work_id in scheduled:
+            kept.append(Expectation.model_validate(item.model_dump()))
+            continue
+        dropped.append(item.work_id)
+        if item.work_id not in replied:
+            unknown.append(
+                PlanViolation(
+                    path=("handoff", "expectations", position, "work_id"),
+                    code=ViolationCode.EXPECTATION_UNKNOWN,
+                    subject=item.work_id,
+                )
+            )
+    note = HandoffNote(expectations=tuple(kept), doubts=plan.handoff.doubts, dropped=tuple(dropped))
+    return note, tuple(unknown)

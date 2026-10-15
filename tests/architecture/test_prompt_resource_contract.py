@@ -41,6 +41,8 @@ from vibesys.metrics import Objective
 from vibesys.orchestration.dynamic.search.api import (
     Blocker,
     BlockerKind,
+    Expectation,
+    HandoffNote,
     PlannerPrompt,
     ReviewEvaluation,
 )
@@ -577,6 +579,23 @@ def core_policy_context() -> dict[str, object]:
         # A correction names the request it repeats; the template only asks whether it is set.
         "of": "planning request",
         "turns_without_candidate": 2,
+        # The handoff file of one planning call (`WriteHandoff`'s fields).
+        "handoff_paths": (".vibesys/state/runs/run-1/orchestrator-handoff/calls/call-0001.md",),
+        "call": 1,
+        "reasoning": "Batch the decode loop first.",
+        "scheduled": (),
+        "updates": (),
+        "handoff": HandoffNote(
+            expectations=(
+                Expectation(
+                    work_id="h1",
+                    expected="Throughput rises.",
+                    if_it_succeeds="Merge it.",
+                    if_it_fails="Profile the queue.",
+                ),
+            ),
+            doubts=("The benchmark may be noisy.",),
+        ),
         # The issue queue's typed contexts.
         "board": (
             IssueBrief(id=1, type="feature", status="open", title="Add streaming", attempts=0),

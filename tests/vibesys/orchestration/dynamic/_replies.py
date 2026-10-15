@@ -5,9 +5,36 @@ from __future__ import annotations
 import json
 
 
-def plan_reply(*entries: dict[str, object], reasoning: str = "portfolio") -> str:
-    """A planner reply of implement or profile entries."""
-    return json.dumps({"reasoning": reasoning, "workstreams": list(entries)})
+def plan_reply(
+    *entries: dict[str, object],
+    reasoning: str = "portfolio",
+    handoff: dict[str, object] | None = None,
+) -> str:
+    """A planner reply of implement or profile entries, with a handoff note for each entry."""
+    note = (
+        handoff
+        if handoff is not None
+        else {
+            "expectations": [expectation(_entry_id(entry)) for entry in entries],
+            "doubts": ["doubt"],
+        }
+    )
+    return json.dumps({"reasoning": reasoning, "workstreams": list(entries), "handoff": note})
+
+
+def _entry_id(entry: dict[str, object]) -> str:
+    return str(entry.get("hypothesis_id", entry.get("profile_id", "unknown")))
+
+
+def expectation(identifier: str, **extra: object) -> dict[str, object]:
+    """One handoff expectation of a planned workstream."""
+    return {
+        "work_id": identifier,
+        "expected": f"expected {identifier}",
+        "if_it_succeeds": f"build on {identifier}",
+        "if_it_fails": f"drop {identifier}",
+        **extra,
+    }
 
 
 def implement(identifier: str, **extra: object) -> dict[str, object]:

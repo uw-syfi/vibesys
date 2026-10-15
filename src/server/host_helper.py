@@ -39,10 +39,10 @@ from pydantic import JsonValue, TypeAdapter
 
 from server.host_api import (
     HELPER_LINE_MAX_BYTES,
-    HELPER_REQUEST_FEATURES,
     HelloRequest,
     HelperError,
     HelperErrorCode,
+    HelperFeature,
     HelperMessage,
     HelperReply,
     HelperRequest,
@@ -58,6 +58,7 @@ from server.host_api import (
     RunStartReply,
     RunStartRequest,
     parse_helper_request,
+    request_features,
 )
 from server.host_helper_requests import (
     HelperHost,
@@ -100,6 +101,8 @@ _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 class ChannelState:
     """What one channel knows: the handshake, requests in flight, watches, the hand-over."""
 
+    offered: frozenset[HelperFeature] = frozenset(HelperFeature)
+    """The features this helper serves (``HelperHost.offered_features``); ``hello`` negotiates among them."""
     negotiated: Negotiated | None = None
     pending: Mapping[str, float] = field(default_factory=dict)
     """Replies still owed to the client, by id, with their deadline."""
@@ -393,7 +396,7 @@ def _admission(
     refusal: HelperError | None = None
     if state.negotiated is None:
         if isinstance(request, HelloRequest):
-            negotiated = negotiate(request, vibesys_version)
+            negotiated = negotiate(request, vibesys_version, state.offered)
             if isinstance(negotiated, HelperError):
                 refusal = negotiated
             else:
@@ -415,10 +418,10 @@ def _admission(
         message = f"request id {request_id!r} is already open on this channel"
         refusal = _error(request_id, HelperErrorCode.DUPLICATE_REQUEST_ID, message)
     else:
-        feature = HELPER_REQUEST_FEATURES.get(type(request))
-        if feature is not None and feature not in state.negotiated.features:
+        missing = [f for f in request_features(request) if f not in state.negotiated.features]
+        if missing:
             message = (
-                f"{request.type} needs the {feature.value} feature, which hello did not return"
+                f"{request.type} needs the {missing[0].value} feature, which hello did not return"
             )
             refusal = _error(request_id, HelperErrorCode.FEATURE_NOT_NEGOTIATED, message)
         elif isinstance(request, InstancesWatchRequest) and (
@@ -575,7 +578,7 @@ class _Channel:
         self._inbox = inbox
         self._output = output
         self._threads = threads
-        self._state = ChannelState()
+        self._state = ChannelState(offered=host.offered_features())
         self._events: list[ChannelEvent] = []
         self._held: dict[str, Connection] = {}
         self._watches: dict[str, tuple[Event, Event]] = {}

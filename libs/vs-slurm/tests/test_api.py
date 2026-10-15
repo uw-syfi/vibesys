@@ -16,7 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec, ProcessTimedOut
+from vs_sim.api import DISCARD, OutputSink, ProcessOutcome, ProcessRun, ProcessSpec, ProcessTimedOut
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     SCHEDULER_READ_END,
@@ -115,7 +115,8 @@ class _FakeConnector:
         self.ready_content_objects: set[str] = set()
         self.locked_content_objects: set[str] = set()
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         argv, stdin = spec.argv, spec.input.decode() or None
         assert tuple(argv) == ("cluster-connector",)
         assert timeout == 20
@@ -231,7 +232,8 @@ class _FakeConnector:
 class _FilesystemConnector:
     """Faithful local filesystem implementation of the connector protocol."""
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         argv, stdin = spec.argv, spec.input.decode() or None
         del timeout
         assert tuple(argv) == ("cluster-connector",)
@@ -426,7 +428,8 @@ class _FakeSshProcess:
         self.environments: list[dict[str, str] | None] = []
         self._program = program
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         argv, stdin = spec.argv, spec.input.decode() or None
         environment, command = _split_clean_environment(argv)
         self.environments.append(environment)
@@ -778,7 +781,8 @@ def test_bounded_wait_requires_positive_timeout(tmp_path: Path) -> None:
 
 
 class _TimedOutProcess:
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         stdin = spec.input.decode() or None
         del stdin
         return ProcessTimedOut(timeout or 0.0, b"", b"")
@@ -1468,12 +1472,15 @@ def test_input_that_changes_during_staging_is_reported_as_a_transient_condition(
     edited.write_text("v1\n", encoding="utf-8")
 
     class _EditingConnector(_FilesystemConnector):
-        def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        def run(
+            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink
+        ) -> ProcessRun:
+            del output
             stdin = spec.input.decode() or None
             assert stdin is not None
             if json.loads(stdin)["operation"] == "sync_to":
                 edited.write_text("v2\n", encoding="utf-8")
-            return super().run(spec, timeout=timeout)
+            return super().run(spec, timeout=timeout, output=DISCARD)
 
     runner = SlurmJobRunner(
         _config(remote_workspace_root=str(tmp_path / "remote")),
@@ -1641,7 +1648,8 @@ class _SubmissionFaultConnector(_FakeConnector):
         self.during_sbatch = during_sbatch
         self.scheduler_called = False
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         stdin = spec.input.decode() or None
         assert stdin is not None
         request = json.loads(stdin)
@@ -1653,7 +1661,7 @@ class _SubmissionFaultConnector(_FakeConnector):
         ):
             response = {"version": 1, "returncode": 255, "stdout": "", "stderr": "private"}
             return ProcessOutcome(0, json.dumps(response).encode(), b"")
-        return super().run(spec, timeout=timeout)
+        return super().run(spec, timeout=timeout, output=DISCARD)
 
 
 @pytest.mark.parametrize("during_sbatch", [False, True])
@@ -1677,7 +1685,8 @@ class _SubmissionFaultSshProcess(_FakeSshProcess):
         self.phase = phase
         self.scheduler_called = False
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         argv = spec.argv
         command = argv[-1]
         is_sbatch = argv[0] == "ssh" and "sbatch-rr " in command
@@ -1691,7 +1700,7 @@ class _SubmissionFaultSshProcess(_FakeSshProcess):
         }[self.phase]
         if should_fail:
             return ProcessOutcome(255, b"", b"private SSH failure")
-        return super().run(spec, timeout=timeout)
+        return super().run(spec, timeout=timeout, output=DISCARD)
 
 
 @pytest.mark.parametrize("phase", ["mkdir", "staging", "rsync", "script-upload", "sbatch"])

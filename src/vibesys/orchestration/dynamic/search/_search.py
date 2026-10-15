@@ -11,6 +11,7 @@ as the search goes (`ctx.choose`), so a stop or a deadline adopts what led at th
 
 from vibesys.candidates.api import measure_input
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._handoff import HANDOFF
 from vibesys.orchestration.dynamic.search._operations import OPERATIONS
 from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone
 from vibesys.orchestration.dynamic.search._planner import plan
@@ -20,7 +21,7 @@ from vibesys.orchestration.dynamic.search._workstream import workstream
 from vs_core.api.search import Flow, NoWinner, StopRequested, TaskStopped, search
 
 
-@search("dynamic", config=DynamicConfig, operations=OPERATIONS, roles=ROLES)
+@search("dynamic", config=DynamicConfig, operations=OPERATIONS, roles=ROLES, owned=(HANDOFF,))
 async def dynamic(ctx: Flow, config: DynamicConfig) -> NoWinner | None:
     """Measure the input, run workstreams in the free slots within budget, name the best."""
     ctx.checkpoint(config)

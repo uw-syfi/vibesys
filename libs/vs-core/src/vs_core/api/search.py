@@ -6,7 +6,9 @@ code receives, the values its aspects take and return (``Role``, ``Session``, ``
 ``Assessment``, ``Kept``, ``NoWinner``, ``INPUT``), the ``Within`` that bounds a wait, the typed
 ``Failed`` a wait that ends without a result gives, the events a flow may read, the
 ``Correction`` a prompt may extend, and the id scheme and operation shapes
-(``StrategyOperations`` and the request and outcome bases) a search names.
+(``StrategyOperations`` and the request and outcome bases) a search names, with the
+registration of an operation it lists as ``owned=`` (``OperationRegistration``,
+``OperationDescriptor``, ``LifecycleClass``).
 
 What stays out on purpose belongs to core and the shell, which import ``vs_core.api``:
 request records and phases, ``Outbound`` and ``Until`` (the stored form of a ``Within``),
@@ -90,6 +92,7 @@ from vs_core.api import (
     ItemId,
     Kept,
     LifecycleCapability,
+    LifecycleClass,
     Limits,
     LocalValidationReport,
     Measure,
@@ -104,7 +107,9 @@ from vs_core.api import (
     NoWinner,
     ObservationStatus,
     Operation,
+    OperationDescriptor,
     OperationFinished,
+    OperationRegistration,
     OperationRequest,
     OperationResult,
     OperationSchemaRef,
@@ -270,6 +275,7 @@ __all__ = [
     "ItemId",
     "Kept",
     "LifecycleCapability",
+    "LifecycleClass",
     "Limits",
     "LocalValidationReport",
     "Measure",
@@ -284,7 +290,9 @@ __all__ = [
     "NotOpened",
     "ObservationStatus",
     "Operation",
+    "OperationDescriptor",
     "OperationFinished",
+    "OperationRegistration",
     "OperationRequest",
     "OperationResult",
     "OperationSchemaRef",

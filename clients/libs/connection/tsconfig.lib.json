@@ -27,6 +27,9 @@
       "path": "../hosts/tsconfig.lib.json"
     },
     {
+      "path": "../logs/tsconfig.lib.json"
+    },
+    {
       "path": "../machine/tsconfig.lib.json"
     },
     {

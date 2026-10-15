@@ -884,6 +884,10 @@ REAL_API_EDGES: dict[Key, str] = {
     ("src/entrypoints/web.py", "interpreter"): (
         "entrypoint: names the interpreter in the server command it starts"
     ),
+    ("src/entrypoints/detached_run.py", "threading"): (
+        "entrypoint: installs and restores threading.excepthook, a process-global interpreter "
+        "hook no vs_sim interface stands in for; it starts no thread"
+    ),
     **{
         ("src/entrypoints/server.py", rule): (
             "entrypoint: starts the detached web gateway in its own session with the log "
@@ -909,6 +913,7 @@ REAL_API_EDGES: dict[Key, str] = {
             ("libs/vs-runtime/src/vs_runtime/_artifact_store.py", "artifact files and receipts"),
             ("libs/vs-runtime/src/vs_runtime/_receipt_store.py", "the receipt namespace lock"),
             ("libs/vs-runtime/src/vs_runtime/_slot_meter.py", "the lease ledger"),
+            ("libs/vs-logs/src/vs_logs/_volume.py", "atomic pipe-mark file replacement"),
             ("libs/vs-evaluation/src/vs_evaluation/filesystem_store.py", "the lifecycle store"),
             ("src/server/event_index.py", "the event journal's index"),
             ("src/server/registry.py", "each live server's registry record lock"),
@@ -984,9 +989,9 @@ REAL_API_PENDING: dict[Key, Pending] = {
         "the repair container runs subprocess.run itself; route it through DockerCli",
     ),
     ("libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py", "subprocess"): Pending(
-        8,
+        4,
         Owner.LANE_A,
-        "_run_docker_command goes through DockerCli; the in-container install program is an edge",
+        "type only: the injected tool runner's CompletedProcess and TimeoutExpired",
     ),
     ("libs/vs-sandbox/src/vs_sandbox/fake_docker_command.py", "subprocess"): Pending(
         2, Owner.LANE_A, "type only: result type aliases"
@@ -1298,6 +1303,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "bundled evaluator packages",
     ),
     "libs/vs-runtime/src/vs_runtime/_event_journal.py": (EdgeKind.STORE, "the event journal"),
+    "libs/vs-logs/src/vs_logs/_volume.py": (EdgeKind.STORE, "log stream segments and index"),
     "libs/vs-runtime/src/vs_runtime/_host_command_bridge.py": (
         EdgeKind.AGENT_WORKSPACE,
         "stages the host command client for the agent",

@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import (
+    DISCARD,
     ProcessGroupUnreaped,
     ProcessOutcome,
     ProcessOutputTooLarge,
@@ -40,6 +41,7 @@ from .config import (
     shell_join_with_port,
 )
 from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
+from .remote_file import SlurmFileSource
 from .remote_operations import (
     RemoteOperationClaim,
     RemoteOperationEvidence,
@@ -798,6 +800,10 @@ class SlurmJobRunner:
         except ValueError as error:
             raise SlurmError.malformed_result() from error
 
+    def remote_file(self, path: PurePosixPath) -> SlurmFileSource:
+        """The cluster file at ``path``, read through this runner's transport as it grows."""
+        return SlurmFileSource(path, self._whole_reading)
+
     def poll_batch(self, handle: SlurmBatchHandle) -> SlurmJobStatus:
         """Read the scheduler state of a batch handle."""
         return self.poll(handle.job)
@@ -1396,13 +1402,11 @@ class _ProcessTransport:
         max_output_bytes: int | None = None,
     ) -> _TransportResponse:
         """Run one transport program; its output is UTF-8 (``UnicodeDecodeError`` otherwise)."""
-        spec = ProcessSpec(
-            tuple(self._launch(argv)), input=b"" if stdin is None else stdin.encode()
-        )
+        spec = ProcessSpec(tuple(self._launch(argv)), input=(stdin or "").encode())
         if max_output_bytes is not None:
             spec = replace(spec, max_output_bytes=max_output_bytes)
         try:
-            run = self._processes.run(spec, timeout=self._timeout)
+            run = self._processes.run(spec, timeout=self._timeout, output=DISCARD)
         except FileNotFoundError as exc:
             raise SlurmError.transport_unavailable(operation) from exc
         match run:

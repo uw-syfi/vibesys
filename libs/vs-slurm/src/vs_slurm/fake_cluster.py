@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING, TypeAlias, TypedDict, Unpack
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from vs_sim.api.testing import FakeByteSource
+
 from .cluster import job_handle, payload_digest
 from .cluster_types import (
     ClusterCancelOutcome,
@@ -58,7 +60,7 @@ from .staging import _ContentStageError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_sim.api import Clock
+    from vs_sim.api import ByteSource, Clock, OutputStream
 
 Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
 
@@ -240,6 +242,7 @@ class FakeCluster:
         self._pending: dict[str, str] = {}
         self._rejections: dict[str, tuple[str, str]] = {}
         self._expired_names: set[str] = set()
+        self._outputs: dict[tuple[str, int, OutputStream], FakeByteSource] = {}
 
     def reopen(self) -> FakeCluster:
         """Reconstruct an implementation over the same external scheduler state."""
@@ -251,6 +254,7 @@ class FakeCluster:
         reopened._pending = self._pending
         reopened._rejections = self._rejections
         reopened._expired_names = self._expired_names
+        reopened._outputs = self._outputs
         return reopened
 
     def forget_name_history(self, operation_id: str) -> None:
@@ -611,6 +615,28 @@ class FakeCluster:
             )
         return ClusterCollected(operation_id=job.operation_id, result=result)
 
+    def stage_output_file(
+        self, operation_id: str, index: int, stream: OutputStream
+    ) -> FakeByteSource:
+        """The output file stage ``index`` of a batch writes ``stream`` to, for a test to grow.
+
+        It exists from this call on; until then :meth:`stage_output` reads no such file. What
+        the test writes here is what a reader sees live; the collected stage result is
+        what the job's script says, so a test keeps the two the same.
+        """
+        validate_operation_id(operation_id)
+        with self._lock:
+            return self._outputs.setdefault(
+                (operation_id, index, stream),
+                FakeByteSource(where=f"{operation_id} stage {index} {stream.value}"),
+            )
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        """What the test wrote to stage ``index``'s output file, read through a live source."""
+        return _StageOutput(self._outputs, (handle.job.invocation_id, index, stream))
+
     def _collect_artifacts(self, job: _Job, *, status: SlurmJobStatus) -> None:
         contents = self._scripts[job.operation_id].artifact_contents or {}
         result = job.result
@@ -789,3 +815,28 @@ class FakeCluster:
             content_cache_hits=0,
             collection_failure="missing exit status",
         )
+
+
+class _StageOutput:
+    """A stage's output file that is missing until the test creates it, as on a cluster."""
+
+    def __init__(
+        self,
+        outputs: dict[tuple[str, int, OutputStream], FakeByteSource],
+        key: tuple[str, int, OutputStream],
+    ) -> None:
+        self._outputs = outputs
+        self._key = key
+        self._where = f"{key[0]} stage {key[1]} {key[2].value}"
+
+    def _file(self) -> FakeByteSource:
+        file = self._outputs.get(self._key)
+        if file is None:
+            raise FileNotFoundError(self._where)
+        return file
+
+    def size(self) -> int:
+        return self._file().size()
+
+    def read(self, offset: int, max_bytes: int) -> bytes:
+        return self._file().read(offset, max_bytes)

@@ -154,9 +154,29 @@ none yet
 Older hypothesis IDs (omitted above; reuse one only to continue it): {{ older_ids | join(', ') }}
 {% endif %}
 
+## Handoff notes of earlier planners
+Each planning call starts a new planner with no memory of the calls before it. Every call
+that scheduled a plan left a handoff file: its reasoning, the workstreams it scheduled, what it
+expected of each, what it meant to do next on each outcome, and its open doubts.
+{% if handoff_paths %}
+The files, newest first, as paths in your workspace. They are not shown here: read the ones
+you need yourself, at least the newest, before you plan.
+{% for path in handoff_paths %}
+- `{{ path }}`
+{% endfor %}
+Compare what they expected with what the history above shows happened.
+{% else %}
+None exists yet: this is the first plan of the run.
+{% endif %}
+Leave the same for the planner after you in {{ reply.handoff }}: in {{ reply.expectations }}, one entry
+per workstream of your reply with its {{ reply.work_id }}, what you expect it to show
+({{ reply.expected }}), and what you would plan next if it does ({{ reply.if_it_succeeds }}) and if it does not
+({{ reply.if_it_fails }}); in {{ reply.doubts }}, what you are unsure of and how a later plan could check it.
+
 Answer with the structured response, filling its top-level fields directly:
-{{ reply.reasoning }} (why this portfolio), {{ reply.workstreams }} (one entry per new workstream), and
-{{ reply.hypothesis_updates }} (parks and abandonments; empty when there are none). Do not wrap
+{{ reply.reasoning }} (why this portfolio), {{ reply.workstreams }} (one entry per new workstream),
+{{ reply.hypothesis_updates }} (parks and abandonments; empty when there are none), and {{ reply.handoff }}
+(your note to the next planner). Do not wrap
 the plan in another field or write it as JSON text inside a field. Each workstream entry
 carries every field listed above. This reply is valid; its values are placeholders, and your
 hypothesis IDs must not occur in the history:

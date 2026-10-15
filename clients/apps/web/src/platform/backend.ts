@@ -4,7 +4,7 @@
  * (`clients/.dependency-cruiser.mjs` and `clients/tools/lint-rules/web-fetch-only-in-backend.grit` hold
  * it to that): the control transport (a WebSocket, or the desktop shell's bridge shaped as one)
  * that `@vibesys/run-session`'s `connectRun` runs the run over, the gateway's capability exchange,
- * and the campaign fixture. It is also the
+ * the campaign fixture, and the desktop run page's log requests. It is also the
  * entry of the browser transport bundle that `check:web-browser-bundle` keeps free of Node builtins.
  */
 
@@ -15,8 +15,16 @@ import {
   parseCampaignFrame,
   parseReplayScenario,
 } from '@vibesys/feature-campaign/state';
+import type {RunLogsRequest} from '@vibesys/ipc';
+import type {LogListOutcome, LogReadOutcome, RunLogSource} from '@vibesys/logs';
 import type {TransportHooks} from '@vibesys/run-session';
-import type {ControlTransport, ScheduleTimeout} from '@vibesys/transport';
+import {
+  type AbortSignalLike,
+  type ControlTransport,
+  abortReason as reasonOf,
+  registerAbort,
+  type ScheduleTimeout,
+} from '@vibesys/transport';
 import {type WebSocketLike, WebSocketTransport} from '@vibesys/transport/websocket';
 
 export type {ControlTransport, WebSocketLike};
@@ -212,4 +220,52 @@ export class EventSourceCampaignStream implements CampaignStream {
     };
     return () => void release();
   }
+}
+
+/** One logs request to the desktop app's main process (the run preload's `logs`). */
+export type AskLogs = (request: RunLogsRequest) => Promise<unknown>;
+
+function isOutcome(value: unknown): value is {readonly ok: boolean} {
+  return (
+    typeof value === 'object' && value !== null && typeof Reflect.get(value, 'ok') === 'boolean'
+  );
+}
+
+/**
+ * Ask `request`, resolving a refusal or a malformed answer as a `transport` failure. An IPC
+ * request cannot be withdrawn, so an aborted request rejects at once and its late answer is
+ * dropped; the main process's own request ends by its wait bound or when the run's page goes away.
+ */
+function askLogs<T extends LogListOutcome | LogReadOutcome>(
+  logs: AskLogs,
+  request: RunLogsRequest,
+  signal: AbortSignalLike,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const registration = registerAbort(signal, () => reject(reasonOf(signal)));
+    if (registration.aborted) {
+      reject(reasonOf(signal));
+      return;
+    }
+    const failed = (message: string): T =>
+      ({ok: false, failure: {code: 'transport', message}}) as T;
+    logs(request).then(
+      answer => {
+        registration.detach();
+        resolve(isOutcome(answer) ? (answer as T) : failed('the desktop app sent no log answer'));
+      },
+      (error: unknown) => {
+        registration.detach();
+        resolve(failed(error instanceof Error ? error.message : String(error)));
+      },
+    );
+  });
+}
+
+/** The run page's `RunLogSource` over the desktop app's logs requests. */
+export function bridgeLogSource(logs: AskLogs): RunLogSource {
+  return {
+    list: signal => askLogs<LogListOutcome>(logs, {kind: 'list'}, signal),
+    read: (input, signal) => askLogs<LogReadOutcome>(logs, {kind: 'read', read: input}, signal),
+  };
 }

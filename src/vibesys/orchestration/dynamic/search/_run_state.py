@@ -22,6 +22,7 @@ from vibesys.orchestration.dynamic.search._context import (
     offered_parents,
     remaining,
 )
+from vibesys.orchestration.dynamic.search._handoff import HandoffWritten
 from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
 from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamDone,
@@ -49,9 +50,11 @@ from vs_core.api.search import INPUT, Input, Kept, NoWinner, RevisionRef, TaskTe
 
 @dataclass(frozen=True)
 class Scheduled:
-    """A planning call ended with a plan to schedule."""
+    """A planning call ended with a plan to schedule, and the handoff file it left."""
 
     check: PlanCheck
+    handoff: HandoffWritten | None = None
+    """The call's handoff file and every one the owner holds; None when its write failed."""
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,8 @@ class RunRecord:
     gate: PlannerGate = field(default_factory=PlannerGate)
     calls: int = 0
     """Planning calls begun; the next call's key is numbered by it."""
+    handoffs: tuple[str, ...] = ()
+    """The paths of the planning calls' handoff files, oldest first, as the owner last listed them."""
     kept: dict[str, Kept] = field(default_factory=dict)
     """The candidates closed workspaces retained that were winner-eligible, by settlement."""
 
@@ -180,6 +185,7 @@ class RunRecord:
             finished=tuple(self.finished_work),
             refunded=self.refunded,
             offered=self.offered(),
+            handoffs=tuple(reversed(self.handoffs)),
             offer=ProfileOffer(
                 fields=tuple(ProfileField(item) for item in self.terms.profile_fields)
             )
@@ -190,7 +196,9 @@ class RunRecord:
     def planned(self, outcome: PlanOutcome) -> None:
         """Fold a finished planning call: park or abandon what it decided, queue what it accepted."""
         match outcome:
-            case Scheduled(check=check):
+            case Scheduled(check=check, handoff=handoff):
+                if handoff is not None:
+                    self.handoffs = handoff.listed
                 for change in check.updates:
                     known = self.hypotheses[change.hypothesis_id]
                     self.hypotheses[change.hypothesis_id] = _hypotheses.with_disposition(

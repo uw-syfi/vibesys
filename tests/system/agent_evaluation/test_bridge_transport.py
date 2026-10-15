@@ -15,6 +15,7 @@ import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
@@ -34,6 +35,7 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
+from vs_sim.api import WorkerStartRefusedError
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     RefusingThreads,
@@ -48,8 +50,6 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    import pytest
 
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
     from vs_sim.api import Connection, Threads
@@ -152,6 +152,27 @@ def test_a_refused_call_worker_drops_only_that_connection(tmp_path: Path) -> Non
     assert refused == b""
     assert isinstance(REPLY.validate_json(served), SocketFailure)
     assert any("call worker did not start" in line for line in diagnostics)
+
+
+def test_a_refused_accept_worker_releases_the_listener_address(tmp_path: Path) -> None:
+    """A bridge that cannot start its acceptor leaves no partially owned listener behind."""
+    clock = VirtualClock()
+    simulator = SimThreads(clock)
+    network = SimNetwork(simulator)
+    bridge = _bridge(
+        tmp_path,
+        network,
+        RefusingThreads(simulator, {"agent-evaluation-bridge": 1}),
+    )
+
+    async def main() -> None:
+        with pytest.raises(WorkerStartRefusedError, match="agent-evaluation-bridge"):
+            await bridge.serve()
+        replacement = network.listen(ADDRESS)
+        replacement.close()
+        await bridge.close()
+
+    simulator.run(lambda: simulator.run_async(main()))
 
 
 @settings(deadline=None, max_examples=examples(pr=8, nightly=300))

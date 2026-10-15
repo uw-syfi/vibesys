@@ -55,6 +55,7 @@ FRAMEWORK_PACKAGES = (
     "vs_mcp",
     "vs_faults",
     "vs_sim",
+    "vs_logs",
 )
 _INTERNAL_DISTRIBUTIONS = frozenset(
     {
@@ -74,6 +75,7 @@ _INTERNAL_DISTRIBUTIONS = frozenset(
         "vs-mcp",
         "vs-faults",
         "vs-sim",
+        "vs-logs",
     }
 )
 _PACKAGE_SOURCE_ROOTS = {
@@ -100,6 +102,7 @@ _PACKAGE_SOURCE_ROOTS = {
     Path("libs/vs-mcp/src/vs_mcp"): PurePosixPath("vs_mcp"),
     Path("libs/vs-faults/src/vs_faults"): PurePosixPath("vs_faults"),
     Path("libs/vs-sim/src/vs_sim"): PurePosixPath("vs_sim"),
+    Path("libs/vs-logs/src/vs_logs"): PurePosixPath("vs_logs"),
     Path("resources/evaluators"): PurePosixPath("vibesys/_resources/evaluators"),
     Path("resources/profilers"): PurePosixPath("vibesys/_resources/profilers"),
     Path("resources/skills"): PurePosixPath("vibesys/_resources/skills"),
