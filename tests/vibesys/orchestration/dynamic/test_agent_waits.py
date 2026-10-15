@@ -52,7 +52,7 @@ def test_the_roles_that_work_on_a_candidate_are_asked_again_after_a_lost_turn() 
     `test_a_lost_planner_turn_is_asked_again_after_five_then_ten_seconds` pins.
     """
     again = {role.name for role in ROLES if role.lost_turns > 0}
-    assert again == {"implementer", "judge", "profiler"}
+    assert again == {"implementer", "judge", "profiler", "merger"}
 
 
 @MODES

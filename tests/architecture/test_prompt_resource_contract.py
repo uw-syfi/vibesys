@@ -43,6 +43,11 @@ from vibesys.orchestration.dynamic.search.api import (
     BlockerKind,
     Expectation,
     HandoffNote,
+    MainMeasurement,
+    MergeableRow,
+    MergeOutcome,
+    MergeRecord,
+    MergeSource,
     PlannerPrompt,
     ReviewEvaluation,
 )
@@ -515,6 +520,7 @@ def core_policy_context() -> dict[str, object]:
         remaining=3,
         base_revision=revision,
         base_accuracy_passed=True,
+        main_revision=revision,
         offer_snapshot="fixture-offer",
         older_ids=(),
         baseline=(),
@@ -595,6 +601,28 @@ def core_policy_context() -> dict[str, object]:
             ),
             doubts=("The benchmark may be noisy.",),
         ),
+        # The run's main and its merges (`MergePrompt` and the planner's main fields).
+        "main_revision": revision,
+        "main_measurement": MainMeasurement(
+            revision=revision, merge_id="m1", accuracy_passed=True, regressed=True
+        ),
+        "merge_running": "m2",
+        "mergeable": (MergeableRow(hypothesis_id="h1", revision=revision),),
+        "merges": (
+            MergeRecord(
+                merge_id="m1",
+                sequence=2,
+                candidates=(MergeSource(hypothesis_id="h1", revision=revision),),
+                base=revision,
+                outcome=MergeOutcome.REFUSED,
+                reason="The two changes rewrite the same kernel.",
+            ),
+        ),
+        "rebase_onto": revision,
+        "merge_id": "m1",
+        "candidates": (MergeSource(hypothesis_id="h1", revision=revision),),
+        "instructions": "Apply h1, then h2.",
+        "watch_for": "Both change the scheduler.",
         # The issue queue's typed contexts.
         "board": (
             IssueBrief(id=1, type="feature", status="open", title="Add streaming", attempts=0),

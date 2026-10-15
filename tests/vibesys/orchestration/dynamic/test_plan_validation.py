@@ -16,6 +16,7 @@ from tests.vibesys.orchestration.dynamic._values import (
     finished_profile,
     hypothesis_record,
     implement_entry,
+    merge_entry,
     portfolio,
     portfolios,
     profile_entry,
@@ -187,6 +188,21 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             portfolio(implement_entry("n"), updates=(update_entry("a"),)),
             Record(hypotheses=[hypothesis_record("a")]),
             "hypothesis_updates.0.hypothesis_id",
+        ),
+        ViolationCode.MERGE_ID_USED: (
+            portfolio(merge_entry("a", "b")),
+            Record(hypotheses=[FINISHED_A], parents=[GOOD_PARENT]),
+            "workstreams.0.merge_id",
+        ),
+        ViolationCode.MERGE_IN_FLIGHT: (
+            portfolio(merge_entry("m1", "b"), merge_entry("m2", "b")),
+            parented,
+            "workstreams.1.kind",
+        ),
+        ViolationCode.MERGE_CANDIDATE_REPEATED: (
+            portfolio(merge_entry("m", "b", "b")),
+            parented,
+            "workstreams.0.candidates.1",
         ),
         ViolationCode.EXPECTATION_UNKNOWN: (
             portfolio(implement_entry("n"), expected=("n", "z")),
