@@ -181,6 +181,21 @@ class ProjectRunResources:
             return None
         return self._open_candidate(workspace_id, revision, reattach=True)
 
+    def leftover_candidates(self) -> tuple[str, ...]:
+        """The workspace IDs of this run's candidate worktrees on disk, in name order."""
+        worktrees = self.project.state.candidate_worktrees_directory(self._request.run_id)
+        if not worktrees.is_dir():
+            return ()
+        return tuple(
+            sorted(entry.name for entry in worktrees.iterdir() if (entry / "workspace").exists())
+        )
+
+    def remove_leftover(self, workspace_id: str) -> None:
+        """Unregister and delete a candidate worktree that no live resource owns."""
+        self.git.remove_worktree(
+            self.project.state.candidate_worktree_directory(self._request.run_id, workspace_id)
+        )
+
     def _open_candidate(
         self, workspace_id: str, revision: str, *, reattach: bool
     ) -> _ProjectWorkspaceResources:

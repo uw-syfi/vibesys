@@ -161,12 +161,15 @@ def spawn_error_from(provider: str, error: BaseException) -> AgentSpawnError:
 
 
 def timeout_error_from(error: agentshim.TurnTimeoutError) -> AgentTurnTimeoutError:
-    """Carry the exceeded budget over.
+    """Carry the exceeded budget and any partial accounting over.
 
     A one-shot process reports the budget as ``CliTimeoutError``; a long-lived
-    one raises its parent, ``TurnTimeoutError``.
+    one raises its parent, ``TurnTimeoutError``. Only the one-shot error can
+    carry the parsed prefix that was received before the process timed out.
     """
-    return AgentTurnTimeoutError(error.timeout)
+    partial = error.partial if isinstance(error, agentshim.CliTimeoutError) else None
+    usage = usage_from(partial.usage, cost_usd=partial.cost_usd) if partial is not None else None
+    return AgentTurnTimeoutError(error.timeout, usage=usage)
 
 
 def failure_from(

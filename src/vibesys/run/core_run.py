@@ -135,7 +135,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         integration.control,
         _SteerTexts(services.artifacts),
     )
-    loop = CoreRunHost(shell, delivery, services.clock, controls)
+    loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing.lease_seconds)
     await start_core_awaiting_lease(loop, config)
     bridge = services.agent_evaluation

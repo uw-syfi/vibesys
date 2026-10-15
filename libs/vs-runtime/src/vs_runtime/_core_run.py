@@ -53,6 +53,7 @@ from vs_core.api import (
 )
 from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
+from vs_runtime._workspace_holds import core_workspace_holds
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
     from vs_runtime._core_requests import ExecutorRefusal
     from vs_runtime._run_control import RunControlChannel
+    from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sim.api import SleepingClock, Threads
 
 
@@ -265,14 +267,32 @@ class RunControlBridge:
         return RunControlEvent(control=control, now_at=now_at)
 
 
+class CoreHeldWorkspaces(Protocol):
+    """The run's candidate workspaces, kept on disk across a host stop only while core holds them."""
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        """Decide what outlives this host from what core references, as *holds* reads it."""
+        ...
+
+    async def release_unheld(self) -> None:
+        """Discard every candidate worktree on disk that core no longer references."""
+        ...
+
+
 @dataclass(frozen=True)
 class CoreRunHost:
-    """The process-local pieces one run loop drives."""
+    """The process-local pieces one run loop drives.
+
+    ``workspaces``, when given, follow the run's core state: a start discards the worktrees a
+    stopped host left that core no longer references, and the host's close keeps only those
+    core still holds (none once the run's result is final).
+    """
 
     shell: CoreRuntime
     delivery: PublicationDelivery
     clock: SleepingClock
     controls: RunControlBridge | None = None
+    workspaces: CoreHeldWorkspaces | None = None
 
 
 def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
@@ -288,6 +308,9 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     (a live holder renews, so it would still hold the lease after that). The wait is
     in clock time: a simulated clock makes it instant. Raises ``LeaseUnavailableError``
     naming the bound when the lease is still held after it.
+
+    Once started, the host's ``workspaces`` follow core's recovered state: worktrees a
+    stopped host left that core no longer references are discarded now.
     """
     give_up_at = host.clock.now() + config.lease_duration
     while True:
@@ -304,7 +327,18 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
                 raise LeaseUnavailableError(message) from error
             await host.clock.sleep(min(config.recovery_poll_interval, remaining))
         else:
-            return
+            break
+    await _follow_core(host)
+
+
+async def _follow_core(host: CoreRunHost) -> None:
+    """Bind the run's workspaces to core's state and discard what core no longer references."""
+    workspaces = host.workspaces
+    if workspaces is None:
+        return
+    shell = host.shell
+    workspaces.follow(lambda: core_workspace_holds(shell.record.envelope.core))
+    await workspaces.release_unheld()
 
 
 async def drive_core(

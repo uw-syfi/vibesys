@@ -127,6 +127,14 @@ class WorkspaceResourceFactory:
         project = self._project.reattach_candidate(workspace_id, revision)
         return None if project is None else self._wrap_candidate(project)
 
+    def leftover_candidates(self) -> tuple[str, ...]:
+        """The workspace IDs of the run's candidate worktrees on disk."""
+        return self._project.leftover_candidates()
+
+    def remove_leftover(self, workspace_id: str) -> None:
+        """Remove a candidate worktree no live handle owns; its sandbox closed with its host."""
+        self._project.remove_leftover(workspace_id)
+
     def _wrap_candidate(self, project: _ProjectWorkspaceResources) -> RuntimeWorkspaceResource:
         workspace_id = project.workspace_id
         ownership = ReleaseStack()

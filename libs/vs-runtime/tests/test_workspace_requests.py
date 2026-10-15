@@ -82,6 +82,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentView,
     RuntimeWorkspaces,
     TrustedEvaluationPlan,
+    WorkspaceHolds,
     WorkspaceResource,
     WorkspaceResourceFactory,
     create_workspace_runtime,
@@ -1372,6 +1373,90 @@ def test_a_clean_host_stop_keeps_every_attempt_workspace_for_the_next_host(
         asyncio.run(exercise())
 
 
+def _candidates_on_disk(env: _Env) -> set[Path]:
+    """The candidate worktree directories of the run, registered or not."""
+    worktrees = env.project.state.candidate_worktrees_directory(env.run_id)
+    if not worktrees.is_dir():
+        return set()
+    return {entry / "workspace" for entry in worktrees.iterdir() if (entry / "workspace").exists()}
+
+
+def _registered(root: Path) -> set[Path]:
+    """The linked worktrees the run's repository registers, its root aside."""
+    paths = {Path(line.split()[0]) for line in _git(root, "worktree", "list").splitlines()}
+    return paths - {root.resolve()}
+
+
+@settings(
+    max_examples=examples(pr=4, nightly=16),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    held=st.lists(st.booleans(), min_size=1, max_size=3),
+    final=st.booleans(),
+    scratch=st.booleans(),
+    restart=st.booleans(),
+)
+def test_a_host_stop_keeps_exactly_the_attempt_workspaces_core_still_holds(
+    tmp_path_factory: pytest.TempPathFactory,
+    held: list[bool],
+    *,
+    final: bool,
+    scratch: bool,
+    restart: bool,
+) -> None:
+    """After a final result no attempt worktree or registration is left; else core's stay.
+
+    After a resumable stop every workspace core references stays on disk with its work, and
+    every other one is gone. With ``restart`` the stopping host never learned core's state,
+    so it kept every attempt workspace, and the next host's start sweeps the ones core no
+    longer references. Regression: a close kept every attempt workspace whatever core's
+    state, so a run with a final result (a deadline stop with attempts open), and members no
+    later host reattached, leaked their worktrees and Git registrations.
+    """
+    with _env(tmp_path_factory.mktemp("holds")) as env:
+
+        async def exercise() -> None:
+            first_host = env.hosts[0]
+            root = first_host.root.path
+            executor, _ = _executor(first_host)
+            attempts = [_attempt(f"a{index}") for index in range(len(held))]
+            paths = [
+                await _ensure_at(executor, first_host, attempt, f"e-{attempt.attempt_id.root}")
+                for attempt in attempts
+            ]
+            for path in paths:
+                (path / "work.txt").write_text(f"in progress {path.name}\n", encoding="utf-8")
+            work = {path: _visible_files(path) for path in paths}
+            if scratch:
+                await first_host.create_candidate()
+            holds = WorkspaceHolds(
+                final=final,
+                attempts=frozenset(
+                    attempt for attempt, kept in zip(attempts, held, strict=True) if kept
+                ),
+            )
+            if restart:
+                await first_host.close()
+                next_host = env.start_host()
+                next_host.follow(lambda: holds)
+                await next_host.release_unheld()
+                await next_host.close()
+            else:
+                first_host.follow(lambda: holds)
+                await first_host.close()
+            expected = (
+                set() if final else {path for path, kept in zip(paths, held, strict=True) if kept}
+            )
+            assert _registered(root) == expected
+            assert _candidates_on_disk(env) == expected
+            for path in expected:
+                assert _visible_files(path) == work[path]
+
+        asyncio.run(exercise())
+
+
 def test_f4_exclusive_root_is_held_by_one_attempt_generation(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
@@ -1536,6 +1621,12 @@ class _FaultyResources:
         return (
             None if resource is None else cast("WorkspaceResource", _FaultyResource(self, resource))
         )
+
+    def leftover_candidates(self) -> tuple[str, ...]:
+        return self._inner.leftover_candidates()
+
+    def remove_leftover(self, workspace_id: str, /) -> None:
+        self._inner.remove_leftover(workspace_id)
 
 
 class _FaultyResource:

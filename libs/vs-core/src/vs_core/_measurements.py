@@ -98,10 +98,10 @@ from .types.waits import WaitOn
 if TYPE_CHECKING:
     from .types.common import DecisionId, Observation, ResourceId, Seconds
     from .types.evaluation import EvaluationEvent, EvaluationState, EvidenceRef, MeasurementPlan
-    from .types.kernel import EvaluationContext, Signal
-    from .types.records import Request, RequestRecord
+    from .types.kernel import EvaluationContext, RunState, Signal
+    from .types.records import RecordsState, Request, RequestRecord
 
-__all__ = ["advance"]
+__all__ = ["advance", "cancel_settled"]
 
 
 def _current(context: EvaluationContext, scope: Scope) -> Verdict[DecisionId | None]:
@@ -1656,6 +1656,8 @@ def _job_request(
     sequence = observation.sequence if observation is not None else 0
     # Evidence is collected once per job, so its id does not name an observation.
     suffix = "" if model is CollectEvidence else f":{sequence}"
+    if model is CancelOwnedJob:
+        suffix += _resend_suffix(context, f"{_step_prefix(job, action)}{suffix}")
     canonical = context.records.record(source)
     # A step on a job is the job's own, whoever asks for it: a poll raised by the clock, a
     # stop, a drain and a late observation all name the submission's decision. Left to the
@@ -1671,6 +1673,22 @@ def _job_request(
         decision_id=inherited.decision_id if inherited is not None else None,
         resource_id=job.resource_id,
     )
+
+
+def _resend_suffix(context: EvaluationContext, base: str) -> str:
+    """Name a cancel sent again for the same observation after earlier ones blocked.
+
+    A cancel blocked at its bound proved nothing (``cancel_settled``), and the job may not be
+    observed again before core asks once more (its submission ended, so nothing polls it).
+    Each re-send gets its own id, so it is a new request and not the blocked one.
+    """
+    blocked = sum(
+        1
+        for row in context.records.records
+        if (row.phase == RequestPhase.BLOCKED or row.failure is not None)
+        and (row.request_id.root == base or row.request_id.root.startswith(f"{base}:resend-"))
+    )
+    return f":resend-{blocked}" if blocked else ""
 
 
 def _job_outbound(
@@ -1797,21 +1815,28 @@ def _cancelling_scope(context: EvaluationContext) -> Scope | None:
 
 
 def _cancel_requested(context: EvaluationContext, resource: ResourceId) -> bool:
+    """Whether core is done asking to cancel *resource* (see ``cancel_settled``)."""
+    return cancel_settled(context.records, context.run, resource)
+
+
+def cancel_settled(records: RecordsState, run: RunState, resource: ResourceId) -> bool:
     """Whether core is done asking to cancel *resource*: one cancel is open or was answered.
 
     A cancel blocked at its bound proved nothing: the executor's cancel failed or its outcome
-    is unknown, and the job may still run. It does not count, so the job's next observation
-    asks for a new cancel (its id names that observation) instead of holding the run closing
-    until the job ends by itself. The backend's ``request_retries.limit`` bounds those
-    re-sends; past it core waits for the job's own end, as it did before any retry.
+    is unknown, and the job may still run. It still proves nothing once a closing run settles
+    it (``failure`` keeps why core ended it without a result). It does not count, so core
+    asks for a new cancel (on the job's next observation, or as the blocked cancel ends when
+    nothing polls the job) instead of leaving the job to end by itself. The backend's
+    ``request_retries.limit`` bounds those re-sends; past it core waits for the job's own
+    end, as it did before any retry.
     """
     cancels = tuple(
-        row
-        for row in context.records.about_resource(resource)
-        if isinstance(row.request, CancelOwnedJob)
+        row for row in records.about_resource(resource) if isinstance(row.request, CancelOwnedJob)
     )
-    blocked = sum(1 for row in cancels if row.phase == RequestPhase.BLOCKED)
-    return blocked < len(cancels) or blocked > context.run.limits.request_retries.limit
+    blocked = sum(
+        1 for row in cancels if row.phase == RequestPhase.BLOCKED or row.failure is not None
+    )
+    return blocked < len(cancels) or blocked > run.limits.request_retries.limit
 
 
 def _known(job: OwnedJob | RegisteredOwnedJob) -> bool:

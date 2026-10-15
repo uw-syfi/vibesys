@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlChannel, RunControlTransition
+    from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
     from vs_sim.api import ProcessSpec, Threads
 
@@ -354,6 +355,7 @@ class FakeWorkspaces:
         self.export_patch_calls: list[str] = []
         self._closing = False
         self._closed = False
+        self._holds: Callable[[], WorkspaceHolds] | None = None
 
     def script_candidate_retain(
         self, *results: BaseException | None, after_retention: bool = False
@@ -465,6 +467,19 @@ class FakeWorkspaces:
     def retain_candidate_revision(self, revision: str) -> None:
         """Keep a snapshotted candidate revision reachable from the root."""
         self._root.add_retained_revision(revision)
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        """Read what core references from *holds* when deciding what a stop keeps."""
+        self._holds = holds
+
+    async def release_unheld(self) -> None:
+        """Remove the worktrees a dead host left that core no longer references."""
+        if self._holds is None:
+            return
+        kept = self._holds().workspace_ids()
+        for leftover in self.leaked_candidates():
+            if leftover.id not in kept:
+                leftover.discard_leftover()
 
     def begin_close(self) -> None:
         """Reject new candidates before asynchronous teardown."""

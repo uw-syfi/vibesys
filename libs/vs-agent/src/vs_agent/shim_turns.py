@@ -22,6 +22,7 @@ from vs_agent.contracts import (
     DEFAULT_TURN_TIMEOUT_S,
     AgentOutputSchemaError,
     AgentTurnResult,
+    AgentTurnTimeoutError,
     SteerOutcome,
 )
 from vs_agent.reply_limits import ReplyGuard, reply_breach
@@ -40,6 +41,19 @@ if TYPE_CHECKING:
     from vs_sim.api import Threads
 
 _SCHEMA_DIR = Path(".cache/vibesys/response-schemas")
+_TERMINAL_RESULT_ATTRIBUTE = "_vibesys_terminal_turn_result"
+
+
+def terminal_result_from(error: BaseException) -> AgentTurnResult | None:
+    """Return completed-turn evidence carried by an otherwise unchanged failure."""
+    result = getattr(error, _TERMINAL_RESULT_ATTRIBUTE, None)
+    return result if isinstance(result, AgentTurnResult) else None
+
+
+def _with_terminal_result[ErrorT: BaseException](error: ErrorT, result: AgentTurnResult) -> ErrorT:
+    """Carry typed terminal evidence without changing the public failure type."""
+    setattr(error, _TERMINAL_RESULT_ATTRIBUTE, result)
+    return error
 
 
 class SteerLedger:
@@ -261,7 +275,8 @@ def _run_turn(
     except Exception as error:
         # A turn stopped for its reply fails however the library reports the stop.
         if events.breach is not None:
-            raise AgentOutputSchemaError(events.breach) from error
+            usage = error.usage if isinstance(error, AgentTurnTimeoutError) else None
+            raise AgentOutputSchemaError(events.breach, usage=usage) from error
         raise
     finally:
         events.observer = None
@@ -269,28 +284,32 @@ def _run_turn(
         live.steers.clear()
 
     result = turn.result
-    refusal = events.breach or reply_breach(shim_translation.result_text(result))
-    if refusal is not None:
-        raise AgentOutputSchemaError(refusal)
-    if result.interrupted:
-        # The conversation survives an interrupt, but the caller asked for
-        # an answer and there is none: a stopped turn raises.
-        message = "turn interrupted"
-        raise agentshim.TurnCancelledError(message)
-    # RESET and REPLACED both say the conversation the caller was
-    # continuing is gone (renewed, or restarted after a refused resume).
-    _log_continuity(live, turn.continuity)
-    return AgentTurnResult(
+    usage = shim_translation.usage_from(
+        result.usage,
+        cost_usd=result.cost_usd,
+        duration_ms=result.duration_ms,
+    )
+    normalized = AgentTurnResult(
         text=shim_translation.result_text(result),
-        usage=shim_translation.usage_from(
-            result.usage,
-            cost_usd=result.cost_usd,
-            duration_ms=result.duration_ms,
-        ),
+        usage=usage,
         provider_session_id=result.session_id,
         restarted=turn.continuity is not agentshim.Continuity.CONTINUED,
         skills=shim_translation.skill_use_from(result.skills),
     )
+    refusal = events.breach or reply_breach(shim_translation.result_text(result))
+    if refusal is not None:
+        raise _with_terminal_result(AgentOutputSchemaError(refusal, usage=usage), normalized)
+    if result.interrupted:
+        # The conversation survives an interrupt, but the caller asked for
+        # an answer and there is none: a stopped turn raises.
+        message = "turn interrupted"
+        # Keep the exact public exception type/catch contract while carrying
+        # evidence that was terminal before cancellation reached the caller.
+        raise _with_terminal_result(agentshim.TurnCancelledError(message), normalized)
+    # RESET and REPLACED both say the conversation the caller was
+    # continuing is gone (renewed, or restarted after a refused resume).
+    _log_continuity(live, turn.continuity)
+    return normalized
 
 
 def _steer_turn(
