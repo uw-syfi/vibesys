@@ -135,12 +135,12 @@ class FakeRuns {
     return {};
   }
 
-  connect(port) {
+  connect(port, _runId) {
     new ProtocolPeer(port);
   }
 
   retry() {}
-  detach() {}
+  detach(_runId) {}
 }
 
 class FakeHosts {
@@ -269,8 +269,8 @@ void app.whenReady().then(() => {
   const welcome = new WelcomeFeed();
   appWindow = new AppWindow({
     log,
-    connect: port => runs.connect(port),
-    closed: () => runs.detach(),
+    connect: (port, runId) => runs.connect(port, runId),
+    closed: runId => runs.detach(runId),
     fatal: error => fatals.push(error.message),
   });
   const desktop = new Desktop({
@@ -281,7 +281,7 @@ void app.whenReady().then(() => {
     settings: new FakeSettings(),
     log,
   });
-  appWindow.openRunPage('This Mac');
+  appWindow.openRunPage(attached.runId, {hostLabel: attached.hostLabel, task: null});
   desktop.chromeChanged();
 });
 
