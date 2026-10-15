@@ -12,7 +12,7 @@ import subprocess
 import uuid
 from contextlib import suppress
 from pathlib import Path
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Protocol, override
 
 from vs_project.api import atomic_write_bytes
 from vs_sandbox.command_execution import execute_command
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     import signal
     from collections.abc import Mapping, Sequence
 
+    from vs_sandbox.docker_states import ContainerLife
     from vs_sandbox.execution import CommandResult
     from vs_sandbox.host_resources import HostResource
     from vs_sim.api import Event, Threads
@@ -77,6 +78,18 @@ _ROOT_SETUP_TIMEOUT_S = 60
 _CONTAINER_IDENTITY_LINE_COUNT = 2
 _EXEC_STOP_TIMEOUT_S = 30
 _NAMED_REMOVE_TIMEOUT_S = 30
+_REMOVE_ATTEMPTS = 3
+
+
+class _CommandLog(Protocol):
+    """Where a Docker lifecycle command and its result are logged."""
+
+    def __call__(
+        self,
+        cmd: list[str],
+        result: subprocess.CompletedProcess[str] | None = None,
+        error: str | None = None,
+    ) -> None: ...
 
 
 class DockerSandboxNotStartedError(RuntimeError):
@@ -120,14 +133,45 @@ def _cleanup_containers() -> None:
     for container_id, docker in list(_live_containers.items()):
         with suppress(OSError, subprocess.TimeoutExpired):
             docker.run(["docker", "stop", container_id], timeout_seconds=30)
-        removed = None
-        with suppress(OSError, subprocess.TimeoutExpired):
-            removed = docker.run(["docker", "rm", "-f", container_id], timeout_seconds=10)
-        if removed is None:
-            continue
-        reading = RemovalReading(removed.returncode, removed.stderr or "")
-        if released(observe_removal(INITIAL_CONTAINER_LIFE, reading)):
+        if _remove_container(docker, container_id, timeout_seconds=10) is None:
             _live_containers.pop(container_id, None)
+
+
+def _remove_container(
+    docker: DockerCli,
+    target: str,
+    *,
+    timeout_seconds: float,
+    log: _CommandLog | None = None,
+) -> Exception | None:
+    """``docker rm -f`` *target* until Docker says it is gone or going.
+
+    The removal is idempotent, so a reading that leaves the container's life
+    unknown (the ``docker`` client died by a signal or timed out, or the daemon
+    gave an unrecognised error) is retried, up to ``_REMOVE_ATTEMPTS`` times.
+    Returns ``None`` once the container is released, else the last failure.
+    """
+    cmd = ["docker", "rm", "-f", target]
+    life: ContainerLife = INITIAL_CONTAINER_LIFE
+    failure: Exception | None = None
+    for _ in range(_REMOVE_ATTEMPTS):
+        try:
+            result = docker.run(cmd, timeout_seconds=timeout_seconds)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            failure = exc
+            if log is not None:
+                log(cmd, error=f"container cleanup failed: {exc}")
+            continue
+        if log is not None:
+            log(cmd, result)
+        life = observe_removal(life, RemovalReading(result.returncode, result.stderr or ""))
+        if released(life):
+            return None
+        failure = RuntimeError(
+            f"Failed to remove Docker container {target} "
+            f"(exit {result.returncode}): {(result.stderr or '').strip()}"
+        )
+    return failure
 
 
 atexit.register(_cleanup_containers)
@@ -738,40 +782,24 @@ class DockerSandbox(WorkspaceSandbox):
 
     def _remove_container_named(self, name: str) -> None:
         """Best-effort ``docker rm -f`` of a container known only by its name."""
-        cmd = ["docker", "rm", "-f", name]
-        with suppress(Exception):
-            result = self._docker.run(cmd, timeout_seconds=_NAMED_REMOVE_TIMEOUT_S)
-            self._log_cmd(cmd, result)
+        _remove_container(
+            self._docker, name, timeout_seconds=_NAMED_REMOVE_TIMEOUT_S, log=self._log_cmd
+        )
 
     def _stop_and_remove_container(self, container_id: str, *, suppress_errors: bool) -> bool:
         """Stop and remove a container, retaining ownership until removal succeeds."""
-        cleanup_error: Exception | None = None
-        commands = (
-            (["docker", "stop", container_id], 30),
-            (["docker", "rm", "-f", container_id], 10),
+        stop = ["docker", "stop", container_id]
+        try:
+            self._log_cmd(stop, self._docker.run(stop, timeout_seconds=30))
+        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009067 [BLE001]; cleanup must record failures but not replace an earlier startup or shutdown error.
+            with suppress(Exception):
+                self._log_cmd(stop, error=f"container cleanup failed: {exc}")
+        failure = _remove_container(
+            self._docker, container_id, timeout_seconds=10, log=self._log_cmd
         )
-        removed = False
-        for cmd, timeout in commands:
-            try:
-                result = self._docker.run(cmd, timeout_seconds=timeout)
-                self._log_cmd(cmd, result)
-                if cmd[1] == "rm":
-                    reading = RemovalReading(result.returncode, result.stderr or "")
-                    removed = released(observe_removal(INITIAL_CONTAINER_LIFE, reading))
-                    if not removed:
-                        cleanup_error = RuntimeError(
-                            f"Failed to remove Docker container {container_id} "
-                            f"(exit {result.returncode}): {result.stderr.strip()}"
-                        )
-            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009067 [BLE001]; cleanup must record failures but not replace an earlier startup or shutdown error.
-                if cmd[1] == "rm":
-                    cleanup_error = exc
-                with suppress(Exception):
-                    self._log_cmd(cmd, error=f"container cleanup failed: {exc}")
-
-        if not removed and cleanup_error is not None and not suppress_errors:
-            raise cleanup_error
-        return removed
+        if failure is not None and not suppress_errors:
+            raise failure
+        return failure is None
 
     def _save_metadata(self) -> None:
         """Write metadata to the host workspace (best-effort)."""

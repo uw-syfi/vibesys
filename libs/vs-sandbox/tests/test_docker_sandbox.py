@@ -174,10 +174,10 @@ class TestStart:
         self, sandbox: DockerSandbox, docker: ScriptedDockerCli
     ) -> None:
 
+        docker.on(("docker", "rm"), docker_result(returncode=1, stderr="daemon unavailable"))
         docker.then(
             docker_result(returncode=125, stdout="abc123container\n", stderr="gpu error"),
             docker_result(),
-            docker_result(returncode=1, stderr="daemon unavailable"),
         )
 
         try:
