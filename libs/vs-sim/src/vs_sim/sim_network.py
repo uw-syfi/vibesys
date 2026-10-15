@@ -16,14 +16,21 @@ import math
 from collections import deque
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_sim.concurrency import Threads
     from vs_sim.network import Connection, Listener
-    from vs_sim.randomness import SeededRandom
+
+
+class _Draws(Protocol):
+    """A seeded stream, such as ``Sim.random``'s."""
+
+    def randint(self, low: int, high: int, /) -> int: ...
+
+    def random(self) -> float: ...
 
 
 class End(StrEnum):
@@ -71,7 +78,7 @@ class LinkFault:
 
     @classmethod
     def draw(
-        cls, rng: SeededRandom, *, connections: int = 1, sends: int = 8, seconds: float = 1.0
+        cls, rng: _Draws, *, connections: int = 1, sends: int = 8, seconds: float = 1.0
     ) -> LinkFault:
         """Any kind, either end, on one of the first ``connections`` before one of its first ``sends``.
 

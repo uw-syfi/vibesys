@@ -1,8 +1,8 @@
 """SimNetwork's link faults: each one ends in a defined state on both ends, never a hang.
 
-Every case runs one echo exchange with no timeouts on any call: the dialer sends numbered
-lines, the acceptor echoes each, and the dialer closes after the last echo. A fault that
-left either end blocked for ever would deadlock the simulator, which fails the case.
+Every case runs one echo exchange with no timeout on any read or write: the dialer sends
+numbered lines, the acceptor echoes each, and the dialer closes after the last echo. A fault
+that left either end blocked for ever would trip the hang guard on joining it.
 """
 
 from __future__ import annotations
@@ -15,13 +15,13 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sim.api.testing import (
+    HANG_GUARD_S,
     End,
     LinkFault,
     LinkFaultKind,
     SimNetwork,
     SimThreads,
     VirtualClock,
-    join_or_fail,
 )
 
 if TYPE_CHECKING:
@@ -66,7 +66,7 @@ def _exchange(threads: SimThreads, network: SimNetwork) -> tuple[_Side, _Side]:
     listener = network.listen("echo")
 
     def serve() -> None:
-        connection = listener.accept()
+        connection = listener.accept(HANG_GUARD_S)
         buffer = bytearray()
         try:
             while (line := _receive(threads, connection, acceptor, buffer)) is not None:
@@ -96,8 +96,9 @@ def _exchange(threads: SimThreads, network: SimNetwork) -> tuple[_Side, _Side]:
 
     server = threads.spawn(serve, name="acceptor")
     client = threads.spawn(dial, name="dialer")
-    join_or_fail(client)
-    join_or_fail(server)
+    for worker in (client, server):
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive(), f"the {worker.name} hung"
     listener.close()
     return dialer, acceptor
 
