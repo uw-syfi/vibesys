@@ -91,8 +91,11 @@ cannot recur.
 - Cancel and stop: the run leaves RUNNING, new calls get `RUN_STOPPING` (the tool tells
   the agent the run is stopping), and admitted jobs drain through the existing cancel
   records.
-- Deadline: `DeadlineReached` resumes the continuation once with a timeout outcome;
-  later calls get `RUN_STOPPING` or `NOT_ALLOWED` by plan deadline.
+- Deadline: once the wait's deadline passes, core resumes the continuation once with a
+  timeout outcome; later calls get `RUN_STOPPING` or `NOT_ALLOWED` by plan deadline. The
+  limit counts from the job's start: while a job waits in a queue the wait has no deadline
+  (only the run's own deadline and stop end it), and each queued interval moves the
+  submission's deadline later by its length (`vs_core._wait_clock`).
 - Rejection: returned in the tool reply, nothing charged.
 - A resumed invocation reports released and children complete, like any dispatched turn,
   so its attempt drains. A yielded invocation holds nothing once its continuation was

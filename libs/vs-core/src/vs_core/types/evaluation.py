@@ -626,7 +626,10 @@ class AgentCall(Value):
     request_id: RequestId | None = None
     """The submission it names, or None when core rejected the call."""
     deadline_at: Seconds | None = None
-    """The named submission's deadline, bounded by the run's; None when rejected."""
+    """The named submission's deadline, bounded by the run's; None when rejected.
+
+    Answered as the call time plus the limit; each interval its job then spends queued moves
+    it later by that interval, so the limit counts from the job's start (``_wait_clock``)."""
     repeat: bool = False
     """Whether the call named a submission an earlier call (or a Measure) had allocated."""
     rejection: AgentRejection | None = None
