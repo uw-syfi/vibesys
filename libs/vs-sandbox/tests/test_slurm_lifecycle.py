@@ -27,6 +27,7 @@ from vs_evaluation.api import (
     EvaluationState,
     EvaluationStep,
     PollPhase,
+    loop_evaluation_deadline,
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
@@ -177,7 +178,9 @@ def _stack(
         clock=ManualClock(),
     )
     store = evaluation_testing.InMemoryEvaluationStore()
-    return executor, EvaluationCoordinator(executor, store, ManualClock())
+    return executor, EvaluationCoordinator(
+        executor, store, ManualClock(), deadline_factory=loop_evaluation_deadline
+    )
 
 
 _OPS = st.lists(st.sampled_from(("snapshot", "inspect_only", "poll", "wait")), max_size=40)
@@ -284,7 +287,9 @@ def _parked_submitter(
         clock=ManualClock(),
     )
     store = evaluation_testing.InMemoryEvaluationStore()
-    coordinator = EvaluationCoordinator(executor, store, ManualClock())
+    coordinator = EvaluationCoordinator(
+        executor, store, ManualClock(), deadline_factory=loop_evaluation_deadline
+    )
     return executor, coordinator, sleeper.idle, sleeper.release
 
 

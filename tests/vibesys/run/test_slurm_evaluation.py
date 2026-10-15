@@ -29,6 +29,7 @@ from vs_evaluation.api import (
     StageFailureKind,
     StageState,
     TrustedEvidence,
+    loop_evaluation_deadline,
 )
 from vs_evaluation.api.testing import InMemoryEvaluationStore, wait_until_executor_started
 from vs_project.api import StateNamespace
@@ -498,7 +499,11 @@ async def test_coordinator_retains_completed_stages_after_late_infrastructure_fa
         sleeper=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
-        executor, InMemoryEvaluationStore(), ManualClock(), max_await_timeout_s=5
+        executor,
+        InMemoryEvaluationStore(),
+        ManualClock(),
+        max_await_timeout_s=5,
+        deadline_factory=loop_evaluation_deadline,
     )
     handle = await coordinator.submit(_request(snapshot))
     assert isinstance(await handle.await_result(5), EvaluationFailed)
@@ -601,7 +606,11 @@ async def test_unsupported_profile_evaluation_fails_instead_of_staying_queued(
     )
     clock = ManualClock()
     coordinator = EvaluationCoordinator(
-        executor, InMemoryEvaluationStore(), clock, max_await_timeout_s=5
+        executor,
+        InMemoryEvaluationStore(),
+        clock,
+        max_await_timeout_s=5,
+        deadline_factory=loop_evaluation_deadline,
     )
 
     handle = await coordinator.submit(_request(snapshot, (EvidenceKind.PROFILE,)))
@@ -637,7 +646,11 @@ async def test_a_kind_without_a_command_is_rejected_not_passed(
         sleeper=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
-        executor, InMemoryEvaluationStore(), ManualClock(), max_await_timeout_s=5
+        executor,
+        InMemoryEvaluationStore(),
+        ManualClock(),
+        max_await_timeout_s=5,
+        deadline_factory=loop_evaluation_deadline,
     )
 
     availability = await executor.availability(ResourceRequirements())

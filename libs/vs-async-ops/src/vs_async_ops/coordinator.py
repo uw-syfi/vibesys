@@ -51,6 +51,13 @@ class AsyncioOperationWaiter:
         return True
 
 
+def loop_operation_deadline(timeout_s: float) -> OperationDeadlineScope:
+    """A deadline ``timeout_s`` seconds away on the running event loop's clock."""
+    # asyncio.Timeout provides this structural scope at runtime; ty does not recognize its
+    # context-manager signature as the port protocol.
+    return cast("OperationDeadlineScope", asyncio.timeout(timeout_s))
+
+
 class OperationNotFoundError(KeyError):
     """An operation ID has no durable record."""
 
@@ -137,19 +144,21 @@ class OperationCoordinator:
         runner: OperationRunner,
         store: OperationStore,
         *,
-        waiter: OperationWaiter | None = None,
-        deadline_factory: Callable[[float], OperationDeadlineScope] | None = None,
+        waiter: OperationWaiter,
+        deadline_factory: Callable[[float], OperationDeadlineScope],
         events: OperationEventSink = NULL_OPERATION_EVENT_SINK,
         event_errors: OperationEventErrorSink = _report_event_error,
         policy: OperationPolicy | None = None,
     ) -> None:
-        """Bind injected effects and lifecycle policy."""
+        """Bind injected effects and lifecycle policy.
+
+        ``waiter`` and ``deadline_factory`` bound waits; `AsyncioOperationWaiter` and
+        `loop_operation_deadline` bound them on the event loop's clock.
+        """
         self._runner = runner
         self._store = store
-        self._waiter = waiter or AsyncioOperationWaiter()
-        self._deadline_factory = deadline_factory or cast(
-            "Callable[[float], OperationDeadlineScope]", asyncio.timeout
-        )
+        self._waiter = waiter
+        self._deadline_factory = deadline_factory
         self._events = events
         self._event_errors = event_errors
         policy = policy or OperationPolicy()

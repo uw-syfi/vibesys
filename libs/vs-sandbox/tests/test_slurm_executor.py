@@ -24,6 +24,7 @@ from vs_evaluation.api import (
     FilesystemEvaluationStore,
     PollPhase,
     StageState,
+    loop_evaluation_deadline,
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import (
@@ -805,6 +806,7 @@ async def test_executor_preserves_both_stages_through_durable_coordinator_failur
         executor,
         FilesystemEvaluationStore(tmp_path / "coordinator", blocking=ThreadBlockingRunner()),
         ManualClock(),
+        deadline_factory=loop_evaluation_deadline,
     )
     try:
         handle = await coordinator.submit(_request())
@@ -1317,6 +1319,7 @@ async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure
         executor,
         FilesystemEvaluationStore(tmp_path / "coordinator", blocking=ThreadBlockingRunner()),
         ManualClock(),
+        deadline_factory=loop_evaluation_deadline,
     )
     request = _request()
     prepared = await coordinator.prepare(request)
@@ -1482,6 +1485,7 @@ async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
         executor,
         FilesystemEvaluationStore(tmp_path / "coordinator", blocking=ThreadBlockingRunner()),
         ManualClock(),
+        deadline_factory=loop_evaluation_deadline,
     )
     request = _request()
     prepared = await coordinator.prepare(request)
@@ -1535,7 +1539,9 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
         sleeper=ManualClock(),
     )
     store = evaluation_testing.InMemoryEvaluationStore()
-    coordinator = EvaluationCoordinator(executor, store, ManualClock())
+    coordinator = EvaluationCoordinator(
+        executor, store, ManualClock(), deadline_factory=loop_evaluation_deadline
+    )
     handle = await coordinator.submit(_request())
     await wait_until_executor_started(runner.accepted, executor, handle.id)
     with pytest.raises(ExecutorCancellationUnknownError, match="unknown external identity"):
@@ -1561,7 +1567,9 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
         clock=ManualClock(),
         sleeper=ManualClock(),
     )
-    restored = EvaluationCoordinator(resumed, store, ManualClock())
+    restored = EvaluationCoordinator(
+        resumed, store, ManualClock(), deadline_factory=loop_evaluation_deadline
+    )
     with pytest.raises(ExecutorCancellationUnknownError, match="unknown external identity"):
         await restored.cancel(handle.id)
     remaining = await store.get(handle.id)
@@ -1597,7 +1605,10 @@ async def test_known_staging_rejection_is_failed_and_cleanup_needs_no_external_i
         sleeper=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
-        executor, evaluation_testing.InMemoryEvaluationStore(), ManualClock()
+        executor,
+        evaluation_testing.InMemoryEvaluationStore(),
+        ManualClock(),
+        deadline_factory=loop_evaluation_deadline,
     )
     handle = await coordinator.submit(_request())
     observed = await _terminal(executor, handle.id)
@@ -1974,6 +1985,7 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
         executor,
         FilesystemEvaluationStore(tmp_path / "records", blocking=ThreadBlockingRunner()),
         ManualClock(),
+        deadline_factory=loop_evaluation_deadline,
     )
     handle = await coordinator.submit(_request())
     await wait_until_executor_started(runner.wait_started, executor, handle.id)

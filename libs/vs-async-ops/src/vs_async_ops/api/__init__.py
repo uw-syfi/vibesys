@@ -8,6 +8,7 @@ from vs_async_ops.coordinator import (
     OperationCoordinatorClosedError,
     OperationNotFoundError,
     OperationObservationTimeoutError,
+    loop_operation_deadline,
 )
 from vs_async_ops.models import (
     ConcurrencyKey,
@@ -59,4 +60,5 @@ __all__ = [
     "OperationWaiter",
     "drain",
     "finish",
+    "loop_operation_deadline",
 ]

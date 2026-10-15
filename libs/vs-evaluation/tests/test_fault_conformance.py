@@ -18,6 +18,7 @@ from vs_evaluation.api import (
     FilesystemEvaluationStore,
     ResourceRequirements,
     StageState,
+    loop_evaluation_deadline,
     stable_handle_id,
 )
 from vs_evaluation.api.testing import (
@@ -57,7 +58,13 @@ def _coordinator(
     executor: FakeEvaluationExecutor,
     store: InMemoryEvaluationStore | FilesystemEvaluationStore,
 ) -> EvaluationCoordinator:
-    return EvaluationCoordinator(executor, store, executor.clock, max_await_timeout_s=20)
+    return EvaluationCoordinator(
+        executor,
+        store,
+        executor.clock,
+        max_await_timeout_s=20,
+        deadline_factory=loop_evaluation_deadline,
+    )
 
 
 @pytest.mark.asyncio

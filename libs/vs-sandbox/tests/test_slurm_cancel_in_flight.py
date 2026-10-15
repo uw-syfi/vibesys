@@ -22,6 +22,7 @@ from vs_evaluation.api import (
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
+    loop_evaluation_deadline,
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
@@ -95,7 +96,10 @@ async def test_a_stop_during_sbatch_reply_cancels_the_submitted_job_once(tmp_pat
         sleeper=ManualClock(),
     )
     coordinator = EvaluationCoordinator(
-        executor, evaluation_testing.InMemoryEvaluationStore(), ManualClock()
+        executor,
+        evaluation_testing.InMemoryEvaluationStore(),
+        ManualClock(),
+        deadline_factory=loop_evaluation_deadline,
     )
     try:
         evaluation = await coordinator.submit(_request())

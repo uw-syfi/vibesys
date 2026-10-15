@@ -27,6 +27,7 @@ from vs_evaluation.agent_models import (
 from vs_evaluation.coordinator import (
     EvaluationCoordinator,
     EvaluationLifecycleError,
+    loop_evaluation_deadline,
     stable_handle_id,
 )
 from vs_evaluation.failure_signature import (
@@ -144,6 +145,7 @@ __all__ = [
     "failure_signature",
     "is_finished",
     "join_observation",
+    "loop_evaluation_deadline",
     "stable_handle_id",
     "state_rank",
 ]

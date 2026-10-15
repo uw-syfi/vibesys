@@ -31,6 +31,7 @@ from vs_evaluation.api import (
     StageFailureKind,
     StageState,
     StoredEvaluation,
+    loop_evaluation_deadline,
 )
 from vs_evaluation.api.testing import (
     FakeDeadlineFactory,
@@ -64,13 +65,20 @@ def coordinator(
 ) -> EvaluationCoordinator:
     """Create a coordinator with the executor's clock."""
     if events is None:
-        return EvaluationCoordinator(executor, store, executor.clock, max_await_timeout_s=20)
+        return EvaluationCoordinator(
+            executor,
+            store,
+            executor.clock,
+            max_await_timeout_s=20,
+            deadline_factory=loop_evaluation_deadline,
+        )
     return EvaluationCoordinator(
         executor,
         store,
         executor.clock,
         max_await_timeout_s=20,
         events=events.append,
+        deadline_factory=loop_evaluation_deadline,
     )
 
 
@@ -633,7 +641,9 @@ async def test_cancel_known_undispatched_claim_has_no_executor_effects() -> None
     clock = ManualClock()
     executor = FakeEvaluationExecutor(clock)
     store = InMemoryEvaluationStore()
-    service = EvaluationCoordinator(executor, store, clock)
+    service = EvaluationCoordinator(
+        executor, store, clock, deadline_factory=loop_evaluation_deadline
+    )
     handle = await service.prepare(request("never-dispatched"))
     prepared = await store.get(handle.id)
     assert prepared is not None
@@ -667,7 +677,9 @@ async def test_external_submit_observes_durable_dispatch_authorization() -> None
     clock = ManualClock()
     store = InMemoryEvaluationStore()
     executor = _DispatchGuardExecutor(clock, store=store)
-    service = EvaluationCoordinator(executor, store, clock)
+    service = EvaluationCoordinator(
+        executor, store, clock, deadline_factory=loop_evaluation_deadline
+    )
     handle = await service.submit(request("authorized-before-effect"))
     assert len(executor.submissions) == 1
     await handle.cancel()
