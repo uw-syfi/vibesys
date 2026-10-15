@@ -1,10 +1,18 @@
 """An unknown session whose last request ends without settling its turn is still carried."""
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 import vs_core.api as core
 
-from .test_session_acceptance_reconciliation import reload_step, unacknowledged_success
+from .test_session_acceptance_reconciliation import (
+    reload_step,
+    scope,
+    turn,
+    turn_observation,
+    unacknowledged_success,
+)
 
 
 def _unknown_turn() -> core.Transition:
@@ -142,3 +150,41 @@ def test_an_unknown_session_with_no_known_lease_keeps_its_wait_and_is_reported(
     assert not [request for request in result.requests if isinstance(request, core.CloseSession)]
     orphans = core.orphan_waits(result.state)
     assert [wait.waiter for wait in orphans] == [core.WaitKind.SESSION], orphans
+
+
+def _ambiguous_ensure_in(epoch: int) -> core.Transition:
+    """A lease request answered ambiguously (unknown acceptance) in host epoch *epoch*."""
+    spec = turn()
+    prepared = reload_step(
+        core.initial_state(),
+        core.TurnRequested(until=core.Until(at=100.0), scope=scope(), turn=spec),
+    )
+    records = prepared.state.records
+    recovery = records.recovery.model_copy(update={"epoch": epoch})
+    state = prepared.state.model_copy(
+        update={"records": records.model_copy(update={"recovery": recovery})}
+    )
+    observation = turn_observation(
+        prepared.requests[0], terminal=True, status=core.ObservationStatus.UNKNOWN
+    )
+    event = core.SessionObserved(session_id=spec.session.session_id, observation=observation)
+    return reload_step(state, event)
+
+
+@settings(max_examples=10, deadline=None)
+@given(epochs=st.lists(st.integers(min_value=0, max_value=6), min_size=2, max_size=4, unique=True))
+def test_a_sessions_inspection_is_a_new_request_in_each_host_epoch(epochs: list[int]) -> None:
+    """Case (b): a restarted host asks afresh instead of reusing a dead host's inspection.
+
+    The identity was one per target for the run's life, so a later epoch's ask returned the
+    dead host's ended inspection and nothing new went out: an ambiguous ensure stayed
+    unknown in every epoch after the first. Within one epoch the ask stays one request.
+    """
+    identities = set()
+    for epoch in epochs:
+        [inspection] = _ambiguous_ensure_in(epoch).requests
+        assert isinstance(inspection, core.InspectRequest)
+        [again] = _ambiguous_ensure_in(epoch).requests
+        assert again == inspection
+        identities.add(inspection.request_id)
+    assert len(identities) == len(epochs)
