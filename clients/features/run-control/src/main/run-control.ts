@@ -54,7 +54,10 @@ export interface RunControlDeps {
   /** Lease the one connection to `id`; the caller releases or transfers every lease. */
   connection(id: HostId): Promise<ConnectionLease>;
   /** Open (or focus an already-open) window for `runId`, titled from `title`. */
-  openPage(runId: string, title: {readonly hostLabel: string; readonly task: string | null}): RunPage;
+  openPage(
+    runId: string,
+    title: {readonly hostLabel: string; readonly task: string | null},
+  ): RunPage;
   /** Ask the user; resolves true on "yes". */
   confirm(text: string): Promise<boolean>;
   /** Record a run only while `current` says this selection still owns navigation. */
