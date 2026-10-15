@@ -42,6 +42,7 @@ from vs_evaluation.api import (
     same_work,
 )
 from vs_runtime._failure_classification import RecordState, classify, is_unsettled, signal_of
+from vs_runtime._measurement_progress import StageRun
 from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     build_trusted_benchmark_command,
@@ -64,11 +65,13 @@ from vs_sandbox.api.slurm import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from contextlib import AbstractContextManager
     from pathlib import Path
 
+    from vs_runtime._measurement_progress import StageOutputOpener
     from vs_runtime.contracts import CandidateWorkspace, Workspaces
-    from vs_sandbox.api.slurm import SlurmExecutionPolicy
-    from vs_sim.api import Clock, Processes, Sleeper
+    from vs_sandbox.api.slurm import SlurmExecutionPolicy, SlurmStageOutputOpener
+    from vs_sim.api import Clock, OutputSink, Processes, Sleeper
     from vs_slurm.api import Cluster, SlurmConfig
 
 _CLEANUP_FAILURE = "cleanup failed"
@@ -127,11 +130,14 @@ class SemanticSlurmEvaluationExecutor:
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
         processes: Processes | None = None,
+        stage_output: StageOutputOpener | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state.
 
         ``clock`` times job deadlines; ``sleeper`` paces the polls of running jobs. Each
         executor uses ``cluster``, or reaches the configured cluster by starting ``processes``.
+        ``stage_output`` opens each stage's stream, which the stage's output on the cluster
+        reaches at each poll while the job runs and in full when it settles.
         """
         self._stage_failure_text = stage_failure_text
         self._clock = clock
@@ -146,6 +152,7 @@ class SemanticSlurmEvaluationExecutor:
         self._admission = admission or SharedSlurmAdmission(config.evaluation_capacity)
         self._cluster = cluster
         self._processes = processes
+        self._stage_output = stage_output
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
         self._availability = self._make_executor(workspaces.root.path)
@@ -289,11 +296,31 @@ class SemanticSlurmEvaluationExecutor:
             if existing is not None:
                 return existing
             workspace = await self._workspaces.create_candidate(record.snapshot)
-            execution = _Execution(workspace, self._make_executor(workspace.path))
+            executor = self._make_executor(workspace.path, self._stage_streams(record.request))
+            execution = _Execution(workspace, executor)
             self._executions[handle_id] = execution
             return execution
 
-    def _make_executor(self, workspace: Path) -> SlurmEvaluationExecutor:
+    def _stage_streams(self, request: EvaluationRequest) -> SlurmStageOutputOpener | None:
+        """The provider's per-stage opener, naming each stage as its progress reports do."""
+        opener = self._stage_output
+        if opener is None:
+            return None
+        purposes = {
+            step.name: SemanticEvaluationStage.model_validate(step.payload).purpose
+            for step in request.stages
+        }
+
+        def open_stage(handle_id: str, stage_id: str) -> AbstractContextManager[OutputSink]:
+            return opener(StageRun(handle_id, stage_id, purpose=purposes.get(stage_id)))
+
+        return open_stage
+
+    def _make_executor(
+        self,
+        workspace: Path,
+        stage_output: SlurmStageOutputOpener | None = None,
+    ) -> SlurmEvaluationExecutor:
         return SlurmEvaluationExecutor(
             self._config,
             workspace=workspace,
@@ -307,6 +334,7 @@ class SemanticSlurmEvaluationExecutor:
             admission=self._admission,
             cluster=self._cluster,
             processes=self._processes,
+            stage_output=stage_output,
         )
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:

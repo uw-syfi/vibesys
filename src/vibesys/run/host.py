@@ -67,7 +67,7 @@ if TYPE_CHECKING:
         RunFacts,
         Workspaces,
     )
-    from vs_runtime.api.core import RunTiming
+    from vs_runtime.api.core import RunTiming, StageOutputOpener
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
         OwnedWorkspaces,
@@ -76,7 +76,7 @@ if TYPE_CHECKING:
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
-    from vs_sim.api import BlockingRunner, Network, ReleaseStack, SleepingClock
+    from vs_sim.api import BlockingRunner, Network, ReleaseStack
 
 
 type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
@@ -389,13 +389,13 @@ class _ProductHostFactory:
             project.state, AgentSessionKey.for_member("core", "run")
         )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
-        executor = self._semantic_executor(
-            self.integration, resources, workspaces, namespace, self.timing.clock
-        )
-        configuration = partial(self._agent_configuration, resources)
-        # Each in-process stage's output goes to the run's log store under its gate,
-        # named by the measurement's handle and try, as its gate events name it.
+        # Each stage's output goes to the run's log store under its gate, named by the
+        # measurement's handle and try, as its gate events name it: an in-process stage's as
+        # its command prints it, a Slurm stage's as each scheduler poll reads it.
         tries = TryHandles()
+        stage_output = tries.stage_output(resources.stage_output)
+        executor = self._semantic_executor(resources, workspaces, namespace, stage_output)
+        configuration = partial(self._agent_configuration, resources)
         return build_core_services(
             policy,
             CoreResources(
@@ -411,7 +411,7 @@ class _ProductHostFactory:
                         evaluation,
                         workspaces,
                         clock=self.timing.clock,
-                        stage_output=tries.stage_output(resources.stage_output),
+                        stage_output=stage_output,
                     ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
@@ -495,13 +495,12 @@ class _ProductHostFactory:
             ),
         )
 
-    @staticmethod
     def _semantic_executor(
-        integration: LocalRunIntegration,
+        self,
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
-        clock: SleepingClock,
+        stage_output: StageOutputOpener,
     ) -> SlurmSemanticEvaluationExecutor | None:
         """Build the cluster's semantic execution adapter when the environment reports one."""
         cluster = resources.environment_resources.view.cluster_evaluation
@@ -515,9 +514,10 @@ class _ProductHostFactory:
             workspaces,
             namespace,
             namespace.external_directory() / "slurm-provider-handles",
-            clock=clock,
-            sleeper=clock,
-            processes=integration.system.slurm_processes,
+            clock=self.timing.clock,
+            sleeper=self.timing.clock,
+            processes=self.integration.system.slurm_processes,
+            stage_output=stage_output,
         )
 
     async def stop_new_work(self) -> None:

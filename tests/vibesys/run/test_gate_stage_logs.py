@@ -47,6 +47,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
     prepare_docker_evaluator_resources,
 )
+from vs_runtime.api.slurm_evaluation_stack import BENCHMARK_OUTPUT, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.evaluator_tools import CargoGitToolSpec, EvaluatorToolError
@@ -195,6 +196,35 @@ async def test_each_gate_stage_writes_to_its_gate_stream_before_it_settles() -> 
     ]
     assert [info.command for info in streams] == ["accuracy", "benchmark"]
     assert _read(reader, streams[1]) == b"".join(_PRINTED["benchmark"])
+
+
+@pytest.mark.asyncio
+async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires_it(
+    tmp_path: Path,
+) -> None:
+    """A stage run on the cluster lands under the same gate owners, through the same tries."""
+    store = _store()
+    tries = TryHandles()
+    stack = await build_stack(tmp_path, stage_output=tries.stage_output(stage_output_opener(store)))
+    executor = RetryingEvaluationExecutor(
+        stack.executor, _RETRIES, InMemoryEvaluationNamespace(), tries=tries
+    )
+
+    await executor.submit(_request(stack.snapshot, "official", _STAGES), handle_id=_HANDLE)
+    await yield_until(
+        lambda: executor.poll(_HANDLE),
+        lambda polled: polled.phase is PollPhase.ENDED,
+        "the measurement to end",
+    )
+    await executor.close()
+
+    reader = reader_of(store, LOG_OWNER)
+    streams = reader.list_streams()
+    assert [(info.owner, info.outcome) for info in streams] == [
+        (GateStage(execution_id=_HANDLE, gate=GateKind.ACCURACY, attempt=1), StreamOutcome.ENDED),
+        (GateStage(execution_id=_HANDLE, gate=GateKind.BENCHMARK, attempt=1), StreamOutcome.ENDED),
+    ]
+    assert [_read(reader, info) for info in streams] == [b"ok", BENCHMARK_OUTPUT.encode()]
 
 
 @pytest.mark.asyncio

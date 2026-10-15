@@ -40,7 +40,8 @@ stage, and passes the entered sink down per call to the runner that writes it:
 | Opener | Called with | Carried by |
 | --- | --- | --- |
 | `vs_runtime` `StartupOutputOpener` | startup stage, command description | `RunEnvironmentRequest.startup_output` |
-| `vs_runtime` `StageOutputOpener` | `StageRun(handle_id, stage_id, purpose, attempt)` | `PollingEvaluationExecutor(stage_output=...)`, through `TryHandles.stage_output` |
+| `vs_runtime` `StageOutputOpener` | `StageRun(handle_id, stage_id, purpose, attempt)` | `PollingEvaluationExecutor(stage_output=...)` and `SemanticSlurmEvaluationExecutor(stage_output=...)`, through `TryHandles.stage_output` |
+| `vs_sandbox` `SlurmStageOutputOpener` | handle id, stage name | `SlurmEvaluationExecutor(stage_output=...)`; the semantic executor adapts its `StageOutputOpener` to it |
 | `vs_runtime` `ToolBuildOutputOpener` | names of the evaluator tools built | `RunEnvironmentRequest.tool_build_output` |
 
 The run's openers live in `vibesys.run.logs`. `stage_output_opener` names a stage
@@ -54,6 +55,20 @@ that is no gate (profiling) opens no stream. `tool_build_output_opener` names a 
 
 Every `CommandRunner.execute` takes `output` and writes each chunk its command prints to
 it as the command runs; the bounded `CommandResult` does not change.
+
+A Slurm stage runs on the cluster, where the batch script writes its stdout and stderr to
+per-stage files (`job.log` holds the job's setup and service output, not a stage's).
+`vs_slurm.api.SlurmFileSource` reads such a file as a `ByteSource` through the runner's
+own transport: one framed remote command per call (`od` for the bytes, `stat` after it
+for identity and size), at most `MAX_REMOTE_READ_BYTES` (256 KiB) a read, so its hex
+form stays under the transport's 1 MiB stream cap. `Cluster.stage_output(handle, index,
+stream)` names a stage's file. `vs_sandbox`'s `StageOutputFollower` is the pump: a
+library cannot import `vs_logs.follow`, and the executor already polls the scheduler, so
+each poll that finds a stage running opens its stream and copies at most four reads per
+file, with no second loop. When the job is collected, the rest comes from the collected
+stage files (no extra remote reads), and each stream ends `ended` when its stage ran to
+an exit status, `failed` when it did not, was cancelled, or its file shrank or was
+replaced. A stage that ran between two polls opens its stream then, or at settle.
 
 `vibesys.run.logs.open_run_log_store(project_root, run_id, threads=...)` opens a run's
 store in `Project.log_directory_for(root, run_id) / "streams"`. Opening a store closes as
@@ -154,4 +169,5 @@ means the chunk reaches the final end. Every byte is read through `ByteSource`.
 | Exit status or signal of a hard death on the tombstone | not built: the detached server is reparented to init, so no vibesys process waits on it and can read its status |
 | Gate stage and tool build openers in the libraries | built |
 | `vibesys` openers for gate stages and tool builds | built (in-process stages; the host environment's hook-driven tool install still discards) |
-| Remote followers (Slurm, SkyPilot, dockerd) | not built |
+| Slurm stage output, live per poll | built |
+| Remote followers (SkyPilot, dockerd) | not built |
