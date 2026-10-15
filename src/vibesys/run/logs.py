@@ -24,17 +24,12 @@ if TYPE_CHECKING:
 RUN_LOG_OWNER = LOG_OWNER
 """The owner adapter a reader of a run's log store decodes owners with."""
 
-<<<<<<< HEAD
-=======
-_STREAMS_DIRECTORY = "streams"
-
 NARRATION_COMMAND = "vibesys"
 """The command a run's narration stream records: the run's own process."""
 
 UNAVAILABLE_LIMITS = LogLimits(max_bytes=1 << 16, segment_bytes=1 << 14)
 """Per-stream bytes kept in memory when the run's store cannot be opened on disk."""
 
->>>>>>> origin/main
 
 def open_run_log_store(
     project_root: Path, run_id: str, *, threads: Threads, limits: LogLimits | None = None
