@@ -5,12 +5,16 @@ passed the trusted accuracy check and measures no worse than main, main becomes 
 refusal, a failed check, a regression or a lost merge leaves it where it was. Each move bumps main's generation, which tells the search that a
 hypothesis started on an older main should rebase. `MainLine` is folded by the run record from
 finished merge workstreams and read by planning; like the record, it is rebuilt by replay.
+
+What a merge must beat is a closed `MainReading`: pending while the input's measurement has not
+landed (nothing is mergeable and main cannot move), no headline when main and the input have no
+headline metric (any verified candidate beats it), or main's headline metric.
 """
 
 from dataclasses import dataclass, field
 
 from vibesys.candidates import api as candidates
-from vibesys.metrics import MetricRow, reading_of
+from vibesys.metrics import MetricRow, MetricSpace, reading_of
 from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone
 from vibesys.orchestration.dynamic.search._parents import ParentOption
 from vibesys.orchestration.dynamic.search._prompts import MergeableRow
@@ -23,6 +27,27 @@ from vibesys.orchestration.dynamic.search._values import (
     ViolationCode,
 )
 from vs_core.api.search import EvidenceKind, RevisionRef, TaskTerms
+
+
+@dataclass(frozen=True)
+class BaselinePending:
+    """The input's measurement has not landed: main has no reading yet to compare a merge with."""
+
+
+@dataclass(frozen=True)
+class NoHeadline:
+    """Main and the input have no headline metric (an unmeasurable input, say): nothing to beat."""
+
+
+@dataclass(frozen=True)
+class Headline:
+    """Main's headline metric now: its own measurement's, else the input's."""
+
+    row: MetricRow
+
+
+type MainReading = BaselinePending | NoHeadline | Headline
+"""What a merge candidate and a merged commit are compared with."""
 
 
 def checkable(terms: TaskTerms) -> bool:
@@ -71,12 +96,21 @@ class MainLine:
     merged: set[tuple[str, str]] = field(default_factory=set)
     """The (hypothesis, revision) candidates a merge already brought into main."""
 
-    def headline(self) -> MetricRow | None:
-        """Main's headline metric now: its own measurement, else the input's."""
+    def reading(self) -> MainReading:
+        """What main measures now: its own measurement, else the input's, else pending."""
         if self.measurement is not None:
-            return self.measurement.metrics[0] if self.measurement.metrics else None
-        seen = None if self.baseline is None else candidates.reading(self.baseline)
-        return seen.metrics[0] if seen is not None and seen.metrics else None
+            metrics = self.measurement.metrics
+        elif self.baseline is None:
+            return BaselinePending()
+        else:
+            seen = candidates.reading(self.baseline)
+            metrics = () if seen is None else seen.metrics
+        return Headline(metrics[0]) if metrics else NoHeadline()
+
+    def headline(self) -> MetricRow | None:
+        """Main's headline metric now, when it has one."""
+        reading = self.reading()
+        return reading.row if isinstance(reading, Headline) else None
 
     def _benchmark_passed(self) -> bool | None:
         if self.measurement is not None:
@@ -91,12 +125,13 @@ class MainLine:
 
         Only the latest verified candidate of a hypothesis is judged; an older revision is not a
         merge candidate at all. Every offered candidate already passed the trusted accuracy check. On a task without a trusted accuracy check nothing is mergeable,
-        since main could never move.
+        since main could never move; while the input's measurement is pending nothing is either,
+        since there is nothing yet to compare a candidate with.
         """
         if not checkable(terms):
             return MergeOptions(checkable=False)
         space = candidates.space_of(terms)
-        main = candidates.measurement(self.headline())
+        main = self.reading()
         rows: list[MergeableRow] = []
         barred: list[tuple[str, ViolationCode]] = []
         for item in offered:
@@ -111,10 +146,12 @@ class MainLine:
                 bar = ViolationCode.MERGE_CANDIDATE_IS_MAIN
             elif key in self.merged:
                 bar = ViolationCode.MERGE_CANDIDATE_MERGED
-            elif not candidates.improves_on(
-                candidates.measurement(headline), main, space=space, when_input_unmeasured=True
-            ):
-                bar = ViolationCode.MERGE_CANDIDATE_NOT_BETTER
+            elif not _beats(headline, main, space):
+                bar = (
+                    ViolationCode.MERGE_BASELINE_PENDING
+                    if isinstance(main, BaselinePending)
+                    else ViolationCode.MERGE_CANDIDATE_NOT_BETTER
+                )
             if bar is not None:
                 barred.append((snapshot.hypothesis_id, bar))
                 continue
@@ -133,6 +170,9 @@ class MainLine:
         Main moves only to a retained commit that passed the trusted accuracy check, whose
         headline metric is not worse than main's and that fails no benchmark check main passed.
         A commit that passed accuracy but measures worse is recorded as regressed and main stays.
+        While the input's measurement is pending there is nothing to compare the commit with, so
+        it is unsound and main stays (a merge's measurement waits for the input, so this is a
+        guard, not a path a run takes).
         """
         start = done.start
         report = done.merge
@@ -142,9 +182,11 @@ class MainLine:
         accuracy_passed = None if accuracy is None else accuracy.passed
         benchmark_passed = None if benchmark is None else benchmark.passed
         metrics = () if benchmark is None else benchmark.metrics
-        main = self.headline()
+        reading = self.reading()
+        main = reading.row if isinstance(reading, Headline) else None
         committed = (
-            report is not None
+            not isinstance(reading, BaselinePending)
+            and report is not None
             and report.outcome is MergeOutcome.MERGED
             and done.failure is None
             and settlement is not None
@@ -232,3 +274,19 @@ class MainLine:
         self.merged |= {
             (source.hypothesis_id, source.revision.revision_id.root) for source in record.candidates
         }
+
+
+def _beats(headline: MetricRow | None, main: MainReading, space: MetricSpace) -> bool:
+    """Whether a candidate's headline metric beats main beyond noise; nothing beats a pending one."""
+    match main:
+        case BaselinePending():
+            return False
+        case NoHeadline():
+            return True
+        case Headline(row=row):
+            return candidates.improves_on(
+                candidates.measurement(headline),
+                candidates.measurement(row),
+                space=space,
+                when_input_unmeasured=False,
+            )

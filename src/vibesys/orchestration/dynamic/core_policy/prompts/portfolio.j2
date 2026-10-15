@@ -99,6 +99,8 @@ Mergeable candidates (passed accuracy and beat main's latest measurement):
 - hypothesis `{{ row.hypothesis_id }}`, revision `{{ rev(row.revision) }}`{% if row.metric %}; {{ metric(row.metric) }}{% endif %}
 
 {% endfor %}
+{% elif baseline_pending %}
+No candidate is mergeable yet: main has no measurement to beat until the input's measurement lands.
 {% else %}
 No candidate is mergeable now: none passed accuracy and beat main's latest measurement.
 {% endif %}

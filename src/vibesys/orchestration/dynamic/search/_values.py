@@ -397,6 +397,7 @@ class ViolationCode(StrEnum):
     MERGE_CANDIDATE_IS_MAIN = "merge-candidate-is-main"
     MERGE_CANDIDATE_MERGED = "merge-candidate-merged"
     MERGE_CANDIDATE_NOT_BETTER = "merge-candidate-not-better"
+    MERGE_BASELINE_PENDING = "merge-baseline-pending"
     MERGE_UNCHECKABLE = "merge-uncheckable"
 
 

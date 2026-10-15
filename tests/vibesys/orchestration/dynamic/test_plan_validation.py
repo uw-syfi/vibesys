@@ -70,12 +70,16 @@ class Record:
     """The (hypothesis, revision) candidates a merge brought into main."""
     main_value: float | None = None
     """Main's measured headline throughput; None leaves main at the input, which has none."""
+    pending: bool = False
+    """Whether the input's measurement is still pending (a record restored before it landed)."""
     terms: TaskTerms = TERMS
 
 
 def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> PlanCheck:
     """Validate ``plan`` against a run record set up as ``record`` says."""
     run = run_record(terms=record.terms)
+    if record.pending:
+        run.baseline = run.main.baseline = None
     for item in record.hypotheses:
         run.hypotheses[item.hypothesis_id] = item
     run.accepted.extend(
@@ -241,6 +245,11 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
         ViolationCode.MERGE_CANDIDATE_NOT_BETTER: (
             portfolio(merge_entry("m", "b")),
             Record(parents=[GOOD_PARENT], main_value=10.0),
+            "workstreams.0.candidates.0",
+        ),
+        ViolationCode.MERGE_BASELINE_PENDING: (
+            portfolio(merge_entry("m", "b")),
+            Record(parents=[GOOD_PARENT], pending=True),
             "workstreams.0.candidates.0",
         ),
         ViolationCode.MERGE_UNCHECKABLE: (

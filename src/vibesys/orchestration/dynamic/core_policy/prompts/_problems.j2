@@ -57,6 +57,8 @@ another merge is running or scheduled; schedule one merge at a time, after the r
 the latest candidate of {{ quoted(item.subject) }} is already merged into main; merge only candidates listed as mergeable
 {%- elif item.code.value == 'merge-candidate-not-better' -%}
 the latest candidate of {{ quoted(item.subject) }} does not beat main's latest measurement; merge only candidates listed as mergeable
+{%- elif item.code.value == 'merge-baseline-pending' -%}
+the input's measurement has not landed, so main has no measurement the latest candidate of {{ quoted(item.subject) }} could be shown to beat; schedule no merge until it lands
 {%- elif item.code.value == 'merge-uncheckable' -%}
 this task has no trusted accuracy check, so a merged commit could never become main; schedule no merge
 {%- elif item.code.value == 'expectation-unknown' -%}

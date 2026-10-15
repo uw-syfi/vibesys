@@ -8,7 +8,7 @@ bound so one long reply cannot crowd out the rest of a prompt.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from vibesys.candidates.api import failure
 from vibesys.orchestration.dynamic.search._prompts import (
@@ -22,8 +22,7 @@ from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
 
 if TYPE_CHECKING:
     from vibesys.candidates.api import Baseline, ReviewEvaluation
-    from vibesys.orchestration.dynamic.search._outcomes import WorkstreamStart
-    from vibesys.orchestration.dynamic.search._values import MergeSource, WorkPlan
+    from vibesys.orchestration.dynamic.search._values import MergeSource, RoundRecord, WorkPlan
     from vs_core.api.search import RevisionRef
 
 CUT = " [cut]"
@@ -65,8 +64,25 @@ def _shown(blocker: Blocker) -> Blocker:
     )
 
 
+class ImplementStart(Protocol):
+    """What an implementation request reads of its scheduled workstream.
+
+    It leaves out the input's measurement the workstream started with: the request is given the
+    input as known when the turn is asked, so a prompt has one baseline to read.
+    """
+
+    @property
+    def plan(self) -> WorkPlan: ...
+    @property
+    def parent(self) -> RevisionRef: ...
+    @property
+    def prior(self) -> RoundRecord | None: ...
+    @property
+    def rebase_onto(self) -> RevisionRef | None: ...
+
+
 def implement_prompt(
-    w: WorkstreamStart, blockers: tuple[Blocker, ...], *, baseline: Baseline | None
+    w: ImplementStart, blockers: tuple[Blocker, ...], *, baseline: Baseline | None
 ) -> ImplementPrompt:
     """One isolated implementation request for the scheduled workstream ``w``.
 
