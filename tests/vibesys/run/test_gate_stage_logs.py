@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -57,14 +56,14 @@ from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.evaluator_tools import CargoGitToolSpec, EvaluatorToolError
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
-from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimThreads, arrival, yield_until
+from vs_sim.api.testing import Gate, ManualClock, SimThreads, arrival, yield_until
+from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_logs.read import LogReader, StreamInfo
     from vs_runtime.api.core import StageOutputOpener
-    from vs_slurm.api import ClusterCollectOutcome, ClusterObservation, ClusterTarget
 
 _HANDLE = "vs-measurement"
 _PRINTED: dict[Literal["accuracy", "benchmark"], tuple[bytes, bytes]] = {
@@ -209,32 +208,29 @@ async def test_each_gate_stage_writes_to_its_gate_stream_before_it_settles() -> 
     assert _read(reader, streams[1]) == b"".join(_PRINTED["benchmark"])
 
 
-class _HeldCollection(ScenarioCluster):
-    """A cluster that holds the execution's own collection until the test releases it.
+class _HeldPacing:
+    """Pacing that holds the executor's own wait for a running job until the test opens it.
 
-    A poll collects an ended job by itself (it passes the state it just read), apart
-    from the execution task that settles the stage streams. Holding the task's
-    collection makes the poll report the end first, as it may under load.
+    The executor's execution task, which opens and settles the stage streams, pauses here
+    between its looks at a running job. A poll collects an ended job by itself, so while
+    the task is held a poll reports the end before the task has collected the job.
     """
 
     def __init__(self) -> None:
-        super().__init__()
-        self.release = threading.Event()
+        self.entered = Gate()
+        self.release = Gate()
 
-    def collect(
-        self,
-        target: ClusterTarget,
-        *,
-        by_job_id: bool = False,
-        observed: ClusterObservation | None = None,
-    ) -> ClusterCollectOutcome:
-        if observed is None:
-            assert self.release.wait(HANG_GUARD_S), "the test never released the collection"
-        return super().collect(target, by_job_id=by_job_id, observed=observed)
+    async def sleep(self, seconds: float) -> None:
+        del seconds
+        self.entered.open()
+        await self.release.wait()
 
 
 async def _execution_ended(executor: RetryingEvaluationExecutor) -> None:
-    """Wait until the execution task has settled the measurement, stage streams included."""
+    """Wait until the execution task has settled the measurement, stage streams included.
+
+    A poll's end is no such proof: the poll collects the job apart from that task.
+    """
     while True:
         observed = await executor.inspect(_HANDLE)
         if observed is not None and observed.state in _TERMINAL:
@@ -248,14 +244,19 @@ async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires
 ) -> None:
     """A stage run on the cluster lands under the same gate owners, through the same tries.
 
-    The host learns the end from a poll, which may come before the execution task has
+    The host learns the end from a poll, which here comes before the execution task has
     collected the job; the streams are whole once that task has settled.
     """
     store = _store()
     tries = TryHandles()
-    cluster = _HeldCollection()
+    cluster = ScenarioCluster()
+    cluster.states = (SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
+    pacing = _HeldPacing()
     stack = await build_stack(
-        tmp_path, cluster, stage_output=tries.stage_output(stage_output_opener(store))
+        tmp_path,
+        cluster,
+        stage_output=tries.stage_output(stage_output_opener(store)),
+        sleeper=pacing,
     )
     executor = RetryingEvaluationExecutor(
         stack.executor, _RETRIES, InMemoryEvaluationNamespace(), tries=tries
@@ -263,15 +264,13 @@ async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires
 
     try:
         await executor.submit(_request(stack.snapshot, "official", _STAGES), handle_id=_HANDLE)
-        await yield_until(
-            lambda: executor.poll(_HANDLE),
-            lambda polled: polled.phase is PollPhase.ENDED,
-            "the measurement to end",
-        )
-        cluster.release.set()
+        await pacing.entered.wait()  # the task saw the job running and paused
+        polled = await executor.poll(_HANDLE)  # the job has completed; the poll collects it
+        assert polled.phase is PollPhase.ENDED
+        pacing.release.open()
         await _execution_ended(executor)
     finally:
-        cluster.release.set()
+        pacing.release.open()
         await executor.close()
 
     reader = reader_of(store, LOG_OWNER)
@@ -302,6 +301,7 @@ async def test_a_slurm_stage_whose_log_disk_is_full_still_measures(tmp_path: Pat
         lambda polled: polled.phase is PollPhase.ENDED,
         "the measurement to end",
     )
+    await _execution_ended(executor)
     await executor.close()
 
     assert ended.terminal is not None
