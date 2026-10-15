@@ -220,6 +220,11 @@ def content_digest(root: Path, *, exclude: str | None = None) -> str:
     ignores modification times, so a new checkout of the same revision has the
     same digest. File contents are streamed, never read whole. ``exclude`` names
     one top-level entry to leave out (the candidate's ``.git``).
+
+    Only regular files, symbolic links and directories count. Special files
+    (FIFOs, sockets, character and block devices) are skipped and never opened:
+    opening a FIFO blocks until a writer appears, and none of them holds
+    content a job could read back.
     """
     normalized = root.resolve(strict=True)
     digest = hashlib.sha256()
@@ -238,10 +243,12 @@ def content_digest(root: Path, *, exclude: str | None = None) -> str:
             kind, payload = "link", hashlib.sha256(os.fsencode(path.readlink())).digest()
         elif stat.S_ISDIR(metadata.st_mode):
             kind, payload = "dir", hashlib.sha256(b"").digest()
-        else:
+        elif stat.S_ISREG(metadata.st_mode):
             kind, executable = "file", bool(metadata.st_mode & _EXECUTABLE)
             with path.open("rb") as stream:
                 payload = hashlib.file_digest(stream, "sha256").digest()
+        else:
+            continue  # a FIFO, socket or device: never opened (see the docstring)
         header = json.dumps([path.relative_to(normalized).as_posix(), kind, executable]).encode(
             "utf-8", errors="surrogateescape"
         )

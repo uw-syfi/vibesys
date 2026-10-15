@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -129,6 +130,23 @@ def test_the_key_sees_the_executable_bit_and_no_other_mode_bit(
         assert key == _key(PROJECT, _request(second), CONFIG)
         (second / name).chmod(modes[1] | (0 if executable else 0o100))
         assert key != _key(PROJECT, _request(second), CONFIG)
+
+
+@given(files=_FILES, name=st.sampled_from(("pipe", "sub/pipe", "z.fifo")))
+@settings(max_examples=examples(pr=6, nightly=60), deadline=None)
+def test_the_key_skips_a_fifo_without_opening_it(files: dict[str, str], name: str) -> None:
+    """Opening a FIFO with no writer blocks forever; the key never opens one.
+
+    A regression hangs here instead of returning.
+    """
+    with TemporaryDirectory() as directory:
+        plain, piped = Path(directory) / "plain", Path(directory) / "piped"
+        _write_tree(plain, files)
+        _write_tree(piped, files)
+        (plain / name).parent.mkdir(parents=True, exist_ok=True)
+        (piped / name).parent.mkdir(parents=True, exist_ok=True)
+        os.mkfifo(piped / name)
+        assert _key(PROJECT, _request(piped), CONFIG) == _key(PROJECT, _request(plain), CONFIG)
 
 
 @given(
