@@ -58,6 +58,11 @@ class FakeEvaluationLedger:
         slot = (self._project, validate_key(key))
         self._store.records.setdefault(slot, {})[(attempt, revision)] = document
 
+    def store_raw_lease(self, key: str, holder: str, document: str) -> None:
+        """Plant a lease's stored bytes, as another build would have written them."""
+        slot = (self._project, validate_key(key))
+        self._store.leases.setdefault(slot, {})[holder] = document
+
     def read(self, key: str) -> LedgerEntry | None:
         """The request's current attempt, the revision it was read at, and its leases."""
         slot = (self._project, validate_key(key))
@@ -73,14 +78,14 @@ class FakeEvaluationLedger:
                 raise LedgerError.unreadable(path, "the record names another key or attempt")
             decoded.append(((attempt, revision), record))
         (_, revision), current = max(decoded, key=lambda item: item[0])
-        return LedgerEntry(
-            current,
-            tuple(
-                decode_lease(text, path=f"{key}/leases/{holder}.json")
-                for holder, text in sorted(leases.items())
-            ),
-            revision,
-        )
+        readable: list[LedgerLease] = []
+        unreadable: list[str] = []
+        for holder, text in sorted(leases.items()):
+            try:
+                readable.append(decode_lease(text, path=f"{key}/leases/{holder}.json"))
+            except LedgerError:
+                unreadable.append(holder)  # a live holder of unknown kind
+        return LedgerEntry(current, tuple(readable), revision, tuple(unreadable))
 
     def claim(self, record: LedgerRecord) -> LedgerRecord:
         """Create the record's attempt unless one exists; return the stored attempt."""

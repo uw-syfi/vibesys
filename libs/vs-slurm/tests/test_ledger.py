@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import math
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -45,6 +46,7 @@ from vs_slurm.api import (
     job_of_handle,
     lease_verdict,
     ledger_operation_id,
+    list_entries,
     settled_state,
     submit_step,
     sweep_unleased,
@@ -290,6 +292,9 @@ def test_a_request_is_unleased_only_after_its_newest_lease_and_the_grace_period(
     if isinstance(verdict, Unleased):
         later = lease_verdict(entry, now=now + 1, grace_seconds=grace)
         assert isinstance(later, Unleased)
+    # A lease this build cannot read holds the request whatever the others say.
+    unknown = dataclasses.replace(entry, unreadable_leases=("run-new",))
+    assert lease_verdict(unknown, now=now, grace_seconds=grace) == Leased(math.inf)
 
 
 def test_a_locator_lands_artifacts_where_the_attaching_request_declares(tmp_path: Path) -> None:
@@ -410,6 +415,24 @@ def test_the_sweep_settles_an_ended_job_and_never_asks_the_cluster_about_it_agai
     forgetful = FakeCluster(clock=ManualClock())
     assert sweep_unleased(world.ledger, forgetful, now=2e9, grace_seconds=0.0) == ()
     assert world.state() is settled
+
+
+def test_a_lease_this_build_cannot_read_holds_the_request_and_blocks_no_removal(
+    tmp_path: Path,
+) -> None:
+    """A newer build's lease is a live holder: never swept, listed, and ``evals remove`` works."""
+    world = _World(tmp_path, status=SlurmJobStatus.RUNNING)
+    world.ledger.store_raw_lease(world.key, "run-new", '{"format_version": 2}\n')
+
+    assert sweep_unleased(world.ledger, world.cluster, now=1e9, grace_seconds=0.0) == ()
+    assert world.state() is LedgerState.SUBMITTED
+    (row,) = list_entries(world.ledger, world.cluster, project=PROJECT, now=1e9).rows
+    assert row.unreadable_leases == ("run-new",)
+    assert row.lease_holders == ("run-a",)
+
+    outcome = withdraw(world.ledger, world.cluster, world.key, reason="removed by operator")
+    assert outcome == Withdrawn(world.key, ledger_operation_id(world.key, 0), world.job_id)
+    assert world.state() is LedgerState.WITHDRAWN
 
 
 def test_the_sweep_never_touches_a_job_outside_the_ledger(tmp_path: Path) -> None:

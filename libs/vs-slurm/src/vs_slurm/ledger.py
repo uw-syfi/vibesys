@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import stat
@@ -425,12 +426,16 @@ class LedgerEntry:
     """The current attempt of a request, the revision it was read at, and every lease on it.
 
     ``revision`` is what a compare-and-swap (``EvaluationLedger.replace``) is
-    against: revision 0 is the claim.
+    against: revision 0 is the claim. ``unreadable_leases`` names the holders
+    whose lease this build cannot decode (a newer ``format_version``, or a
+    damaged file): each counts as a live holder of unknown kind, so the request
+    is never swept as unleased while one stands, and reading never fails on one.
     """
 
     record: LedgerRecord
     leases: tuple[LedgerLease, ...] = ()
     revision: int = 0
+    unreadable_leases: tuple[str, ...] = ()
 
 
 def check_transition(before: LedgerRecord, after: LedgerRecord) -> None:
@@ -623,7 +628,13 @@ LeaseVerdict = Leased | Unleased
 
 
 def lease_verdict(entry: LedgerEntry, *, now: float, grace_seconds: float) -> LeaseVerdict:
-    """Whether a request is still wanted. Pure: the record's creation counts as its first lease."""
+    """Whether a request is still wanted. Pure: the record's creation counts as its first lease.
+
+    A lease this build cannot read holds the request indefinitely: its expiry is
+    unknown, and a newer build's holder may well be alive.
+    """
+    if entry.unreadable_leases:
+        return Leased(math.inf)
     expired_at = max((lease.expires_at for lease in entry.leases), default=entry.record.created_at)
     until = expired_at + grace_seconds
     return Leased(until) if now <= until else Unleased(expired_at)

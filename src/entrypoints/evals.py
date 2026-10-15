@@ -166,6 +166,8 @@ def _line(row: LedgerRow) -> str:
         if row.lease_age_seconds is None
         else f"lease renewed {_duration(row.lease_age_seconds)} ago"
     )
+    if row.unreadable_leases:
+        lease += f", unreadable lease from {', '.join(row.unreadable_leases)}"
     wait = ""
     if row.waiting_seconds is not None:
         wait = f"  waiting {_duration(row.waiting_seconds)}"

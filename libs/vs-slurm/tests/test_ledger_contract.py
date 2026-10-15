@@ -49,6 +49,7 @@ class _Case:
     reopen: Callable[[], EvaluationLedger]
     plant: Callable[[str, int, str], None]
     put_file: Callable[[str, bytes], str]
+    plant_lease: Callable[[str, str, str], None]
 
 
 def _make(implementation: str, root: Path) -> _Case:
@@ -60,7 +61,7 @@ def _make(implementation: str, root: Path) -> _Case:
             fake.put_operator_file(path, content)
             return path
 
-        return _Case(fake, fake.reopen, fake.store_raw, put_fake)
+        return _Case(fake, fake.reopen, fake.store_raw, put_fake, fake.store_raw_lease)
     remote = root / "remote"
     remote.mkdir()
     config = SlurmConfig(
@@ -88,7 +89,12 @@ def _make(implementation: str, root: Path) -> _Case:
         path.write_bytes(content)
         return path.as_posix()
 
-    return _Case(open_ledger(), open_ledger, plant, put_file)
+    def plant_lease(key: str, holder: str, document: str) -> None:
+        directory = remote / "contract" / "ledger" / PROJECT / key / "leases"
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / f"{holder}.json").write_text(document, encoding="utf-8")
+
+    return _Case(open_ledger(), open_ledger, plant, put_file, plant_lease)
 
 
 IMPLEMENTATIONS = ("fake", "remote")
@@ -270,6 +276,29 @@ def test_a_lease_that_cannot_be_read_is_absent_not_malformed(tmp_path: Path) -> 
     entry = case.reopen().read(KEY)
     assert entry is not None
     assert [lease.holder for lease in entry.leases] == ["run-a"]
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        '{"format_version": 2, "holder": "run-new", "lease_kind": "slot"}\n',
+        '{"holder": "run-new"}\n',
+        "not json\n",
+    ],
+    ids=["newer_format", "no_version", "damaged"],
+)
+def test_a_lease_this_build_cannot_decode_is_a_holder_of_unknown_kind(
+    case: _Case, document: str
+) -> None:
+    """One undecodable lease never fails the read: it is reported, and the others stand."""
+    case.ledger.claim(_record())
+    case.ledger.renew(KEY, LedgerLease(holder="run-a", renewed_at=1.0, expires_at=301.0))
+    case.plant_lease(KEY, "run-new", document)
+    entry = case.reopen().read(KEY)
+    assert entry is not None
+    assert [lease.holder for lease in entry.leases] == ["run-a"]
+    assert entry.unreadable_leases == ("run-new",)
+    assert entry.record == _record()
 
 
 def test_leases_are_per_holder_and_released_one_at_a_time(case: _Case) -> None:

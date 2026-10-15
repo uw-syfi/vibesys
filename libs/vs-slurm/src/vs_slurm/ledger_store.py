@@ -77,7 +77,8 @@ class RemoteEvaluationLedger:
 
         A document that vanishes between the listing and the read (a released
         lease) is absent, never malformed: each file is read in one ``cat`` whose
-        failure skips it.
+        failure skips it. A lease that is there but cannot be decoded is reported
+        in ``unreadable_leases``; it never fails the read.
         """
         directory = self._key_directory(key)
         quoted = shlex.quote(directory.as_posix())
@@ -91,11 +92,15 @@ class RemoteEvaluationLedger:
             raise LedgerError.malformed_reply("read")
         revisions: list[tuple[int, int, LedgerRecord]] = []
         leases: list[LedgerLease] = []
+        unreadable: list[str] = []
         for line in lines[:-1]:
             path, _, document = line.partition(" ")
             name = PurePosixPath(path)
             if name.parent.name == "leases":
-                leases.append(decode_lease(document, path=path))
+                try:
+                    leases.append(decode_lease(document, path=path))
+                except LedgerError:
+                    unreadable.append(name.stem)  # a live holder of unknown kind
                 continue
             numbered = _REVISION.fullmatch(name.name)
             if numbered is None:
@@ -108,7 +113,12 @@ class RemoteEvaluationLedger:
         if not revisions:
             return None
         _, revision, current = max(revisions, key=lambda item: item[:2])
-        return LedgerEntry(current, tuple(sorted(leases, key=lambda lease: lease.holder)), revision)
+        return LedgerEntry(
+            current,
+            tuple(sorted(leases, key=lambda lease: lease.holder)),
+            revision,
+            tuple(sorted(unreadable)),
+        )
 
     def claim(self, record: LedgerRecord) -> LedgerRecord:
         """Create the record's attempt unless one exists; return the stored attempt."""

@@ -50,6 +50,8 @@ class LedgerRow(BaseModel):
     attempt: int
     owner: str
     lease_holders: tuple[str, ...]
+    # Holders whose lease this build cannot read (a newer build's); each holds the request.
+    unreadable_leases: tuple[str, ...] = ()
     # Seconds since the newest lease renewal; None when no run holds a lease.
     lease_age_seconds: float | None
     candidate: str | None
@@ -143,6 +145,7 @@ def _row(entry: LedgerEntry, cluster: Cluster, *, now: float) -> LedgerRow:
         attempt=record.attempt,
         owner=record.owner,
         lease_holders=tuple(lease.holder for lease in entry.leases),
+        unreadable_leases=entry.unreadable_leases,
         lease_age_seconds=None if newest is None else max(0.0, now - newest),
         candidate=record.labels.candidate,
         workstream=record.labels.workstream,
