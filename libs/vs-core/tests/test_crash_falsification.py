@@ -56,6 +56,7 @@ from vs_core.api import (
     TurnResult,
     TurnSpec,
     Until,
+    WaitOn,
     initial_state,
     step,
 )
@@ -138,7 +139,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
         state.model_copy(
             update={
                 "records": core.RecordsState(
-                    recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
+                    hosts=(), recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY)
                 )
             }
         ),
@@ -184,6 +185,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
     )
     dispatch = DispatchTurn(request_id=yielded.request_id, scope=scope, turn=original_turn)
     job = OwnedJob(
+        wait=WaitOn(timer=0.0),
         resource_id=resource,
         scope=scope,
         plan=plan,
@@ -241,6 +243,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                 ),
             ),
             "records": core.RecordsState(
+                hosts=(),
                 recovery=core.RecoveryBarrier(phase=core.RecoveryPhase.READY),
                 records=(
                     core.RequestRecord(
@@ -252,6 +255,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         sequence=yielded.sequence,
                         observation=yielded,
                         until=core.Until(at=100.0),
+                        addressed_by=(),
                     ),
                     core.RequestRecord(
                         request_id=job_request,
@@ -260,6 +264,7 @@ def suspended_run() -> tuple[CoreState, TurnSpec, JobObserved]:
                         lifecycle=core.LifecycleClass.OWNED_JOB,
                         phase=core.RequestPhase.DISPATCHED,
                         until=core.Until(at=10.0),
+                        addressed_by=(),
                     ),
                 ),
             ),

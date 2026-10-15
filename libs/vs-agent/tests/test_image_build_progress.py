@@ -8,6 +8,7 @@ from hypothesis import strategies as st
 
 from vs_agent.api.images import ImageBuildProgress, TaskImageBuildError, agent_image
 from vs_agent.api.testing import FakeDockerBuildRunner, docker_result
+from vs_sim.api.testing import ManualClock
 
 _TOTAL = 14
 
@@ -19,7 +20,12 @@ def _step_line(sequence: int, step: int, total: int, instruction: str) -> str:
 def _build(stderr: str, *, returncode: int = 0) -> list[ImageBuildProgress]:
     observed: list[ImageBuildProgress] = []
     runner = FakeDockerBuildRunner(build_result=docker_result(returncode=returncode, stderr=stderr))
-    agent_image("python:3.12-bookworm", command_runner=runner, on_progress=observed.append)
+    agent_image(
+        "python:3.12-bookworm",
+        command_runner=runner,
+        on_progress=observed.append,
+        clock=ManualClock(),
+    )
     return observed
 
 
@@ -77,7 +83,12 @@ def test_a_failed_build_still_reports_the_steps_it_reached() -> None:
     )
 
     with pytest.raises(TaskImageBuildError, match="ERROR: process did not complete"):
-        agent_image("python:3.12-bookworm", command_runner=runner, on_progress=observed.append)
+        agent_image(
+            "python:3.12-bookworm",
+            command_runner=runner,
+            on_progress=observed.append,
+            clock=ManualClock(),
+        )
 
     assert observed == [ImageBuildProgress(done=1, total=3, label="RUN npm install")]
 
@@ -87,4 +98,6 @@ def test_a_build_with_no_sink_streams_nothing() -> None:
         build_result=docker_result(stderr=_step_line(6, 2, 3, "RUN npm install"))
     )
 
-    assert agent_image("python:3.12-bookworm", command_runner=runner).startswith("sha256:")
+    assert agent_image(
+        "python:3.12-bookworm", command_runner=runner, clock=ManualClock()
+    ).startswith("sha256:")

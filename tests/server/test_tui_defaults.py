@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.server.support import build_server_parts
+from tests.server.support import REQUEST_TIME, build_server_parts
 
 from entrypoints.server import _tui_defaults_from_argv
 from server.api.protocol import TuiDefaultsQuery
@@ -31,7 +31,7 @@ def _defaults(theme: TuiTheme) -> InteractiveSetupDefaults:
 def test_api_answers_with_provider_defaults() -> None:
     parts = build_server_parts(tui_defaults=lambda: _defaults(TuiTheme.SOLARIZED_LIGHT))
 
-    response = parts.api.execute(TuiDefaultsQuery())
+    response = parts.api.execute(TuiDefaultsQuery(timestamp=REQUEST_TIME))
 
     assert response.ok
     assert response.tui_defaults is not None
@@ -48,15 +48,15 @@ def test_api_resolves_defaults_on_demand_and_caches_them() -> None:
     parts = build_server_parts(tui_defaults=provide)
     assert calls == []
 
-    first = parts.api.execute(TuiDefaultsQuery())
-    second = parts.api.execute(TuiDefaultsQuery())
+    first = parts.api.execute(TuiDefaultsQuery(timestamp=REQUEST_TIME))
+    second = parts.api.execute(TuiDefaultsQuery(timestamp=REQUEST_TIME))
 
     assert calls == [1]
     assert first.tui_defaults == second.tui_defaults
 
 
 def test_api_without_provider_reports_no_defaults() -> None:
-    response = build_server_parts().api.execute(TuiDefaultsQuery())
+    response = build_server_parts().api.execute(TuiDefaultsQuery(timestamp=REQUEST_TIME))
     assert response.ok
     assert response.tui_defaults is None
 
@@ -68,7 +68,7 @@ def test_failing_provider_surfaces_as_request_error() -> None:
 
     parts = build_server_parts(tui_defaults=provide)
     with pytest.raises(FileNotFoundError):
-        parts.api.execute(TuiDefaultsQuery())
+        parts.api.execute(TuiDefaultsQuery(timestamp=REQUEST_TIME))
 
 
 def test_provider_resolves_theme_from_launch_directory(

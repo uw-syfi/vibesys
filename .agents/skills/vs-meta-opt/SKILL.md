@@ -1,6 +1,8 @@
 ---
 name: vs-meta-opt
 description: Run and audit long-lived VibeSys meta-optimization campaigns that improve VibeSys as an optimizer rather than directly optimizing its bespoke candidate. Use when Codex should launch or resume VibeSys with a specified input, monitor every completed round, use independent counterfactual reviews when a trajectory plateaus or becomes uncertain, diagnose ineffective agent-system behavior, implement and commit VibeSys changes, compare later trajectory windows, and repeat within round, time, cost, or intervention budgets.
+metadata:
+  kind: workflow
 ---
 
 # VS Meta Opt

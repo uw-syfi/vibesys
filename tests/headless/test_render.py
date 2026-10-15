@@ -1,5 +1,6 @@
 """Tests for the headless terminal renderer (synthetic events in, text out)."""
 
+from datetime import UTC, datetime
 from io import StringIO
 
 from headless.render import HeadlessRenderer, TodoDisplay
@@ -46,7 +47,9 @@ def _render(
         max_text_len=max_text_len,
     )
     for event_type, data in payloads:
-        renderer.handle(make_core_event(event_type, data=data))
+        renderer.handle(
+            make_core_event(event_type, data=data, timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
     return out.getvalue()
 
 
@@ -58,7 +61,11 @@ def _render_event(
 ) -> str:
     out = StringIO()
     renderer = HeadlessRenderer(out=out)
-    renderer.handle(make_core_event(event_type, data=data, status=status))
+    renderer.handle(
+        make_core_event(
+            event_type, data=data, status=status, timestamp=datetime(2026, 1, 1, tzinfo=UTC)
+        )
+    )
     return out.getvalue()
 
 
@@ -457,5 +464,7 @@ class TestIgnoredEvents:
     def test_event_without_data_produces_no_output(self) -> None:
         out = StringIO()
         renderer = HeadlessRenderer(out=out)
-        renderer.handle(make_core_event(CoreEventType.RUN_STARTED))
+        renderer.handle(
+            make_core_event(CoreEventType.RUN_STARTED, timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
         assert out.getvalue() == ""

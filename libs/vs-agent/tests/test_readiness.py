@@ -13,7 +13,14 @@ from pathlib import Path
 
 import agentshim
 import pytest
-from agentshim.testing import FakeExecutor, FakeRun, probe_executor, probe_run, scripted_turn
+from agentshim.testing import (
+    FakeClock,
+    FakeExecutor,
+    FakeRun,
+    probe_executor,
+    probe_run,
+    scripted_turn,
+)
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -33,6 +40,7 @@ from vs_agent.client import AgentDiagnosticLog
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
+from vs_sim.api.testing import ManualClock, SimThreads
 
 PROVIDERS = ("claude", "codex", "gemini", "opencode")
 ROLES = ("planner", "implementer", "judge")
@@ -68,7 +76,11 @@ def _spec(root: Path, provider: str, role: str = "implementer") -> AgentSessionS
 
 def _launcher(provider: str, fake: FakeExecutor, home: Path) -> ConfinedSessionLauncher:
     return ConfinedSessionLauncher(
-        provider=provider, executor_factory=lambda: fake, launcher_env=lambda: _env_of(home)
+        provider=provider,
+        executor_factory=lambda: fake,
+        launcher_env=lambda: _env_of(home),
+        clock=FakeClock(),
+        threads=SimThreads(),
     )
 
 
@@ -141,6 +153,8 @@ def _client(provider: str, fake: FakeExecutor, home: Path) -> tuple[AgentClient,
         provider=provider,
         diagnostic_log=AgentDiagnosticLog(log),
         check_readiness=True,
+        clock=ManualClock(),
+        threads=SimThreads(),
     )
     return client, log
 
@@ -240,8 +254,12 @@ def test_a_failure_is_not_remembered_so_a_fixed_environment_is_rechecked(
         provider=provider,
         executor_factory=lambda: current[0],
         launcher_env=lambda: _env_of(home),
+        clock=FakeClock(),
+        threads=SimThreads(),
     )
-    client = AgentClient(launcher, provider=provider, check_readiness=True)
+    client = AgentClient(
+        launcher, provider=provider, check_readiness=True, clock=ManualClock(), threads=SimThreads()
+    )
 
     with pytest.raises(ProviderNotReadyError):
         _invoke(client, tmp_path)

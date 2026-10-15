@@ -34,19 +34,20 @@ import stat
 import subprocess
 import sys
 import tarfile
-import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
-from contextlib import contextmanager, suppress
+from collections.abc import Callable
+from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Sequence
+    from collections.abc import Generator, Sequence
 
 _ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 _MODAL_WEB_URL = re.compile(r"https://[a-zA-Z0-9.-]+\.modal\.run")
@@ -85,15 +86,17 @@ _KEEPWARM_INTERVAL_SECONDS = 30.0
 def _runtime_dir() -> Path:
     """Return this process's private per-user runtime directory.
 
-    Prefers ``XDG_RUNTIME_DIR``, which is already private per user by POSIX
-    convention; otherwise falls back to a uid-suffixed directory under the
-    system temp directory so unrelated users sharing a host cannot collide
-    on the evaluator's lock or lease files.
+    This helper is mounted alone into the agent container and cannot import
+    ``vs_project``, so it restates ``vs_project.api.user_runtime_root`` (an
+    absolute ``XDG_RUNTIME_DIR`` else ``/tmp/vibesys-<uid>``, never the
+    ``TMPDIR``-dependent temp directory) and ``ensure_private_directory`` (in
+    ``_ensure_runtime_dir``). ``tests/vibesys/sandbox/test_private_directory_rule.py``
+    runs both on the same directories and requires the same verdict.
     """
-    xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
-    if xdg_runtime_dir:
+    xdg_runtime_dir = os.environ.get("XDG_RUNTIME_DIR", "")
+    if xdg_runtime_dir and Path(xdg_runtime_dir).is_absolute():
         return Path(xdg_runtime_dir) / "vibesys"
-    return Path(tempfile.gettempdir()) / f"vibesys-{os.getuid()}"
+    return Path("/tmp") / f"vibesys-{os.getuid()}"  # noqa: S108  # lint-waiver: LW-178203 [S108]; a short, node-local, session-independent path, as `vs_project.api.user_runtime_root` fixes it; `tempfile.gettempdir()` follows `$TMPDIR`
 
 
 _LOCK_PATH = _runtime_dir() / "modal-evaluator.lock"
@@ -253,14 +256,73 @@ def extract_modal_app_identifier(output: str) -> str:
     return matches[-1]
 
 
-def recent_modal_logs(app_identifier: str, *, workspace: str) -> str:
+@dataclass(frozen=True)
+class ProgramResult:
+    """How a program that ran to completion ended, with its decoded output."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+class Programs(Protocol):
+    """Runs a program to completion with its text output captured.
+
+    ``run`` raises ``OSError`` when the program cannot start and ``TimeoutError`` (an
+    ``OSError``) once it outlives ``timeout`` seconds; ``None`` waits for it to end.
+    """
+
+    def run(self, argv: Sequence[str], *, cwd: str, timeout: float | None) -> ProgramResult:
+        """Run ``argv`` in ``cwd`` and return how it ended."""
+        ...
+
+
+class _SubprocessPrograms:
+    """The operating system's programs, for ``main`` alone.
+
+    This helper runs as one stdlib-only file in the run environment, where ``vs_sim``'s
+    ``OsProcesses`` is not importable; everything below ``main`` takes its programs.
+    """
+
+    def run(self, argv: Sequence[str], *, cwd: str, timeout: float | None) -> ProgramResult:
+        """Run ``argv`` with ``subprocess``; a timeout kills it and raises ``TimeoutError``."""
+        try:
+            result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010240 [S603]; every caller passes the resolved Modal CLI and fixed argv built by `_modal_cli`.
+                list(argv), cwd=cwd, capture_output=True, text=True, check=False, timeout=timeout
+            )
+        except subprocess.TimeoutExpired as exc:
+            message = f"{argv[0]} timed out after {timeout:g} seconds"
+            raise TimeoutError(message) from exc
+        return ProgramResult(result.returncode, result.stdout, result.stderr)
+
+
+HealthProbe = Callable[[str, float], int]
+"""``probe(url, timeout)`` returns the HTTP status the URL answers, or raises ``OSError``."""
+
+KeepWarm = Callable[[str], AbstractContextManager[object]]
+"""``keep_warm(base_url)`` keeps a deployment's idle timer reset while its context is open."""
+
+
+@dataclass(frozen=True)
+class ModalHost:
+    """The effects the evaluator performs on its host; ``main`` alone builds the real ones."""
+
+    clock: WaitClock
+    programs: Programs
+    health: HealthProbe
+    keep_warm: KeepWarm
+
+
+def _modal_cli(*arguments: str) -> tuple[str, ...]:
+    """The argv that runs the project's Modal CLI with ``arguments``."""
+    return (shutil.which("uv") or "uv", "run", "modal", *arguments)
+
+
+def recent_modal_logs(app_identifier: str, *, workspace: str, programs: Programs) -> str:
     """Fetch a bounded recent-log excerpt for a failed readiness check."""
     try:
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010240 [S603]; Modal logs uses a resolved CLI and fixed read-only argv with a parsed app identifier.
-            [
-                shutil.which("uv") or "uv",
-                "run",
-                "modal",
+        result = programs.run(
+            _modal_cli(
                 "app",
                 "logs",
                 app_identifier,
@@ -269,14 +331,11 @@ def recent_modal_logs(app_identifier: str, *, workspace: str) -> str:
                 "--tail",
                 "200",
                 "--timestamps",
-            ],
+            ),
             cwd=workspace,
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=30,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except OSError as exc:
         return f"Could not fetch Modal logs: {type(exc).__name__}: {exc}"
 
     output = _ANSI_ESCAPE.sub("", f"{result.stdout}\n{result.stderr}".strip())
@@ -300,7 +359,11 @@ class WaitClock(Protocol):
 
 
 class MonotonicWaits:
-    """The operating system's monotonic clock and real sleeping."""
+    """The operating system's monotonic clock and real sleeping, for ``main`` alone.
+
+    This helper runs as one stdlib-only file in the run environment, where ``vs_sim``'s
+    real clocks are not importable; everything below ``main`` takes its clock.
+    """
 
     def now(self) -> float:
         """Monotonic seconds."""
@@ -311,9 +374,13 @@ class MonotonicWaits:
         time.sleep(seconds)
 
 
-def _health_status(health_url: str, timeout_seconds: float) -> int:
-    """The HTTP status ``/health`` answers within ``timeout_seconds``; ``OSError`` otherwise."""
-    with urllib.request.urlopen(health_url, timeout=timeout_seconds) as response:  # noqa: S310  # lint-waiver: LW-010210 [S310]; the endpoint is restricted to a verified Modal HTTPS host.
+def _urllib_health_status(health_url: str, timeout_seconds: float) -> int:
+    """The HTTP status ``health_url`` answers within ``timeout_seconds``, for ``main`` alone.
+
+    Raises ``OSError`` otherwise; ``urllib.error.URLError``, raised for an error status
+    too, is one.
+    """
+    with urllib.request.urlopen(health_url, timeout=timeout_seconds) as response:  # noqa: S310  # lint-waiver: LW-010210 [S310]; callers pass `_modal_health_url`, restricted to a verified Modal HTTPS host.
         return response.status
 
 
@@ -321,22 +388,21 @@ def wait_for_health(
     base_url: str,
     *,
     timeout_seconds: float,
-    clock: WaitClock | None = None,
-    probe: Callable[[str, float], int] = _health_status,
+    clock: WaitClock,
+    probe: HealthProbe,
 ) -> None:
     """Wait until the deployed candidate returns HTTP 200 from ``/health``.
 
     Gives up once ``timeout_seconds`` pass on ``clock``: no probe or pause runs past that
     deadline. ``probe(url, timeout)`` returns the status or raises ``OSError``.
     """
-    clock = clock or MonotonicWaits()
     deadline = clock.now() + timeout_seconds
     health_url = _modal_health_url(base_url)
     last_error = "no response"
     while (remaining := deadline - clock.now()) > 0:
         try:
             status = probe(health_url, min(_HEALTH_PROBE_TIMEOUT_SECONDS, remaining))
-        except (OSError, urllib.error.URLError) as exc:
+        except OSError as exc:
             last_error = f"{type(exc).__name__}: {exc}"
         else:
             if health_ready(status):
@@ -348,12 +414,11 @@ def wait_for_health(
     raise TimeoutError(message)
 
 
-def _healthy_now(base_url: str) -> bool:
+def _healthy_now(base_url: str, health: HealthProbe) -> bool:
     """Return whether an existing deployment is immediately reusable."""
     try:
-        with urllib.request.urlopen(_modal_health_url(base_url), timeout=5) as response:  # noqa: S310  # lint-waiver: LW-010211 [S310]; readiness probes only contact a verified Modal HTTPS host.
-            return health_ready(response.status)
-    except (OSError, urllib.error.URLError, ValueError):
+        return health_ready(health(_modal_health_url(base_url), 5))
+    except (OSError, ValueError):
         return False
 
 
@@ -402,18 +467,13 @@ def _release_requested() -> bool:
     return os.environ.get(_RELEASE_DEPLOYMENT_ENV, "").lower() in {"1", "true", "yes"}
 
 
-def _stop_modal_app(app_identifier: str, *, workspace: str) -> bool:
+def _stop_modal_app(app_identifier: str, *, workspace: str, programs: Programs) -> bool:
     """Stop a deployed app without prompting, returning whether it succeeded."""
     try:
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010241 [S603]; stop receives a parsed deployment identifier and fixed non-shell argv.
-            [shutil.which("uv") or "uv", "run", "modal", "app", "stop", app_identifier, "--yes"],
-            cwd=workspace,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
+        result = programs.run(
+            _modal_cli("app", "stop", app_identifier, "--yes"), cwd=workspace, timeout=60
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+    except OSError as exc:
         print(  # noqa: T201  # lint-waiver: LW-000212 [T201]; Modal CLI teardown failure is reported to the user.
             f"Could not stop Modal app {app_identifier}: {type(exc).__name__}: {exc}",
             file=sys.stderr,
@@ -430,10 +490,10 @@ def _stop_modal_app(app_identifier: str, *, workspace: str) -> bool:
     return False
 
 
-def _retire_deployment(lease: _DeploymentLease, *, workspace: str) -> None:
+def _retire_deployment(lease: _DeploymentLease, *, workspace: str, programs: Programs) -> None:
     """Best-effort stop and forget a lease that must not be reused."""
     if lease.app_identifier is not None:
-        _stop_modal_app(lease.app_identifier, workspace=workspace)
+        _stop_modal_app(lease.app_identifier, workspace=workspace, programs=programs)
     _DEPLOYMENT_LEASE_PATH.unlink(missing_ok=True)
 
 
@@ -728,9 +788,9 @@ def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; th
     workspace: str,
     base_url: str,
     timeout_seconds: float = _CONTAINER_DISCOVERY_TIMEOUT_SECONDS,
-    clock: WaitClock | None = None,
-    list_containers: Callable[[str], ContainerListing | ListingFailed] | None = None,
-    warm: Callable[[str], bool] | None = None,
+    clock: WaitClock,
+    list_containers: Callable[[str], ContainerListing | ListingFailed],
+    warm: Callable[[str], object],
 ) -> str:
     """Return the id of a running container for the deployed app.
 
@@ -739,9 +799,6 @@ def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; th
     Gives up once ``timeout_seconds`` pass on ``clock``, after a last listing at that
     deadline; no pause runs past it.
     """
-    clock = clock or MonotonicWaits()
-    list_containers = list_containers or _list_containers
-    warm = warm or _healthy_now
     deadline = clock.now() + timeout_seconds
     life: ContainerLife = ContainerUnknown()
     last_error = "no container listed"
@@ -761,23 +818,16 @@ def find_app_container(  # noqa: PLR0913  # lint-waiver: LW-241402 [PLR0913]; th
             clock.sleep(min(_CONTAINER_POLL_SECONDS, remaining))
 
 
-def _list_containers(workspace: str) -> ContainerListing | ListingFailed:
+def _list_containers(workspace: str, *, programs: Programs) -> ContainerListing | ListingFailed:
     """Run ``modal container list --json`` and parse it, without interpreting the entries."""
     try:
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010242 [S603]; list is a fixed read-only Modal CLI operation with no user command string.
-            [shutil.which("uv") or "uv", "run", "modal", "container", "list", "--json"],
-            cwd=workspace,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-        )
+        result = programs.run(_modal_cli("container", "list", "--json"), cwd=workspace, timeout=60)
         if result.returncode != 0:
             return ListingFailed(
                 f"container list exited {result.returncode}: {result.stderr.strip()}"
             )
         entries = json.loads(result.stdout)
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError) as exc:
         return ListingFailed(f"{type(exc).__name__}: {exc}")
     if not isinstance(entries, list):
         return ListingFailed("container list JSON is not a list")
@@ -891,37 +941,44 @@ def _parse_exec_output(stdout: str) -> tuple[ExecLife, dict[str, bytes], str]:
     return life, files, "\n".join(passthrough)
 
 
-class _DeploymentKeepWarm:
-    """Probe the public endpoint periodically while the colocated run executes.
+class _ThreadKeepWarm:
+    """Probe the public endpoint from a thread while the colocated run executes, for ``main`` alone.
 
     Colocated traffic never crosses Modal ingress, so it does not reset the
     app's idle scaledown timer; without these probes Modal may retire the
     serving container mid-measurement.
     """
 
-    def __init__(self, base_url: str) -> None:
+    def __init__(self, base_url: str, health: HealthProbe) -> None:
+        """Keep ``base_url`` warm by probing it with ``health``."""
         self._base_url = base_url
+        self._health = health
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True)
 
-    def __enter__(self) -> _DeploymentKeepWarm:
+    def __enter__(self) -> _ThreadKeepWarm:
+        """Start probing."""
         self._thread.start()
         return self
 
     def __exit__(self, *exc_info: object) -> None:
+        """Stop probing, waiting a bounded time for the thread."""
         self._stop.set()
         self._thread.join(timeout=10)
 
     def _run(self) -> None:
         while not self._stop.wait(_KEEPWARM_INTERVAL_SECONDS):
-            _healthy_now(self._base_url)
+            _healthy_now(self._base_url, self._health)
 
 
-def _execute_colocated(
+def _execute_colocated(  # noqa: PLR0913  # lint-waiver: LW-918417 [PLR0913]; the command, its workspace and deployment, the host effects, and two staging inputs.
+    # > A request object would be built only to unpack here (both callers hold the values
+    # > separately), and discovering the container in each caller would duplicate the wait.
     command: Sequence[str],
     *,
     workspace: str,
     deployment: tuple[str, str],
+    host: ModalHost,
     setup_command: Sequence[str] | None = None,
     evaluator_package_root: str | None = None,
 ) -> int:
@@ -942,32 +999,22 @@ def _execute_colocated(
         app_identifier,
         workspace=workspace,
         base_url=base_url,
+        clock=host.clock,
+        list_containers=partial(_list_containers, programs=host.programs),
+        warm=partial(_healthy_now, health=host.health),
     )
     script = _bootstrap_script(
         command,
         plan.output_paths,
         setup_command=setup_command,
     )
-    with _DeploymentKeepWarm(base_url):
-        result = subprocess.run(  # noqa: S603  # lint-waiver: LW-010243 [S603]; the in-container command is explicitly composed and passed after `sh -c` inside Modal's container API.
-            [
-                shutil.which("uv") or "uv",
-                "run",
-                "modal",
-                "container",
-                "exec",
-                container_id,
-                "--",
-                "sh",
-                "-c",
-                script,
-                "vibesys-eval",
-                *chunks,
-            ],
+    with host.keep_warm(base_url):
+        result = host.programs.run(
+            _modal_cli(
+                "container", "exec", container_id, "--", "sh", "-c", script, "vibesys-eval", *chunks
+            ),
             cwd=workspace,
-            capture_output=True,
-            text=True,
-            check=False,
+            timeout=None,
         )
     life, files, passthrough = _parse_exec_output(result.stdout)
     if passthrough:
@@ -989,13 +1036,18 @@ def _execute_colocated(
 def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This installed CLI helper accepts argv, workspace, entrypoint, readiness timeout, trusted setup argv, and evaluator package root as separate caller controls.
     command: Sequence[str],
     *,
+    host: ModalHost,
     workspace: str = "/workspace",
     entrypoint: str = "main.py",
     readiness_timeout_seconds: float = 90,
     setup_command: Sequence[str] | None = None,
     evaluator_package_root: str | None = None,
 ) -> int:
-    """Deploy the candidate and run ``command`` inside its serving container."""
+    """Deploy the candidate and run ``command`` inside its serving container.
+
+    ``host`` runs the Modal CLI, probes the deployment, and times and paces the
+    readiness and container-discovery waits.
+    """
     if not command:
         message = "missing evaluator command after '--'"
         raise ValueError(message)
@@ -1014,6 +1066,7 @@ def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This in
     with _exclusive_evaluation():
         return _run_evaluator_unlocked(
             command,
+            host=host,
             workspace=workspace,
             entrypoint=entrypoint,
             readiness_timeout_seconds=readiness_timeout_seconds,
@@ -1025,6 +1078,7 @@ def run_evaluator(  # noqa: PLR0913  # lint-waiver: LW-011128 [PLR0913]; This in
 def _execute_reused_candidate(
     command: Sequence[str],
     *,
+    host: ModalHost,
     workspace: str,
     setup_command: Sequence[str] | None,
     evaluator_package_root: str | None,
@@ -1038,9 +1092,9 @@ def _execute_reused_candidate(
     if (
         lease.candidate_revision != candidate_revision
         or lease.app_identifier is None
-        or not _healthy_now(lease.base_url)
+        or not _healthy_now(lease.base_url, host.health)
     ):
-        _retire_deployment(lease, workspace=workspace)
+        _retire_deployment(lease, workspace=workspace, programs=host.programs)
         return None
 
     print(  # noqa: T201  # lint-waiver: LW-000218 [T201]; reusing a healthy deployment is reported to the invoking CLI.
@@ -1052,6 +1106,7 @@ def _execute_reused_candidate(
             command,
             workspace=workspace,
             deployment=(lease.base_url, lease.app_identifier),
+            host=host,
             setup_command=setup_command,
             evaluator_package_root=evaluator_package_root,
         )
@@ -1060,11 +1115,11 @@ def _execute_reused_candidate(
         return 1
     finally:
         if _release_requested():
-            _retire_deployment(lease, workspace=workspace)
+            _retire_deployment(lease, workspace=workspace, programs=host.programs)
 
 
 def _deploy_and_wait_for_health(
-    *, workspace: str, entrypoint: str, readiness_timeout_seconds: float
+    *, workspace: str, entrypoint: str, readiness_timeout_seconds: float, host: ModalHost
 ) -> tuple[str, str] | int:
     try:
         deployment_path = _deployment_path(workspace, entrypoint)
@@ -1072,12 +1127,8 @@ def _deploy_and_wait_for_health(
         print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000220 [T201]; setup failure diagnostics are reported to the invoking CLI.
         return 1
 
-    deploy = subprocess.run(  # noqa: S603  # lint-waiver: LW-010244 [S603]; deploy runs the generated trusted deployment file through a resolved Modal CLI.
-        [shutil.which("uv") or "uv", "run", "modal", "deploy", str(deployment_path)],
-        cwd=workspace,
-        capture_output=True,
-        text=True,
-        check=False,
+    deploy = host.programs.run(
+        _modal_cli("deploy", str(deployment_path)), cwd=workspace, timeout=None
     )
     deploy_output = f"{deploy.stdout}\n{deploy.stderr}".strip()
     if deploy_output:
@@ -1089,7 +1140,12 @@ def _deploy_and_wait_for_health(
     try:
         base_url = extract_modal_web_url(deploy_output)
         app_identifier = extract_modal_app_identifier(deploy_output)
-        wait_for_health(base_url, timeout_seconds=readiness_timeout_seconds)
+        wait_for_health(
+            base_url,
+            timeout_seconds=readiness_timeout_seconds,
+            clock=host.clock,
+            probe=host.health,
+        )
     except (TimeoutError, ValueError) as exc:
         print(f"Modal evaluator setup failed: {exc}", file=sys.stderr)  # noqa: T201  # lint-waiver: LW-000222 [T201]; setup failure diagnostics are reported to the invoking CLI.
         if app_identifier is None:
@@ -1097,10 +1153,11 @@ def _deploy_and_wait_for_health(
                 app_identifier = extract_modal_app_identifier(deploy_output)
         if app_identifier is not None:
             print(  # noqa: T201  # lint-waiver: LW-000223 [T201]; recent Modal logs are shown to the invoking CLI after readiness failure.
-                f"Recent Modal logs:\n{recent_modal_logs(app_identifier, workspace=workspace)}",
+                "Recent Modal logs:\n"
+                f"{recent_modal_logs(app_identifier, workspace=workspace, programs=host.programs)}",
                 file=sys.stderr,
             )
-            _stop_modal_app(app_identifier, workspace=workspace)
+            _stop_modal_app(app_identifier, workspace=workspace, programs=host.programs)
         return 1
     return base_url, app_identifier
 
@@ -1108,6 +1165,7 @@ def _deploy_and_wait_for_health(
 def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913]; This phase shares the validated argv/path/setup values across fresh and reused deployments; another request wrapper would duplicate run_evaluator's CLI options.
     command: Sequence[str],
     *,
+    host: ModalHost,
     workspace: str,
     entrypoint: str,
     readiness_timeout_seconds: float,
@@ -1117,6 +1175,7 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
     candidate_revision = os.environ.get(_CANDIDATE_REVISION_ENV)
     reused_result = _execute_reused_candidate(
         command,
+        host=host,
         workspace=workspace,
         setup_command=setup_command,
         evaluator_package_root=evaluator_package_root,
@@ -1128,6 +1187,7 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
         workspace=workspace,
         entrypoint=entrypoint,
         readiness_timeout_seconds=readiness_timeout_seconds,
+        host=host,
     )
     if isinstance(deployed, int):
         return deployed
@@ -1141,6 +1201,7 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
             command,
             workspace=workspace,
             deployment=deployed,
+            host=host,
             setup_command=setup_command,
             evaluator_package_root=evaluator_package_root,
         )
@@ -1155,9 +1216,9 @@ def _run_evaluator_unlocked(  # noqa: PLR0913  # lint-waiver: LW-011129 [PLR0913
                 and lease is not None
                 and lease.candidate_revision == candidate_revision
             ):
-                _retire_deployment(lease, workspace=workspace)
+                _retire_deployment(lease, workspace=workspace, programs=host.programs)
             else:
-                _stop_modal_app(app_identifier, workspace=workspace)
+                _stop_modal_app(app_identifier, workspace=workspace, programs=host.programs)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -1179,6 +1240,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         command = command[1:]
     return run_evaluator(
         command,
+        host=ModalHost(
+            clock=MonotonicWaits(),
+            programs=_SubprocessPrograms(),
+            health=_urllib_health_status,
+            keep_warm=partial(_ThreadKeepWarm, health=_urllib_health_status),
+        ),
         workspace=args.workspace,
         entrypoint=args.entrypoint,
         readiness_timeout_seconds=args.readiness_timeout_seconds,

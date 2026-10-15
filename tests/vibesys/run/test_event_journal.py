@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 
 from vibesys.events import (
     AgentExecutionStartedData,
@@ -18,6 +19,8 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStarted,
     AgentExecutionStatus,
 )
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,7 +32,13 @@ def test_current_round_event_requires_explicit_profile_outcome() -> None:
 
 
 def test_a_semantic_event_uses_the_unified_durable_stream(tmp_path: Path) -> None:
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     try:
         integration.attach(tmp_path, run_id="run-winner")
         data = WinnerSelectedData(selection="candidate", revision="abc123", settlement_id="s-1")
@@ -44,7 +53,13 @@ def test_a_semantic_event_uses_the_unified_durable_stream(tmp_path: Path) -> Non
 
 
 def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> None:
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     try:
         integration.attach(tmp_path, run_id="run-1")
         integration.agent_execution_event(
@@ -86,8 +101,20 @@ def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> 
 
 
 def test_local_integrations_own_isolated_agent_event_streams(tmp_path: Path) -> None:
-    first = LocalRunIntegration()
-    second = LocalRunIntegration()
+    first = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
+    second = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     try:
         first.attach(tmp_path / "first", run_id="run-1")
         second.attach(tmp_path / "second", run_id="run-2")

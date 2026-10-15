@@ -34,14 +34,15 @@ import threading
 from collections import deque
 from typing import TYPE_CHECKING, Self, cast
 
+from vs_sim.concurrency import OsThreadLocal
 from vs_sim.randomness import SeededRandom
-from vs_sim.virtual import VirtualClock
+from vs_sim.virtual import SIM_MONOTONIC_ORIGIN, VirtualClock, VirtualTimeLimitError, run_hosted
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
     from types import TracebackType
 
-    from vs_sim.concurrency import Lock
+    from vs_sim.concurrency import Lock, ThreadLocal
     from vs_sim.trace import EventTrace
 
 
@@ -363,6 +364,10 @@ class SimThreads:
         """A new, cleared event."""
         return SimEvent(self)
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        """A per-thread value; each simulated thread runs on an OS thread of its own."""
+        return OsThreadLocal(initial)
+
     def sleep(self, seconds: float) -> None:
         """Block the calling simulated thread for ``seconds`` of virtual time."""
         me = self.caller()
@@ -371,8 +376,34 @@ class SimThreads:
             self.block(me, f"sleep({seconds:g})", None, seconds)
 
     def now(self) -> float:
-        """Virtual seconds."""
-        return self.clock.now()
+        """Monotonic virtual seconds: the timeline plus ``SIM_MONOTONIC_ORIGIN``.
+
+        The offset keeps this reading apart from the timeline's own clock and from
+        ``WallClockView``, so code that compares a monotonic reading with a clock
+        reading is visibly wrong in simulation, as it is in production.
+        """
+        return SIM_MONOTONIC_ORIGIN + self.clock.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        """Run ``main`` to completion on an event loop on the calling simulated thread.
+
+        The loop's time is this simulation's timeline. While it has nothing to do, its
+        thread waits like any other simulated thread, so the others run and time advances
+        to the earliest timer, the loop's own or a thread's; a callback another simulated
+        thread schedules on it (``call_soon_threadsafe``, as ``SimBlockingRunner`` does)
+        wakes it.
+
+        Raises:
+            RuntimeError: the caller is not a simulated thread.
+        """
+        if isinstance(self.caller(), _OutsideThread):
+            message = "run_async must be called from a simulated thread"
+            raise RuntimeError(message)  # noqa: TRY004  # LW-222587 [TRY004]; a missing precondition of the call, not a bad argument type.
+            # > TypeError would say an argument has the wrong type; no argument is wrong here.
+        seed = None if self._rng is None else self._rng.randint(0, 2**32 - 1)
+        return run_hosted(
+            self.clock, main, host=_LoopWake(self), trace=self._trace, schedule_seed=seed
+        )
 
     # ----- driving -----
 
@@ -381,6 +412,8 @@ class SimThreads:
 
         Raises:
             SimDeadlockError: nothing can run and no timer is pending.
+            VirtualTimeLimitError: the next timer is past the clock's ``limit``, so the run is
+                stuck rather than slow.
         """
         outcome: list[T] = []
         first = self._start_main(main, outcome)
@@ -392,6 +425,12 @@ class SimThreads:
                 due = self.next_timer()
                 if due is None:
                     raise SimDeadlockError(self.describe())
+                if self.clock.limit is not None and due > self.clock.limit:
+                    message = (
+                        f"virtual time passed its limit of {self.clock.limit:g} s; "
+                        f"{self._waiting()}"
+                    )
+                    raise VirtualTimeLimitError(message)
                 self.advance_to(due)
         finally:
             self.close()
@@ -425,8 +464,15 @@ class SimThreads:
             heapq.heappop(self._timers)
         return None
 
+    def advance(self, seconds: float) -> None:
+        """Move the clock ``seconds`` forward and wake every thread whose timer is due by then."""
+        self.advance_to(self.clock.now() + max(0.0, seconds))
+
     def advance_to(self, instant: float) -> None:
-        """Move the clock to ``instant`` and wake every thread whose timer is due by then."""
+        """Move the clock to ``instant`` and wake every thread whose timer is due by then.
+
+        ``instant`` is on the clock's timeline (``clock.now()``), not on ``now()``'s.
+        """
         if self._trace is not None and instant > self.clock.at:
             self._trace.advance(self.clock.at, instant)
         self.clock.at = max(self.clock.at, instant)
@@ -440,8 +486,12 @@ class SimThreads:
 
     def describe(self) -> str:
         """What every unfinished thread waits on, for a deadlock report."""
-        waiting = [f"{t.name}: {t.blocked_on or 'runnable'}" for t in self._threads if not t.done]
-        return "no thread can run and no timer is pending; " + "; ".join(waiting)
+        return "no thread can run and no timer is pending; " + self._waiting()
+
+    def _waiting(self) -> str:
+        return "; ".join(
+            f"{t.name}: {t.blocked_on or 'runnable'}" for t in self._threads if not t.done
+        )
 
     def close(self) -> None:
         """Unwind every thread still parked, so no operating-system thread outlives the run."""
@@ -540,6 +590,24 @@ class SimThreads:
         me.blocked_on = None
         if me.poison is not None:
             raise me.poison
+
+
+class _LoopWake:
+    """Parks the thread of a loop started by ``run_async`` until a callback or a timer."""
+
+    def __init__(self, sim: SimThreads) -> None:
+        self._sim = sim
+        self._woken = sim.event()
+
+    def park(self, timeout: float | None) -> None:
+        self._woken.wait(timeout)
+        self._woken.clear()
+
+    def wake(self) -> None:
+        # Only a simulated thread can hand over the baton; a real worker thread's callback
+        # reaches the loop through its wakeup pipe, which the loop reads in a real select.
+        if not isinstance(self._sim.caller(), _OutsideThread):
+            self._woken.set()
 
 
 class SimBlockingRunner:

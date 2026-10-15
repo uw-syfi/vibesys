@@ -39,6 +39,8 @@ from vs_runtime.api.core import (
     SessionLifecycleRequests,
     SessionRequestRouter,
 )
+from vs_sim.api import OsThreads, ThreadBlockingRunner
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -46,6 +48,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import SessionStore
     from vs_runtime.api.core import SessionResolver
+    from vs_sim.api import BlockingRunner
 
 CONTINUATION = ContinuationId(root="continuation-1")
 
@@ -55,7 +58,7 @@ class RecordingClient(AgentClient):
 
     def __init__(self, driver: FakeProvider, store: SessionStore) -> None:
         """Wrap the Fake driver; *store* keeps the checkpoint across a release."""
-        super().__init__(driver, session_store=store)
+        super().__init__(driver, session_store=store, clock=ManualClock(), threads=OsThreads())
         self.cancelled: list[AgentSessionKey] = []
         self.released: list[AgentSessionKey] = []
 
@@ -105,7 +108,9 @@ def open_lifecycle_host(
             message = "provider died after accepting the turn"
             raise ConnectionError(message)
 
-    client = RecordingClient(FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn), store)
+    client = RecordingClient(
+        FakeProvider(answer=answer or {"value": 7}, on_turn=on_turn, threads=OsThreads()), store
+    )
     return SessionHost(
         FakeSessionResolver(workspace, TemplateRenderer(workspace)),
         client,
@@ -116,18 +121,23 @@ def open_lifecycle_host(
 
 
 def lifecycle_executor(
-    host: SessionHost, store: ReceiptStore, sessions: FakeAgentSessions | None = None
+    host: SessionHost,
+    store: ReceiptStore,
+    sessions: FakeAgentSessions | None = None,
+    blocking: BlockingRunner | None = None,
 ) -> SessionRequestRouter:
     """A SESSIONS executor over the host's durable pieces.
 
     By default a freshly started host, which forgets which turns it was running;
-    pass *sessions* to keep one process alive across calls.
+    pass *sessions* to keep one process alive across calls, and *blocking* to run its
+    blocking calls somewhere other than worker threads (a simulation's threads).
     """
     resolver: SessionResolver = host.resolver
-    sessions = sessions or FakeAgentSessions(host.client, host.journal)
-    turns = RuntimeSessionRequests(sessions, resolver, store)
+    sessions = sessions or FakeAgentSessions(host.client, host.journal, threads=OsThreads())
+    runner = blocking or ThreadBlockingRunner()
+    turns = RuntimeSessionRequests(sessions, resolver, store, blocking=runner)
     return SessionRequestRouter(
-        turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement)
+        turns, SessionLifecycleRequests(sessions, turns, store, turns.settlement, runner)
     )
 
 

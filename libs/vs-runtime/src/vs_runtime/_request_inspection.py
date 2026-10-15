@@ -156,7 +156,7 @@ class RecordedRequestInspector:
             request,
             context,
             # An effect that never started holds nothing: there is nothing left to release.
-            ObservationFacts.never_held("no begun marker: the effect never started"),
+            ObservationFacts.not_begun("no begun marker: the effect never started"),
             reissue=ReissueProof.NEVER_BEGAN,
         )
 

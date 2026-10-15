@@ -57,6 +57,7 @@ from vs_core.api.testing import (
 )
 from vs_project.api import FakeStateStore
 from vs_runtime._fake_core_execution import FakePublicationDelivery
+from vs_runtime._observation_factory import ObservationFacts
 from vs_runtime.api.core import (
     CoreRunHost,
     CoreRuntime,
@@ -72,7 +73,7 @@ from vs_runtime.api.core import (
     start_core,
 )
 from vs_runtime.api.infrastructure import RunStopped, create_run_control_channel
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -237,6 +238,23 @@ class ScriptedExecutors:
             # A stopped turn reports cancelled and released, as the session executor does.
             status = ObservationStatus.CANCELLED
         succeeded = isinstance(answer, Succeeded)
+        resource_id = (
+            answer.resource_id if isinstance(answer, Succeeded | Running | InvalidReply) else None
+        )
+        if terminal and not accepted and resource_id is None:
+            # A refusal holds nothing, so it is built as the production executors build it.
+            facts = ObservationFacts.refused("")
+        else:
+            facts = ObservationFacts(
+                status=status,
+                accepted=accepted,
+                terminal=terminal,
+                released=terminal,
+                # An accepted submission reports its job complete as a child, as production does.
+                children_complete=terminal or (accepted and isinstance(request, SubmitMeasurement)),
+                resource_id=resource_id,
+                revision=answer.revision if succeeded else None,
+            )
         observation = Observation(
             event_id=EventId(root=f"{key}:observation:{sequence}"),
             request_id=request.request_id,
@@ -244,18 +262,13 @@ class ScriptedExecutors:
             admission_id=request.admission_id,
             sequence=sequence,
             observed_at=now_at,
-            status=status,
-            accepted=accepted,
-            terminal=terminal,
-            released=terminal,
-            # An accepted submission reports its job complete as a child, as production does.
-            children_complete=terminal or (accepted and isinstance(request, SubmitMeasurement)),
-            resource_id=(
-                answer.resource_id
-                if isinstance(answer, Succeeded | Running | InvalidReply)
-                else None
-            ),
-            revision=answer.revision if succeeded else None,
+            status=facts.status,
+            accepted=facts.accepted,
+            terminal=facts.terminal,
+            released=facts.released,
+            children_complete=facts.children_complete,
+            resource_id=facts.resource_id,
+            revision=facts.revision,
         )
         if isinstance(answer, Failed):
             return RequestObserved(
@@ -548,14 +561,14 @@ def scripted_host[C](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a re
         options.attach(shell, clock)
     controls = (
         RunControlBridge(
-            create_run_control_channel(_IgnoredTransitions()),
+            create_run_control_channel(_IgnoredTransitions(), SimThreads()),
             _NoSteer(),
         )
         if options.controlled
         else None
     )
     host = CoreRunHost(
-        shell, FakePublicationDelivery(store) if delivery is None else delivery, clock, controls
+        shell, FakePublicationDelivery() if delivery is None else delivery, clock, controls
     )
     config = RunLoopConfig(
         host_id="scenario",

@@ -26,6 +26,13 @@ def test_translate_command_argument_rewrites_tokens(argument: str, expected: str
     assert translate_command_arguments((argument,), _REPLACEMENTS) == (expected,)
 
 
+@pytest.mark.parametrize("depth", [100_000])
+def test_a_deeply_nested_argument_is_rewritten_as_text(depth: int) -> None:
+    argument = "[" * depth + '"${ROOT}"' + "]" * depth
+    expected = "[" * depth + '"/work"' + "]" * depth
+    assert translate_command_arguments((argument,), _REPLACEMENTS) == (expected,)
+
+
 @pytest.mark.parametrize(
     "argv",
     [

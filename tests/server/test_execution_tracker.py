@@ -29,6 +29,7 @@ from server.events import (
     ToolResultData,
 )
 from server.run_attachment import AgentSelection
+from vs_sim.api import OsThreads
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -196,7 +197,7 @@ def test_attach_merges_bootstrap_and_durable_execution_history(tmp_path: Path) -
     durable_dir = tmp_path / "durable"
     durable_dir.mkdir()
     execution_id = "a" * 32
-    durable = EventStore(durable_dir / "run-events.jsonl", "run-1")
+    durable = EventStore(durable_dir / "run-events.jsonl", "run-1", threads=OsThreads())
     durable.append(
         RunEvent(
             timestamp=_TIMESTAMP,
@@ -402,7 +403,7 @@ def test_cancellation_and_run_finish_terminalize_activity(tmp_path: Path) -> Non
 
 def test_legacy_invocations_project_without_becoming_live(tmp_path: Path) -> None:
     execution_id = "a" * 32
-    store = EventStore(tmp_path / "run-events.jsonl", "legacy")
+    store = EventStore(tmp_path / "run-events.jsonl", "legacy", threads=OsThreads())
     store.append(
         RunEvent(
             timestamp=_TIMESTAMP,

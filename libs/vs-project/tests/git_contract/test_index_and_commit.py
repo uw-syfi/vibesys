@@ -56,6 +56,32 @@ def test_stage_all_is_limited_to_its_pathspecs(sandbox: ContractProject) -> None
     assert not sandbox.repo.has_staged_changes(["a.txt"])
 
 
+@pytest.mark.parametrize(
+    ("spec", "accepted"),
+    [
+        ("empty", True),
+        ("./empty/", True),
+        (":(literal)empty", True),
+        (":(glob)empty", False),
+        ("empt*", False),
+        ("missing", False),
+    ],
+)
+def test_a_pathspec_naming_an_existing_path_matches_even_without_files(
+    sandbox: ContractProject, spec: str, *, accepted: bool
+) -> None:
+    sandbox.start({"a.txt": "1\n"})
+    (sandbox.root / "empty").mkdir()
+
+    if accepted:
+        sandbox.repo.stage_all([spec])
+        assert not sandbox.repo.has_staged_changes()
+    else:
+        with pytest.raises(StagingError) as raised:
+            sandbox.repo.stage_all([spec])
+        assert raised.value.unreadable == ()
+
+
 def test_ignored_files_are_staged_only_when_forced(sandbox: ContractProject) -> None:
     sandbox.start({"a.txt": "1\n"})
     repo = sandbox.repo

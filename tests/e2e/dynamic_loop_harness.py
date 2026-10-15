@@ -34,11 +34,13 @@ from pydantic import ValidationError
 from tests.support.docker_environment import host_container_backend
 from tests.support.loop_invariants import RunRecords, check, terminal_event
 from tests.support.loop_spec import loop_spec
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.slurm_environment import with_fake_image_build
 from tests.support.task_project import write_task
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
+from entrypoints.production import production_timing
 from launch import LaunchSettings
 from vibesys.api import (
     CoreEventType,
@@ -63,6 +65,7 @@ from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import FakeStateStores, Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import run_virtual
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, FakeConnector, recorded_commands
 
@@ -79,7 +82,7 @@ if TYPE_CHECKING:
     from vs_project.api import StateStoreFactory
     from vs_runtime.api.infrastructure import StopTimer
     from vs_sandbox.api import ComputeBackendImpl
-    from vs_slurm.api import SlurmProcess
+    from vs_sim.api import Processes
 
 # Simulated seconds one run may wait; a healthy scenario needs a small fraction of it.
 SIMULATED_BUDGET_S = 120.0
@@ -155,6 +158,7 @@ class _SharedCancelClient(FakeAgentClient):
             session_store=session_store,
             skill_selection=skill_selection,
             log_dir=log_dir,
+            threads=OsThreads(),
         )
         self._seen = seen
 
@@ -442,7 +446,7 @@ class LoopInput:
     slurm_config: Path
     agent_config: Path
     connector: FakeConnector
-    """The in-process Fake cluster; pass it to :func:`run_request` as ``slurm_process``."""
+    """The in-process Fake cluster; pass it to :func:`run_request` as ``slurm_processes``."""
     state_stores: FakeStateStores | None
     """The run's durable records, kept across a simulated crash; ``None`` is the real ``.vibesys``.
 
@@ -624,7 +628,7 @@ def run_request(  # noqa: PLR0913
     client_factory: Callable[..., AgentClientProtocol] | None = None,
     clock: CrashableRunClock | None = None,
     backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-    slurm_process: SlurmProcess | None = None,
+    slurm_processes: Processes | None = None,
     state_stores: StateStoreFactory | None = None,
 ) -> LoopRun:
     """Execute a built request through the production host composition.
@@ -640,14 +644,21 @@ def run_request(  # noqa: PLR0913
         clock.limit = clock.at + budget_s
     runs = launch.default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
             agent_client_factory=client_factory or agents.client,
             backend_factory=backend_factory or host_container_backend,
-            stop_timer=stop_timer or FakeStopTimer(),
-            timing=None if clock is None else RunTiming(clock, PRODUCTION_LEASE_SECONDS),
+            stop_timer=stop_timer or FakeStopTimer(threads=OsThreads()),
+            timing=(
+                production_timing()
+                if clock is None
+                else RunTiming(clock, PRODUCTION_LEASE_SECONDS, OsThreads())
+            ),
             # The agent's container mounts the repository's `.git` read-only, so the
             # repository must exist on disk: these runs use the product's real Git.
+            processes=REAL_PROCESSES,
             git_repository=None,
-            slurm_process=slurm_process,
+            slurm_processes=slurm_processes,
             state_stores=state_stores,
         )
     )

@@ -22,7 +22,8 @@ from tests.support.workspace_world import open_workspace_env
 from vibesys.run.environment import open_run_environment
 from vs_runtime.api.infrastructure import SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
-from vs_sandbox.api.slurm import load_slurm_operator_settings, run_brokered_process
+from vs_sandbox.api.slurm import BrokeredProcesses, load_slurm_operator_settings
+from vs_sim.api import OsThreads, ProcessOutcome, ProcessSpec, UnixNetwork
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
@@ -101,7 +102,7 @@ def _run(
 
     Every session the run opens (the root's first, then each candidate's) is appended to *opened*.
     """
-    backend = DaemonBackend(daemon_engine(tmp_path))
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
     environment = environment or _environment(tmp_path, backend)
 
     def open_session(request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -193,7 +194,7 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
     """The SSH transport's broker of a candidate session is scoped like its GPU broker."""
     config = tmp_path / "ssh.toml"
     config.write_text(_SSH_CONFIG, encoding="utf-8")
-    backend = DaemonBackend(daemon_engine(tmp_path))
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
     environment = SlurmEnvironment(
         load_slurm_operator_settings(config), docker=daemon_docker_config(backend.engine)
     )
@@ -210,13 +211,14 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             f"{local}/",
             "test-cluster:/remote/vibesys/test-cluster/job/",
         )
-        return run_brokered_process(
+        processes = BrokeredProcesses(
             Path(env["VIBESYS_SLURM_BROKER_SOCKET"]),
             env["VIBESYS_SLURM_BROKER_TOKEN"],
-            argv,
-            stdin=None,
-            timeout=5,
-        ).returncode
+            network=UnixNetwork(),
+        )
+        run = processes.run(ProcessSpec(tuple(argv)), timeout=5)
+        assert isinstance(run, ProcessOutcome)
+        return run.returncode
 
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         first = await workspaces.create_candidate()

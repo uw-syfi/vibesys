@@ -1,0 +1,7 @@
+# version sha256-of-RunEnvelope[FlowState]-JSON-schema; see test_envelope_schema_version.py
+# append-only: a shape change adds a line for the next version. scripts/check_stale_revert.py
+# fails a change that edits or drops a line the base branch has.
+8 6ccc98db52beec5fb6e259faf70fb4d8c710748a2381efcf83e9fda69c13490a
+9 90337f8f744d2b0da07246cd383f29207682ec732e91f1102f0eeb9dbdfd7d8e
+10 f77e0bcbf09d4cd06421c36b6447e5ba720f58ab405a6c1f1d188edf2b3bbb30
+11 27d7959d9b8b696a4558c08b5928b5c65e03311a3739515108e267119a4ede64

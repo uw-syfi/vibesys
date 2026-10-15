@@ -13,9 +13,11 @@ import sys
 from pathlib import Path
 
 from tests.support.docker_environment import host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.vibesys.orchestration.plugin import capability_plugin
 
+from entrypoints.production import production_timing
 from entrypoints.run import supervise
 from headless import run as render_run
 from launch import LaunchSettings, default_runs
@@ -29,12 +31,15 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
+from vs_sim.api import LoopSignalSource, OsThreads, ThreadBlockingRunner, UnixNetwork
 
 PLUGIN_ID = "slurm-signal"
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 def main(project_root: Path, slurm_config: Path) -> None:
@@ -60,6 +65,10 @@ def main(project_root: Path, slurm_config: Path) -> None:
     )
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_resumable_client,
             backend_factory=host_container_backend,
@@ -68,7 +77,7 @@ def main(project_root: Path, slurm_config: Path) -> None:
 
     async def execute() -> None:
         handle = runs.start(request)
-        await supervise(handle, render_run(handle))
+        await supervise(handle, render_run(handle), signals=LoopSignalSource())
 
     asyncio.run(execute())
 

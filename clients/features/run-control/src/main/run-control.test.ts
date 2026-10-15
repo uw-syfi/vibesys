@@ -308,6 +308,106 @@ async function observeListing(
 }
 
 describe('RunControl over the FakeHelper', () => {
+  test('retiring a start owner stops a late launch without opening its page', async () => {
+    const w = world();
+    const delayed = w.link.helper.deferNext('run.start');
+    const starting = w.runs.start(HOST, '/p', 'spsc', [], {
+      owner: '10:100',
+      sequence: 1,
+    });
+    await delayed.received;
+
+    w.runs.retireStartOwner('10:100');
+    delayed.release();
+
+    expect(await starting).toBe('cancelled');
+    expect(w.runs.attached()).toBeNull();
+    expect(w.pages).toMatchObject({opened: 0, closed: 0});
+    expect(w.link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
+    expect(w.link.helper.host.instances).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('retiring a pending start preserves the run that was already attached', async () => {
+    const w = world();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    await w.runs.attach(HOST, RUN_A);
+    const delayed = w.link.helper.deferNext('run.start');
+    const starting = w.runs.start(HOST, '/p', 'spsc', [], {
+      owner: '10:100',
+      sequence: 1,
+    });
+    await delayed.received;
+
+    w.runs.retireStartOwner('10:100');
+    expect(w.runs.attached()?.instanceId).toBe(RUN_A);
+    delayed.release();
+
+    expect(await starting).toBe('cancelled');
+    expect(w.runs.attached()?.instanceId).toBe(RUN_A);
+    expect(w.pages).toMatchObject({opened: 1, closed: 0});
+    expect(w.link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('equal start sequences from different owners are independent', async () => {
+    const w = world();
+    const olderReply = w.link.helper.deferNext('run.start');
+    const older = w.runs.start(HOST, '/p', 'spsc', [], {owner: '10:100', sequence: 1});
+    await olderReply.received;
+    const newerReply = w.link.helper.deferNext('run.start');
+    const newer = w.runs.start(HOST, '/p', 'spsc', [], {owner: '11:101', sequence: 1});
+    await newerReply.received;
+
+    w.runs.retireStartOwner('10:100');
+    newerReply.release();
+    expect(await newer).toBe('started');
+    const selected = w.runs.attached()?.instanceId;
+    olderReply.release();
+    expect(await older).toBe('cancelled');
+
+    expect(selected).toBe('000000000002');
+    expect(w.runs.attached()?.instanceId).toBe(selected);
+    expect(w.link.helper.stops).toEqual([{instanceId: '000000000001', force: false}]);
+    expect(w.pages).toMatchObject({opened: 1, closed: 0});
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a successor cancellation cannot cancel a predecessor with the same sequence', async () => {
+    const w = world();
+    const delayed = w.link.helper.deferNext('run.start');
+    const starting = w.runs.start(HOST, '/p', 'spsc', [], {
+      owner: '10:100',
+      sequence: 1,
+    });
+    await delayed.received;
+
+    w.runs.cancelStart({owner: '11:101', sequence: 1});
+    delayed.release();
+
+    expect(await starting).toBe('started');
+    expect(w.pages).toMatchObject({opened: 1, closed: 0});
+    expect(w.link.helper.stops).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('duplicate start identities within one owner remain rejected', async () => {
+    const w = world();
+    const delayed = w.link.helper.deferNext('run.start');
+    const identity = {owner: '10:100', sequence: 1};
+    const first = w.runs.start(HOST, '/p', 'spsc', [], identity);
+    await delayed.received;
+
+    await expect(w.runs.start(HOST, '/p', 'spsc', [], identity)).rejects.toThrow(
+      'that start was already asked for',
+    );
+
+    w.runs.cancelStart(identity);
+    delayed.release();
+    expect(await first).toBe('cancelled');
+    await w.connection[Symbol.asyncDispose]();
+  });
+
   test('regression: a start while the host listing is already held binds the run, not an ended one', async () => {
     const w = world();
     // The connection already holds a listing from before the start published its record.
@@ -559,13 +659,13 @@ describe('RunControl over the FakeHelper', () => {
     const w = world({deferConnectionCall: 2});
     const delayedStart = w.link.helper.deferNext('run.start');
 
-    const older = w.runs.start(HOST, '/p', 'spsc', [], 1);
+    const older = w.runs.start(HOST, '/p', 'spsc', [], {owner: 'doc', sequence: 1});
     await delayedStart.received;
     const launched = w.link.helper.host.instances[0];
     if (launched === undefined) throw new Error('run.start did not publish its serving record');
     // Withdraw the start explicitly: a different-target attach no longer supersedes it, so this is
     // the one way, besides a same-target race, to abandon a launch before it ever claims a target.
-    w.runs.cancelStart(1);
+    w.runs.cancelStart({owner: 'doc', sequence: 1});
     delayedStart.release();
     const cleanup = w.deferredConnection;
     if (cleanup === null) throw new Error('cleanup connection was not deferred');
@@ -587,11 +687,11 @@ describe('RunControl over the FakeHelper', () => {
     const w = world({deferConnectionCalls: [2, 3], failConnectionCall: 3});
     const delayedStart = w.link.helper.deferNext('run.start');
 
-    const older = w.runs.start(HOST, '/p', 'spsc', [], 1);
+    const older = w.runs.start(HOST, '/p', 'spsc', [], {owner: 'doc', sequence: 1});
     await delayedStart.received;
     const launched = w.link.helper.host.instances[0];
     if (launched === undefined) throw new Error('run.start did not publish its serving record');
-    w.runs.cancelStart(1);
+    w.runs.cancelStart({owner: 'doc', sequence: 1});
     delayedStart.release();
     const cleanup = w.deferredConnectionAt(2);
     if (cleanup === null) throw new Error('cleanup connection was not deferred');
@@ -680,9 +780,9 @@ describe('RunControl over the FakeHelper', () => {
     const w = world({failConnectionCall: 2});
     const delayed = w.link.helper.deferNext('run.start');
 
-    const older = w.runs.start(HOST, '/p', 'spsc', [], 1);
+    const older = w.runs.start(HOST, '/p', 'spsc', [], {owner: 'doc', sequence: 1});
     await delayed.received;
-    w.runs.cancelStart(1);
+    w.runs.cancelStart({owner: 'doc', sequence: 1});
     delayed.release();
     expect(await older).toBe('cancelled');
 

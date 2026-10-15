@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.docker_environment import host_container_backend
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import (
     _policy,
@@ -23,6 +24,7 @@ from tests.vibesys.run.test_core_host_composition import (
     _write_project,
 )
 
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.core_services import CoreCompositionError
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
@@ -30,7 +32,9 @@ from vs_agent.api.testing import FakeAgentInvocationStore
 from vs_mcp.api import StdioServerDescriptor
 from vs_runtime.api import AgentRole, AgentTool, OrchestrationPlugin
 from vs_runtime.api.core import RunTiming
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_runtime.api.testing import FakeStopTimer
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -62,7 +66,13 @@ def _compose(
         options=EmptyOptions,
         core=_policy(templates),
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> None:
@@ -72,7 +82,7 @@ def _compose(
                 integration,
                 plugin=replace(plugin),
                 options=EmptyOptions(),
-                timing=RunTiming(clock, 60.0),
+                timing=RunTiming(clock, 60.0, OsThreads()),
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
@@ -83,6 +93,10 @@ def _compose(
                     if declined
                     else None
                 ),
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ):
                 return
         finally:

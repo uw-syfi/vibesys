@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from inspect import signature
 from typing import TYPE_CHECKING, cast
 
-from tests.server.support import build_server_parts
+from tests.server.support import REQUEST_TIME, build_server_parts
 from websockets.asyncio.client import connect
 
 from server.api.protocol import EventBatchMessage, SubscribeRequest
 from server.events import MAX_SERIALIZED_RUN_EVENT_BYTES, EventType, OutputData, make_event
 from server.transport.websocket import WebSocketGateway
+from vs_sim.api import MonotonicClock, OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -45,6 +47,7 @@ def test_one_event_past_the_peer_frame_cap_arrives_cut_and_the_socket_stays_open
     produced = make_event(
         EventType.OUTPUT,
         data=OutputData(stream="stdout", content=content),
+        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
     )
     stamped = produced.model_copy(
         update={"sequence": parts.api.latest_sequence + 1, "run_id": parts.journal.run_id_locked()}
@@ -59,7 +62,11 @@ def test_one_event_past_the_peer_frame_cap_arrives_cut_and_the_socket_stays_open
     ) -> tuple[str, EventBatchMessage, EventBatchMessage]:
         origin = f"http://127.0.0.1:{gateway.bound_port}"
         async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-            await websocket.send(SubscribeRequest(client_id="large-event-client").model_dump_json())
+            await websocket.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME, client_id="large-event-client"
+                ).model_dump_json()
+            )
             assert json.loads(await _next_frame(websocket))["type"] == "subscribed"
             first_frame = await _next_frame(websocket)
             first = EventBatchMessage.model_validate_json(first_frame)
@@ -67,7 +74,12 @@ def test_one_event_past_the_peer_frame_cap_arrives_cut_and_the_socket_stays_open
             second = EventBatchMessage.model_validate_json(await _next_frame(websocket))
             return first_frame, first, second
 
-    with WebSocketGateway(parts.api) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        clock=MonotonicClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         first_frame, first, second = asyncio.run(receive(gateway))
     parts.close()
 

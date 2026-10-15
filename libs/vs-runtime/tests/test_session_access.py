@@ -37,6 +37,7 @@ from vs_runtime.api.core import (
     ReleasedRunInvocations,
 )
 from vs_runtime.api.executor_contexts import context_for
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import pairwise_rows
 
 if TYPE_CHECKING:
@@ -149,7 +150,9 @@ class AccessWorld:
         sessions = self.env.project.state.local_namespace(RUN_ID, "sessions")
         host = open_lifecycle_host(
             self.root.path,
-            DurableSessionStore(sessions.slot("sessions.json", AgentSessionState)),
+            DurableSessionStore(
+                sessions.slot("sessions.json", AgentSessionState), threads=OsThreads()
+            ),
             answer=self.answer,
             effect=self.write,
         )
@@ -167,7 +170,7 @@ class AccessWorld:
             target.write_text(text, encoding="utf-8")
 
     def store(self) -> ReceiptStore:
-        return ReceiptStore(self.env.receipts_namespace())
+        return ReceiptStore(self.env.receipts_namespace(), threads=OsThreads())
 
     async def execute(self, request: RequestBase) -> ExecutionResult:
         return await self.host.run(request, self.store())

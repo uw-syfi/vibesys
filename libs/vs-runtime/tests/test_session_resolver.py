@@ -52,7 +52,8 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.infrastructure import AgentExecutionConfiguration
-from vs_sim.api.testing import examples
+from vs_sim.api import OsThreads, ThreadBlockingRunner
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -100,7 +101,7 @@ class Production:
 
 
 def open_production(env: WorkspaceEnv, declared: AgentRole) -> Production:
-    store = ReceiptStore(env.receipts_namespace())
+    store = ReceiptStore(env.receipts_namespace(), threads=OsThreads())
     artifacts = ArtifactStore(env.project.state.local_namespace(RUN_ID, "artifacts"))
     turns: list[AgentTurnRequest] = []
 
@@ -123,9 +124,18 @@ def open_production(env: WorkspaceEnv, declared: AgentRole) -> Production:
         ),
         session_spec=spec,
     )
-    client = AgentClient(FakeProvider(answer={"value": 7}, on_turn=turns.append))
+    client = AgentClient(
+        FakeProvider(answer={"value": 7}, on_turn=turns.append, threads=OsThreads()),
+        clock=ManualClock(),
+        threads=OsThreads(),
+    )
     requests = open_session_requests(
-        inputs, client=client, invocation_slot=FakeAgentInvocationStore(), store=store
+        inputs,
+        client=client,
+        invocation_slot=FakeAgentInvocationStore(),
+        store=store,
+        blocking=ThreadBlockingRunner(),
+        threads=OsThreads(),
     ).turns
     return Production(env, artifacts, ProductionSessionResolver(inputs), store, requests, turns)
 

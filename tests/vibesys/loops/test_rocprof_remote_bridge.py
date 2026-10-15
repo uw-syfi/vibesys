@@ -18,7 +18,14 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
-from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge, capture_runtime
+from hypothesis import given
+from hypothesis import strategies as st
+from resources.profilers.rocprof.remote_bridge import (
+    RemoteCaptureBridge,
+    RemoteCaptureError,
+    _load_result,
+    capture_runtime,
+)
 
 from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
@@ -361,3 +368,54 @@ def test_remote_capture_requires_explicit_durable_state_root(tmp_path: Path) -> 
             profile_root=tmp_path / "profiles",
             clock=ManualClock(),
         )
+
+
+_WHOLE_RESULT = json.dumps(
+    {
+        "failed_fields": [],
+        "output": "captured",
+        "capture_ids": ["run-1"],
+        "profiles_path": "/remote/profiles",
+    },
+    sort_keys=True,
+)
+
+
+def test_a_whole_result_file_loads(tmp_path: Path) -> None:
+    path = tmp_path / "result.json"
+    path.write_text(_WHOLE_RESULT + "\n", encoding="utf-8")
+
+    assert _load_result(path) == {
+        "output": "captured",
+        "capture_ids": ["run-1"],
+        "profiles_path": "/remote/profiles",
+    }
+
+
+@given(cut=st.integers(min_value=0, max_value=len(_WHOLE_RESULT) - 1))
+def test_a_cut_result_file_is_malformed_never_an_empty_capture(
+    cut: int, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    """A result cut anywhere is refused; it never reads as a capture that found no profiles."""
+    path = tmp_path_factory.mktemp("result") / "result.json"
+    path.write_text(_WHOLE_RESULT[:cut], encoding="utf-8")
+
+    with pytest.raises(RemoteCaptureError):
+        _load_result(path)
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        '{"output": "x", "capture_ids": ["../escape"], "profiles_path": null}',
+        '{"output": "x", "capture_ids": [], "profiles_path": null, "surprise": 1}',
+        '{"capture_ids": [], "profiles_path": null}',
+        "[]",
+    ],
+)
+def test_a_result_file_of_the_wrong_shape_is_malformed(document: str, tmp_path: Path) -> None:
+    path = tmp_path / "result.json"
+    path.write_text(document, encoding="utf-8")
+
+    with pytest.raises(RemoteCaptureError):
+        _load_result(path)

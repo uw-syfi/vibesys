@@ -5,13 +5,19 @@ no built-in catalog or tool selection occurs here.
 """
 
 from vibesys.api._session import _create_session as create_session
-from vibesys.api.assembly import ProfilerPreflight, SessionAgents, SessionImplementations
+from vibesys.api.assembly import (
+    NativeProfilerPreflight,
+    ProfilerPreflight,
+    SessionAgents,
+    SessionImplementations,
+)
 from vibesys.composition import AgentToolContext
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.integration import RunResources
 
 __all__ = [
     "AgentToolContext",
+    "NativeProfilerPreflight",
     "ProfilerPreflight",
     "RunResources",
     "SessionAgents",

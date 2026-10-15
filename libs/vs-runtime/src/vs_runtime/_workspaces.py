@@ -16,7 +16,6 @@ from vs_runtime.contracts import (
     Workspaces,
     member_workspace_id,
 )
-from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -24,6 +23,7 @@ if TYPE_CHECKING:
 
     from vs_runtime._agent_execution import AgentExecutionScope
     from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
+    from vs_runtime._workspace_receipts import BaselineEntry, RootBaselineDrift
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
     from vs_runtime.contracts import CandidateWorkspace, Workspace
     from vs_sandbox.api import CommandRunner
@@ -68,6 +68,10 @@ class WorkspaceResource(Protocol):
     ) -> bool: ...
 
     def unversioned_paths(self) -> tuple[str, ...]: ...
+
+    def baseline_entries(self, paths: tuple[str, ...]) -> tuple[BaselineEntry, ...]: ...
+
+    def baseline_drift(self, entries: tuple[BaselineEntry, ...]) -> RootBaselineDrift: ...
 
     def find_snapshot(self, label: str) -> str | None: ...
 
@@ -279,6 +283,18 @@ class RuntimeWorkspace:
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402331 [SLF001]; a workspace handle delegates synchronization to its owning collection.
             return await run_sync(self._owner.runner, self._resource.unversioned_paths)
 
+    async def baseline_entries(self, paths: tuple[str, ...]) -> tuple[BaselineEntry, ...]:
+        """Fingerprint *paths* (from :meth:`unversioned_paths`) as they are now."""
+        self._ensure_open()
+        async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402332 [SLF001]; a workspace handle delegates synchronization to its owning collection.
+            return await run_sync(self._owner.runner, self._resource.baseline_entries, paths)
+
+    async def baseline_drift(self, entries: tuple[BaselineEntry, ...]) -> RootBaselineDrift:
+        """Compare the tree now to a recorded pre-run baseline; reports any drift found."""
+        self._ensure_open()
+        async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402333 [SLF001]; a workspace handle delegates synchronization to its owning collection.
+            return await run_sync(self._owner.runner, self._resource.baseline_drift, entries)
+
     async def find_snapshot(self, label: str) -> str | None:
         self._ensure_open()
         async with self._owner._mutation(self):  # noqa: SLF001  # lint-waiver: LW-402311 [SLF001]; a workspace handle delegates synchronization to its owning collection.
@@ -331,11 +347,11 @@ class RuntimeWorkspaces:
         self,
         resources: WorkspaceResourceProvider,
         *,
-        runner: BlockingRunner | None = None,
+        runner: BlockingRunner,
     ) -> None:
-        """Own ``resources``; their synchronous effects run on ``runner`` (a worker thread by default)."""
+        """Own ``resources``; their synchronous effects run on ``runner``."""
         self._resources = resources
-        self._runner = runner or ThreadBlockingRunner()
+        self._runner = runner
         self._root_lock = asyncio.Lock()
         self._lifecycle_lock = asyncio.Lock()
         self._candidate_locks: dict[str, asyncio.Lock] = {}

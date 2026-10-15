@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import threading
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,7 +16,6 @@ from server.events import (
     EventType,
     RunEvent,
 )
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from server.chat.options import ChatRunSettings
@@ -143,7 +141,7 @@ class ChatManager:
         *,
         run_status: Callable[[], RunStatus],
         drain_timeout_seconds: float = _CHAT_DRAIN_TIMEOUT_SECONDS,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Initialize chat routing over the shared server condition and journal.
 
@@ -151,11 +149,11 @@ class ChatManager:
         waits for an answer in flight before it defers the close.
         """
         self._condition = condition
-        self._threads = threads or OsThreads()
+        self._threads = threads
         self._drain_timeout_seconds = drain_timeout_seconds
         self._journal = journal
         self._run_status = run_status
-        self._chat_response_local = _ChatResponseLocal()
+        self._chat_response_local = self._threads.local(_ChatResponseLocal)
         self._fallback_answer: Callable[[str], str] | None = None
         self._default_handler: Callable[[str], ChatAnswer] | None = None
         self._thread_factory: ChatThreadFactory | None = None
@@ -178,7 +176,7 @@ class ChatManager:
 
     def apply_replayed_event(self, event: RunEvent) -> None:
         """Fold chat metadata from a live append or resumed journal."""
-        captures = self._chat_response_local.captures
+        captures = self._chat_response_local.get().captures
         if event.type is EventType.CHAT and captures:
             captures[-1] = event
         if event.type is EventType.CHAT_THREAD_CREATED and isinstance(
@@ -249,7 +247,7 @@ class ChatManager:
         self, text: str, thread_id: ChatThreadId | None = None
     ) -> tuple[str, RunEvent | None]:
         """Answer a question and return its synchronously folded terminal event."""
-        captures = self._chat_response_local.captures
+        captures = self._chat_response_local.get().captures
         captures.append(None)
         try:
             answer = self.chat(text, thread_id)
@@ -586,7 +584,7 @@ def _chat_thread_title(question: str) -> str:
     return f"{head.rstrip() if separator else cut}…"
 
 
-class _ChatResponseLocal(threading.local):
+class _ChatResponseLocal:
     """Active request scopes awaiting a terminal chat event on this thread."""
 
     def __init__(self) -> None:

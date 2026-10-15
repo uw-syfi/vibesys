@@ -9,8 +9,10 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, built_in_orchestrations, create_session
 from vibesys.api import (
     ComputeBackend,
@@ -53,6 +55,7 @@ from vs_runtime.api import (
     AgentRole,
     OrchestrationResumeDecision,
 )
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -63,11 +66,18 @@ def _discard_event(event: CoreEvent) -> None:
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 _SETTINGS = LaunchSettings(
-    backend_factory=host_container_backend, agent_client_factory=_resumable_client
+    blocking=ThreadBlockingRunner(),
+    network=UnixNetwork(),
+    timing=production_timing(),
+    processes=REAL_PROCESSES,
+    backend_factory=host_container_backend,
+    agent_client_factory=_resumable_client,
 )
 
 
@@ -193,7 +203,13 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
     session = create_session(
         request,
         sink=_discard_event,
-        settings=LaunchSettings(backend_factory=host_container_backend),
+        settings=LaunchSettings(
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            backend_factory=host_container_backend,
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+        ),
     )
 
     # A core strategy runs durable, resumable sessions; the stub backend offers none, so the

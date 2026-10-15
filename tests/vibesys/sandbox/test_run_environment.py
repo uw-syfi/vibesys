@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from tests.support import run_test_command
+from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import (
@@ -66,11 +67,13 @@ from vs_sandbox.api.evaluator_tools import (
     tool_spec_digest,
 )
 from vs_sandbox.api.slurm import (
+    BrokeredProcesses,
     SlurmGpuAliasError,
     load_slurm_operator_settings,
     read_slurm_capture_plan,
-    run_brokered_process,
 )
+from vs_sim.api import ProcessOutcome, ProcessSpec, UnixNetwork
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -211,6 +214,9 @@ class FakeBackend:
             )
         return self.sandbox
 
+    def ensure_accelerator_available(self) -> None:
+        return
+
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         del log_dir
         return None
@@ -235,6 +241,7 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
         "cli_provider": None,
         "run_id": "run-123",
         "framework_root": tmp_path / "framework",
+        "clock": ManualClock(),
     }
     package_root = overrides.pop("evaluator_package_root", None)
     tools_root = overrides.pop("evaluator_tools_root", None)
@@ -253,7 +260,7 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
             )
     values.update(overrides)
     log_dir.mkdir(exist_ok=True)
-    return RunEnvironmentRequest(**values)
+    return RunEnvironmentRequest(**values, slurm_processes=REAL_PROCESSES)
 
 
 #: The profiles these tests drive container setup with. agentshim registers
@@ -636,7 +643,10 @@ rsync_command = ["/bin/true"]
             f"{local}/",
             "test-cluster:/remote/vibesys/test-cluster/job/",
         )
-        return run_brokered_process(socket, token, argv, stdin=None, timeout=5).returncode
+        processes = BrokeredProcesses(socket, token, network=UnixNetwork())
+        run = processes.run(ProcessSpec(argv), timeout=5)
+        assert isinstance(run, ProcessOutcome)
+        return run.returncode
 
     try:
         assert upload(candidate) == 0
@@ -1899,6 +1909,8 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         cli_provider="codex",
         run_id="20260429-100000-runa",
         framework_root=tmp_path / "framework",
+        clock=ManualClock(),
+        slurm_processes=REAL_PROCESSES,
     )
     req_b = RunEnvironmentRequest(
         log_dir=log_b,
@@ -1909,6 +1921,8 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         cli_provider="codex",
         run_id="20260429-100100-runb",
         framework_root=tmp_path / "framework",
+        clock=ManualClock(),
+        slurm_processes=REAL_PROCESSES,
     )
     _open(env, req_a)
     _open(env, req_b)

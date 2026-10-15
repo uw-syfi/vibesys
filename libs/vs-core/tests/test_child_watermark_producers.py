@@ -192,7 +192,7 @@ def test_legacy_aggregate_is_not_certified_without_source_inspection() -> None:
         }
     )
     state = state.model_copy(
-        update={"records": core.RecordsState(records=(source,), children=(child,))}
+        update={"records": core.RecordsState(hosts=(), records=(source,), children=(child,))}
     )
     recovered = core.step(reload(state), core.RecoveryStarted(epoch=2, now_at=1.0))
     assert recovered.state.records.children == (child,)
@@ -447,7 +447,12 @@ def test_cached_old_epoch_inspection_cannot_recertify_missing_history(
     state = state.model_copy(
         update={
             "records": state.records.model_copy(
-                update={"children": (legacy,), "recovery": core.RecoveryBarrier(epoch=epoch - 1)}
+                update={
+                    "children": (legacy,),
+                    "recovery": core.RecoveryBarrier(epoch=epoch - 1),
+                    # A log ending at another epoch than the barrier's is refused on reload.
+                    "hosts": (),
+                }
             )
         }
     )

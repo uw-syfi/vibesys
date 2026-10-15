@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, get_args, get_origin, overload
 
+from pydantic import JsonValue, TypeAdapter, ValidationError
+
 from ._outcomes import prove_outcome
 from ._values import (
     ImmutableSchemaError,
@@ -31,7 +33,7 @@ from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Command, Operation, StrategyState, Wait
 
-ENVELOPE_SCHEMA_VERSION = 4
+ENVELOPE_SCHEMA_VERSION = 11
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -416,12 +418,31 @@ def operation_result(operation_id: OperationId, event: RequestObserved) -> Opera
     return prove_outcome(result, event.outcome, event.operation_schema)
 
 
-def _read_envelope_version(source: str, path: tuple[str | int, ...]) -> int:
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+
+
+def check_envelope_version(source: str | bytes, at: tuple[str, ...]) -> None:
+    """Refuse a stored envelope of another version before decoding anything of its shape.
+
+    ``source`` is the stored JSON document and ``at`` the keys leading to the envelope's
+    ``schema_version`` inside it. The shape of an envelope changes with its version, so
+    validating an old one in full fails on whichever field moved, with an error that does not
+    say the run is from another VibeSys; this check says it first.
+    """
+    _validate_envelope_version(_read_envelope_version(source, at, at))
+
+
+def _read_envelope_version(
+    source: str | bytes, path: tuple[str | int, ...], at: tuple[str, ...] = ("schema_version",)
+) -> int:
     try:
-        header = json.loads(source)
-    except json.JSONDecodeError as error:
+        header = _ANY_JSON.validate_json(source)
+    except ValidationError as error:
         raise ContractError(path, "valid JSON object envelope required") from error
-    version = header.get("schema_version") if isinstance(header, dict) else None
+    version: object = header
+    for key in at:
+        version = version.get(key) if isinstance(version, dict) else None
     if type(version) is not int:
         raise ContractError(path, "integer envelope version required; explicit migration required")
     return version
@@ -429,9 +450,16 @@ def _read_envelope_version(source: str, path: tuple[str | int, ...]) -> int:
 
 def _validate_envelope_version(version: object) -> None:
     if type(version) is not int or version != ENVELOPE_SCHEMA_VERSION:
+        older = type(version) is int and version < ENVELOPE_SCHEMA_VERSION
+        origin = (
+            "it was written by an older VibeSys and there is no migration; start a new run"
+            if older
+            else "it was written by a newer VibeSys; resume it with that version"
+        )
         raise ContractError(
             ("schema_version",),
-            f"envelope version {version!r} is not supported; version {ENVELOPE_SCHEMA_VERSION} required",
+            f"envelope version {version!r} is not supported; version {ENVELOPE_SCHEMA_VERSION} "
+            f"required: {origin}",
         )
 
 

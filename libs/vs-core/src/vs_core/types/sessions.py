@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, assert_never
 
 from pydantic import ConfigDict, Field, model_validator
 
@@ -45,6 +45,7 @@ from .evaluation import Continuation, ResumeAuthorizationReceipt
 from .evaluation_history import EvaluationHistoryCursor
 from .session_inputs import InputRecord, InvocationInputTarget, SessionInput
 from .until import ReplyError, Until
+from .waits import WaitOn
 
 
 class Access(StrEnum):
@@ -107,6 +108,43 @@ class SessionPhase(StrEnum):
     UNKNOWN = "unknown"
 
 
+def session_may_wait(phase: SessionPhase) -> bool:
+    """Whether a session in this phase may wait: a waiting one, or an unknown one inspected.
+
+    A session whose acquisition or turn core cannot settle is unknown; while the inspection
+    that settles it is out, it waits on that inspection. One with nothing out waits on nothing
+    core can name, and carries no wait.
+    """
+    return session_waits(phase) or phase == SessionPhase.UNKNOWN
+
+
+def turn_acquires(invocation: Invocation) -> bool:
+    """Whether a turn is still acquiring: requested, charged or not, with no result yet."""
+    return invocation.phase == SessionPhase.ACQUIRING and invocation.observation is None
+
+
+def turn_may_wait(invocation: Invocation) -> bool:
+    """Whether a turn may carry a wait: while it acquires, or while its yield is unpublished."""
+    return turn_acquires(invocation) or invocation.pending_suspension is not None
+
+
+def session_waits(phase: SessionPhase) -> bool:
+    """Whether a session in this phase waits on a request's result."""
+    match phase:
+        case SessionPhase.ACQUIRING | SessionPhase.EXECUTING | SessionPhase.CLOSING:
+            return True
+        case (
+            SessionPhase.IDLE
+            | SessionPhase.CHECKPOINTED
+            | SessionPhase.SUSPENDED
+            | SessionPhase.TERMINAL
+            | SessionPhase.UNKNOWN
+        ):
+            return False
+        case _:
+            assert_never(phase)
+
+
 class SessionView(Value):
     """Persisted session identity, lease and invocation-acceptance facts.
 
@@ -129,6 +167,22 @@ class SessionView(Value):
     pending_records: tuple[RequestId, ...] = ()
     acceptance_sequence: int | None = Field(default=None, ge=0)
     continuation_id: ContinuationId | None = None
+    wait: WaitOn | None = None
+    """The requests the session waits on while acquiring, executing or closing: the one
+    that acquires, runs or closes it, or the inspection that stands in for one."""
+
+    @model_validator(mode="after")
+    def waits_only_while_waiting(self) -> SessionView:
+        """A session that waits on nothing carries no wait.
+
+        The other half, that a waiting session always carries one, holds at the end of every
+        step (``unmet_waits``): a transition builds the session before it names the request.
+        """
+        if self.wait is not None and not session_may_wait(self.phase):
+            raise ContractValidationError(
+                "wait", f"a session in phase {self.phase.value} waits on nothing"
+            )
+        return self
 
 
 class SessionProjection(SessionView):
@@ -179,6 +233,20 @@ class Invocation(Value):
     """How long the turn may run once the shell dispatches it: what ``until`` allowed, as a
     duration. The turn's own requests count it from their dispatch, not from this admission.
     Admission always sets it; None is a turn whose ``until`` is already absolute."""
+    wait: WaitOn | None = None
+    """What the turn waits on. While it acquires: its session, whose acquisition carries it
+    on. While its yield is unpublished: the checkpoint request that retains its workspace, or
+    the inspection of the turn that lets core request one."""
+
+    @model_validator(mode="after")
+    def waits_only_while_waiting(self) -> Invocation:
+        """Only a turn acquiring or yielding waits; the other half holds after each step."""
+        if self.wait is not None and not turn_may_wait(self):
+            raise ContractValidationError(
+                "wait",
+                f"a turn in phase {self.phase.value} acquires nothing and publishes no yield",
+            )
+        return self
 
     @model_validator(mode="after")
     def pending_suspension_identity(self) -> Invocation:
@@ -235,6 +303,16 @@ class InterruptClaim(Value):
     phase: Literal["pending", "draining", "checkpointed", "completed", "blocked"] = "pending"
     checkpoint_authority: RequestId | None = None
     refunded_charge: ChargeId | None = None
+    wait: WaitOn | None
+    """What a draining claim waits on once its turn ended: the checkpoint request that
+    retains the interrupted turn's workspace."""
+
+    @model_validator(mode="after")
+    def waits_only_while_draining(self) -> InterruptClaim:
+        """Only a draining claim waits; the other half holds after each step."""
+        if self.wait is not None and self.phase != "draining":
+            raise ContractValidationError("wait", f"a {self.phase} interruption waits on nothing")
+        return self
 
 
 class SessionAcquisitionGroup(Value):
@@ -542,6 +620,36 @@ class AcquisitionStalled(Value):
     invocation: InvocationRef
 
 
+class InvocationCheckpointPending(Value):
+    """Internal signal: the checkpoint of a terminal turn is requested as *request_id*.
+
+    The attempt that owns the turn raises it in the step it sends the checkpoint request, or
+    when the request it was asked for is already out. A turn whose yield is unpublished, and a
+    draining interruption of it, then name that request as what they wait on. A checkpoint the
+    attempt declines raises nothing, so the waits it would have carried have nothing to end
+    them and the step ends them by name (``CheckpointStalled``).
+    """
+
+    kind: Literal["invocation_checkpoint_pending"] = "invocation_checkpoint_pending"
+    invocation: InvocationRef
+    request_id: RequestId
+
+
+class SessionWaitLapsed(Value):
+    """A request a waiting session names ended without moving the session.
+
+    Internal signal raised once a step's other signals settle, never shell input. The
+    session's own transition takes each answer of its requests, so a session still naming an
+    ended request is one the answer did not move: the request blocked at its bound, or the
+    session refused what it said. The session waits again on the requests it names that are
+    still open, or, with none left, no longer knows what the executor holds (``UNKNOWN``).
+    """
+
+    kind: Literal["session_wait_lapsed"] = "session_wait_lapsed"
+    session_id: SessionId
+    request_id: RequestId
+
+
 class EnsureSession(RequestBase):
     """Acquire a lease or positively reattach required_resource.
 
@@ -846,7 +954,9 @@ type SessionsEvent = Annotated[
     | RunInvocationCheckpointRequested
     | RunInvocationCheckpointObserved
     | CheckpointStalled
-    | AcquisitionStalled,
+    | AcquisitionStalled
+    | SessionWaitLapsed
+    | InvocationCheckpointPending,
     Field(discriminator="kind"),
 ]
 type SessionRequest = Annotated[

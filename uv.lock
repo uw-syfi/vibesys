@@ -20,6 +20,7 @@ members = [
     "vs-async-ops",
     "vs-bench",
     "vs-core",
+    "vs-decode",
     "vs-dst",
     "vs-evaluation",
     "vs-evaluator-protocol",
@@ -2987,6 +2988,7 @@ source = { editable = "libs/vs-agent" }
 dependencies = [
     { name = "agentshim" },
     { name = "pydantic" },
+    { name = "vs-decode" },
     { name = "vs-faults" },
     { name = "vs-mcp" },
     { name = "vs-project" },
@@ -2999,6 +3001,7 @@ dependencies = [
 requires-dist = [
     { name = "agentshim", specifier = ">=0.15.7,<0.16" },
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-faults", editable = "libs/vs-faults" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
@@ -3054,6 +3057,17 @@ dependencies = [
 requires-dist = [{ name = "pydantic", specifier = ">=2" }]
 
 [[package]]
+name = "vs-decode"
+version = "0.1.0"
+source = { editable = "libs/vs-decode" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+
+[[package]]
 name = "vs-dst"
 version = "0.1.0"
 source = { editable = "libs/vs-dst" }
@@ -3080,6 +3094,7 @@ version = "0.1.0"
 source = { editable = "libs/vs-evaluation" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-decode" },
     { name = "vs-evaluator-protocol" },
     { name = "vs-mcp" },
     { name = "vs-project" },
@@ -3089,6 +3104,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-evaluator-protocol", editable = "libs/vs-evaluator-protocol" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
@@ -3101,10 +3117,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-evaluator-protocol" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-decode" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
+]
 
 [[package]]
 name = "vs-faults"
@@ -3112,12 +3132,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-faults" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-decode" },
     { name = "vs-sim" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
@@ -3125,6 +3147,18 @@ requires-dist = [
 name = "vs-github"
 version = "0.1.0"
 source = { editable = "libs/vs-github" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "vs-decode" },
+    { name = "vs-sim" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
+]
 
 [[package]]
 name = "vs-issue-tracker"
@@ -3133,6 +3167,7 @@ source = { editable = "libs/vs-issue-tracker" }
 dependencies = [
     { name = "pydantic" },
     { name = "vs-core" },
+    { name = "vs-decode" },
     { name = "vs-github" },
     { name = "vs-sim" },
 ]
@@ -3141,6 +3176,7 @@ dependencies = [
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-core", editable = "libs/vs-core" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-github", editable = "libs/vs-github" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
@@ -3167,12 +3203,16 @@ source = { editable = "libs/vs-project" }
 dependencies = [
     { name = "pydantic" },
     { name = "pygit2" },
+    { name = "vs-decode" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pygit2", specifier = ">=1.18,<2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
 [[package]]
@@ -3197,8 +3237,10 @@ dependencies = [
     { name = "vs-agent" },
     { name = "vs-async-ops" },
     { name = "vs-core" },
+    { name = "vs-decode" },
     { name = "vs-evaluation" },
     { name = "vs-evaluator-protocol" },
+    { name = "vs-github" },
     { name = "vs-issue-tracker" },
     { name = "vs-mcp" },
     { name = "vs-project" },
@@ -3216,8 +3258,10 @@ requires-dist = [
     { name = "vs-agent", editable = "libs/vs-agent" },
     { name = "vs-async-ops", editable = "libs/vs-async-ops" },
     { name = "vs-core", editable = "libs/vs-core" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-evaluation", editable = "libs/vs-evaluation" },
     { name = "vs-evaluator-protocol", editable = "libs/vs-evaluator-protocol" },
+    { name = "vs-github", editable = "libs/vs-github" },
     { name = "vs-issue-tracker", editable = "libs/vs-issue-tracker" },
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
@@ -3236,6 +3280,7 @@ dependencies = [
     { name = "modal" },
     { name = "pydantic" },
     { name = "pyyaml" },
+    { name = "vs-decode" },
     { name = "vs-evaluation" },
     { name = "vs-project" },
     { name = "vs-sim" },
@@ -3248,6 +3293,7 @@ requires-dist = [
     { name = "modal", specifier = ">=1.4.2" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-evaluation", editable = "libs/vs-evaluation" },
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-sim", editable = "libs/vs-sim" },
@@ -3265,12 +3311,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-slurm" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-decode" },
     { name = "vs-sim" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2" },
+    { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 

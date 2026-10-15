@@ -18,10 +18,13 @@ This module is the single owner of those facts.
 
 from __future__ import annotations
 
-import json
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from pydantic import JsonValue, TypeAdapter
+
+from vs_decode.api import decode_json
 
 if TYPE_CHECKING:
     from vs_sandbox.docker_cli import DockerCli
@@ -58,6 +61,12 @@ NESTED_DAEMON_READY_SCRIPT = (
     ' echo "nested Docker daemon not ready after $1s" >&2;'
     f" tail -n 40 {NESTED_DAEMON_LOG} >&2 2>/dev/null; exit 1"
 )
+
+
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_RUNTIME_LISTING_BYTES = 1024 * 1024
+"""The largest ``docker info`` runtime listing read."""
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
 def workspace_container_root(host_workspace: str, *, same_path: bool) -> str:
@@ -128,12 +137,12 @@ def require_sysbox_runtime(docker: DockerCli) -> None:
         raise ContainerRuntimeUnavailableError.runtime_unreadable(
             result.stderr.strip() or f"exit {result.returncode}"
         )
-    try:
-        runtimes = json.loads(result.stdout.strip() or "null")
-    except json.JSONDecodeError as exc:
-        raise ContainerRuntimeUnavailableError.runtime_listing_unparseable(
-            result.stdout.strip()
-        ) from exc
+    runtimes = decode_json(
+        result.stdout.strip() or "null",
+        _ANY_JSON,
+        source="docker info Runtimes",
+        max_bytes=_MAX_RUNTIME_LISTING_BYTES,
+    )
     if not isinstance(runtimes, dict):
         raise ContainerRuntimeUnavailableError.runtime_listing_unparseable(result.stdout.strip())
     if SYSBOX_DOCKER_RUNTIME not in runtimes:

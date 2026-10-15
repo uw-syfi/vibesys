@@ -54,6 +54,7 @@ entrypoints = ["py.typed", "_tui/**/*"]
 server = ["py.typed", "chat/prompts/*.j2"]
 launch = ["py.typed"]
 vs_evaluator_protocol = ["py.typed"]
+vs_decode = ["py.typed"]
 vs_evaluation = ["py.typed"]
 vs_async_ops = ["py.typed"]
 vs_github = ["py.typed"]
@@ -100,7 +101,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "sdk/vs-bench/tests"]
 # Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
 sim_smoke_slow = ["tests/system/chaos", "tests/system/skeleton", "libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
@@ -153,7 +154,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_bench"]
+source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_bench"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured
@@ -222,7 +223,7 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/src", "libs/vs-decode/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
@@ -273,16 +274,32 @@ convention = "google"
 "langchain_openai".msg = "langchain was removed; do not reintroduce it."
 "langchain_google_vertexai".msg = "langchain was removed; do not reintroduce it."
 "langgraph".msg = "langgraph was removed; do not reintroduce it."
-"agentshim".msg = "Only vs_agent talks to agentshim; use vs_agent.api (or vs_agent.api.testing in tests)."
+# Real time: product code and deterministic-tier tests take a vs_sim Clock, Sleeper or
+# SleepingClock as a required argument (vs_sim.api.testing has ManualClock and VirtualClock),
+# and yield to the event loop with vs_sim.api.yield_now(). Only libs/vs-sim, the real test
+# tiers and code that runs outside the VibeSys process are exempt (per-file-ignores below).
+"time".msg = "Take a vs_sim.api Clock or Sleeper as a required argument instead of reading real time."
+"datetime.datetime.now".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"datetime.datetime.utcnow".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"datetime.datetime.today".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"datetime.date.today".msg = "Stamp times from a vs_sim.api Clock (vs_sim.api.utc_datetime(clock))."
+"asyncio.sleep".msg = "Wait on a vs_sim.api Sleeper; yield to the loop with vs_sim.api.yield_now()."
 
 [tool.ruff.lint.flake8-type-checking]
 runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope.ProtocolModel", "server.control_envelope.Request", "server.control_envelope.ResponseEnvelope", "vs_core._outcomes.OutcomeValue", "vs_core.types.common.Value", "vs_core.types.common.Identity", "vs_core.types.common.RequestBase", "vs_core.types.common.OperationSchemaRef", "vs_core.types.strategy.DecisionBase", "vs_core.types.kernel.AreaContext", "vs_core.types.strategy.OperationRequest"]
 
 [tool.ruff.lint.per-file-ignores]
-# agentshim is the agent-CLI library; vs_agent is its only importer. The e2e
-# tests drive the real library and CLIs, so they may name it too.
-"libs/vs-agent/**" = ["TID251"]
+# The e2e tests drive the real library and CLIs, so they may use real time.
 "tests/e2e/**" = ["TID251"]
+# The real-time bans exempt the owner of the real clock, the other real test tiers, and code
+# that runs outside the VibeSys process: staged profiler and evaluator resources, the
+# stdlib-only Modal evaluator helper, CI and release scripts, and the vs-bench SDK.
+"libs/vs-sim/**" = ["TID251"]
+"tests/slurm_cluster/**" = ["TID251"]
+"tests/minimal_container/**" = ["TID251"]
+"resources/**" = ["TID251"]
+"libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py" = ["TID251"]
+"sdk/vs-bench/**" = ["TID251"]
 "tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
@@ -292,6 +309,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 "libs/vs-sandbox/src/vs_sandbox/*_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/concurrency_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-sim/src/vs_sim/signal_relay_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-runtime/src/vs_runtime/api/*_contracts.py" = ["S101", "PLR2004"]
 # Scenario and fixture builders for the runtime's own test suites, moved out of tests/support
 # (where D, S101 and PLR2004 were already waived) so every consumer reaches them through
@@ -301,11 +319,11 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 # scripts/ holds standalone CI helper tools whose job is to report diagnostics
 # on stdout, so `print` is the intended output mechanism rather than a stray
 # debug statement. Same categorical treatment as S101 in tests/.
-"scripts/**" = ["T201"]
+"scripts/**" = ["T201", "TID251"]
 # packaging/ holds top-level build modules with no __init__.py on purpose (a
 # `packaging` package would shadow the PyPA `packaging` library), and release
 # tools that report on stdout/stderr like scripts/.
-"packaging/*.py" = ["INP001", "T201"]
+"packaging/*.py" = ["INP001", "T201", "TID251"]
 # This file unit-tests resources/profilers/torch/analyze_torch_profile.py, a
 # standalone script (no public library API) loaded by file path. Exercising
 # its trace-indexing, correlation, and shape/roofline math directly means
@@ -354,6 +372,7 @@ root = [
     "tests",
     "resources/evaluators/microservice",
     "libs/vs-evaluator-protocol/src",
+    "libs/vs-decode/src",
     "libs/vs-evaluation/src",
     "libs/vs-async-ops/src",
     "libs/vs-github/src",
@@ -389,6 +408,8 @@ include = [
     "resources/evaluators/microservice/kubernetes_runtime",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-evaluator-protocol/tests",
+    "libs/vs-decode/src",
+    "libs/vs-decode/tests",
     "libs/vs-evaluation/src",
     "libs/vs-evaluation/tests",
     "libs/vs-async-ops/src",

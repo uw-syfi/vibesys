@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sim.api import Clock, Threads
 
 
 class ComputeBackend(StrEnum):
@@ -146,19 +147,30 @@ class ComputeBackendImpl(Protocol):
         """
         ...
 
+    def ensure_accelerator_available(self) -> None:
+        """Raise when this host cannot provide the backend's accelerator right now.
+
+        Called once per run, before any image build or sandbox is created, so a
+        host that cannot honor ``make_sandbox(attach_accelerator=True)`` fails here,
+        naming what is missing, instead of at the first container start. A backend
+        whose accelerator has no host-side prerequisite to probe is a no-op.
+        """
+        ...
+
 
 def make_local_shell_sandbox(
     *,
     host_workspace: str,
     env: dict[str, str],
     lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
+    threads: Threads,
 ) -> LocalShellRunner:
     """Construct the unconfined local-shell sandbox and run its lifecycle hooks.
 
     Every backend builds the local sandbox the same way, so the construction
     lives here once.
     """
-    sandbox = LocalShellRunner(host_workspace, env=env, inherit_env=True)
+    sandbox = LocalShellRunner(host_workspace, env=env, inherit_env=True, threads=threads)
     SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
     return sandbox
 
@@ -194,18 +206,25 @@ def backend_is_host_only(backend: ComputeBackend) -> bool:
     return backend in _HOST_ONLY
 
 
-def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-692103 [PLR0913]; the registry call forwards each backend's independent construction seams uniformly; a config object would only rename them.
+def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]; one keyword per construction input every registered backend shares.
+    # > A settings object would only rename these keywords for the one caller and the
+    # > registered factories; splitting the factory per backend would branch on a
+    # > backend name, which the registry exists to avoid.
     backend: ComputeBackend,
     log_dir: Path,
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
-    docker: DockerCli | None = None,
+    docker: DockerCli,
+    threads: Threads,
+    clock: Clock,
     events: object | None = None,
 ) -> ComputeBackendImpl:
     """Construct the registered implementation for one compute stack.
 
-    A supplied *docker* replaces the built-in Docker CLI for built-in backends.
+    *docker* runs the backend's ``docker`` commands and *threads* is the clock its
+    sandboxes measure command timeouts on.
+    ``clock`` counts seconds since the epoch; a backend stamps what it records with it.
     ``events`` is a backend-specific contention-events seam (only the CUDA
     backend reads it today); every registered factory accepts and may ignore
     it so this call stays uniform across backends.
@@ -214,9 +233,15 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-692103 [PLR0913]
     if backend not in _REGISTRY:
         message = f"No backend impl registered for {backend!r}"
         raise ValueError(message)
-    if docker is None:
-        return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, events=events)
-    return _REGISTRY[backend](log_dir=log_dir, log=log, image=image, docker=docker, events=events)
+    return _REGISTRY[backend](
+        log_dir=log_dir,
+        log=log,
+        image=image,
+        docker=docker,
+        threads=threads,
+        clock=clock,
+        events=events,
+    )
 
 
 def _register_defaults() -> None:

@@ -39,6 +39,7 @@ from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, drive_core
 from vs_runtime.api.infrastructure import (
     CapacityHandling,
+    ProviderFallback,
     QuotaAction,
     QuotaPolicy,
     RunControlTransition,
@@ -47,7 +48,8 @@ from vs_runtime.api.infrastructure import (
     install_capacity_gate,
 )
 from vs_runtime.api.testing import FakeCapacityTimer, ProbedRunClock
-from vs_sim.api.testing import clock_from
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock, clock_from
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -100,7 +102,7 @@ async def _play(
         if transition.kind is RunControlTransitionKind.PAUSED and played.timer is None:
             channel.resume()
 
-    channel = RuntimeRunControlChannel(on_transition)
+    channel = RuntimeRunControlChannel(on_transition, threads=OsThreads())
     if policy.action is QuotaAction.WAIT:
         played.timer = FakeCapacityTimer(channel, start=START)
 
@@ -108,12 +110,17 @@ async def _play(
         writer = CandidateWriter(root)
         played.writer = writer
         script = FakeTurnScript(answers=(*([error] * stops), writer.answer))
-        client = AgentClient(FakeProvider(script=script, on_turn=writer))
+        client = AgentClient(
+            FakeProvider(script=script, on_turn=writer, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
+        )
         install_capacity_gate(
             client,
             control=channel,
             events=played.sink,
-            handling=CapacityHandling(policy, played.timer),
+            handling=CapacityHandling(policy, ProviderFallback(None, OsThreads()), played.timer),
+            clock=ManualClock(),
         )
         resolver = CandidateResolver(
             root,

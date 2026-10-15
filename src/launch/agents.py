@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from vibesys.api import agent_spec_from_config
 from vibesys.api.wiring import platform_skill_selection
-from vs_agent.api import build_agent_client
 from vs_mcp.api import ToolServerDescriptor, expose_as_tools
 from vs_runtime.api.infrastructure import (
     ManagedConversationSpec,
@@ -30,7 +29,7 @@ if TYPE_CHECKING:
 class BuiltInSessionAgents:
     """Construct run-scoped environments and conversations with built-in tools."""
 
-    client_factory: Callable[..., AgentClientProtocol] = build_agent_client
+    client_factory: Callable[..., AgentClientProtocol]
 
     def open_environment(
         self,
@@ -107,6 +106,8 @@ class BuiltInSessionAgents:
                 agent_events=agent_events,
                 additional_host_resources=readable_resources,
                 client_factory=self.client_factory,
+                clock=resources.clock,
+                threads=resources.threads,
             )
 
 

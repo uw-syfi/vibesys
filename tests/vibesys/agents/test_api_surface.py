@@ -18,6 +18,7 @@ import vs_agent.api.testing
 from vs_agent.api import AgentClient, AgentClientProtocol
 from vs_agent.api.testing import FakeAgentClient
 from vs_agent.stub_runner import StubAgentClient
+from vs_sim.api import OsThreads
 
 
 def _protocol_members(protocol: type) -> set[str]:
@@ -85,6 +86,6 @@ def test_stub_fake_conforms_to_client_protocol() -> None:
 
 def test_stub_fake_is_constructible_and_usable() -> None:
     """The fake constructs with no arguments and answers basic queries."""
-    fake = StubAgentClient()
+    fake = StubAgentClient(threads=OsThreads())
     assert fake.backend_name == "stub"
     assert fake.capabilities is not None

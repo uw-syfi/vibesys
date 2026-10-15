@@ -20,8 +20,9 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.support.real_git import REAL_GIT
 
-from vs_project.api import GitCommandError, run_git
+from vs_project.api import GitCommandError
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -74,7 +75,7 @@ _STEPS = st.builds(
 
 def _agent(root: Path, *args: str) -> bool:
     """Run bare ``git`` the way an agent does; whether it succeeded."""
-    return run_git([*_AGENT_IDENTITY, *args], cwd=root).returncode == 0
+    return REAL_GIT.run([*_AGENT_IDENTITY, *args], cwd=root).returncode == 0
 
 
 def _run(step: _Step, root: Path, repos: dict[Actor, GitRepository], counter: int) -> bool:
@@ -118,16 +119,18 @@ def _run(step: _Step, root: Path, repos: dict[Actor, GitRepository], counter: in
 
 def _snapshot(root: Path) -> tuple[str, str, str]:
     """The index entries, the ``HEAD`` tree, and every ref name, as plain ``git`` reports them."""
-    index = run_git(["ls-files", "--stage"], cwd=root).stdout.decode()
-    tree = run_git(["rev-parse", "--verify", "--quiet", "HEAD^{tree}"], cwd=root).stdout.decode()
-    refs = run_git(["for-each-ref", "--format=%(refname)"], cwd=root).stdout.decode()
+    index = REAL_GIT.run(["ls-files", "--stage"], cwd=root).stdout.decode()
+    tree = REAL_GIT.run(
+        ["rev-parse", "--verify", "--quiet", "HEAD^{tree}"], cwd=root
+    ).stdout.decode()
+    refs = REAL_GIT.run(["for-each-ref", "--format=%(refname)"], cwd=root).stdout.decode()
     return index, tree, refs
 
 
 def _assert_healthy(root: Path, step: _Step) -> None:
-    fsck = run_git(["fsck", "--strict", "--no-dangling"], cwd=root)
+    fsck = REAL_GIT.run(["fsck", "--strict", "--no-dangling"], cwd=root)
     assert fsck.returncode == 0, (step, fsck.stderr)
-    status = run_git(["status", "--porcelain"], cwd=root)
+    status = REAL_GIT.run(["status", "--porcelain"], cwd=root)
     assert status.returncode == 0, (step, status.stderr)
     assert not list((root / ".git").rglob("*.lock")), step
 
@@ -238,10 +241,10 @@ def test_history_with_merges_and_several_roots_reads_like_the_oracle(
     assert _agent(root, "merge", "-q", "--no-ff", "-m", "merge side", "side")
     # A second, unrelated root commit, merged in.
     empty_tree = (
-        run_git(["hash-object", "-t", "tree", "/dev/null"], cwd=root).stdout.decode().strip()
+        REAL_GIT.run(["hash-object", "-t", "tree", "/dev/null"], cwd=root).stdout.decode().strip()
     )
     orphan = (
-        run_git([*_AGENT_IDENTITY, "commit-tree", empty_tree, "-m", "second root"], cwd=root)
+        REAL_GIT.run([*_AGENT_IDENTITY, "commit-tree", empty_tree, "-m", "second root"], cwd=root)
         .stdout.decode()
         .strip()
     )

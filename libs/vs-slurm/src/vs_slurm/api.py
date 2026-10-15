@@ -60,12 +60,12 @@ from .runner import (
     SlurmJobResult,
     SlurmJobRunner,
     SlurmJobWaitResult,
-    SlurmProcess,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
 from .scheduler_read import READ_END as SCHEDULER_READ_END
 from .scheduler_read import split_framed as split_framed_scheduler_query
+from .scheduler_read import unframed as unframed_output
 from .scheduler_states import (
     INITIAL_LIFE,
     AccountingRow,
@@ -167,7 +167,6 @@ __all__ = [
     "SlurmJobWaitResult",
     "SlurmLocalTransport",
     "SlurmPhase",
-    "SlurmProcess",
     "SlurmRawState",
     "SlurmService",
     "SlurmSshTransport",
@@ -195,6 +194,7 @@ __all__ = [
     "split_framed_scheduler_query",
     "status_of",
     "tree_content_identity",
+    "unframed_output",
     "validate_cluster_operation_id",
 ]
 

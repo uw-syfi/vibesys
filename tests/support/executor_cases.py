@@ -100,6 +100,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
 from vs_runtime.api.slurm_evaluation_stack import (
     SCOPE as EVALUATION_SCOPE,
 )
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Iterator
@@ -126,7 +127,7 @@ class _World:
         return FaultingNamespace(self.real_namespace(), crash_at)
 
     def store(self, faulting: FaultingNamespace) -> ReceiptStore:
-        return ReceiptStore(cast("StateNamespace", faulting))
+        return ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
 
     def writes(self) -> int:
         return self._writes
@@ -146,7 +147,7 @@ async def inspect_request_of(world: CaseWorld, target: RequestBase) -> Execution
     """
     target_id = cast("RequestId", target.request_id)
     namespace = world.receipts_namespace()
-    store = ReceiptStore(namespace)
+    store = ReceiptStore(namespace, threads=OsThreads())
     inspector = RegisteredOperationRequests(
         catalog_of(scenarios(world.owners_root(), namespace)),
         NamespaceOperationReceipts(store),
@@ -277,7 +278,7 @@ class _SemanticWorld(_World):
 
     def effects(self) -> int:
         real = self.real_namespace()
-        return len(JournalSemanticEvents(ReceiptStore(real), real).read())
+        return len(JournalSemanticEvents(ReceiptStore(real, threads=OsThreads()), real).read())
 
 
 class _SemanticEventsCase:
@@ -473,8 +474,10 @@ class _WorkspacesWorld:
         digest: str | None = None,
     ) -> ExecutionResult:
         faulting = FaultingNamespace(self.env.receipts_namespace(), crash_at)
-        store = ReceiptStore(cast("StateNamespace", faulting))
-        executor = RuntimeWorkspaceRequests(self.env.start_host(), store, SettledRunInvocations())
+        store = ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
+        executor = RuntimeWorkspaceRequests(
+            self.env.start_host(), store, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+        )
         context = context_for(request, lease=lease)
         if digest is not None:
             context = context.model_copy(update={"payload_digest": digest})
@@ -517,7 +520,7 @@ class _WorkspacesCase:
     async def world(self) -> AsyncIterator[_WorkspacesWorld]:
         with (
             tempfile.TemporaryDirectory() as raw,
-            _state_home(Path(raw) / "operator-state"),
+            state_home(Path(raw) / "operator-state"),
             open_workspace_env(Path(raw)) as env,
         ):
             try:
@@ -593,7 +596,9 @@ class _SessionLifecycleWorld(_SessionsWorld):
     def __init__(self, base: Path) -> None:
         super().__init__(base)
         slot = self.real_namespace().slot("sessions.json", AgentSessionState)
-        self.host = open_lifecycle_host(base / "workspace", DurableSessionStore(slot))
+        self.host = open_lifecycle_host(
+            base / "workspace", DurableSessionStore(slot, threads=OsThreads())
+        )
 
     async def prepare(self, scenario: Scenario) -> RequestBase:
         await self._seed(ensure_request())
@@ -653,7 +658,7 @@ class _SessionLifecycleCase:
 
 
 @contextmanager
-def _state_home(path: Path) -> Iterator[None]:
+def state_home(path: Path) -> Iterator[None]:
     """Point the Project state home at *path* for one world (restored on exit)."""
     previous = os.environ.get("VIBESYS_STATE_HOME")
     os.environ["VIBESYS_STATE_HOME"] = str(path)

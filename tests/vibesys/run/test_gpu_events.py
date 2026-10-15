@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
 from vibesys.run import EventJournal
 from vibesys.run.gpu_events import CoreGpuContentionEvents
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -15,7 +16,7 @@ if TYPE_CHECKING:
 def _journal_and_events(
     tmp_path: Path, run_id: str = "run-1"
 ) -> tuple[EventJournal, CoreGpuContentionEvents]:
-    journal = EventJournal()
+    journal = EventJournal(clock=ManualClock(), threads=SimThreads())
     journal.attach(tmp_path / run_id, run_id)
     return journal, CoreGpuContentionEvents(journal)
 

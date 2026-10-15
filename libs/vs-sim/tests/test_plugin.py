@@ -179,6 +179,20 @@ def test_the_determinism_check_passes_a_deterministic_test(suite: pytest.Pyteste
     suite.runpytest_inprocess("--sim-determinism-check").assert_outcomes(passed=1)
 
 
+def test_the_determinism_check_preserves_named_tasks(suite: pytest.Pytester) -> None:
+    suite.makepyfile(
+        """
+        import asyncio
+
+        async def test_named_task(sim):
+            task = asyncio.create_task(sim.clock.sleep(1), name="worker")
+            assert task.get_name() == "worker"
+            await task
+        """
+    )
+    suite.runpytest_inprocess("--sim-determinism-check").assert_outcomes(passed=1)
+
+
 def test_the_determinism_check_catches_a_test_that_depends_on_something_outside_the_clock(
     suite: pytest.Pytester,
 ) -> None:

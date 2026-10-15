@@ -23,7 +23,8 @@ from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
 from server.run_attachment import AgentSelection, RunAttachment
-from vs_sim.api.testing import SimThreads, wait_or_fail
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock, SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,6 +45,7 @@ def _remember_thread(parts: ServerParts, thread_id: str = "thread-1") -> ChatThr
             chat_thread_id=thread_id,
             agent_kind="chat",
             data=spec,
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
     return spec
@@ -376,6 +378,8 @@ def _factory_for_test(
         ),
         build_agent=build_agent,
         fallback=lambda _question: "fallback",
+        clock=ManualClock(),
+        threads=OsThreads(),
     )
 
 

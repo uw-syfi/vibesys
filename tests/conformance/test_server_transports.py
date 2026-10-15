@@ -22,6 +22,8 @@ from websockets.sync.client import ClientConnection, connect
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import WebSocketGateway, WebSocketLimits
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable, Mapping
@@ -112,7 +114,9 @@ def _running_connection(
     limits: WebSocketLimits | None = None,
 ) -> Generator[ScenarioConnection]:
     if transport == "unix":
-        with UnixJsonlServer(socket_path, parts.api):
+        with UnixJsonlServer(
+            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+        ):
             connection = _UnixConnection(socket_path)
             try:
                 yield connection
@@ -120,7 +124,13 @@ def _running_connection(
                 connection.close()
         return
     assert transport == "websocket", f"unknown transport: {transport}"
-    with WebSocketGateway(parts.api, limits=limits or WebSocketLimits()) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        limits=limits or WebSocketLimits(),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         connection = _WebSocketConnection(gateway)
         try:
             yield connection
@@ -147,6 +157,38 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
             assert batch["history_after_sequence"] == parts.api.latest_sequence - 50
         else:
             assert batch["history_after_sequence"] == 0
+    finally:
+        parts.close()
+
+
+@pytest.mark.parametrize("tail", [None, 20])
+@pytest.mark.parametrize("transport", ["unix", "websocket"])
+def test_future_resume_cursor_replays_the_live_store_on_each_transport(
+    tmp_path: Path,
+    socket_dir: Path,
+    tail: int | None,
+    transport: str,
+) -> None:
+    parts = _parts_with_history(tmp_path)
+    latest = parts.api.latest_sequence
+    request = {
+        "type": "subscribe",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "after_sequence": latest + 100,
+        **({} if tail is None else {"tail": tail}),
+    }
+    try:
+        with _running_connection(transport, parts, socket_dir / "future-cursor.sock") as connection:
+            connection.send(request)
+            assert connection.receive()["type"] == "subscribed"
+            batch = connection.receive()
+
+        expected_floor = 0 if tail is None else max(0, latest - tail)
+        assert batch["history_after_sequence"] == expected_floor
+        assert batch["through_sequence"] == latest
+        assert [
+            event["sequence"] for event in batch["events"] if event["sequence"] > expected_floor
+        ] == list(range(expected_floor + 1, latest + 1))
     finally:
         parts.close()
 
@@ -201,7 +243,14 @@ def test_a_rebootstrap_split_across_frames_supersedes_the_fold_once(
         with _running_connection(
             "websocket", parts, socket_dir / "split-rebootstrap.sock", limits
         ) as connection:
-            connection.send({"type": "subscribe", "after_sequence": 0, "tail": 10})
+            connection.send(
+                {
+                    "type": "subscribe",
+                    "timestamp": "2026-01-01T00:00:00Z",
+                    "after_sequence": 0,
+                    "tail": 10,
+                }
+            )
             assert connection.receive()["type"] == "subscribed"
             assert connection.receive()["type"] == "event_batch"
             with parts.condition:
@@ -311,7 +360,9 @@ def test_a_backlog_published_between_checkpoints_arrives_as_coalesced_batches(
     parts = build_server_parts(tmp_path / "logs")
     try:
         with _running_connection(transport, parts, socket_dir / "burst.sock") as connection:
-            connection.send({"type": "subscribe", "after_sequence": 0})
+            connection.send(
+                {"type": "subscribe", "timestamp": "2026-01-01T00:00:00Z", "after_sequence": 0}
+            )
             assert connection.receive()["type"] == "subscribed"
             assert connection.receive()["type"] == "event_batch"
 
@@ -354,14 +405,22 @@ def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
     scenario = load_scenario(scenario_name)
     parts = _parts_with_history(tmp_path)
     settle = FakeSettleWindow()
-    tracker = SubscriptionTracker(settle)
+    tracker = SubscriptionTracker(settle, threads=OsThreads())
     socket_path = socket_dir / "dual.sock"
     waiter, settled = _disconnect_waiter(tracker)
 
     try:
         with (
-            UnixJsonlServer(socket_path, parts.api, tracker),
-            WebSocketGateway(parts.api, subscriptions=tracker) as gateway,
+            UnixJsonlServer(
+                socket_path, parts.api, tracker, threads=OsThreads(), network=UnixNetwork()
+            ),
+            WebSocketGateway(
+                parts.api,
+                subscriptions=tracker,
+                clock=ManualClock(),
+                threads=OsThreads(),
+                request_runner=ThreadBlockingRunner(),
+            ) as gateway,
         ):
             connections: dict[str, ScenarioConnection] = {
                 "terminal": _UnixConnection(socket_path),

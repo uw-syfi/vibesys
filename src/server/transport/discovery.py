@@ -13,21 +13,19 @@ from __future__ import annotations
 import json
 import os
 import secrets
-import urllib.error
-import urllib.request
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from pydantic_core import from_json
+from pydantic import JsonValue, TypeAdapter
 
 from server.registry import FLOCK_AVAILABLE, LockState, probe_lock, try_lock, unlock
-from vs_sim.api import PidfdProcessSignaller
+from vs_decode.api import Unreadable, read_json
 
 if TYPE_CHECKING:
-    from vs_sim.api import Clock, ProcessSignaller
+    from vs_sim.api import Clock, LoopbackHttp, ProcessSignaller
 
 _PROCESS_TABLE = Path("/proc")
 """Where per-process open descriptors are readable, when the host exposes them."""
@@ -44,7 +42,6 @@ _IPV4_WILDCARD_HEX = "00000000"
 _IPV6_MAPPED_LOOPBACK_HEX = "0000000000000000FFFF00000100007F"
 _TCP_LISTEN_STATE = "0A"
 _SOCKET_PREFIX = "socket:["
-_PROCESS_SIGNALLER = PidfdProcessSignaller()
 
 
 class WebPortState(StrEnum):
@@ -88,7 +85,7 @@ class WebPortInspector:
         self,
         process_table: Path = _PROCESS_TABLE,
         *,
-        process_signaller: ProcessSignaller = _PROCESS_SIGNALLER,
+        process_signaller: ProcessSignaller,
     ) -> None:
         """Inspect ``process_table``, injectable for deterministic filesystem tests."""
         self._process_table = process_table
@@ -153,20 +150,52 @@ class WebHealthProbe(Protocol):
         ...
 
 
+_HEALTH_TIMEOUT_SECONDS = 0.4
+_HEALTH_BODY = b"vibesys-ok\n"
+_HEALTH_OK = 200
+
+
 class UrlWebHealthProbe:
     """Probe a published gateway through its loopback health endpoint."""
 
+    def __init__(self, http: LoopbackHttp) -> None:
+        """Send the health request through ``http``."""
+        self._http = http
+
     def healthy(self, record: WebInstanceRecord) -> bool:
         """Return whether the bounded health request answers with the exact success body."""
-        health = f"http://127.0.0.1:{record.port}/health?token={record.token}"
-        try:
-            with urllib.request.urlopen(health, timeout=0.4) as response:  # noqa: S310  # lint-waiver: LW-101049 [S310]; probe only the loopback health URL recorded by this process
-                return response.status == 200 and response.read() == b"vibesys-ok\n"  # noqa: PLR2004  # lint-waiver: LW-101050 [PLR2004]; compare the fixed health response status required by the protocol
-        except (OSError, urllib.error.URLError):
-            return False
+        reply = self._http.get(
+            record.port,
+            f"/health?token={record.token}",
+            timeout=_HEALTH_TIMEOUT_SECONDS,
+            max_bytes=len(_HEALTH_BODY) + 1,
+        )
+        return reply is not None and reply.status == _HEALTH_OK and reply.body == _HEALTH_BODY
 
 
-_WEB_HEALTH_PROBE = UrlWebHealthProbe()
+@dataclass(frozen=True)
+class WebDiscovery:
+    """Find a usable live gateway from its published record."""
+
+    processes: ProcessSignaller
+    """Tells whether the record's process still exists."""
+    probe: WebHealthProbe
+    """Asks the gateway whether it can serve a browser now."""
+
+    def discover(self, path: Path, *, cleanup_stale: bool = True) -> WebInstanceRecord | None:
+        """Return a usable live record, removing a definitively dead owner's state if requested."""
+        record = _read_record(path)
+        if record is None:
+            return None
+        if not self.processes.exists(record.pid):
+            if cleanup_stale:
+                record.remove_if_owner(path)
+            return None
+        # A failed health request is not death evidence. The gateway may be alive but temporarily
+        # unable to answer before the bounded probe expires, so consuming its record here would
+        # make a later discovery unable to recover. A dead PID above is definitive and remains
+        # eligible for cleanup.
+        return record if self.probe.healthy(record) else None
 
 
 @dataclass(frozen=True)
@@ -182,36 +211,14 @@ class WebInstanceRecord:
     web_build_id: str | None = None
 
     @classmethod
-    def discover(
-        cls,
-        path: Path,
-        *,
-        cleanup_stale: bool = True,
-        probe: WebHealthProbe = _WEB_HEALTH_PROBE,
-    ) -> WebInstanceRecord | None:
-        """Return a usable live record, removing a definitively dead owner's state if requested."""
-        record = _read_record(path)
-        if record is None:
-            return None
-        if not _pid_alive(record.pid):
-            if cleanup_stale:
-                record.remove_if_owner(path)
-            return None
-        # A failed health request is not death evidence. The gateway may be alive but temporarily
-        # unable to answer before the bounded probe expires, so consuming its record here would
-        # make a later discovery unable to recover. A dead PID above is definitive and remains
-        # eligible for cleanup.
-        return record if probe.healthy(record) else None
-
-    @classmethod
     def read(cls, path: Path) -> WebInstanceRecord | None:
         """Return the published record without probing the gateway it names.
 
-        `discover` answers "can I hand this URL to a browser", which needs a
+        `WebDiscovery.discover` answers "can I hand this URL to a browser", which needs a
         health probe and so is both slower and load-sensitive. This answers the
         weaker "which process published this instance", which is what a caller
         that only wants to signal or identify the gateway needs, and unlike
-        `discover` it still answers that while the gateway is starting up or
+        `WebDiscovery.discover` it still answers that while the gateway is starting up or
         shutting down. It says nothing about liveness: a record outlives a
         gateway that was killed, and a `None` return only means no record is
         readable right now, not that nothing is running.
@@ -645,11 +652,18 @@ def _holds_file(descriptors: tuple[Path, ...], device: int, inode: int) -> bool:
     return False
 
 
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_RECORD_BYTES = 64 * 1024
+"""Far past any web instance record; a longer file is not one."""
+
+
 def _read_record(path: Path) -> WebInstanceRecord | None:
+    # Another process wrote the file, so ``vs_decode`` reads it: bounded, with nesting
+    # bounded by pydantic's parser, and never blocking on a FIFO put in its place.
+    raw = read_json(path, _JSON_VALUE, max_bytes=_MAX_RECORD_BYTES)
+    if isinstance(raw, Unreadable):
+        return None
     try:
-        # Pydantic's parser bounds nesting and reports it, and invalid UTF-8, as
-        # ``ValueError``; ``json.loads`` raised ``RecursionError`` past this handler.
-        raw = from_json(path.read_bytes())
         if not isinstance(raw, dict) or raw.get("version") != 1:
             return None
         return WebInstanceRecord(
@@ -667,16 +681,6 @@ def _read_record(path: Path) -> WebInstanceRecord | None:
         )
     except (OSError, TypeError, ValueError, KeyError):
         return None
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def _positive_int(value: object) -> int:

@@ -26,6 +26,7 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
 from tests.slurm_cluster.cluster import SlurmCluster, build_image, docker
+from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
@@ -37,8 +38,9 @@ from vs_runtime.api.infrastructure import (
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
 )
-from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend
+from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend, SubprocessDockerCli
 from vs_sandbox.api.slurm import load_slurm_operator_settings
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
 
 if TYPE_CHECKING:
     import threading
@@ -300,7 +302,12 @@ def make_request(
         workspace=workspace,
         ref_dir=None,
         backend=LocalBackend(
-            ComputeBackend.CPU, log_dir, log=lambda _: None, image="python:3.12-slim"
+            ComputeBackend.CPU,
+            log_dir,
+            log=lambda _: None,
+            image="python:3.12-slim",
+            docker=SubprocessDockerCli(processes=OsProcesses()),
+            threads=OsThreads(),
         ),
         agent_backend="stub",
         cli_provider=None,
@@ -311,6 +318,8 @@ def make_request(
         benchmark_command="python3 benchmark.py",
         benchmark_output_argument=BENCHMARK_OUTPUT_ARGUMENT,
         evaluator_requirements=TrustedEvaluatorRequirements(),
+        clock=MonotonicClock(),
+        slurm_processes=REAL_PROCESSES,
     )
 
 

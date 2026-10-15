@@ -5,12 +5,15 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal, NoReturn
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, TypeAdapter
 
+from vs_decode.api import Unreadable, UnreadableKind, decode_json
 from vs_evaluator_protocol.errors import ReasonCode, reject
 
-# Parses untrusted JSON with nesting bounded, failing as a ValueError.
+# The target for a record line before its `kind` picks the record model.
 _JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+MAX_RECORD_LINE_BYTES = 4 * 1024 * 1024
+"""The largest record line an evaluator may write."""
 
 PROTOCOL_VERSION: int = 2
 
@@ -146,34 +149,42 @@ def parse_records(text: str) -> list[Record]:
 def _parse_line(line: str, number: int) -> Record:
     """Parse one non-blank line into the record its `kind` names.
 
-    The line comes from the evaluator, so ``_JSON`` parses it: pydantic's parser
-    bounds nesting and reports it as a ``ValueError``, where ``json.loads``
-    recurses per level and raised ``RecursionError`` past every caller's handler.
+    The line comes from the evaluator, so ``vs_decode`` parses it: bounded in size,
+    with nesting bounded by pydantic's parser, where ``json.loads`` recursed per level
+    and raised ``RecursionError`` past every caller's handler.
     """
-    try:
-        payload = _JSON.validate_json(line)
-    except ValueError:
+    payload = decode_json(line, _JSON, source=f"line {number}", max_bytes=MAX_RECORD_LINE_BYTES)
+    if isinstance(payload, Unreadable):
+        if payload.kind is UnreadableKind.TOO_LARGE:
+            reject(
+                ReasonCode.MALFORMED_LINE,
+                f"line {number} is larger than {MAX_RECORD_LINE_BYTES} bytes",
+            )
         reject(ReasonCode.MALFORMED_LINE, f"line {number} is not valid JSON")
     if not isinstance(payload, dict):
         reject(ReasonCode.MALFORMED_LINE, f"line {number} is not a JSON object")
     kind = payload.get("kind")
     if not isinstance(kind, str) or kind not in _RECORD_TYPES:
         reject(ReasonCode.UNKNOWN_KIND, f"line {number} has unknown record kind {kind!r}")
-    try:
-        return _RECORD_TYPES[kind].model_validate_json(line)
-    except ValidationError as error:
-        _reject_invalid_record(error, line=number, kind=kind)
+    record = decode_json(
+        line, _RECORD_TYPES[kind], source=f"line {number}", max_bytes=MAX_RECORD_LINE_BYTES
+    )
+    if isinstance(record, Unreadable):
+        _reject_invalid_record(record, line=number, kind=kind)
+    return record
 
 
-def _reject_invalid_record(error: ValidationError, *, line: int, kind: str) -> NoReturn:
-    """Translate a pydantic failure into the reason code the protocol names."""
-    details = error.errors()
-    unknown_key = next((detail for detail in details if detail["type"] == "extra_forbidden"), None)
-    detail = unknown_key or details[0]
-    key = ".".join(str(part) for part in detail["loc"])
+def _reject_invalid_record(record: Unreadable, *, line: int, kind: str) -> NoReturn:
+    """Translate a validation failure into the reason code the protocol names."""
+    problems = record.problems
+    unknown_key = next((p for p in problems if p.error_type == "extra_forbidden"), None)
+    problem = unknown_key or problems[0]
     if unknown_key is not None:
-        reject(ReasonCode.UNKNOWN_KEY, f"line {line}: {kind} record has unknown key {key!r}")
+        reject(
+            ReasonCode.UNKNOWN_KEY,
+            f"line {line}: {kind} record has unknown key {problem.key_path!r}",
+        )
     reject(
         ReasonCode.INVALID_RECORD,
-        f"line {line}: {kind} record has invalid key {key!r}: {detail['msg']}",
+        f"line {line}: {kind} record has invalid key {problem.key_path!r}: {problem.message}",
     )

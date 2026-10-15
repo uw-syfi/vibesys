@@ -5,12 +5,15 @@ import {desktopBridge, desktopSessionOptions, markDesktopShell} from '../platfor
 import {browserLifecycle} from '../platform/lifecycle.js';
 import '../styles.css';
 import {createLiveApp} from './compose.js';
-import {applySessionTheme, applyWebTheme} from './theme.js';
+import {BrowserWebThemePreferenceStore, createWebThemeController} from './theme.js';
 
 // The desktop shell's entry: the page is bundled inside the app, and the shell's bridge is its
 // only way to the server. There is no URL, token, or gateway to read.
 markDesktopShell(document.documentElement, window.vibesysDesktop);
-applyWebTheme(document.documentElement, null);
+const theme = createWebThemeController(
+  document.documentElement,
+  new BrowserWebThemePreferenceStore(() => window.localStorage),
+);
 
 const root = document.querySelector('#root');
 if (root === null) throw new Error('Web viewer root is missing');
@@ -25,6 +28,6 @@ if (bridge === null) {
   );
 } else {
   const session = new WebSession(desktopSessionOptions(bridge, browserLifecycle()));
-  void applySessionTheme(document.documentElement, session);
-  reactRoot.render(<StrictMode>{createLiveApp(session)}</StrictMode>);
+  theme.resolveSessionDefault(session);
+  reactRoot.render(<StrictMode>{createLiveApp(session, theme)}</StrictMode>);
 }

@@ -132,6 +132,7 @@ def released_job(identity: int) -> tuple[core.CoreState, core.OwnedJob, core.Req
         phase=core.RequestPhase.COMPLETED,
         observation=observation,
         until=core.Until(at=1.0),
+        addressed_by=(),
     )
     return state, job, source
 

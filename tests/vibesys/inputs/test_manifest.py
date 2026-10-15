@@ -18,6 +18,7 @@ from vibesys.inputs import (
     EvaluatorInput,
     InputCommand,
     InputManifest,
+    InputManifestParseError,
     WorkspaceSource,
     load_task,
     render_input_manifest,
@@ -268,6 +269,10 @@ def test_load_task_reports_missing_files_and_invalid_manifest(tmp_path: Path) ->
     (task / "vibesys.input.toml").write_text("version = 2\n")
     with pytest.raises(ValueError, match="Invalid input manifest"):
         load_task(tmp_path)
+    (task / "vibesys.input.toml").write_text("version = [\n")
+    with pytest.raises(InputManifestParseError, match="Invalid input manifest") as raised:
+        load_task(tmp_path)
+    assert raised.value.path == task / "vibesys.input.toml"
 
 
 _TASK_NAMES = st.text(alphabet="abcdefghijklmnopqrstuvwxyz", min_size=1, max_size=8)

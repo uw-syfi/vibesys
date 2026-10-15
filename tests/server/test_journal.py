@@ -102,6 +102,7 @@ def test_attach_renumbering_bootstrap_events_starts_a_new_sequence_space(tmp_pat
     durable.journal.record(EventType.RUN_FINISHED, status=EventStatus.COMPLETED)
 
     current = build_server_parts(tmp_path / "bootstrap")
+    current.journal.record(EventType.SERVER_READY, status=EventStatus.ACTIVE)
     bootstrap_store = current.journal.store_id_locked()
     folded = current.journal.read()
     current.attach(tmp_path / "durable")
@@ -112,7 +113,7 @@ def test_attach_renumbering_bootstrap_events_starts_a_new_sequence_space(tmp_pat
     # a different sequence space and the identity has to say so.
     assert current.journal.store_id_locked() != bootstrap_store
     assert [event.sequence for event in attached] == [event.sequence for event in folded]
-    assert attached != folded
+    assert [event.type for event in attached] != [event.type for event in folded]
 
 
 def test_attach_into_an_empty_log_keeps_the_sequence_space(tmp_path: Path) -> None:
@@ -259,7 +260,14 @@ def test_operational_failure_events_require_diagnostics(
         with pytest.raises(ValueError, match="must include a diagnostic"):
             parts.journal.record(event_type, status=status)
     with pytest.raises(ValueError, match="must include a diagnostic"):
-        parts.journal.append(make_event(event_type, "boom", status=EventStatus.FAILED))
+        parts.journal.append(
+            make_event(
+                event_type,
+                "boom",
+                status=EventStatus.FAILED,
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+            )
+        )
 
 
 def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path: Path) -> None:
@@ -271,6 +279,7 @@ def test_append_accepts_failed_gate_outcomes_without_diagnostics(tmp_path: Path)
             EventType.GATE_FINISHED,
             status=EventStatus.FAILED,
             data=GateFinishedData(gate=GateKind.ACCURACY, output_tail="mismatch"),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
     assert gate.diagnostic is None

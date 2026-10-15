@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
@@ -11,8 +12,10 @@ import pytest
 from pydantic import ValidationError
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, create_session, default_runs
 from launch.agents import BuiltInSessionAgents
 from launch.testing import FakeSessionAgents
@@ -35,6 +38,8 @@ from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecor
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -119,13 +124,19 @@ class _PreparedEnvironment:
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
 def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
     return LaunchSettings(
-        agents=FakeSessionAgents() if request.param else None,
+        blocking=ThreadBlockingRunner(),
+        network=UnixNetwork(),
+        timing=production_timing(),
+        processes=REAL_PROCESSES,
+        agents=FakeSessionAgents(OsThreads()) if request.param else None,
         backend_factory=host_container_backend,
     )
 
@@ -161,7 +172,16 @@ def _session(tmp_path: Path, settings: LaunchSettings | None = None) -> _LocalRu
             request,
             sink=cast("EventSink", lambda _event: None),
             registry=registry,
-            settings=settings,
+            settings=(
+                LaunchSettings(
+                    timing=production_timing(),
+                    processes=REAL_PROCESSES,
+                    blocking=ThreadBlockingRunner(),
+                    network=UnixNetwork(),
+                )
+                if settings is None
+                else settings
+            ),
         ),
     )
 
@@ -175,7 +195,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
     project_root.mkdir()
     (project_root / "OBJECTIVE.md").write_text("Test the auxiliary API.\n", encoding="utf-8")
     project = Project.open(project_root)
-    project.state.create_project("test")
+    project.state.create_project("test", now=datetime(2026, 1, 1, tzinfo=UTC))
     project.state.create_run(
         project.state.new_run_manifest(
             "test",
@@ -186,6 +206,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
             execution=run_execution_record(),
             orchestration=OrchestrationDescriptor(id="stub", config_version=1, options={}),
             trusted_input_baseline="0" * 40,
+            now=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
     shared_session = _EnvironmentSession()
@@ -215,6 +236,8 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
         backend=ComputeBackend.CPU,
         skill_source_dirs=(),
         host_resources=(),
+        clock=ManualClock(),
+        threads=OsThreads(),
     )
 
 
@@ -367,7 +390,7 @@ def test_auxiliary_selection_rejected_before_environment_acquisition(
     launch = AuxiliaryAgentLaunch.model_validate(
         _launch(evidence).model_dump() | {"provider": provider}
     )
-    agents = agent_settings.agents or BuiltInSessionAgents()
+    agents = agent_settings.agents or BuiltInSessionAgents(client_factory=_resumable_client)
 
     with pytest.raises(ValueError, match=provider):
         agents.create_agent(launch, resources, NULL_AGENT_EVENT_SINK)
@@ -396,6 +419,10 @@ def test_independent_auxiliary_scope_survives_session_close(
 
     async def execute() -> None:
         settings = LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             backend_factory=host_container_backend,
             agents=agent_settings.agents,

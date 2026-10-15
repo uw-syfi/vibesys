@@ -72,11 +72,14 @@ def _silent(phase: RequestPhase, status: ObservationStatus, *, terminal: bool) -
         sequence=0,
         observation=answered,
         until=Until(at=BOUND),
+        addressed_by=(),
     )
     return state.model_copy(
         update={
             "records": RecordsState(
-                records=(record,), recovery=RecoveryBarrier(epoch=1, phase=RecoveryPhase.READY)
+                hosts=(),
+                records=(record,),
+                recovery=RecoveryBarrier(epoch=1, phase=RecoveryPhase.READY),
             )
         }
     )

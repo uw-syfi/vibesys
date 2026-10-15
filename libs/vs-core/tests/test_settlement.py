@@ -3,7 +3,7 @@
 from typing import ClassVar, Literal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
 
@@ -471,7 +471,7 @@ def test_evidence_attribution_corruption_cannot_establish_eligibility(corrupt: s
     if corrupt == "job_evidence":
         job = job.model_copy(update={"evidence": ()})
     if corrupt == "job_terminal":
-        job = job.model_copy(update={"terminal": False})
+        job = job.model_copy(update={"terminal": False, "wait": core.WaitOn(timer=0.0)})
     assessment = value.assessments[0]
     if corrupt == "verdict":
         assessment = assessment.model_copy(update={"verdict": "rejected"})
@@ -566,6 +566,7 @@ def judge_state() -> tuple[core.CoreState, core.Settlement]:
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.COMPLETED,
         until=core.Until(at=10.0),
+        addressed_by=(),
     )
     return state.model_copy(
         update={
@@ -590,10 +591,12 @@ def judge_state() -> tuple[core.CoreState, core.Settlement]:
             "generation",
             "workspace",
             "json",
+            "deep_json",
             "missing_output",
         ]
     )
 )
+@example(corrupt="deep_json")
 def test_unmeasured_judge_requires_declared_exact_final_authority(corrupt: str) -> None:
     state, value = judge_state()
     invocation = state.sessions.invocations[0]
@@ -626,6 +629,7 @@ def test_unmeasured_judge_requires_declared_exact_final_authority(corrupt: str) 
         "generation": {"scope": invocation.scope.model_copy(update={"generation": 1})},
         "workspace": {"turn": invocation.turn.model_copy(update={"workspace": invocation.scope})},
         "json": {"output_json": "malformed"},
+        "deep_json": {"output_json": "[" * 100_000 + "]" * 100_000},
         "missing_output": {"output_json": None},
     }
     invocation = invocation.model_copy(update=replacements.get(corrupt, {}))
@@ -817,6 +821,7 @@ def registered_judge_state() -> tuple[core.CoreState, core.Settlement, core.Oper
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.COMPLETED,
         until=core.Until(at=10.0),
+        addressed_by=(),
     )
     return (
         state.model_copy(
@@ -1641,7 +1646,13 @@ def test_pending_preserves_requested_eligibility_until_all_proofs_arrive(
         state = state.model_copy(
             update={
                 "evaluation": state.evaluation.model_copy(
-                    update={"jobs": (job.model_copy(update={"terminal": False}),)}
+                    update={
+                        "jobs": (
+                            job.model_copy(
+                                update={"terminal": False, "wait": core.WaitOn(timer=0.0)}
+                            ),
+                        )
+                    }
                 )
             }
         )

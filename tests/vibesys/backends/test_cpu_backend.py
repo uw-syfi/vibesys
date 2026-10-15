@@ -21,6 +21,9 @@ from vs_sandbox.api import (
     SandboxLifecycleHooks,
     create_compute_backend,
 )
+from vs_sandbox.api.testing import ScriptedDockerCli
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -38,7 +41,9 @@ def _make_backend(tmp_path: Path, *, docker: DockerCli | None = None) -> LocalBa
     impl = create_compute_backend(
         ComputeBackend.CPU,
         log_dir=tmp_path / "logs",
-        docker=docker,
+        docker=ScriptedDockerCli() if docker is None else docker,
+        clock=ManualClock(),
+        threads=OsThreads(),
     )
     assert isinstance(impl, LocalBackend)
     return impl
@@ -46,7 +51,13 @@ def _make_backend(tmp_path: Path, *, docker: DockerCli | None = None) -> LocalBa
 
 class TestCpuRegistry:
     def test_cpu_in_registry(self, tmp_path: Path) -> None:
-        impl = create_compute_backend(ComputeBackend.CPU, log_dir=tmp_path)
+        impl = create_compute_backend(
+            ComputeBackend.CPU,
+            log_dir=tmp_path,
+            clock=ManualClock(),
+            docker=ScriptedDockerCli(),
+            threads=OsThreads(),
+        )
         assert isinstance(impl, LocalBackend)
         assert impl.name is ComputeBackend.CPU
 

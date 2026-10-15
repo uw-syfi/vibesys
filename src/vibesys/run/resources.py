@@ -1,7 +1,6 @@
 """Explicit product composition for one canonical VibeSys run."""
 
 import shlex
-import shutil
 import sys
 from collections.abc import Callable, Mapping
 from contextlib import ExitStack
@@ -44,14 +43,13 @@ from vibesys.orchestration.skill_selection import (
 from vibesys.run.contracts import RunRequest
 from vibesys.run.environment import open_run_environment
 from vibesys.run.evaluation import trusted_evaluation_plan
-from vibesys.run.evaluation_socket import evaluation_socket_mount
+from vibesys.run.evaluation_socket import evaluation_socket_mount, remove_evaluation_socket
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.gpu_events import CoreGpuContentionEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
 from vibesys.run.profilers import (
     ProfilerPreflight,
-    native_profiler_preflight,
     resolve_run_profiler,
     validate_run_request,
 )
@@ -121,9 +119,8 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import (
     ComputeBackendImpl,
     HostResource,
-    create_compute_backend,
 )
-from vs_sim.api import MonotonicClock
+from vs_sim.api import utc_datetime
 
 
 def _coerce_dir(raw: str | Path | None, label: str) -> Path | None:
@@ -162,8 +159,8 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
     ) = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-    profiler_preflight: ProfilerPreflight | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl],
+    profiler_preflight: ProfilerPreflight,
 ) -> "_PreparedRun":
     """Open one project context and register its resources with ``ownership``.
 
@@ -171,10 +168,10 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     failure. Product composition chooses every resource; the runtime host owns
     their common lifetime.
 
-    ``backend_factory`` overrides how the compute backend is constructed
-    (default: ``vs_sandbox.api.create_compute_backend``); a test injects
-    ``vs_sandbox.api.testing.FakeComputeBackend`` here instead of monkeypatching
-    the registry or a backend's internal sandbox constructor.
+    ``backend_factory`` constructs the compute backend: launch binds
+    ``vs_sandbox.api.create_compute_backend`` to the run's Docker CLI and threads; a
+    test injects ``vs_sandbox.api.testing.FakeComputeBackend`` here instead of
+    monkeypatching the registry or a backend's internal sandbox constructor.
     """
     return _assemble_run_resources(
         ownership=ownership,
@@ -197,10 +194,10 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
         | None
     ) = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-    profiler_preflight: ProfilerPreflight | None = None,
+    backend_factory: Callable[..., ComputeBackendImpl],
+    profiler_preflight: ProfilerPreflight,
 ) -> "_PreparedRun":
-    validate_run_request(request)
+    validate_run_request(request, git=integration.git)
     bundle = request.input_bundle
     exp_name = request.exp_name or request.resolved_run_id
     config = request.config
@@ -223,8 +220,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
     backend = request.backend
     remote_repo = request.remote_repo
     repo_visibility = request.repo_visibility
-    boot_clock = MonotonicClock()
-    context_start = boot_clock.now()
+    clock = integration.clock
+    context_start = clock.now()
     # Boot spans recorded before this function ran (the dispatch preamble)
     # come first, so the run log reads in the order the work happened once
     # the buffer below flushes into ``RunLogger``. Assembly's own spans stay
@@ -263,7 +260,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             run_id = (
                 request.resolved_run_id
                 if existing or request.run_id is not None
-                else generate_run_id(exp_name)
+                else generate_run_id(exp_name, now=utc_datetime(clock))
             )
             collection_root = runs_dir.expanduser().resolve() if runs_dir is not None else None
             copied_project = not existing and collection_root is not None
@@ -305,31 +302,19 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             resolved_profiler_kind = resolve_run_profiler(
                 request,
                 environment,
-                native_preflight=(
-                    native_profiler_preflight if profiler_preflight is None else profiler_preflight
-                ),
+                native_preflight=profiler_preflight,
                 log=buffered_logs.append,
             )
 
         with boot_trace.span("backend_and_model"):
-            backend_log_dir = Project.log_directory_for(project_root, run_id)
-            if backend_factory is None:
-                # A caller-supplied backend factory (tests, mainly) builds its
-                # own double and does not take this production-only seam.
-                backend_impl = create_compute_backend(
-                    backend,
-                    log_dir=backend_log_dir,
-                    log=buffered_logs.append,
-                    image=environment.backend_image,
-                    events=CoreGpuContentionEvents(integration.events),
-                )
-            else:
-                backend_impl = backend_factory(
-                    backend,
-                    log_dir=backend_log_dir,
-                    log=buffered_logs.append,
-                    image=environment.backend_image,
-                )
+            backend_impl = backend_factory(
+                backend,
+                log_dir=Project.log_directory_for(project_root, run_id),
+                log=buffered_logs.append,
+                image=environment.backend_image,
+                clock=clock,
+                events=CoreGpuContentionEvents(integration.events),
+            )
             model_name = config.model.name
         with boot_trace.span("execution_record"):
             skill_source_paths = resolve_skill_source_paths(skills_dirs)
@@ -385,6 +370,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 environment=environment,
                 backend=backend_impl,
                 log=buffered_logs.append,
+                git=integration.git,
             )
             if copied_project:
                 source_reference = task_root / "reference"
@@ -477,6 +463,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     git_events=CoreGitTrackerEvents(integration.events),
                     log_emit=run_log_emitter(integration.agent_events),
                     on_log_ready=integration.attach,
+                    clock=clock,
                     git_repository=integration.git_repository,
                     state_stores=integration.state_stores,
                     resume_recovery=recover_existing_run if existing else None,
@@ -513,7 +500,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 data=ExperimentsChangedData(reason="project_attached"),
             )
             logger.lprint(
-                f"experiments gate open after {(boot_clock.now() - context_start) * 1000:.0f}ms"
+                f"experiments gate open after {(clock.now() - context_start) * 1000:.0f}ms"
             )
 
             project_ref_dir = (
@@ -578,10 +565,12 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             if resolved_backend == AgentBackend.CLI:
                 # Agents run in containers that must reach the in-turn evaluation service.
                 socket_mount = evaluation_socket_mount(project_root, run_id)
-                ownership.callback(shutil.rmtree, socket_mount.host_path, ignore_errors=True)
+                ownership.callback(remove_evaluation_socket, project_root, run_id)
                 evaluation_socket_mounts = (socket_mount,)
 
-            experiment_repository = ExperimentRepository(project_root, logger.lprint)
+            experiment_repository = ExperimentRepository(
+                project_root, logger.lprint, git=integration.git, github=integration.github
+            )
             experiment_repository.configure(
                 remote_repo,
                 repo_visibility,
@@ -600,6 +589,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 agent_backend=resolved_backend,
                 cli_provider=resolved_cli_provider,
                 run_id=run_id,
+                clock=clock,
+                slurm_processes=integration.slurm_processes,
                 objective=agent_objective,
                 objective_document=project_resources.objective_document,
                 accuracy_command=accuracy_command,
@@ -631,6 +622,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         environment_resources = open_run_environment_resources(
             run_environment_request,
             lambda request: open_run_environment(environment, request),
+            clock=clock,
         )
         # Later containers (candidates, auxiliary agents) reuse this request;
         # their builds are not the run's startup.
@@ -685,6 +677,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 backend=backend,
                 skill_source_dirs=tuple(skill_source_paths),
                 host_resources=agent_host_resources,
+                clock=clock,
+                threads=integration.threads,
             )
         )
         project_resources.mark_ready()

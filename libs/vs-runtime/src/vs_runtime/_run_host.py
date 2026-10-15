@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_runtime.contracts import RunCleanupError
-from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -29,9 +28,9 @@ def _cleanup_failure(errors: list[BaseException]) -> RunCleanupError:
 class BlockingOperations:
     """Run synchronous effects without racing run teardown."""
 
-    def __init__(self, runner: BlockingRunner | None = None) -> None:
-        """Run operations on ``runner``; the default is a worker thread each."""
-        self._runner = runner or ThreadBlockingRunner()
+    def __init__(self, runner: BlockingRunner) -> None:
+        """Run operations on ``runner``."""
+        self._runner = runner
         self._tasks: set[asyncio.Task] = set()
         self._closed = False
 
@@ -187,13 +186,12 @@ async def _close_preparation_resources(
 async def open_run_host(
     prepare: Callable[[ExitStack], RunHostComponents],
     *,
-    runner: BlockingRunner | None = None,
+    runner: BlockingRunner,
 ) -> AsyncIterator[RuntimeRunHost]:
     """Prepare and close one host, including on cancellation or setup failure.
 
-    Preparation and failed-preparation cleanup run on ``runner`` (a worker thread by default).
+    Preparation and failed-preparation cleanup run on ``runner``.
     """
-    runner = runner or ThreadBlockingRunner()
     ownership = ExitStack()
     host: RuntimeRunHost | None = None
     try:

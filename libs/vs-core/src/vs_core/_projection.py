@@ -94,11 +94,11 @@ def evidence_view(state: EvaluationState) -> tuple[EvidenceRef, ...]:
 
 
 def next_observe_at(state: EvaluationState) -> float | None:
-    """The earliest scheduled poll time, so the run loop can sleep until it."""
+    """The earliest timer a job waits on, so the run loop can sleep until it."""
     due = tuple(
-        job.pacing.next_at
+        job.wait.timer
         for job in (*state.jobs, *state.registered_jobs)
-        if job.pacing.next_at is not None
+        if job.wait is not None and job.wait.timer is not None
     )
     return min(due) if due else None
 

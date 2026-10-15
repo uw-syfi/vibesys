@@ -11,13 +11,14 @@ from hypothesis import strategies as st
 
 from vs_sandbox.api import LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 
 def _local_shell() -> LocalShellRunner:
-    return LocalShellRunner(Path.cwd())
+    return LocalShellRunner(Path.cwd(), threads=OsThreads())
 
 
 @pytest.mark.parametrize("make", [FakeCommandRunner, _local_shell], ids=["fake", "local"])

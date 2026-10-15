@@ -73,7 +73,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import TypeAdapter
 
 from vs_core.api import (
     AgentCall,
@@ -103,6 +103,7 @@ from vs_core.api import (
     Within,
     suspension_refusal,
 )
+from vs_decode.api import Unreadable, decode_json
 from vs_evaluation.api import (
     RECEIPT_LINE,
     AgentEvaluationCall,
@@ -125,7 +126,6 @@ from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._workspace_lookup import find_scope_workspace
 from vs_runtime._workspace_requests import revision_ref
-from vs_sim.api import OsThreads, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -403,14 +403,13 @@ class AgentEvaluationBridge:
         records: AgentEvaluationRecords,
         diagnostics: Callable[[str], None] = _ignore_diagnostic,
         *,
-        network: Network | None = None,
-        threads: Threads | None = None,
+        network: Network,
+        threads: Threads,
     ) -> None:
         """Bind the socket path, the plan policy, the workspace lookup, the records and a log sink.
 
         ``diagnostics`` hears one line for each call refused as busy, for the run's journal.
-        ``network`` binds the socket path and ``threads`` reads each connection; both
-        default to the operating system's.
+        ``network`` binds the socket path and ``threads`` reads each connection.
         """
         self._socket_path = socket_path
         self._policy = policy
@@ -425,8 +424,8 @@ class AgentEvaluationBridge:
         self._shell: AdmissionShell | None = None
         self._clock: Clock | None = None
         self._scopes: dict[str, _Scoped] = {}
-        self._network = network or UnixNetwork()
-        self._threads = threads or OsThreads()
+        self._network = network
+        self._threads = threads
         self._listener: Listener | None = None
         self._guard = self._threads.lock()
         self._open: set[Connection] = set()
@@ -457,7 +456,12 @@ class AgentEvaluationBridge:
         if not hmac.compare_digest(mac, expected):
             message = "unknown evaluation token"
             raise PermissionError(message)
-        return Scope.model_validate_json(base64.urlsafe_b64decode(body))
+        scope = decode_json(
+            base64.urlsafe_b64decode(body), Scope, source="evaluation token", max_bytes=_FRAME_LIMIT
+        )
+        if isinstance(scope, Unreadable):
+            raise PermissionError(str(scope))
+        return scope
 
     # socket service
 
@@ -566,15 +570,15 @@ class AgentEvaluationBridge:
         """
         acknowledge = _nothing
         try:
-            call = _CALLS.validate_json(frame)
+            call = decode_json(frame, _CALLS, source="evaluation tool call", max_bytes=_FRAME_LIMIT)
+            if isinstance(call, Unreadable):
+                return self._failure(ToolRefusal.MALFORMED), acknowledge
             if isinstance(call, SubmitCall):
                 result, acknowledge = await self._submit(self._scope_of(call.token))
             elif isinstance(call, WaitCall):
                 result = self._validate_wait(self._scope_of(call.token), call.handles)
             else:
                 return self._failure(ToolRefusal.REFUSED), acknowledge
-        except ValidationError:
-            return self._failure(ToolRefusal.MALFORMED), acknowledge
         except PermissionError:
             return self._failure(ToolRefusal.UNKNOWN_CALLER), acknowledge
         except ToolRefusedError as error:

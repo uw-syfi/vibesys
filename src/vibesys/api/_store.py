@@ -16,15 +16,15 @@ from vs_project.api import (
     NullGitTrackerEvents,
     ProjectStateError,
     is_project_state_path,
+    open_git_repository,
 )
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vibesys.api.contracts import RunView
     from vibesys.plugin_catalog import OrchestrationRegistration, OrchestrationRegistry
-    from vs_project.api import OrchestrationRunManifest, Project
+    from vs_project.api import Git, OrchestrationRunManifest, Project
     from vs_sim.api import Threads
 
 
@@ -139,10 +139,11 @@ def _open_run_store(
     project: Project,
     *,
     registry: OrchestrationRegistry,
-    threads: Threads | None = None,
+    git: Git,
+    threads: Threads,
 ) -> RunStore:
     """Compose a product store over one canonical project."""
-    return _LocalRunStore(project, registry=registry, threads=threads or OsThreads())
+    return _LocalRunStore(project, registry=registry, git=git, threads=threads)
 
 
 class _GitReadEvents(NullGitTrackerEvents):
@@ -167,6 +168,7 @@ class _LocalRunRecord:
         run_id: str,
         *,
         registry: OrchestrationRegistry,
+        git: Git,
         threads: Threads,
     ) -> None:
         self._threads = threads
@@ -177,7 +179,12 @@ class _LocalRunRecord:
             :16
         ]
         self._git_events = _GitReadEvents()
-        self._git = GitTracker(project.root, run_id=run_id, events=self._git_events)
+        self._git = GitTracker(
+            project.root,
+            run_id=run_id,
+            events=self._git_events,
+            repository=open_git_repository(project.root, git=git, faults=self._git_events),
+        )
         self._git_lock = threads.lock()
         registration = self._registration(self._manifest())
         self._framework_prefixes = (
@@ -241,13 +248,12 @@ class _LocalRunRecord:
 
     def _effective_objective(self) -> str | None:
         try:
-            document = (
-                self._project.state.portable_namespace(self._run_id, "runtime").external_directory()
-                / "effective-objective.md"
+            contents = self._project.state.portable_namespace(self._run_id, "runtime").read_bytes(
+                "effective-objective.md"
             )
-            return document.read_text(encoding="utf-8") if document.is_file() else None
         except (OSError, ProjectStateError):
             return None
+        return None if contents is None else contents.decode("utf-8", errors="replace")
 
     def _git_read(
         self,
@@ -282,10 +288,16 @@ class _LocalRunStore:
     """`RunStore` backed by one `vs_project.Project`'s persisted state."""
 
     def __init__(
-        self, project: Project, *, registry: OrchestrationRegistry, threads: Threads
+        self,
+        project: Project,
+        *,
+        registry: OrchestrationRegistry,
+        git: Git,
+        threads: Threads,
     ) -> None:
         self._project = project
         self._registry = registry
+        self._git = git
         self._threads = threads
 
     def list_runs(self) -> Sequence[RunView]:
@@ -300,7 +312,7 @@ class _LocalRunStore:
         # on the record's first later use.
         self._project.state.load_run(run_id)
         return _LocalRunRecord(
-            self._project, run_id, registry=self._registry, threads=self._threads
+            self._project, run_id, registry=self._registry, git=self._git, threads=self._threads
         )
 
 

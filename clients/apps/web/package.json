@@ -23,6 +23,7 @@
     "@vibesys/contracts": "workspace:*",
     "@vibesys/feature-gateway-connect": "workspace:*",
     "@vibesys/feature-run-view": "workspace:*",
+    "@vibesys/feature-web-theme": "workspace:*",
     "@vibesys/ipc": "workspace:*",
     "@vibesys/run-session": "workspace:*",
     "@vibesys/store": "workspace:*",

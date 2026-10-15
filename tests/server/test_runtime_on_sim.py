@@ -15,8 +15,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.server.support import REQUEST_TIME, sim_platform
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 
-from launch import default_runs
+from entrypoints.production import production_runs
 from server.api.protocol import StopCommand, SubscribeRequest
 from server.runtime import ServerRuntime
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -24,7 +26,14 @@ from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    ManualClock,
+    SimNetwork,
+    SimThreads,
+    examples,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -131,11 +140,10 @@ def test_a_subscriber_reads_the_event_that_ends_the_run_before_the_server_closes
         network = SimNetwork(threads)
         runtime = ServerRuntime(
             run_id="run-1",
-            runs=default_runs(),
+            runs=production_runs(),
             socket_path=socket_path,
             detach=ending.detach,
-            threads=threads,
-            network=network,
+            platform=sim_platform(threads, network=network),
         )
         seen: list[list[str]] = []
         read = threads.event()
@@ -143,7 +151,12 @@ def test_a_subscriber_reads_the_event_that_ends_the_run_before_the_server_closes
         def subscriber() -> None:
             assert runtime.transport_listening.wait(HANG_GUARD_S)
             client = network.connect(str(socket_path))
-            client.send(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+            client.send(
+                SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
+                .model_dump_json()
+                .encode()
+                + b"\n"
+            )
             seen.append(_read_events_to_end(client))
             read.set()
 
@@ -171,7 +184,10 @@ class _Subscription:
 
     def __init__(self, network: SimNetwork, socket_path: Path) -> None:
         self._connection = network.connect(str(socket_path), HANG_GUARD_S)
-        self._connection.send(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+        self._connection.send(
+            SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json().encode()
+            + b"\n"
+        )
         self._buffer = b""
 
     def read(self) -> dict[str, Any]:
@@ -219,10 +235,9 @@ def _on_sim(seed: int, body: Callable[[SimThreads, SimNetwork], None]) -> None:
 def _runtime(socket_path: Path, threads: SimThreads, network: SimNetwork) -> ServerRuntime:
     return ServerRuntime(
         run_id="run-1",
-        runs=default_runs(),
+        runs=production_runs(),
         socket_path=socket_path,
-        threads=threads,
-        network=network,
+        platform=sim_platform(threads, network=network),
     )
 
 
@@ -355,14 +370,20 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
             name="subscriber",
             daemon=False,
         )
-        integration = LocalRunIntegration()
+        integration = LocalRunIntegration(
+            clock=ManualClock(),
+            git=REAL_GIT,
+            github=NO_GITHUB,
+            threads=OsThreads(),
+            slurm_processes=REAL_PROCESSES,
+        )
         integration.events.subscribe(runtime.integration.project_event)
 
         def run() -> str:
             control = _SessionControlStub(integration.control)
             runtime.controls.install(control)
             try:
-                runtime.api.execute(StopCommand())
+                runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
                 integration.control.raise_if_stopped()
                 return "unreachable"
             finally:
@@ -404,7 +425,7 @@ def test_runtime_does_not_duplicate_core_terminal_event(
             name="subscriber",
             daemon=False,
         )
-        core_events = CoreEventJournal()
+        core_events = CoreEventJournal(clock=ManualClock(), threads=OsThreads())
         core_events.subscribe(runtime.integration.project_event)
 
         runtime.run(

@@ -10,7 +10,7 @@ still need their own base) so this leaf library never imports ``vibesys.*``.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, ClassVar, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,15 +18,13 @@ from pydantic import BaseModel, ConfigDict, Field
 class EventPayload(BaseModel):
     """Immutable base for structured agent event payloads.
 
-    These payloads sit inside the run's recorded event payloads, which ignore
-    keys they do not declare so that history replays after a field is removed;
-    these follow the same rule.
+    Rejects keys it does not declare: no field of these payloads has ever been
+    removed, so a recorded event that carries an unknown key is corrupt or was
+    written by a newer producer, and reading it as if the key were absent would
+    hide that.
     """
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
-    unknown_keys_reason: ClassVar[str] = (
-        "Nested in recorded run events, which replay after a payload field is removed."
-    )
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
 
 AgentOutputChannel = Literal["assistant", "analysis", "tool", "diagnostic", "prompt"]

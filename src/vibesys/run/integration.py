@@ -28,11 +28,13 @@ from vibesys.events import (
 )
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
+from vs_project.api import git_repositories
 from vs_runtime.api.core import RuntimeRecord, winner_selection
 from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
     AgentExecutionStarted,
     AgentExecutionStatus,
+    RootBaselineDrifted,
     RunControlTransition,
     WorkspaceResourceEvent,
     WorkspaceRestoreFailed,
@@ -49,14 +51,15 @@ if TYPE_CHECKING:
     from vibesys.config import Config
     from vibesys.constants import ComputeBackend
     from vs_agent.api import AgentEventSink
-    from vs_project.api import GitRepositoryFactory, Project, StateStoreFactory
+    from vs_github.api import GitHubCLI
+    from vs_project.api import Git, GitRepositoryFactory, Project, StateStoreFactory
     from vs_runtime.api.core import WinnerSelection
     from vs_runtime.api.infrastructure import (
         ProjectRunResources,
         RunEnvironmentResources,
     )
     from vs_sandbox.api import HostResource
-    from vs_slurm.api import SlurmProcess
+    from vs_sim.api import Clock, Processes, Threads
 
 
 def run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
@@ -93,6 +96,10 @@ class RunResources:
     backend: ComputeBackend
     skill_source_dirs: tuple[Path, ...]
     host_resources: tuple[HostResource, ...]
+    clock: Clock
+    """The run's clock, in seconds since the epoch."""
+    threads: Threads
+    """Makes the run's threads and locks."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,6 +331,16 @@ def _emit_winner_selected(
     )
 
 
+def _baseline_drift_detail(event: RootBaselineDrifted) -> str:
+    """Describe which pre-run paths an attempt changed or removed."""
+    parts = []
+    if event.modified:
+        parts.append(f"modified: {', '.join(event.modified)}")
+    if event.removed:
+        parts.append(f"removed: {', '.join(event.removed)}")
+    return "; ".join(parts)
+
+
 class _CoreCommitObserver:
     """Publish a confirmed core commit: the committed-view hint, then its semantic events."""
 
@@ -368,26 +385,40 @@ class LocalRunIntegration:
     `RunSession`.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-261402 [PLR0913]; each argument is an implementation the wiring code substitutes independently.
+        # > Bundling them would only rename the keywords every caller passes; building Git and
+        # > the GitHub CLI here from one process launcher would hand this class a primitive
+        # > instead of the two roles it passes on.
         self,
         git_repository: GitRepositoryFactory | None = None,
-        slurm_process: SlurmProcess | None = None,
         state_stores: StateStoreFactory | None = None,
+        *,
+        clock: Clock,
+        git: Git,
+        github: GitHubCLI,
+        threads: Threads,
+        slurm_processes: Processes,
     ) -> None:
         """Compose a durable journal with direct invocation control.
 
-        ``git_repository`` builds the run's ``GitRepository`` implementations; ``None``
-        runs the Git CLI. ``slurm_process`` replaces the Slurm transport's process
-        boundary for the run's evaluations; ``None`` runs the configured programs.
+        ``git`` starts the run's Git commands and ``github`` its GitHub CLI commands. ``git_repository`` builds the run's
+        ``GitRepository`` implementations; ``None`` opens the configured one over ``git``. ``slurm_processes`` starts the Slurm
+        transport's programs for the run's evaluations.
         ``state_stores`` opens each run's ``StateStore``; ``None`` is the local
-        crash-atomic one.
+        crash-atomic one. ``clock`` counts seconds since the epoch; it stamps the
+        run's events, names its logs, and times its boot. ``threads`` makes the run's
+        threads and locks.
         """
-        self.git_repository = git_repository
-        self.slurm_process = slurm_process
+        self.git = git
+        self.github = github
+        self.git_repository = git_repositories(git) if git_repository is None else git_repository
+        self.slurm_processes = slurm_processes
         self.state_stores = state_stores
-        self.events = EventJournal()
-        self.agent_events = CoreAgentEventSink(self.events.record)
-        self.control = create_run_control_channel(_CoreRunControlEvents(self.events))
+        self.clock = clock
+        self.threads = threads
+        self.events = EventJournal(clock, threads)
+        self.agent_events = CoreAgentEventSink(self.events.record, clock)
+        self.control = create_run_control_channel(_CoreRunControlEvents(self.events), threads)
         self._closed = False
         self._committed_state_listener: (
             Callable[[str, BaseModel, tuple[str, ...] | None], None] | None
@@ -484,6 +515,16 @@ class LocalRunIntegration:
                     ),
                     source=FrameworkSource.GIT_TRACKING,
                     source_label="rollback",
+                ),
+            )
+        if isinstance(event, RootBaselineDrifted):
+            return self.events.emit(
+                CoreEventType.FRAMEWORK_WARNING,
+                data=FrameworkWarningData(
+                    summary="an attempt changed files that existed in the project before the run",
+                    detail=_baseline_drift_detail(event),
+                    source=FrameworkSource.GIT_TRACKING,
+                    source_label="exclusive-root baseline",
                 ),
             )
         raise AssertionError(event)

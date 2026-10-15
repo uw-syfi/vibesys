@@ -33,7 +33,12 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
-from vs_sandbox.api.slurm import PROFILE_OUTPUT_ROOT, SlurmEvaluationPlan, SlurmExecutionPolicy
+from vs_sandbox.api.slurm import (
+    PROFILE_END,
+    PROFILE_OUTPUT_ROOT,
+    SlurmEvaluationPlan,
+    SlurmExecutionPolicy,
+)
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterSubmitOutcome,
@@ -74,7 +79,7 @@ class ScenarioCluster(FakeCluster):
         self.benchmark_exit: int | None = 0
         self.job_exit_code = 0
         self.benchmark_output = BENCHMARK_OUTPUT
-        self.profile_output = "profile captured\n"
+        self.profile_output = f"profile captured\n{PROFILE_END}\n"
         self.submissions: list[str] = []
         self.batches: list[SlurmBatchRequest] = []
         """Every batch request the scheduler accepted, in submission order."""
@@ -211,6 +216,8 @@ async def build_stack(
         root / "handles",
         stage_failure_text=render_stage_failure,
         clock=clock if clock is not None else ManualClock(),
+        # Pacing moves a timeline of its own, so polling never brings a deadline nearer.
+        sleeper=ManualClock(),
         cluster=cluster,
     )
     return Stack(executor, cluster, snapshot)

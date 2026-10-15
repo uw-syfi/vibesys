@@ -15,6 +15,14 @@ Checked: relative links and absolute links back into this repository
 `#anchor` when the target is Markdown. Other external URLs are not fetched,
 so the check stays offline and deterministic.
 
+Orphans: with no PATH arguments, every page under `docs/` must be reachable,
+either from an entry in the website sidebar (`website/sidebars.ts`) or from a
+Markdown link in another tracked file. A page nothing reaches is served only to
+readers who already know its URL, so it goes stale unnoticed. The pages that
+were orphans when this rule arrived are recorded in `ORPHAN_ALLOWLIST`, which
+only shrinks: a recorded page that gains a link, or is deleted, fails until its
+entry is removed.
+
 Not checked: anything inside a fenced code block or an inline `code` span.
 Markdown link syntax written in a code span is a sample, not a link, so the
 spans are stripped before the link patterns run. A `file:symbol` code citation
@@ -59,6 +67,24 @@ EXCLUDED_PREFIXES = (
     "resources/skills/neuron-agentic-development/",
 )
 MARKDOWN_SUFFIXES = (".md", ".mdx")
+
+# The website sidebar. Its quoted strings that equal a doc id (the page's path
+# under `docs/` without its suffix) count as inbound links for the orphan check.
+SIDEBAR = "website/sidebars.ts"
+SIDEBAR_STRING = re.compile(r"""['"]([\w./-]+)['"]""")
+
+# Pages under docs/ that nothing linked to when the orphan check was added.
+# Shrink-only: link the page from a related doc or the sidebar, or delete it,
+# then remove its entry here. Never add one.
+ORPHAN_ALLOWLIST = frozenset(
+    {
+        "docs/contributing/kernel3-contract-decisions.md",
+        "docs/contributing/web-run-viewer-parity.md",
+        "docs/design/core-agent-evaluation-bridge.md",
+        "docs/design/iteration-navigation.md",
+        "docs/design/launch.md",
+    }
+)
 
 # Inline `[text](target)` links plus `[id]: target` reference definitions.
 INLINE_LINK = re.compile(r"\[[^\]]*\]\(\s*<?([^)\s<>]+)>?(?:\s+[\"'][^\"']*[\"'])?\s*\)")
@@ -254,6 +280,56 @@ def check(files: list[Path], repo_root: Path) -> list[Problem]:
     return problems
 
 
+def sidebar_doc_ids(sidebar_text: str) -> set[str]:
+    """Every quoted string in the sidebar source; doc ids are among them."""
+    return set(SIDEBAR_STRING.findall(sidebar_text))
+
+
+def find_orphans(files: list[Path], repo_root: Path, sidebar_ids: set[str]) -> list[str]:
+    """List the published pages in ``files`` that no sidebar id or other file links to.
+
+    Pages are returned repo-relative, as POSIX strings, sorted. Only links from
+    ``files`` count, so pass every tracked Markdown file.
+    """
+    root = repo_root.resolve()
+    pages = {
+        path.resolve(): path.relative_to(repo_root)
+        for path in files
+        if published_root_of(path.relative_to(repo_root)) is not None
+    }
+    reached: set[Path] = set()
+    for path in files:
+        for link in extract_links(path):
+            resolved = resolve(link, repo_root)
+            if resolved is None:
+                continue
+            target = resolved[0].resolve()
+            if target != path.resolve():
+                reached.add(target)
+    orphans = []
+    for absolute, rel in pages.items():
+        doc_id = absolute.relative_to(root / rel.parts[0]).with_suffix("").as_posix()
+        if absolute not in reached and doc_id not in sidebar_ids:
+            orphans.append(rel.as_posix())
+    return sorted(orphans)
+
+
+def check_orphans(orphans: list[str], allowlist: frozenset[str]) -> list[str]:
+    """Report new orphans and allowlist entries that are no longer orphans."""
+    messages = [
+        f"{page}: no sidebar entry or Markdown link reaches this page; link it "
+        f"from a related doc or from {SIDEBAR}, or delete it"
+        for page in orphans
+        if page not in allowlist
+    ]
+    messages += [
+        f"{page}: listed in ORPHAN_ALLOWLIST in scripts/check_doc_links.py but "
+        "is linked or gone; remove the entry"
+        for page in sorted(allowlist - set(orphans))
+    ]
+    return messages
+
+
 def main(argv: list[str] | None = None) -> int:
     """Check every selected Markdown file and print each broken link."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -271,8 +347,20 @@ def main(argv: list[str] | None = None) -> int:
     for problem in problems:
         rel = problem.link.source.relative_to(repo_root)
         print(f"{rel}:{problem.link.line}: {problem.link.target}: {problem.reason}")
-    if problems:
-        print(f"\n{len(problems)} broken Markdown link(s) in {len(files)} file(s).")
+    orphan_messages: list[str] = []
+    if not args.paths:
+        sidebar = repo_root / SIDEBAR
+        sidebar_ids = sidebar_doc_ids(sidebar.read_text()) if sidebar.exists() else set()
+        orphan_messages = check_orphans(
+            find_orphans(files, repo_root, sidebar_ids), ORPHAN_ALLOWLIST
+        )
+    for message in orphan_messages:
+        print(message)
+    if problems or orphan_messages:
+        print(
+            f"\n{len(problems)} broken Markdown link(s) and {len(orphan_messages)} "
+            f"orphan problem(s) in {len(files)} file(s)."
+        )
         return 1
     print(f"Checked {len(files)} Markdown file(s); no broken links.")
     return 0

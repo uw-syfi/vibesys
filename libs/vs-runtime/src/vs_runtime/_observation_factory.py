@@ -23,7 +23,7 @@ sequence cannot be chosen without it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass, field
 from typing import TYPE_CHECKING
 
 from vs_core.api import (
@@ -41,6 +41,7 @@ from vs_runtime._receipt_store import ReceiptCorruptError
 
 if TYPE_CHECKING:
     from vs_core.api import RequestBase
+    from vs_runtime._effect_fence import FenceKey, NothingHeld
     from vs_runtime._receipt_store import ReceiptStore
 
 
@@ -56,9 +57,20 @@ PAYLOAD_CONFLICT = "same request identity with another payload"
 """The diagnostic of every executor's refusal of a reused identity (``payload_conflict``)."""
 
 
+_VOUCHED = object()
+"""Marks facts built by a named constructor that states why the request holds nothing."""
+
+
 @dataclass(frozen=True)
 class ObservationFacts:
-    """What an executor learned about one request, without any identity fields."""
+    """What an executor learned about one request, without any identity fields.
+
+    Facts that hold nothing (a terminal release that accepts nothing and names no resource)
+    end core's owning record, so they come only from a constructor that states why the
+    request holds nothing: ``never_held`` (a closed effect fence proves it), ``refused`` (a
+    sealed self-refusal) or ``not_begun`` (an inspection; core resends the request). Built
+    any other way they raise ``TypeError``.
+    """
 
     status: ObservationStatus
     terminal: bool = True
@@ -70,6 +82,18 @@ class ObservationFacts:
     diagnostic: str = ""
     revision: RevisionRef | None = None
     """The revision a snapshot or retain produced; a derived event may carry only this one."""
+    _vouch: InitVar[object] = field(default=None, kw_only=True)
+    """Init-only, so ``dataclasses.replace`` does not carry it over: a copy that holds nothing raises."""
+
+    def __post_init__(self, _vouch: object) -> None:
+        if self.holds_nothing and _vouch is not _VOUCHED:
+            message = "facts that hold nothing come only from never_held, refused or not_begun"
+            raise TypeError(message)
+
+    @property
+    def holds_nothing(self) -> bool:
+        """A terminal answer that releases what it names while accepting and naming nothing."""
+        return self.terminal and self.released and not self.accepted and self.resource_id is None
 
     @classmethod
     def payload_conflict(cls) -> ObservationFacts:
@@ -82,19 +106,46 @@ class ObservationFacts:
         return cls(status=ObservationStatus.REJECTED, diagnostic=PAYLOAD_CONFLICT)
 
     @classmethod
-    def never_held(cls, diagnostic: str) -> ObservationFacts:
-        """A terminal refusal of a request proven to hold nothing, now or later.
+    def never_held(cls, proof: NothingHeld, key: FenceKey, diagnostic: str) -> ObservationFacts:
+        """A terminal answer that what the request names holds nothing, now or later.
 
-        Every executor answers this way when it can prove the effect never began and never
-        will (no binding, no begun marker, no dispatch record under a fence). Core ends an
-        owning record only on a proven release, so a bare rejection there would leave it
-        waiting for an answer that never comes.
+        Only a closed effect fence proves it (``EffectFences.close`` or ``cleared``): a
+        cancel, close or discard of something no request entered the fence to create, or
+        whose entries the closer removed. Core ends an owning record only on a proven
+        release, so a bare rejection there would leave it waiting for an answer that never
+        comes. ``key`` is the fence of what the request names; a proof about another fence,
+        or a copy of a proof, raises ``TypeError``.
         """
+        proof.vouch(key)
+        return cls._holding_nothing(diagnostic)
+
+    @classmethod
+    def refused(cls, diagnostic: str) -> ObservationFacts:
+        """A terminal refusal of a request by itself, decided before it created anything.
+
+        The refusal is sealed with the request's identity, so the request never acts later
+        and holds nothing. It is never an answer about what another request created: that
+        is ``never_held``, which needs a closed fence.
+        """
+        return cls._holding_nothing(diagnostic)
+
+    @classmethod
+    def not_begun(cls, diagnostic: str) -> ObservationFacts:
+        """An inspection's answer that the inspected request's effect has not begun.
+
+        Core sends that request again under the same identity, so whatever it later holds
+        is reported under that identity and an earlier delivery cannot act twice.
+        """
+        return cls._holding_nothing(diagnostic)
+
+    @classmethod
+    def _holding_nothing(cls, diagnostic: str) -> ObservationFacts:
         return cls(
             status=ObservationStatus.REJECTED,
             released=True,
             children_complete=True,
             diagnostic=diagnostic,
+            _vouch=_VOUCHED,
         )
 
 

@@ -33,7 +33,7 @@ from ._proofs import (
     released_owner,
 )
 from ._registry import ClosedRecordContradictionError, ContractError
-from ._request_forward import declaration, owner_signals, records_own, success_without_reply
+from ._request_forward import declaration, owner_signals, records_own
 from ._session_scope import lost_turn_cancellation
 from ._values import digest
 from .types.attempts import RevisionOperationRequested
@@ -73,6 +73,7 @@ from .types.records import (
     RetryDue,
     TargetObservation,
     request_lifecycle,
+    success_without_reply,
     within,
 )
 from .types.sessions import (

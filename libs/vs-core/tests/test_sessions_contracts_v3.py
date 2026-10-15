@@ -283,6 +283,7 @@ def test_run_checkpoint_pending_request_preserves_record_in_public_codec(generat
         lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
         phase=core.RequestPhase.PREPARED,
         until=core.Until(at=30.0),
+        addressed_by=(),
     )
     state = state.model_copy(
         update={"records": state.records.model_copy(update={"records": (record,)})}
@@ -378,6 +379,7 @@ def test_setup_classification_survives_root_target_and_canonical_record_codecs(
         setup_failure=failure,
         sequence=observation.sequence,
         until=core.Until(at=10.0),
+        addressed_by=(),
     )
     state = core.initial_state()
     state = state.model_copy(

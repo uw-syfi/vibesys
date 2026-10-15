@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.entrypoints.test_launch_frontends import _request
 from tests.support.core_plugins import failing_plugin
+from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 
+from entrypoints.production import production_timing
 from launch import (
     LaunchSettings,
     default_runs,
@@ -23,6 +25,8 @@ from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -53,7 +57,9 @@ class FalseyFakeAgentFactory:
 
     def __call__(self, **_kwargs: object) -> FakeAgentClient:
         client = FakeAgentClient(
-            session_reuse=True, capabilities=AgentCapabilities(provider_session_resume=True)
+            session_reuse=True,
+            capabilities=AgentCapabilities(provider_session_resume=True),
+            threads=OsThreads(),
         ).set_text(None, "selected fake")
         self.clients.append(client)
         return client
@@ -112,14 +118,18 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
     backend_factory = FalseyFakeBackendFactory()
     agents = FalseyFakeSessionAgents(agents_factory)
     settings = FalseyLaunchSettings(
+        timing=production_timing(),
+        processes=REAL_PROCESSES,
         registry=registry,
         agent_client_factory=agents_factory,
         backend_factory=backend_factory,
         agents=agents,
         git_repository=FakeGitRepositories().repository,
+        blocking=ThreadBlockingRunner(),
+        network=UnixNetwork(),
     )
     validate_descriptor(request.orchestration, registry=registry)
-    validate_run_request(request, registry=registry)
+    validate_run_request(request, registry=registry, git=REAL_GIT)
 
     async def execute() -> None:
         handle = default_runs(settings).start(request)
@@ -148,7 +158,12 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
             assert not agents_factory.clients[0].closed
             assert agents_factory.clients[1].closed
             assert (
-                open_run_store(Project.open(request.project_root), registry=registry)
+                open_run_store(
+                    Project.open(request.project_root),
+                    registry=registry,
+                    git=REAL_GIT,
+                    threads=SimThreads(),
+                )
                 .get_run(result.run_id)
                 .run_id
                 == result.run_id
@@ -182,9 +197,13 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
     request = _request(tmp_path / "project")
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=lambda **_kwargs: FakeAgentClient(
-                capabilities=AgentCapabilities(provider_session_resume=True)
+                capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
             ),
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
             git_repository=FakeGitRepositories().repository,

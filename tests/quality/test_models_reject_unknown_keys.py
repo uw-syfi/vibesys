@@ -32,10 +32,9 @@ import importlib
 import sys
 from functools import cache
 from pathlib import Path
+from typing import ClassVar
 
-from pydantic import BaseModel, RootModel, TypeAdapter
-
-from server.events import ChatData, EventPayload
+from pydantic import BaseModel, ConfigDict, RootModel, TypeAdapter, create_model
 
 REPOSITORY = Path(__file__).resolve().parents[2]
 REASON = "unknown_keys_reason"
@@ -176,10 +175,16 @@ def test_every_decoded_dataclass_and_typed_dict_forbids_unknown_keys() -> None:
 
 
 def test_a_reason_does_not_cover_a_subclass_in_another_module() -> None:
-    class NewPayload(EventPayload):
+    class Lenient(BaseModel):
+        model_config = ConfigDict(extra="ignore")
+        unknown_keys_reason: ClassVar[str] = "A reader of a newer writer's records."
+
+    class SameModule(Lenient):
         value: int
 
-    assert _declared_reason(EventPayload) is not None
-    assert _declared_reason(ChatData) == _declared_reason(EventPayload)
-    assert NewPayload.model_config.get("extra") == "ignore"
-    assert _declared_reason(NewPayload) is None
+    elsewhere = create_model("Elsewhere", __base__=Lenient, __module__="elsewhere", value=int)
+
+    assert _declared_reason(Lenient) is not None
+    assert _declared_reason(SameModule) == _declared_reason(Lenient)
+    assert elsewhere.model_config.get("extra") == "ignore"
+    assert _declared_reason(elsewhere) is None

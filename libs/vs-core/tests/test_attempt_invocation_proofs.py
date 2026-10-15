@@ -176,6 +176,7 @@ def invocation_fixture(
         phase=RequestPhase.COMPLETED,
         observation=observed if correlation == "exact" else None,
         until=Until(at=1000),
+        addressed_by=(),
     )
     decision = RequestTurn(decision_id=request.decision_id, scope=scope, turn=turn)
     if receipt_kind == "mismatched":
@@ -211,6 +212,7 @@ def invocation_fixture(
         refund=1,
         phase="draining",
         checkpoint_authority=RequestId(root="checkpoint"),
+        wait=None,
     )
     if receipt_kind == "foreign-request-decision":
         request = request.model_copy(update={"decision_id": DecisionId(root="foreign")})

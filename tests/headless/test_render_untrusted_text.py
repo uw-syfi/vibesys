@@ -11,6 +11,7 @@ as an earlier ``PASS``.
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from io import StringIO
 
 from hypothesis import example, given, settings
@@ -152,7 +153,11 @@ def test_no_control_character_from_event_text_reaches_the_terminal(
     renderer = HeadlessRenderer(out=out, color=color, max_result_len=None, max_text_len=None)
 
     for event_type, data, status in payloads:
-        renderer.handle(make_core_event(event_type, data=data, status=status))
+        renderer.handle(
+            make_core_event(
+                event_type, data=data, status=status, timestamp=datetime(2026, 1, 1, tzinfo=UTC)
+            )
+        )
 
     assert not _CONTROL.findall(_OWN_SEQUENCES.sub("", out.getvalue()))
 
@@ -165,6 +170,7 @@ def test_a_control_character_is_shown_not_dropped() -> None:
         make_core_event(
             CoreEventType.TOOL_RESULT,
             data=ToolResultData(tool="shell", content="a\x1b[2Jb\r\nc\td"),
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
         )
     )
 

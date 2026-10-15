@@ -13,9 +13,11 @@ loop exactly as the legacy loop ran them, one board operation at a time per run.
 
 from __future__ import annotations
 
-import json
 from typing import TYPE_CHECKING, Protocol, cast
 
+from pydantic import JsonValue, TypeAdapter
+
+from vs_decode.api import Unreadable, decode_json
 from vs_issue_tracker.api import (
     AppliedChanges,
     ApplyIssueChanges,
@@ -44,6 +46,9 @@ if TYPE_CHECKING:
     from vs_runtime._core_requests import ExecutionContext
 
 _PROGRESS_MARKER = "<!-- vibesys:progress-key:v1 {key} -->\n"
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_PAYLOAD_BYTES = 16 * 1024 * 1024
+"""The largest turn reply payload rendered into a progress entry."""
 
 
 class BoardTexts(Protocol):
@@ -212,8 +217,16 @@ class IssueBoardOwner:
         return LoggedProgress(status="succeeded")
 
 
+class ProgressPayloadUnreadableError(ValueError):
+    """A recorded turn payload that is too large or not JSON."""
+
+
 def _payload(payload_json: str) -> dict[str, object] | None:
     if not payload_json:
         return None
-    loaded = json.loads(payload_json)
+    loaded = decode_json(
+        payload_json, _JSON_VALUE, source="progress payload", max_bytes=_MAX_PAYLOAD_BYTES
+    )
+    if isinstance(loaded, Unreadable):
+        raise ProgressPayloadUnreadableError(str(loaded))
     return loaded if isinstance(loaded, dict) else {"value": loaded}

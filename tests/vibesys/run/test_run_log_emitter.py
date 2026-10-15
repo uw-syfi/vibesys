@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 from vibesys.run.integration import run_log_emitter
 from vs_agent.api import NullAgentEventSink
 from vs_project.api import RunLogger
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, examples
 
 
 class _RecordingEvents(NullAgentEventSink):
@@ -32,7 +32,9 @@ def test_a_message_after_the_run_log_closed_still_reaches_the_event_stream(
     events = _RecordingEvents()
     with tempfile.TemporaryDirectory() as directory:
         # No stderr tee: the logger must not touch the process-wide stderr in a test.
-        logger = RunLogger(Path(directory), tee_stderr=False, emit=run_log_emitter(events))
+        logger = RunLogger(
+            Path(directory), tee_stderr=False, emit=run_log_emitter(events), clock=ManualClock()
+        )
         logger.close()
         for message in messages:
             logger.lprint(message)

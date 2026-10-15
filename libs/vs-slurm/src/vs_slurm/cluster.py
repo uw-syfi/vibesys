@@ -5,13 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import TypeAlias
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
+
+from vs_sim.api import ProcessTimeoutError
 
 from .cluster_store import OperationStore
 from .cluster_types import (
@@ -170,7 +171,7 @@ class SlurmCluster:
             RemoteOperationError,
             ValidationError,
             UnicodeError,
-            subprocess.SubprocessError,
+            ProcessTimeoutError,
         ) as exc:
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
 
@@ -229,7 +230,7 @@ class SlurmCluster:
             RemoteOperationError,
             ValidationError,
             UnicodeError,
-            subprocess.SubprocessError,
+            ProcessTimeoutError,
         ) as exc:
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
         return self._dispatch_claimed(request, record)
@@ -252,7 +253,7 @@ class SlurmCluster:
             SlurmError,
             OSError,
             UnicodeError,
-            subprocess.SubprocessError,
+            ProcessTimeoutError,
             RemoteOperationError,
             ValidationError,
         ) as exc:
@@ -353,7 +354,7 @@ class SlurmCluster:
             RemoteOperationError,
             ValidationError,
             UnicodeError,
-            subprocess.SubprocessError,
+            ProcessTimeoutError,
         ) as exc:
             operation_id = target if isinstance(target, str) and not by_job_id else None
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
@@ -370,7 +371,7 @@ class SlurmCluster:
                     SlurmError,
                     OSError,
                     UnicodeError,
-                    subprocess.SubprocessError,
+                    ProcessTimeoutError,
                     RemoteOperationError,
                     ValidationError,
                 ) as exc:
@@ -391,7 +392,7 @@ class SlurmCluster:
             RemoteOperationError,
             ValidationError,
             UnicodeError,
-            subprocess.SubprocessError,
+            ProcessTimeoutError,
         ) as exc:
             operation_id = target if isinstance(target, str) and not by_job_id else None
             return ClusterUnknown(operation_id=operation_id, reason=str(exc))
@@ -480,7 +481,7 @@ class SlurmCluster:
             SlurmError,
             OSError,
             UnicodeError,
-            subprocess.SubprocessError,
+            ProcessTimeoutError,
             RemoteOperationError,
             ValidationError,
         ) as exc:
@@ -687,7 +688,7 @@ class SlurmCluster:
             SlurmError,
             OSError,
             UnicodeError,
-            subprocess.SubprocessError,
+            ProcessTimeoutError,
             RemoteOperationError,
             ValidationError,
         ) as exc:
@@ -718,7 +719,7 @@ class SlurmCluster:
             SlurmError,
             OSError,
             UnicodeError,
-            subprocess.SubprocessError,
+            ProcessTimeoutError,
             RemoteOperationError,
         ):
             if job_id == "0":
@@ -744,7 +745,7 @@ class SlurmCluster:
     def _completed_stages(self, handle: SlurmBatchHandle) -> int | None:
         try:
             return self._runner.completed_stages(handle)
-        except (SlurmError, OSError, UnicodeError, subprocess.SubprocessError):
+        except (SlurmError, OSError, UnicodeError, ProcessTimeoutError):
             # Stage progress is advisory: failing to read it must not hide the
             # scheduler reading that was already obtained.
             return None

@@ -15,10 +15,12 @@ from typing import TYPE_CHECKING
 from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.core_plugins import core_policy
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.candidates.api import run_deadline_at
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -34,7 +36,9 @@ from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import AgentRole, CorePlan, CoreRunContext, OrchestrationPlugin, RunStatus
 from vs_runtime.api.core import RunTiming
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_runtime.api.testing import FakeStopTimer
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,7 +47,9 @@ if TYPE_CHECKING:
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 def _run(
@@ -88,7 +94,13 @@ def _run(
         profiler_kind=ProfilerKind.NONE,
         backend=ComputeBackend.CPU,
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     # A paused run asks for nothing; it stays open until the deadline stops it.
     if strategy is None:
         integration.control.request_pause()
@@ -101,10 +113,14 @@ def _run(
                 integration,
                 plugin=plugin,
                 options=EmptyOptions(),
-                timing=RunTiming(clock, 60.0),
+                timing=RunTiming(clock, 60.0, OsThreads()),
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ) as host:
                 return await drive_core_run(host, integration)
         finally:

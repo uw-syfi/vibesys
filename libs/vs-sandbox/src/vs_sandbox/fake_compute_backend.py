@@ -156,6 +156,10 @@ class FakeComputeBackend:
         SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
         return sandbox
 
+    def ensure_accelerator_available(self) -> None:
+        """No-op: scripted hosts are always capable unless a test raises itself."""
+        return
+
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Report no contention monitor."""
         del log_dir

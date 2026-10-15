@@ -16,11 +16,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
 
 from vibesys.api.request import RunEnvironmentSpec
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities, build_agent_client
@@ -33,8 +35,10 @@ from vs_agent.api.testing import (
 )
 from vs_runtime.api import AgentWorkspaceRouteError
 from vs_runtime.api.core import RunTiming
+from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -54,12 +58,21 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
 
     def client_factory(**kwargs: object) -> FakeAgentClient:
         given_to_client.update(kwargs)
-        return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+        return FakeAgentClient(
+            capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+        )
 
     def backend_factory(
-        _name: object, *, log_dir: Path, log: object = None, image: str | None = None
+        _name: object,
+        *,
+        log_dir: Path,
+        log: object = None,
+        image: str | None = None,
+        clock: object,
+        events: object | None = None,
     ) -> _DaemonBackend:
-        made = _DaemonBackend(log_dir, log=log, image=image)  # ty: ignore[invalid-argument-type]
+        del clock, events  # the fake backend records no timestamps and has no device to watch
+        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
         made.engine = engine
         return made
 
@@ -71,7 +84,13 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             ),
         }
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> tuple[bool, list[str]]:
@@ -80,10 +99,14 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(clock, 60.0),
+            timing=RunTiming(clock, 60.0, OsThreads()),
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+            stop_timer=FakeStopTimer(threads=OsThreads()),
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            profiler_preflight=FakeProfilerPreflight(),
         ) as host:
             lookup = cast(
                 "Callable[[Path], DockerSandbox | None]", given_to_client["workspace_sandboxes"]
@@ -153,14 +176,25 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
     clients: list[AgentClientProtocol] = []
 
     def client_factory(**kwargs: object) -> AgentClientProtocol:
-        client = build_agent_client(executor_factory=lambda: executor, **kwargs)  # ty: ignore[invalid-argument-type]
+        client = build_agent_client(
+            executor_factory=lambda: executor,
+            threads=OsThreads(),
+            **kwargs,  # ty: ignore[invalid-argument-type]
+        )
         clients.append(client)
         return client
 
     def backend_factory(
-        _name: object, *, log_dir: Path, log: object = None, image: str | None = None
+        _name: object,
+        *,
+        log_dir: Path,
+        log: object = None,
+        image: str | None = None,
+        clock: object,
+        events: object | None = None,
     ) -> _DaemonBackend:
-        made = _DaemonBackend(log_dir, log=log, image=image)  # ty: ignore[invalid-argument-type]
+        del clock, events  # the fake backend records no timestamps and has no device to watch
+        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
         made.engine = engine
         return made
 
@@ -172,7 +206,13 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
             ),
         }
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     clock = VirtualClock(at=0.0)
     turns = _Turns()
 
@@ -182,10 +222,14 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(clock, 60.0),
+            timing=RunTiming(clock, 60.0, OsThreads()),
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+            stop_timer=FakeStopTimer(threads=OsThreads()),
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            profiler_preflight=FakeProfilerPreflight(),
         ) as host:
             turns.root_containers = {c.container_id for c in engine.containers()}
             paths = [

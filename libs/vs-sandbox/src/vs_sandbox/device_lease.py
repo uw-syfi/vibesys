@@ -11,10 +11,10 @@ backend.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from vs_project.api import atomic_write_bytes
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
     from vs_sandbox.compute_backends import ComputeBackendImpl, ContentionMonitor
     from vs_sandbox.gpu_monitor import GpuInfo
+    from vs_sim.api import Clock
 
     class _ReselectionView(Protocol):
         """The single environment capability device reselection consumes."""
@@ -38,10 +39,15 @@ class DeviceLease:
         backend: ComputeBackendImpl,
         *,
         log_dir: Path,
+        clock: Clock,
         run_environment_view: _ReselectionView | None = None,
     ) -> None:
-        """Bind the selected backend to run-specific device monitoring state."""
+        """Bind the selected backend to run-specific device monitoring state.
+
+        ``clock`` counts seconds since the epoch; it stamps ``finished_at`` in ``gpu.json``.
+        """
         self._backend = backend
+        self._clock = clock
         self._log_dir = log_dir
         self._view = run_environment_view
         self.monitor: ContentionMonitor | None = None
@@ -98,7 +104,7 @@ class DeviceLease:
 
         data["contention_detected"] = contention_events > 0
         data["contention_events"] = contention_events
-        data["finished_at"] = datetime.now(UTC).isoformat()
+        data["finished_at"] = utc_datetime(self._clock).isoformat()
         atomic_write_bytes(gpu_json, json.dumps(data, indent=2).encode())
 
     def close(self) -> None:

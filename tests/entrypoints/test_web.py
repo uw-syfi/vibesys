@@ -22,6 +22,7 @@ from tests.entrypoints.support import (
     PORT_LISTENER,
     FakeDetachedGateway,
     FakePortGateway,
+    FakeWebInstanceFinder,
 )
 
 from entrypoints import web
@@ -64,6 +65,10 @@ def _record() -> web.WebInstanceRecord:
         started_at=0.0,
         web_build_id=f"sha256:{'1' * 64}",
     )
+
+
+_PUBLISHED = FakeWebInstanceFinder(lambda _path, **_kwargs: _record())
+"""A launched gateway that has already published its record."""
 
 
 def test_live_demo_command_uses_the_shared_server_entrypoint(tmp_path: Path) -> None:
@@ -205,11 +210,9 @@ def test_wait_for_record_returns_a_published_record(polls_before_publication: in
         return record if polls > polls_before_publication else None
 
     threads = SimThreads()
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        # test-isolation: discovery is replaced to isolate the polling helper.
-        monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
-
-        found = threads.run(lambda: _wait_for_record(Path("record.json"), threads))
+    found = threads.run(
+        lambda: _wait_for_record(Path("record.json"), FakeWebInstanceFinder(discover), threads)
+    )
 
     assert found == record
     assert polls == polls_before_publication + 1
@@ -221,12 +224,10 @@ def test_wait_for_record_reports_a_startup_timeout() -> None:
         assert not cleanup_stale
 
     threads = SimThreads()
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        # test-isolation: discovery is replaced to exercise the timeout branch.
-        monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
-
-        with pytest.raises(SystemExit, match="did not publish"):
-            threads.run(lambda: _wait_for_record(Path("record.json"), threads))
+    with pytest.raises(SystemExit, match="did not publish"):
+        threads.run(
+            lambda: _wait_for_record(Path("record.json"), FakeWebInstanceFinder(discover), threads)
+        )
 
     assert threads.now() >= web._RECORD_WAIT_SECONDS  # noqa: SLF001  # lint-waiver: LW-101699 [SLF001]; the bound is the behavior under test
 
@@ -243,8 +244,6 @@ def test_run_live_launches_gateway_and_prints_browser_links(
     monkeypatch.setattr(web, "_pnpm", lambda: "pnpm")
     # test-isolation: live mode delegates to build, launch, and record discovery.
     monkeypatch.setattr(web, "_live_command", lambda **_kwargs: ["gateway"])
-    # test-isolation: live mode delegates to build, launch, and record discovery.
-    monkeypatch.setattr(web, "_wait_for_record", lambda _path: _record())
 
     args = argparse.Namespace(
         project=project,
@@ -259,7 +258,8 @@ def test_run_live_launches_gateway_and_prints_browser_links(
         run_args=(),
     )
 
-    assert _run_live(args, tmp_path, web._DefaultWebLiveEffects(children)) == 0  # noqa: SLF001  # lint-waiver: LW-101700 [SLF001]; the default effects are the unit that runs the build and the gateway
+    effects = web._DefaultWebLiveEffects(children, _PUBLISHED, SimThreads())  # noqa: SLF001  # lint-waiver: LW-101700 [SLF001]; the default effects are the unit that runs the build and the gateway
+    assert _run_live(args, tmp_path, effects) == 0
     assert [child.argv for child in children.children] == [("pnpm", "build"), ("gateway",)]
     output = capsys.readouterr().out
     assert f"Web build: sha256:{'1' * 64}" in output
@@ -270,7 +270,7 @@ def test_run_live_launches_gateway_and_prints_browser_links(
 @given(status=integers(min_value=1, max_value=255))
 def test_a_failed_bundle_build_stops_the_live_launch(status: int) -> None:
     children = _exits_with(status)
-    effects = web._DefaultWebLiveEffects(children)  # noqa: SLF001  # lint-waiver: LW-101702 [SLF001]; the default effects are the unit that runs the build
+    effects = web._DefaultWebLiveEffects(children, _PUBLISHED, SimThreads())  # noqa: SLF001  # lint-waiver: LW-101702 [SLF001]; the default effects are the unit that runs the build
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         # test-isolation: the pnpm lookup searches the host's PATH, which the test does not control.
@@ -295,7 +295,7 @@ def test_run_live_rejects_missing_project_for_non_demo_mode(tmp_path: Path) -> N
         run_args=(),
     )
     with pytest.raises(SystemExit, match="pass --project"):
-        _run_live(args, tmp_path)
+        _run_live(args, tmp_path, FailedLiveEffects())
 
 
 def test_run_live_demo_stages_replay_log_for_gateway(
@@ -312,8 +312,6 @@ def test_run_live_demo_stages_replay_log_for_gateway(
 
     # test-isolation: inspect gateway composition without starting a subprocess.
     monkeypatch.setattr(web, "_live_command", live_command)
-    # test-isolation: return the record a real gateway publishes after startup.
-    monkeypatch.setattr(web, "_wait_for_record", lambda _path: _record())
     args = argparse.Namespace(
         project=None,
         task=None,
@@ -327,7 +325,7 @@ def test_run_live_demo_stages_replay_log_for_gateway(
         run_args=(),
     )
 
-    effects = web._DefaultWebLiveEffects(_exits_with(0))  # noqa: SLF001  # lint-waiver: LW-101701 [SLF001]; isolate the helper from a detached server process
+    effects = web._DefaultWebLiveEffects(_exits_with(0), _PUBLISHED, SimThreads())  # noqa: SLF001  # lint-waiver: LW-101701 [SLF001]; isolate the helper from a detached server process
     assert _run_live(args, tmp_path, effects) == 0
     replay_log = cast("Path", captured["replay_log"])
     runtime_dir = tmp_path / "clients" / "apps" / "web" / ".vibesys-demo"
@@ -355,7 +353,7 @@ def test_run_live_demo_rejects_operator_run_arguments(tmp_path: Path) -> None:
     (tmp_path / _DEMO_LOG).write_text("{}\n")
 
     with pytest.raises(SystemExit, match="does not accept run arguments"):
-        _run_live(args, tmp_path)
+        _run_live(args, tmp_path, FailedLiveEffects())
 
 
 class FailedLiveEffects(WebLiveEffects):
@@ -476,7 +474,7 @@ def test_tunnel_runs_ssh_with_the_capability_url(
 
 
 def test_status_reports_gateway_lifecycle(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     instance = tmp_path / "record.json"
     record = _record()
@@ -486,9 +484,11 @@ def test_status_reports_gateway_lifecycle(
         assert not cleanup_stale
         return record
 
-    # test-isolation: only a live health endpoint settles what status reports.
-    monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
-    assert _run_status(argparse.Namespace(instance=instance)) == 0
+    finder = FakeWebInstanceFinder(discover)
+    assert (
+        _run_status(argparse.Namespace(instance=instance), FakePortGateway((PORT_FREE,)), finder)
+        == 0
+    )
     output = capsys.readouterr().out
     assert "VibeSys web UI:" in output
     assert f"Web build: sha256:{'1' * 64}" in output
@@ -499,7 +499,10 @@ def test_port_status_identifies_a_gateway_without_reading_its_record(
 ) -> None:
     gateway = FakePortGateway((PORT_GATEWAY,))
 
-    assert _run_status(argparse.Namespace(instance=None, port=PORT), gateway) == 0
+    assert (
+        _run_status(argparse.Namespace(instance=None, port=PORT), gateway, FakeWebInstanceFinder())
+        == 0
+    )
 
     output = capsys.readouterr().out
     assert "VibeSys web gateway on 127.0.0.1:8765" in output
@@ -520,7 +523,10 @@ def test_port_status_names_but_does_not_accept_an_unverified_listener(
     )
     gateway = FakePortGateway((observation,))
 
-    assert _run_status(argparse.Namespace(instance=None, port=PORT), gateway) == 1
+    assert (
+        _run_status(argparse.Namespace(instance=None, port=PORT), gateway, FakeWebInstanceFinder())
+        == 1
+    )
 
     output = capsys.readouterr().out
     assert "127.0.0.1:8765" in output
@@ -730,16 +736,13 @@ def test_stop_messages_report_each_outcome(result: GatewayStopResult, expected: 
     assert _stop_message(Path("/runtime/record.json"), result) == expected
 
 
-def test_status_is_reported_when_the_record_is_absent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_status_is_reported_when_the_record_is_absent(tmp_path: Path) -> None:
     def discover(path: Path, *, cleanup_stale: bool) -> None:
         assert path
         assert not cleanup_stale
 
-    # test-isolation: only a live health endpoint settles what status reports.
-    monkeypatch.setattr(web.WebInstanceRecord, "discover", discover)
-    assert _run_status(argparse.Namespace(instance=tmp_path / "missing.json")) == 1
+    args = argparse.Namespace(instance=tmp_path / "missing.json")
+    assert _run_status(args, FakePortGateway((PORT_FREE,)), FakeWebInstanceFinder(discover)) == 1
 
 
 def test_main_dispatches_each_web_command(monkeypatch: pytest.MonkeyPatch) -> None:

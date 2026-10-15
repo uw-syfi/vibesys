@@ -18,8 +18,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from tests.server.support import REQUEST_TIME
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 
-from launch import default_runs
+from entrypoints.production import production_runs
 from server.api.protocol import SubscribeRequest
 from server.host_api import (
     InstanceStatus,
@@ -42,7 +44,7 @@ from server.registry import (
 from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_sim.api import OsThreads, SystemClock, UnixNetwork
+from vs_sim.api import OsThreads, PidfdProcessSignaller, Platform, SystemClock, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -54,6 +56,9 @@ if TYPE_CHECKING:
 
 class _NoSignal:
     """A host that cannot signal: the only way to stop is the control socket."""
+
+    def exists(self, pid: int) -> bool:
+        return PidfdProcessSignaller().exists(pid)
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         del pid, current
@@ -101,7 +106,10 @@ class _Subscriber:
         self.seen: list[str] = []
         self.subscribed = threading.Event()
         self.stopped = threading.Event()
-        self.connection.send(SubscribeRequest(after_sequence=0).model_dump_json().encode() + b"\n")
+        self.connection.send(
+            SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json().encode()
+            + b"\n"
+        )
         self.thread = threading.Thread(target=self._read)
         self.thread.start()
 
@@ -146,9 +154,19 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     socket_path.parent.mkdir(parents=True, mode=0o700)
     registry = LiveRegistry(FileInstanceStore(root), SystemClock())
     runtime = ServerRuntime(
-        run_id="run-1", runs=default_runs(), socket_path=socket_path, detach=True
+        run_id="run-1",
+        runs=production_runs(),
+        socket_path=socket_path,
+        detach=True,
+        platform=Platform.real(),
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=SystemClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     integration.events.subscribe(runtime.integration.project_event)
     threads = OsThreads()
     outcome: list[object] = []
@@ -192,7 +210,10 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         result = registry.stop(
             instance_id,
             StopEffects(
-                ControlSocketStopRequester(UnixNetwork()), _NoSignal(), threads, threads.sleep
+                ControlSocketStopRequester(UnixNetwork(), clock=SystemClock()),
+                _NoSignal(),
+                threads,
+                threads.sleep,
             ),
         )
 

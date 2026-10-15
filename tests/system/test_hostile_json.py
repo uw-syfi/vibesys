@@ -25,11 +25,12 @@ import json
 from contextlib import redirect_stdout, suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from resources.profilers.rocprof import analyze_rocprof, att, counters
+from tests.server.support import REQUEST_TIME
 
 from server.api.protocol import Response, SubscribeRequest, decode_request
 from server.control_envelope import ResponseEnvelopeReader
@@ -44,26 +45,33 @@ from server.host_api import (
 from server.host_helper import ChannelState, Received, Send, step
 from server.transport.discovery import WebInstanceRecord
 from vibesys.run import CoreAgentEventSink
+from vs_decode.api import Unreadable, decode_json, read_json
 from vs_evaluator_protocol.api import ProtocolError, parse_records
 from vs_runtime.api import CommandResult
 from vs_runtime.api.infrastructure import (
     LocalValidationRecipeError,
+    LocalValidator,
     ModelRequestError,
     ProtocolBenchmarkContract,
     ScalarBenchmarkContract,
+    TrustedBenchmarkContract,
     create_model_request_reconciler,
     decode_trusted_benchmark_run,
-    run_local_validation,
 )
-from vs_runtime.api.testing import FakeCommands, FakeModelVolumeProvisioner, FakeWorkspace
-from vs_sim.api.testing import hostile_json_frames
+from vs_runtime.api.testing import (
+    FakeCommands,
+    FakeModelVolumeProvisioner,
+    FakeWorkspace,
+    MemoryValidationPasses,
+)
+from vs_sim.api.testing import OVERSIZED_BYTES, ManualClock, hostile_json_frames
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import ModuleType
 
 _VALID = (
-    SubscribeRequest(after_sequence=0).model_dump_json().encode(),
+    SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0).model_dump_json().encode(),
     json.dumps(
         {"type": "hello", "request_id": "h", "client_versions": [1, 1], "app_version": "v"}
     ).encode(),
@@ -85,7 +93,7 @@ class _Decoder:
 
 
 def _decode_request(frame: bytes, _: Path) -> None:
-    result = decode_request(frame)
+    result = decode_request(frame, clock=ManualClock())
     assert isinstance(result, Response) or result.type
 
 
@@ -116,7 +124,13 @@ def _model_manifest(frame: bytes, workspace: Path) -> None:
     ).reconcile(workspace)
 
 
-def _benchmark_result(contract: ProtocolBenchmarkContract | ScalarBenchmarkContract) -> _Decoder:
+_BENCHMARK_CONTRACTS: tuple[TrustedBenchmarkContract, ...] = (
+    ProtocolBenchmarkContract(),
+    ScalarBenchmarkContract(output_argument="--out", metric="tok_s"),
+)
+
+
+def _benchmark_result(contract: TrustedBenchmarkContract) -> _Decoder:
     def decode(frame: bytes, _: Path) -> None:
         framed = (
             "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n"
@@ -212,8 +226,7 @@ def _local_validation(workspace: Path) -> tuple[object, ...]:
     commands = FakeCommands()
     commands.script(CommandResult(output="passed\n", exit_code=0))
     return asyncio.run(
-        run_local_validation(
-            commands,
+        LocalValidator(commands, MemoryValidationPasses()).run(
             FakeWorkspace(path=workspace),
             recipe_artifact="validation/recipes.json",
             report_location="validation/report.json",
@@ -242,16 +255,42 @@ def _validation_recipes(frame: bytes, workspace: Path) -> None:
 
 def _tool_result(frame: bytes, _: Path) -> None:
     payloads: list[object] = []
-    CoreAgentEventSink(payloads.append).tool_result("shell", frame.decode("utf-8", "replace"))
+    CoreAgentEventSink(payloads.append, ManualClock()).tool_result(
+        "shell", frame.decode("utf-8", "replace")
+    )
     assert len(payloads) == 1
 
 
+class _Hello(BaseModel):
+    """A strict document shaped like one of the valid frames, for the decode function."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: str
+    request_id: str
+    client_versions: list[int]
+    app_version: str
+
+
+def _decode_json_file(frame: bytes, workspace: Path) -> None:
+    """The framework's decode function: a file's value or a typed ``Unreadable``, never a raise."""
+    path = workspace / "document.json"
+    path.write_bytes(frame)
+    decoded = read_json(path, _Hello, max_bytes=OVERSIZED_BYTES - 1)
+    assert isinstance(decoded, _Hello) or (decoded.source == str(path) and decoded.problems)
+    assert isinstance(
+        decode_json(frame, _Hello, source="frame", max_bytes=OVERSIZED_BYTES - 1),
+        _Hello | Unreadable,
+    )
+
+
 _DECODERS = {
+    "decode-json": _Decoder(_decode_json_file),
     "protocol-request": _Decoder(_decode_request),
     "instance-record": _Decoder(_parse_record),
     "helper-channel": _Decoder(_helper_channel),
-    "helper-request": _Decoder(lambda frame, _: parse_helper_request(frame), (ValidationError,)),
-    "helper-message": _Decoder(lambda frame, _: parse_helper_message(frame), (ValidationError,)),
+    "helper-request": _Decoder(lambda frame, _: parse_helper_request(frame)),
+    "helper-message": _Decoder(lambda frame, _: parse_helper_message(frame)),
     "response-envelope": _Decoder(
         lambda frame, _: ResponseEnvelopeReader.model_validate_json(frame), (ValidationError,)
     ),
@@ -259,10 +298,10 @@ _DECODERS = {
     "evaluator-records": _Decoder(
         lambda frame, _: parse_records(frame.decode("utf-8", "replace")), (ProtocolError,)
     ),
-    "protocol-benchmark-result": _benchmark_result(ProtocolBenchmarkContract()),
-    "scalar-benchmark-result": _benchmark_result(
-        ScalarBenchmarkContract(output_argument="--out", metric="tok_s")
-    ),
+    **{
+        f"{type(contract).__name__}-result": _benchmark_result(contract)
+        for contract in _BENCHMARK_CONTRACTS
+    },
     "model-manifest": _Decoder(_model_manifest, (ModelRequestError,)),
     "agent-tool-result": _Decoder(_tool_result),
     "local-validation-report": _Decoder(_validation_report),
@@ -275,6 +314,12 @@ _DECODERS = {
     "rocprof-counters": _Decoder(_rocprof_counters, (_capture_runtime.CaptureFailedError,)),
     "rocprof-thread-trace": _Decoder(_rocprof_thread_trace, (att.AttOutputNotFoundError,)),
 }
+
+
+def test_every_benchmark_contract_has_a_decoder_row() -> None:
+    """A new `TrustedBenchmarkContract` member fails here until `_BENCHMARK_CONTRACTS` lists it."""
+    members = set(get_args(TrustedBenchmarkContract.__value__))
+    assert {type(contract) for contract in _BENCHMARK_CONTRACTS} == members
 
 
 @pytest.mark.parametrize("decoder", list(_DECODERS.values()), ids=list(_DECODERS))

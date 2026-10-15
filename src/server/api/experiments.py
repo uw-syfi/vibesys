@@ -22,7 +22,6 @@ from vibesys.api.hypothesis import (
     HypothesisView,
     agent_projection,
 )
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from vibesys.api import RunView
@@ -142,9 +141,9 @@ class _Delta:
 class ExperimentProjection:
     """Revisioned, bounded cache of the frontend-neutral experiment projection."""
 
-    def __init__(self, *, history_limit: int = 64, threads: Threads | None = None) -> None:
+    def __init__(self, *, threads: Threads, history_limit: int = 64) -> None:
         """Initialize an empty projection with bounded revision history."""
-        self._lock = (threads or OsThreads()).rlock()
+        self._lock = threads.rlock()
         self._history: deque[_Delta] = deque(maxlen=history_limit)
         self._run_id: str | None = None
         self._source_id: str | None = None

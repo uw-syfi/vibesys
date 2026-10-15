@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from entrypoints.server import _DetachedGatewayEffects
+from entrypoints.server import real_gateway_effects
 from server.host_api import RunStatus, StopOutcome, StopRoute
 from server.instances import ControlSocketStopRequester
 from server.registry import CRASHED, FileInstanceStore, LiveRegistry, StopEffects, instance_root
@@ -92,7 +92,7 @@ def test_stop_terminates_a_live_server_and_removes_its_record(
     result = registry.stop(
         INSTANCE,
         StopEffects(
-            ControlSocketStopRequester(UnixNetwork()),
+            ControlSocketStopRequester(UnixNetwork(), clock=SystemClock()),
             PidfdProcessSignaller(),
             threads,
             threads.sleep,
@@ -117,7 +117,7 @@ def test_a_detached_child_runs_in_its_own_session_without_a_terminal(tmp_path: P
     )
     log = tmp_path / "child.log"
     with log.open("w+b") as output:
-        child = _DetachedGatewayEffects().spawn([sys.executable, "-c", probe], {}, output)
+        child = real_gateway_effects().spawn([sys.executable, "-c", probe], {}, output)
         try:
             assert child.wait(timeout=HANG_GUARD_S) == 0
         finally:

@@ -206,7 +206,7 @@ export function canonicalJournalEvents(records: RunEventRecord[]): RunEventRecor
         provider: null,
         model: null,
       };
-      canonical.push({...event, type: 'agent_execution_started', data: started});
+      canonical.push({...event, type: 'agent_execution_started', data: {...started}});
       continue;
     }
     if (type === 'invocation_finished' && data?.['kind'] === 'invocation_finished') {

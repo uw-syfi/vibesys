@@ -206,6 +206,7 @@ def measurement_ledger_row(job: OwnedJob) -> RequestRecord:
         phase=RequestPhase.COMPLETED,
         observation=job.observation,
         until=Until(at=10.0),
+        addressed_by=(),
     )
 
 

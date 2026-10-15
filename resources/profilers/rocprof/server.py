@@ -1039,6 +1039,9 @@ def build_server(  # noqa: C901, PLR0915  # LW-910097; this function implements 
     def bench_parse(log: str) -> str:
         """Extract `wall_ms: <float>` lines from a driver log into a JSON `{"wall_ms": [...]}`.
 
+        The driver must print `wall_ms_done: <count>` once after its last sample; a log
+        without it, cut mid-line, or whose count differs is refused as incomplete.
+
         Args:
             log: Path to the driver log.
         """

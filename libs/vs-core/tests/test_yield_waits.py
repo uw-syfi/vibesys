@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
 import vs_core.api as core
+from vs_sim.api.testing import examples
 
 from .test_pending_suspension_contract import _invocation, _pending
 from .test_request_recovery import fixture_digest, initial_state, pending_record
@@ -10,10 +14,18 @@ from .test_request_recovery import fixture_digest, initial_state, pending_record
 OWNER = core.AttemptId(root="attempt")
 
 
-def _yielded() -> core.Invocation:
+def _yielded(*named: str) -> core.Invocation:
+    """A yielded turn; *named* are the requests its recorded wait names."""
     invocation = _invocation(0, OWNER)
+    wait = (
+        core.WaitOn(requests=tuple(core.RequestId(root=name) for name in named)) if named else None
+    )
     return core.Invocation.model_validate(
-        {**invocation.model_dump(), "pending_suspension": _pending(invocation, ["job"], 50.0)}
+        {
+            **invocation.model_dump(),
+            "pending_suspension": _pending(invocation, ["job"], 50.0),
+            "wait": None if wait is None else wait.model_dump(),
+        }
     )
 
 
@@ -55,7 +67,7 @@ def test_a_yield_nothing_checkpoints_is_a_wait_nothing_will_end() -> None:
 
 
 def test_a_yield_is_produced_by_its_checkpoint_while_that_runs() -> None:
-    invocation = _yielded()
+    invocation = _yielded("checkpoint")
     running = _state(invocation, _checkpoint(invocation, core.RequestPhase.DISPATCHED))
 
     assert core.orphan_waits(running) == ()
@@ -63,7 +75,37 @@ def test_a_yield_is_produced_by_its_checkpoint_while_that_runs() -> None:
 
 
 def test_a_yield_whose_checkpoint_ended_without_publishing_is_a_wait_nothing_will_end() -> None:
-    invocation = _yielded()
+    invocation = _yielded("checkpoint")
     ended = _state(invocation, _checkpoint(invocation, core.RequestPhase.COMPLETED))
 
     assert [wait.waiter for wait in core.orphan_waits(ended)] == [core.WaitKind.YIELD_PUBLICATION]
+
+
+_PHASES = st.sampled_from(list(core.RequestPhase))
+_OPEN = {core.RequestPhase.PREPARED, core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING}
+
+
+@settings(max_examples=examples(pr=30, nightly=1000), deadline=None)
+@given(phases=st.lists(_PHASES, max_size=3), unrelated=st.lists(_PHASES, max_size=2))
+def test_a_yield_is_an_orphan_exactly_when_its_recorded_wait_names_nothing_open(
+    phases: list[core.RequestPhase], unrelated: list[core.RequestPhase]
+) -> None:
+    """The verdict reads only the requests the yield named (#2428), not every checkpoint of
+    the turn: an open checkpoint the yield does not name keeps nothing alive."""
+    named = [f"named-{index}" for index in range(len(phases))]
+    invocation = _yielded(*named)
+    records = [
+        _checkpoint(invocation, phase).model_copy(update={"request_id": core.RequestId(root=name)})
+        for name, phase in zip(named, phases, strict=True)
+    ]
+    records += [
+        _checkpoint(invocation, phase).model_copy(
+            update={"request_id": core.RequestId(root=f"other-{index}")}
+        )
+        for index, phase in enumerate(unrelated)
+    ]
+    state = _state(invocation, *records)
+
+    orphaned = [w for w in core.orphan_waits(state) if w.waiter == core.WaitKind.YIELD_PUBLICATION]
+
+    assert bool(orphaned) == (not _OPEN.intersection(phases))

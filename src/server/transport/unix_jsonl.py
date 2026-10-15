@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import errno
+import logging
 import sys
 from contextlib import suppress
+from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -14,10 +16,11 @@ from server.api.protocol import (
     Response,
     SubscribedMessage,
     SubscribeRequest,
-    decode_request,
 )
-from server.transport.subscriptions import SubscriptionTracker
-from vs_sim.api import OsThreads, UnixNetwork
+from server.transport.subscriptions import (
+    SubscriptionAdmissionClosedError,
+    SubscriptionTracker,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -37,10 +40,20 @@ if TYPE_CHECKING:
 _DISCONNECT_POLL_SECONDS = 0.1
 # Pause between idle checks of a stream whose cursor has not moved.
 _IDLE_BACKOFF_SECONDS = 0.05
+# Bound how long the accept worker can stay inside a platform's ``accept``
+# after another thread closes the listener. POSIX does not promise that closing
+# a descriptor in one thread interrupts a syscall already using it in another.
+_ACCEPT_CLOSE_POLL_SECONDS = 0.1
+# Pause before retrying `accept()` after a transient failure (e.g. the process
+# or system file-descriptor table is exhausted), so a sustained shortage does
+# not spin the accept loop instead of giving fds a chance to free up.
+_ACCEPT_RETRY_BACKOFF_SECONDS = 0.1
 MAX_SOCKET_PATH_BYTES = 103 if sys.platform == "darwin" else 107
 _RECV_BYTES = 65536
 MAX_REQUEST_LINE_BYTES = 1024 * 1024
 """The longest request line a session buffers; the WebSocket gateway's inbound frame cap."""
+
+_LOG = logging.getLogger(__name__)
 
 
 class SocketPathTooLongError(OSError):
@@ -82,6 +95,16 @@ class _PeerGoneError(Exception):
     """The client's end of the connection is gone; nothing more can reach it."""
 
 
+@dataclass(eq=False)
+class _OwnedClientSession:
+    """One admitted connection and the worker the server must drain."""
+
+    connection: Connection
+    worker_ready: Event
+    worker: Worker | None = None
+    owner: object | None = None
+
+
 class _ClientSession:
     """One client connection: read JSONL requests, answer each, or stream events."""
 
@@ -96,36 +119,36 @@ class _ClientSession:
         self._api = api
         self._subscriptions = subscriptions
         self._threads = threads
+        self._hangup_watcher: Worker | None = None
 
     def handle(self) -> None:
         """Serve requests until the client hangs up, or until its subscription ends."""
         api = self._api
         for line in self._lines():
             request = (
-                Response.from_exception("unknown", RequestLineTooLongError())
+                api.failure("unknown", "", RequestLineTooLongError())
                 if line is None
-                else decode_request(line)
+                else api.decode_request(line)
             )
             if isinstance(request, Response):
                 self._write_message(request)
                 continue
             try:
                 if isinstance(request, SubscribeRequest):
-                    with self._subscriptions.track() as delivery:
-                        try:
-                            self._stream(request, delivery)
-                        except _PeerGoneError:
-                            pass
-                        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010252 [BLE001]; arbitrary event serialization failures are returned as protocol stream errors.
-                            self._write_stream_error(request.request_id, request.client_id, exc)
+                    try:
+                        with self._subscriptions.track() as delivery:
+                            try:
+                                self._stream(request, delivery)
+                            except _PeerGoneError:
+                                pass
+                            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010252 [BLE001]; arbitrary event serialization failures are returned as protocol stream errors.
+                                self._write_stream_error(request.request_id, request.client_id, exc)
+                    except SubscriptionAdmissionClosedError as exc:
+                        self._write_stream_error(request.request_id, request.client_id, exc)
                     return
                 response = api.execute(request)
             except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010253 [BLE001]; the socket boundary converts request failures into typed protocol responses.
-                response = Response.from_exception(
-                    request.request_id,
-                    exc,
-                    operation="Request",
-                ).model_copy(update={"client_id": request.client_id})
+                response = api.failure(request.request_id, request.client_id, exc)
             self._write_message(response)
 
     def _lines(self) -> Iterator[bytes | None]:
@@ -197,7 +220,7 @@ class _ClientSession:
         cursor, reported_floor, store_id = self._write_bootstrap(request, bootstrap)
         delivery.delivered(cursor)
         hung_up = self._threads.event()
-        self._threads.spawn(
+        self._hangup_watcher = self._threads.spawn(
             partial(self._watch_for_hangup, hung_up), name="vibesys-server-jsonl-hangup"
         )
         while True:
@@ -239,6 +262,12 @@ class _ClientSession:
             cursor = checkpoint.through_sequence
             delivery.delivered(cursor)
 
+    def close(self) -> None:
+        """Close the connection and drain the subscription's hangup watcher."""
+        self._connection.close()
+        if self._hangup_watcher is not None:
+            self._hangup_watcher.join()
+
     def _watch_for_hangup(self, hung_up: Event) -> None:
         """Read and discard what the client sends after subscribing; set ``hung_up`` at its end.
 
@@ -253,7 +282,8 @@ class _ClientSession:
                 pass
         except OSError:
             pass
-        hung_up.set()
+        finally:
+            hung_up.set()
 
     def _rebootstrap(
         self, request: SubscribeRequest, cursor: int, store_id: str
@@ -299,7 +329,14 @@ class _ClientSession:
     def _write_stream_error(self, request_id: str, client_id: str, error: Exception) -> None:
         """Report a replay or stream failure without hiding a live connection."""
         protocol_error = ProtocolErrorMessage.from_exception(
-            error, operation="Event stream", code="stream_failed", request_id=request_id
+            error,
+            operation="Event stream",
+            code=(
+                error.diagnostic_code
+                if isinstance(error, SubscriptionAdmissionClosedError)
+                else "stream_failed"
+            ),
+            request_id=request_id,
         ).model_copy(update={"client_id": client_id})
         with suppress(_PeerGoneError):
             self._write_message(protocol_error)
@@ -324,25 +361,25 @@ class UnixJsonlServer:
         self,
         path: Path,
         api: RunApi,
-        subscriptions: SubscriptionTracker | None = None,
-        threads: Threads | None = None,
-        network: Network | None = None,
+        subscriptions: SubscriptionTracker | None,
+        threads: Threads,
+        network: Network,
     ) -> None:
         """Create a Unix server, optionally sharing subscription accounting.
 
         ``threads`` runs the accept loop and each client, and paces idle
-        streams; ``network`` binds the socket. Both default to the operating
-        system's.
+        streams; ``network`` binds the socket.
         """
         self.path = path
         self.api = api
-        self._threads = threads or OsThreads()
-        self._subscriptions = subscriptions or SubscriptionTracker()
-        self._network = network or UnixNetwork()
+        self._threads = threads
+        self._subscriptions = subscriptions or SubscriptionTracker(threads=threads)
+        self._network = network
         self._listener: Listener | None = None
         self._acceptor: Worker | None = None
         self._guard = self._threads.lock()
-        self._open: set[Connection] = set()
+        self._sessions: set[_OwnedClientSession] = set()
+        self._thread_identity = self._threads.local(object)
         self._closing = False
 
     def start(self) -> None:
@@ -366,34 +403,75 @@ class UnixJsonlServer:
     def _accept_loop(self, listener: Listener) -> None:
         while True:
             try:
-                connection = listener.accept()
-            except OSError:
-                return  # the listener was closed
+                connection = listener.accept(timeout=_ACCEPT_CLOSE_POLL_SECONDS)
+            except TimeoutError:
+                # A close may not interrupt an in-flight accept on every Unix.
+                # Poll only to observe that lifecycle transition; an idle,
+                # still-open listener simply starts another bounded accept.
+                with self._guard:
+                    if self._closing:
+                        return
+                continue
+            except OSError as exc:
+                with self._guard:
+                    closing = self._closing
+                if closing:
+                    return  # the listener was closed deliberately
+                # A transient failure, e.g. EMFILE/ENFILE while the process or
+                # system file-descriptor table is exhausted. The listener is
+                # still open: log it and keep accepting once the pressure
+                # eases, rather than permanently killing the accept loop.
+                _LOG.warning("accept() failed (errno=%s): %s; retrying", exc.errno, exc)
+                self._threads.sleep(_ACCEPT_RETRY_BACKOFF_SECONDS)
+                continue
             with self._guard:
                 if self._closing:
                     connection.close()
                     return
-                self._open.add(connection)
-            self._threads.spawn(
-                partial(self._serve, connection), name="vibesys-server-jsonl-client", daemon=True
-            )
+                self._discard_finished_sessions_locked()
+                session = _OwnedClientSession(connection, self._threads.event())
+                self._sessions.add(session)
+            try:
+                worker = self._threads.spawn(
+                    partial(self._serve, session),
+                    name="vibesys-server-jsonl-client",
+                    daemon=True,
+                )
+            except BaseException:
+                with self._guard:
+                    self._sessions.discard(session)
+                connection.close()
+                session.worker_ready.set()
+                raise
+            with self._guard:
+                session.worker = worker
+            session.worker_ready.set()
 
-    def _serve(self, connection: Connection) -> None:
+    def _serve(self, owned: _OwnedClientSession) -> None:
+        owned.worker_ready.wait()
+        owned.owner = self._thread_identity.get()
+        session = _ClientSession(owned.connection, self.api, self._subscriptions, self._threads)
         try:
-            _ClientSession(connection, self.api, self._subscriptions, self._threads).handle()
+            session.handle()
         except _PeerGoneError:
             pass
         finally:
-            with self._guard:
-                self._open.discard(connection)
-            connection.close()
+            session.close()
+
+    def _discard_finished_sessions_locked(self) -> None:
+        """Forget workers only after they have completely returned."""
+        self._sessions = {
+            session
+            for session in self._sessions
+            if session.worker is None or session.worker.is_alive()
+        }
 
     def wait_for_subscriber(self, timeout: float) -> bool:
         """Wait until a presentation client has established its event stream."""
         return self._subscriptions.wait_for_subscriber(timeout)
 
     def wait_until_delivered(self, sequence: int, timeout: float) -> bool:
-        """Wait, bounded, until every open stream wrote through ``sequence``."""
+        """Close subscription admission and wait for streams to reach ``sequence``."""
         return self._subscriptions.wait_until_delivered(sequence, timeout)
 
     def wait_for_subscriber_disconnect(self) -> None:
@@ -401,18 +479,36 @@ class UnixJsonlServer:
         self._subscriptions.wait_for_none_active()
 
     def close(self) -> None:
-        """Stop accepting, hang up on every client, and remove the socket path."""
-        listener, self._listener = self._listener, None
-        acceptor, self._acceptor = self._acceptor, None
+        """Stop admission, hang up on every client, and drain their workers.
+
+        A request may call ``close`` reentrantly. A client worker cannot drain
+        itself, and two such callers must not cross-join each other, so a
+        reentrant call initiates shutdown and then unwinds through the normal
+        worker-finalization path. An outside owner drains every worker.
+        """
+        caller = self._thread_identity.get()
         with self._guard:
             self._closing = True
-            open_connections, self._open = self._open, set()
+            listener = self._listener
+            acceptor = self._acceptor
+            self._discard_finished_sessions_locked()
+            sessions = tuple(self._sessions)
+            reentrant = any(session.owner is caller for session in sessions)
         if listener is not None:
             listener.close()
+        for session in sessions:
+            session.connection.close()
         if acceptor is not None:
-            acceptor.join(timeout=2)
-        for connection in open_connections:
-            connection.close()
+            acceptor.join()
+        if reentrant:
+            return
+        for session in sessions:
+            session.worker_ready.wait()
+            worker = session.worker
+            if worker is not None:
+                worker.join()
+        with self._guard:
+            self._discard_finished_sessions_locked()
 
     def __enter__(self) -> UnixJsonlServer:
         """Start the server and return it as a context manager."""

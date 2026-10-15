@@ -32,9 +32,12 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from scripts.ast_identity import node_identity
-from vs_project.api import run_git
+from vs_project.api import Git, GitCommandError
+from vs_sim.api import OsProcesses
 
 __all__ = ["Scan", "main", "measure", "ratchet"]
+
+_GIT = Git(OsProcesses())
 
 MANIFEST = "scripts/contract_replacements.json"
 BASELINE = "scripts/contract_sot_baseline.jsonl"
@@ -816,9 +819,9 @@ def consumer_renames(root: Path, ref: str) -> dict[str, str]:
     """Preserve identities only for Git-detected renames whose source is absent."""
     if ref.startswith("-"):
         raise ContractGateError.invalid(ref)
-    base = run_git(["merge-base", ref, "HEAD"], cwd=root, text=True, timeout=30)
-    base.check_returncode()
-    changes = run_git(
+    base = _GIT.run_text(["merge-base", ref, "HEAD"], cwd=root, timeout=30)
+    base.check()
+    changes = _GIT.run_text(
         [
             "diff",
             "--name-status",
@@ -829,10 +832,9 @@ def consumer_renames(root: Path, ref: str) -> dict[str, str]:
             "--",
         ],
         cwd=root,
-        text=True,
         timeout=30,
     )
-    changes.check_returncode()
+    changes.check()
     fields = changes.stdout.split("\0")[:-1]
     if len(fields) % 3:
         raise ContractGateError.invalid(fields)
@@ -920,7 +922,13 @@ def main(argv: list[str] | None = None) -> int:
         elif scan.counts != baseline:
             print("contract baseline is stale; run check_contract_sot.py --write", file=sys.stderr)
             return 1
-    except (OSError, ValueError, SyntaxError, subprocess.CalledProcessError) as exc:
+    except (
+        OSError,
+        ValueError,
+        SyntaxError,
+        subprocess.CalledProcessError,
+        GitCommandError,
+    ) as exc:
         print(f"check_contract_sot: {exc}", file=sys.stderr)
         return 2
     print(f"contract SOT: {len(scan.counts)} tuples, {sum(scan.counts.values())} occurrences")

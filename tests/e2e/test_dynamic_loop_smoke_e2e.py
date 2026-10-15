@@ -48,10 +48,12 @@ from tests.support.loop_invariants import (
     summarize,
     terminal_event,
 )
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.slurm_environment import with_fake_image_build
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
+from entrypoints.production import production_timing
 from entrypoints.run import supervise
 from headless import HeadlessRenderer
 from headless import run as render_run
@@ -73,7 +75,14 @@ from vs_agent.api.testing import (
 )
 from vs_evaluation.api.tools import SUBMIT_TOOL, VALIDATE_WAIT_TOOL, build_core_evaluation_tools
 from vs_project.api import Project, StoredEnvelope
-from vs_sim.api import MonotonicClock, UnixNetwork
+from vs_sim.api import (
+    LoopSignalSource,
+    MonotonicClock,
+    OsThreads,
+    SystemClock,
+    ThreadBlockingRunner,
+    UnixNetwork,
+)
 from vs_slurm.fake_connector import active_jobs, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
@@ -493,7 +502,7 @@ class _RoleLaunchers:
     @property
     def capabilities(self) -> AgentCapabilities:
         """What every scripted role honors; the roles share one fake's capabilities."""
-        return FakeProvider(turn=[assistant_text("")]).capabilities
+        return FakeProvider(turn=[assistant_text("")], threads=OsThreads()).capabilities
 
     def __init__(self) -> None:
         self._launchers: list[FakeProvider] = []
@@ -541,6 +550,7 @@ class _RoleLaunchers:
                     usage(input_tokens=1200, output_tokens=80),
                 ],
                 answer=_PLAN,
+                threads=OsThreads(),
             ),
             IMPLEMENTER.id: FakeProvider(
                 turn=[
@@ -551,8 +561,11 @@ class _RoleLaunchers:
                 ],
                 script=FakeTurnScript(answers=(waiting, _IMPLEMENTED)),
                 on_turn=measure_own_edit,
+                threads=OsThreads(),
             ),
-            JUDGE.id: FakeProvider(turn=[assistant_text("The change is correct.")], answer=_JUDGED),
+            JUDGE.id: FakeProvider(
+                turn=[assistant_text("The change is correct.")], answer=_JUDGED, threads=OsThreads()
+            ),
         }
         launcher = scripts[spec.role]
         self._launchers.append(launcher)
@@ -577,6 +590,8 @@ def _core_agents(
         model_name=spec.model,
         session_store=session_store,
         event_sink=events,
+        clock=SystemClock(),
+        threads=OsThreads(),
     )
 
 
@@ -726,7 +741,9 @@ def _run_headless_recording(
 
     async def execute() -> RunResult:
         handle = runs.start(request)
-        return await supervise(handle, render_run(handle, renderer=renderer))
+        return await supervise(
+            handle, render_run(handle, renderer=renderer), signals=LoopSignalSource()
+        )
 
     return asyncio.run(execute())
 
@@ -788,7 +805,14 @@ def test_core_path_runs_the_fake_slurm_search(
     )
     request = with_fake_image_build(request)
     runs = launch.default_runs(
-        LaunchSettings(agent_client_factory=_core_agents, backend_factory=host_container_backend)
+        LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
+            agent_client_factory=_core_agents,
+            backend_factory=host_container_backend,
+        )
     )
 
     renderer = _RecordingRenderer()

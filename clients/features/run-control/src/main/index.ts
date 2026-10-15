@@ -3,4 +3,4 @@
  * stopping runs over `@vibesys/connection`, and relaying the run page's connections.
  */
 export type {RelayPort} from './relay.js';
-export {RunControl} from './run-control.js';
+export {RunControl, type StartIdentity} from './run-control.js';

@@ -18,8 +18,6 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
-
 from server.host_api import (
     Checkout,
     DetachedLaunchErrorCode,
@@ -36,6 +34,7 @@ from server.host_helper_requests import (
     Scan,
     ScannedEntry,
 )
+from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project, ProjectError
 from vs_sim.api import ProcessSpec
 
@@ -47,6 +46,7 @@ if TYPE_CHECKING:
 _PYPROJECT_LIMIT_BYTES = 1 << 20
 _GIT_TIMEOUT_SECONDS = 2.0
 _LAUNCH_OUTPUT_TAIL = 2000
+_LAUNCH_RECORD_LIMIT = 1 << 20
 
 
 class FileProjects:
@@ -208,10 +208,11 @@ class SubprocessRunLauncher:
         lines = outcome.stdout.decode("utf-8", errors="replace").strip().splitlines()
         last = lines[-1] if lines else ""
         for model in (LiveInstanceRecord, DetachedLaunchFailure):
-            try:
-                return model.model_validate_json(last)
-            except ValidationError:
-                continue
+            decoded = decode_json(
+                last, model, source="launch output", max_bytes=_LAUNCH_RECORD_LIMIT
+            )
+            if not isinstance(decoded, Unreadable):
+                return decoded
         tail = outcome.stderr.decode("utf-8", errors="replace").strip()[-_LAUNCH_OUTPUT_TAIL:]
         summary = f"the launch exited with status {outcome.returncode} and printed no record"
         return _launch_failure(f"{summary}: {tail}" if tail else summary, outcome.returncode)

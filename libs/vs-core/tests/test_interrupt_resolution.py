@@ -70,6 +70,7 @@ def test_an_interruption_whose_checkpoint_fails_ends_failed_not_open(
     assert failures[0].invocation == snapshot.invocation
     assert not [row for row in result.events if isinstance(row, core.InterruptCompleted)]
     assert result.state.sessions.interrupts[0].phase == "blocked"
+    assert result.state.sessions.interrupts[0].wait is None
     assert _open_interrupt_waits(result.state) == []
 
 
@@ -78,6 +79,15 @@ def test_a_live_checkpoint_keeps_the_interruption_waiting() -> None:
     waits = [wait for wait in core.waits(state) if wait.waiter == core.WaitKind.INTERRUPT]
     assert [wait.producer for wait in waits] == [core.Producer.PENDING_REQUEST]
     assert snapshot.request_id is not None
+
+
+def test_a_draining_interruption_records_the_checkpoint_it_waits_on() -> None:
+    """The step that requests the checkpoint names it on the claim (#2428); nothing infers it."""
+    state, snapshot = _interrupted_until_checkpoint()
+    (claim,) = state.sessions.interrupts
+    assert snapshot.request_id is not None
+    assert claim.phase == "draining"
+    assert claim.wait == core.WaitOn(requests=(snapshot.request_id,))
 
 
 def test_an_interruption_whose_checkpoint_keeps_answering_retryably_is_retried_then_fails() -> None:

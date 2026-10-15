@@ -87,16 +87,14 @@ An MCP tool server is an external contract that agents call with arbitrary
 arguments, in any order, at any time.
 
 - Put each tool server in a compartmentalized home with a declared public
-  interface and no imports from the orchestration that uses it. Valid homes
-  are its own module, its own library under `libs/` when other packages
-  reuse it, or a standalone server under `resources/`, such as the
-  profilers in `resources/profilers/`.
-- Servers in `src/` and `libs/` build their tools on the shared tool layer
-  (`vs_mcp` `ToolSpec` and `serve_stdio`), not a hand-built `FastMCP`, so
-  that cross-cutting mechanisms cover every tool: deadlines, result size
-  limits, fault injection. A standalone server under `resources/` may use
-  FastMCP directly. Share its conventions through the `_common` package of
-  its resource family, and test it the same way.
+  interface and no imports from the orchestration that uses it: its own
+  module, its own library when other packages reuse it, or a standalone
+  server shipped as a resource.
+- Build every in-process server's tools on one shared tool layer, not a
+  hand-built server per tool, so that cross-cutting mechanisms cover every
+  tool: deadlines, result size limits, fault injection. A standalone server
+  shares its conventions with its siblings through one common package, and
+  is tested the same way.
 - Keep the server thin over a service with a typed API. The server parses
   arguments and formats replies. A stateful service rechecks every call through
   its pure core; its shell owns persistence and I/O.

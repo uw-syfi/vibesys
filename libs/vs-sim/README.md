@@ -5,13 +5,17 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
 
 - `vs_sim.api` holds the role-named interfaces product code takes
   (`Clock`, `Sleeper`, `SleepingClock`, `BlockingRunner`, `SignalSource`,
-  `ProcessLauncher`, `StreamingCommand`, `RandomSource`, `Threads`, `Network`) and their real
-  implementations (`SystemClock`, `MonotonicClock`, `ThreadBlockingRunner`, `LoopSignalSource`,
-  `SubprocessLauncher`, `SubprocessStreamingCommand`, `SeededRandom`, `SystemRandomSource`,
-  `OsThreads`, `UnixNetwork`).
+  `ProcessLauncher`, `Processes`, `StreamingCommand`, `RandomSource`, `Threads`, `Network`)
+  and their real implementations (`SystemClock`, `MonotonicClock`, `ThreadBlockingRunner`,
+  `LoopSignalSource`, `SubprocessLauncher`, `OsProcesses`, `SubprocessStreamingCommand`,
+  `SeededRandom`, `SystemRandomSource`, `OsThreads`, `UnixNetwork`).
   `Threads` is the one interface for everything that blocks an operating-system thread:
-  `spawn`, locks, reentrant locks, conditions, events, synchronous `sleep` and a monotonic
-  `now`. `Network` carries bytes over local stream connections (`listen`, `accept`,
+  `spawn`, locks, reentrant locks, conditions, events, thread-local values, synchronous
+  `sleep` and a monotonic `now`. `Processes` runs a command to completion in a process group
+  of its own; its result says whether the command exited, timed out and was cleaned up, or
+  timed out and left something running. `Platform` bundles them for the few components that
+  use more than three; `Platform.real()` is built at an entrypoint and `Sim.platform` in a
+  test. `Network` carries bytes over local stream connections (`listen`, `accept`,
   `connect`, `send`, `recv`).
 - `vs_sim.api.testing` holds the test side: the deterministic scheduler
   (`VirtualClock`, `run_virtual`), `ManualClock`, an event trace for comparing two
@@ -22,7 +26,7 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
   `file_size_limit`, Fakes of each interface (including
   `GatedBlockingRunner`, which keeps a blocking call in flight until released), and a contract suite
   every implementation of `Clock`, `BlockingRunner`, `SignalSource`, `ProcessLauncher`,
-  `StreamingCommand` (`ScriptedStreamingCommand` is its Fake; the real one runs it in
+  `Processes`, `StreamingCommand` (`ScriptedStreamingCommand` is its Fake; the real one runs it in
   `tests/e2e`), `Threads` and `Network` passes.
 - `SimThreads` simulates `Threads` cooperatively: every simulated thread is a real thread
   but only one runs at a time, and under a schedule seed the next one is drawn from the

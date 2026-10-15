@@ -78,6 +78,7 @@ from vs_project.api.git_repository import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vs_project._git_process import Git
     from vs_project.api.git_repository import (
         GitFaultSink,
         Pathspec,
@@ -96,11 +97,11 @@ _REF_WILDCARDS = frozenset("*?[\\")
 class Pygit2GitRepository:
     """libgit2 for the portable operations, the Git CLI for the rest."""
 
-    def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
+    def __init__(self, root: Path, *, git: Git, faults: GitFaultSink) -> None:
         pygit2.option(pygit2.enums.Option.SET_OWNER_VALIDATION, 0)
         self._root = root
         self._faults = faults
-        self._cli = CliGitRepository(root, faults=faults)
+        self._cli = CliGitRepository(root, git=git, faults=faults)
         self._location: RepositoryLocation | None = None
         self._exclude_file = root / ".git" / "info" / "exclude"
 

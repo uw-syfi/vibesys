@@ -41,7 +41,7 @@ def sample_limits(**overrides: object) -> Limits:
 def initial_state() -> CoreState:
     """Build a capability-disabled run; all identities and times are supplied."""
     return CoreState(
-        records=RecordsState(recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
+        records=RecordsState(hosts=(), recovery=RecoveryBarrier(phase=RecoveryPhase.READY)),
         run=RunState(
             limits=sample_limits(),
             run_id=RunId(root="run"),

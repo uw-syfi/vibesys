@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -34,6 +33,7 @@ from vs_runtime.api.infrastructure import (
     CapacityHandling,
     QuotaPolicy,
     RunHostComponents,
+    StateValidationPasses,
     WorkspaceResourceFactory,
     bounded_stop,
     create_model_request_reconciler,
@@ -76,7 +76,7 @@ if TYPE_CHECKING:
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
-    from vs_sim.api import Clock
+    from vs_sim.api import BlockingRunner, Network, SleepingClock
 
 
 type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
@@ -124,10 +124,12 @@ class _ProductHostFactory:
     open_agent_environment: Callable[..., AgentExecutionEnvironment] | None
     projector: CommittedStateProjector | None
     agent_client_factory: Callable[..., AgentClientProtocol] | None
-    backend_factory: Callable[..., ComputeBackendImpl] | None
+    backend_factory: Callable[..., ComputeBackendImpl]
     plugin: OrchestrationPlugin
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore] | None
     timing: RunTiming
+    blocking: BlockingRunner
+    network: Network
     resume_policy: (
         Callable[
             [OrchestrationDescriptor, OrchestrationDescriptor],
@@ -136,7 +138,7 @@ class _ProductHostFactory:
         | None
     )
     options: BaseModel
-    profiler_preflight: ProfilerPreflight | None = None
+    profiler_preflight: ProfilerPreflight
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None
     core_services: CoreServices | None = field(default=None, init=False)
     local_evaluation: Evaluation | None = field(default=None, init=False)
@@ -170,13 +172,14 @@ class _ProductHostFactory:
         return self._components(resources, ownership)
 
     def _components(self, resources: _PreparedRun, ownership: ExitStack) -> RunHostComponents:
-        blocking = BlockingOperations()
+        blocking = BlockingOperations(self.blocking)
         project = resources.project_resources
         environment = resources.environment_resources
         logger = project.logger
         session_store = DurableSessionStore(
             project.state.local("agent").slot("sessions.json", AgentSessionState),
             log=logger.lprint,
+            threads=self.timing.threads,
         )
         policy = self.plugin.core
         if policy is None:
@@ -191,6 +194,8 @@ class _ProductHostFactory:
             skill_selection=platform_skill_selection(resources.backend),
             host_resources=resources.agent_host_resources,
             events=self.integration.workspace_resource_event,
+            threads=self.integration.threads,
+            blocking=self.blocking,
             model_requests=(
                 create_model_request_reconciler() if environment.view.env_kind == "modal" else None
             ),
@@ -200,7 +205,11 @@ class _ProductHostFactory:
         if offer.withheld:
             logger.lprint(f"[profiler] {offer.reason}.")
         agent_runtime = create_workspace_runtime(
-            workspace_resources=workspace_resources, blocking=blocking
+            workspace_resources=workspace_resources,
+            blocking=blocking,
+            validation_passes=StateValidationPasses(
+                project.project.state.local_namespace(project.state.run_id, "validation")
+            ),
         )
         workspaces = agent_runtime.workspaces
         evaluation = create_evaluation(
@@ -337,9 +346,10 @@ class _ProductHostFactory:
             )
         )
         ownership.callback(environment.close)
-        events = CoreAgentEventSink(self.integration.events.record)
+        events = CoreAgentEventSink(self.integration.events.record, self.timing.clock)
         client = self.agent_client_factory(
             spec=base,
+            clock=self.timing.clock,
             session_store=session_store,
             backends=(
                 {role.id: environment.backends["chat"] for role in self.plugin.agents}
@@ -367,7 +377,10 @@ class _ProductHostFactory:
             client,
             control=self.integration.control,
             events=events,
-            handling=CapacityHandling.for_policy(self.request.config.agent.quota.to_policy()),
+            handling=CapacityHandling.for_policy(
+                self.request.config.agent.quota.to_policy(), self.integration.threads
+            ),
+            clock=self.timing.clock,
         )
         # Every core session shares one run-scoped journal, named by a fixed member key.
         invocations = self.invocation_store_factory(
@@ -389,7 +402,7 @@ class _ProductHostFactory:
                 evaluation=RetryingEvaluationExecutor(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces),
+                    else PollingEvaluationExecutor(evaluation, workspaces, clock=self.timing.clock),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
                         project.state.run_id, "core-evaluation-tries"
@@ -406,6 +419,10 @@ class _ProductHostFactory:
                 invocation_slot=invocations,
                 configuration=configuration,
                 clock=self.timing.clock,
+                github=self.integration.github,
+                threads=self.integration.threads,
+                blocking=self.blocking,
+                network=self.network,
                 agent_lifecycle=self.integration.agent_execution_event,
                 evaluation_diagnostics=self._evaluation_diagnostic,
                 stateless_tool_servers=self._stateless_tool_servers(resources),
@@ -471,7 +488,7 @@ class _ProductHostFactory:
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
-        clock: Clock,
+        clock: SleepingClock,
     ) -> SlurmSemanticEvaluationExecutor | None:
         """Build the cluster's semantic execution adapter when the environment reports one."""
         cluster = resources.environment_resources.view.cluster_evaluation
@@ -486,7 +503,8 @@ class _ProductHostFactory:
             namespace,
             namespace.external_directory() / "slurm-provider-handles",
             clock=clock,
-            process=integration.slurm_process,
+            sleeper=clock,
+            processes=integration.slurm_processes,
         )
 
     async def stop_new_work(self) -> None:
@@ -538,10 +556,12 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     open_agent_environment: Callable[..., AgentExecutionEnvironment] | None = None,
     projector: CommittedStateProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
-    backend_factory: Callable[..., ComputeBackendImpl] | None = None,
-    profiler_preflight: ProfilerPreflight | None = None,
-    stop_timer: StopTimer = asyncio.sleep,
+    backend_factory: Callable[..., ComputeBackendImpl],
+    profiler_preflight: ProfilerPreflight,
+    stop_timer: StopTimer,
     timing: RunTiming,
+    blocking: BlockingRunner,
+    network: Network,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore]
     | None = None,
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
@@ -568,11 +588,13 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
         plugin=plugin,
         invocation_store_factory=invocation_store_factory,
         timing=timing,
+        blocking=blocking,
+        network=network,
         resume_policy=resume_policy,
         options=options,
         stateless_tool_servers=stateless_tool_servers,
     )
-    async with open_run_host(factory.prepare) as host:
+    async with open_run_host(factory.prepare, runner=blocking) as host:
         try:
             async with bounded_stop(
                 integration.control,

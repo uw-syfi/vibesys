@@ -167,6 +167,7 @@ def resume_state(
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.PREPARED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     owners = ()
     if attempt_owned:

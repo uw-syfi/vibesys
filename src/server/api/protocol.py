@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAliasType
 
-from pydantic import Field, FiniteFloat, TypeAdapter
-from pydantic_core import from_json
+from pydantic import Field, FiniteFloat, JsonValue, TypeAdapter
 
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
 from server.chat.options import ChatOptions
@@ -29,9 +28,14 @@ from vibesys.api.hypothesis import (
     JudgeVerdict,
     PerfDeltaReason,
 )
+from vs_decode.api import Unreadable, UnreadableKind, decode_json
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from datetime import datetime
+
+    from vs_sim.api import Clock
 
 # Both snapshots and streamed batches publish the same execution checkpoint.
 # Naming the list keeps the generated client contract referentially identical,
@@ -520,19 +524,19 @@ class Response(ResponseEnvelope):
         request_id: str,
         error: BaseException,
         *,
+        timestamp: datetime,
         operation: str = "Request",
-        scope: DiagnosticScope = DiagnosticScope.REQUEST,
-        code: str | None = None,
     ) -> Response:
         """Build a failed response with consistent legacy and typed errors."""
         diagnostic = exception_to_diagnostic(
             error,
-            scope=scope,
+            scope=DiagnosticScope.REQUEST,
             operation=operation,
-            code=code or getattr(error, "diagnostic_code", None),
+            code=getattr(error, "diagnostic_code", None),
         )
         return cls(
             request_id=request_id,
+            timestamp=timestamp,
             ok=False,
             error=diagnostic.summary,
             diagnostic=diagnostic,
@@ -540,36 +544,61 @@ class Response(ResponseEnvelope):
 
 
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
+MAX_REQUEST_FRAME_BYTES = 16 * 1024 * 1024
+"""The largest request frame any transport hands to ``decode_request``."""
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
-def decode_request(frame: str | bytes) -> ProtocolRequest | Response:
+def decode_request(frame: str | bytes, *, clock: Clock) -> ProtocolRequest | Response:
     """Parse one request frame, or the failed response that rejects it.
 
     Every transport decodes through here, so a malformed frame (invalid JSON or
     UTF-8, a JSON value that is not an object, a missing or unknown ``type``,
     unknown keys, nesting deeper than the JSON parser's depth limit) draws the
-    same typed response on each of them. The rejection echoes the frame's
+    same typed response on each of them, stamped by ``clock``. The rejection echoes the frame's
     ``request_id`` and ``client_id`` when it carries them as an object, so a
     client can match it to what it sent.
 
-    Total: no frame makes this raise. A frame is parsed only by pydantic's JSON
-    parser, which bounds nesting and reports it as a ``ValueError``; Python's
-    ``json`` recurses per level and raises ``RecursionError`` instead, which
-    escaped to the transport and ended the client's session.
+    Total: no frame makes this raise. A frame is parsed only by ``vs_decode``: at most
+    ``MAX_REQUEST_FRAME_BYTES``, with nesting bounded by pydantic's JSON parser, where
+    Python's ``json`` recursed per level and raised ``RecursionError``, which escaped to
+    the transport and ended the client's session. A frame that fails validation names
+    its failing paths in the diagnostic's ``validation_paths``.
     """
-    try:
-        return _REQUEST_ADAPTER.validate_json(frame)
-    except ValueError as error:
-        request_id, client_id = _frame_ids(frame)
-        return Response.from_exception(request_id, error, operation="Request").model_copy(
-            update={"client_id": client_id}
-        )
+    request = decode_json(
+        frame, _REQUEST_ADAPTER, source="request frame", max_bytes=MAX_REQUEST_FRAME_BYTES
+    )
+    if not isinstance(request, Unreadable):
+        return request
+    request_id, client_id = _frame_ids(frame)
+    response = failure_response(
+        request_id, client_id, RequestFrameError(request.details("frame")), clock=clock
+    )
+    if request.kind is not UnreadableKind.INVALID or response.diagnostic is None:
+        return response
+    paths = tuple(problem.location for problem in request.problems)
+    diagnostic = response.diagnostic.model_copy(update={"validation_paths": paths})
+    return response.model_copy(update={"diagnostic": diagnostic})
+
+
+class RequestFrameError(ValueError):
+    """A request frame that is not a valid request; the message names each failing path."""
+
+
+def failure_response(
+    request_id: str, client_id: str, error: BaseException, *, clock: Clock
+) -> Response:
+    """The failed response for ``error``, stamped by ``clock`` and addressed to ``client_id``."""
+    return Response.from_exception(
+        request_id, error, timestamp=utc_datetime(clock), operation="Request"
+    ).model_copy(update={"client_id": client_id})
 
 
 def _frame_ids(frame: str | bytes) -> tuple[str, str]:
-    try:
-        value = from_json(frame)
-    except ValueError:
+    value = decode_json(
+        frame, _JSON_VALUE, source="request frame", max_bytes=MAX_REQUEST_FRAME_BYTES
+    )
+    if isinstance(value, Unreadable):
         return "unknown", ""
     if not isinstance(value, dict):
         return "unknown", ""

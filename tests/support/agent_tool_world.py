@@ -55,7 +55,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.contracts import AgentRole, AgentTool
 from vs_sim.api import MonotonicClock, OsThreads
-from vs_sim.api.testing import SimNetwork
+from vs_sim.api.testing import ManualClock, SimNetwork
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -212,19 +212,26 @@ async def scenario(
             writer=agent,
         )
         resolvers.append(resolver)
-        client = AgentClient(FakeProvider(answer=agent.answer, on_turn=agent))
+        client = AgentClient(
+            FakeProvider(answer=agent.answer, on_turn=agent, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
+        )
         return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 
     def yields(workspaces: RuntimeWorkspaces, receipts: StateNamespace) -> TurnYields:
         bridge = AgentEvaluationBridge(
             tmp_path / "evaluation.sock",
             POLICY,
-            ScopeWorkspaces(workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts))),
+            ScopeWorkspaces(
+                workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts, threads=OsThreads()))
+            ),
             AgentEvaluationRecords(
-                OwedSubmissions(ReceiptStore(receipts)),
-                ReceiptEvidenceLedger(ReceiptStore(receipts)),
+                OwedSubmissions(ReceiptStore(receipts, threads=OsThreads())),
+                ReceiptEvidenceLedger(ReceiptStore(receipts, threads=OsThreads())),
             ),
             network=agents[0].network,
+            threads=OsThreads(),
         )
         resolvers[0].bridge = bridge
         bridges.append(bridge)

@@ -7,20 +7,18 @@ import signal
 import subprocess
 import sys
 import tempfile
-import threading
 import webbrowser
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import partial
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn, Protocol
 
 from entrypoints import cli
 from entrypoints.main_thread_interrupt import MainThreadInterrupt
+from entrypoints.production import production_runs, production_web_discovery
 from entrypoints.web_assets import WebAssetBundle
-from launch import default_runs
 from server.host_api import (
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
@@ -40,6 +38,7 @@ from server.registry import (
 )
 from server.runtime import (
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
+    WebDiscovery,
     WebGatewayListener,
     WebInstanceClaim,
     WebInstanceHold,
@@ -55,8 +54,16 @@ from vibesys.api import ConfigurationError
 from vibesys.api.request import generate_experiment_name, repository_name_from_experiment
 from vs_github.api import GitHubCLI, GitHubCLIError
 from vs_project.api import Project
-from vs_sandbox.api import relay_signals
-from vs_sim.api import OsThreads, SystemClock
+from vs_sim.api import (
+    OsProcesses,
+    OsThreads,
+    Platform,
+    SignalMainThreadWake,
+    Signals,
+    SystemClock,
+    WakeupFdSignalRelay,
+    utc_datetime,
+)
 
 _WEB_PORT_MAX = 65_535
 _DETACHED_START_TIMEOUT_SECONDS = 10.0
@@ -66,8 +73,6 @@ GATEWAY_STOP_TIMEOUT_SECONDS = WEBSOCKET_CLOSE_TIMEOUT_SECONDS + _GATEWAY_STOP_G
 """Transport close bound plus grace to observe the released instance files."""
 _DETACHED_POLL_SECONDS = 0.05
 _DETACHED_LOG_TAIL_BYTES = 4_096
-_INTERRUPT_SIGNAL = signal.SIGUSR1
-"""Private signal that wakes the main thread; only the relay sends it."""
 
 if TYPE_CHECKING:
     import argparse
@@ -76,7 +81,7 @@ if TYPE_CHECKING:
 
     from server.runtime import ServerLifecycleObserver, ServerRuntime
     from vibesys.api import Config, Runs
-    from vs_sim.api import Threads
+    from vs_sim.api import MainThreadWake, SignalRelay, Threads
 
 
 def _report_stuck_main_thread(waited: float) -> None:
@@ -87,37 +92,33 @@ def _report_stuck_main_thread(waited: float) -> None:
 
 
 @contextmanager
-def _termination_signal(runtime: ServerRuntime) -> Iterator[None]:
+def _termination_signal(
+    runtime: ServerRuntime, relay: SignalRelay, wake: MainThreadWake, threads: Threads
+) -> Iterator[None]:
     """Forward launcher termination into the server's cleanup boundary.
 
     The kernel may hand a process-directed SIGTERM to a transport thread, while
     CPython runs Python handlers on the main thread only, so a handler installed
-    for SIGTERM is not run while the main thread is blocked in the run. The
-    relay observes SIGTERM on whichever thread took it, then interrupts the main
-    thread with a private wake signal that is always delivered to it, resent
-    until the main thread has taken it (see ``MainThreadInterrupt``).
+    for SIGTERM is not run while the main thread is blocked in the run. *relay*
+    observes SIGTERM on whichever thread took it, then *wake* interrupts the main
+    thread, resent until the main thread has taken it (see ``MainThreadInterrupt``).
     """
-    interrupt = MainThreadInterrupt(
-        partial(signal.pthread_kill, threading.get_ident(), _INTERRUPT_SIGNAL),
-        OsThreads(),
-        _report_stuck_main_thread,
-    )
 
-    def on_interrupt_signal(signum: int, frame: object) -> None:
-        del signum, frame
+    def on_wake() -> None:
+        # Bound below, before the relay that alone requests a wake is entered.
         interrupt.take()
 
-    def terminate(signum: int) -> None:
-        del signum
-        runtime.shutdown()
-        interrupt.request()
+    with ExitStack() as scope:
+        send = scope.enter_context(wake.armed(on_wake))
+        interrupt = MainThreadInterrupt(send, threads, _report_stuck_main_thread)
 
-    previous = signal.signal(_INTERRUPT_SIGNAL, on_interrupt_signal)
-    try:
-        with relay_signals([signal.SIGTERM], terminate):
-            yield
-    finally:
-        signal.signal(_INTERRUPT_SIGNAL, previous)
+        def terminate(signum: int) -> None:
+            del signum
+            runtime.shutdown()
+            interrupt.request()
+
+        scope.enter_context(relay.relay([Signals.SIGTERM], terminate))
+        yield
 
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:
@@ -251,7 +252,7 @@ def _suggest_repository_owner(config: Config) -> str | None:
     if repository.owner is not None:
         return str(repository.owner)
     try:
-        return GitHubCLI().current_user()
+        return GitHubCLI(OsProcesses()).current_user()
     except GitHubCLIError:
         return None
 
@@ -273,7 +274,9 @@ def _resolve_tui_defaults(  # noqa: PLR0913  # lint-waiver: LW-011105 [PLR0913];
         launch_config_path = directory_config if directory_config.is_file() else None
     resolved_input = input_path.expanduser().resolve() if input_path is not None else None
     resolved_runs_dir = (runs_dir or Path.cwd() / "exp_env").expanduser().resolve()
-    resolved_name = experiment_name or generate_experiment_name(resolved_input)
+    resolved_name = experiment_name or generate_experiment_name(
+        resolved_input, now=utc_datetime(SystemClock())
+    )
     return InteractiveSetupDefaults(
         runs_dir=str(resolved_runs_dir),
         input_path=str(resolved_input) if resolved_input is not None else "",
@@ -358,11 +361,13 @@ class _DetachedGatewayEffects:
     One class covers launching and stopping because both act on the same
     gateway through the same mechanisms. `stop_detached_gateway` reaches it
     through the narrower `WebGatewayStopEffects` Protocol, which omits `spawn`
-    and `discover`. Time passes on *threads* (the real clock by default).
+    and `discover`. Time passes on *threads*, and *discovery* finds the gateway
+    and identifies processes; `real_gateway_effects` builds this host's.
     """
 
-    def __init__(self, threads: Threads | None = None) -> None:
-        self._threads = OsThreads() if threads is None else threads
+    def __init__(self, threads: Threads, discovery: WebDiscovery) -> None:
+        self._threads = threads
+        self._discovery = discovery
 
     def spawn(
         self,
@@ -381,7 +386,7 @@ class _DetachedGatewayEffects:
         )
 
     def discover(self, instance_path: Path) -> WebInstanceRecord | None:
-        return WebInstanceRecord.discover(instance_path, cleanup_stale=False)
+        return self._discovery.discover(instance_path, cleanup_stale=False)
 
     def read_record(self, instance_path: Path) -> WebInstanceRecord | None:
         return WebInstanceRecord.read(instance_path)
@@ -393,10 +398,10 @@ class _DetachedGatewayEffects:
         os.kill(pid, signal.SIGTERM)
 
     def inspect_port(self, port: int) -> WebPortObservation:
-        return WebPortInspector().inspect(port)
+        return WebPortInspector(process_signaller=self._discovery.processes).inspect(port)
 
     def terminate_listener(self, listener: WebGatewayListener) -> None:
-        WebPortInspector().terminate(listener)
+        WebPortInspector(process_signaller=self._discovery.processes).terminate(listener)
 
     def monotonic(self) -> float:
         return self._threads.now()
@@ -405,13 +410,15 @@ class _DetachedGatewayEffects:
         self._threads.sleep(seconds)
 
 
-_DETACHED_EFFECTS = _DetachedGatewayEffects()
+def real_gateway_effects() -> _DetachedGatewayEffects:
+    """This host's gateway effects: OS threads and the production discovery; entrypoints only."""
+    return _DetachedGatewayEffects(OsThreads(), production_web_discovery())
 
 
 def _spawn_detached(
     arguments: list[str],
     instance_path: Path,
-    effects: _DetachedGatewayEffects = _DETACHED_EFFECTS,
+    effects: _DetachedGatewayEffects,
 ) -> None:
     """Start the long-lived child and wait for its capability record."""
     instance_path.parent.mkdir(parents=True, exist_ok=True)
@@ -508,7 +515,7 @@ class _DetachedStartError(RuntimeError):
 def _spawn_detached_instance(
     arguments: list[str],
     root: Path,
-    effects: _DetachedGatewayEffects = _DETACHED_EFFECTS,
+    effects: _DetachedGatewayEffects,
 ) -> LiveInstanceRecord:
     """Start a headless detached server under ``root`` and return its serving record.
 
@@ -660,7 +667,7 @@ class WebGatewayStopEffects(Protocol):
 
 def stop_detached_gateway(
     instance_path: Path,
-    effects: WebGatewayStopEffects | None = None,
+    effects: WebGatewayStopEffects,
 ) -> GatewayStopResult:
     """Stop the gateway using ``instance_path`` and wait for its files to close.
 
@@ -698,7 +705,6 @@ def stop_detached_gateway(
     so the result does not claim it was, and the observation still decides the
     outcome.
     """
-    effects = _DETACHED_EFFECTS if effects is None else effects
     hold = effects.observe(instance_path)
     record = effects.read_record(instance_path)
     if record is None and hold.free:
@@ -774,10 +780,9 @@ class WebGatewayPortEffects(Protocol):
 
 def stop_web_gateway_on_port(
     port: int,
-    effects: WebGatewayPortEffects | None = None,
+    effects: WebGatewayPortEffects,
 ) -> GatewayPortStopResult:
     """Stop only a listener proven to be the same-user VibeSys gateway."""
-    effects = _DETACHED_EFFECTS if effects is None else effects
     observation = effects.inspect_port(port)
     if observation.state is WebPortState.FREE:
         return GatewayPortStopResult(GatewayPortStopOutcome.NOT_RUNNING, observation)
@@ -827,24 +832,32 @@ def _detached_failure(summary: str, log_path: Path, output: BinaryIO) -> str:
     return f"{tail}\n{message}" if tail else message
 
 
-def _discover_web_instance(path: Path, threads: Threads | None = None) -> WebInstanceRecord | None:
-    """Wait through the bind-to-record race before deciding to launch again."""
-    clock = OsThreads() if threads is None else threads
+class WebInstanceFinder(Protocol):
+    """Finds the live gateway that an instance record names."""
+
+    def discover(self, path: Path, *, cleanup_stale: bool = True) -> WebInstanceRecord | None:
+        """Return the record at *path* when its gateway answers, else None."""
+        ...
+
+
+def _discover_web_instance(
+    path: Path, finder: WebInstanceFinder, threads: Threads
+) -> WebInstanceRecord | None:
+    """Wait through the bind-to-record race, on *threads*' clock, before deciding to launch again."""
+    clock = threads
     deadline = clock.now() + 2
     while True:
-        record = WebInstanceRecord.discover(path, cleanup_stale=False)
+        record = finder.discover(path, cleanup_stale=False)
         if record is not None:
             return record
         if not WebInstanceClaim.is_held(path):
-            return WebInstanceRecord.discover(path)
+            return finder.discover(path)
         if clock.now() >= deadline:
-            return WebInstanceRecord.discover(path)
+            return finder.discover(path)
         clock.sleep(0.05)
 
 
-def _launch_detached_instance(
-    arguments: list[str], effects: _DetachedGatewayEffects = _DETACHED_EFFECTS
-) -> None:
+def _launch_detached_instance(arguments: list[str], effects: _DetachedGatewayEffects) -> None:
     """Validate, spawn a headless detached server, and print one JSON line.
 
     The line is the server's ``LiveInstanceRecord`` on success (exit 0), else
@@ -952,6 +965,7 @@ def main(
     has no structured channel to reach a frontend on, and stderr is inherited
     by the TUI launcher and redirected onto the detached startup log.
     """
+    cli.start_boot_trace()
     try:
         _serve(sys.argv[1:] if argv is None else argv, observer, runs)
     except ConfigurationError as exc:
@@ -987,7 +1001,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
     detach = _detach_requested(arguments)
     detached_child = os.environ.get("VIBESYS_DETACHED_CHILD") == "1"
     if detach and not web and not detached_child:
-        _launch_detached_instance(arguments)
+        _launch_detached_instance(arguments, real_gateway_effects())
         return
     try:
         # Resolve the browser artifact before reusing or spawning a gateway.
@@ -1004,7 +1018,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
     if web and not detached_child:
         if instance_path is None:  # pragma: no cover - web always supplies a path.
             raise RuntimeError("Web instance path was not resolved")  # noqa: TRY003  # lint-waiver: LW-101038 [TRY003]; guard an impossible parser/launcher invariant
-        existing = _discover_web_instance(instance_path)
+        existing = _discover_web_instance(instance_path, production_web_discovery(), OsThreads())
         if existing is not None:
             if web_bundle is not None and existing.web_build_id != web_bundle.build_id:
                 cli.configuration_error(
@@ -1019,7 +1033,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
             return
         if detach:
             try:
-                _spawn_detached(arguments, instance_path)
+                _spawn_detached(arguments, instance_path, real_gateway_effects())
             except RuntimeError as exc:
                 # A refused or failed detached launch is an operator-facing
                 # outcome, not a defect, so it reports a message rather than a
@@ -1060,10 +1074,11 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
         run_id = None if request is None else request.resolved_run_id
         project_root = None if request is None else request.resolved_project_root
         server_runtime = import_module("server.runtime").ServerRuntime
+        platform = Platform.real()
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
-                runs=default_runs() if runs is None else runs,
+                runs=production_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,
                 tui_defaults=_tui_defaults_from_argv(arguments),
@@ -1075,18 +1090,23 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 instance_path=instance_path,
                 detach=detach,
                 read_only_log=read_only_log,
+                platform=platform,
             )
         else:
             runtime = server_runtime(
                 socket_path=control_socket,
-                runs=default_runs() if runs is None else runs,
+                runs=production_runs() if runs is None else runs,
                 run_id=run_id,
                 project_root=project_root,
                 tui_defaults=_tui_defaults_from_argv(arguments),
                 detach=detach,
                 observer=observer,
+                platform=platform,
             )
-        with _termination_signal(runtime):
+        threads = platform.threads
+        with _termination_signal(
+            runtime, WakeupFdSignalRelay(threads), SignalMainThreadWake(), threads
+        ):
             result = runtime.run(lambda: None if request is None else runtime.drive(request))
     finally:
         if temp_socket_dir is not None:

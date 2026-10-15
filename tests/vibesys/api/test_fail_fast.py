@@ -7,8 +7,10 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, create_session
 from vibesys.api import (
     ComputeBackend,
@@ -19,6 +21,7 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import load_task
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,7 +85,15 @@ def test_incompatible_profiler_is_rejected_at_session_construction(
 
     with pytest.raises(ConfigurationError) as raised:
         create_session(
-            request, sink=record, settings=LaunchSettings(backend_factory=host_container_backend)
+            request,
+            sink=record,
+            settings=LaunchSettings(
+                timing=production_timing(),
+                processes=REAL_PROCESSES,
+                backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+            ),
         )
     assert raised.value.diagnostic.code == "profiler_incompatible"
     assert "--profiler" in str(raised.value)
@@ -133,7 +144,15 @@ def test_collection_in_repository_fails_before_session_start(
 
     with pytest.raises(ConfigurationError, match="--runs-dir") as raised:
         create_session(
-            request, sink=record, settings=LaunchSettings(backend_factory=host_container_backend)
+            request,
+            sink=record,
+            settings=LaunchSettings(
+                timing=production_timing(),
+                processes=REAL_PROCESSES,
+                backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+            ),
         )
     assert raised.value.diagnostic.code == "invalid_runs_dir"
     assert str(containing) in str(raised.value)

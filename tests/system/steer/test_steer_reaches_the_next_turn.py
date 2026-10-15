@@ -48,7 +48,8 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import FakeRunControlEventSink
-from vs_sim.api.testing import clock_from
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock, clock_from
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -105,7 +106,11 @@ def _agents(sent: Sent) -> Callable[[Path], SessionHost]:
             sent.record(request)
             writer(request)
 
-        client = AgentClient(FakeProvider(answer=writer.answer, on_turn=on_turn))
+        client = AgentClient(
+            FakeProvider(answer=writer.answer, on_turn=on_turn, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
+        )
         resolver = MessageResolver(
             root,
             TemplateRenderer(root),
@@ -140,7 +145,7 @@ async def test_a_steer_queued_before_the_turn_reaches_it_once_and_is_recorded(
 ) -> None:
     sent = Sent()
     sink = FakeRunControlEventSink()
-    channel = RuntimeRunControlChannel(sink)
+    channel = RuntimeRunControlChannel(sink, threads=OsThreads())
     channel.queue_steer(STEER)
     with open_skeleton_world(tmp_path, agents=_agents(sent)) as world:
         core = await _run(world, channel)
@@ -161,7 +166,7 @@ async def test_a_steer_queued_before_the_turn_reaches_it_once_and_is_recorded(
 
 async def test_a_run_with_no_steer_sends_the_turn_no_operator_input(tmp_path: Path) -> None:
     sent = Sent()
-    channel = RuntimeRunControlChannel(FakeRunControlEventSink())
+    channel = RuntimeRunControlChannel(FakeRunControlEventSink(), threads=OsThreads())
     with open_skeleton_world(tmp_path, agents=_agents(sent)) as world:
         core = await _run(world, channel)
 
@@ -172,7 +177,7 @@ async def test_a_run_with_no_steer_sends_the_turn_no_operator_input(tmp_path: Pa
 
 def test_a_steer_control_core_holds_without_its_input_gets_the_input_exactly_once() -> None:
     """A crash between the control and its input is repaired by the next poll, never doubled."""
-    channel = RuntimeRunControlChannel(FakeRunControlEventSink())
+    channel = RuntimeRunControlChannel(FakeRunControlEventSink(), threads=OsThreads())
     bridge = RunControlBridge(channel, _NoStore())
     ref = ArtifactRef(artifact_id=ArtifactId(root="steer-control-1"), digest="d" * 64)
     control = ControlInput(control_id=ControlId(root="control-1"), action="steer", artifact=ref)

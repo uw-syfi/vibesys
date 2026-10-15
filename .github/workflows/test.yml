@@ -125,6 +125,11 @@ jobs:
       - name: Check doc code citations
         run: python3 -m scripts.check_doc_citations
 
+      # Here as well as in python_quality: `.repoctl/components.toml` ignores `.agents/`,
+      # so a skills-only change selects no Python job. Stdlib only, about a second.
+      - name: Check agent skills
+        run: python3 -m scripts.check_skills
+
   # One environment setup for the Python quality group. repoctl prints each
   # command before running it and names the failing command in its error.
   python-checks:

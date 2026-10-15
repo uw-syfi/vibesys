@@ -20,5 +20,12 @@ export type {
   TransportHooks,
   WebChatOptions,
 } from './ports.js';
-export {createRunStore, type RunAction, type RunStore, runStep} from './run.js';
+export {
+  createRunStore,
+  type IterationPublicationOutcome,
+  type IterationRunMismatch,
+  type RunAction,
+  type RunStore,
+  runStep,
+} from './run.js';
 export {WebSession, type WebSessionOptions} from './web-session.js';

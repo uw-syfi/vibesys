@@ -23,7 +23,6 @@ from vs_runtime._core_requests import (
 )
 
 if TYPE_CHECKING:
-    from vs_project.api import StateStore
     from vs_runtime._core_record import Publication, PublicationContext
 
 
@@ -92,8 +91,7 @@ class FakeRequestExecution:
 class FakePublicationDelivery:
     """In-memory durable publication ledger with exact stable-ID conflict checks."""
 
-    def __init__(self, store: StateStore) -> None:
-        self._store = store
+    def __init__(self) -> None:
         self._publications: tuple[Publication, ...] = ()
 
     def read(self) -> tuple[Publication, ...]:
@@ -108,7 +106,7 @@ class FakePublicationDelivery:
         def append() -> None:
             self._publications = append_publication(self._publications, publication)
 
-        if not self._store.mutate_if_fenced(context.fence, context.now_at, append):
+        if not context.lease.write_if_held(append):
             raise ContractError(("fence",), "publication host no longer owns the run")
         return PublicationAcknowledgement(
             publication_id=publication.publication_id, sequence=publication.sequence

@@ -8,7 +8,6 @@ import binascii
 import contextlib
 import math
 import shlex
-import threading
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -27,6 +26,7 @@ from pydantic import (
 )
 
 from vs_core.api import EvidenceKind
+from vs_decode.api import Unreadable, decode_json
 from vs_evaluator_protocol.api import (
     ErrorRecord,
     Hello,
@@ -50,6 +50,8 @@ from vs_sandbox.api import CommandResult
 
 # Parses untrusted JSON with nesting bounded, failing as a ValueError.
 _JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_BENCHMARK_RESULT_BYTES = 16 * 1024 * 1024
+"""The largest benchmark result block read out of evaluator output."""
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -58,6 +60,7 @@ if TYPE_CHECKING:
     from vs_project.api import GitTracker
     from vs_runtime.api.infrastructure import ModelRequestReconciler
     from vs_sandbox.api import CommandRunner
+    from vs_sim.api import BlockingRunner, Event, Threads
 
 _BENCHMARK_OUTPUT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-837218 [S108]; remote sandbox bridges allowlist this fixed transport path and every nonce is removed after use.
 _BENCHMARK_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -357,15 +360,22 @@ async def _drain(task: asyncio.Task[object]) -> None:
 class RuntimeTrustedEvaluation:
     """Concrete trusted evaluation owner for one workspace and sandbox."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-260143 [PLR0913]; the plan, the workspace it owns, and the threads and runner its cancellable worker uses.
+        # > A parameter object for workspace, sandbox and Git would have one user and only
+        # > rename arguments; bundling threads and blocking would be a second ``Platform``,
+        # > which only entrypoints and the server runtime take.
         self,
         plan: TrustedEvaluationPlan,
         workspace: Path,
         sandbox: CommandRunner,
         git: GitTracker,
         model_requests: ModelRequestReconciler | None,
+        threads: Threads,
+        blocking: BlockingRunner,
     ) -> None:
         self._plan = plan
+        self._threads = threads
+        self._blocking = blocking
         self._workspace = workspace
         self._sandbox = sandbox
         self._git = git
@@ -391,7 +401,7 @@ class RuntimeTrustedEvaluation:
 
     async def _run_sync[Result](
         self,
-        operation: Callable[[threading.Event], Result],
+        operation: Callable[[Event], Result],
     ) -> Result:
         """Run *operation* in a worker; cancelling the caller stops its command.
 
@@ -399,8 +409,8 @@ class RuntimeTrustedEvaluation:
         (and, on Slurm, cancels its job); the worker is drained before the
         cancellation propagates, so no command outlives this call.
         """
-        cancel = threading.Event()
-        task = asyncio.create_task(asyncio.to_thread(operation, cancel))
+        cancel = self._threads.event()
+        task = asyncio.create_task(self._blocking.run(operation, cancel))
         try:
             return await asyncio.shield(task)
         except asyncio.CancelledError as cancelled:
@@ -419,9 +429,7 @@ class RuntimeTrustedEvaluation:
             return (), f"Model-weight request could not be satisfied: {error}"
         return volumes, None
 
-    def _accuracy(
-        self, command_override: str | None, cancel: threading.Event
-    ) -> TrustedAccuracyResult:
+    def _accuracy(self, command_override: str | None, cancel: Event) -> TrustedAccuracyResult:
         command = self._plan.accuracy_command
         volumes, failure = self._provision()
         if failure is not None:
@@ -489,7 +497,7 @@ class RuntimeTrustedEvaluation:
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
-        cancel: threading.Event,
+        cancel: Event,
     ) -> TrustedBenchmarkResult:
         contract = self._plan.benchmark_contract
         command = self._plan.benchmark_command
@@ -594,7 +602,7 @@ class RuntimeTrustedEvaluation:
         *,
         timeout: int | None,
         label: str,
-        cancel: threading.Event,
+        cancel: Event,
     ) -> tuple[CommandResult, str | None]:
         try:
             result = self._sandbox.execute(command, timeout=timeout, cancel=cancel)
@@ -830,9 +838,11 @@ def _decode_benchmark_failure(
 
 
 def _parse_scalar(encoded: str, metric: str) -> float:
-    # Evaluator output: pydantic's parser bounds nesting as a ValueError, where
-    # ``json.loads`` raises RecursionError past the callers' handlers.
-    payload = _JSON.validate_json(encoded.strip())
+    payload = decode_json(
+        encoded.strip(), _JSON, source="benchmark result", max_bytes=_MAX_BENCHMARK_RESULT_BYTES
+    )
+    if isinstance(payload, Unreadable):
+        raise _BenchmarkResultError(str(payload))
     values = (
         [payload[metric]]
         if isinstance(payload, dict) and metric in payload
@@ -863,13 +873,22 @@ def _metric_values(value: object, metric: str) -> list[object]:
     return []
 
 
-def create_trusted_evaluation_executor(
+def create_trusted_evaluation_executor(  # noqa: PLR0913  # lint-waiver: LW-260144 [PLR0913]; mirrors the executor's constructor, whose waiver LW-260143 explains the arguments.
+    # > A parameter object would have this one factory as its only user and only rename
+    # > the constructor's arguments.
     plan: TrustedEvaluationPlan,
     *,
     workspace: Path,
     sandbox: CommandRunner,
     git: GitTracker,
     model_requests: ModelRequestReconciler | None = None,
+    threads: Threads,
+    blocking: BlockingRunner,
 ) -> TrustedEvaluationExecutor:
-    """Bind trusted evaluation mechanism to one owned workspace."""
-    return RuntimeTrustedEvaluation(plan, workspace, sandbox, git, model_requests)
+    """Bind trusted evaluation mechanism to one owned workspace.
+
+    Each operation runs on ``blocking``; ``threads`` makes the event that cancels it.
+    """
+    return RuntimeTrustedEvaluation(
+        plan, workspace, sandbox, git, model_requests, threads, blocking
+    )

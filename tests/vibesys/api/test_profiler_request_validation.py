@@ -9,8 +9,10 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, create_session
 from vibesys.api import (
     AgentOutputChunkData,
@@ -29,6 +31,7 @@ from vibesys.api.request import RunEnvironmentSpec, load_task
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -175,13 +178,27 @@ def test_profile_workload_requirement_precedes_provisioning(
             create_session(
                 request,
                 sink=record,
-                settings=LaunchSettings(backend_factory=host_container_backend),
+                settings=LaunchSettings(
+                    timing=production_timing(),
+                    processes=REAL_PROCESSES,
+                    backend_factory=host_container_backend,
+                    blocking=ThreadBlockingRunner(),
+                    network=UnixNetwork(),
+                ),
             )
         assert error.value.diagnostic.code == "profile_workload_invalid"
         assert error.value.diagnostic.stage == "profiler_validation"
     else:
         session = create_session(
-            request, sink=record, settings=LaunchSettings(backend_factory=host_container_backend)
+            request,
+            sink=record,
+            settings=LaunchSettings(
+                timing=production_timing(),
+                processes=REAL_PROCESSES,
+                backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+            ),
         )
         session.close()
     assert events == []
@@ -207,7 +224,15 @@ def test_incompatible_profiler_is_a_typed_early_configuration_failure(
 
     with pytest.raises(ConfigurationError, match="--profiler") as error:
         create_session(
-            request, sink=discard, settings=LaunchSettings(backend_factory=host_container_backend)
+            request,
+            sink=discard,
+            settings=LaunchSettings(
+                timing=production_timing(),
+                processes=REAL_PROCESSES,
+                backend_factory=host_container_backend,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+            ),
         )
     assert error.value.diagnostic.code == "profiler_incompatible"
     assert error.value.diagnostic.stage == "profiler_validation"
@@ -231,6 +256,10 @@ def test_auto_native_preflight_failure_records_none_without_profiler_support(
         request,
         sink=record,
         settings=LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=_profiler_registry(),
             backend_factory=backend,
             git_repository=git.repository,
@@ -282,6 +311,10 @@ def test_auto_native_preflight_failure_through_default_launch_wiring(
         request,
         sink=discard,
         settings=LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=_profiler_registry(),
             backend_factory=_RecordingBackendFactory(),
             git_repository=FakeGitRepositories().repository,
@@ -310,6 +343,10 @@ def test_explicit_native_preflight_failure_precedes_backend_and_project_effects(
         request,
         sink=record,
         settings=LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=_profiler_registry(),
             backend_factory=backend,
             profiler_preflight=preflight,

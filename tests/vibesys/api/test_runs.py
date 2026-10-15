@@ -10,9 +10,11 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 from tests.support.core_plugins import capability_plugin, failing_plugin
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 
+from entrypoints.production import production_timing
 from entrypoints.run import supervise
 from launch import LaunchSettings, default_runs
 from vibesys.api import (
@@ -32,6 +34,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, ProjectStateError, validate_run_id
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -63,7 +66,9 @@ def request_template(tmp_path: Path) -> RunRequest:
 
 
 def _fake_agent(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 @pytest.mark.asyncio
@@ -72,6 +77,10 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     registry.register_plugin(failing_plugin("identity-test"))
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_fake_agent,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
@@ -165,6 +174,10 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     )
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_fake_agent,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
@@ -172,7 +185,7 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     )
     handle = runs.start(request_template)
     handle.stop()
-    result = await supervise(handle, handle_signals=False)
+    result = await supervise(handle, signals=None)
     assert result.status is ProductRunStatus.STOPPED
     assert not result.succeeded
     events = [event async for event in handle.events()]

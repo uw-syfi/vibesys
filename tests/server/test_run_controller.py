@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from tests.server.support import (
     DEADLOCK_GUARD_S,
+    REQUEST_TIME,
     ServerParts,
     build_server_parts,
     run_at_paused_boundary,
@@ -99,9 +100,9 @@ def test_steering_queued_while_paused_survives_resume_for_core_to_take(tmp_path:
 def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
-    pause = parts.api.execute(PauseCommand())
-    resume = parts.api.execute(ResumeCommand())
-    steer = parts.api.execute(SteerCommand(text="prioritize latency"))
+    pause = parts.api.execute(PauseCommand(timestamp=REQUEST_TIME))
+    resume = parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME))
+    steer = parts.api.execute(SteerCommand(timestamp=REQUEST_TIME, text="prioritize latency"))
 
     assert pause.ack is not None
     assert resume.ack is not None
@@ -115,10 +116,10 @@ def test_api_control_commands_ack_and_reach_controller(tmp_path: Path) -> None:
 def test_a_resume_command_can_ask_for_the_fallback_and_a_plain_one_cannot(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
 
-    parts.api.execute(ResumeCommand())
+    parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME))
     assert parts.control.consume_fallback_request() is False
 
-    ack = parts.api.execute(ResumeCommand(fallback=True)).ack
+    ack = parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, fallback=True)).ack
 
     assert ack is not None
     assert (ack.action, ack.status) == ("resume", "consumed")
@@ -151,7 +152,7 @@ def test_pause_is_pending_until_the_invocation_boundary(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")
 
-    parts.api.execute(PauseCommand())
+    parts.api.execute(PauseCommand(timestamp=REQUEST_TIME))
 
     assert parts.api.snapshot().status is RunStatus.PAUSING
     parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
@@ -238,7 +239,7 @@ def test_stop_is_pending_until_the_invocation_boundary(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     execution = parts.start_execution("implementer", "round 1", "work")
 
-    stop = parts.api.execute(StopCommand())
+    stop = parts.api.execute(StopCommand(timestamp=REQUEST_TIME))
 
     assert stop.ack is not None
     assert (stop.ack.action, stop.ack.status) == ("stop", "pending")

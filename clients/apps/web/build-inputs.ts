@@ -11,6 +11,7 @@ export const WEB_BUNDLE_PACKAGES = [
   'features/campaign',
   'features/conversation',
   'features/run-view',
+  'features/web-theme',
   'libs/hosts',
   'libs/ipc',
   'libs/machine',

@@ -7,6 +7,7 @@ import os
 import sys
 import threading
 from collections import deque
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -28,6 +29,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
 from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api import OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
@@ -66,6 +68,8 @@ def _executor(
         sandbox=sandbox,
         git=cast("GitTracker", git or _Git()),
         model_requests=model_requests,
+        threads=OsThreads(),
+        blocking=ThreadBlockingRunner(),
     )
 
 
@@ -226,7 +230,10 @@ def _bulky_executor(
     script = tmp_path / "bench.py"
     script.write_text(_BULKY_BENCHMARK, encoding="utf-8")
     sandbox = LocalShellRunner(
-        tmp_path, env={"PATH": os.environ["PATH"]}, max_output_chars=max_output_chars
+        tmp_path,
+        env={"PATH": os.environ["PATH"]},
+        max_output_chars=max_output_chars,
+        threads=OsThreads(),
     )
     return _executor(
         tmp_path,
@@ -458,7 +465,7 @@ def test_benchmark_execution_error_is_typed_and_cleanup_failure_is_suppressed(
 
 def test_model_request_failure_prevents_trusted_command(tmp_path: Path) -> None:
     project = Project.open(tmp_path)
-    project.state.create_project("trusted evaluation")
+    project.state.create_project("trusted evaluation", now=datetime(2026, 1, 1, tzinfo=UTC))
     project.configuration_root().resolve("models.json", must_exist=False).write_text(
         '[{"id":"blocked/model"}]'
     )

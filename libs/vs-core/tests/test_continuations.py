@@ -276,6 +276,7 @@ def fixture(
             plan=plan,
             status=core.ObservationStatus.SUCCEEDED if settled else core.ObservationStatus.PENDING,
             terminal=settled,
+            wait=None if settled else core.WaitOn(timer=0.0),
             observation=observation(
                 scope,
                 core.RequestId(root=f"submission-{index}"),
@@ -297,6 +298,7 @@ def fixture(
             resource_id=job.resource_id,
             status=job.status,
             terminal=job.terminal,
+            wait=job.wait,
             observation=job.observation,
         )
         for index, job in enumerate(jobs)
@@ -322,6 +324,7 @@ def fixture(
         phase=core.RequestPhase.COMPLETED,
         observation=record.observation,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     state = state.model_copy(
         update={
@@ -402,6 +405,7 @@ def test_wait_all_reordering_duplicate_and_stale_notifications_authorize_once(
             update={
                 "status": core.ObservationStatus.SUCCEEDED,
                 "terminal": True,
+                "wait": None,
                 "observation": job.observation.model_copy(
                     update={
                         "status": core.ObservationStatus.SUCCEEDED,
@@ -599,6 +603,7 @@ def test_retirement_records_exact_park_authority_without_resume(
             lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
             phase=core.RequestPhase.PREPARED,
             until=core.Until(at=100.0),
+            addressed_by=(),
         )
         state = state.model_copy(
             update={
@@ -673,6 +678,7 @@ def reopened_fixture() -> tuple[core.CoreState, core.Continuation, core.Continua
             "outcome_schema": request.operation.schema_ref.outcome_schema,
             "outcome_json": codec.encode_outcome(request.operation.schema_ref, outcome),
             "until": core.Until(at=100.0),
+            "addressed_by": (),
         },
         context={"operation_registry": codec},
     )
@@ -1337,6 +1343,7 @@ def test_only_conclusive_terminal_dependencies_complete_wait_all(
         update={
             "status": status,
             "terminal": terminal,
+            "wait": None if terminal else job.wait or core.WaitOn(timer=0.0),
             "observation": job.observation.model_copy(
                 update={"status": status, "terminal": terminal}
             ),
@@ -1410,6 +1417,7 @@ def test_unknown_job_always_requests_inspection_for_all_optional_progress_fields
         update={
             "status": core.ObservationStatus.UNKNOWN,
             "terminal": terminal,
+            "wait": None if terminal else job.wait,
             "observation": job.observation.model_copy(
                 update={"status": core.ObservationStatus.UNKNOWN, "terminal": terminal}
             ),
@@ -1468,6 +1476,7 @@ def parked_fixture() -> tuple[core.CoreState, core.ContinuationReopenRequested]:
         phase=core.RequestPhase.COMPLETED,
         observation=close_proof,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     continuation = continuation.model_copy(
         update={
@@ -1527,6 +1536,7 @@ def test_scope_close_and_timeout_never_substitute_for_dependency_release(
             "status": status,
             "terminal": terminal,
             "released": released,
+            "wait": None if terminal else core.WaitOn(timer=0.0),
             "observation": job.observation.model_copy(
                 update={"status": status, "terminal": terminal, "released": released}
             ),
@@ -1554,6 +1564,7 @@ def test_scope_close_and_timeout_never_substitute_for_dependency_release(
                 resource_id=row.resource_id,
                 status=row.status,
                 terminal=row.terminal,
+                wait=row.wait,
                 released=row.released,
                 observation=row.observation,
             )

@@ -200,3 +200,19 @@ def test_failures_and_exit_statuses_agree_with_bash(tmp_path: Path, command: str
 def test_other_commands_are_left_to_bash_without_side_effects(tmp_path: Path, command: str) -> None:
     assert run(command.format(r=tmp_path)) is None
     assert list(tmp_path.iterdir()) == []
+
+
+def test_evidence_past_the_size_cap_is_invalid_without_being_parsed(tmp_path: Path) -> None:
+    padding = " " * (16 * 1024 * 1024)
+    oversized = (
+        f'{{"intent": null,{padding}"accepted": null, "rejected": null, "cancelled": false}}'
+    )
+    config = SlurmConfig(
+        name="fake",
+        remote_workspace_root=str(tmp_path),
+        transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
+    )
+    operations = RemoteOperations(_Transport(lambda _command: (0, oversized, "")), config, None)
+
+    with pytest.raises(RemoteOperationError):
+        operations.inspect("op-1")

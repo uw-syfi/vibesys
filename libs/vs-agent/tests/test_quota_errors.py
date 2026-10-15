@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 
 import agentshim
 import pytest
-from agentshim.testing import FakeExecutor, FakeRun, scripted_failure, scripted_turn
+from agentshim.testing import FakeClock, FakeExecutor, FakeRun, scripted_failure, scripted_turn
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -22,6 +22,7 @@ from vs_agent.api import AgentClient, AgentQuotaError, QuotaCondition
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
+from vs_sim.api.testing import ManualClock, SimThreads
 
 PROVIDERS = ("claude", "codex")
 _NOT_QUOTA = (agentshim.FailureKind.AUTH, agentshim.FailureKind.OTHER)
@@ -45,9 +46,13 @@ def _client(provider: str, runs: list[FakeRun], home: Path) -> AgentClient:
                 SANDBOX_DISABLE_ENV: "off",
             },
             transient_retry_delays=(),
+            clock=FakeClock(),
+            threads=SimThreads(),
         ),
         provider=provider,
         run_log_file=None,
+        clock=ManualClock(),
+        threads=SimThreads(),
     )
 
 

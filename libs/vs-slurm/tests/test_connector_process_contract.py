@@ -1,6 +1,6 @@
 """One process-boundary contract for every transport and the in-process Fake.
 
-The runner reaches a cluster through ``SlurmProcess``. The deterministic tiers
+The runner reaches a cluster through ``vs_sim`` ``Processes``. The deterministic tiers
 inject ``FakeConnector`` so no process is spawned; the real connector is the
 executable ``python -m vs_slurm.fake_connector``, which also stands in for the
 local transport's shell and rsync programs. A caller written against the
@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vs_sim.api import OsProcesses, ProcessSpec
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     SlurmConfig,
@@ -39,6 +40,12 @@ if TYPE_CHECKING:
 _JOB_NAME = re.compile(r"--job-name=\S+")
 
 
+def _unpaused(seconds: float) -> None:
+    """The pause of a wait whose job is terminal at its first poll: it is never called."""
+    message = f"the job was not terminal at its first poll (pause of {seconds} s)"
+    raise AssertionError(message)
+
+
 def _connector_program(state: Path) -> tuple[str, ...]:
     """The executable connector, which answers the connector protocol and the local programs."""
     return (sys.executable, "-m", "vs_slurm.fake_connector", str(state))
@@ -50,6 +57,7 @@ def _real_runner(root: Path, remote: Path) -> SlurmJobRunner:
     command = _connector_program(state)
     return SlurmJobRunner(
         _config(remote, SlurmConnectorTransport(kind="connector", command=command)),
+        processes=OsProcesses(),
         scratch_root=root / "scratch",
         invocation_id=lambda: "contract_01",
         clock=ManualClock(),
@@ -65,6 +73,7 @@ def _local_runner(root: Path, remote: Path) -> SlurmJobRunner:
     )
     return SlurmJobRunner(
         _config(remote, transport),
+        processes=OsProcesses(),
         scratch_root=root / "scratch",
         invocation_id=lambda: "contract_01",
         clock=ManualClock(),
@@ -76,7 +85,7 @@ def _fake_runner(root: Path, remote: Path) -> SlurmJobRunner:
     connector = FakeConnector(root / "cluster")
     return SlurmJobRunner(
         _config(remote, SlurmConnectorTransport(kind="connector", command=("fake-connector",))),
-        process=connector,
+        processes=connector,
         scratch_root=root / "scratch",
         invocation_id=lambda: "contract_01",
         clock=ManualClock(),
@@ -96,7 +105,7 @@ def _observe(
     workspace.mkdir()
     (root / "scratch").mkdir()
     result = make(root, remote).run(
-        SlurmJobRequest(workspace=workspace, command=("sh", "-c", script))
+        SlurmJobRequest(workspace=workspace, command=("sh", "-c", script)), pause=_unpaused
     )
     commands = [
         # The scheduler job name embeds a digest of the (per-side) workspace path.
@@ -164,8 +173,12 @@ def test_an_interceptor_answers_or_forwards_every_request_and_none_restores_the_
         return refusal if str(request["command"]).startswith("refuse") else answer(request)
 
     connector.intercept(intercept)
-    refused = connector(["x"], stdin=_exec_request(f"refuse {text}"), timeout=1)
-    forwarded = connector(["x"], stdin=_exec_request(f"echo {text}"), timeout=1)
+    refused = connector.run(
+        ProcessSpec(("x",), input=_exec_request(f"refuse {text}").encode()), timeout=1
+    )
+    forwarded = connector.run(
+        ProcessSpec(("x",), input=_exec_request(f"echo {text}").encode()), timeout=1
+    )
 
     assert json.loads(refused.stdout) == refusal
     assert json.loads(forwarded.stdout)["stdout"] == f"{text}\n"
@@ -173,5 +186,5 @@ def test_an_interceptor_answers_or_forwards_every_request_and_none_restores_the_
     # The refused request never reached the cluster; the forwarded one did.
     assert recorded_commands(connector.state) == [f"echo {text}"]
     connector.intercept(None)
-    connector(["x"], stdin=_exec_request(f"echo {text}"), timeout=1)
+    connector.run(ProcessSpec(("x",), input=_exec_request(f"echo {text}").encode()), timeout=1)
     assert seen == [f"refuse {text}", f"echo {text}"]

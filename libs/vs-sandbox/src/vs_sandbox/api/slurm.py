@@ -28,7 +28,7 @@ from vs_sandbox.host_command_client import TOKEN_ENV as COMMAND_BROKER_TOKEN_ENV
 from vs_sandbox.job_confinement import HostJobConfinement, JobConfinement
 from vs_sandbox.read_only_links import ReadOnlyPathLinkError, check_read_only_links
 from vs_sandbox.slurm_broker import SlurmProcessBroker, SlurmProcessBrokerError
-from vs_sandbox.slurm_broker_client import BrokerReplyError, run_brokered_process
+from vs_sandbox.slurm_broker_client import BrokeredProcesses, BrokerReplyError
 from vs_sandbox.slurm_capture_plan import (
     SlurmCapturePlan,
     SlurmCapturePlanError,
@@ -61,6 +61,7 @@ from vs_sandbox.slurm_policy import (
 from vs_sandbox.slurm_profile import (
     GPU_ACTIVE_FRACTION_METRIC,
     HIP_API_TIME_METRIC_PREFIX,
+    PROFILE_END,
     PROFILE_OUTPUT_ROOT,
     PROFILE_STATS_PREFIX,
     HipApiTime,
@@ -72,7 +73,7 @@ from vs_sandbox.slurm_profile import (
     split_profile_stats,
     trusted_profile_command,
 )
-from vs_sandbox.slurm_settings_toml import render_slurm_operator_toml
+from vs_sandbox.slurm_settings_toml import render_slurm_operator_toml, write_slurm_operator_toml
 
 #: The single-file, standard-library-only client an agent's container runs.
 HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
@@ -83,6 +84,7 @@ __all__ = [
     "GPU_ACTIVE_FRACTION_METRIC",
     "HIP_API_TIME_METRIC_PREFIX",
     "HOST_COMMAND_CLIENT",
+    "PROFILE_END",
     "PROFILE_OUTPUT_ROOT",
     "PROFILE_STATS_PREFIX",
     "AgentGpuConfig",
@@ -90,6 +92,7 @@ __all__ = [
     "AgentGpuRequestError",
     "BrokerReplyError",
     "BrokerTransport",
+    "BrokeredProcesses",
     "GpuCommand",
     "GpuCommands",
     "GpuJobRequest",
@@ -129,9 +132,9 @@ __all__ = [
     "read_slurm_capture_plan",
     "render_slurm_operator_toml",
     "require_profile_fields",
-    "run_brokered_process",
     "split_profile_stats",
     "translate_slurm_gpu",
     "trusted_profile_command",
     "write_slurm_capture_plan",
+    "write_slurm_operator_toml",
 ]

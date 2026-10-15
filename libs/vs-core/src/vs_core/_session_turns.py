@@ -28,6 +28,12 @@ from ._session_admission import (
     _registered_request,
 )
 from ._session_checkpoints import turn_source_matches as _turn_proof
+from ._session_rows import awaiting as _awaiting
+from ._session_rows import awaiting_checkpoint as _awaiting_checkpoint
+from ._session_rows import invocation_row as _invocation
+from ._session_rows import replace_invocation as _replace_invocation
+from ._session_rows import replace_session as _replace_session
+from ._session_rows import session_row as _session
 from ._session_scope import (
     attempt_for,
     inspect_turn,
@@ -45,13 +51,9 @@ from ._session_state import (
     _ensure,
     _episode,
     _inspect_session,
-    _invocation,
     _reconciling,
     _record,
-    _replace_invocation,
-    _replace_session,
     _run_reusable,
-    _session,
     _session_id,
     _setup,
 )
@@ -116,6 +118,7 @@ from .types.sessions import (
     TurnInputsReserved,
     TurnObserved,
     TurnRequested,
+    session_may_wait,
 )
 from .types.strategy import Accepted, RequestTurn
 
@@ -219,7 +222,9 @@ def _acquire(
                 "admission_id": event.admission_id,
             }
         )
-        session = session.model_copy(update={"pending_records": (request.request_id,)})
+        session = _awaiting(
+            session.model_copy(update={"pending_records": (request.request_id,)}), context, request
+        )
         state = _replace_session(state, session)
         requests.append(_setup(context, request))
     state = state.model_copy(update={"acquisition_groups": (*state.acquisition_groups, group)})
@@ -294,11 +299,15 @@ def _group_observed(
         if group.failure_request is None:
             raise ContractValidationError("failure_request", "failed group lacks cleanup authority")
         close = _close(session, context, group.failure_request)
-        session = session.model_copy(
-            update={
-                "phase": SessionPhase.CLOSING,
-                "pending_records": (*session.pending_records, close.request_id),
-            }
+        session = _awaiting(
+            session.model_copy(
+                update={
+                    "phase": SessionPhase.CLOSING,
+                    "pending_records": (*session.pending_records, close.request_id),
+                }
+            ),
+            context,
+            close,
         )
         return AreaChange(
             state=_replace_session(state, session), requests=(_cleanup(context, close),)
@@ -329,11 +338,15 @@ def _group_observed(
                 continue
             if member.resource_id is not None and not _run_reusable(member, context):
                 request = _close(member, context, observation.request_id)
-                member = member.model_copy(
-                    update={
-                        "phase": SessionPhase.CLOSING,
-                        "pending_records": (*member.pending_records, request.request_id),
-                    }
+                member = _awaiting(
+                    member.model_copy(
+                        update={
+                            "phase": SessionPhase.CLOSING,
+                            "pending_records": (*member.pending_records, request.request_id),
+                        }
+                    ),
+                    context,
+                    request,
                 )
                 state = _replace_session(state, member)
                 requests.append(_cleanup(context, request))
@@ -404,11 +417,10 @@ def _close_observed(
             else _never_acquired(context, session)
         )
     ):
+        inspection = _inspect_session(session, context, observation.request_id)
         return AreaChange(
-            state=state,
-            requests=(
-                _cleanup(context, _inspect_session(session, context, observation.request_id)),
-            ),
+            state=_replace_session(state, _awaiting(session, context, inspection)),
+            requests=(_cleanup(context, inspection),),
         )
     session = session.model_copy(
         update={
@@ -572,11 +584,15 @@ def _after_ensure(
                 update={"state": _replace_invocation(grouped.state, abandoned)}
             )
         request = _close(session, context, closure.value.authority)
-        closing = session.model_copy(
-            update={
-                "phase": SessionPhase.CLOSING,
-                "pending_records": (*session.pending_records, request.request_id),
-            }
+        closing = _awaiting(
+            session.model_copy(
+                update={
+                    "phase": SessionPhase.CLOSING,
+                    "pending_records": (*session.pending_records, request.request_id),
+                }
+            ),
+            context,
+            request,
         )
         signals = () if invocation is None else _prepared_completion(context, invocation)
         return AreaChange(
@@ -597,11 +613,15 @@ def _closing(
 ) -> AreaChange[SessionsState]:
     """*change* plus the close of *session*, which then waits for it."""
     request = _close(session, context, authority)
-    closing = session.model_copy(
-        update={
-            "phase": SessionPhase.CLOSING,
-            "pending_records": (*session.pending_records, request.request_id),
-        }
+    closing = _awaiting(
+        session.model_copy(
+            update={
+                "phase": SessionPhase.CLOSING,
+                "pending_records": (*session.pending_records, request.request_id),
+            }
+        ),
+        context,
+        request,
     )
     return change.model_copy(
         update={
@@ -646,11 +666,10 @@ def _ensure_observed(
         session = session.model_copy(
             update={"phase": SessionPhase.UNKNOWN, "acceptance_sequence": observation.sequence}
         )
+        inspection = _inspect_session(session, context, observation.request_id)
         return AreaChange(
-            state=_replace_session(state, session),
-            requests=(
-                _cleanup(context, _inspect_session(session, context, observation.request_id)),
-            ),
+            state=_replace_session(state, _awaiting(session, context, inspection)),
+            requests=(_cleanup(context, inspection),),
         )
     if observation.accepted:
         if (
@@ -683,12 +702,14 @@ def _ensure_observed(
     )
     change = _after_ensure(_replace_session(state, session), context, session, event)
     if phase == SessionPhase.UNKNOWN:
+        inspection = _inspect_session(session, context, observation.request_id)
+        unknown = _session(change.state, session.spec.session_id)
         change = change.model_copy(
             update={
-                "requests": (
-                    *change.requests,
-                    _inspect_session(session, context, observation.request_id),
-                )
+                "state": change.state
+                if unknown is None or unknown.phase != SessionPhase.UNKNOWN
+                else _replace_session(change.state, _awaiting(unknown, context, inspection)),
+                "requests": (*change.requests, inspection),
             }
         )
     return change
@@ -838,11 +859,15 @@ def _after_turn_cleanup(
     request = _close(session, context, owner.closure.authority)
     if request.request_id in session.pending_records:
         return AreaChange(state=state)
-    closing = session.model_copy(
-        update={
-            "phase": SessionPhase.CLOSING,
-            "pending_records": (*session.pending_records, request.request_id),
-        }
+    closing = _awaiting(
+        session.model_copy(
+            update={
+                "phase": SessionPhase.CLOSING,
+                "pending_records": (*session.pending_records, request.request_id),
+            }
+        ),
+        context,
+        request,
     )
     return AreaChange(
         state=_replace_session(state, closing), requests=(_cleanup(context, request),)
@@ -912,13 +937,12 @@ def _late_turn_observed(
             ),
         }
     )
+    inspection = inspect_turn(context, invocation) if acceptance_unresolved(invocation) else None
+    if inspection is not None and session.phase == SessionPhase.UNKNOWN:
+        session = _awaiting(session, context, inspection)
     state = _replace_session(state, session)
     cleanup = _after_turn_cleanup(state, context, invocation, session)
-    requests = (
-        (_reconciling(context, inspect_turn(context, invocation)),)
-        if acceptance_unresolved(invocation)
-        else ()
-    )
+    requests = () if inspection is None else (_reconciling(context, inspection),)
     return cleanup.model_copy(
         update={
             "signals": (*signals, *cleanup.signals),
@@ -982,7 +1006,7 @@ def _turn_observed(
         return AreaChange(state=state)
     previous = invocation.observation
     if _unresolved_after_inspection(context, invocation, event):
-        return _release_unknown(state, context, event)
+        return _release_lost_turn(state, context, event.invocation)
     event, inspected = _correlated_turn_observation(context, invocation, event)
     if is_terminal(invocation):
         return _late_turn_observed(state, context, invocation, event, inspected=inspected)
@@ -1006,20 +1030,19 @@ def _unresolved_after_inspection(
     )
 
 
-def _release_unknown(
-    state: SessionsState, context: SessionsContext, event: TurnObserved
+def _release_lost_turn(
+    state: SessionsState, context: SessionsContext, ref: InvocationRef
 ) -> AreaChange[SessionsState]:
     """Cancel a turn whose acceptance the executor's own inspection could not settle.
 
-    The cancellation releases the executor's record of the unfinished dispatch, so a
-    successor turn can continue the conversation; its result ends this turn as lost.
+    The inspection either answered unknown or ended without an answer. The cancellation
+    releases the executor's record of the unfinished dispatch, so a successor turn can
+    continue the conversation; its result ends this turn as lost.
     """
     return _cancel(
         state,
         context,
-        InvocationCancellationRequested(
-            invocation=event.invocation, authority=lost_turn_authority(event.invocation)
-        ),
+        InvocationCancellationRequested(invocation=ref, authority=lost_turn_authority(ref)),
     )
 
 
@@ -1069,11 +1092,24 @@ def _apply_turn_observation(
             ),
         }
     )
-    state = _replace_session(state, session)
     signals = acceptance_signals(invocation, event, observation)
     requests: tuple[Outbound, ...] = ()
+    inspection: InspectTurn | None = None
     if phase == SessionPhase.UNKNOWN or acceptance_unresolved(invocation):
-        requests = (_reconciling(context, inspect_turn(context, invocation)),)
+        inspection = inspect_turn(context, invocation)
+        requests = (_reconciling(context, inspection),)
+    if session_may_wait(session.phase):
+        # A turn still running moves the session only by its own next answer, or by the
+        # inspection sent here.
+        named: tuple[InspectTurn | RequestId, ...] = (observation.request_id,)
+        if inspection is not None:
+            named = (*named, inspection)
+        session = _awaiting(session, context, *named)
+    state = _replace_session(state, session)
+    if inspection is not None:
+        # The inspection settles the acceptance a yield's checkpoint, or an interruption's,
+        # needs before core can request it.
+        state = _awaiting_checkpoint(state, context, event.invocation, inspection)
     if not is_terminal(invocation):
         return AreaChange(state=state, signals=signals, requests=requests)
     signals = (*signals, *_terminal_signals(state, context, invocation, event))
@@ -1142,11 +1178,15 @@ def _cancel(
     )
     if request.request_id in session.pending_records:
         return AreaChange(state=state)
-    session = session.model_copy(
-        update={
-            "phase": SessionPhase.CLOSING,
-            "pending_records": (*session.pending_records, request.request_id),
-        }
+    session = _awaiting(
+        session.model_copy(
+            update={
+                "phase": SessionPhase.CLOSING,
+                "pending_records": (*session.pending_records, request.request_id),
+            }
+        ),
+        context,
+        request,
     )
     return AreaChange(
         state=_replace_session(state, session),
@@ -1166,12 +1206,10 @@ def _drain_acquiring(
         if row.request_id in session.pending_records and isinstance(row.request, EnsureSession)
     )
     if ensures:
+        inspections = tuple(_inspect_session(session, context, row.request_id) for row in ensures)
         return AreaChange(
-            state=state,
-            requests=tuple(
-                _cleanup(context, _inspect_session(session, context, row.request_id))
-                for row in ensures
-            ),
+            state=_replace_session(state, _awaiting(session, context, *inspections)),
+            requests=tuple(_cleanup(context, inspection) for inspection in inspections),
         )
     if invocation is None:
         return AreaChange(state=state)
@@ -1206,21 +1244,23 @@ def _drain_lease(
             for row in context.records.records
             if row.request_id in session.pending_records and isinstance(row.request, EnsureSession)
         )
+        inspections = tuple(_inspect_session(session, context, row.request_id) for row in ensures)
         return AreaChange(
-            state=state,
-            requests=tuple(
-                _cleanup(context, _inspect_session(session, context, row.request_id))
-                for row in ensures
-            ),
+            state=_replace_session(state, _awaiting(session, context, *inspections)),
+            requests=tuple(_cleanup(context, inspection) for inspection in inspections),
         )
     request = _close(session, context, authority)
     if request.request_id in session.pending_records:
         return AreaChange(state=state)
-    closing = session.model_copy(
-        update={
-            "phase": SessionPhase.CLOSING,
-            "pending_records": (*session.pending_records, request.request_id),
-        }
+    closing = _awaiting(
+        session.model_copy(
+            update={
+                "phase": SessionPhase.CLOSING,
+                "pending_records": (*session.pending_records, request.request_id),
+            }
+        ),
+        context,
+        request,
     )
     return AreaChange(
         state=_replace_session(state, closing), requests=(_cleanup(context, request),)

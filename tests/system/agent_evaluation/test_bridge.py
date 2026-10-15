@@ -69,7 +69,14 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.contracts import AgentRole, AgentTool
 from vs_sim.api import MonotonicClock, OsThreads
-from vs_sim.api.testing import SimNetwork, VirtualClock, clock_from, examples, run_virtual
+from vs_sim.api.testing import (
+    ManualClock,
+    SimNetwork,
+    VirtualClock,
+    clock_from,
+    examples,
+    run_virtual,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -184,19 +191,26 @@ async def scenario(
             writer=writer,
         )
         resolvers.append(resolver)
-        client = AgentClient(FakeProvider(answer=writer.answer, on_turn=writer))
+        client = AgentClient(
+            FakeProvider(answer=writer.answer, on_turn=writer, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
+        )
         return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 
     def yields(workspaces: RuntimeWorkspaces, receipts: StateNamespace) -> AgentEvaluationBridge:
         bridge = AgentEvaluationBridge(
             tmp_path / "evaluation.sock",
             POLICY,
-            ScopeWorkspaces(workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts))),
+            ScopeWorkspaces(
+                workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts, threads=OsThreads()))
+            ),
             AgentEvaluationRecords(
-                OwedSubmissions(ReceiptStore(receipts)),
-                ReceiptEvidenceLedger(ReceiptStore(receipts)),
+                OwedSubmissions(ReceiptStore(receipts, threads=OsThreads())),
+                ReceiptEvidenceLedger(ReceiptStore(receipts, threads=OsThreads())),
             ),
             network=writers[0].network,
+            threads=OsThreads(),
         )
         resolvers[0].bridge = bridge
         bridges.append(bridge)

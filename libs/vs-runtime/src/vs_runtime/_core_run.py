@@ -51,7 +51,6 @@ from vs_core.api import (
 )
 from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
-from vs_sim.api import SleepingClock, SystemClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -60,6 +59,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
     from vs_runtime._core_requests import ExecutorRefusal
     from vs_runtime._run_control import RunControlChannel
+    from vs_sim.api import SleepingClock, Threads
 
 
 type ControlAction = Literal["pause", "resume", "stop", "steer"]
@@ -80,21 +80,23 @@ PRODUCTION_LEASE_SECONDS = 60.0
 
 @dataclass(frozen=True)
 class RunTiming:
-    """The time source and lease length one run is composed with."""
+    """The time sources and lease length one run is composed with.
+
+    ``clock`` is the run's epoch timeline for the core loop and its timestamps;
+    ``threads`` is the blocking time (monotonic reads, sleeps, locks) that code on
+    worker threads, such as an agent turn, waits on. A production entrypoint builds
+    both from the real implementations; a simulated run builds them from one simulation.
+    """
 
     clock: SleepingClock
     lease_seconds: float
+    threads: Threads
 
     def __post_init__(self) -> None:
         """Reject a lease that could never be held."""
         if self.lease_seconds <= 0:
             message = "lease_seconds must be positive"
             raise ValueError(message)
-
-    @classmethod
-    def production(cls) -> RunTiming:
-        """Wall time and the production lease."""
-        return cls(SystemClock(), PRODUCTION_LEASE_SECONDS)
 
 
 class NextWake(Protocol):
@@ -397,6 +399,7 @@ class _Loop:
             self._raise_if_lease_lost()
             now = self._read()
             self._renew(now)
+            self._shell.record_renewal()
             self._woken.clear()
             for event in self._due_controls(now):
                 self._shell.submit(event, now_at=now)
@@ -444,15 +447,36 @@ class _Loop:
             raise failure
 
     async def _heartbeat(self) -> None:
-        """Renew the lease every third of its duration until cancelled."""
+        """Renew the lease a third of its duration after the last renewal, and tell core.
+
+        Core learns of a renewal at the next commit, which may come in the middle of a loop
+        iteration that publishes or waits for requests. So the proof of life core holds is at
+        most one renewal interval old, plus the longest stretch without a commit (one
+        publication, or a wait for requests). Queuing the renewal only at the top of the
+        next iteration added every publication of the iteration to that age.
+        """
         while True:
-            await self._clock.sleep(self._config.lease_duration / 3)
-            self._renew(self._read())
+            # Sleep until the next renewal is due, not for a fixed period: the loop also
+            # renews, and a period out of phase with it wakes just short of due, skips,
+            # and leaves up to two intervals between renewals.
+            due = self._renewal_due()
+            await self._clock.sleep(max(due - self._read(), 0.0))
+            if self._renewal_due() == due:
+                # Renew even if float rounding woke this a hair before ``due``; checking
+                # ``now >= due`` again could skip it and sleep for nothing, forever.
+                self._renew_now(self._read())
+            self._shell.record_renewal()
+
+    def _renewal_due(self) -> float:
+        return self._renewed_at + self._config.lease_duration / 3
 
     def _renew(self, now: float) -> None:
-        if now - self._renewed_at >= self._config.lease_duration / 3:
-            self._shell.renew(now_at=now, lease_duration=self._config.lease_duration)
-            self._renewed_at = now
+        if now >= self._renewal_due():
+            self._renew_now(now)
+
+    def _renew_now(self, now: float) -> None:
+        self._shell.renew(now_at=now, lease_duration=self._config.lease_duration)
+        self._renewed_at = now
 
     def _due_controls(self, now: float) -> tuple[CoreEvent, ...]:
         core = self._core()
@@ -506,11 +530,15 @@ class _Loop:
         )
 
     def _signature(self) -> object:
-        """Everything that changes when work happened; time and the revision counter do not."""
+        """Everything that changes when work happened; time, liveness and the revision do not."""
         record = self._shell.record
         core = record.envelope.core
         quiet = core.model_copy(
-            update={"revision": 0, "run": core.run.model_copy(update={"now_at": 0.0})}
+            update={
+                "revision": 0,
+                "run": core.run.model_copy(update={"now_at": 0.0}),
+                "records": core.records.model_copy(update={"hosts": ()}),
+            }
         )
         return (quiet, record.envelope.strategy, record.delivery_cursor, self._shell.dispatched)
 
@@ -528,7 +556,7 @@ class _Loop:
         past_deadline = now >= core.run.deadline_at
         if due is None and not paused and (not recovering or past_deadline):
             raise RunStalledError(_describe(core, self._stall_notes()))
-        wake = [self._renewed_at + self._config.lease_duration / 3]
+        wake = [self._renewal_due()]
         if due is not None:
             wake.append(due)
         if recovering and due is None:
@@ -544,30 +572,29 @@ class _Loop:
 
         That is a request finishing, an operator stop, the time core asked for next (a
         job poll, or a wake the strategy requested), the next control poll (pause and
-        steer are read there) or the run deadline. A turn can run for many minutes, so
-        these are timers of the wait itself; the heartbeat renews the lease. With none
-        due the loop does not sleep at all.
+        steer are read there), the run deadline, or the next lease renewal, which the next
+        iteration records in core. A turn can run for many minutes, so these are timers of
+        the wait itself; the heartbeat renews the lease.
         """
         now = self._read()
-        wake = [due] if due is not None and due > now else []
+        wake = [self._renewal_due()]
+        if due is not None and due > now:
+            wake.append(due)
         if self._controls is not None:
             wake.append(now + self._config.control_poll_interval)
         if not self._deadline_stop:
             wake.append(self._shell.record.envelope.core.run.deadline_at)
-        await self._race(max(min(wake) - now, 0.0) if wake else None)
+        await self._race(max(min(wake) - now, 0.0))
 
-    async def _race(self, seconds: float | None) -> None:
+    async def _race(self, seconds: float) -> None:
         """Wait for a request to finish, the operator to stop, or ``seconds`` to pass."""
         waiting: list[asyncio.Future[Any]] = [
             asyncio.ensure_future(self._shell.wait_for_flight()),
             asyncio.ensure_future(self._woken.wait()),
+            asyncio.create_task(
+                self._clock.sleep(max(seconds, self._config.min_sleep)), name=WAIT_TASK
+            ),
         ]
-        if seconds is not None:
-            waiting.append(
-                asyncio.create_task(
-                    self._clock.sleep(max(seconds, self._config.min_sleep)), name=WAIT_TASK
-                )
-            )
         if self._lease is not None:
             waiting.append(self._lease)
         try:

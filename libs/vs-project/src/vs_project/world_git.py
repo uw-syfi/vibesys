@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Protocol
 
 from vs_project._fake_git_repository import FakeGitRepositories
-from vs_project._git_process import run_git
+from vs_project._git_process import Git
 
 IN_MEMORY_GIT = FakeGitRepositories()
 """One in-memory disk for harnesses that build a fresh run per call.
@@ -64,16 +64,17 @@ class WorldGit(Protocol):
 class CliWorldGit:
     """Real Git, run as an agent in a sandbox would."""
 
-    def __init__(self, root: Path) -> None:
-        """Serve the project repository at ``root``."""
+    def __init__(self, root: Path, git: Git) -> None:
+        """Serve the project repository at ``root``, starting Git through ``git``."""
         self._root = root
+        self._run = git
 
     def _git(self, cwd: Path, *args: str) -> str:
         identity = ["-c", "user.name=agent", "-c", "user.email=agent@example.com"]
-        result = run_git([*identity, *args], cwd=cwd)
+        result = self._run.run_text([*identity, *args], cwd=cwd)
         if result.returncode != 0:
-            raise WorldGitError(result.stderr.decode())
-        return result.stdout.decode()
+            raise WorldGitError(result.stderr)
+        return result.stdout
 
     def worktrees(self) -> list[Path]:
         """See :class:`WorldGit`."""
@@ -139,6 +140,8 @@ class FakeWorldGit:
         return tree
 
 
-def world_git(root: Path, disk: FakeGitRepositories | None) -> WorldGit:
-    """The ``WorldGit`` for a world whose Fake disk is ``disk`` (``None`` for real Git)."""
-    return CliWorldGit(root) if disk is None else FakeWorldGit(root, disk)
+def world_git(root: Path, git: FakeGitRepositories | Git) -> WorldGit:
+    """The ``WorldGit`` for a world on the Fake disk ``git``, or on real Git started by ``git``."""
+    if isinstance(git, Git):
+        return CliWorldGit(root, git)
+    return FakeWorldGit(root, git)

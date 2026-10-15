@@ -33,6 +33,7 @@ if TYPE_CHECKING:
         SearchDef,
     )
     from vs_core.api import RunFacts as CoreRunFacts
+    from vs_github.api import GitHubClient
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime._agent_evaluation import AgentEvaluationPolicy
     from vs_runtime._artifact_store import ArtifactStore
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from vs_runtime._operation_wiring import OperationRole
     from vs_runtime._run_environment import RunEnvironmentView
     from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
+    from vs_sim.api import Clock, Threads
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
@@ -744,6 +746,9 @@ class OwnedOperationResources:
 
     ``variables`` are the plan's run-level template variables and ``templates`` is the
     directory of the policy's templates, the same two inputs the render operation reads.
+    ``clock`` is the run's clock, for owners that stamp what they record, and ``threads`` makes
+    the locks of owners that serialize their own state. ``github`` reaches GitHub, for owners
+    that keep their records there.
     """
 
     run_id: str
@@ -751,6 +756,9 @@ class OwnedOperationResources:
     options: BaseModel
     variables: Mapping[str, object]
     templates: Path
+    clock: Clock
+    threads: Threads
+    github: GitHubClient
 
 
 @dataclass(frozen=True, slots=True)

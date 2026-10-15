@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 from tests.support.core_plugins import capability_plugin
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.skeleton_strategy import (
     ATTEMPT,
     IMPLEMENTER_ROLE,
@@ -25,6 +26,7 @@ from tests.support.skeleton_strategy import (
 )
 from tests.support.task_project import write_task
 
+from entrypoints.production import production_timing
 from entrypoints.run import supervise
 from headless import run as render_run
 from launch import LaunchSettings, default_runs
@@ -41,6 +43,7 @@ from vs_core.api.search import Flow, NotOpened, NoWinner, search
 from vs_project.api import OrchestrationDescriptor, Project, ProjectStateError
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import FakeSignalSource
 
 if TYPE_CHECKING:
@@ -74,6 +77,7 @@ class _DaemonBackend(HostExecutedContainerBackend):
             resources=resources,
             docker=self.engine,
             run_id=run_id,
+            threads=OsThreads(),
         )
 
 
@@ -199,8 +203,11 @@ def _execute(
         log_dir: Path,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
+        clock: object,
+        events: object | None = None,
     ) -> _DaemonBackend:
-        backend = _DaemonBackend(log_dir, log=log, image=image)
+        del clock, events  # the fake backend records no timestamps and has no device to watch
+        backend = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())
         backend.engine = engine
         return backend
 
@@ -221,9 +228,13 @@ def _execute(
     )
     runs = default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=lambda **_: FakeAgentClient(
-                capabilities=AgentCapabilities(provider_session_resume=True)
+                capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
             ),
             backend_factory=backend_factory,
         )

@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vs_decode.api import Unreadable, decode_json
 from vs_sandbox.agent_gpu import (
     AgentGpuConfig,
     GpuCommand,
@@ -191,11 +192,22 @@ def _read_frame(connection: Connection) -> bytes:
     return frame[: frame.find(b"\n") + 1] if b"\n" in frame else frame
 
 
+class BrokerRequestError(ValueError):
+    """A request frame that is not a valid call; names the problems, never the input."""
+
+    def __init__(self, unreadable: Unreadable) -> None:
+        """Describe the unreadable frame."""
+        super().__init__(str(unreadable))
+
+
 def _parse_call(frame: bytes) -> GpuCall:
     if not frame.endswith(b"\n") or len(frame) > _MAX_FRAME_BYTES:
         message = "invalid command broker request"
         raise ValueError(message)
-    return GpuCall.model_validate_json(frame)
+    call = decode_json(frame, GpuCall, source="command broker request", max_bytes=_MAX_FRAME_BYTES)
+    if isinstance(call, Unreadable):
+        raise BrokerRequestError(call)
+    return call
 
 
 def _send(connection: Connection, payload: Mapping[str, object]) -> None:

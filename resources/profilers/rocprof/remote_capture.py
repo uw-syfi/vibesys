@@ -34,6 +34,9 @@ import capture  # noqa: E402  # LW-930102; the preceding path setup must run bef
 # The host's `vs_sandbox.slurm_profile.PROFILE_STATS_PREFIX` names the same line; a test
 # keeps the two equal, because this script cannot import the host's libraries.
 PROFILE_STATS_PREFIX = "VIBESYS_PROFILE_STATS "
+# Printed last on success, so the host can tell a whole summary from a cut one;
+# `vs_sandbox.slurm_profile.PROFILE_END` names it too and the same test keeps them equal.
+PROFILE_END = "VIBESYS_PROFILE_END"
 
 _CAPTURE_TOOLS = {
     "timeline": (
@@ -175,6 +178,7 @@ def run_request(
     stats = _timeline_stats(kind, profiles_path / new_ids[0])
     if stats is not None:
         sys.stdout.write(f"{PROFILE_STATS_PREFIX}{json.dumps(stats, sort_keys=True)}\n")
+    sys.stdout.write(f"{PROFILE_END}\n")
     return 0
 
 

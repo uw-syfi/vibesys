@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import UTC, datetime
 from typing import Protocol
 
 
@@ -32,6 +33,15 @@ class Sleeper(Protocol):
 
 class SleepingClock(Clock, Sleeper, Protocol):
     """A clock that can also wait: the run loop reads ``now`` and sleeps on one timeline."""
+
+
+def utc_datetime(clock: Clock) -> datetime:
+    """Read ``clock`` as an aware UTC datetime, for a timestamp a person or file records.
+
+    ``clock`` must count seconds since the epoch, as :class:`SystemClock` and the
+    simulated clocks do; a monotonic clock's reading names no calendar time.
+    """
+    return datetime.fromtimestamp(clock.now(), UTC)
 
 
 class SystemClock:

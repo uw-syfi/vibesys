@@ -15,6 +15,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
+from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_core.api import HostFence, HostId, Until
@@ -23,6 +24,7 @@ from vs_project.api import (
     NullGitTrackerEvents,
     OrchestrationDescriptor,
     RunEnvironmentRecord,
+    git_repositories,
 )
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api import (
@@ -55,9 +57,11 @@ from vs_runtime.api.operation_fixtures import VerifyParentRevision as _VerifyReq
 from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaces,
+    MemoryValidationPasses,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import examples
+from vs_sim.api import OsThreads, ThreadBlockingRunner
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -121,6 +125,8 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                         git_events=NullGitTrackerEvents(),
                         log_emit=_emit,
                         on_log_ready=lambda _path: None,
+                        clock=ManualClock(),
+                        git_repository=git_repositories(REAL_GIT),
                     ),
                     resolve_resume=lambda _manifest: pytest.fail("unexpected resume"),
                 )
@@ -135,11 +141,14 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     cli_provider="codex",
                     run_id="workspace-contract",
                     framework_root=Path(scratch),
+                    clock=ManualClock(),
+                    slurm_processes=REAL_PROCESSES,
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),
                     RunEnvironmentView(paths=AgentPaths(), cli_sandboxed=True),
                 ),
+                clock=ManualClock(),
             )
             ownership.callback(environment.close)
             resources = WorkspaceResourceFactory(
@@ -151,9 +160,13 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
+                threads=OsThreads(),
+                blocking=ThreadBlockingRunner(),
             )
             workspaces = create_workspace_runtime(
-                workspace_resources=resources, blocking=BlockingOperations()
+                workspace_resources=resources,
+                blocking=BlockingOperations(runner=ThreadBlockingRunner()),
+                validation_passes=MemoryValidationPasses(),
             ).workspaces
         try:
             yield workspaces

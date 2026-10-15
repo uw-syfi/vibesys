@@ -19,7 +19,6 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import hashlib
-import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -36,6 +35,7 @@ if TYPE_CHECKING:
     from vs_core.api import RequestBase
     from vs_project.api import StateNamespace
     from vs_runtime._core_requests import ExecutionContext
+    from vs_sim.api import Threads
 
 
 class ReceiptCorruptError(Exception):
@@ -166,11 +166,11 @@ class ReceiptStore:
     _EXECUTIONS = "executions"
     _FENCES = "fences"
 
-    def __init__(self, namespace: StateNamespace) -> None:
-        """Bind to the namespace that holds this run's receipts."""
+    def __init__(self, namespace: StateNamespace, threads: Threads) -> None:
+        """Bind to the namespace that holds this run's receipts; ``threads`` makes its lock."""
         self._namespace = namespace
         self._lock_path = namespace.external_directory() / "receipts.lock"
-        self._guard = threading.RLock()
+        self._guard = threads.rlock()
         self._depth = 0
         self._run_gates: dict[str, _RunGate] = {}
 

@@ -42,7 +42,7 @@ class _SuiteEnvironment:
         # that maintenance prunes any worktree whose admin directory has no
         # gitdir file yet. A test's next ``git worktree add`` is in exactly that
         # state between creating ``.git/worktrees/<name>`` and locking it, so the
-        # background prune can delete it mid-command. ``run_git`` already
+        # background prune can delete it mid-command. ``Git`` already
         # disables maintenance for product Git; this covers every Git a test
         # starts itself. Command-line config survives tests that replace HOME.
         for index, (key, value) in enumerate((("maintenance.auto", "false"), ("gc.auto", "0"))):

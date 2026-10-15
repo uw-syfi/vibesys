@@ -1,7 +1,6 @@
 """Which ``GitRepository`` implementation serves a project: the one place that decides.
 
-``GitTracker`` asks :func:`open_git_repository` for its repository unless the
-caller injects one. The choice is a value, not an ``except ImportError``:
+The wiring code asks :func:`open_git_repository` for each ``GitTracker``'s repository. The choice is a value, not an ``except ImportError``:
 
 * ``VIBESYS_GIT_BACKEND`` (``cli`` or ``pygit2``) selects explicitly. An
   unknown value, or ``pygit2`` when the package is not installed on this
@@ -29,7 +28,8 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
 
-    from vs_project.api.git_repository import GitFaultSink, GitRepository
+    from vs_project._git_process import Git
+    from vs_project.api.git_repository import GitFaultSink, GitRepository, GitRepositoryFactory
 
 GIT_BACKEND_ENV = "VIBESYS_GIT_BACKEND"
 
@@ -76,16 +76,29 @@ def select_git_backend(requested: str | None, *, pygit2_available: bool) -> GitB
 def open_git_repository(
     root: Path,
     *,
+    git: Git,
     faults: GitFaultSink,
     environ: Mapping[str, str] | None = None,
 ) -> GitRepository:
-    """Build the configured ``GitRepository`` over the worktree top level ``root``."""
+    """Build the configured ``GitRepository`` over the worktree top level ``root``.
+
+    The CLI implementation, and the CLI half of the libgit2 one, start Git through ``git``.
+    """
     configured = (os.environ if environ is None else environ).get(GIT_BACKEND_ENV)
     backend = select_git_backend(configured, pygit2_available=pygit2_installed())
     if backend is GitBackend.CLI:
-        return CliGitRepository(root, faults=faults)
+        return CliGitRepository(root, git=git, faults=faults)
     from vs_project._pygit2_git_repository import (  # noqa: PLC0415  # lint-waiver: LW-415570 [PLC0415]; importing pygit2 only when this backend is chosen is what keeps a platform without the wheel importable.
         Pygit2GitRepository,
     )
 
-    return Pygit2GitRepository(root, faults=faults)
+    return Pygit2GitRepository(root, git=git, faults=faults)
+
+
+def git_repositories(git: Git) -> GitRepositoryFactory:
+    """The factory that opens the configured implementation over each root it is given."""
+
+    def open_repository(root: Path, faults: GitFaultSink) -> GitRepository:
+        return open_git_repository(root, git=git, faults=faults)
+
+    return open_repository

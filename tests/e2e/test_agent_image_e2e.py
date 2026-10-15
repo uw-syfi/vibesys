@@ -27,6 +27,7 @@ from tests.support import run_test_command
 from vs_agent.api import CONTAINER_PYTHON
 from vs_agent.api.images import agent_image, build_task_image
 from vs_runtime.api.infrastructure import image_features
+from vs_sim.api import MonotonicClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,6 +73,7 @@ def test_cpu_agent_image_runs_every_shipped_cli_as_the_agent_user() -> None:
         "python:3.12-bookworm",
         features=image_features(("rust", "go")),
         timeout=_BUILD_TIMEOUT_S,
+        clock=MonotonicClock(),
     )
 
     result = run_test_command(
@@ -99,6 +101,7 @@ def test_container_runtime_and_pip_extras_features_install_everything_they_use()
         "python:3.12-bookworm",
         features=image_features(("container-runtime",), ("modal>=0.66",)),
         timeout=_BUILD_TIMEOUT_S,
+        clock=MonotonicClock(),
     )
 
     result = run_test_command(
@@ -146,12 +149,18 @@ def test_agent_layer_builds_on_a_task_image_end_to_end(tmp_path: Path, flow: str
     dockerfile = _task_dockerfile(tmp_path)
     if flow == "recorded-id":
         task_id = build_task_image(
-            dockerfile, base_image="python:3.12-bookworm", timeout=_BUILD_TIMEOUT_S
+            dockerfile,
+            base_image="python:3.12-bookworm",
+            timeout=_BUILD_TIMEOUT_S,
+            clock=MonotonicClock(),
         )
-        image_id = agent_image(task_id, timeout=_BUILD_TIMEOUT_S)
+        image_id = agent_image(task_id, timeout=_BUILD_TIMEOUT_S, clock=MonotonicClock())
     else:
         image_id = agent_image(
-            "python:3.12-bookworm", task_dockerfile=dockerfile, timeout=_BUILD_TIMEOUT_S
+            "python:3.12-bookworm",
+            task_dockerfile=dockerfile,
+            timeout=_BUILD_TIMEOUT_S,
+            clock=MonotonicClock(),
         )
 
     result = run_test_command(
@@ -185,7 +194,10 @@ def test_agent_user_and_group_are_both_named_agent_over_a_uid_1000_base(tmp_path
         encoding="utf-8",
     )
     image_id = agent_image(
-        "python:3.12-bookworm", task_dockerfile=dockerfile, timeout=_BUILD_TIMEOUT_S
+        "python:3.12-bookworm",
+        task_dockerfile=dockerfile,
+        timeout=_BUILD_TIMEOUT_S,
+        clock=MonotonicClock(),
     )
 
     result = run_test_command(

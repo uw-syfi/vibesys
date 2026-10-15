@@ -188,7 +188,7 @@ def test_hotel_native_task_materializes_shared_checker(tmp_path: Path) -> None:
         environment=unconfined_host_environment(),
         backend=FakeComputeBackend(),
         log=lambda _message: None,
-        git_runner=FakeGitRunner(head=workspace_source.commit),
+        git=FakeGitRunner(head=workspace_source.commit).git(),
     )
     provision_project(
         input_root,

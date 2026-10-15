@@ -514,3 +514,11 @@ def test_input_fingerprint_read_failure_is_reported(
 
     with pytest.raises(ProjectStateError, match=r"Could not fingerprint project input .*denied"):
         store.state.input_fingerprint()
+
+
+def test_a_state_model_that_drops_unknown_keys_is_refused() -> None:
+    class _Lenient(BaseModel):
+        round: int
+
+    with pytest.raises(TypeError, match="extra='forbid'"):
+        decode_state_document(_Lenient, b'{"round": 1}', source="lenient.json")

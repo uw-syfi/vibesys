@@ -14,14 +14,14 @@ from vs_issue_tracker.api import (
     IssueTrackerLoadError,
     IssueType,
 )
-from vs_sim.api.testing import hostile_json_frames
+from vs_sim.api.testing import ManualClock, hostile_json_frames
 
 _FRAMES = hostile_json_frames()
 
 
 def test_github_issue_tracker_preserves_status_attempts_and_history() -> None:
     cli = FakeGitHubClient()
-    tracker = GitHubIssueTracker("owner/repo", cli=cli)
+    tracker = GitHubIssueTracker("owner/repo", cli=cli, clock=ManualClock())
     issue = tracker.create(
         type=IssueType.BUG,
         title="Keep my body",
@@ -65,13 +65,13 @@ def test_progress_log_uses_separate_issue_and_is_hidden_from_tracker() -> None:
     progress.append("## Iter 1\n\nA completed turn.\n\n")
     assert progress.read() == "# Experiment Progress\n\n## Iter 1\n\nA completed turn.\n\n"
 
-    tracker = GitHubIssueTracker("owner/repo", cli=cli)
+    tracker = GitHubIssueTracker("owner/repo", cli=cli, clock=ManualClock())
     assert tracker.list() == []
 
 
 def test_reserved_issue_metadata_corruption_is_reported() -> None:
     cli = FakeGitHubClient()
-    tracker = GitHubIssueTracker("owner/repo", cli=cli)
+    tracker = GitHubIssueTracker("owner/repo", cli=cli, clock=ManualClock())
     issue = tracker.create(
         type=IssueType.BUG,
         title="Broken metadata",
@@ -102,7 +102,7 @@ def test_reserved_progress_metadata_corruption_is_reported() -> None:
 def test_an_issue_event_comment_of_any_text_is_a_load_error(frame: bytes) -> None:
     """Anyone who can comment writes these; ``json`` raised ``RecursionError`` on deep nesting."""
     cli = FakeGitHubClient()
-    tracker = GitHubIssueTracker("owner/repo", cli=cli)
+    tracker = GitHubIssueTracker("owner/repo", cli=cli, clock=ManualClock())
     issue = tracker.create(
         type=IssueType.BUG, title="t", description="d", created_by="judge", iteration=1
     )

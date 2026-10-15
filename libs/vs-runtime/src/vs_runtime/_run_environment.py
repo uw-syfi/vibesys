@@ -25,7 +25,6 @@ container or remote process lifetime at the command layer.
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import shutil
@@ -65,6 +64,7 @@ from vs_runtime._environment_startup import (
     EnvironmentStartupStage,
 )
 from vs_runtime._image_features import image_features
+from vs_runtime._model_artifacts import read_model_metadata
 from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
@@ -78,6 +78,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     remote_evaluator_setup_command,
     required_evaluator_tools_root,
 )
+from vs_runtime._workspace_files import write_for_agent
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
     DeviceLease,
@@ -125,8 +126,10 @@ from vs_sandbox.api.symlink_mounts import (
     find_mount_root,
     symlink_lifecycle_hooks,
 )
+from vs_sim.api import OsProcesses
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
+_RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
 """The runtime resource declaration's ``agent_path`` for the effective objective.
 
 Used in exactly one place: the ``HostResource`` :func:`_container_mount_plan`
@@ -148,6 +151,7 @@ if TYPE_CHECKING:
         WorkspaceSandbox,
     )
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
+    from vs_sim.api import Clock, Processes
 
 
 @dataclass(frozen=True)
@@ -366,6 +370,10 @@ class RunEnvironmentRequest:
     cli_provider: str | None
     run_id: str
     framework_root: Path
+    clock: Clock
+    """Measures the agent image build budget."""
+    slurm_processes: Processes
+    """Starts the Slurm transport programs a host broker runs for the agent's container."""
     objective: str | None = None
     # Authored run state belongs to git_history_root, including when workspace
     # is a candidate revision that predates the objective's committed document.
@@ -503,8 +511,10 @@ def _close_failed_environment_resources(
 def open_run_environment_resources(
     request: RunEnvironmentRequest,
     open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
+    *,
+    clock: Clock,
 ) -> RunEnvironmentResources:
-    """Open a root session and own its newly started device lease."""
+    """Open a root session and own its newly started device lease; ``clock`` counts epoch seconds."""
     ownership = ExitStack()
     try:
         with boot_trace.span("environment_open"):
@@ -513,6 +523,7 @@ def open_run_environment_resources(
             device = DeviceLease(
                 request.backend,
                 log_dir=request.log_dir,
+                clock=clock,
                 run_environment_view=session.view,
             )
             ownership.callback(device.close)
@@ -912,10 +923,19 @@ class DockerEnvironment:
         requirements = request.evaluator_requirements
         log: Callable[[str], None] = request.log or (lambda _: None)
         toolchains: set[str] = set(evaluator_agent_toolchains(requirements))
+        attach_accelerator = extras.attach_accelerator and attaches_accelerator(
+            docker_in_docker=request.docker_in_docker
+        )
+        if attach_accelerator:
+            # Fail before the image build when the backend's accelerator is not
+            # usable on this host; nothing falls back to running without it.
+            request.backend.ensure_accelerator_available()
         if request.docker_in_docker:
             # Fail before the image build when the host has no Sysbox; nothing
             # falls back to the host socket.
-            require_sysbox_runtime(self.config.docker or SubprocessDockerCli())
+            require_sysbox_runtime(
+                self.config.docker or SubprocessDockerCli(processes=OsProcesses())
+            )
             toolchains.add(CONTAINER_RUNTIME_TOOLCHAIN)
             log(DOCKER_IN_DOCKER_NOTICE)
         # The task image, when a task has a Dockerfile, is built by the
@@ -931,6 +951,7 @@ class DockerEnvironment:
                 else self.config.image_build_timeout_seconds
             ),
             on_progress=_image_build_progress(request),
+            clock=request.clock,
         )
         workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
         resources, docker_symlinks = _container_mount_plan(
@@ -980,8 +1001,7 @@ class DockerEnvironment:
             container_image=container_image,
             docker_in_docker=request.docker_in_docker,
             same_path_workspace=extras.same_path_workspace,
-            attach_accelerator=extras.attach_accelerator
-            and attaches_accelerator(docker_in_docker=request.docker_in_docker),
+            attach_accelerator=attach_accelerator,
             run_id=request.run_id,
         )
         _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
@@ -995,7 +1015,11 @@ class DockerEnvironment:
             if self.config.orphan_reaper is not None
             else reap_orphaned_agents
         )
-        reaper(run_id, docker=self.config.docker or SubprocessDockerCli(), log=log)
+        reaper(
+            run_id,
+            docker=self.config.docker or SubprocessDockerCli(processes=OsProcesses()),
+            log=log,
+        )
 
     def repair_workspace(
         self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]
@@ -1201,6 +1225,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                 _docker_backend_image(request),
                 features=image_features(evaluator_agent_toolchains(requirements)),
                 on_progress=_image_build_progress(request),
+                clock=request.clock,
             )
             container_image = _ensure_pushed_for_remote_backend(
                 container_image,
@@ -1225,8 +1250,7 @@ class SkyPilotEnvironment(DockerEnvironment):
                     (str(caller_state), caller_state_path, False),
                 )
             )
-            runtime_document = request.log_dir / "runtime-environment.md"
-            runtime_document.write_text(runtime_presentation)
+            runtime_document = _write_runtime_document(request.log_dir, runtime_presentation)
             runtime_path = "/opt/vibesys-runtime/environment.md"
             resources.append(
                 host_resource_for_mount(str(runtime_document), runtime_path, read_only=True)
@@ -1379,6 +1403,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 evaluator_agent_toolchains(requirements), _MODAL_EDITOR_PIP_EXTRAS
             ),
             on_progress=_image_build_progress(request),
+            clock=request.clock,
         )
         container_image = _ensure_pushed_for_remote_backend(
             container_image,
@@ -1392,8 +1417,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         if request.git_history_root is not None:
             cli_provider_env.setdefault("VIBESYS_GIT_HISTORY", "/opt/vibesys-history")
         cli_provider_env["VIBESYS_MODAL_APP_NAME"] = app_name
-        runtime_document = request.log_dir / "runtime-environment.md"
-        runtime_document.write_text(runtime_presentation)
+        runtime_document = _write_runtime_document(request.log_dir, runtime_presentation)
         runtime_container_path = "/opt/vibesys-runtime/environment.md"
         resources.append(
             host_resource_for_mount(str(runtime_document), runtime_container_path, read_only=True)
@@ -1518,22 +1542,15 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             return
         ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
 
-        meta = json.loads(meta_path.read_text())
-        model_id = meta.get("model_id")
-        if not model_id:
-            message = (
-                f"meta.json at {meta_path} missing required 'model_id' field "
-                "(needed for Modal auto-upload)"
-            )
-            raise ValueError(message)
+        meta = read_model_metadata(meta_path)
         hf_available = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
         local_model = request.ref_dir / "model"
         local_path = None
         if not hf_available and local_model.exists() and local_model.resolve().is_dir():
             local_path = str(local_model.resolve())
         self.model_volume = ensure_model_volume(
-            model_id,
-            revision=meta.get("revision"),
+            meta.model_id,
+            revision=meta.revision,
             local_path=local_path,
             log=request.log or print,
         )
@@ -1556,22 +1573,24 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
             return None
         ensure_model_volume = import_module("vs_sandbox.api").ensure_model_volume
 
-        draft_meta = json.loads(draft_meta_path.read_text())
-        draft_model_id = draft_meta.get("model_id")
-        if not draft_model_id:
-            message = f"draft_meta.json at {draft_meta_path} missing required 'model_id' field"
-            raise ValueError(message)
+        draft_meta = read_model_metadata(draft_meta_path)
         hf_available = bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN"))
         local_draft = request.ref_dir / "draft_model"
         local_path = None
         if not hf_available and local_draft.exists() and local_draft.resolve().is_dir():
             local_path = str(local_draft.resolve())
         return ensure_model_volume(
-            draft_model_id,
-            revision=draft_meta.get("revision"),
+            draft_meta.model_id,
+            revision=draft_meta.revision,
             local_path=local_path,
             log=request.log or print,
         )
+
+
+def _write_runtime_document(log_dir: Path, presentation: str) -> Path:
+    """Write the runtime environment document the agent's container mounts read-only."""
+    write_for_agent(log_dir, _RUNTIME_DOCUMENT_NAME, presentation.encode("utf-8"))
+    return log_dir / _RUNTIME_DOCUMENT_NAME
 
 
 def _modal_app_name(run_id: str, fallback: str) -> str:

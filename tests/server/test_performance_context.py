@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from tests.server.support import agent_descriptor, build_server_parts, run_record
+from tests.server.support import REQUEST_TIME, agent_descriptor, build_server_parts, run_record
 from tests.support.multi_search import SearchRecord
 
 from server.api.performance import build_performance_context, summarize_objective
@@ -72,7 +73,7 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
     project.mkdir()
     (project / "OBJECTIVE.md").write_text("Make the queue fast.\n", encoding="utf-8")
     vibesys_project = Project.open(project)
-    vibesys_project.state.create_project("queue")
+    vibesys_project.state.create_project("queue", now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = vibesys_project.state.new_run_manifest(
         "queue",
         run_id="queue-run",
@@ -82,6 +83,7 @@ def _project_run(project: Path, objectives: tuple[str, ...]) -> tuple[Project, s
         execution=run_execution_record(),
         orchestration=agent_descriptor(metric_space=_configuration(objectives)),
         trusted_input_baseline="0" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
     )
     vibesys_project.state.create_run(manifest)
     return vibesys_project, manifest.run_id
@@ -143,7 +145,7 @@ def test_service_projects_context_from_round_evidence_and_objective_prose(
     )
 
     SearchRecord(project, run_id).save(state)
-    response = _service(project, run_id).execute(PerformanceQuery())
+    response = _service(project, run_id).execute(PerformanceQuery(timestamp=REQUEST_TIME))
 
     context = response.performance_context
     assert context is not None
@@ -164,7 +166,7 @@ def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path
         HypothesisState(metrics=_configuration(("total_ops_per_sec:max",)))
     )
 
-    response = _service(project, run_id).execute(PerformanceQuery())
+    response = _service(project, run_id).execute(PerformanceQuery(timestamp=REQUEST_TIME))
 
     assert response.performance == []
     context = response.performance_context
@@ -176,7 +178,7 @@ def test_service_names_the_objective_before_the_first_measurement(tmp_path: Path
 
 
 def test_service_returns_no_context_without_an_attached_run() -> None:
-    response = build_server_parts().api.execute(PerformanceQuery())
+    response = build_server_parts().api.execute(PerformanceQuery(timestamp=REQUEST_TIME))
 
     assert response.performance == []
     assert response.performance_context is None

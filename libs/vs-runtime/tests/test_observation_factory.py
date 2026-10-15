@@ -19,6 +19,7 @@ from vs_core.api import (
     DiscardWorkspace,
     ObservationStatus,
     RequestId,
+    ResourceId,
     Scope,
 )
 from vs_core.api.proofs import Proven, fresh_observation
@@ -31,6 +32,7 @@ from vs_runtime.api.core import (
     ObservationSubject,
     ReceiptStore,
 )
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -93,13 +95,13 @@ def test_every_issued_observation_is_fresh_for_core_across_restarts(
         env.setenv("VIBESYS_STATE_HOME", str(Path(directory) / "state"))
         namespace = _namespace(Path(directory))
         request = _request("request")
-        factory = ObservationFactory(ReceiptStore(namespace))
+        factory = ObservationFactory(ReceiptStore(namespace, threads=OsThreads()))
         history: list[Observation] = []
         previous: ObservationFacts | None = None
         sequence = -1
         for index, (facts, restart) in enumerate(steps):
             if restart:
-                factory = ObservationFactory(ReceiptStore(namespace))
+                factory = ObservationFactory(ReceiptStore(namespace, threads=OsThreads()))
             observation = factory.observe(
                 ObservationSubject.of(request), facts, observed_at=float(index)
             )
@@ -121,11 +123,11 @@ def test_replay_returns_the_stored_observation_unchanged_even_at_a_later_time(
 ) -> None:
     namespace = _namespace(tmp_path)
     request = _request("r1")
-    first = ObservationFactory(ReceiptStore(namespace)).observe(
+    first = ObservationFactory(ReceiptStore(namespace, threads=OsThreads())).observe(
         ObservationSubject.of(request), _FACTS[0], observed_at=1.0
     )
     assert (
-        ObservationFactory(ReceiptStore(namespace)).observe(
+        ObservationFactory(ReceiptStore(namespace, threads=OsThreads())).observe(
             ObservationSubject.of(request), _FACTS[0], observed_at=9.0
         )
         == first
@@ -134,7 +136,7 @@ def test_replay_returns_the_stored_observation_unchanged_even_at_a_later_time(
 
 def test_requests_have_independent_sequences(tmp_path: Path) -> None:
     namespace = _namespace(tmp_path)
-    factory = ObservationFactory(ReceiptStore(namespace))
+    factory = ObservationFactory(ReceiptStore(namespace, threads=OsThreads()))
     factory.observe(ObservationSubject.of(_request("r1")), _FACTS[0], observed_at=1.0)
     factory.observe(ObservationSubject.of(_request("r1")), _FACTS[2], observed_at=2.0)
     assert (
@@ -146,9 +148,44 @@ def test_requests_have_independent_sequences(tmp_path: Path) -> None:
 def test_an_unreadable_row_is_a_typed_error_not_a_reused_sequence(tmp_path: Path) -> None:
     namespace = _namespace(tmp_path)
     request = _request("r1")
-    factory = ObservationFactory(ReceiptStore(namespace))
+    factory = ObservationFactory(ReceiptStore(namespace, threads=OsThreads()))
     factory.observe(ObservationSubject.of(request), _FACTS[0], observed_at=1.0)
     (name,) = namespace.entries("observations")
     namespace.write_bytes(f"observations/{name}", b"not json")
     with pytest.raises(ObservationLedgerCorruptError):
         factory.observe(ObservationSubject.of(request), _FACTS[2], observed_at=2.0)
+
+
+@given(
+    status=st.sampled_from(ObservationStatus),
+    terminal=st.booleans(),
+    accepted=st.booleans(),
+    released=st.booleans(),
+    named=st.booleans(),
+)
+@settings(max_examples=examples(pr=40, nightly=200), deadline=None)
+def test_only_a_named_constructor_builds_facts_that_hold_nothing(
+    status: ObservationStatus, *, terminal: bool, accepted: bool, released: bool, named: bool
+) -> None:
+    """A terminal release that accepts and names nothing ends core's owning record.
+
+    So it is built only by a constructor that says why nothing is held; any other facts
+    construct as given.
+    """
+
+    def build() -> ObservationFacts:
+        return ObservationFacts(
+            status,
+            terminal=terminal,
+            accepted=accepted,
+            released=released,
+            resource_id=ResourceId(root="r1") if named else None,
+        )
+
+    if terminal and released and not accepted and not named:
+        with pytest.raises(TypeError, match="never_held, refused or not_begun"):
+            build()
+    else:
+        assert not build().holds_nothing
+    for vouched in (ObservationFacts.refused("x"), ObservationFacts.not_begun("x")):
+        assert vouched.holds_nothing

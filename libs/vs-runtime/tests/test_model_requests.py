@@ -112,6 +112,30 @@ def test_reconcile_rejects_invalid_json_with_manifest_path(tmp_path: Path, conte
         reconciler.reconcile(tmp_path)
 
 
+def test_reconcile_refuses_a_manifest_linked_outside_the_workspace(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps([{"id": "org/secret"}]))
+    workspace = tmp_path / "workspace"
+    (workspace / MODEL_MANIFEST_RELPATH).parent.mkdir(parents=True)
+    (workspace / MODEL_MANIFEST_RELPATH).symlink_to(outside)
+    provisioner = FakeModelVolumeProvisioner()
+    reconciler = create_model_request_reconciler(provisioner=provisioner, environment={})
+
+    with pytest.raises(ModelRequestError, match="escapes the workspace"):
+        reconciler.reconcile(workspace)
+    assert provisioner.requests == ()
+
+
+def test_reconcile_refuses_an_oversized_manifest(tmp_path: Path) -> None:
+    _write_manifest(tmp_path, [{"id": "org/a", "revision": "r" * (2 * 1024 * 1024)}])
+    reconciler = create_model_request_reconciler(
+        provisioner=FakeModelVolumeProvisioner(), environment={}
+    )
+
+    with pytest.raises(ModelRequestError, match="is larger than"):
+        reconciler.reconcile(tmp_path)
+
+
 def test_reconcile_applies_injected_operator_allowlist(tmp_path: Path) -> None:
     _write_manifest(tmp_path, [{"id": "trusted/model"}])
     provisioner = FakeModelVolumeProvisioner()
@@ -151,3 +175,15 @@ def test_reconcile_propagates_provisioner_failure(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="volume unavailable"):
         reconciler.reconcile(tmp_path)
+
+
+def test_a_manifest_that_is_not_a_regular_file_is_refused_not_treated_as_absent(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / MODEL_MANIFEST_RELPATH).mkdir(parents=True)
+    provisioner = FakeModelVolumeProvisioner()
+    reconciler = create_model_request_reconciler(provisioner=provisioner, environment={})
+
+    with pytest.raises(ModelRequestError, match="is not a regular file"):
+        reconciler.reconcile(tmp_path)
+    assert provisioner.requests == ()

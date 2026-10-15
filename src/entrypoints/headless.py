@@ -13,7 +13,7 @@ import sys
 import traceback
 from typing import TYPE_CHECKING
 
-from entrypoints.cli import _render_configuration_error, dispatch
+from entrypoints.cli import _render_configuration_error, dispatch, start_boot_trace
 from headless import printable
 from vibesys.api import ConfigurationError
 
@@ -26,6 +26,7 @@ __all__ = ["main", "print_uncaught"]
 def main(argv: list[str] | None = None) -> None:
     """Run the headless command-line interface."""
     arguments = sys.argv[1:] if argv is None else argv
+    start_boot_trace()
     try:
         dispatch(arguments)
     except ConfigurationError as exc:

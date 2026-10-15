@@ -13,7 +13,7 @@ from vs_agent.events import AgentOutputChannel, AgentStatusData, ToolResultPaylo
 from vs_agent.progress import AgentProgress
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.todos import todos_from_tool_call
-from vs_sim.api import Clock, MonotonicClock
+from vs_sim.api import Clock
 
 ContextWindowLookup = Callable[[str | None], int | None]
 """Resolves a model name to its context window size in tokens.
@@ -84,7 +84,8 @@ class AgentLogger:
         round_label: str | None = None,
         invocation_id: str | None = None,
         event_sink: AgentEventSink = NULL_AGENT_EVENT_SINK,
-        clock: Clock | None = None,
+        *,
+        clock: Clock,
     ) -> None:
         """Initialize callback state and its output destinations."""
         self._external_text_streaming = False
@@ -96,7 +97,7 @@ class AgentLogger:
         self._model_name = model_name
         self._agent_label = agent_label
         self._progress = progress
-        self._clock = clock or MonotonicClock()
+        self._clock = clock
         self._start_time = self._clock.now()
         self._input_tokens = 0
         self._context_window_lookup = context_window_lookup or _default_context_window_lookup

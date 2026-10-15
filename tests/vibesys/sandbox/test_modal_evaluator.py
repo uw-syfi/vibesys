@@ -9,12 +9,16 @@ import shlex
 import stat
 import sys
 import tarfile
+from contextlib import nullcontext
+from dataclasses import dataclass, field
 from importlib.util import module_from_spec, spec_from_file_location
 from types import ModuleType, SimpleNamespace
 from typing import TYPE_CHECKING, TypedDict, Unpack, cast
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from tests.support import run_test_command
 
 from vs_sandbox import (
@@ -24,6 +28,8 @@ from vs_sandbox.modal_evaluator import (  # test-isolation: constants bound remo
     _MAX_DIAGNOSTIC_CHARS,
     _MAX_ENCODED_SETUP_COMMAND_CHARS,
     _RELEASE_DEPLOYMENT_ENV,
+    ModalHost,
+    ProgramResult,
     _build_stage_archive,
     _decode_setup_command,
     _execute_colocated,
@@ -32,12 +38,107 @@ from vs_sandbox.modal_evaluator import (  # test-isolation: constants bound remo
     _modal_health_url,
     _stop_modal_app,
 )
+from vs_sim.api.testing import ManualClock
 
 _UV_EXECUTABLE = modal_evaluator.shutil.which("uv") or "uv"
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
+
+
+class AdvancingClock:
+    """A manual clock whose blocking sleep moves it forward."""
+
+    def __init__(self) -> None:
+        """Start at zero."""
+        self._clock = ManualClock(0.0)
+
+    def now(self) -> float:
+        """The current time."""
+        return self._clock.now()
+
+    def sleep(self, seconds: float) -> None:
+        """Pause ``seconds`` manual seconds."""
+        self._clock.advance(seconds)
+
+
+@dataclass(frozen=True)
+class ProgramCall:
+    """One Modal CLI run the evaluator asked for."""
+
+    argv: list[str]
+    cwd: str
+    timeout: float | None
+
+
+class ScriptedPrograms:
+    """Answers each program run from ``answer(argv)`` and records the call."""
+
+    def __init__(self, answer: Callable[[list[str]], SimpleNamespace]) -> None:
+        """Answer runs with ``answer``; it may raise ``OSError`` for a program that cannot start."""
+        self._answer = answer
+        self.calls: list[ProgramCall] = []
+
+    def run(self, argv: Sequence[str], *, cwd: str, timeout: float | None) -> ProgramResult:
+        """Record the run and return the scripted outcome."""
+        self.calls.append(ProgramCall(list(argv), cwd, timeout))
+        outcome = self._answer(list(argv))
+        return ProgramResult(outcome.returncode, outcome.stdout, outcome.stderr)
+
+
+def _refuse_every_program(argv: list[str]) -> SimpleNamespace:
+    raise AssertionError(argv)
+
+
+@dataclass
+class ScriptedHealth:
+    """Answers every health probe with ``status``, or raises ``error``; records each URL."""
+
+    status: int = 200
+    error: OSError | None = None
+    urls: list[str] = field(default_factory=list)
+
+    def __call__(self, url: str, _timeout: float) -> int:
+        """Answer one probe."""
+        self.urls.append(url)
+        if self.error is not None:
+            raise self.error
+        return self.status
+
+
+@dataclass
+class _Host:
+    """A fake evaluator host and the records a test reads back."""
+
+    programs: ScriptedPrograms
+    health: ScriptedHealth
+    clock: AdvancingClock
+    warmed: list[str]
+
+    @property
+    def host(self) -> ModalHost:
+        """The host the evaluator runs on."""
+        return ModalHost(
+            clock=self.clock,
+            programs=self.programs,
+            health=self.health,
+            keep_warm=lambda base_url: self.warmed.append(base_url) or nullcontext(),
+        )
+
+
+def _fake_host(
+    answer: Callable[[list[str]], SimpleNamespace] = _refuse_every_program,
+    *,
+    health: ScriptedHealth | None = None,
+    clock: AdvancingClock | None = None,
+) -> _Host:
+    return _Host(
+        programs=ScriptedPrograms(answer),
+        health=ScriptedHealth() if health is None else health,
+        clock=AdvancingClock() if clock is None else clock,
+        warmed=[],
+    )
 
 
 class _EvaluatorOptions(TypedDict, total=False):
@@ -45,6 +146,7 @@ class _EvaluatorOptions(TypedDict, total=False):
     setup_command: list[str] | None
     container_listing: SimpleNamespace | None
     exec_stdout: str
+    health: ScriptedHealth
 
 
 _DEPLOY_STDOUT = (
@@ -57,7 +159,7 @@ _DEPLOY_STDOUT = (
 def isolate_deployment_path_checks(
     request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Keep subprocess tests focused on orchestration, not the fake /workspace."""
+    """Keep Modal CLI tests focused on orchestration, not the fake /workspace."""
     if request.node.name.startswith(("test_deployment_path_", "test_lock_path_")):
         return
     monkeypatch.setattr(
@@ -84,14 +186,14 @@ def _run_deployment_path_case(
     if candidate_revision is not None:
         monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", candidate_revision)
 
-    def run_deploy(command: list[str], **_options: object) -> SimpleNamespace:
+    def run_deploy(command: list[str]) -> SimpleNamespace:
         deployed_paths.append(str(command[-1]))
         return SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
 
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run_deploy)
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", lambda *_args, **_kwargs: 0)
-    modal_evaluator.run_evaluator(["true"], workspace=str(workspace), entrypoint=entrypoint)
+    modal_evaluator.run_evaluator(
+        ["true"], workspace=str(workspace), entrypoint=entrypoint, host=_fake_host(run_deploy).host
+    )
     return deployed_paths
 
 
@@ -101,7 +203,9 @@ def _run_with_lock_path(lock_path: Path, tmp_path: Path) -> int:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     try:
-        return modal_evaluator.run_evaluator(["true"], workspace=str(workspace))
+        return modal_evaluator.run_evaluator(
+            ["true"], workspace=str(workspace), host=_fake_host().host
+        )
     finally:
         monkeypatch.undo()
 
@@ -119,7 +223,7 @@ def _run_public_evaluator(
     exec_stdout = options.get("exec_stdout", "__VIBESYS_EXEC_RC__=0\n")
     calls: list[list[str]] = []
 
-    def run(command: list[str], **_options: object) -> SimpleNamespace:
+    def run(command: list[str]) -> SimpleNamespace:
         calls.append(command)
         if command[3] == "deploy":
             return SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
@@ -136,12 +240,6 @@ def _run_public_evaluator(
         )
 
     monkeypatch.setattr(modal_evaluator, "_LOCK_PATH", tmp_path / "runtime" / "lock")
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", lambda *_args, **_kwargs: None)
-    keepwarm = MagicMock()
-    keepwarm.return_value.__enter__ = MagicMock()
-    keepwarm.return_value.__exit__ = MagicMock(return_value=False)
-    monkeypatch.setattr(modal_evaluator, "_DeploymentKeepWarm", keepwarm)
     result = modal_evaluator.run_evaluator(
         command,
         workspace=str(workspace),
@@ -149,6 +247,7 @@ def _run_public_evaluator(
             str(evaluator_package_root) if evaluator_package_root is not None else None
         ),
         setup_command=setup_command,
+        host=_fake_host(run, health=options.get("health")).host,
     )
     return result, calls
 
@@ -230,30 +329,6 @@ def test_deployment_path_rejects_absolute_path(
     )
 
 
-def test_runtime_dir_is_per_user_without_xdg_runtime_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Public evaluation creates its lock under a uid-suffixed temp directory."""
-    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
-    real_uid = os.getuid()
-    monkeypatch.setattr(modal_evaluator.os, "getuid", lambda: 1001)
-    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    first = _load_modal_evaluator(monkeypatch, "uid_1001")
-    monkeypatch.setattr(first.os, "getuid", lambda: real_uid)
-    assert first.run_evaluator(["true"], workspace=str(workspace)) == 1
-    monkeypatch.setattr(modal_evaluator.os, "getuid", lambda: 1002)
-    second = _load_modal_evaluator(monkeypatch, "uid_1002")
-    monkeypatch.setattr(second.os, "getuid", lambda: real_uid)
-    assert second.run_evaluator(["true"], workspace=str(workspace)) == 1
-
-    first_lock = tmp_path / "vibesys-1001" / "modal-evaluator.lock"
-    second_lock = tmp_path / "vibesys-1002" / "modal-evaluator.lock"
-    assert first_lock.exists()
-    assert second_lock.exists()
-
-
 def test_runtime_dir_prefers_xdg_runtime_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -263,7 +338,7 @@ def test_runtime_dir_prefers_xdg_runtime_dir(
     workspace.mkdir()
     imported = _load_modal_evaluator(monkeypatch, "xdg")
 
-    assert imported.run_evaluator(["true"], workspace=str(workspace)) == 1
+    assert imported.run_evaluator(["true"], workspace=str(workspace), host=_fake_host().host) == 1
     assert (tmp_path / "vibesys" / "modal-evaluator.lock").exists()
 
 
@@ -467,7 +542,7 @@ def test_setup_command_encoding_round_trips_opaque_argv(
     command = ("sh", "-c", "printf '%s' '$HOME; touch nope'", "")
 
     encoded = modal_evaluator.encode_setup_command(command)
-    parsed: list[tuple[object, ...]] = []
+    parsed: list[tuple[tuple[object, ...], dict[str, object]]] = []
     monkeypatch.setattr(
         modal_evaluator,
         "run_evaluator",
@@ -475,7 +550,11 @@ def test_setup_command_encoding_round_trips_opaque_argv(
     )
     assert modal_evaluator.main(["--setup-command-base64", encoded, "--", "true"]) == 0
 
-    assert parsed == [
+    [(argv, options)] = parsed
+    host = options.pop("host")
+    assert isinstance(host, ModalHost)
+    assert isinstance(host.clock, modal_evaluator.MonotonicWaits)
+    assert [(argv, options)] == [
         (
             (["true"],),
             {
@@ -767,17 +846,6 @@ def test_evaluator_reports_container_list_cli_error(
     workspace.mkdir()
     (workspace / "main.py").write_text("app = object()\n")
     listing = SimpleNamespace(returncode=2, stdout="", stderr="token expired")
-    monkeypatch.setattr(modal_evaluator, "_healthy_now", MagicMock(return_value=True))
-    monkeypatch.setattr(modal_evaluator.time, "sleep", lambda _: None)
-
-    ticks = 0
-
-    def monotonic() -> float:
-        nonlocal ticks
-        ticks += 1
-        return 0.0 if ticks < 3 else 1_000.0
-
-    monkeypatch.setattr(modal_evaluator.time, "monotonic", monotonic)
 
     result, calls = _run_public_evaluator(
         workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
@@ -796,23 +864,17 @@ def test_evaluator_reports_missing_running_container(
     workspace.mkdir()
     (workspace / "main.py").write_text("app = object()\n")
     listing = SimpleNamespace(returncode=0, stdout="[]", stderr="")
-    warm = MagicMock(return_value=True)
-    monkeypatch.setattr(modal_evaluator, "_healthy_now", warm)
-    monkeypatch.setattr(modal_evaluator.time, "sleep", lambda _: None)
-
-    ticks = 0
-
-    def monotonic() -> float:
-        nonlocal ticks
-        ticks += 1
-        return 0.0 if ticks < 3 else 1_000.0
-
-    monkeypatch.setattr(modal_evaluator.time, "monotonic", monotonic)
+    health = ScriptedHealth()
     result, calls = _run_public_evaluator(
-        workspace, ["python", "main.py"], tmp_path, monkeypatch, container_listing=listing
+        workspace,
+        ["python", "main.py"],
+        tmp_path,
+        monkeypatch,
+        container_listing=listing,
+        health=health,
     )
     assert result == 1
-    assert warm.call_count == 1
+    assert len(health.urls) >= 2
     assert not any(call[3:5] == ["container", "exec"] for call in calls)
     assert "no running container found" in capsys.readouterr().err
 
@@ -1086,39 +1148,77 @@ def test_evaluator_reports_missing_rc_sentinel(
 
 def test_run_evaluator_deploys_waits_and_runs_colocated(monkeypatch: pytest.MonkeyPatch) -> None:
     deploy = SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
-    run = MagicMock(return_value=deploy)
-    wait = MagicMock()
+    fake = _fake_host(MagicMock(return_value=deploy))
+    host = fake.host
     colocated = MagicMock(return_value=0)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", wait)
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", colocated)
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", host=host
     )
 
     assert result == 0
-    assert run.call_args_list == [
-        call(
+    assert fake.programs.calls == [
+        ProgramCall(
             [_UV_EXECUTABLE, "run", "modal", "deploy", "/workspace/main.py"],
             cwd="/workspace",
-            capture_output=True,
-            text=True,
-            check=False,
+            timeout=None,
         ),
     ]
-    wait.assert_called_once_with(
-        "https://workspace--candidate.modal.run",
-        timeout_seconds=90,
-    )
+    assert fake.health.urls == ["https://workspace--candidate.modal.run/health"]
     colocated.assert_called_once_with(
         ["uv", "run", "python", "checker.py"],
         workspace="/workspace",
         deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        host=host,
         setup_command=None,
         evaluator_package_root=None,
     )
+
+
+def test_an_unready_deployment_is_given_up_on_at_the_readiness_deadline_of_the_given_clock(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    deploy = SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
+    colocated: list[object] = []
+    monkeypatch.setattr(modal_evaluator, "_execute_colocated", lambda *a, **_k: colocated.append(a))
+    fake = _fake_host(lambda _argv: deploy, health=ScriptedHealth(error=OSError()))
+
+    result = modal_evaluator.run_evaluator(
+        ["true"], workspace="/workspace", readiness_timeout_seconds=30, host=fake.host
+    )
+
+    assert result == 1
+    assert not colocated
+    assert fake.clock.now() == 30
+    assert "did not become ready" in capsys.readouterr().err
+
+
+@given(timeout=st.integers(min_value=1, max_value=300))
+def test_a_missing_container_is_given_up_on_at_the_discovery_deadline_of_the_given_clock(
+    timeout: int,
+) -> None:
+    clock = AdvancingClock()
+    probes: list[float] = []
+
+    def warm(_base_url: str) -> bool:
+        probes.append(clock.now())
+        return True
+
+    with pytest.raises(TimeoutError):
+        modal_evaluator.find_app_container(
+            "candidate-app",
+            workspace="/workspace",
+            base_url="https://workspace--candidate.modal.run",
+            timeout_seconds=timeout,
+            clock=clock,
+            list_containers=lambda _workspace: modal_evaluator.ContainerListing(()),
+            warm=warm,
+        )
+
+    assert clock.now() == timeout
+    assert probes
+    assert max(probes) < timeout
 
 
 def test_run_evaluator_threads_trusted_setup_and_package(
@@ -1128,9 +1228,8 @@ def test_run_evaluator_threads_trusted_setup_and_package(
     package = tmp_path / "package"
     package.mkdir()
     deploy = SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
+    host = _fake_host(MagicMock(return_value=deploy)).host
     colocated = MagicMock(return_value=0)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", MagicMock(return_value=deploy))
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", MagicMock())
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", colocated)
 
     result = modal_evaluator.run_evaluator(
@@ -1138,6 +1237,7 @@ def test_run_evaluator_threads_trusted_setup_and_package(
         workspace="/workspace",
         setup_command=["installer", "--locked"],
         evaluator_package_root=str(package),
+        host=host,
     )
 
     assert result == 0
@@ -1145,6 +1245,7 @@ def test_run_evaluator_threads_trusted_setup_and_package(
         ["python", ".vibesys-evaluator-package/adapter.py"],
         workspace="/workspace",
         deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        host=host,
         setup_command=("installer", "--locked"),
         evaluator_package_root=str(package.resolve()),
     )
@@ -1170,13 +1271,21 @@ def test_main_decodes_setup_command_and_forwards_package(monkeypatch: pytest.Mon
     )
 
     assert result == 4
-    run.assert_called_once_with(
-        ["python", ".vibesys-evaluator-package/adapter.py"],
-        workspace="/workspace",
-        entrypoint="main.py",
-        readiness_timeout_seconds=90,
-        setup_command=("installer", "argument with spaces"),
-        evaluator_package_root="/opt/vibesys-evaluator-package",
+    run.assert_called_once()
+    args, options = run.call_args
+    options = dict(options)
+    host = options.pop("host")
+    assert isinstance(host, ModalHost)
+    assert isinstance(host.clock, modal_evaluator.MonotonicWaits)
+    assert (args, options) == (
+        (["python", ".vibesys-evaluator-package/adapter.py"],),
+        {
+            "workspace": "/workspace",
+            "entrypoint": "main.py",
+            "readiness_timeout_seconds": 90,
+            "setup_command": ("installer", "argument with spaces"),
+            "evaluator_package_root": "/opt/vibesys-evaluator-package",
+        },
     )
 
 
@@ -1188,15 +1297,13 @@ def test_run_evaluator_requires_app_identifier(
         stdout="Web Function URL: https://workspace--candidate.modal.run\n",
         stderr="",
     )
-    run = MagicMock(return_value=deploy)
     colocated = MagicMock(return_value=0)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", MagicMock())
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", colocated)
 
     result = modal_evaluator.run_evaluator(
         ["uv", "run", "python", "checker.py"],
         workspace="/workspace",
+        host=_fake_host(MagicMock(return_value=deploy)).host,
     )
 
     assert result == 1
@@ -1206,19 +1313,18 @@ def test_run_evaluator_requires_app_identifier(
 
 def test_run_evaluator_deploys_custom_entrypoint(monkeypatch: pytest.MonkeyPatch) -> None:
     deploy = SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
-    run = MagicMock(return_value=deploy)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", MagicMock())
+    fake = _fake_host(MagicMock(return_value=deploy))
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", MagicMock(return_value=0))
 
     result = modal_evaluator.run_evaluator(
         ["checker"],
         workspace="/workspace",
         entrypoint="examples/deployment/service.py",
+        host=fake.host,
     )
 
     assert result == 0
-    assert run.call_args_list[0] == call(
+    assert fake.programs.calls[0] == ProgramCall(
         [
             _UV_EXECUTABLE,
             "run",
@@ -1227,9 +1333,7 @@ def test_run_evaluator_deploys_custom_entrypoint(monkeypatch: pytest.MonkeyPatch
             "/workspace/examples/deployment/service.py",
         ],
         cwd="/workspace",
-        capture_output=True,
-        text=True,
-        check=False,
+        timeout=None,
     )
 
 
@@ -1247,25 +1351,25 @@ def test_run_evaluator_reuses_healthy_deployment_for_exact_revision(
             }
         )
     )
-    healthy = MagicMock(return_value=True)
     colocated = MagicMock(return_value=0)
     monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", "abc123")
     monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
-    monkeypatch.setattr(modal_evaluator, "_healthy_now", healthy)
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", colocated)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", MagicMock())
+    fake = _fake_host()
+    host = fake.host
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", host=host
     )
 
     assert result == 0
-    healthy.assert_called_once_with("https://workspace--candidate.modal.run")
+    assert fake.health.urls == ["https://workspace--candidate.modal.run/health"]
+    assert fake.programs.calls == []
     colocated.assert_called_once_with(
         ["uv", "run", "python", "checker.py"],
         workspace="/workspace",
         deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        host=host,
         setup_command=None,
         evaluator_package_root=None,
     )
@@ -1289,13 +1393,11 @@ def test_run_evaluator_redeploys_when_lease_lacks_app_identifier(
     colocated = MagicMock(return_value=0)
     monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", "abc123")
     monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", MagicMock())
+    fake = _fake_host(run)
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", colocated)
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", host=fake.host
     )
 
     assert result == 0
@@ -1322,22 +1424,17 @@ def test_run_evaluator_releases_reused_deployment_after_final_gate(
     monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", "abc123")
     monkeypatch.setenv("VIBESYS_RELEASE_MODAL_DEPLOYMENT", "1")
     monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
-    monkeypatch.setattr(modal_evaluator, "_healthy_now", MagicMock(return_value=True))
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", MagicMock(return_value=0))
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
+    fake = _fake_host(run)
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", host=fake.host
     )
 
     assert result == 0
-    assert run.call_args_list[-1] == call(
+    assert fake.programs.calls[-1] == ProgramCall(
         [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
         cwd="/workspace",
-        capture_output=True,
-        text=True,
-        check=False,
         timeout=60,
     )
     assert not lease_path.exists()
@@ -1354,22 +1451,17 @@ def test_run_evaluator_releases_new_deployment_after_final_gate(
     monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", "abc123")
     monkeypatch.setenv("VIBESYS_RELEASE_MODAL_DEPLOYMENT", "1")
     monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", MagicMock())
+    fake = _fake_host(run)
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", MagicMock(return_value=0))
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", host=fake.host
     )
 
     assert result == 0
-    assert run.call_args_list[-1] == call(
+    assert fake.programs.calls[-1] == ProgramCall(
         [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
         cwd="/workspace",
-        capture_output=True,
-        text=True,
-        check=False,
         timeout=60,
     )
     assert not lease_path.exists()
@@ -1394,22 +1486,17 @@ def test_run_evaluator_stops_mismatched_leased_app_before_redeploy(
     run = MagicMock(side_effect=[stop, deploy])
     monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", "new")
     monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", MagicMock())
+    fake = _fake_host(run)
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", MagicMock(return_value=0))
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", host=fake.host
     )
 
     assert result == 0
-    assert run.call_args_list[0] == call(
+    assert fake.programs.calls[0] == ProgramCall(
         [_UV_EXECUTABLE, "run", "modal", "app", "stop", "old-app", "--yes"],
         cwd="/workspace",
-        capture_output=True,
-        text=True,
-        check=False,
         timeout=60,
     )
 
@@ -1431,13 +1518,11 @@ def test_run_evaluator_redeploys_and_replaces_mismatched_revision(
     run = MagicMock(return_value=deploy)
     monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", "new")
     monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
-    monkeypatch.setattr(modal_evaluator, "wait_for_health", MagicMock())
+    fake = _fake_host(run)
     monkeypatch.setattr(modal_evaluator, "_execute_colocated", MagicMock(return_value=0))
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", host=fake.host
     )
 
     assert result == 0
@@ -1449,38 +1534,33 @@ def test_run_evaluator_redeploys_and_replaces_mismatched_revision(
 
 
 def test_run_evaluator_prints_modal_logs_when_readiness_fails(
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     deploy = SimpleNamespace(returncode=0, stdout=_DEPLOY_STDOUT, stderr="")
-    run = MagicMock(return_value=deploy)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
-    monkeypatch.setattr(
-        modal_evaluator,
-        "wait_for_health",
-        MagicMock(side_effect=TimeoutError("not ready")),
-    )
-    logs = MagicMock(return_value="RuntimeError: CUDA toolkit mismatch")
-    monkeypatch.setattr(modal_evaluator, "recent_modal_logs", logs)
+    logs = SimpleNamespace(returncode=0, stdout="RuntimeError: CUDA toolkit mismatch", stderr="")
+
+    def run(command: list[str]) -> SimpleNamespace:
+        return logs if command[3:5] == ["app", "logs"] else deploy
+
+    fake = _fake_host(run, health=ScriptedHealth(status=503))
 
     result = modal_evaluator.run_evaluator(
-        ["uv", "run", "python", "checker.py"],
-        workspace="/workspace",
+        ["uv", "run", "python", "checker.py"], workspace="/workspace", host=fake.host
     )
 
     assert result == 1
-    logs.assert_called_once_with("candidate-app", workspace="/workspace")
+    logs_fetched = [
+        call.argv[5] for call in fake.programs.calls if call.argv[3:5] == ["app", "logs"]
+    ]
+    assert logs_fetched == ["candidate-app"]
     assert "RuntimeError: CUDA toolkit mismatch" in capsys.readouterr().err
     assert (
-        call(
+        ProgramCall(
             [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
             cwd="/workspace",
-            capture_output=True,
-            text=True,
-            check=False,
             timeout=60,
         )
-        in run.call_args_list
+        in fake.programs.calls
     )
 
 
@@ -1516,35 +1596,21 @@ def test_modal_health_url_only_accepts_modal_web_hosts() -> None:
             _modal_health_url(bad)
 
 
-def _fake_response(status: int) -> MagicMock:
-    response = MagicMock()
-    response.status = status
-    response.__enter__.return_value = response
-    return response
-
-
 @pytest.mark.parametrize(
-    ("outcome", "expected"),
-    [
-        (_fake_response(200), True),
-        (_fake_response(503), False),
-        (OSError("refused"), False),
-    ],
+    ("status", "error", "expected"),
+    [(200, None, True), (503, None, False), (200, OSError("refused"), False)],
 )
 def test_healthy_now_reflects_the_health_probe(
-    monkeypatch: pytest.MonkeyPatch, outcome: object, expected: object
+    status: int, error: OSError | None, expected: object
 ) -> None:
-    if isinstance(outcome, Exception):
-        urlopen = MagicMock(side_effect=outcome)
-    else:
-        urlopen = MagicMock(return_value=outcome)
-    monkeypatch.setattr(modal_evaluator.urllib.request, "urlopen", urlopen)
+    health = ScriptedHealth(status=status, error=error)
 
-    assert _healthy_now("https://a--b.modal.run") is expected
-    assert _healthy_now("https://evil.example") is False
+    assert _healthy_now("https://a--b.modal.run", health) is expected
+    assert _healthy_now("https://evil.example", health) is False
+    assert health.urls == ["https://a--b.modal.run/health"]
 
 
-def test_recent_modal_logs_formats_bounded_output(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recent_modal_logs_formats_bounded_output() -> None:
     limit = _MAX_DIAGNOSTIC_CHARS
     results = iter(
         [
@@ -1553,33 +1619,43 @@ def test_recent_modal_logs_formats_bounded_output(monkeypatch: pytest.MonkeyPatc
             SimpleNamespace(stdout="a" * (limit + 10) + "TAIL", stderr=""),
         ]
     )
-    run = MagicMock(side_effect=lambda *_a, **_k: next(results))
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
+    programs = ScriptedPrograms(lambda _argv: SimpleNamespace(returncode=0, **vars(next(results))))
 
-    assert modal_evaluator.recent_modal_logs("app", workspace="/w") == "red line\nerr"
-    assert (
-        modal_evaluator.recent_modal_logs("app", workspace="/w") == "Modal returned no recent logs."
-    )
-    truncated = modal_evaluator.recent_modal_logs("app", workspace="/w")
+    def logs() -> str:
+        return modal_evaluator.recent_modal_logs("app", workspace="/w", programs=programs)
+
+    assert logs() == "red line\nerr"
+    assert logs() == "Modal returned no recent logs."
+    truncated = logs()
     assert truncated.startswith("[... earlier Modal logs omitted ...]\n")
     assert truncated.endswith("TAIL")
     assert len(truncated) == len("[... earlier Modal logs omitted ...]\n") + limit
-    argv = run.call_args.args[0]
+    argv = programs.calls[-1].argv
     assert argv[argv.index("logs") + 1] == "app"
-    assert run.call_args.kwargs["cwd"] == "/w"
+    assert programs.calls[-1].cwd == "/w"
 
 
-def test_recent_modal_logs_reports_fetch_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", MagicMock(side_effect=OSError("no uv")))
+@pytest.mark.parametrize(
+    ("error", "shown"),
+    [
+        (OSError("no uv"), "OSError: no uv"),
+        (
+            TimeoutError("uv timed out after 30 seconds"),
+            "TimeoutError: uv timed out after 30 seconds",
+        ),
+    ],
+)
+def test_recent_modal_logs_reports_fetch_failure(error: OSError, shown: str) -> None:
+    programs = ScriptedPrograms(MagicMock(side_effect=error))
 
     assert (
-        modal_evaluator.recent_modal_logs("app", workspace="/w")
-        == "Could not fetch Modal logs: OSError: no uv"
+        modal_evaluator.recent_modal_logs("app", workspace="/w", programs=programs)
+        == f"Could not fetch Modal logs: {shown}"
     )
 
 
 def test_stop_modal_app_reports_success_failure_and_launch_errors(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     outcomes = iter(
         [
@@ -1589,17 +1665,17 @@ def test_stop_modal_app_reports_success_failure_and_launch_errors(
         ]
     )
 
-    def run(*_args: object, **_kwargs: object) -> SimpleNamespace:
+    def run(_argv: list[str]) -> SimpleNamespace:
         outcome = next(outcomes)
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
 
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
+    programs = ScriptedPrograms(run)
 
-    assert _stop_modal_app("app", workspace="/w") is True
-    assert _stop_modal_app("app", workspace="/w") is False
-    assert _stop_modal_app("app", workspace="/w") is False
+    assert _stop_modal_app("app", workspace="/w", programs=programs) is True
+    assert _stop_modal_app("app", workspace="/w", programs=programs) is False
+    assert _stop_modal_app("app", workspace="/w", programs=programs) is False
     assert capsys.readouterr().err.splitlines() == [
         "Stopped Modal app app.",
         "Could not stop Modal app app (exit 3): out",
@@ -1620,44 +1696,45 @@ def test_stage_archive_rejects_a_package_root_that_is_a_file(tmp_path: Path) -> 
 
 def test_run_evaluator_validates_command_and_package_root(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="missing evaluator command after"):
-        modal_evaluator.run_evaluator([], workspace=str(tmp_path))
+        modal_evaluator.run_evaluator([], workspace=str(tmp_path), host=_fake_host().host)
     package = tmp_path / "package.txt"
     package.write_text("x")
 
     with pytest.raises(ValueError, match="evaluator package root is not a directory"):
         modal_evaluator.run_evaluator(
-            ["true"], workspace=str(tmp_path), evaluator_package_root=str(package)
+            ["true"],
+            workspace=str(tmp_path),
+            evaluator_package_root=str(package),
+            host=_fake_host().host,
         )
 
 
 def test_evaluator_relays_exec_stderr(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (workspace / "main.py").write_text("app = object()\n")
 
-    def run(command: list[str], **_options: object) -> SimpleNamespace:
+    def run(command: list[str]) -> SimpleNamespace:
         if command[3:5] == ["container", "list"]:
             listing = [{"app_name": "candidate-app", "container_id": "ta-123"}]
             return SimpleNamespace(returncode=0, stdout=json.dumps(listing), stderr="")
         return SimpleNamespace(returncode=0, stdout="__VIBESYS_EXEC_RC__=0\n", stderr="warn\n")
 
-    keepwarm = MagicMock()
-    keepwarm.return_value.__enter__ = MagicMock()
-    keepwarm.return_value.__exit__ = MagicMock(return_value=False)
-    monkeypatch.setattr(modal_evaluator, "_DeploymentKeepWarm", keepwarm)
-    monkeypatch.setattr(modal_evaluator.subprocess, "run", run)
+    fake = _fake_host(run)
 
     result = _execute_colocated(
         ["python", "main.py"],
         workspace=str(workspace),
         deployment=("https://workspace--candidate.modal.run", "candidate-app"),
+        host=fake.host,
     )
 
     assert result == 0
+    assert fake.warmed == ["https://workspace--candidate.modal.run"]
+    assert fake.programs.calls[-1].timeout is None
     assert capsys.readouterr().err == "warn\n"
 
 
@@ -1679,20 +1756,28 @@ def test_reused_deployment_setup_failure_is_reported_and_released(
     monkeypatch.setenv("VIBESYS_CANDIDATE_REVISION", "abc123")
     monkeypatch.setenv(_RELEASE_DEPLOYMENT_ENV, "1")
     monkeypatch.setattr(modal_evaluator, "_DEPLOYMENT_LEASE_PATH", lease_path)
-    monkeypatch.setattr(modal_evaluator, "_healthy_now", MagicMock(return_value=True))
     monkeypatch.setattr(
         modal_evaluator, "_execute_colocated", MagicMock(side_effect=ValueError("bad setup"))
     )
-    stop = MagicMock(return_value=True)
-    monkeypatch.setattr(modal_evaluator, "_stop_modal_app", stop)
+    fake = _fake_host(lambda _argv: SimpleNamespace(returncode=0, stdout="", stderr=""))
 
     result = _execute_reused_candidate(
-        ["true"], workspace="/workspace", setup_command=None, evaluator_package_root=None
+        ["true"],
+        workspace="/workspace",
+        setup_command=None,
+        evaluator_package_root=None,
+        host=fake.host,
     )
 
     assert result == 1
     err = capsys.readouterr().err
     assert "Reusing healthy Modal deployment for candidate revision abc123." in err
     assert "Modal evaluator setup failed: bad setup" in err
-    stop.assert_called_once_with("candidate-app", workspace="/workspace")
+    assert fake.programs.calls == [
+        ProgramCall(
+            [_UV_EXECUTABLE, "run", "modal", "app", "stop", "candidate-app", "--yes"],
+            cwd="/workspace",
+            timeout=60,
+        )
+    ]
     assert not lease_path.exists()

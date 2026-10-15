@@ -50,9 +50,9 @@ from vs_sim.api import ProcessTimeoutError, Threads
 from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Coroutine, Mapping, Sequence
 
-    from vs_sim.api import Condition, Event, Lock, Worker
+    from vs_sim.api import Condition, Event, Lock, ThreadLocal, Worker
 
 _GROUP_PERMISSION_ERROR = "process group is not signalable"
 
@@ -129,7 +129,7 @@ class _StuckDrainWorker:
     def join(self, timeout: float | None = None) -> None:
         self.join_timeouts.append(timeout)
         if self.is_alive() and timeout is not None:
-            self._threads.advance_to(self._threads.now() + timeout)
+            self._threads.advance(timeout)
 
 
 class _StuckDrainThreads:
@@ -158,14 +158,20 @@ class _StuckDrainThreads:
     def event(self) -> Event:
         return self._threads.event()
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        return self._threads.local(initial)
+
     def sleep(self, seconds: float) -> None:
-        self.advance_to(self.now() + seconds)
+        self._threads.advance(seconds)
 
     def now(self) -> float:
         return self._threads.now()
 
-    def advance_to(self, instant: float) -> None:
-        self._threads.advance_to(instant)
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        return self._threads.run_async(main)
+
+    def advance(self, seconds: float) -> None:
+        self._threads.advance(seconds)
 
     def release_drains(self) -> None:
         self.drains_released = True
@@ -186,7 +192,7 @@ class _StuckSkyPilotProcess:
         if timeout is None:
             raise AssertionError
         if len(self.wait_timeouts) > 1:
-            self._threads.advance_to(self._threads.now() + timeout)
+            self._threads.advance(timeout)
         raise ProcessTimeoutError(("sky",), timeout)
 
     def kill_group(self) -> None:
@@ -232,11 +238,17 @@ class _RecordingThreads:
     def event(self) -> Event:
         return self._threads.event()
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        return self._threads.local(initial)
+
     def sleep(self, seconds: float) -> None:
         self._threads.sleep(seconds)
 
     def now(self) -> float:
         return self._threads.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        return self._threads.run_async(main)
 
     def run[T](self, main: Callable[[], T]) -> T:
         return self._threads.run(main)
@@ -393,6 +405,7 @@ def test_subprocess_timeout_kills_the_group_and_bounds_all_cleanup_waits() -> No
         cleanup_timeout=7,
     )
 
+    started = threads.now()
     with pytest.raises(ProcessTimeoutError) as caught:
         runner.run(("sky", "status"), timeout=3)
 
@@ -400,7 +413,7 @@ def test_subprocess_timeout_kills_the_group_and_bounds_all_cleanup_waits() -> No
     assert process.group_kills == 1
     assert process.wait_timeouts == [3, 7]
     assert [worker.join_timeouts for worker in threads.workers] == [[0], [0]]
-    assert threads.now() == 8
+    assert threads.now() - started == 7
 
 
 def test_normal_exit_with_stuck_drains_reaps_workers_and_closes_pipes_after_group_kill() -> None:
@@ -412,6 +425,7 @@ def test_normal_exit_with_stuck_drains_reaps_workers_and_closes_pipes_after_grou
         cleanup_timeout=7,
     )
 
+    started = threads.now()
     with pytest.raises(SkyPilotCLIError, match="process group was killed"):
         runner.run(("sky", "status"))
 
@@ -421,7 +435,7 @@ def test_normal_exit_with_stuck_drains_reaps_workers_and_closes_pipes_after_grou
     assert all(not worker.is_alive() for worker in threads.workers)
     assert process.stdout.closed
     assert process.stderr.closed
-    assert threads.now() == 8
+    assert threads.now() - started == 7
 
 
 def test_timeout_cancels_blocked_bridge_sink_without_retaining_drain_workers_or_pipes() -> None:
@@ -946,6 +960,46 @@ def test_inspect_cluster_rejects_invalid_json_with_message() -> None:
 
     with pytest.raises(SkyPilotOutputError, match="status returned invalid JSON"):
         runner.inspect_cluster("lease")
+
+
+_WHOLE_STATUS = json.dumps([{"name": "lease", "status": "UP"}])
+_WHOLE_QUEUE = json.dumps({"lease": [{"job_name": "j", "job_id": 7, "status": "RUNNING"}]})
+
+
+@given(cut=st.integers(min_value=0, max_value=len(_WHOLE_STATUS) - 1))
+def test_a_cut_status_reply_is_an_error_never_an_absent_cluster(cut: int) -> None:
+    """Every proper prefix of a status document is unknown, not "the cluster is gone"."""
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=_WHOLE_STATUS[:cut])]))
+
+    with pytest.raises(SkyPilotOutputError):
+        runner.inspect_cluster("lease")
+
+
+@given(cut=st.integers(min_value=0, max_value=len(_WHOLE_QUEUE) - 1))
+def test_a_cut_queue_reply_is_an_error_never_an_absent_job(cut: int) -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=_WHOLE_QUEUE[:cut])]))
+
+    with pytest.raises(SkyPilotOutputError):
+        runner.query_job("lease", job_name="j")
+
+
+@pytest.mark.parametrize("stdout", ["{}", '{"error": "boom"}', '{"clusters": null}'])
+def test_a_status_object_without_its_cluster_list_is_not_an_absent_cluster(stdout: str) -> None:
+    runner = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))
+
+    with pytest.raises(SkyPilotOutputError, match="must contain a cluster list"):
+        runner.inspect_cluster("lease")
+
+
+@pytest.mark.parametrize("stdout", ["[" * 100_000, "{" * 100_000, '{"lease": ' * 50_000])
+def test_absurdly_nested_control_output_is_a_typed_error(stdout: str) -> None:
+    status = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))
+    queue = SkyPilotJobRunner(FakeCommandRunner([_result(stdout=stdout)]))
+
+    with pytest.raises(SkyPilotOutputError):
+        status.inspect_cluster("lease")
+    with pytest.raises(SkyPilotOutputError):
+        queue.query_job("lease", job_name="j")
 
 
 def test_ensure_rejects_unknown_cluster_status() -> None:

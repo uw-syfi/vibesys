@@ -23,10 +23,12 @@ from tests.support import run_test_command
 from vs_agent.api.images import (
     agent_image,
 )
+from vs_sandbox.api import SubprocessDockerCli
 from vs_sandbox.docker_sandbox import (
     DockerSandbox,
 )
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
 
 pytestmark = pytest.mark.e2e
 
@@ -92,11 +94,13 @@ def test_docker_probe_enforces_the_shared_resource_contract(tmp_path: Path) -> N
     unlisted_path.write_text("do not read\n")
     resources = (HostResource(readonly_path, HostResourceAccess.READ_ONLY, "conformance fixture"),)
 
-    image = agent_image(_DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S)
+    image = agent_image(_DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock())
     sandbox = DockerSandbox(
         host_workspace=str(workspace),
         image=image,
         resources=resources,
+        docker=SubprocessDockerCli(processes=OsProcesses()),
+        threads=OsThreads(),
     )
     sandbox.start()
     try:
@@ -151,8 +155,14 @@ def test_a_sandbox_container_exits_on_sigterm_so_stop_needs_no_sigkill(tmp_path:
     """
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    image = agent_image(_DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S)
-    sandbox = DockerSandbox(host_workspace=str(workspace), image=image, auto_remove=False)
+    image = agent_image(_DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock())
+    sandbox = DockerSandbox(
+        host_workspace=str(workspace),
+        image=image,
+        auto_remove=False,
+        docker=SubprocessDockerCli(processes=OsProcesses()),
+        threads=OsThreads(),
+    )
     sandbox.start()
     try:
         container = sandbox.container_id

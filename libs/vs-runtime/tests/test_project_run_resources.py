@@ -7,6 +7,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import REAL_GIT
 
 from vs_project.api import (
     GitError,
@@ -28,6 +29,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
 )
 from vs_runtime.api.testing import FakeProjectMaterializationEffects
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,6 +80,7 @@ def _materializer(root: Path) -> ProjectMaterializer:
         log=lambda _message: None,
         sdk_roots=SDKRoots(checkout=root.parent / "sdk", packaged=root.parent / "sdk"),
         excluded_dirs=(),
+        git=REAL_GIT,
     )
 
 
@@ -99,6 +102,7 @@ def _effects(events: list[str]) -> ProjectRunEffects:
         git_repository=_DISK.repository,
         log_emit=emit,
         on_log_ready=on_log_ready,
+        clock=ManualClock(),
     )
 
 

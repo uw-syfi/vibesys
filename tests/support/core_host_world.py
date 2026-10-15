@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING
 from tests.support.core_plugins import EmptyOptions, capability_plugin
 from tests.support.docker_environment import host_container_backend
 
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.host import open_product_core_host
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
 from vs_runtime.api.core import RunTiming
-from vs_sim.api import SystemClock
+from vs_runtime.api.testing import FakeStopTimer
+from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -30,7 +32,9 @@ if TYPE_CHECKING:
 
 
 def _resumable_client(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 @asynccontextmanager
@@ -47,10 +51,14 @@ async def open_core_host(
         integration,
         plugin=plugin or capability_plugin(request.orchestration.id),
         options=EmptyOptions(),
-        timing=RunTiming(SystemClock(), 60.0),
+        timing=RunTiming(SystemClock(), 60.0, OsThreads()),
         agent_client_factory=_resumable_client,
         backend_factory=backend_factory,
         invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+        stop_timer=FakeStopTimer(threads=OsThreads()),
+        blocking=ThreadBlockingRunner(),
+        network=UnixNetwork(),
+        profiler_preflight=FakeProfilerPreflight(),
     ) as host:
         yield host
 

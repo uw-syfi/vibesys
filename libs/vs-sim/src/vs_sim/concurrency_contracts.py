@@ -10,6 +10,7 @@ asserts outcomes, never durations.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -79,6 +80,32 @@ class ThreadsContract:
                 return ran
 
             assert sorted(subject.run(program)) == list(range(count)), seed
+
+    def test_each_thread_sees_its_own_local_value(self) -> None:
+        """A thread's writes to its local value are invisible to every other thread."""
+        for seed in range(_CASES):
+            subject = self.threads_under_test(seed)
+            count = SeededRandom(seed).randint(1, 6)
+
+            def program(subject: ThreadsUnderTest = subject, count: int = count) -> list[list[int]]:
+                local = subject.threads.local(list[int])
+                local.get().append(-1)
+                seen: dict[int, list[int]] = {}
+
+                def work(i: int) -> None:
+                    local.get().append(i)
+                    seen[i] = list(local.get())
+
+                workers = [
+                    subject.threads.spawn(lambda i=i: work(i), name=f"w{i}") for i in range(count)
+                ]
+                for worker in workers:
+                    _join(worker)
+                return [local.get(), *(seen[i] for i in range(count))]
+
+            mine, *theirs = subject.run(program)
+            assert mine == [-1], seed
+            assert theirs == [[i] for i in range(count)], seed
 
     def test_a_worker_keeps_its_name(self) -> None:
         """The handle reports the name the thread was spawned with."""
@@ -329,6 +356,50 @@ class ThreadsContract:
             return threads.now() - start
 
         assert abs(subject.run(program) - 5.0) < 1e-9
+
+    def test_run_async_is_woken_by_a_callback_from_another_thread(self) -> None:
+        """A loop waiting on another thread's result gets it, with its own timers running."""
+        for seed in range(_CASES):
+            subject = self.threads_under_test(seed)
+            threads = subject.threads
+            tick = subject.tick
+
+            async def main(threads: Threads = threads, tick: float = tick) -> list[str]:
+                loop = asyncio.get_running_loop()
+                answer: asyncio.Future[str] = loop.create_future()
+                order: list[str] = []
+
+                def worker() -> None:
+                    threads.sleep(tick)
+                    loop.call_soon_threadsafe(answer.set_result, "worker")
+
+                threads.spawn(worker, name="worker")
+                # test-isolation: the loop's own timer, on whichever timeline the loop runs
+                await asyncio.sleep(tick / 2)
+                order.append("timer")
+                order.append(await asyncio.wait_for(answer, HANG_GUARD_S))
+                return order
+
+            def program(threads: Threads = threads, main: Callable[[], Any] = main) -> object:
+                return threads.run_async(main())
+
+            assert subject.run(program) == ["timer", "worker"], seed
+
+    def test_run_async_timers_overlap_other_threads_sleeps_on_an_exact_clock(self) -> None:
+        """A loop's sleep and a thread's sleep started together end together."""
+        subject = self.threads_under_test(0)
+        if not subject.exact:
+            return
+        threads = subject.threads
+
+        async def main() -> float:
+            start = threads.now()
+            threads.spawn(lambda: threads.sleep(5.0), name="sleeper")
+            # test-isolation: the loop runs on the simulated timeline, so this costs no wall time
+            await asyncio.sleep(5.0)
+            return threads.now() - start
+
+        assert abs(subject.run(lambda: threads.run_async(main())) - 5.0) < 1e-9
 
 
 @dataclass(frozen=True)

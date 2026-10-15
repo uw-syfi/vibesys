@@ -15,6 +15,7 @@ from uuid import UUID
 
 import pytest
 from tests.support.multi_search import SearchRecord
+from tests.support.real_git import REAL_GIT
 
 from entrypoints.chat_tools_server import build_parser, build_tools
 from launch import open_run_store
@@ -31,6 +32,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
     RunExecutionRecord,
 )
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -154,7 +156,7 @@ async def _call(server: FastMCP, name: str, **kwargs: object) -> str:
 def _tools(tmp_path: Path) -> tuple[tuple[ToolSpec, ...], str]:
     project, run_id = _project_with_run(tmp_path)
     _seed_agent_state(project, run_id)
-    store = open_run_store(project)
+    store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
     return build_tools(store, project, run_id), run_id
 
 
@@ -204,7 +206,7 @@ class TestToolRegistration:
 
     def test_build_tools_fails_fast_on_an_unknown_run(self, tmp_path: Path) -> None:
         project, _run_id = _project_with_run(tmp_path)
-        store = open_run_store(project)
+        store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
 
         with pytest.raises(Exception, match="no-such-run"):  # vs_project.ProjectStateError
             build_tools(store, project, "no-such-run")

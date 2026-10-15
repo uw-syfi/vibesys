@@ -12,6 +12,7 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from vs_evaluation.lifecycle import is_finished
+from vs_sim.api import yield_now
 from vs_sim.api.testing import wait_until_started
 
 if TYPE_CHECKING:
@@ -26,7 +27,7 @@ async def _ended(executor: EvaluationExecutor, handle_id: str) -> None:
             return
         await executor.wait_for_change(handle_id, timeout_s=float("inf"))
         # A fake may return at once; yield so the test's own tasks still run.
-        await asyncio.sleep(0)
+        await yield_now()
 
 
 async def wait_until_executor_started(

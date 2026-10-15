@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_runtime.api import RuntimeContractError
+from vs_runtime.api.core import BaselineEntry, RootBaselineDrift
 from vs_runtime.api.infrastructure import (
     AgentExecutionScope,
     BlockingOperations,
@@ -22,8 +23,10 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import (
     FakeWorkspace,
+    MemoryValidationPasses,
 )
 from vs_sandbox.api import CommandResult
+from vs_sim.api import ThreadBlockingRunner
 from vs_sim.api.testing import GatedBlockingRunner, arrival
 
 if TYPE_CHECKING:
@@ -78,6 +81,13 @@ class _Resource:
 
     def unversioned_paths(self) -> tuple[str, ...]:
         return ()
+
+    def baseline_entries(self, paths: tuple[str, ...]) -> tuple[BaselineEntry, ...]:
+        return tuple(BaselineEntry(path=path) for path in paths)
+
+    def baseline_drift(self, entries: tuple[BaselineEntry, ...]) -> RootBaselineDrift:
+        del entries
+        return RootBaselineDrift()
 
     def matches_revision(
         self, revision: str, *, exact_keeping: tuple[str, ...] | None = None
@@ -233,7 +243,9 @@ def _runtime(provider: _Provider, runner: GatedBlockingRunner | None = None) -> 
         pytest.fail("workspace-only test opened an agent client")
 
     return create_workspace_runtime(
-        workspace_resources=provider, blocking=BlockingOperations(runner)
+        workspace_resources=provider,
+        blocking=BlockingOperations(runner or ThreadBlockingRunner()),
+        validation_passes=MemoryValidationPasses(),
     )
 
 

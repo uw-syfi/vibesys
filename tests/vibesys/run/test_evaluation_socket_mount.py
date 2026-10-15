@@ -12,19 +12,23 @@ import os
 import tempfile
 from pathlib import Path
 
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
 
 from vibesys.api.request import RunEnvironmentSpec
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.evaluation_socket import evaluation_socket_path
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
 from vs_runtime.api.core import RunTiming
+from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 
 def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]:
@@ -36,9 +40,16 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
     engine = FakeDockerEngine(root / "engine")
 
     def backend_factory(
-        _name: object, *, log_dir: Path, log: object = None, image: str | None = None
+        _name: object,
+        *,
+        log_dir: Path,
+        log: object = None,
+        image: str | None = None,
+        clock: object,
+        events: object | None = None,
     ) -> _DaemonBackend:
-        made = _DaemonBackend(log_dir, log=log, image=image)  # ty: ignore[invalid-argument-type]
+        del clock, events  # the fake backend records no timestamps and has no device to watch
+        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
         made.engine = engine
         return made
 
@@ -50,7 +61,13 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             ),
         }
     )
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     clock = VirtualClock(at=0.0)
 
     def reaches(run_id: str) -> list[bool]:
@@ -69,12 +86,16 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             integration,
             plugin=_plugin(templates),
             options=EmptyOptions(),
-            timing=RunTiming(clock, 60.0),
+            timing=RunTiming(clock, 60.0, OsThreads()),
             agent_client_factory=lambda **_: FakeAgentClient(
-                capabilities=AgentCapabilities(provider_session_resume=True)
+                capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
             ),
             backend_factory=backend_factory,
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+            stop_timer=FakeStopTimer(threads=OsThreads()),
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            profiler_preflight=FakeProfilerPreflight(),
         ) as host:
             for _ in range(candidates):
                 await host.workspaces.create_candidate()

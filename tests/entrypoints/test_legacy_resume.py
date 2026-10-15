@@ -14,16 +14,18 @@ from tests.support.task_project import write_task
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.headless import main as headless_main
+from entrypoints.production import production_runs
 from entrypoints.run import run_headless
 from entrypoints.server import main as server_main
-from launch import default_runs
 from vibesys.api import ConfigurationError
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
+from vs_sim.api.testing import FakeSignalSource
 
 if TYPE_CHECKING:
     from pathlib import Path
+
 
 _RUN_ID = "20260811-120000-11111111-dynamic"
 _NOW = datetime(2026, 8, 11, 12, tzinfo=UTC)
@@ -44,7 +46,7 @@ def _project(root: Path) -> Path:
 def _legacy_run(root: Path, *, state: bytes | None) -> Path:
     """Record a dynamic run; `state` is the legacy loop's state file, when it wrote one."""
     project = Project.open(root)
-    project.state.create_project(root.name)
+    project.state.create_project(root.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = project.state.new_run_manifest(
         root.name,
         run_id=_RUN_ID,
@@ -153,7 +155,7 @@ def test_the_session_guards_a_request_that_skipped_validation(
     )
 
     with pytest.raises(ConfigurationError) as raised:
-        run_headless(request, default_runs())
+        run_headless(request, production_runs(), FakeSignalSource())
 
     assert raised.value.diagnostic.code == _CODE
     assert _RUN_ID in raised.value.diagnostic.message

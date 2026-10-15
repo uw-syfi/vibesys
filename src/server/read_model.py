@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from server.events import ConfigurationFailedData, EventStatus, EventType, RunEvent
+from vibesys.api import read_latest_run_log
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -147,18 +148,6 @@ class RunInspector:
                 chunks.append(f"--- {document.name} ---\n" + "\n".join(lines[start : start + 80]))
         return "\n\n".join(chunks) or f"No persisted detail found for round {number}."
 
-    def latest_run_log(self) -> Path | None:
-        """Return the newest regular run log, if the integration has a log directory."""
-        log_dir = self.integration.log_dir
-        if log_dir is None:
-            return None
-        candidates = sorted(
-            path for path in log_dir.glob("run-*.log") if path.is_file() and not path.is_symlink()
-        )
-        if candidates:
-            return candidates[-1]
-        return None
-
     def _status_answer(self, question: str, answer: str) -> str:
         self.integration.record(EventType.STATUS_QUERY, question)
         return answer
@@ -175,14 +164,10 @@ class RunInspector:
                 for item in attached_run.history_documents()
                 if item.relative_path.suffix in {".json", ".jsonl", ".log", ".md", ".txt"}
             )
-        latest = self.latest_run_log()
+        log_dir = self.integration.log_dir
+        latest = read_latest_run_log(log_dir) if log_dir is not None else None
         if latest is not None:
-            documents.append(
-                _HistoryDocument(
-                    name=latest.name,
-                    text=latest.read_text(encoding="utf-8", errors="replace"),
-                )
-            )
+            documents.append(_HistoryDocument(name=latest.name, text=latest.text))
         return documents
 
     def _search_latest(self, terms: tuple[str, ...], label: str) -> str:

@@ -25,7 +25,10 @@ import type {Store} from '@vibesys/store';
 import {Button, Dialog} from '@vibesys/ui';
 import {type JSX, type ReactNode, useEffect, useState, useSyncExternalStore} from 'react';
 import {bootstrapGateway, fetchCampaignFixture} from '../platform/backend.js';
+import type {WebThemeController} from './theme.js';
+import {WebThemePicker} from './theme-picker.js';
 import '@vibesys/ui/tokens.css';
+// Each feature styles its own views; the page frame is the entry's `styles.css`.
 import '@vibesys/feature-gateway-connect/styles.css';
 import '@vibesys/feature-run-view/styles.css';
 import '@vibesys/feature-campaign/styles.css';
@@ -50,6 +53,8 @@ export interface DemoAppOptions {
   readonly onGatewayConnected: (connection: GatewayConnection) => void;
   readonly initialGatewayError?: string | null;
   readonly initialGatewayTarget?: GatewayBootstrapTarget | null;
+  /** The page-owned preference survives replacement of replay and live run surfaces. */
+  readonly theme: WebThemeController;
 }
 
 export interface DemoAppServices {
@@ -69,6 +74,7 @@ export function createDemoApp(
     onGatewayConnected,
     initialGatewayError = null,
     initialGatewayTarget = null,
+    theme,
   }: DemoAppOptions,
   services: DemoAppServices = DEFAULT_DEMO_SERVICES,
 ): PreviewPage {
@@ -86,11 +92,13 @@ export function createDemoApp(
   campaign.dispatch({type: 'load'});
   return {
     view: (
-      <Demo
-        campaign={campaign}
-        gateway={gateway}
-        initialOpen={initialGatewayError !== null || initialGatewayTarget !== null}
-      />
+      <WebAppShell theme={theme}>
+        <Demo
+          campaign={campaign}
+          gateway={gateway}
+          initialOpen={initialGatewayError !== null || initialGatewayTarget !== null}
+        />
+      </WebAppShell>
     ),
     close: () => {
       gateway.dispatch({type: 'cancel'});
@@ -245,10 +253,29 @@ export function createLiveCampaignApp(stream: CampaignStream): PreviewPage {
   };
 }
 
-/** The live page over the existing session machine, shared with the desktop entry. */
-export function createLiveApp(session: WebSession): JSX.Element {
+/** The live page over `session`, which this starts, shared with the desktop entry. */
+export function createLiveApp(session: WebSession, theme: WebThemeController): JSX.Element {
   void session.start();
-  return <Live session={session} run={session.store} />;
+  return (
+    <WebAppShell theme={theme}>
+      <Live session={session} run={session.store} />
+    </WebAppShell>
+  );
+}
+
+function WebAppShell({
+  theme,
+  children,
+}: {
+  readonly theme: WebThemeController;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <>
+      <WebThemePicker theme={theme} />
+      {children}
+    </>
+  );
 }
 
 type RunView = 'run' | 'campaign';

@@ -318,3 +318,49 @@ def test_a_blocked_record_holds_closure_only_while_a_cancellation_of_its_resourc
     ]
     assert bool(held) == (accepted or identified)
     assert all(wait.producer is None for wait in held)
+
+
+@given(named=st.booleans())
+def test_a_blocked_record_is_carried_only_by_the_commands_it_names(*, named: bool) -> None:
+    """A cancellation in flight carries the closing run's wait on a record only when named.
+
+    The record's ``addressed_by`` is written as each command about it is registered (#2428), so
+    a live cancellation the record does not name is nothing it waits on.
+    """
+    state = _silent(core.RequestPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
+    record = state.records.records[0]
+    assert record.observation is not None
+    observation = record.observation.model_copy(
+        update={"accepted": True, "resource_id": core.ResourceId(root="job")}
+    )
+    cancel = core.CancelOwnedResource(
+        request_id=core.RequestId(root="cancel"),
+        scope=record.request.scope,
+        admission_id=record.request.admission_id,
+        resource_id=core.ResourceId(root="job"),
+        target=record.request_id,
+    )
+    in_flight = record.model_copy(
+        update={
+            "request_id": cancel.request_id,
+            "request": cancel,
+            "phase": core.RequestPhase.DISPATCHED,
+            "observation": None,
+            "lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE,
+        }
+    )
+    held = record.model_copy(
+        update={
+            "observation": observation,
+            "addressed_by": (cancel.request_id,) if named else (),
+        }
+    )
+    state = state.model_copy(
+        update={
+            "records": state.records.model_copy(update={"records": (held, in_flight)}),
+        }
+    )
+    [wait] = [
+        wait for wait in core.waits(stopped(state)) if wait.waiter == core.WaitKind.BLOCKED_RECORD
+    ]
+    assert wait.producer == (core.Producer.PENDING_REQUEST if named else None)

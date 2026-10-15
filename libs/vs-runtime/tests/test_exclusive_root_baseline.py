@@ -14,6 +14,7 @@ The host dies at any durable write or restore step, exactly as in
 from __future__ import annotations
 
 import asyncio
+import shutil
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -24,6 +25,7 @@ from tests.support.workspace_world import WorkspaceEnv, open_workspace_env
 
 from vs_core.api import DiscardWorkspace, ObservationStatus, WorkspaceMode, WorkspacePlan
 from vs_runtime.api.core import revision_ref
+from vs_runtime.api.infrastructure import RootBaselineDrifted
 from vs_sim.api.testing import examples, swept
 
 from .test_exclusive_root_attempts import (
@@ -44,6 +46,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_project.api import GitRepository
+    from vs_runtime.api.infrastructure import WorkspaceResourceEvent
 
 # Each example builds real workspaces. A pull request draws a sample; the nightly depth
 # (`--depth=nightly`) searches deeper.
@@ -211,3 +214,68 @@ def test_a_host_that_dies_in_the_first_restore_loses_no_pre_run_file(
     first = Step(_NEVER, _NEVER, restore_dies_at, creates=_LEFTOVERS, modifies=())
     later = Step(_NEVER, _NEVER, restore_dies_at, creates=_LEFTOVERS, modifies=())
     _play(tmp_path_factory, monkeypatch, _PRE_RUN, [first, later])
+
+
+# The restore keeps a baseline path no matter what an attempt did to it (above), but an
+# attempt that changed or removed one is reported when its hold of the root ends: a
+# standalone file ("notes.txt", never collapsed: see `GitTracker._collapse_untracked`) is
+# checked for a content change or removal, and a baseline directory with no tracked files
+# (".venv/", collapsed to one entry) is checked for removal only (#2100).
+_NOTES_ACTIONS = ("unchanged", "modified", "removed")
+
+
+async def _drift_steps(
+    env: WorkspaceEnv, events: list[WorkspaceResourceEvent], notes_action: str, *, venv_gone: bool
+) -> None:
+    host = Host(env, RestoreCrash())
+    root = env.hosts[-1].root
+    (root.path / ".gitignore").write_text(_IGNORE_RULES, encoding="utf-8")
+    await root.snapshot("ignore rules")
+    base = revision_ref(cast("str", root.revision))
+    plan = WorkspacePlan(mode=_ROOT, base=base)
+    _write_pre_run(root.path, (".venv/bin/python", "notes.txt"))
+    attempt = _attempt("a0")
+    granted = await host.run(_ensure(attempt, "ensure-0", plan))
+    assert _status(granted) is ObservationStatus.SUCCEEDED
+    assert events == []
+    if notes_action == "modified":
+        (root.path / "notes.txt").write_text("modified by a0\n", encoding="utf-8")
+    elif notes_action == "removed":
+        (root.path / "notes.txt").unlink()
+    if venv_gone:
+        shutil.rmtree(root.path / ".venv")
+    discard = DiscardWorkspace(**_common(attempt, "discard-0"), attempt=attempt)
+    released = await host.run(discard)
+    assert _status(released) is ObservationStatus.SUCCEEDED
+    modified = ("notes.txt",) if notes_action == "modified" else ()
+    removed = tuple(
+        name
+        for name, gone in ((".venv/", venv_gone), ("notes.txt", notes_action == "removed"))
+        if gone
+    )
+    expected = (
+        [RootBaselineDrifted(modified=modified, removed=removed)] if modified or removed else []
+    )
+    assert events == expected
+
+
+@settings(
+    max_examples=examples(pr=3, nightly=6),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(notes_action=st.sampled_from(_NOTES_ACTIONS), venv_gone=st.booleans())
+def test_an_attempt_that_changes_or_removes_a_pre_run_file_is_reported(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    notes_action: str,
+    *,
+    venv_gone: bool,
+) -> None:
+    path = tmp_path_factory.mktemp("baseline-drift")
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(path / "operator-state"))
+    events: list[WorkspaceResourceEvent] = []
+    with open_workspace_env(path, memory_paths=(_ARTIFACT_DIR,), events=events.append) as env:
+        asyncio.run(_drift_steps(env, events, notes_action, venv_gone=venv_gone))
+        for workspaces in env.hosts:
+            asyncio.run(workspaces.close())

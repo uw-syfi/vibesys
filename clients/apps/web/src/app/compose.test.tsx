@@ -11,6 +11,7 @@ import {targetFromCapability} from '@vibesys/feature-gateway-connect/renderer';
 import {FakeLifecycle, sessionWith} from '@vibesys/run-session/testing';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createDemoApp, createLiveApp, createLiveCampaignApp} from './compose.js';
+import {createWebThemeController} from './theme.js';
 
 const campaignRecord = parseReplayScenario(
   JSON.parse(
@@ -49,6 +50,13 @@ function runningBestPath(markup: string): string {
   return path;
 }
 
+function fakeTheme(): ReturnType<typeof createWebThemeController> {
+  return createWebThemeController(
+    {dataset: {}, style: {setProperty: () => undefined}},
+    {read: () => null, save: () => undefined, remove: () => undefined},
+  );
+}
+
 test('renders an initial capability launch before its exchange settles', () => {
   const target = targetFromCapability(
     'http://127.0.0.1:5173/',
@@ -61,6 +69,7 @@ test('renders an initial capability launch before its exchange settles', () => {
       page: 'http://127.0.0.1:5173/',
       initialGatewayTarget: {...target, bootstrapUrl: target.bootstrapUrl},
       onGatewayConnected: () => undefined,
+      theme: fakeTheme(),
     },
     {
       bootstrap: (url, signal) => {
@@ -88,7 +97,7 @@ test('renders an initial capability launch before its exchange settles', () => {
 
 test('campaign preview loads through its campaign service alone', async () => {
   const app = createDemoApp(
-    {page: 'http://127.0.0.1:5173/', onGatewayConnected: () => undefined},
+    {page: 'http://127.0.0.1:5173/', onGatewayConnected: () => undefined, theme: fakeTheme()},
     {
       bootstrap: async () => 'unused',
       loadCampaign: async () => campaignRecord,
@@ -122,7 +131,7 @@ test('the page owner releases a preview stream independently of React render lif
 test('the live page defaults to the run view, with a toggle into the live campaign view', () => {
   const {session} = sessionWith(new FakeLifecycle());
 
-  const html = renderToStaticMarkup(createLiveApp(session));
+  const html = renderToStaticMarkup(createLiveApp(session, fakeTheme()));
 
   expect(html).toContain('VIBESYS / RUN VIEWER');
   expect(html).toContain('id="run-campaign-toggle"');

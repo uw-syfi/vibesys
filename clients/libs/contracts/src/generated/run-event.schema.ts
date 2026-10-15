@@ -3,6 +3,7 @@
 const runEventSchema: Record<string, unknown> = {
   "$defs": {
     "AgentExecutionActivityData": {
+      "additionalProperties": false,
       "description": "Complete current activity for an active agent execution.",
       "properties": {
         "kind": {
@@ -47,6 +48,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "AgentExecutionFinishedData": {
+      "additionalProperties": false,
       "description": "Terminal result for one agent execution.",
       "properties": {
         "kind": {
@@ -79,6 +81,7 @@ const runEventSchema: Record<string, unknown> = {
       ]
     },
     "AgentExecutionStartedData": {
+      "additionalProperties": false,
       "description": "Semantic context for one prompt-to-result agent execution.",
       "properties": {
         "kind": {
@@ -150,6 +153,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "AgentOutputChunkData": {
+      "additionalProperties": false,
       "description": "Incremental output produced during agent execution.",
       "properties": {
         "kind": {
@@ -194,6 +198,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "AgentStatusData": {
+      "additionalProperties": false,
       "description": "Structured progress readings for one agent invocation.\n\nCarried on presentation events so renderers can format their own status\nprefix (e.g. ``[Round 3/24 | Implementer | 12.3s | 20k/1.0M]``) without\nthe server baking any layout or styling into the payload.",
       "properties": {
         "progress": {
@@ -247,6 +252,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "BenchmarkResultData": {
+      "additionalProperties": false,
       "description": "Metric result emitted by a benchmark stage.",
       "properties": {
         "kind": {
@@ -278,6 +284,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "ChatData": {
+      "additionalProperties": false,
       "description": "Completed answer and optional thread-turn identity.",
       "properties": {
         "kind": {
@@ -323,6 +330,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "ChatThreadCreatedData": {
+      "additionalProperties": false,
       "description": "Identity and resolved agent settings for one experiment-chat thread.\n\nReplayed by clients to rebuild the thread list; the default thread is\nimplicit and never records one of these.",
       "properties": {
         "kind": {
@@ -370,6 +378,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "string"
     },
     "CommandResultPayload": {
+      "additionalProperties": false,
       "description": "Structured result of a command-style tool execution.",
       "properties": {
         "kind": {
@@ -420,6 +429,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "ConfigurationFailedData": {
+      "additionalProperties": false,
       "description": "Diagnostic details for configuration-stage failure.",
       "properties": {
         "kind": {
@@ -692,6 +702,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "string"
     },
     "ExperimentsChangedData": {
+      "additionalProperties": false,
       "description": "Reason and revision for a changed experiment projection.",
       "properties": {
         "kind": {
@@ -744,6 +755,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "string"
     },
     "FrameworkWarningData": {
+      "additionalProperties": false,
       "description": "A non-fatal framework fault an operator should see.\n\nThe server projection also lifts this payload into the wire event's\n``diagnostic`` field so diagnostic-oriented clients need no new handling.",
       "properties": {
         "kind": {
@@ -793,6 +805,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "GateFinishedData": {
+      "additionalProperties": false,
       "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries the trailing command\noutput on failure. ``round_label`` groups the per-recipe local-validation\ngates of one attempt back together, so a client folds them into a\npass-fraction itself rather than the backend aggregating one.",
       "properties": {
         "kind": {
@@ -916,6 +929,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "string"
     },
     "GateStartedData": {
+      "additionalProperties": false,
       "description": "One framework gate began evaluating the current candidate.",
       "properties": {
         "kind": {
@@ -976,6 +990,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "InvocationFinishedData": {
+      "additionalProperties": false,
       "description": "Result or error recorded when a model invocation ends.",
       "properties": {
         "kind": {
@@ -1008,6 +1023,7 @@ const runEventSchema: Record<string, unknown> = {
       ]
     },
     "InvocationStartedData": {
+      "additionalProperties": false,
       "description": "Prompts submitted at the start of a model invocation.",
       "properties": {
         "kind": {
@@ -1034,6 +1050,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "IterationsChangedData": {
+      "additionalProperties": false,
       "description": "Semantic revision of the policy-owned iteration projection.",
       "properties": {
         "kind": {
@@ -1062,6 +1079,7 @@ const runEventSchema: Record<string, unknown> = {
       ]
     },
     "JsonResultPayload": {
+      "additionalProperties": false,
       "description": "A tool result that is a JSON object or array, already parsed.",
       "properties": {
         "kind": {
@@ -1092,6 +1110,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "JudgeResultData": {
+      "additionalProperties": false,
       "description": "Verdict and feedback returned by the judge.\n\nSee ``vibesys.events.JudgeResultData`` for ``skipped``/``skip_reason``/\n``implementer_outcome``.",
       "properties": {
         "kind": {
@@ -1163,6 +1182,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "OutputData": {
+      "additionalProperties": false,
       "description": "Captured line of server output and its stream.",
       "properties": {
         "kind": {
@@ -1198,6 +1218,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "PhaseData": {
+      "additionalProperties": false,
       "description": "Name and optional attempt number for a loop phase.",
       "properties": {
         "kind": {
@@ -1231,6 +1252,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "ProviderSwitchedData": {
+      "additionalProperties": false,
       "description": "The run replaced a provider by its fallback.\n\nSessions opened from now on run on ``to_provider`` and ``to_model`` as fresh\nconversations; a session already open does not move. Every later event\ncarries the provider and model it actually ran on.",
       "properties": {
         "kind": {
@@ -1276,6 +1298,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "QuotaAbandonedData": {
+      "additionalProperties": false,
       "description": "The quota policy ended a turn with the quota error instead of pausing or waiting longer.",
       "properties": {
         "kind": {
@@ -1316,6 +1339,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "QuotaPausedData": {
+      "additionalProperties": false,
       "description": "A turn stopped on a provider capacity limit and the run paused for it.\n\n``condition`` is ``quota_exhausted`` (a usage, spend or billing limit) or\n``rate_limited`` (sustained rate limiting); ``detail`` is the provider's\ndiagnostic and ``resets_at`` the epoch second the provider said capacity\nreturns, when it said. The run stays paused until it resumes; ``resumes_at`` is the\nepoch second the run's quota policy resumes it by itself, ``None`` when only the\noperator can. ``policy`` is the unattended quota policy; the fallback fields name the\nprovider and model an operator may resume with, ``None`` when none is configured.",
       "properties": {
         "kind": {
@@ -1410,6 +1434,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "QuotaResumedData": {
+      "additionalProperties": false,
       "description": "A run paused on a capacity limit resumed on the same provider and sent the turn again.",
       "properties": {
         "kind": {
@@ -1440,6 +1465,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "RateLimitUpdateData": {
+      "additionalProperties": false,
       "description": "One rate-limit window a provider reported, as semantic data.\n\n``exhausted`` is the resolved fact (the provider's own statement, else\nusage at or past 100%); the other fields are what the provider stated,\n``None`` when it did not state them. ``resets_at`` is epoch seconds.",
       "properties": {
         "kind": {
@@ -1533,6 +1559,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "RoundFinishedData": {
+      "additionalProperties": false,
       "description": "Summary of attempt, judge, and performance outcomes for a round.",
       "properties": {
         "kind": {
@@ -1593,6 +1620,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "RunConfiguredData": {
+      "additionalProperties": false,
       "description": "One per run: the resolved configuration a loop starts with.\n\nSee ``vibesys.events.RunConfiguredData`` for ``max_continuation_rounds``/\n``max_unmeasured_turns``.",
       "properties": {
         "kind": {
@@ -1700,6 +1728,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "RunFailedData": {
+      "additionalProperties": false,
       "description": "Why a run ended without a result to keep, with the counts behind it.",
       "properties": {
         "kind": {
@@ -1767,6 +1796,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "string"
     },
     "RunInterruptedData": {
+      "additionalProperties": false,
       "description": "Reason and optional signal for an interrupted run.",
       "properties": {
         "kind": {
@@ -1800,6 +1830,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "RunStartedData": {
+      "additionalProperties": false,
       "description": "Initial input and loop settings for a run.",
       "properties": {
         "kind": {
@@ -1846,6 +1877,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "RunStartupProgressData": {
+      "additionalProperties": false,
       "description": "A starting run reached ``stage``, or progressed within it.\n\nJournaled while the run acquires its resources, before it is ready. The\nstage only moves forward; ``progress`` is present when the stage reports\nit (an image build's steps done of total, and the step now running).",
       "properties": {
         "kind": {
@@ -1892,6 +1924,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "string"
     },
     "RunStatusChangedData": {
+      "additionalProperties": false,
       "description": "One move of the run through its lifecycle.\n\nCarries the whole transition so a client folds the status instead of\ninferring it: ``status`` is the new value and ``previous`` the one it\nreplaced. Which invocation boundary a pause landed on is on the event\nenvelope (``agent_kind``, ``round_label``, ``execution_id``) like every\nother execution-scoped fact, not repeated here.",
       "properties": {
         "kind": {
@@ -1916,6 +1949,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "ServerReadyData": {
+      "additionalProperties": false,
       "description": "Transport details emitted once the server is ready.",
       "properties": {
         "kind": {
@@ -1982,6 +2016,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "string"
     },
     "SubprocessOutputData": {
+      "additionalProperties": false,
       "description": "Captured output from a managed subprocess.",
       "properties": {
         "kind": {
@@ -2022,6 +2057,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "TodoItemData": {
+      "additionalProperties": false,
       "description": "One item in the agent's reported todo list.",
       "properties": {
         "content": {
@@ -2041,6 +2077,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "TodoUpdateData": {
+      "additionalProperties": false,
       "description": "Current todo list reported by an agent.",
       "properties": {
         "kind": {
@@ -2064,6 +2101,7 @@ const runEventSchema: Record<string, unknown> = {
       ]
     },
     "ToolCallData": {
+      "additionalProperties": false,
       "description": "Tool name, call identity, and arguments emitted by an agent.",
       "properties": {
         "kind": {
@@ -2113,6 +2151,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "ToolResultData": {
+      "additionalProperties": false,
       "description": "Raw tool result and optional structured rendering payload.",
       "properties": {
         "kind": {
@@ -2182,6 +2221,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "TurnUsageData": {
+      "additionalProperties": false,
       "description": "Settled token and cost accounting for one finished agent turn.\n\nSee ``vibesys.events.TurnUsageData``.",
       "properties": {
         "kind": {
@@ -2270,6 +2310,7 @@ const runEventSchema: Record<string, unknown> = {
       ]
     },
     "UsageUpdateData": {
+      "additionalProperties": false,
       "description": "Token usage reported by the active model.",
       "properties": {
         "kind": {
@@ -2315,6 +2356,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "WinnerSelectedData": {
+      "additionalProperties": false,
       "description": "The run's result was chosen: a retained candidate, or the unchanged trusted input.",
       "properties": {
         "kind": {
@@ -2357,6 +2399,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "WorkspaceSnapshotData": {
+      "additionalProperties": false,
       "description": "A Git tracker outcome: a snapshot, baseline, or exclusion change.\n\nExactly one aspect is populated per event: a snapshot attempt carries\n``label`` (``commit`` is None when there was nothing to commit), a\ntrusted-input baseline carries ``baseline``, and a snapshot-exclusion\nchange carries ``excluded_paths``.",
       "properties": {
         "kind": {
@@ -2495,6 +2538,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "string"
     },
     "WorkstreamFinishedData": {
+      "additionalProperties": false,
       "description": "One workstream (one dynamic-run round) ended; its typed failure, if any.\n\nSee ``vibesys.events.WorkstreamFinishedData`` for why ``setup_failure``\nand ``refunded`` are always ``False`` from this event's only current\nproducer.",
       "properties": {
         "kind": {

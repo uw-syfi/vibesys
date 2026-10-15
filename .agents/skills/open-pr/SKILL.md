@@ -1,6 +1,8 @@
 ---
 name: open-pr
 description: Prepare and open VibeSys pull requests from local repo changes. Use when the user asks to create, open, publish, submit, or draft a PR for this repository, including tasks that need branch hygiene, targeted validation, PR intent reflection, PR template completion, commit/push, GitHub pull request creation, native GitHub stacks for dependent PRs, or maintaining a stack after its base changes or lands.
+metadata:
+  kind: workflow
 ---
 
 # Open PR
@@ -47,6 +49,9 @@ uv run pytest -k keyword
 uv run pytest
 ```
 
+   - Run only the checks the change can affect; CI runs the rest. If a check
+     you need cannot run, say so in the PR body.
+
 6. Commit intentionally:
    - Stage only the PR's files.
    - Re-run `git diff --staged` before committing.
@@ -75,7 +80,7 @@ uv run pytest
      Mirror the closing issue's area labels (`area/*`, `workload/*`,
      `app/*`, and similar) when the PR closes an issue that carries them.
    - When opening a dependent series, create every PR with its complete body,
-     then register the series as a native GitHub stack as described below.
+     then register the series as a native GitHub stack ([references/stacks.md](references/stacks.md)).
    - When the PR is a follow-up to someone else's merged or open PR (a more
      robust fix for the same bug, a refactor that makes that bug
      unrepresentable, or a hardening of its tests), notify the original
@@ -86,59 +91,11 @@ uv run pytest
      robust fix. Keep the tone informational; it is a courtesy, not a
      request for changes.
 
-## Native GitHub Stacks
+## Stacks
 
-Use a native GitHub stack when two or more PRs form a true dependency chain in
-the same repository. Keep the bottom PR based on the trunk and each later PR
-based on the preceding PR's head branch. Do not stack PRs merely because they
-are related or opened together.
-
-1. Ensure the official extension is available. Install it when missing:
-   `gh extension install github/gh-stack`.
-2. Open each PR normally so its title, draft state, and repository-template
-   body are deliberate and complete.
-3. Link the open PRs in bottom-to-top order:
-   `gh stack link --base <trunk> <bottom-pr> <...> <top-pr>`.
-   Pass PR numbers or URLs. Omit `--open` unless the user requested ready PRs.
-4. Verify each direct base with
-   `gh pr view <pr> --json number,baseRefName,headRefName,isDraft,state,url`.
-5. Verify remote stack membership with
-   `gh api repos/{owner}/{repo}/pulls/<pr> --jq '.stack'`, then inspect the
-   reported stack using
-   `gh api repos/{owner}/{repo}/stacks/<stack-number>` and confirm its trunk
-   and exact bottom-to-top PR order. `gh stack view` reflects local tracking
-   and is not sufficient verification after `gh stack link`.
-
-For every intentionally independent PR opened alongside stacked work, target
-the trunk, do not pass it to `gh stack link`, and verify that its remote
-`.stack` value is `null`.
-
-## Maintaining a stack
-
-PRs land through the GitHub merge queue with squash merge, bottom-up. A child
-branch therefore still holds the pre-squash commits of any parent that has
-already landed.
-
-- Ask how the stack will be landed (queue order, squash) and which PRs are
-  enqueued before touching any stack branch or resolving conflicts across
-  branches.
-- Never push to a branch that is queued or about to be queued: the push drops
-  it from the queue.
-- After a parent lands or changes, move the child onto the new parent tip so
-  the already-squashed commits are dropped:
-  `git rebase --onto <new-parent-tip> <old-parent-tip> <child>`, then
-  `git push --force-with-lease`. Do not merge the parent forward into the
-  child: that drags pre-squash history in and conflicts with the squashed
-  commits on the trunk.
-- Force-with-lease on a stack branch is safe only when nobody else pushes to
-  it. Ask the user before force-pushing.
-- After changing a base PR, check each child against the new base tip with
-  `git merge-tree --write-tree <base> <head>` (exit 0 means clean). A child
-  that was clean against its old base can conflict with the updated one. Use
-  this before trusting or dismissing GitHub's mergeable state, which can lag
-  by a minute: poll past `UNKNOWN`.
-- Keep child PRs in draft until the stack has been rebased onto the current
-  base. Mark a PR ready only after verifying its mergeable state.
+For two or more PRs that form a true dependency chain, read
+[references/stacks.md](references/stacks.md) before opening them, and again
+before touching a stack after its base changes or lands.
 
 ## PR Body
 
@@ -161,7 +118,7 @@ PRs are squash-merged, so the PR title becomes the commit subject on `main`. Use
 ```
 
 - `type`: one of `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`. Lowercase.
-- `scope`: optional, lowercase. Omit it for `src/vibesys` (the core package) and for cross-cutting changes. For documentation under `docs/`, use the scope of the area it describes (e.g. `docs(ui): ...`), or none for general guides. Otherwise use: `ui` for client-side code under `clients/` (its packages, features, and apps), `client` for the backend client crate, `server` for `src/server`, `example` for `examples/`, `website` for `website/` (the docs site build, theme, and deploy), and the library directory name for `libs/` (e.g. `vs-sandbox`, `vs-project`).
+- `scope`: optional, lowercase. Omit it for the core `vibesys` product package and for cross-cutting changes. For documentation, use the scope of the area it describes (e.g. `docs(ui): ...`), or none for general guides. Otherwise use: `ui` for client-side code (its packages, features, and apps), `client` for the backend client crate, `server` for the server package, `example` for example bundles, `website` for the docs site (build, theme, and deploy), and the library's package name for a library (e.g. `vs-sandbox`, `vs-project`).
 - Summary: imperative mood, lowercase first word, no trailing period, about 72 characters or fewer, describing the behavior change rather than the files touched.
 - Do not add the PR number; GitHub appends it on squash merge.
 - Each PR in a stack gets its own type based on what that PR does.
@@ -175,7 +132,7 @@ Avoid generic summaries such as "update files" or "fix tests."
 - Mention changes to external contracts: manifests, metadata, feature flags, CLI flags, evaluator interfaces, model-serving example bundle shape, prompt output, or skill routing.
 - For prompt changes, include the snapshot diff or state that snapshots were not applicable.
 - For config, metadata, feature flags, and persisted state, verify both valid input and failure cases when touched.
-- For `resources/skills/serving-systems/`, confirm the subtree authoring guide was followed.
+- For the bundled serving-systems product skill, confirm its authoring guide was followed.
 - Do not include unrelated refactors, broad cleanup, or reverted user work in the PR.
 
 ## Handoff

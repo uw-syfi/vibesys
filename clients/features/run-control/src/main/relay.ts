@@ -34,7 +34,7 @@ import {defaultScheduleTimeout, NewlineFramer, type ScheduleTimeout} from '@vibe
  */
 const RELAY_PROGRESS_DEADLINE_MS = 40_000;
 
-/** The page side of one connection: a started message port. */
+/** The page side of one connection. */
 export interface RelayPort {
   post(message: MainToPage): void;
   onMessage(listener: (data: unknown) => void): void;

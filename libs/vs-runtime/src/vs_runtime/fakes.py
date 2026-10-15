@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypeAlias, TypeVar
+from typing import TYPE_CHECKING, Literal, Never, TypeAlias, TypeVar
 
 from pydantic import BaseModel
 
 from vs_agent.api import (
     NULL_SKILL_SELECTION,
 )
+from vs_project.api import Git
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
 from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
 from vs_runtime._workspace_access import WorkspaceAccessRecovery
@@ -35,13 +35,15 @@ from vs_runtime.contracts import (
     validate_trusted_shell_command,
     validate_workspace_writable_paths,
 )
+from vs_sim.api.testing import FakeProcesses, ProcessScript
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleEvent
     from vs_runtime._run_control import RunControlChannel, RunControlTransition
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
+    from vs_sim.api import ProcessSpec, Threads
 
 
 class FakeAgentExecutionEnvironment:
@@ -230,32 +232,42 @@ class FakeProjectMaterializationEffects:
         return self.removes_children
 
 
+def _answers_take_no_time(seconds: float) -> Never:
+    message = f"an in-memory Git answer took {seconds:g} s"
+    raise AssertionError(message)
+
+
 class FakeGitRunner:
-    """In-memory command effect for pinned project-source checkouts."""
+    """Git for pinned project-source checkouts, answered in memory: ``git()`` starts no process.
+
+    Any other command fails as it would outside a repository.
+    """
 
     def __init__(self, *, head: str, fail_command: str | None = None) -> None:
         """Configure the resolved commit and optional failing Git command."""
         self.head = head
         self.fail_command = fail_command
-        self.calls: list[tuple[tuple[str, ...], Path]] = []
+        self.calls: list[tuple[tuple[str, ...], Path | None]] = []
 
-    def __call__(self, args: Sequence[str], cwd: Path) -> str:
+    def git(self) -> Git:
+        """A ``Git`` whose every command this Fake answers."""
+        return Git(FakeProcesses(self._answer, pass_time=_answers_take_no_time))
+
+    def _answer(self, spec: ProcessSpec) -> ProcessScript:
         """Apply clone/checkout/rev-parse semantics without a subprocess."""
+        args = spec.argv[1:]
         command = args[0]
-        self.calls.append((tuple(args), cwd))
+        self.calls.append((args, spec.cwd))
         if command == self.fail_command:
-            message = f"git {command} failed: configured fake failure"
-            raise RuntimeError(message)
+            return ProcessScript(returncode=1, stderr=b"configured fake failure")
         if command == "clone":
-            destination = Path(args[-1])
-            (destination / ".git").mkdir(parents=True)
-            return ""
+            (Path(args[-1]) / ".git").mkdir(parents=True)
+            return ProcessScript()
         if command == "checkout":
-            return ""
+            return ProcessScript()
         if command == "rev-parse":
-            return f"{self.head}\n"
-        message = f"unsupported fake Git command: {command}"
-        raise ValueError(message)
+            return ProcessScript(stdout=f"{self.head}\n".encode())
+        return ProcessScript(returncode=128, stderr=b"fatal: not a git repository")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1050,10 +1062,10 @@ class FakeStopTimer:
     from any thread, so no test waits on the wall clock.
     """
 
-    def __init__(self) -> None:
-        """Start with no recorded or pending waits."""
+    def __init__(self, threads: Threads) -> None:
+        """Start with no recorded or pending waits; ``threads`` makes the lock waits share."""
         self.delays: list[float] = []
-        self._condition = threading.Condition()
+        self._condition = threads.condition()
         self._pending: list[tuple[asyncio.AbstractEventLoop, asyncio.Future[None]]] = []
 
     async def __call__(self, seconds: float) -> None:

@@ -97,6 +97,7 @@ EXPECTED_TARGET = {
                 "agent_measurement_requested",
                 "job_observed",
                 "observations_due",
+                "job_wait_lapsed",
                 "job_termination_requested",
                 "jobs_drain_requested",
                 "run_jobs_cancel_requested",
@@ -124,7 +125,10 @@ EXPECTED_TARGET = {
         ),
         ("vs_core._session_stalls.advance_stalled_checkpoint_waits", ("checkpoint_stalled",)),
         ("vs_core._session_stalls.advance_stalled_acquisitions", ("acquisition_stalled",)),
+        ("vs_core._session_stalls.advance_lapsed_session_waits", ("session_wait_lapsed",)),
+        ("vs_core._session_checkpoints.advance", ("invocation_checkpoint_pending",)),
         ("vs_core.records._observation", ("request_observed",)),
+        ("vs_core._host_epochs.renewed", ("host_renewed",)),
         (
             "vs_core._settlement.advance",
             (
@@ -147,7 +151,12 @@ EXPECTED_TARGET = {
         ),
         (
             "vs_core._request_recovery.advance",
-            ("recovery_started", "recovery_ready", "reconciliation_deadline"),
+            (
+                "recovery_started",
+                "recovery_ready",
+                "reconciliation_deadline",
+                "recovery_check_wait_lapsed",
+            ),
         ),
         (
             "vs_core.scheduling.schedule",

@@ -113,9 +113,7 @@ async def test_render_failure_drains_the_owned_run_before_process_scope_exits() 
     output.close()
 
     with pytest.raises(ValueError, match="closed file"):
-        await supervise(
-            handle, run(handle, renderer=HeadlessRenderer(out=output)), handle_signals=False
-        )
+        await supervise(handle, run(handle, renderer=HeadlessRenderer(out=output)), signals=None)
 
     assert session.started.is_set()
     assert session.closed
@@ -182,7 +180,7 @@ async def test_broken_pipe_during_cancellation_does_not_interrupt_async_cleanup(
         supervise(
             handle,
             run(handle, renderer=HeadlessRenderer(out=_BrokenPipeOutput())),
-            handle_signals=False,
+            signals=None,
         )
     )
     await arrival(session.started.wait(), supervision)

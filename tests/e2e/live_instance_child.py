@@ -16,7 +16,7 @@ from server.registry import (
     instance_root,
     instance_socket_path,
 )
-from vs_sim.api import SystemClock
+from vs_sim.api import OsThreads, SystemClock
 
 
 def main(instance_id: str) -> None:
@@ -42,6 +42,7 @@ def main(instance_id: str) -> None:
             ),
             clock,
             metadata=FileInstanceMetadataStore(root),
+            threads=OsThreads(),
         )
         sys.stdout.write("ready\n")
         sys.stdout.flush()

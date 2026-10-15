@@ -23,12 +23,15 @@ cache key depends only on what was selected.
 
 from __future__ import annotations
 
-import json
 import re
 import shlex
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
+
+from pydantic import JsonValue, TypeAdapter
+
+from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -102,6 +105,12 @@ class BuildPlan:
     generated_files: Mapping[str, str]
 
 
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_FEATURE_METADATA_BYTES = 1024 * 1024
+"""The largest ``devcontainer-feature.json`` read."""
+"""Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
+
+
 def option_env_name(option_id: str) -> str:
     """Return the environment variable a Feature option is exported as.
 
@@ -121,11 +130,13 @@ def parse_feature_metadata(text: str, *, folder_name: str) -> FeatureSpec:
             id than its folder, uses a field this build path does not support,
             or declares an option without a usable type and default.
     """
-    try:
-        document: Any = json.loads(text)
-    except ValueError as exc:
-        message = f"Feature {folder_name}: devcontainer-feature.json is not valid JSON: {exc}"
-        raise FeatureSpecError(message) from exc
+    document: Any = decode_json(
+        text, _ANY_JSON, source="devcontainer-feature.json", max_bytes=_MAX_FEATURE_METADATA_BYTES
+    )
+    if isinstance(document, Unreadable):
+        reason = document.problems[0].message
+        message = f"Feature {folder_name}: devcontainer-feature.json is not valid JSON: {reason}"
+        raise FeatureSpecError(message)
     if not isinstance(document, dict):
         message = f"Feature {folder_name}: devcontainer-feature.json must be a JSON object"
         raise FeatureSpecError(message)

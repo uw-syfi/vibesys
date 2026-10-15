@@ -111,6 +111,12 @@ interface Claim {
   readonly sequence: number;
 }
 
+/** One welcome document's start request, unique across renderer-document lifetimes. */
+export interface StartIdentity {
+  readonly owner: string;
+  readonly sequence: number;
+}
+
 /** One stale launch waiting to learn whether the newer claim successfully adopts its server. */
 interface PendingAdoption {
   readonly result: Promise<boolean>;
@@ -127,8 +133,8 @@ export class RunControl {
   readonly #bindings = new Map<string, Binding>();
   /** The claim currently navigating toward (or already bound to) each target, by `targetKey`. */
   readonly #claims = new Map<string, Claim>();
-  /** Starts the welcome view asked for, by token; also this call's claim (`cancelStart`). */
-  readonly #starts = new Map<number, Claim>();
+  /** Starts the welcome view asked for, by document owner and renderer-local sequence. */
+  readonly #starts = new Map<string, Map<number, Claim>>();
   /** Stale launches held until the matching claim binds or is abandoned. */
   readonly #pendingAdoptions = new Map<string, PendingAdoption>();
   /**
@@ -236,25 +242,35 @@ export class RunControl {
     project: string,
     task: string | null,
     args: readonly string[],
-    token: number | null = null,
+    identity: StartIdentity | null = null,
   ): Promise<StartOutcome> {
-    if (token !== null && this.#starts.has(token))
+    if (identity !== null && this.#startClaim(identity) !== undefined)
       throw new Error('that start was already asked for');
     const claim: Claim = this.#newClaim();
-    if (token !== null) this.#starts.set(token, claim);
+    if (identity !== null) this.#setStartClaim(identity, claim);
     try {
       return await this.#launch(id, project, task, args, null, claim);
     } finally {
-      if (token !== null) this.#starts.delete(token);
+      if (identity !== null) this.#deleteStartClaim(identity, claim);
     }
   }
 
-  /** Cancel the start named `token`; a start that already ended has nothing to cancel. */
-  cancelStart(token: number): void {
-    const claim = this.#starts.get(token);
+  /** Cancel the start named by `identity`; a start that already ended has nothing to cancel. */
+  cancelStart(identity: StartIdentity): void {
+    const claim = this.#startClaim(identity);
     if (claim === undefined) return;
     claim.cancelled = true;
     this.#forgetClaim(claim);
+  }
+
+  /** Revoke every pending start owned by a renderer document that went away. */
+  retireStartOwner(owner: string): void {
+    const starts = this.#starts.get(owner);
+    if (starts === undefined) return;
+    for (const claim of starts.values()) {
+      claim.cancelled = true;
+      this.#forgetClaim(claim);
+    }
   }
 
   /** Resume run `run` of `project` on `id` and attach. */
@@ -279,7 +295,10 @@ export class RunControl {
     this.#bindings.get(runId)?.connection.dispatch({type: 'user-retry'});
   }
 
-  /** Relay one connection `runId`'s run page opened, over a run channel. */
+  /**
+   * Relay one connection `runId`'s run page opened, over a run channel. Message and close listener
+   * ownership is installed synchronously before this returns.
+   */
   connect(port: RelayPort, runId: string): void {
     const run = this.#bindings.get(runId);
     if (run === undefined) {
@@ -627,6 +646,23 @@ export class RunControl {
     if (this.#claims.get(target.key) !== claim) return;
     this.#claims.delete(target.key);
     this.#settleAdoption(target.id, target.instanceId, false);
+  }
+
+  #startClaim(identity: StartIdentity): Claim | undefined {
+    return this.#starts.get(identity.owner)?.get(identity.sequence);
+  }
+
+  #setStartClaim(identity: StartIdentity, claim: Claim): void {
+    const starts = this.#starts.get(identity.owner) ?? new Map<number, Claim>();
+    starts.set(identity.sequence, claim);
+    this.#starts.set(identity.owner, starts);
+  }
+
+  #deleteStartClaim(identity: StartIdentity, claim: Claim): void {
+    const starts = this.#starts.get(identity.owner);
+    if (starts?.get(identity.sequence) !== claim) return;
+    starts.delete(identity.sequence);
+    if (starts.size === 0) this.#starts.delete(identity.owner);
   }
 
   #phase(binding: Binding, phase: Phase): void {

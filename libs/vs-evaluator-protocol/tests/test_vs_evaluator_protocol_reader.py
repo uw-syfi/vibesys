@@ -75,6 +75,16 @@ def test_parse_records_rejects_a_line_that_is_not_a_json_object(line: str) -> No
     assert "line 2" in str(rejection.value)
 
 
+def test_parse_records_rejects_a_line_past_the_size_cap_before_parsing_it() -> None:
+    oversized = '{"kind":"result","pad":"' + "x" * (4 * 1024 * 1024) + '"}'
+
+    with pytest.raises(ProtocolError) as rejection:
+        parse_records(f"{HELLO_LINE}\n{oversized}")
+
+    assert rejection.value.code == ReasonCode.MALFORMED_LINE
+    assert "line 2 is larger than" in str(rejection.value)
+
+
 def test_parse_records_rejects_a_record_without_a_kind() -> None:
     with pytest.raises(ProtocolError) as rejection:
         parse_records('{"protocol":2,"metrics":{}}')

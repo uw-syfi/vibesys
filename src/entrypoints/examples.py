@@ -34,7 +34,8 @@ from entrypoints.example_catalog import (
     list_examples,
     load_registry,
 )
-from vs_project.api import run_git
+from vs_project.api import Git
+from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -69,7 +70,9 @@ class ExampleMaterializer(Protocol):
 
 @dataclass(frozen=True)
 class GitExampleMaterializer:
-    """Uses the real file system, and starts Git through ``vs_project``'s ``run_git``."""
+    """Uses the real file system, and starts Git through ``git``."""
+
+    git: Git
 
     def copy_tracked(
         self, checkout: Path, example: PurePosixPath, destination: Path, *, message: str
@@ -106,7 +109,7 @@ class GitExampleMaterializer:
 
     def _git(self, cwd: Path, *args: str) -> str:
         try:
-            completed = run_git(args, cwd=cwd, text=True)
+            completed = self.git.run_text(args, cwd=cwd)
         except OSError as exc:
             message = f"cannot run git: {exc}"
             raise ExampleMaterializationError(message) from exc
@@ -260,7 +263,10 @@ def run(
         if not destination.is_absolute():
             destination = cwd / destination
         project = new_example(
-            root, args.example, destination, materializer or GitExampleMaterializer()
+            root,
+            args.example,
+            destination,
+            materializer or GitExampleMaterializer(Git(OsProcesses())),
         )
     except (CatalogError, DestinationError, ExampleMaterializationError) as exc:
         return 1, "", f"vibesys example: {exc}\n"

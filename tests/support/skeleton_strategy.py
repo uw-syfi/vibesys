@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, ClassVar, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 import vs_core.api as core
 from vs_core.api.search import (
@@ -36,6 +36,8 @@ DIGEST = "ab" * 32
 
 class Implementation(BaseModel):
     """The implementer's structured reply: the commit it made in its workspace."""
+
+    model_config = ConfigDict(extra="forbid")
 
     commit: str
     waiting: bool = False

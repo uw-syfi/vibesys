@@ -15,6 +15,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
+from tests.support.real_git import real_git_tracker
 
 from vs_project.api import GIT_BACKEND_ENV, GitTracker, NullGitTrackerEvents
 from vs_sim.api.testing import examples
@@ -70,7 +71,7 @@ def _real_head(root: Path) -> str | None:
 
 
 def _fresh_tracker(root: Path, *, existing: bool) -> GitTracker:
-    tracker = GitTracker(root, run_id="head-run", events=NullGitTrackerEvents())
+    tracker = real_git_tracker(root, run_id="head-run", events=NullGitTrackerEvents())
     tracker.init(existing=existing)
     return tracker
 
@@ -114,7 +115,7 @@ def test_current_sha_matches_git_after_any_operation_sequence(
 
 def test_current_sha_is_none_before_the_first_commit(tmp_path: Path) -> None:
     _git(tmp_path, "init", "-q", "-b", "main")
-    tracker = GitTracker(tmp_path, run_id="head-run", events=NullGitTrackerEvents())
+    tracker = real_git_tracker(tmp_path, run_id="head-run", events=NullGitTrackerEvents())
     assert tracker.current_sha() is None
     assert _real_head(tmp_path) is None
 
@@ -145,7 +146,7 @@ def test_current_sha_matches_git_in_a_linked_worktree(tmp_path: Path, commits: l
     linked = tmp_path / f"{main.name}-linked"
     _git(main, "worktree", "add", "-q", "-b", "linked", str(linked))
     # An unbound tracker, as for a candidate worktree: it finds the repository itself.
-    tracker = GitTracker(linked, run_id="head-run", events=NullGitTrackerEvents())
+    tracker = real_git_tracker(linked, run_id="head-run", events=NullGitTrackerEvents())
     assert tracker.current_sha() == _real_head(linked)
 
     for step, operation in enumerate(commits):

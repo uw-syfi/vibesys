@@ -56,6 +56,7 @@ def _session_record() -> RequestRecord:
         lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
         phase=RequestPhase.DISPATCHED,
         until=Until(at=100.0),
+        addressed_by=(),
     )
 
 
@@ -73,6 +74,7 @@ def _lost_inspection(target: RequestRecord, phase: RequestPhase) -> RequestRecor
         lifecycle=LifecycleClass.QUERY,
         phase=phase,
         until=Until(at=100.0),
+        addressed_by=(),
     )
 
 
@@ -95,7 +97,7 @@ def test_an_inspection_that_never_reported_goes_out_again_with_a_bound_from_the_
     state = initial_state()
     state = state.model_copy(
         update={
-            "records": RecordsState(records=(target, lost), recovery=RecoveryBarrier()),
+            "records": RecordsState(hosts=(), records=(target, lost), recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
         }
     )

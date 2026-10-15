@@ -11,6 +11,7 @@ from typing import IO, TYPE_CHECKING, Any, ClassVar, Self, cast
 import pytest
 
 from vs_runtime.api.infrastructure import DurableEventJournal, EventCodec
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -181,7 +182,7 @@ class _FaultPath(Path):
 
 
 def _journal(codec: EventCodec[_Event] | None = None) -> DurableEventJournal[_Event]:
-    return DurableEventJournal(codec or _Codec(), filename="events.jsonl")
+    return DurableEventJournal(codec or _Codec(), filename="events.jsonl", threads=OsThreads())
 
 
 def test_journal_flushes_pending_events_and_continues_sequence(tmp_path: Path) -> None:

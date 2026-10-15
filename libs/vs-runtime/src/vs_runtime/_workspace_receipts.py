@@ -10,9 +10,9 @@ the store's ``run_once``, not this module's.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from vs_core.api import AttemptRef, RequestId, ResourceId, RevisionRef, WorkspaceMode
 
@@ -52,6 +52,49 @@ class RootRelease(StrEnum):
     """The generation never ended its hold and does not hold the root (a newer one took it)."""
 
 
+class BaselineEntryKind(StrEnum):
+    """What a baseline path held when it was recorded, and so how drift is checked."""
+
+    DIRECTORY = "directory"
+    """A path recorded with a trailing ``/``: checked only for removal."""
+    FILE = "file"
+    """A contained regular file with a content fingerprint: checked for removal and change."""
+    UNFINGERPRINTED = "unfingerprinted"
+    """Something that is not a contained regular file (a symlink, a FIFO, an unreadable
+    file): checked only for removal, as nothing at the path any more."""
+
+
+class BaselineEntry(BaseModel):
+    """One path the exclusive root held before the run, with a file's content fingerprint.
+
+    ``fingerprint`` is a file's content hash, set when *path* names a contained regular
+    file. A directory (a path recorded with a trailing ``/``) has none: fingerprinting its
+    contents would need the walk PR #2011 chose not to pay for (a ``.venv`` can hold 100k
+    files), so a directory is only ever checked for removal, never for a change inside it.
+    Neither has anything else that could not be fingerprinted; ``kind`` tells them apart.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    path: str
+    fingerprint: str | None = None
+
+    @model_validator(mode="after")
+    def _directory_has_no_fingerprint(self) -> Self:
+        if self.path.endswith("/") and self.fingerprint is not None:
+            message = f"directory baseline entry {self.path!r} must not carry a fingerprint"
+            raise ValueError(message)
+        return self
+
+    @property
+    def kind(self) -> BaselineEntryKind:
+        """What the path held when recorded."""
+        if self.path.endswith("/"):
+            return BaselineEntryKind.DIRECTORY
+        if self.fingerprint is not None:
+            return BaselineEntryKind.FILE
+        return BaselineEntryKind.UNFINGERPRINTED
+
+
 class RootBaseline(BaseModel):
     """The untracked and ignored paths the root held before any attempt ran.
 
@@ -60,7 +103,31 @@ class RootBaseline(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    paths: tuple[str, ...]
+    entries: tuple[BaselineEntry, ...]
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        """The recorded paths alone: ``git clean``'s keep list and the exact-tree exemption."""
+        return tuple(entry.path for entry in self.entries)
+
+
+class RootBaselineDrift(BaseModel):
+    """Pre-run paths found changed or gone when an attempt's hold of the root ended.
+
+    Empty when the root holds every baseline path exactly as the first grant found it.
+    This is reported to the operator, never acted on: the restore already decided (see
+    ``RootBaseline``) to leave baseline paths untouched, whether or not an attempt changed
+    them.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    modified: tuple[str, ...] = ()
+    removed: tuple[str, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        """Return whether the root matches the baseline exactly."""
+        return not self.modified and not self.removed
 
 
 class WorkspaceReceipts(Protocol):
@@ -68,18 +135,11 @@ class WorkspaceReceipts(Protocol):
 
     def load_binding(self, attempt: AttemptRef) -> AttemptBinding | None: ...
 
-    def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding | None:
+    def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding:
         """Store the binding if absent; return the binding that won.
 
-        ``None`` when the generation was withdrawn first (`withdraw_unbound`): it never binds.
-        """
-        ...
-
-    def withdraw_unbound(self, attempt: AttemptRef) -> AttemptBinding | None:
-        """The generation's binding, or ``None`` after ending a generation that bound nothing.
-
-        The check and the release mark are one step under the store's lock, as is ``bind``,
-        so a ``None`` answer proves the generation holds no workspace now and never will.
+        The caller holds the attempt's workspace fence (``EffectFences``): a discard that
+        closed it first is what keeps a withdrawn generation from binding.
         """
         ...
 
@@ -164,24 +224,13 @@ class StoreWorkspaceReceipts:
     def load_binding(self, attempt: AttemptRef) -> AttemptBinding | None:
         return self._store.load(_BINDINGS, "binding", attempt_key(attempt), AttemptBinding)
 
-    def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding | None:
-        def decide(
-            stored: AttemptBinding | None,
-        ) -> tuple[AttemptBinding | None, AttemptBinding | None]:
-            if stored is not None:
-                return None, stored
-            return (None, None) if self.is_released(attempt) else (binding, binding)
+    def bind(self, attempt: AttemptRef, binding: AttemptBinding) -> AttemptBinding:
+        def decide(stored: AttemptBinding | None) -> tuple[AttemptBinding | None, AttemptBinding]:
+            return (None, stored) if stored is not None else (binding, binding)
 
         return self._store.modify(
             _BINDINGS, "binding", attempt_key(attempt), AttemptBinding, decide
         )
-
-    def withdraw_unbound(self, attempt: AttemptRef) -> AttemptBinding | None:
-        with self._store.exclusive():
-            binding = self.load_binding(attempt)
-            if binding is None:
-                self.mark_released(attempt)
-            return binding
 
     def acquire_root(self, attempt: AttemptRef) -> RootGrant:
         def decide(holder: AttemptRef | None) -> tuple[AttemptRef | None, RootGrant]:

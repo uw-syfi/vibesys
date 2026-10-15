@@ -70,7 +70,7 @@ def _materializer(root: Path, *, excluded_dirs: set[str] | None = None) -> Proje
         log=lambda _message: None,
         sdk_roots=SDKRoots(checkout=root.parent / "sdk", packaged=root.parent / "sdk"),
         excluded_dirs=excluded_dirs or set(),
-        git_runner=FakeGitRunner(head="0123456"),
+        git=FakeGitRunner(head="0123456").git(),
     )
 
 

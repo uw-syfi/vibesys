@@ -17,9 +17,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 
 from entrypoints.detached_run import RecordPublisher
-from launch import default_runs
+from entrypoints.production import production_runs
 from server.host_api import (
     InstanceStatus,
     LiveInstanceRecord,
@@ -47,7 +48,7 @@ from vibesys.events import (
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.images import TaskImageBuildError
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
-from vs_sim.api import OsThreads, SystemClock
+from vs_sim.api import OsThreads, Platform, SystemClock
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -88,7 +89,13 @@ def _serve(
 
     def serve() -> None:
         hostname, version = host_facts()
-        integration = LocalRunIntegration()
+        integration = LocalRunIntegration(
+            clock=clock,
+            git=REAL_GIT,
+            github=NO_GITHUB,
+            threads=OsThreads(),
+            slurm_processes=REAL_PROCESSES,
+        )
         try:
             with registry.register(instance_id) as hold:
                 publisher = RecordPublisher(
@@ -108,13 +115,15 @@ def _serve(
                     ),
                     clock,
                     metadata=FileInstanceMetadataStore(root),
+                    threads=OsThreads(),
                 )
                 runtime = ServerRuntime(
                     run_id="run-1",
-                    runs=default_runs(),
+                    runs=production_runs(),
                     socket_path=socket_path,
                     detach=True,
                     observer=publisher,
+                    platform=Platform.real(),
                 )
                 integration.events.subscribe(runtime.integration.project_event)
                 try:

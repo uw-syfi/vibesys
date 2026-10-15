@@ -6,7 +6,11 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.server.support import wait_for_worker
 
-from server.transport.subscriptions import SubscriptionTracker, ThreadingSettleWindow
+from server.transport.subscriptions import (
+    SubscriptionAdmissionClosedError,
+    SubscriptionTracker,
+    ThreadingSettleWindow,
+)
 from vs_sim.api.testing import SimThreads, examples, wait_or_fail
 
 SETTLE_SECONDS = 1.0
@@ -128,7 +132,7 @@ def test_a_drain_waits_exactly_until_every_open_stream_has_the_last_event(
     threads = SimThreads(schedule_seed=seed)
     tracker = SubscriptionTracker(threads=threads)
 
-    def main() -> tuple[bool, float]:
+    def main() -> tuple[bool, float, str]:
         opened = [threads.event() for _ in endings]
         release = threads.event()
 
@@ -151,14 +155,20 @@ def test_a_drain_waits_exactly_until_every_open_stream_has_the_last_event(
         started = threads.now()
         drained = tracker.wait_until_delivered(target, DRAIN_BOUND_SECONDS)
         waited = threads.now() - started
+        try:
+            with tracker.track():
+                late_admission = "admitted"
+        except SubscriptionAdmissionClosedError:
+            late_admission = "refused"
         release.set()
         for worker in workers:
             wait_for_worker(worker)
-        return drained, waited
+        return drained, waited, late_admission
 
-    drained, waited = threads.run(main)
+    drained, waited, late_admission = threads.run(main)
 
     stalled = any(ending == "stalls" for ending, _ in endings)
     assert drained is not stalled
     expected = DRAIN_BOUND_SECONDS if stalled else max((d for _, d in endings), default=0.0)
     assert waited == expected
+    assert late_admission == "refused"

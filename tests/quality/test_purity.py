@@ -17,7 +17,10 @@ from scripts.check_purity import (
     scan_value_exports,
 )
 
-from vs_project.api import run_git
+from vs_project.api import Git
+from vs_sim.api import OsProcesses
+
+_GIT = Git(OsProcesses())
 
 
 @pytest.mark.parametrize(
@@ -205,42 +208,42 @@ def test_previous_baseline_fetches_only_explicit_base_for_a_shallow_checkout(
 ) -> None:
     origin = tmp_path / "origin"
     origin.mkdir()
-    run_git(["init", "--initial-branch=main"], cwd=origin).check_returncode()
-    run_git(["config", "user.name", "Purity fixture"], cwd=origin).check_returncode()
-    run_git(["config", "user.email", "purity@example.invalid"], cwd=origin).check_returncode()
+    _GIT.run_text(["init", "--initial-branch=main"], cwd=origin).check()
+    _GIT.run_text(["config", "user.name", "Purity fixture"], cwd=origin).check()
+    _GIT.run_text(["config", "user.email", "purity@example.invalid"], cwd=origin).check()
     baseline = origin / "scripts" / "purity_violations.json"
     baseline.parent.mkdir()
     baseline.write_text("[]\n")
-    run_git(["add", "."], cwd=origin).check_returncode()
-    run_git(
+    _GIT.run_text(["add", "."], cwd=origin).check()
+    _GIT.run_text(
         [
             "commit",
             "-m",
             "Initial baseline\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
         ],
         cwd=origin,
-    ).check_returncode()
-    run_git(["checkout", "-b", "feature"], cwd=origin).check_returncode()
+    ).check()
+    _GIT.run_text(["checkout", "-b", "feature"], cwd=origin).check()
     (origin / "feature.txt").write_text("feature\n")
-    run_git(["add", "."], cwd=origin).check_returncode()
-    run_git(
+    _GIT.run_text(["add", "."], cwd=origin).check()
+    _GIT.run_text(
         ["commit", "-m", "Feature\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"],
         cwd=origin,
-    ).check_returncode()
+    ).check()
     if history == "merged":
-        run_git(["checkout", "main"], cwd=origin).check_returncode()
+        _GIT.run_text(["checkout", "main"], cwd=origin).check()
         (origin / "main.txt").write_text("main advance\n")
-        run_git(["add", "."], cwd=origin).check_returncode()
-        run_git(
+        _GIT.run_text(["add", "."], cwd=origin).check()
+        _GIT.run_text(
             [
                 "commit",
                 "-m",
                 "Main advance\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
             ],
             cwd=origin,
-        ).check_returncode()
-        run_git(["checkout", "feature"], cwd=origin).check_returncode()
-        run_git(
+        ).check()
+        _GIT.run_text(["checkout", "feature"], cwd=origin).check()
+        _GIT.run_text(
             [
                 "merge",
                 "main",
@@ -248,9 +251,9 @@ def test_previous_baseline_fetches_only_explicit_base_for_a_shallow_checkout(
                 "Merge main\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
             ],
             cwd=origin,
-        ).check_returncode()
+        ).check()
     checkout = tmp_path / "checkout"
-    run_git(
+    _GIT.run_text(
         [
             "clone",
             "--depth=1",
@@ -260,10 +263,10 @@ def test_previous_baseline_fetches_only_explicit_base_for_a_shallow_checkout(
             str(checkout),
         ],
         cwd=tmp_path,
-    ).check_returncode()
+    ).check()
     assert previous_baseline(checkout, "origin/main") == frozenset()
     assert (
-        run_git(["rev-parse", "--is-shallow-repository"], cwd=checkout, text=True).stdout.strip()
+        _GIT.run_text(["rev-parse", "--is-shallow-repository"], cwd=checkout).stdout.strip()
         == "false"
     )
 

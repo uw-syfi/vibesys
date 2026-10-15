@@ -17,12 +17,19 @@ Two halves:
 
 Driver pattern
 --------------
-A driver prints one line per timed iteration to stdout::
+A driver prints one line per timed iteration to stdout, then, once, after the
+last iteration, the number of lines it printed::
 
     wall_ms: <float>
+    ...
+    wall_ms_done: <count>
 
-``parse <log>`` extracts every such line into ``{"wall_ms": [...]}`` JSON,
-which is the input format ``compare`` reads.
+``parse <log>`` extracts every sample line into ``{"wall_ms": [...]}`` JSON,
+which is the input format ``compare`` reads. A log that lacks the ``wall_ms_done``
+line, ends in the middle of a line, or holds a different number of samples than the
+driver counted was cut (a killed driver, a lost transfer): ``parse`` refuses it
+instead of handing ``compare`` fewer samples, or a sample read from half a number,
+as if they were the run.
 
 JSON schemas
 ------------
@@ -82,7 +89,60 @@ MIN_PAIRS_FOR_VERDICT = 2
 # anything for.
 MIN_SAMPLES_FOR_TREND = 3
 
-WALL_MS_RE = re.compile(r"wall_ms:\s*([\d.eE+-]+)")
+_NUMBER = r"[+-]?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?"
+WALL_MS_RE = re.compile(rf"wall_ms:\s*({_NUMBER})(?=\s|$)")
+WALL_MS_DONE_RE = re.compile(r"wall_ms_done:\s*(\d+)\s*$")
+
+
+class DriverLogIncompleteError(ValueError):
+    """A driver log that does not prove it holds every sample the driver took."""
+
+    @classmethod
+    def cut_mid_line(cls) -> DriverLogIncompleteError:
+        """The log's last line has no newline, so its number may be cut."""
+        return cls("driver log ends in the middle of a line")
+
+    @classmethod
+    def no_done_line(cls) -> DriverLogIncompleteError:
+        """No ``wall_ms_done: <count>`` line closes the log."""
+        return cls("driver log has no 'wall_ms_done: <count>' line; the driver did not finish")
+
+    @classmethod
+    def lines_after_done(cls) -> DriverLogIncompleteError:
+        """Samples or a second done line follow the done line."""
+        return cls("driver log has sample lines after its 'wall_ms_done:' line")
+
+    @classmethod
+    def count_mismatch(cls, found: int, counted: int) -> DriverLogIncompleteError:
+        """The driver counted a different number of samples than the log holds."""
+        return cls(f"driver log holds {found} samples but its driver counted {counted}")
+
+
+def parse_driver_log(text: str) -> list[float]:
+    """The ``wall_ms`` samples of a driver log that proves it is whole.
+
+    Raises ``DriverLogIncompleteError`` unless every line is newline-terminated and
+    the log's last sample-related line is ``wall_ms_done: <count>`` with ``count``
+    equal to the samples before it.
+    """
+    if text and not text.endswith("\n"):
+        raise DriverLogIncompleteError.cut_mid_line()
+    samples: list[float] = []
+    counted: int | None = None
+    for line in text.splitlines():
+        done = WALL_MS_DONE_RE.search(line)
+        sample = WALL_MS_RE.search(line)
+        if counted is not None and (done or sample):
+            raise DriverLogIncompleteError.lines_after_done()
+        if done:
+            counted = int(done.group(1))
+        elif sample:
+            samples.append(float(sample.group(1)))
+    if counted is None:
+        raise DriverLogIncompleteError.no_done_line()
+    if counted != len(samples):
+        raise DriverLogIncompleteError.count_mismatch(len(samples), counted)
+    return samples
 
 
 # ---------------------------------------------------------------------------
@@ -403,9 +463,12 @@ def _print_verdict(verdict: PairedVerdict, label_a: str, label_b: str) -> None:
 
 
 def cmd_parse(ns: argparse.Namespace) -> None:
-    """Extract ``wall_ms: <float>`` lines from a driver log into JSON."""
+    """Extract ``wall_ms: <float>`` lines from a whole driver log into JSON."""
     text = Path(ns.log).read_text(encoding="utf-8")
-    values = [float(m) for m in WALL_MS_RE.findall(text)]
+    try:
+        values = parse_driver_log(text)
+    except DriverLogIncompleteError as error:
+        sys.exit(f"{ns.log}: {error}")
     print(json.dumps({"wall_ms": values}))  # noqa: T201  # LW-920169; this standalone script reports progress/results/diagnostics on stdout or stderr, its intended output mechanism
 
 
@@ -434,7 +497,10 @@ def main(argv: list[str] | None = None) -> None:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("parse", help="extract wall_ms: <float> lines from a driver log")
+    p = sub.add_parser(
+        "parse",
+        help="extract wall_ms: <float> lines from a driver log that ends with wall_ms_done: <count>",
+    )
     p.add_argument("log")
     p.set_defaults(fn=cmd_parse)
 

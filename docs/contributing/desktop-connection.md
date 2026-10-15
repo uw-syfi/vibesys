@@ -380,7 +380,10 @@ Rules:
 4. **Warm links.** At launch the manager opens ssh masters for the hosts in Recent (no prompts; a
    host that needs credentials stays `auth-needed` until the user signs in). Target: a populated
    host panel within 1 s of choosing a host with a warm master (one channel open, `hello`,
-   `instances.list`).
+   `instances.list`). Prompt authority belongs to the live callers of one link attempt, not its
+   first caller: an explicit sign-in that joins a master check makes the resulting master
+   interactive; if a batch master is already starting, its exact process retires before one
+   interactive successor starts. A sign-in abandoned before launch cannot authorize a prompt.
 5. **Closing the app closes channels and masters, never runs.**
 6. **Work belongs to its state.** The machine is XState (`clients-architecture.md`, "State"). Each
    operation (link, handshake, ping, check) is an invoked actor the shell provides, and each wait

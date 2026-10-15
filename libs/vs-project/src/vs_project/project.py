@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
-from vs_project._git_process import git_environment, run_git
+from vs_project._git_process import git_environment
 from vs_project._layout import (
     ConfigurationRoot,
     ProjectLayout,
@@ -17,10 +16,12 @@ from vs_project._layout import (
 )
 from vs_project._state import ProjectState
 from vs_project._state_store import LocalStateStore
+from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from vs_project._git_process import Git
     from vs_project._state_io import StoreDurabilityEffects
     from vs_project.api.state_store import (
         CommitFault,
@@ -157,21 +158,20 @@ class Project:
         return ProjectState.find_projects(collection)
 
     @staticmethod
-    def validate_collection_root(collection: Path) -> None:
+    def validate_collection_root(collection: Path, *, git: Git) -> None:
         """Reject a collection whose child projects would nest inside a Git repository."""
         root = collection.expanduser().resolve()
         for ancestor in (root, *root.parents):
             if not ancestor.is_dir() or not (ancestor / ".git").exists():
                 continue
             try:
-                result = run_git(
+                result = git.run_text(
                     ["rev-parse", "--show-toplevel"],
                     cwd=ancestor,
                     env=git_environment(safe_directory=ancestor),
-                    text=True,
                     timeout=10.0,
                 )
-            except (OSError, subprocess.TimeoutExpired) as exc:
+            except (OSError, ProcessTimeoutError) as exc:
                 message = f"could not validate project collection {root}: {exc}"
                 raise ProjectLayoutError(message) from exc
             if result.returncode == 0:

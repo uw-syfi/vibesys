@@ -27,6 +27,7 @@ from vs_agent.api import (
     SessionScope,
 )
 from vs_agent.api.testing import FakeProvider, assistant_text, usage
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -38,12 +39,14 @@ if TYPE_CHECKING:
 def _client_and_journal(
     tmp_path: Path, *, turn: Sequence[agentshim.AgentEvent]
 ) -> tuple[AgentClient, EventJournal]:
-    journal = EventJournal()
+    journal = EventJournal(clock=ManualClock(), threads=SimThreads())
     journal.attach(tmp_path / "run", "run-1")
     client = AgentClient(
-        FakeProvider(turn=turn),
+        FakeProvider(turn=turn, threads=SimThreads()),
         provider="fake",
-        event_sink=CoreAgentEventSink(journal.record),
+        event_sink=CoreAgentEventSink(journal.record, clock=ManualClock()),
+        clock=ManualClock(),
+        threads=SimThreads(),
     )
     return client, journal
 

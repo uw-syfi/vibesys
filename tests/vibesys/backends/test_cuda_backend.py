@@ -5,6 +5,7 @@ import pytest
 from tests.support.docker import capture_docker_start_argv, recording_docker_cli
 
 from vs_sandbox.api import (
+    CudaAcceleratorUnavailableError,
     CudaBackend,
     DockerSandbox,
     GpuInfo,
@@ -12,6 +13,9 @@ from vs_sandbox.api import (
     HostResourceAccess,
     SandboxKind,
 )
+from vs_sandbox.api.testing import FakeGpuTelemetry, ScriptedDockerCli
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock
 
 
 def test_cpu_only_control_plane_docker_skips_gpu_runtime(
@@ -19,7 +23,7 @@ def test_cpu_only_control_plane_docker_skips_gpu_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     docker = recording_docker_cli()
-    backend = CudaBackend(tmp_path, docker=docker)
+    backend = CudaBackend(tmp_path, docker=docker, clock=ManualClock(), threads=OsThreads())
     pick_device = MagicMock()
     monkeypatch.setattr("vs_sandbox.cuda_backend.pick_gpu", pick_device)
 
@@ -39,7 +43,9 @@ def test_cpu_only_control_plane_docker_skips_gpu_runtime(
 def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backend = CudaBackend(tmp_path)
+    backend = CudaBackend(
+        tmp_path, clock=ManualClock(), threads=OsThreads(), docker=ScriptedDockerCli()
+    )
 
     sandbox = backend.make_sandbox(
         SandboxKind.DOCKER,
@@ -68,7 +74,7 @@ def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
 
 def test_docker_forwards_resources_to_the_sandbox(tmp_path: Path) -> None:
     docker = recording_docker_cli()
-    backend = CudaBackend(tmp_path, docker=docker)
+    backend = CudaBackend(tmp_path, docker=docker, clock=ManualClock(), threads=OsThreads())
     resource = HostResource(tmp_path / "history", HostResourceAccess.READ_ONLY, "history")
 
     sandbox = backend.make_sandbox(
@@ -82,3 +88,45 @@ def test_docker_forwards_resources_to_the_sandbox(tmp_path: Path) -> None:
     assert isinstance(sandbox, DockerSandbox)
     command = capture_docker_start_argv(sandbox, docker)
     assert f"{resource.path}:{resource.agent_path or resource.path}:ro" in command
+
+
+def test_ensure_accelerator_available_rejects_a_host_with_no_gpu(tmp_path: Path) -> None:
+    backend = CudaBackend(
+        tmp_path,
+        gpu_telemetry=FakeGpuTelemetry(gpus=[]),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        docker=ScriptedDockerCli(),
+    )
+
+    with pytest.raises(CudaAcceleratorUnavailableError, match="NVIDIA GPU"):
+        backend.ensure_accelerator_available()
+
+
+def test_ensure_accelerator_available_accepts_a_host_with_a_gpu(tmp_path: Path) -> None:
+    gpu = GpuInfo(0, "GPU-aaaa", "H100", 0, 100, 0)
+    backend = CudaBackend(
+        tmp_path,
+        gpu_telemetry=FakeGpuTelemetry(gpus=[gpu]),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        docker=ScriptedDockerCli(),
+    )
+
+    backend.ensure_accelerator_available()  # must not raise
+
+
+def test_ensure_accelerator_available_trusts_a_pinned_cuda_visible_devices(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A user who pinned a GPU index is trusted, matching device-selection's own exception."""
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+    backend = CudaBackend(
+        tmp_path,
+        gpu_telemetry=FakeGpuTelemetry(gpus=[]),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        docker=ScriptedDockerCli(),
+    )
+
+    backend.ensure_accelerator_available()  # must not raise

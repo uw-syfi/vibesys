@@ -1,10 +1,10 @@
 """The bridge wire protocol: strict, versioned messages that reject version, operation and policy overrides."""
 
 import pytest
-from pydantic import ValidationError
 
 from vs_sandbox.api.skypilot import (
     EvaluationRequest,
+    FrameDecodeError,
     OutputFrame,
     decode_request,
     decode_response,
@@ -29,5 +29,5 @@ def test_protocol_round_trips_strict_versioned_messages() -> None:
     ],
 )
 def test_protocol_rejects_version_operation_and_policy_overrides(payload: bytes) -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(FrameDecodeError):
         decode_request(payload)

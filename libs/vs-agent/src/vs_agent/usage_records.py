@@ -7,10 +7,10 @@ that reads ``usage.jsonl`` sees the rows a real run writes.
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from pathlib import Path
 
     from vs_agent.contracts import AgentSkillUse, AgentUsage
@@ -50,10 +50,11 @@ def append_usage_record(  # noqa: PLR0913  # lint-waiver: LW-135801 [PLR0913]; t
     reasoning_effort: str | None,
     usage: AgentUsage,
     skills: AgentSkillUse,
+    recorded_at: datetime,
 ) -> None:
     """Append one turn's row to ``log_dir``'s usage file; raise ``OSError`` if it cannot."""
     record = {
-        "timestamp": datetime.now(UTC).isoformat(),
+        "timestamp": recorded_at.isoformat(),
         "kind": kind,
         "round_label": round_label,
         "provider": provider,

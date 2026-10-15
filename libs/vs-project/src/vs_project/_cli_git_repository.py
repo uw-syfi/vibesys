@@ -2,7 +2,7 @@
 
 This is the reference implementation of the contract in
 ``vs_project.api.git_repository``; every other implementation is checked
-against it. All commands go through ``run_git``, so background maintenance stays
+against it. All commands go through ``Git``, so background maintenance stays
 disabled (see ``_git_process``). After ``bind`` they are pinned with
 ``GIT_DIR`` and ``GIT_WORK_TREE`` to the repository selected at that moment.
 """
@@ -10,13 +10,12 @@ disabled (see ``_git_process``). After ``bind`` they are pinned with
 from __future__ import annotations
 
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
 from vs_project._exclude_file import append_excludes
-from vs_project._git_process import git_environment, run_git
+from vs_project._git_process import git_environment
 from vs_project.api.git_repository import (
     COMMIT_IDENTITY_EMAIL,
     COMMIT_IDENTITY_NAME,
@@ -27,11 +26,14 @@ from vs_project.api.git_repository import (
     RepositoryLocation,
     StagingError,
 )
+from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vs_project._git_process import Git
     from vs_project.api.git_repository import GitFaultSink, Pathspec, Revision
+    from vs_sim.api import ProcessOutcome
 
 
 _BRANCH_PREFIX = "refs/heads/"
@@ -57,8 +59,9 @@ class CliGitRepository:
         "GIT_OPTIONAL_LOCKS": "0",
     }
 
-    def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
+    def __init__(self, root: Path, *, git: Git, faults: GitFaultSink) -> None:
         self._root = root
+        self._git = git
         self._faults = faults
         self._git_dir: Path | None = None
         self._work_tree: Path | None = None
@@ -88,13 +91,13 @@ class CliGitRepository:
         *,
         timeout: float | None = None,
         index_file: Path | None = None,
-    ) -> subprocess.CompletedProcess[bytes]:
+    ) -> ProcessOutcome:
         """Run ``git <args>`` at the root; the caller judges the exit code."""
         overrides = self._pins()
         if index_file is not None:
             overrides["GIT_INDEX_FILE"] = str(index_file)
         try:
-            return run_git(
+            return self._git.run(
                 args,
                 cwd=self._root,
                 env=git_environment(
@@ -102,16 +105,14 @@ class CliGitRepository:
                 ),
                 timeout=timeout,
             )
-        except subprocess.TimeoutExpired as error:
+        except ProcessTimeoutError as error:
             raise GitTimeoutError(["git", *args], timeout or 0.0) from error
 
     @staticmethod
-    def _failure(
-        args: Sequence[str], result: subprocess.CompletedProcess[bytes]
-    ) -> GitCommandError:
+    def _failure(args: Sequence[str], result: ProcessOutcome) -> GitCommandError:
         return GitCommandError(["git", *args], result.returncode, _text(result.stderr).strip())
 
-    def _run_checked(self, args: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
+    def _run_checked(self, args: Sequence[str]) -> ProcessOutcome:
         """Run ``git <args>``; a nonzero exit is reported to the fault sink and raised."""
         result = self._run(args)
         if result.returncode != 0:
@@ -171,7 +172,7 @@ class CliGitRepository:
     def head(self) -> str | None:
         try:
             result = self._run(["rev-parse", "HEAD"])
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, ProcessTimeoutError):
             return None
         if result.returncode != 0:
             return None
@@ -440,7 +441,7 @@ class CliGitRepository:
 
     def worktree_head(self, worktree: Path) -> str:
         args = ["rev-parse", "HEAD"]
-        result = run_git(
+        result = self._git.run(
             args,
             cwd=worktree,
             env=git_environment(safe_directory=worktree, overrides=self._ENVIRONMENT),

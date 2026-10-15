@@ -7,10 +7,15 @@ import ctypes
 import os
 import signal
 import sys
+import threading
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+Signals = signal.Signals
+"""Signal numbers (``Signals.SIGTERM``), so callers name them without importing ``signal``."""
 
 
 class SignalSource(Protocol):
@@ -26,19 +31,49 @@ class SignalSource(Protocol):
 
 
 class LoopSignalSource:
-    """The running event loop's signal handlers (main thread, Unix)."""
+    """The process's own signals, delivered on the running event loop (Unix).
+
+    Only the main thread receives a process's signals, so on any other thread this
+    source installs nothing and ``remove_handler`` reports false. Removing a handler
+    restores the disposition the signal had before this source first took it, so a
+    scope that handles signals leaves the process as it found it.
+    """
+
+    def __init__(self) -> None:
+        """Take no signal until a handler is added."""
+        self._previous: dict[
+            signal.Signals, signal.Handlers | Callable[..., object] | int | None
+        ] = {}
 
     def add_handler(self, number: signal.Signals, handler: Callable[[], None]) -> None:
-        """Install ``handler`` on the running loop."""
+        """Install ``handler`` on the running loop, on the main thread only."""
+        if threading.current_thread() is not threading.main_thread():
+            return
+        if number not in self._previous:
+            self._previous[number] = signal.getsignal(number)
         asyncio.get_running_loop().add_signal_handler(number, handler)
 
     def remove_handler(self, number: signal.Signals) -> bool:
-        """Remove the running loop's handler for ``number``."""
-        return asyncio.get_running_loop().remove_signal_handler(number)
+        """Remove the loop's handler for ``number`` and restore its earlier disposition."""
+        if number not in self._previous:
+            return False
+        removed = asyncio.get_running_loop().remove_signal_handler(number)
+        previous = self._previous.pop(number)
+        if previous is not None:
+            signal.signal(number, previous)
+        return removed
 
 
 class ProcessSignaller(Protocol):
     """Terminate an existing process only after validating a stable identity for it."""
+
+    def exists(self, pid: int) -> bool:
+        """Whether a process with id ``pid`` exists now, whoever owns it.
+
+        Only a definite absence is false: a process another user owns exists. The answer
+        names no stable identity, so an id the kernel reused also exists.
+        """
+        ...
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Send SIGTERM to stable ``pid`` iff ``current`` remains true; whether it was sent.
@@ -60,6 +95,16 @@ class PidfdProcessSignaller:
     def __init__(self, *, direct_syscalls: bool = False) -> None:
         """Choose the interpreter wrappers (default) or force direct system calls."""
         self._direct_syscalls = direct_syscalls
+
+    def exists(self, pid: int) -> bool:
+        """Probe ``pid`` with signal 0, which checks for the process and delivers nothing."""
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, revalidate caller identity, and send SIGTERM through its pidfd."""

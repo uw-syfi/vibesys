@@ -44,7 +44,8 @@ from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import append_usage_record
 from vs_mcp.api import StdioServerDescriptor
-from vs_sim.api import OsThreads
+from vs_sim.api import utc_datetime
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -60,6 +61,8 @@ T = TypeVar("T", bound=BaseModel)
 #: Default answer :meth:`FakeAgentClient.invoke_text` returns when nothing is
 #: configured for the call's ``kind`` and no module-wide default was set.
 DEFAULT_TEXT = "Fake agent inspected the trajectory."
+_FAKE_EPOCH = ManualClock()
+"""Every fake turn happens at the epoch: the fake's usage rows carry no real time."""
 
 type ResponseValue = BaseModel | dict[str, object]
 type ResponseSource = ResponseValue | Callable[[FakeInvocation], ResponseValue]
@@ -190,7 +193,7 @@ class FakeAgentClient:
         session_store: SessionStore | None = None,
         skill_selection: SkillSelection = NULL_SKILL_SELECTION,
         log_dir: Path | None = None,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Create a fake client; see the class docstring for defaults.
 
@@ -244,7 +247,6 @@ class FakeAgentClient:
         self._refuses_accepted_steers = False
         self._refusals: list[Callable[[], None]] = []
         self._turns_in_flight = 0
-        threads = threads or OsThreads()
         self._steer_lock = threads.lock()
 
         self._capacity_gate: CapacityGate | None = None
@@ -745,6 +747,7 @@ class FakeAgentClient:
             reasoning_effort=reasoning_effort,
             usage=self._usage,
             skills=AgentSkillUse(),
+            recorded_at=utc_datetime(_FAKE_EPOCH),
         )
 
     def set_capacity_gate(self, gate: CapacityGate) -> None:

@@ -14,6 +14,8 @@ from server.chat.session import ExperimentChatDependencies, ExperimentChatSessio
 from server.chat.transcript import FileChatTranscriptStore
 from server.events import EventType
 from vibesys.run import CoreAgentEventSink
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -69,6 +71,7 @@ def _chat(
             model="gpt-test",
             fallback=lambda _question: "fallback",
             transcript_history=transcript_history,
+            threads=OsThreads(),
         ),
         agent,
     )
@@ -125,7 +128,7 @@ def test_streamed_output_is_filed_under_the_thread_that_asked(
     tmp_path: Path, thread_id: str | None
 ) -> None:
     parts = build_server_parts(tmp_path)
-    events = CoreAgentEventSink(parts.integration.project_event)
+    events = CoreAgentEventSink(parts.integration.project_event, clock=ManualClock())
     agent = _FakeManagedAgent(on_turn=lambda: events.agent_output("partial ", agent_kind="chat"))
     transcripts = FileChatTranscriptStore.open(tmp_path / "state")
     transcript = transcripts.open_transcript(thread_id)
@@ -140,6 +143,7 @@ def test_streamed_output_is_filed_under_the_thread_that_asked(
             provider="codex",
             model="gpt-test",
             fallback=lambda _question: "fallback",
+            threads=OsThreads(),
         ),
         agent,
     )

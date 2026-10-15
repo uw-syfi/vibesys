@@ -77,6 +77,8 @@ export type SessionEvent =
    * identity changed between its load's check and its fold.
    */
   | {readonly type: 'projection-rejected'; readonly error: Error}
+  /** A complete iteration traversal belonged to another run than the run fold. */
+  | {readonly type: 'iteration-rejected'; readonly error: Error}
   /** The control channel changed state (the shell drops repeats of the same state). */
   | {readonly type: 'controls'; readonly state: ControlChannelState}
   /** The tab became visible or the network came back (or the machine woke). */
@@ -545,6 +547,14 @@ export const sessionMachine = setup({
         'projection-rejected': {
           actions: assign(({context, event}) => withProblem(context, 'projection', event.error)),
         },
+        // Navigation is an independently reloadable projection: reject only that projection and
+        // leave the healthy event stream and its stronger error channel untouched.
+        'iteration-rejected': {
+          actions: {
+            type: 'reportIterationError',
+            params: ({event}) => ({error: event.error}),
+          },
+        },
         controls: {
           actions: assign(({context, event}) => ({view: {...context.view, controls: event.state}})),
         },
@@ -769,14 +779,13 @@ export const sessionMachine = setup({
                           snapshot: applies(context, replacementSettled(context, event.output)),
                         }),
                       },
-                      // Applying higher post-replacement evidence changes whether a closed stream
-                      // should reconnect: the stream owner reevaluates, even if its terminal socket
-                      // closed while this snapshot was in flight.
+                      // Applying newer fenced evidence changes whether a closed stream should
+                      // reconnect: the stream owner reevaluates, even if its terminal socket closed
+                      // while this snapshot was in flight.
                       {
                         type: 'reevaluateStream',
                         params: ({context, event}) => ({
                           applied:
-                            context.replacement.owner !== 'startup' &&
                             applies(context, replacementSettled(context, event.output)) !== null,
                         }),
                       },

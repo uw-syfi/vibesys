@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import shlex
-import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from itertools import count
@@ -17,6 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, precondition, rule
 
+from vs_sim.api import ProcessTimedOut
 from vs_sim.api.testing import ManualClock, examples, wait_until_started_sync
 from vs_slurm.api import (
     INITIAL_LIFE,
@@ -57,7 +57,8 @@ from vs_slurm.wiring import FakeCluster, SlurmCluster
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from subprocess import CompletedProcess
+
+    from vs_sim.api import ProcessRun, ProcessSpec
 
 
 class _ScriptOptions(TypedDict, total=False):
@@ -136,7 +137,7 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
             remote_workspace_root=str(remote),
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         ),
-        process=connector,
+        processes=connector,
         clock=ManualClock(),
     )
 
@@ -299,7 +300,7 @@ def test_cancel_acknowledges_a_tombstoned_dispatch_with_no_scheduler_job(
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         )
         cluster = SlurmCluster(
-            SlurmJobRunner(config, process=connector, clock=ManualClock()),
+            SlurmJobRunner(config, processes=connector, clock=ManualClock()),
             state_root=tmp_path / "cluster-state",
         )
 
@@ -884,11 +885,12 @@ def test_local_rejection_survives_lost_remote_rejection_publication(tmp_path: Pa
     connector = FakeConnector(tmp_path / "connector")
     connector.script("rejected-publication", rejected_reason="staging rejected")
 
-    def process(argv: Sequence[str], *, stdin: str | None, timeout: float) -> CompletedProcess[str]:
-        if stdin is not None and "rejected.json.pending." in stdin:
-            message = "rejection publication unavailable"
-            raise OSError(message)
-        return connector(argv, stdin=stdin, timeout=timeout)
+    class _LosesRejectionPublication:
+        def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+            if b"rejected.json.pending." in spec.input:
+                message = "rejection publication unavailable"
+                raise OSError(message)
+            return connector.run(spec, timeout=timeout)
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -898,7 +900,7 @@ def test_local_rejection_survives_lost_remote_rejection_publication(tmp_path: Pa
             remote_workspace_root=str(tmp_path / "remote"),
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         ),
-        process=process,
+        processes=_LosesRejectionPublication(),
         clock=ManualClock(),
     )
     state = tmp_path / "state"
@@ -922,15 +924,18 @@ def test_local_rejection_survives_lost_remote_rejection_publication(tmp_path: Pa
     "error",
     [
         UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid UTF8"),
-        subprocess.TimeoutExpired("transport", 1),
+        ProcessTimedOut(1.0, b"", b""),
     ],
 )
 def test_fresh_operation_transport_failures_are_typed_unknown(
-    tmp_path: Path, action: str, error: Exception
+    tmp_path: Path, action: str, error: Exception | ProcessTimedOut
 ) -> None:
-    def process(argv: Sequence[str], *, stdin: str | None, timeout: float) -> CompletedProcess[str]:
-        del argv, stdin, timeout
-        raise error
+    class _Fails:
+        def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+            del spec, timeout
+            if isinstance(error, ProcessTimedOut):
+                return error
+            raise error
 
     runner = SlurmJobRunner(
         SlurmConfig(
@@ -938,7 +943,7 @@ def test_fresh_operation_transport_failures_are_typed_unknown(
             remote_workspace_root=str(tmp_path / "remote"),
             transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
         ),
-        process=process,
+        processes=_Fails(),
         clock=ManualClock(),
     )
     cluster = SlurmCluster(runner, state_root=tmp_path / "state")

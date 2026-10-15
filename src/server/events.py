@@ -7,7 +7,7 @@ import re
 import uuid
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import (
     TYPE_CHECKING,
@@ -53,7 +53,6 @@ from vibesys.api import (
 from vibesys.api import (
     JsonResultPayload as _JsonResultPayload,
 )
-from vs_sim.api import OsThreads
 
 CommandResultPayload = _CommandResultPayload
 JsonResultPayload = _JsonResultPayload
@@ -220,16 +219,20 @@ class EventPayload(BaseModel):
     every reader instead of copying the whole history on each replay. Producers
     build new payloads; ``model_copy(update=...)`` still works on frozen models.
 
-    Payloads ignore keys they do not declare, which is how history recorded
-    before a field was removed still replays: the retired ``driver``
-    attribution (always ``"agentshim"``) on ``chat_thread_created`` and
-    ``agent_execution_started`` events is dropped on read and never
-    re-serialized. The ``RunEvent`` envelope and wire requests still reject
-    unknown keys.
+    Payloads reject keys they do not declare. A payload that drops a field lists it in
+    ``retired_keys``, so history recorded before the removal still replays.
     """
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
-    unknown_keys_reason: ClassVar[str] = "Recorded events replay after a payload field is removed."
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    retired_keys: ClassVar[frozenset[str]] = frozenset()
+    """Keys a payload once declared: dropped when recorded history replays, never written."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_keys(cls, data: object) -> object:
+        if cls.retired_keys and isinstance(data, dict):
+            return {key: value for key, value in data.items() if key not in cls.retired_keys}
+        return data
 
 
 class ChatData(EventPayload):
@@ -253,6 +256,9 @@ class ChatThreadCreatedData(EventPayload):
     Replayed by clients to rebuild the thread list; the default thread is
     implicit and never records one of these.
     """
+
+    retired_keys: ClassVar[frozenset[str]] = frozenset({"driver"})
+    """``driver`` was always ``"agentshim"`` and was removed in #1486."""
 
     kind: Literal["chat_thread_created"] = "chat_thread_created"
     thread_id: ChatThreadId
@@ -292,6 +298,9 @@ class AgentExecutionActivityData(EventPayload):
 
 class AgentExecutionStartedData(EventPayload):
     """Semantic context for one prompt-to-result agent execution."""
+
+    retired_keys: ClassVar[frozenset[str]] = frozenset({"driver"})
+    """``driver`` was always ``"agentshim"`` and was removed in #1486."""
 
     kind: Literal["agent_execution_started"] = "agent_execution_started"
     stage: str
@@ -1064,7 +1073,7 @@ class EventStore:
     """
 
     def __init__(
-        self, path: Path, run_id: str, *, read_only: bool = False, threads: Threads | None = None
+        self, path: Path, run_id: str, *, read_only: bool = False, threads: Threads
     ) -> None:
         """Open an indexed event file, optionally without cache writes."""
         self.path = path
@@ -1077,7 +1086,6 @@ class EventStore:
         # Neither ``path`` nor ``run_id`` can serve: a retired store can be
         # reopened at the same path, and ``run_id`` is reassigned in place.
         self.store_id = uuid.uuid4().hex
-        threads = threads or OsThreads()
         self._lock = threads.rlock()
         self._changed = threads.condition(self._lock)
         self._parsed_records = 0
@@ -1635,11 +1643,13 @@ def _repair_legacy_sequences(events: list[RunEvent]) -> list[RunEvent]:
 def make_event(
     event_type: EventType,
     text: str = "",
+    *,
+    timestamp: datetime,
     **fields: object,
 ) -> RunEvent:
-    """Build a timestamped event from its type, text, and payload fields."""
+    """Build an event that happened at ``timestamp`` from its type, text, and payload fields."""
     return RunEvent.model_validate(
-        {"timestamp": datetime.now(UTC), "type": event_type, "text": text, **fields}
+        {"timestamp": timestamp, "type": event_type, "text": text, **fields}
     )
 
 

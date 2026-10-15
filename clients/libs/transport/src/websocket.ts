@@ -29,7 +29,9 @@ import {
   subscribeRequest,
 } from './transport.js';
 
+const CONNECTING = 0;
 const OPEN = 1;
+const CLOSING = 2;
 const CLOSED = 3;
 const DEFAULT_CONNECT_TIMEOUT_MS = 5_000;
 const DEFAULT_CLOSE_GRACE_MS = 250;
@@ -403,9 +405,10 @@ export class WebSocketTransport implements ControlTransport {
     } catch (error) {
       throw transportFailure(error);
     }
+    const readyState = socket.readyState;
     // An injected factory may hand back a socket that is already open, in which
     // case there is no handshake to wait on and no `onopen` to come.
-    if (socket.readyState === OPEN) {
+    if (readyState === OPEN) {
       const closeOpening = (): Promise<void> => {
         this.#openingSockets.delete(socket);
         return this.#closeSocket(socket);
@@ -419,6 +422,18 @@ export class WebSocketTransport implements ControlTransport {
       this.#openingSockets.delete(socket);
       await this.#closeSocket(socket);
       throw abortReason(signal);
+    }
+    if (readyState === CLOSING || readyState === CLOSED) {
+      void this.#closeSocket(socket);
+      throw disconnectedError('Server disconnected before WebSocket opened');
+    }
+    if (readyState !== CONNECTING) {
+      void this.#closeSocket(socket);
+      throw new BackendClientError(
+        'disconnected',
+        `WebSocket factory returned invalid readyState ${String(readyState)}`,
+        {retryable: false},
+      );
     }
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -654,6 +669,7 @@ function disconnectedError(message: string): BackendClientError {
 }
 
 function transportFailure(error: unknown): BackendClientError {
+  if (error instanceof BackendClientError) return error;
   const cause = error instanceof Error ? error : new Error(String(error));
   return new BackendClientError('disconnected', cause.message, {cause});
 }

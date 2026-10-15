@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
+    from vs_sim.api import Clock, Threads
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
@@ -43,14 +44,18 @@ HOST_ONLY_BACKENDS = frozenset({ComputeBackend.METAL})
 class LocalBackend:
     """No-device backend (Metal / CPU) — hardware hooks are no-ops."""
 
-    def __init__(
+    # lint-waiver: LW-261405 [PLR0913]; the platform identity plus the registry's shared keywords.
+    # > Grouping them would only rename the keywords create_compute_backend passes every
+    # > registered backend, and the Docker CLI and clock are independent effects.
+    def __init__(  # noqa: PLR0913
         self,
         name: ComputeBackend,
         log_dir: Path,
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
-        docker: DockerCli | None = None,
+        docker: DockerCli,
+        threads: Threads,
     ) -> None:
         """Configure the Metal or CPU backend from its platform identity."""
         self.name = name
@@ -66,6 +71,7 @@ class LocalBackend:
         self._lprint = log or print
         self.image = image
         self._docker = docker
+        self._threads = threads
         # No accelerator to pick — kept for protocol parity with other backends
         # (e.g. run resources read ``selected_device``).
         self.selected_device = None
@@ -105,6 +111,7 @@ class LocalBackend:
                 host_workspace=host_workspace,
                 env=extra_env,
                 lifecycle_hooks=lifecycle_hooks,
+                threads=self._threads,
             )
         if kind is SandboxKind.DOCKER and self._supports_docker:
             if self.image is None:
@@ -128,6 +135,7 @@ class LocalBackend:
                 auth_files=auth_files,
                 lifecycle_hooks=lifecycle_hooks,
                 docker=self._docker,
+                threads=self._threads,
                 docker_in_docker=docker_in_docker,
                 same_path_workspace=same_path_workspace,
                 run_id=run_id,
@@ -137,6 +145,10 @@ class LocalBackend:
             raise ValueError(_exception_message)
         message = f"Unknown sandbox kind: {kind!r}"
         raise ValueError(message)
+
+    def ensure_accelerator_available(self) -> None:
+        """No host prerequisite to probe: Metal has no passthrough, CPU needs no device."""
+        return
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
         """Return no monitor because host-only backends have no device contention."""
@@ -155,39 +167,51 @@ class LocalBackend:
 # Signatures mirror ``backends.get``'s call convention.
 
 
-def metal_backend(
+# lint-waiver: LW-261406 [PLR0913]; the registry's shared construction keywords, one to one.
+# > Grouping them would only rename the keywords create_compute_backend passes every
+# > registered backend.
+def metal_backend(  # noqa: PLR0913
     log_dir: Path,
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
-    docker: DockerCli | None = None,
+    docker: DockerCli,
+    threads: Threads,
+    clock: Clock,
     events: object | None = None,
 ) -> LocalBackend:
-    """Apple Silicon / Metal backend (local execution only)."""
-    del events  # no device to watch for contention
+    """Apple Silicon / Metal backend (local execution only); it records no timestamps."""
+    del clock, events  # no timestamps; no device to watch for contention
     return LocalBackend(
         ComputeBackend.METAL,
         log_dir,
         log=log,
         image=image,
         docker=docker,
+        threads=threads,
     )
 
 
-def cpu_backend(
+# lint-waiver: LW-261407 [PLR0913]; the registry's shared construction keywords, one to one.
+# > Grouping them would only rename the keywords create_compute_backend passes every
+# > registered backend.
+def cpu_backend(  # noqa: PLR0913
     log_dir: Path,
     *,
     log: Callable[[str], None] | None = None,
     image: str | None = None,
-    docker: DockerCli | None = None,
+    docker: DockerCli,
+    threads: Threads,
+    clock: Clock,
     events: object | None = None,
 ) -> LocalBackend:
-    """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers)."""
-    del events  # no device to watch for contention
+    """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers); no timestamps."""
+    del clock, events  # no timestamps; no device to watch for contention
     return LocalBackend(
         ComputeBackend.CPU,
         log_dir,
         log=log,
         image=image or _DEFAULT_CPU_IMAGE,
         docker=docker,
+        threads=threads,
     )

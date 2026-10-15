@@ -83,6 +83,7 @@ def yield_state(
         lifecycle=core.LifecycleClass.SESSION_TURN,
         phase=core.RequestPhase.DISPATCHED,
         until=core.Until(at=100.0),
+        addressed_by=(),
     )
     owner = core.AttemptView(
         attempt_id=attempt_id,
@@ -125,7 +126,7 @@ def yield_state(
                 "run": state.run.model_copy(update={"receipts": (receipt,)}),
                 "attempts": core.AttemptsState(attempts=(owner,)),
                 "sessions": core.SessionsState(sessions=(session,), invocations=(invocation,)),
-                "records": core.RecordsState(records=(record,)),
+                "records": core.RecordsState(hosts=(), records=(record,)),
             }
         ),
         request,

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.skeleton_world import drive, open_skeleton_world
 from tests.support.workspace_world import RUN_ID
 
@@ -17,6 +18,8 @@ from vibesys.events import CoreEvent, CoreEventType, WinnerSelectedData
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import RuntimeRecord, winner_selection
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +38,13 @@ async def test_one_core_run_notifies_the_listener_per_commit_and_announces_its_w
 
     Budget: one skeleton run on real Git, the cheapest way to see the production loop's commits.
     """
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     heard: list[CoreEvent] = []
     integration.events.subscribe(heard.append)
     with open_skeleton_world(tmp_path) as world:

@@ -20,15 +20,9 @@ faults, deterministically, and check invariants over the result.
   [fakes-and-contracts.md](fakes-and-contracts.md)) remain for single
   scenario tests; fault schedules are for runs that combine many faults.
 
-In this repository the wrappers live in `libs/vs-faults` (import
-`vs_faults.api`): one `FaultPlan` (a seed plus rules naming a boundary, a
-target, the ordinal of the matching call, and the fault) drives
-`FaultyAgentClient` (any agent client implementation), `FaultyToolDispatch` (a tool
-dispatcher keyed by tool name), and `python -m vs_faults.connector PLAN STATE
--- INNER...` (any Slurm connector command). `generated_replies(plan)` answers
-a Fake agent client from each turn's declared schema. The dynamic loop's
-sweep (`tests/system/chaos/test_chaos.py`,
-`scripts/chaos_loop.sh N`) shows how to compose them.
+Keep one fault-plan type (a seed plus rules naming a boundary, a target, the
+ordinal of the matching call, and the fault) that drives every wrapper, so a
+run combines faults across boundaries from one seed.
 
 ## Composed-system chaos
 
@@ -63,7 +57,7 @@ TigerBeetle do, instead of one scripted fault per test.
 - Check "no orphan waits" after every step (see
   [functional-core.md](../../software-design/references/functional-core.md)).
 - CI runs N seeds. A failing seed prints and replays exactly.
-- Build on `vs-faults` (`FaultPlan`); do not add a second mechanism.
+- Build on the existing fault-plan mechanism; do not add a second one.
 
 ## Agent behavior
 

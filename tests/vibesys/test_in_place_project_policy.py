@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from pathlib import Path
 
 from vibesys.run.project_policy import build_project_path_policy
@@ -15,7 +16,7 @@ def test_uninitialized_project_policy_protects_no_authored_inputs(tmp_path: Path
             path.mkdir()
     (project / ".git").mkdir()
     store = Project.open(project).state
-    store.create_project("test")
+    store.create_project("test", now=datetime(2026, 1, 1, tzinfo=UTC))
     store.model_cache_directory("test").mkdir(parents=True)
     (project / "agent.toml").write_text("private\n")
     (project / ".env.local").write_text("TOKEN=private\n")

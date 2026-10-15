@@ -34,10 +34,14 @@ from ._routing import SIGNAL_ORDER, event_area
 from ._validation import validate_decision
 from ._values import digest, share_unchanged
 from ._waits import (
+    lapsed_check_waits,
+    lapsed_job_waits,
+    lapsed_session_waits,
     stalled_acquisitions,
     stalled_blocked_records,
     stalled_checkpoint_waits,
     undispatchable_requests,
+    unmet_waits,
 )
 from ._watches import watch_deadlines
 from .types.attempts import (
@@ -99,8 +103,11 @@ from .types.kernel import (
 )
 from .types.records import (
     BlockedRecordStalled,
+    BlockRequest,
+    CancelOwnedResource,
     DispatchAuthorized,
     ExecuteRegisteredOperation,
+    InspectRequest,
     OperationResult,
     OperationRetireRequested,
     Outbound,
@@ -366,9 +373,11 @@ def register_requests(
                 phase=RequestPhase.PREPARED,
                 until=scheduled.until,
                 limit_from_dispatch=scheduled.limit_from_dispatch,
+                addressed_by=(),
             )
         )
         appended[request_id] = records[-1]
+        _address(records, appended, request)
         allocated.append(request)
         added.setdefault(request.decision_id, []).append(request_id)
     if not allocated:
@@ -393,6 +402,32 @@ def register_requests(
             "run": run,
         }
     ), tuple(allocated)
+
+
+def _address(
+    records: list[RequestRecord],
+    appended: dict[RequestId, RequestRecord],
+    request: Request,
+) -> None:
+    """Name a reconciliation command on the record it addresses, as the command is registered.
+
+    A command about a request core holds no record of has no waiter to name it.
+    """
+    if (
+        not isinstance(request, InspectRequest | CancelOwnedResource | BlockRequest)
+        or request.request_id is None
+    ):
+        return
+    for index, row in enumerate(records):
+        if row.request_id != request.target:
+            continue
+        if request.request_id not in row.addressed_by:
+            records[index] = row.model_copy(
+                update={"addressed_by": (*row.addressed_by, request.request_id)}
+            )
+            if row.request_id in appended:
+                appended[row.request_id] = records[index]
+        return
 
 
 def _with_requests(receipt: DecisionReceipt, request_ids: list[RequestId]) -> DecisionReceipt:
@@ -654,7 +689,9 @@ def _stall_entries(
     The waits are a checkpoint wait without a producer (``CheckpointStalled``), a turn acquiring
     with nothing to carry it (``AcquisitionStalled``) and a prepared
     request that can never be dispatched (``RequestUndispatchable``), and a blocked record a closing
-    run waits on that no live request addresses (``BlockedRecordStalled``). A fired watch
+    run waits on that no live request addresses (``BlockedRecordStalled``), and a job whose
+    recorded wait names a request that ended without moving it (``JobWaitLapsed``), and the same
+    for a session (``SessionWaitLapsed``) or a recovery check (``RecoveryCheckWaitLapsed``). A fired watch
     (``WhileOpen``, ``WhileAlive``) is also raised here, as the deadline of the waits that declared it. A signal already raised
     in this step is not raised again: if its reducer could not end the wait (an ambiguous
     record it refuses to act on), the wait stays visible to the orphan check instead of the
@@ -665,13 +702,11 @@ def _stall_entries(
     signals = (
         *(
             CheckpointStalled(invocation=invocation)
-            for invocation in stalled_checkpoint_waits(
-                state.sessions, state.records.records, in_flight
-            )
+            for invocation in stalled_checkpoint_waits(state.sessions, state.records, in_flight)
         ),
         *(
             AcquisitionStalled(invocation=invocation)
-            for invocation in stalled_acquisitions(state.sessions, state.records.records, in_flight)
+            for invocation in stalled_acquisitions(state.sessions, state.records, in_flight)
         ),
         *(
             RequestUndispatchable(request_id=request_id)
@@ -681,6 +716,9 @@ def _stall_entries(
             BlockedRecordStalled(request_id=request_id)
             for request_id in stalled_blocked_records(state)
         ),
+        *lapsed_job_waits(state),
+        *lapsed_session_waits(state),
+        *lapsed_check_waits(state),
         *watch_deadlines(state),
     )
     return [
@@ -1564,10 +1602,13 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
     else:
         if isinstance(event, RecoveryStarted):
             # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
-            credited = records.credit_downtime(state.records, state.run, event)
-            state = state.model_copy(update={"records": credited})
+            opened = records.open_host_epoch(state.records, state.run, event)
+            state = state.model_copy(update={"records": opened})
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))
+    unmet = unmet_waits(given, result.state)
+    if unmet:
+        raise ContractError(("wait",), f"a recorded wait breaks its contract: {unmet[0]}")
     advanced = result.state.model_copy(update={"revision": state.revision + 1})
     return result.model_copy(update={"state": share_unchanged(given, advanced)})
 

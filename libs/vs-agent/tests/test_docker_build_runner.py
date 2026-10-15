@@ -33,9 +33,9 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Coroutine, Sequence
 
-    from vs_sim.api import Condition, Event, Lock, Worker
+    from vs_sim.api import Condition, Event, Lock, ThreadLocal, Worker
 
 
 class _FakePipedProcess:
@@ -109,10 +109,10 @@ class _StuckWorker:
         if not self.is_alive() or timeout is None:
             return
         if self._threads.kill_requested and timeout >= self._threads.worker_settle_seconds:
-            self._threads.advance_to(self._threads.now() + self._threads.worker_settle_seconds)
+            self._threads.advance(self._threads.worker_settle_seconds)
             self._stopped = True
             return
-        self._threads.advance_to(self._threads.now() + timeout)
+        self._threads.advance(timeout)
 
 
 class _StuckThreads:
@@ -142,14 +142,20 @@ class _StuckThreads:
     def event(self) -> Event:
         return self._threads.event()
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        return self._threads.local(initial)
+
     def sleep(self, seconds: float) -> None:
         self._threads.sleep(seconds)
 
     def now(self) -> float:
         return self._threads.now()
 
-    def advance_to(self, instant: float) -> None:
-        self._threads.advance_to(instant)
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        return self._threads.run_async(main)
+
+    def advance(self, seconds: float) -> None:
+        self._threads.advance(seconds)
 
     def request_kill(self) -> None:
         self.kill_requested = True
@@ -294,9 +300,7 @@ def test_timeout_kills_reaps_and_closes_the_fake_process_group(tmp_path: Path) -
     with pytest.raises(TaskImageBuildError, match="budget of 7 seconds ran out"):
         threads.run(
             lambda: build_task_image(
-                dockerfile,
-                command_runner=runner,
-                timeout=7,
+                dockerfile, command_runner=runner, timeout=7, clock=ManualClock()
             )
         )
 
@@ -478,7 +482,9 @@ def test_a_stopped_task_build_reports_the_output_tail_and_running_step(tail: str
         dockerfile = Path(directory) / "Dockerfile"
         dockerfile.write_text("FROM scratch\n", encoding="utf-8")
         with pytest.raises(ImageBuildTimeoutError) as caught:
-            build_task_image(dockerfile, command_runner=StallingRunner(), timeout=30)
+            build_task_image(
+                dockerfile, command_runner=StallingRunner(), timeout=30, clock=ManualClock()
+            )
 
     assert caught.value.step == "step 2/9: RUN pip install torch"
     assert caught.value.output == tail.strip()[-4000:]

@@ -373,7 +373,7 @@ def _write_project_run(
     fixture_options = options or _RunFixtureOptions()
     vibesys_project = Project.open(project)
     store = vibesys_project.state
-    store.create_project(project.name)
+    store.create_project(project.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = store.new_run_manifest(
         project.name,
         run_id=run_id,
@@ -542,7 +542,8 @@ def test_task_dockerfile_builds_once_for_a_launch(tmp_path: Path) -> None:
 
     assert spec.name == "docker"
     assert spec.options["image"] == image_id
-    build.assert_called_once_with(dockerfile.resolve())
+    build.assert_called_once()
+    assert build.call_args.args == (dockerfile.resolve(),)
 
 
 @pytest.mark.parametrize(
@@ -580,7 +581,8 @@ def test_each_outer_loop_builds_the_task_image_once(
     ):
         request = cli.build_run_request(invocation)
 
-    build.assert_called_once_with(dockerfile.resolve())
+    build.assert_called_once()
+    assert build.call_args.args == (dockerfile.resolve(),)
     assert request.run_environment is not None
     assert request.run_environment.options["image"] == image_id
 
@@ -1120,7 +1122,8 @@ def test_repository_resume_rebuilds_a_recorded_task_docker_environment(
 
     assert spec.name == "docker"
     assert spec.options["image"] == rebuilt_image
-    build.assert_called_once_with(dockerfile.resolve())
+    build.assert_called_once()
+    assert build.call_args.args == (dockerfile.resolve(),)
 
 
 def test_repository_resume_rejects_a_different_task(tmp_path: Path) -> None:
@@ -1517,7 +1520,7 @@ def test_v5_agent_resume_restores_config_constraints_and_budget(
         ),
     )
     store = Project.open(project).state
-    store.create_project(project.name)
+    store.create_project(project.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = store.new_run_manifest(
         project.name,
         run_id=run_id,
@@ -1587,7 +1590,7 @@ def test_v5_plain_resume_restores_options_and_budget(
     run_id = "20260811-120000-11111111-plain-v5"
     configuration = _plain_configuration()
     store = Project.open(project).state
-    store.create_project(project.name)
+    store.create_project(project.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = store.new_run_manifest(
         project.name,
         run_id=run_id,
@@ -1663,7 +1666,7 @@ def test_v5_evolve_resume_restores_openevolve_settings_and_budget(
     run_id = "20260811-120000-11111111-evolve-v5"
     configuration = _evolve_configuration()
     store = Project.open(project).state
-    store.create_project(project.name)
+    store.create_project(project.name, now=datetime(2026, 1, 1, tzinfo=UTC))
     manifest = store.new_run_manifest(
         project.name,
         run_id=run_id,

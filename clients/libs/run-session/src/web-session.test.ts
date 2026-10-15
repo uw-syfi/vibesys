@@ -6,6 +6,7 @@ import {
   ServerError,
 } from '@vibesys/contracts';
 import {event, eventBatch, snapshotResponse} from '@vibesys/contracts/testing';
+import {initialIterationNavigation} from '@vibesys/run-state';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import type {BatchReconciliation, StreamMessageContext} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -449,10 +450,30 @@ describe('WebSession', () => {
     await session.close();
   });
 
+  test('rejects foreign iteration navigation without crashing or replacing the run view', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+    transport.iterations.push(iterationResponse('foreign', 'Generation 2', 'run-2'));
+
+    await session.start();
+    await waitForSession(session, () => session.getState().iterationError !== null);
+
+    expect(session.store.getState().runId).toBe('run-1');
+    expect(session.store.getIterations()).toEqual(initialIterationNavigation());
+    expect(session.getState()).toMatchObject({
+      status: 'connected',
+      error: null,
+      controls: {status: 'connected'},
+    });
+    expect(session.getState().iterationError?.message).toContain('run-1');
+    expect(session.getState().iterationError?.message).toContain('run-2');
+    await session.close();
+  });
+
   test('delivers a lifecycle command through the session-owned control connection', async () => {
     const {session, transport} = sessionWith(new FakeLifecycle());
     transport.snapshots.push({
       request_id: 'request-pause',
+      timestamp: '2026-01-01T00:00:00Z',
       ok: true,
       ack: {action: 'pause', status: 'pending'},
     });
@@ -468,6 +489,7 @@ describe('WebSession', () => {
     const {session, transport} = sessionWith(new FakeLifecycle());
     transport.snapshots.push({
       request_id: 'request-stop',
+      timestamp: '2026-01-01T00:00:00Z',
       ok: false,
       error: 'run is read only',
     });
@@ -998,6 +1020,49 @@ describe('WebSession', () => {
     resumed.onDisconnect(disconnect('stream ended before the known tail'));
     expect(session.getState().status).toBe('stale');
     expect(scheduler.pendingDelays()).toEqual([0]);
+    await session.close();
+  });
+
+  test('retries a quietly closed startup stream when its fenced snapshot proves a gap', async () => {
+    const lifecycle = new FakeLifecycle();
+    const {session, transport} = sessionWith(lifecycle, {reconnectDelaysMs: []});
+    const startupSnapshot = deferred<ProtocolResponse>();
+    transport.snapshots.push(startupSnapshot.promise);
+    transport.silentDials = 1;
+
+    const starting = session.start();
+    await settle();
+    const initial = transport.subscriptions[0];
+    if (initial === undefined) throw new Error('Initial subscription did not open');
+
+    initial.onMessage(
+      eventBatch([event(1, 'run_finished', {run_id: 'run-1'})], {
+        store_id: 'store-1',
+        through_sequence: 1,
+        history_after_sequence: 0,
+      }),
+    );
+    await settle();
+    expect(
+      transport.requests.filter(request => request.type === 'query.snapshot').at(-1),
+    ).toMatchObject({type: 'query.snapshot', expected_store_id: 'store-1'});
+
+    // The terminal fold makes this established close look complete until its snapshot answers.
+    initial.onDisconnect(disconnect('startup stream closed before snapshot'));
+    expect(transport.subscriptions).toHaveLength(1);
+
+    // The fenced snapshot is authoritative evidence that two journal events are still missing.
+    transport.silentDials = 1;
+    startupSnapshot.resolve(snapshotResponse({sequence: 3, status: 'completed'}));
+    await starting;
+    await settle();
+
+    expect(initial.closed).toBe(true);
+    expect(transport.subscriptions).toHaveLength(2);
+    expect(transport.subscriptions[1]).toMatchObject({
+      afterSequence: 1,
+      options: {storeId: 'store-1'},
+    });
     await session.close();
   });
 
@@ -2292,7 +2357,7 @@ describe('WebSession', () => {
   });
 });
 
-function iterationResponse(revision: string, label: string): ProtocolResponse {
+function iterationResponse(revision: string, label: string, runId = 'run-1'): ProtocolResponse {
   const ordinal = Number(label.split(' ').at(-1));
   return {
     protocol_version: 1,
@@ -2303,7 +2368,7 @@ function iterationResponse(revision: string, label: string): ProtocolResponse {
     iterations: {
       kind: 'page',
       schema_version: 1,
-      run_id: 'run-1',
+      run_id: runId,
       projection_revision: revision,
       parent_id: null,
       from_cursor: null,
@@ -2375,6 +2440,7 @@ function storeReplacedResponse(): ProtocolResponse {
   return {
     ok: false,
     request_id: 'request-store-replaced',
+    timestamp: '2026-01-01T00:00:00Z',
     error: 'Request failed',
     diagnostic: {
       code: 'snapshot_store_replaced',

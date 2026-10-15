@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, cast
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
+from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 from tests.support.session_world import RunningRunInvocations, SettledRunInvocations
 
 from vs_agent.api import NULL_SKILL_SELECTION
@@ -58,7 +59,7 @@ from vs_project.api import (
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
-    run_git,
+    git_repositories,
 )
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api import RuntimeContractError
@@ -89,9 +90,11 @@ from vs_runtime.api.infrastructure import (
     open_run_environment_resources,
 )
 from vs_runtime.api.observation_contracts import assert_core_accepts
+from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import examples, swept, wait_or_fail, wait_until_started
+from vs_sim.api import OsThreads, ThreadBlockingRunner
+from vs_sim.api.testing import ManualClock, examples, swept, wait_or_fail, wait_until_started
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
@@ -156,7 +159,9 @@ class _Env:
     def start_host(self) -> RuntimeWorkspaces:
         """Start another host over the same disk state, as after a process restart."""
         runtime = create_workspace_runtime(
-            workspace_resources=self.factory, blocking=BlockingOperations()
+            workspace_resources=self.factory,
+            blocking=BlockingOperations(runner=ThreadBlockingRunner()),
+            validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
         _ENVS[runtime.workspaces] = self
@@ -164,7 +169,9 @@ class _Env:
 
     def store(self) -> ReceiptStore:
         """A store over the run's durable receipts (a new one models a restart)."""
-        return ReceiptStore(self.project.state.local_namespace(self.run_id, "receipts"))
+        return ReceiptStore(
+            self.project.state.local_namespace(self.run_id, "receipts"), threads=OsThreads()
+        )
 
 
 _ENVS: weakref.WeakKeyDictionary[RuntimeWorkspaces, _Env] = weakref.WeakKeyDictionary()
@@ -202,7 +209,11 @@ def _env(
         pytest.fail("fresh run resumed")
 
     effects = ProjectRunEffects(
-        git_events=NullGitTrackerEvents(), log_emit=_emit, on_log_ready=lambda _path: None
+        git_events=NullGitTrackerEvents(),
+        log_emit=_emit,
+        on_log_ready=lambda _path: None,
+        clock=ManualClock(),
+        git_repository=git_repositories(REAL_GIT),
     )
     with open_project_run_resources(
         request, effects=effects, resolve_resume=unexpected_resume
@@ -219,8 +230,11 @@ def _env(
                 framework_root=tmp_path,
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
+                clock=ManualClock(),
+                slurm_processes=REAL_PROCESSES,
             ),
             lambda _request: _Session(),
+            clock=ManualClock(),
         )
         with closing(environment):
             factory = WorkspaceResourceFactory(
@@ -232,6 +246,8 @@ def _env(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
+                threads=OsThreads(),
+                blocking=ThreadBlockingRunner(),
             )
             env = _Env(project.project, "workspace-requests", wrap(factory))
             env.start_host()
@@ -282,7 +298,7 @@ def _context(
 
 
 def _git(path: Path, *args: str) -> str:
-    result = run_git(list(args), cwd=path)
+    result = REAL_GIT.run(list(args), cwd=path)
     assert result.returncode == 0, result.stderr
     return result.stdout.decode().strip()
 
@@ -292,7 +308,9 @@ def _executor(
 ) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
-    return RuntimeWorkspaceRequests(workspaces, chosen, SettledRunInvocations()), chosen
+    return RuntimeWorkspaceRequests(
+        workspaces, chosen, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+    ), chosen
 
 
 async def _run(
@@ -427,7 +445,7 @@ class _FailingStore(ReceiptStore):
     """A real store whose chosen writes fail, as when a host dies at that point."""
 
     def __init__(self, namespace: StateNamespace) -> None:
-        super().__init__(namespace)
+        super().__init__(namespace, OsThreads())
         self.fail_done = False
         self.fail_release_mark = False
         self.fail_bind = False
@@ -668,7 +686,9 @@ def test_run_snapshot_binds_invocation_request_and_retention(tmp_path: Path) -> 
 def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         store = _ENVS[workspaces].store()
-        running = RuntimeWorkspaceRequests(workspaces, store, RunningRunInvocations())
+        running = RuntimeWorkspaceRequests(
+            workspaces, store, RunningRunInvocations(), blocking=ThreadBlockingRunner()
+        )
         request = SnapshotAndRetainRun(
             request_id=_rid("run-snap-wait"),
             scope=Scope(owner=RunId(root="run-1"), generation=3),
@@ -687,7 +707,9 @@ def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> N
         assert not observed.terminal
         assert waiting.observation.revision is None
         assert _commits(workspaces) == commits
-        settled = RuntimeWorkspaceRequests(workspaces, store, SettledRunInvocations())
+        settled = RuntimeWorkspaceRequests(
+            workspaces, store, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+        )
         done = await _run(settled, request)
         assert done.observation.observation.status is ObservationStatus.SUCCEEDED
         assert_core_accepts([waiting, done], expect_retry=True)

@@ -10,6 +10,7 @@ import {Window} from 'happy-dom';
 import {act} from 'react';
 import type {Root} from 'react-dom/client';
 import {createLiveApp} from './compose.js';
+import {createWebThemeController} from './theme.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -43,6 +44,13 @@ function toggleButton(container: HTMLElement): HTMLButtonElement {
   return found;
 }
 
+function fakeTheme(): ReturnType<typeof createWebThemeController> {
+  return createWebThemeController(
+    {dataset: {}, style: {setProperty: () => undefined}},
+    {read: () => null, save: () => undefined, remove: () => undefined},
+  );
+}
+
 test('the run/campaign toggle switches the live page between the two views over one session', async () => {
   const {session, transport} = sessionWith(new FakeLifecycle());
   const {createRoot} = await import('react-dom/client');
@@ -50,7 +58,7 @@ test('the run/campaign toggle switches the live page between the two views over 
   document.body.append(container);
   const root: Root = createRoot(container);
 
-  await act(async () => root.render(createLiveApp(session)));
+  await act(async () => root.render(createLiveApp(session, fakeTheme())));
   await settle();
 
   expect(container.textContent).toContain('VIBESYS / RUN VIEWER');

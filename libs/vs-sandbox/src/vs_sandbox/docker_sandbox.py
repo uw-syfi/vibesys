@@ -26,7 +26,6 @@ from vs_sandbox.docker_cli import (
     EXEC_MARKER_ENV,
     SIGNAL_EXEC_SCRIPT,
     DockerCli,
-    SubprocessDockerCli,
 )
 from vs_sandbox.docker_states import (
     INITIAL_CONTAINER_LIFE,
@@ -45,10 +44,11 @@ if TYPE_CHECKING:
 
     from vs_sandbox.execution import CommandResult
     from vs_sandbox.host_resources import HostResource
-    from vs_sim.api import Event
+    from vs_sim.api import Event, Threads
 
-# Global registry of live containers for cleanup on exit / SIGINT.
-_live_containers: dict[str, str] = {}  # container_id -> container_name
+# Global registry of live containers for cleanup on exit / SIGINT: each container's id and
+# the Docker CLI that started it, which is the one that can stop it.
+_live_containers: dict[str, DockerCli] = {}
 
 # Environment variables whose *values* must never leave this process.
 # Credentials reach the container as ``-e NAME=VALUE`` arguments on
@@ -115,10 +115,9 @@ def _non_secret_env(env: dict[str, str]) -> dict[str, str]:
     return {name: value for name, value in env.items() if not _is_secret_env_name(name)}
 
 
-def _cleanup_containers(docker: DockerCli | None = None) -> None:
-    """Stop and remove all tracked containers through *docker* (the real CLI by default)."""
-    docker = docker if docker is not None else SubprocessDockerCli()
-    for container_id, _name in list(_live_containers.items()):
+def _cleanup_containers() -> None:
+    """Stop and remove all tracked containers, each through the Docker CLI that started it."""
+    for container_id, docker in list(_live_containers.items()):
         with suppress(OSError, subprocess.TimeoutExpired):
             docker.run(["docker", "stop", container_id], timeout_seconds=30)
         removed = None
@@ -257,7 +256,9 @@ class DockerSandbox(WorkspaceSandbox):
         agent_gid: int | None = None,
         auth_files: list[tuple[str, str]] | None = None,
         lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
-        docker: DockerCli | None = None,
+        *,
+        docker: DockerCli,
+        threads: Threads,
         docker_in_docker: bool = False,
         same_path_workspace: bool = False,
         run_id: str | None = None,
@@ -327,8 +328,10 @@ class DockerSandbox(WorkspaceSandbox):
             lifecycle_hooks: Trusted extensions invoked in order after
                 built-in initialization and before the sandbox becomes ready.
                 They run again after every container recreation.
-            docker: The ``docker`` CLI to run commands through; defaults to
-                the real binary on ``PATH``. Tests pass a fake daemon.
+            docker: The ``docker`` CLI to run commands through: the real
+                binary (:class:`SubprocessDockerCli`) or a fake daemon.
+            threads: The clock a command's timeout is measured on; it must be
+                the one *docker*'s spawned ``docker exec`` clients run on.
             docker_in_docker: Run the container under the Sysbox runtime with a
                 Docker daemon of its own inside it (see
                 :mod:`vs_sandbox.container_runtime`), mounting the workspace at
@@ -391,7 +394,8 @@ class DockerSandbox(WorkspaceSandbox):
         self._agent_gid = agent_gid if agent_gid is not None else os.getgid()
         self._auth_files: list[tuple[str, str]] = list(auth_files or [])
         self._lifecycle = SandboxLifecycle(lifecycle_hooks)
-        self._docker: DockerCli = docker if docker is not None else SubprocessDockerCli()
+        self._docker = docker
+        self._threads = threads
 
     @staticmethod
     def _setup_logger(log_path: str | Path | None) -> logging.Logger | None:
@@ -544,7 +548,7 @@ class DockerSandbox(WorkspaceSandbox):
             container_id = result.stdout.strip()
             if container_id:
                 self._container_id = container_id
-                _live_containers[container_id] = self._container_name
+                _live_containers[container_id] = self._docker
                 self._discard_started_container()
             else:
                 # A client that failed after the daemon created the container
@@ -558,7 +562,7 @@ class DockerSandbox(WorkspaceSandbox):
             )
             raise RuntimeError(message)
         self._container_id = result.stdout.strip()
-        _live_containers[self._container_id] = self._container_name
+        _live_containers[self._container_id] = self._docker
 
         try:
             self._initialize_started_container()
@@ -969,6 +973,7 @@ class DockerSandbox(WorkspaceSandbox):
             max_output_chars=self._max_output_bytes,
             launch=lambda: PopenProcess(self._docker.spawn(exec_cmd)),
             signal_remote=lambda number: self._signal_exec(container_id, exec_id, number),
+            threads=self._threads,
         )
         self._log_cmd(
             exec_cmd,

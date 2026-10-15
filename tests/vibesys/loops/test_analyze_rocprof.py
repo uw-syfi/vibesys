@@ -82,7 +82,7 @@ from tests.vibesys.loops.profiler_strategies import (
     wrap_with_namespace_and_template_noise,
 )
 
-from vs_sandbox.api.slurm import PROFILE_STATS_PREFIX
+from vs_sandbox.api.slurm import PROFILE_END, PROFILE_STATS_PREFIX
 
 _REAL_FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "rocprof" / "rocprofv3_real"
 
@@ -1571,3 +1571,4 @@ def test_profile_stats_agree_with_the_host_idle_percentage_and_rank_hip_api_by_t
 def test_the_capture_and_the_host_name_the_statistics_line_the_same() -> None:
 
     assert remote_capture.PROFILE_STATS_PREFIX == PROFILE_STATS_PREFIX
+    assert remote_capture.PROFILE_END == PROFILE_END

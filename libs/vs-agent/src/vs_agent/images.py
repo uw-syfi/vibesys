@@ -8,28 +8,33 @@ provider actually runs in, so a CLI version bump rebuilds only that top
 layer.
 
 Docker owns layer caching for both images; VibeSys invokes each build once
-per launch and consumes the runnable manifest ID resolved from a unique local
-tag. Default provenance attestations are disabled because their generated
-metadata otherwise changes the manifest ID when all filesystem layers match.
+per launch and consumes the runnable manifest ID resolved from a local tag
+derived from the build's own inputs, so an unchanged task or agent selection
+retags rather than re-creates an image, and launches do not leave behind an
+ever-growing set of local tags. Default provenance attestations are disabled
+because their generated metadata otherwise changes the manifest ID when all
+filesystem layers match.
 """
 
 from __future__ import annotations
 
-import json
+import contextlib
+import hashlib
 import math
 import queue
 import re
-import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from pydantic import JsonValue, TypeAdapter
+
 from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
+from vs_decode.api import decode_json
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
 from vs_sim.api import (
     Clock,
-    MonotonicClock,
     OsThreads,
     PipedProcess,
     PipedProcessLauncher,
@@ -65,6 +70,10 @@ _PROCESS_SETTLE_TIMEOUT_SECONDS = 5.0
 # After a normally exited leader, leave half of the one final cleanup budget
 # for killing inherited writers and settling the readers they kept open.
 _DRAIN_GRACE_FRACTION = 0.5
+#: Repository of the local tag keyed by a digest of the task's build context,
+#: Dockerfile, and base image argument, so an unchanged task retags the same
+#: image and a changed one gets a new tag. Every build prunes the
+#: repository's other tags, so at most one survives past one launch.
 _TASK_IMAGE_REPOSITORY = "vibesys-task-build"
 #: Repository of the local tag that names a bare image ID so BuildKit can
 #: resolve it in a ``FROM`` line. Keyed by the full ID, so re-tagging is a
@@ -785,25 +794,32 @@ class SubprocessDockerBuildRunner:
         return _Settlement(workers_stopped, tuple(errors))
 
 
-def build_task_image(
+# lint-waiver: LW-731409 [PLR0913]; the Dockerfile, base, runner, budget, progress sink and the
+# > clock that measures the budget each change one build independently; a settings object would
+# > only rename the keywords agent_image already passes the same way.
+def build_task_image(  # noqa: PLR0913
     dockerfile_path: Path,
     *,
     base_image: str | None = None,
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
+    clock: Clock,
 ) -> str:
     """Build a task Dockerfile and return its immutable Docker image ID.
 
     The task directory is the complete Docker build context. Candidate source,
     Git metadata, and other project inputs therefore cannot be copied into the
-    image. Docker owns layer caching; VibeSys invokes the build once per launch
-    and consumes the runnable manifest ID resolved from a unique local tag.
-    Default provenance attestations are disabled because their generated
-    metadata otherwise changes the manifest ID when all filesystem layers
-    match. The unique tag remains as a local reachability anchor: containerd's
-    image store cannot run the stable config digest emitted by ``--iidfile``
-    when an otherwise untagged image has no retained manifest reference.
+    image. The local tag Docker builds to is keyed to a digest of the build
+    context, the Dockerfile, and ``base_image``, so an unchanged task retags
+    the same image instead of adding another local tag, and Docker's own
+    layer cache answers the rebuild without redoing any step. The tag is a
+    local reachability anchor: containerd's image store cannot run the stable
+    config digest emitted by ``--iidfile`` when an otherwise untagged image
+    has no retained manifest reference. Every call prunes this repository's
+    other local tags, so a changed task's old tag does not linger. Default
+    provenance attestations are disabled because their generated metadata
+    otherwise changes the manifest ID when all filesystem layers match.
 
     ``base_image``, when given, is passed as ``--build-arg BASE_IMAGE=...``,
     so a task Dockerfile may declare ``ARG BASE_IMAGE`` and
@@ -817,13 +833,14 @@ def build_task_image(
     ``timeout`` is the budget for the whole build, not for one Docker command.
     When it runs out, the running Docker process group is killed and
     :class:`ImageBuildTimeoutError` carries the step and output tail.
+    ``clock`` measures the budget.
     """
     dockerfile = _validated_task_dockerfile(dockerfile_path, timeout)
     runner = command_runner or SubprocessDockerBuildRunner()
     return _build_task_image(
         dockerfile,
         base_image=base_image,
-        build=_BuildRun(runner=runner, timeout=timeout, on_progress=on_progress),
+        build=_BuildRun(runner=runner, timeout=timeout, on_progress=on_progress, clock=clock),
     ).image_id
 
 
@@ -841,15 +858,84 @@ def _validated_task_dockerfile(dockerfile_path: Path, timeout: float) -> Path:
 
 
 def _build_task_image(dockerfile: Path, *, base_image: str | None, build: _BuildRun) -> _BuiltImage:
-    """Build a validated task Dockerfile and return its tag and immutable ID."""
+    """Build a validated task Dockerfile to a content-addressed tag and return it with its ID."""
+    context = dockerfile.parent
     extra_build_args = ("--build-arg", f"BASE_IMAGE={base_image}") if base_image is not None else ()
     target = _BuildTarget(
         source=str(dockerfile),
-        context=dockerfile.parent,
+        context=context,
         image_repository=_TASK_IMAGE_REPOSITORY,
         image_label="task image",
     )
-    return _build_and_inspect(target, extra_build_args, build)
+    image_tag = f"{_TASK_IMAGE_REPOSITORY}:{_task_image_digest(context, base_image)}"
+    built = _build_and_inspect(target, extra_build_args, build, image_tag=image_tag)
+    _prune_superseded_task_tags(build, context, keep_tag=image_tag)
+    return built
+
+
+def _task_image_digest(context: Path, base_image: str | None) -> str:
+    """Hash *context* and *base_image* into a deterministic 32-character tag suffix.
+
+    The task Dockerfile is always a direct child of its own build context
+    (:func:`_validated_task_dockerfile` keeps the lexical parent as the
+    context), so hashing every file under *context* already covers it along
+    with every other input Docker can read while building. Folding in
+    *base_image* covers the one input outside the context. The same inputs
+    always hash to the same tag, mirroring how
+    :func:`vs_sandbox.feature_image.build_feature_image` keys the agent
+    layer's tag to its own inputs.
+    """
+    digest = hashlib.sha256()
+    digest.update(repr(base_image).encode())
+    digest.update(b"\0")
+    for path in sorted(p for p in context.rglob("*") if p.is_file()):
+        digest.update(str(path.relative_to(context)).encode())
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:32]
+
+
+def _prune_superseded_task_tags(build: _BuildRun, context: Path, *, keep_tag: str) -> None:
+    """Best-effort: remove every other local tag under :data:`_TASK_IMAGE_REPOSITORY`.
+
+    One launch resolves exactly one task image tag (*keep_tag*, keyed to this
+    task's content); any other tag in the repository is left over from a
+    since-changed task or an earlier VibeSys version and would otherwise
+    accumulate forever, which is the bug this guards against. Removing a tag
+    drops a name, not Docker's own layer cache, so a future build of a
+    since-pruned task still reuses whatever layers it shares with others.
+    Failing to list or remove a tag does not fail the build: the image this
+    launch needed is already resolved.
+    """
+    timeout = min(_DEFAULT_VERIFY_TIMEOUT_SECONDS, build.remaining())
+    if timeout <= 0:
+        return
+    try:
+        listed = _bounded_result(
+            build.runner.run(
+                ("docker", "image", "ls", "--format", "{{.Tag}}", _TASK_IMAGE_REPOSITORY),
+                cwd=context,
+                timeout=timeout,
+            )
+        )
+    except (FileNotFoundError, ProcessTimeoutError):
+        return
+    if listed.returncode != 0:
+        return
+    keep_suffix = keep_tag.removeprefix(f"{_TASK_IMAGE_REPOSITORY}:")
+    for tag in listed.stdout.split():
+        if tag == keep_suffix:
+            continue
+        timeout = min(_DEFAULT_VERIFY_TIMEOUT_SECONDS, build.remaining())
+        if timeout <= 0:
+            return
+        with contextlib.suppress(FileNotFoundError, ProcessTimeoutError):
+            build.runner.run(
+                ("docker", "image", "rm", f"{_TASK_IMAGE_REPOSITORY}:{tag}"),
+                cwd=context,
+                timeout=timeout,
+            )
 
 
 def _resolvable_base(base_image: str, build: _BuildRun) -> str:
@@ -883,7 +969,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
-    clock: Clock | None = None,
+    clock: Clock,
 ) -> str:
     """Build the agent layer on top of a task image, and return its image ID.
 
@@ -920,9 +1006,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
         raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
-    build = _BuildRun(
-        runner=runner, timeout=timeout, on_progress=on_progress, clock=clock or MonotonicClock()
-    )
+    build = _BuildRun(runner=runner, timeout=timeout, on_progress=on_progress, clock=clock)
     if task_dockerfile is not None:
         dockerfile = _validated_task_dockerfile(task_dockerfile, timeout)
         base = _build_task_image(
@@ -962,8 +1046,8 @@ class _BuildRun:
 
     runner: DockerBuildRunner
     timeout: float
+    clock: Clock
     on_progress: BuildProgressSink | None = None
-    clock: Clock = field(default_factory=MonotonicClock)
     started: float = field(init=False)
 
     def __post_init__(self) -> None:
@@ -1057,10 +1141,9 @@ def _timeout_error(
 
 
 def _build_and_inspect(
-    target: _BuildTarget, extra_build_args: Sequence[str], build: _BuildRun
+    target: _BuildTarget, extra_build_args: Sequence[str], build: _BuildRun, *, image_tag: str
 ) -> _BuiltImage:
-    """Build one Dockerfile to a unique tag and resolve its immutable ID."""
-    image_tag = f"{target.image_repository}:{uuid.uuid4().hex}"
+    """Build one Dockerfile to *image_tag* and resolve its immutable ID."""
     build_argv = (
         "docker",
         "build",
@@ -1345,15 +1428,22 @@ def _cached_repo_digest(
     return _repo_digest_for(result.stdout, repository)
 
 
+_ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_INSPECT_BYTES = 1024 * 1024
+"""The largest ``RepoDigests`` listing read from ``docker image inspect``."""
+
+
 def _repo_digest_for(repo_digests_json: str, repository: str) -> str | None:
     """Pick the ``repository@sha256:...`` entry out of a ``RepoDigests`` JSON list.
 
     Absent, malformed, or non-list output resolves to ``None``.
     """
-    try:
-        digests = json.loads(repo_digests_json.strip() or "null")
-    except json.JSONDecodeError:
-        return None
+    digests = decode_json(
+        repo_digests_json.strip() or "null",
+        _ANY_JSON,
+        source="docker image inspect RepoDigests",
+        max_bytes=_MAX_INSPECT_BYTES,
+    )
     if not isinstance(digests, list):
         return None
     prefix = f"{repository}@sha256:"

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from vs_sim.api import Clock, OsThreads, SubprocessProbe, SystemClock, Threads
+from vs_sim.api import Clock, OsThreads, SubprocessProbe, Threads
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -244,7 +244,7 @@ class GpuContentionMonitor:
         *,
         telemetry: GpuTelemetry | None = None,
         threads: Threads | None = None,
-        clock: Clock | None = None,
+        clock: Clock,
         events: GpuContentionEvents | None = None,
     ) -> None:
         """Configure monitoring for one GPU UUID and polling interval."""
@@ -253,7 +253,7 @@ class GpuContentionMonitor:
         self._interval = interval
         self._telemetry: GpuTelemetry = telemetry or NvidiaSmiTelemetry()
         self._threads: Threads = threads or OsThreads()
-        self._clock: Clock = clock or SystemClock()
+        self._clock: Clock = clock
         self._events = events
 
         self._stop_event = self._threads.event()

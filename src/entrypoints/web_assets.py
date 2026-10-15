@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from vs_decode.api import Unreadable, read_json
 
 WEB_BUILD_MANIFEST = ".vibesys-web-build.json"
 WEB_BUILD_COMMAND = "pnpm --dir clients/apps/web build"
@@ -181,11 +183,15 @@ class WebAssetBundle:
         return cls(resolved, manifest.build_id)
 
 
+_MAX_MANIFEST_BYTES = 4 * 1024 * 1024
+"""Far past any web build manifest; a longer file is not one."""
+
+
 def _read_manifest(path: Path) -> _WebBuildManifest:
-    try:
-        return _WebBuildManifest.model_validate_json(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, ValidationError) as error:
-        raise _WebAssetError.invalid_manifest(path, error) from None
+    manifest = read_json(path, _WebBuildManifest, max_bytes=_MAX_MANIFEST_BYTES)
+    if isinstance(manifest, Unreadable):
+        raise _WebAssetError.invalid_manifest(path, ValueError(manifest.details("manifest")))
+    return manifest
 
 
 def _validate_snapshot(value: dict[str, str]) -> dict[str, str]:

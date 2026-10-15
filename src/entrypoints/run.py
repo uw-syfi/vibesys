@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import signal
 import sys
-import threading
 from contextlib import contextmanager
 from functools import partial
 from typing import TYPE_CHECKING
@@ -13,7 +11,7 @@ from typing import TYPE_CHECKING
 from headless import printable
 from headless import run as render_run
 from vibesys.api import RunStopped
-from vs_sim.api import LoopSignalSource
+from vs_sim.api import Signals
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Iterator
@@ -26,8 +24,8 @@ if TYPE_CHECKING:
 # jobs) before the process exits.
 __all__ = ["failure_reason", "run_headless", "supervise"]
 
-_TERMINATION_SIGNALS = (signal.SIGTERM, signal.SIGHUP)
-_HANDLED_SIGNALS = (signal.SIGINT, *_TERMINATION_SIGNALS)
+_TERMINATION_SIGNALS = (Signals.SIGTERM, Signals.SIGHUP)
+_HANDLED_SIGNALS = (Signals.SIGINT, *_TERMINATION_SIGNALS)
 
 
 class _Supervisor:
@@ -38,7 +36,7 @@ class _Supervisor:
         self._execution = execution
         self._stopping = False
         self.terminating = False
-        self.signalled: signal.Signals | None = None
+        self.signalled: Signals | None = None
 
     def stop(self) -> None:
         """Request a cooperative stop once; the run drains in-flight work."""
@@ -52,11 +50,11 @@ class _Supervisor:
             self.terminating = True
             self._session.cancel()
 
-    def on_signal(self, number: signal.Signals) -> None:
+    def on_signal(self, number: Signals) -> None:
         """Stop on the first Ctrl-C; cancel on any other or repeated signal."""
         first = self.signalled is None
         self.signalled = self.signalled or number
-        if first and number is signal.SIGINT:
+        if first and number is Signals.SIGINT:
             self.stop()
         else:
             self.terminate()
@@ -74,22 +72,21 @@ async def supervise(
     session: RunHandle,
     work: Awaitable[RunResult] | None = None,
     *,
-    handle_signals: bool = True,
-    signals: SignalSource | None = None,
+    signals: SignalSource | None,
 ) -> RunResult:
     """Await the run; a stop or signal unwinds it through its own teardown.
 
     Cancelling this coroutine requests a cooperative stop and drains the run
-    before the cancellation propagates. With *handle_signals*, the first SIGINT
+    before the cancellation propagates. With a *signals* source, the first SIGINT
     requests that stop and returns the typed stopped result; SIGTERM, SIGHUP,
     or a repeated signal cancel the run and end in ``SystemExit(128 + n)``.
     The handlers run on the event loop, so no signal raises inside a teardown step.
-    *signals* is where they arrive: the process's own signals by default, a Fake
-    that a test delivers by hand otherwise.
+    *signals* is where they arrive: the process's own (``LoopSignalSource``, built
+    by the entrypoint), a Fake that a test delivers by hand, or None to handle none.
     """
     execution = asyncio.ensure_future(work if work is not None else session.result())
     supervisor = _Supervisor(session, execution)
-    with _signal_scope(supervisor, signals, enabled=handle_signals):
+    with _signal_scope(supervisor, signals):
         completed = False
         try:
             result = await _await_completion(supervisor, execution)
@@ -128,39 +125,35 @@ async def _await_completion(
 
 
 @contextmanager
-def _signal_scope(
-    supervisor: _Supervisor, signals: SignalSource | None, *, enabled: bool
-) -> Iterator[None]:
-    """Temporarily install signal callbacks and, for the process's own, restore its signals."""
-    own = signals is None
-    source = LoopSignalSource() if signals is None else signals
-    installed: list[signal.Signals] = []
-    previous = {}
+def _signal_scope(supervisor: _Supervisor, signals: SignalSource | None) -> Iterator[None]:
+    """Route the handled signals to *supervisor* for the scope, then hand them back."""
+    if signals is None:
+        yield
+        return
+    installed: list[Signals] = []
     try:
-        if enabled and (not own or threading.current_thread() is threading.main_thread()):
-            for number in _HANDLED_SIGNALS:
-                if own:
-                    previous[number] = signal.getsignal(number)
-                source.add_handler(number, partial(supervisor.on_signal, number))
-                installed.append(number)
+        for number in _HANDLED_SIGNALS:
+            signals.add_handler(number, partial(supervisor.on_signal, number))
+            installed.append(number)
         yield
     finally:
         for number in installed:
-            source.remove_handler(number)
-            if previous.get(number) is not None:
-                signal.signal(number, previous[number])
+            signals.remove_handler(number)
 
 
-def _signal_exit(number: signal.Signals) -> BaseException:
+def _signal_exit(number: Signals) -> BaseException:
     return SystemExit(128 + number)
 
 
-def run_headless(request: RunRequest, runs: Runs) -> RunResult:
-    """Start one run and supervise terminal rendering through completion."""
+def run_headless(request: RunRequest, runs: Runs, signals: SignalSource) -> RunResult:
+    """Start one run and supervise terminal rendering through completion.
+
+    *signals* is where the process's stop and termination signals arrive.
+    """
 
     async def execute() -> RunResult:
         handle = runs.resume(request) if request.resume is not None else runs.start(request)
-        return await supervise(handle, render_run(handle))
+        return await supervise(handle, render_run(handle), signals=signals)
 
     try:
         return asyncio.run(execute())

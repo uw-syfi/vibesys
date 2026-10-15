@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.core_plugins import failing_plugin
+from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 
 from entrypoints.headless import print_uncaught
+from entrypoints.production import production_timing
 from entrypoints.run import run_headless
 from launch import LaunchSettings, default_runs
 from server.runtime import ServerRuntime
@@ -27,6 +29,8 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import OsThreads, Platform, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import FakeSignalSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -37,7 +41,9 @@ if TYPE_CHECKING:
 
 
 def _fake_agent(**_kwargs: object) -> FakeAgentClient:
-    return FakeAgentClient(capabilities=AgentCapabilities(provider_session_resume=True))
+    return FakeAgentClient(
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+    )
 
 
 def _request(root: Path) -> RunRequest:
@@ -70,7 +76,9 @@ def _runs(clients: list[FakeAgentClient] | None = None, *, real_git: bool = Fals
 
     def agent_factory(**_kwargs: object) -> FakeAgentClient:
         client = FakeAgentClient(
-            session_reuse=True, capabilities=AgentCapabilities(provider_session_resume=True)
+            session_reuse=True,
+            capabilities=AgentCapabilities(provider_session_resume=True),
+            threads=OsThreads(),
         ).set_text(None, "retained chat answer")
         if clients is not None:
             clients.append(client)
@@ -78,6 +86,10 @@ def _runs(clients: list[FakeAgentClient] | None = None, *, real_git: bool = Fals
 
     return default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=agent_factory,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
@@ -91,7 +103,7 @@ def test_headless_entry_starts_and_renders_launch_run(
 ) -> None:
     # The one launch run over the real Git CLI: the default wiring of the repository.
     runs = _runs(real_git=True)
-    result = run_headless(_request(tmp_path / "project"), runs)
+    result = run_headless(_request(tmp_path / "project"), runs, FakeSignalSource())
 
     assert result.run_id.endswith("launch-test")
     assert not result.succeeded
@@ -126,6 +138,10 @@ def _rejecting_runs(plan: Callable[[CoreRunContext], CorePlan]) -> Runs:
     registry.register_plugin(replace(plugin, core=replace(plugin.core, plan=plan)))
     return default_runs(
         LaunchSettings(
+            blocking=ThreadBlockingRunner(),
+            network=UnixNetwork(),
+            timing=production_timing(),
+            processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_fake_agent,
             backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
@@ -144,7 +160,7 @@ def test_the_run_failed_line_and_traceback_show_control_characters_instead_of_se
     """
     runs = _rejecting_runs(_plan_rejecting_with(f"core rejected {_CONTROLS} the observation"))
     with pytest.raises(_CoreRejectedError) as raised:
-        run_headless(_request(tmp_path / "project"), runs)
+        run_headless(_request(tmp_path / "project"), runs, FakeSignalSource())
     print_uncaught(raised.type, raised.value, raised.tb)
 
     err = capsys.readouterr().err
@@ -160,7 +176,7 @@ def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
 ) -> None:
     runs = _rejecting_runs(_rejecting_plan)
     with pytest.raises(Exception, match="core rejected"):
-        run_headless(_request(tmp_path / "project"), runs)
+        run_headless(_request(tmp_path / "project"), runs, FakeSignalSource())
 
     lines = [line for line in capsys.readouterr().err.splitlines() if line.startswith("run failed")]
     assert lines == ["run failed: _CoreRejectedError: core rejected the observation"]
@@ -168,7 +184,12 @@ def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
 
 def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> None:
     runs = _runs()
-    runtime = ServerRuntime(run_id="run-1", socket_path=tmp_path / "control.sock", runs=runs)
+    runtime = ServerRuntime(
+        run_id="run-1",
+        socket_path=tmp_path / "control.sock",
+        runs=runs,
+        platform=Platform.real(),
+    )
     try:
         result = runtime.drive(_request(tmp_path / "project"))
         assert any(event.type == "run_failed" for event in runtime.journal.read())
@@ -179,10 +200,7 @@ def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> N
         runtime.integration.close()
 
 
-@pytest.mark.parametrize("settings", [None, LaunchSettings(agent_client_factory=_fake_agent)])
-def test_launch_rejects_invalid_builtin_options_before_execution(
-    settings: LaunchSettings | None, tmp_path: Path
-) -> None:
+def test_launch_rejects_invalid_builtin_options_before_execution(tmp_path: Path) -> None:
     request = _request(tmp_path / "project").model_copy(
         update={
             "orchestration": OrchestrationDescriptor(
@@ -192,7 +210,15 @@ def test_launch_rejects_invalid_builtin_options_before_execution(
     )
 
     async def execute() -> None:
-        runs = default_runs(settings)
+        runs = default_runs(
+            LaunchSettings(
+                timing=production_timing(),
+                processes=REAL_PROCESSES,
+                agent_client_factory=_fake_agent,
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+            )
+        )
         with pytest.raises(ValueError, match="unknown_launch_option"):
             runs.start(request)
         assert runs.list_active() == ()
@@ -203,7 +229,12 @@ def test_launch_rejects_invalid_builtin_options_before_execution(
 def test_server_retains_chat_after_run_result_and_releases_it_on_close(tmp_path: Path) -> None:
     clients: list[FakeAgentClient] = []
     runs = _runs(clients)
-    runtime = ServerRuntime(run_id="run-1", socket_path=tmp_path / "control.sock", runs=runs)
+    runtime = ServerRuntime(
+        run_id="run-1",
+        socket_path=tmp_path / "control.sock",
+        runs=runs,
+        platform=Platform.real(),
+    )
     try:
         runtime.drive(_request(tmp_path / "project"))
         assert clients, [

@@ -132,28 +132,34 @@ graph TD
     entrypoints --> server
     entrypoints --> vibesys
     entrypoints --> vs_agent
+    entrypoints --> vs_decode
     entrypoints --> vs_github
     entrypoints --> vs_issue_tracker
     entrypoints --> vs_mcp
     entrypoints --> vs_project
+    entrypoints --> vs_runtime
     entrypoints --> vs_sandbox
     entrypoints --> vs_sim
     headless --> vibesys
     launch --> vibesys
     launch --> vs_agent
     launch --> vs_evaluation
+    launch --> vs_github
     launch --> vs_mcp
     launch --> vs_project
     launch --> vs_runtime
     launch --> vs_sandbox
+    launch --> vs_sim
     launch --> vs_slurm
     server --> vibesys
     server --> vs_async_ops
+    server --> vs_decode
     server --> vs_project
     server --> vs_prompts
     server --> vs_sim
     vibesys --> vs_agent
     vibesys --> vs_core
+    vibesys --> vs_decode
     vibesys --> vs_evaluation
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
@@ -165,6 +171,7 @@ graph TD
     vibesys --> vs_sandbox
     vibesys --> vs_sim
     vibesys --> vs_slurm
+    vs_agent --> vs_decode
     vs_agent --> vs_faults
     vs_agent --> vs_mcp
     vs_agent --> vs_project
@@ -175,19 +182,29 @@ graph TD
     vs_dst --> vs_project
     vs_dst --> vs_runtime
     vs_dst --> vs_sim
+    vs_evaluation --> vs_decode
     vs_evaluation --> vs_evaluator_protocol
     vs_evaluation --> vs_mcp
     vs_evaluation --> vs_project
     vs_evaluation --> vs_sim
+    vs_evaluator_protocol --> vs_decode
+    vs_faults --> vs_decode
     vs_faults --> vs_sim
+    vs_github --> vs_decode
+    vs_github --> vs_sim
     vs_issue_tracker --> vs_core
+    vs_issue_tracker --> vs_decode
     vs_issue_tracker --> vs_github
     vs_issue_tracker --> vs_sim
+    vs_project --> vs_decode
+    vs_project --> vs_sim
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops
     vs_runtime --> vs_core
+    vs_runtime --> vs_decode
     vs_runtime --> vs_evaluation
     vs_runtime --> vs_evaluator_protocol
+    vs_runtime --> vs_github
     vs_runtime --> vs_issue_tracker
     vs_runtime --> vs_mcp
     vs_runtime --> vs_project
@@ -195,10 +212,12 @@ graph TD
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_sim
     vs_runtime --> vs_slurm
+    vs_sandbox --> vs_decode
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_project
     vs_sandbox --> vs_sim
     vs_sandbox --> vs_slurm
+    vs_slurm --> vs_decode
     vs_slurm --> vs_sim
 ```
 [//]: # (tach-graph:end)

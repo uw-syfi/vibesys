@@ -13,9 +13,11 @@ from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment
 from tests.support.host_environment import unconfined_host_spec
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import task_path, write_task
 
 from launch import built_in_orchestrations, open_run_store
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES, Config
 from vibesys.constants import ComputeBackend
@@ -52,6 +54,8 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 class _PortableStateProbe(BaseModel):
@@ -92,6 +96,14 @@ class _CreateContextOptions(TypedDict, total=False):
     skills_dirs: list[str] | None
     backend: ComputeBackend
     run_environment: RunEnvironmentSpec
+
+
+@pytest.fixture(autouse=True)
+def _boot_trace_on_virtual_clocks() -> Iterator[None]:
+    """Install the boot trace the entrypoint would, on clocks that only a test moves."""
+    boot_trace.install(boot_trace.BootTrace(wall=ManualClock(), elapsed=ManualClock()))
+    yield
+    boot_trace.install(None)
 
 
 def _write_project(root: Path, *, evaluator_name: str = "checker") -> Path:
@@ -207,7 +219,14 @@ def _create_context(
     try:
         prepared = open_run_resources(
             request,
-            options.get("integration") or LocalRunIntegration(),
+            options.get("integration")
+            or LocalRunIntegration(
+                clock=ManualClock(),
+                git=REAL_GIT,
+                github=NO_GITHUB,
+                threads=OsThreads(),
+                slurm_processes=REAL_PROCESSES,
+            ),
             ownership=ownership,
             agent_specs=resolve_agent_specs(
                 request.config,
@@ -217,6 +236,7 @@ def _create_context(
             ),
             resume_policy=registration.resume_policy,
             backend_factory=options.get("backend_factory") or _RecordingBackendFactory(),
+            profiler_preflight=FakeProfilerPreflight(),
         )
     except BaseException as construction_error:
         try:
@@ -468,7 +488,13 @@ def test_evaluator_tools_built_for_one_project_are_reused_by_another(tmp_path: P
 def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> None:
     project = tmp_path / "queue"
     evaluator = _write_project(project)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     try:
         with _create_context(project, evaluator=evaluator, integration=integration) as ctx:
             changed = [
@@ -706,7 +732,7 @@ def test_agent_v5_run_resumes_only_with_the_options_it_started_with(tmp_path: Pa
     assert isinstance(stored, OrchestrationRunManifest)
     assert stored.orchestration.id == "multi-agent"
     assert stored.orchestration.options["max_rounds"] == 1
-    view = open_run_store(Project.open(project)).get_run(run_id)
+    view = open_run_store(Project.open(project), git=REAL_GIT, threads=SimThreads()).get_run(run_id)
     assert view.loop == "multi-agent"
     registration = built_in_orchestrations().resolve(stored.orchestration.id)
     assert registration.projector is not None
@@ -837,7 +863,13 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
     _git(project, "remote", "add", "origin", str(remote))
     _git(project, "push", "-q", "-u", "origin", f"vibesys-runs/{run_id}")
     published = _git(remote, "rev-parse", f"refs/heads/vibesys-runs/{run_id}")
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
 
     def reject_resources(_resources: object) -> None:
         message = "resource publication failed"

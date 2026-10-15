@@ -1,4 +1,4 @@
-"""Ending the turn of a checkpoint wait that nothing can resolve, as any ended turn is cleaned up."""
+"""Ending the waits of sessions and their turns that nothing can carry on any more."""
 
 from __future__ import annotations
 
@@ -6,26 +6,28 @@ from typing import TYPE_CHECKING
 
 from . import _session_checkpoints
 from ._acquisition_stall import stalled_acquisition
+from ._session_rows import request_ended as _ended
 from ._session_turns import (
     _after_turn_cleanup,
     _invocation,
     _prepared_completion,
+    _release_lost_turn,
     _replace_invocation,
     _replace_session,
     _session,
 )
 from ._turn_outcomes import turn_result
 from ._waits import stalled_acquisitions
-from .types.common import (
-    ContractValidationError,
-)
+from .types.common import ContractValidationError, InvocationRef
 from .types.kernel import AreaChange
 from .types.sessions import (
     AcquisitionStalled,
     CheckpointStalled,
     InputReservationReleased,
     SessionPhase,
+    SessionWaitLapsed,
 )
+from .types.waits import WaitOn
 
 if TYPE_CHECKING:
     from .types.kernel import SessionsContext
@@ -66,9 +68,7 @@ def advance_stalled_acquisitions(
     if not isinstance(event, AcquisitionStalled):
         raise ContractValidationError("event.kind", "event is not an acquisition stall")
     invocation = _invocation(state, event.invocation)
-    if invocation is None or event.invocation not in stalled_acquisitions(
-        state, context.records.records
-    ):
+    if invocation is None or event.invocation not in stalled_acquisitions(state, context.records):
         return AreaChange(state=state)
     observation = stalled_acquisition(invocation, context.run.now_at)
     ended = invocation.model_copy(
@@ -90,3 +90,44 @@ def advance_stalled_acquisitions(
         ),
         events=(turn_result(event.invocation, observation),),
     )
+
+
+def advance_lapsed_session_waits(
+    state: SessionsState, context: SessionsContext, event: SessionsEvent
+) -> AreaChange[SessionsState]:
+    """A request the session waits on ended without moving it: wait on the others still open.
+
+    With none left, an unknown session whose turn's acceptance is unsettled releases that
+    turn as lost, as when its inspection answers unknown, and waits on the cancellation. Any
+    other session keeps its wait on ended requests. It is then an orphan, and the run halts
+    loudly with it named (``RESOLUTIONS``): a session whose last request ended without proof
+    may hold a lease or a running turn core cannot account for, and nothing yet decides who
+    releases it.
+    """
+    if not isinstance(event, SessionWaitLapsed):
+        raise ContractValidationError("event.kind", "event is not a lapsed session wait")
+    session = _session(state, event.session_id)
+    if session is None or session.wait is None or event.request_id not in session.wait.requests:
+        return AreaChange(state=state)
+    if not _ended(context, event.request_id):
+        return AreaChange(state=state)
+    kept = tuple(request for request in session.wait.requests if not _ended(context, request))
+    if not kept and session.phase == SessionPhase.UNKNOWN:
+        turn = (
+            None
+            if session.invocation is None
+            else _invocation(
+                state,
+                InvocationRef(
+                    session_id=session.spec.session_id,
+                    invocation_id=session.invocation,
+                    generation=session.generation,
+                ),
+            )
+        )
+        if turn is not None and turn.phase == SessionPhase.UNKNOWN:
+            return _release_lost_turn(state, context, turn.invocation)
+    if not kept:
+        return AreaChange(state=state)
+    waiting = session.model_copy(update={"wait": WaitOn(requests=kept)})
+    return AreaChange(state=_replace_session(state, waiting))

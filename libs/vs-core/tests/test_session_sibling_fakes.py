@@ -224,14 +224,17 @@ def fake_attempts(
         retention=event.retention,
         invocation=event.invocation,
     )
+    # Like the real Attempts, confirm the request a yield or interruption then waits on.
+    pending = core.InvocationCheckpointPending(invocation=event.invocation, request_id=request_id)
     if request_id in owner.pending_records:
-        return core.AreaChange(state=state)
+        return core.AreaChange(state=state, signals=(pending,))
     updated = owner.model_copy(update={"pending_records": (*owner.pending_records, request_id)})
     return core.AreaChange(
         state=state.model_copy(
             update={"attempts": tuple(updated if row == owner else row for row in state.attempts)}
         ),
         requests=(core.within(request, 100.0),),
+        signals=(pending,),
     )
 
 

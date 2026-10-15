@@ -399,6 +399,15 @@ _REPLACEMENT_OPS = st.builds(
 
 
 @settings(max_examples=_EXAMPLES, deadline=None)
+@example(
+    # Regression: `git add -A -- dir` accepts a directory left empty by a staged deletion; a
+    # pathspec naming a path on disk matches even when it selects no file.
+    operations=[
+        _Op(kind="delete", path="dir/c.txt"),
+        _Op(kind="stage"),
+        _Op(kind="stage", specs=1),
+    ]
+)
 @example(operations=[_Op(kind="file_over_dir"), _Op(kind="stage"), _Op(kind="restore")])
 @example(
     operations=[

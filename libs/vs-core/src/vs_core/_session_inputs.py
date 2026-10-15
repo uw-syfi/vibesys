@@ -18,6 +18,8 @@ from ._proofs import (
     request_matches,
 )
 from ._session_checkpoints import checkpoint_matches, turn_source_matches
+from ._session_rows import awaiting_checkpoint as _awaiting_checkpoint
+from ._session_rows import replace_claim as _replace_claim
 from ._session_scope import attempt_for, dispatching_request, proven_invocation, scope_active
 from .types.attempts import (
     AttemptChargeRefundRequested,
@@ -187,7 +189,9 @@ def _inspection(
         )
     )
     return AreaChange(
-        state=state, requests=(within(request, context.run.limits.reconciliation_bound),)
+        # The inspection also settles the acceptance a pending yield's checkpoint needs.
+        state=_awaiting_checkpoint(state, context, ref, request),
+        requests=(within(request, context.run.limits.reconciliation_bound),),
     )
 
 
@@ -409,8 +413,9 @@ def _interrupt(
         authority=event.authority,
         refund=event.refund,
         phase="draining",
+        wait=None,
     )
-    state = state.model_copy(update={"interrupts": (*state.interrupts, claim)})
+    state = _replace_claim(state, claim)
     if (
         invocation.observation is None
         or not invocation.observation.terminal
@@ -483,16 +488,6 @@ def _interrupt_completion(
         )
     return signals, InterruptCompleted(
         invocation=claim.invocation, checkpoint=checkpoint, refund=claim.refund
-    )
-
-
-def _replace_claim(state: SessionsState, claim: InterruptClaim) -> SessionsState:
-    return state.model_copy(
-        update={
-            "interrupts": tuple(
-                claim if row.invocation == claim.invocation else row for row in state.interrupts
-            )
-        }
     )
 
 

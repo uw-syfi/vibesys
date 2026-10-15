@@ -4,9 +4,10 @@ import re
 import sys
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO, cast
+
+from vs_sim.api import Clock, utc_datetime
 
 # Matches ANSI escape sequences (CSI colors, cursor control, and simple
 # single-character escapes) so the durable log stays plain text even when
@@ -107,13 +108,15 @@ class RunLogger:
         self,
         log_dir: Path,
         *,
+        clock: Clock,
         tee_stderr: bool = True,
         emit: Callable[[str, TextIO], None] | None = None,
     ) -> None:
         self.log_dir = log_dir
+        self._clock = clock
         self._emit = emit if emit is not None else _default_emit
         self._lock = threading.RLock()
-        run_started = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        run_started = utc_datetime(clock).strftime("%Y%m%d-%H%M%S")
         self.path = log_dir / f"run-{run_started}.log"
         self.file = self.path.open("a", encoding="utf-8")
         self.writer = cast(
@@ -157,7 +160,7 @@ class RunLogger:
         with self._lock:
             previous_file = self.file
             previous_file.flush()
-            ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+            ts = utc_datetime(self._clock).strftime("%Y%m%d-%H%M%S")
             suffix = f"step{label}" if isinstance(label, int) else label
             new_path = self.log_dir / f"run-{ts}-{suffix}.log"
             new_file = new_path.open("a", encoding="utf-8")

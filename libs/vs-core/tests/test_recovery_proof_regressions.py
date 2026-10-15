@@ -72,6 +72,7 @@ def _record(request: core.Request, lifecycle: core.LifecycleClass) -> core.Reque
             resource_id=core.ResourceId(root="resource"),
             children_complete=True,
         ),
+        addressed_by=(),
     )
 
 
@@ -89,7 +90,7 @@ def _recovering(record: core.RequestRecord) -> core.CoreState:
     return state.model_copy(
         update={
             "run": state.run.model_copy(update={"status": core.RunStatus.PAUSED}),
-            "records": core.RecordsState(records=(record, anchor)),
+            "records": core.RecordsState(hosts=(), records=(record, anchor)),
         }
     )
 
@@ -458,6 +459,7 @@ def registered_measurement_fixture(
     )
     record = _record(execution, core.LifecycleClass.OWNED_JOB)
     job = core.RegisteredOwnedJob(
+        wait=core.WaitOn(requests=(identity,)),
         operation_id=execution.operation_id,
         request_id=identity,
         scope=execution.scope,

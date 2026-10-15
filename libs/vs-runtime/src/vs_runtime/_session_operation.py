@@ -6,22 +6,22 @@ import asyncio
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
 
 async def await_session_operation[Result](
-    operation: asyncio.Task[Result], *, stop: Callable[[], None] | None = None
+    operation: asyncio.Task[Result], *, stop: Callable[[], Awaitable[object]] | None = None
 ) -> Result:
     """Retain the session's resources until dispatch or access enforcement settles.
 
     A cancelled caller cannot interrupt the operation's thread, so ``stop`` asks the
-    provider to end the turn (once, off the event loop); without it a hung provider turn
+    provider to end the turn (once; the caller runs it off the event loop); without it a hung provider turn
     would outlive the cancellation that is waiting for it.
     """
     try:
         return await asyncio.shield(operation)
     except asyncio.CancelledError as cancelled:
-        stopping = [] if stop is None else [asyncio.ensure_future(asyncio.to_thread(stop))]
+        stopping = [] if stop is None else [asyncio.ensure_future(stop())]
         settled = asyncio.gather(operation, *stopping, return_exceptions=True)
         while not settled.done():
             try:

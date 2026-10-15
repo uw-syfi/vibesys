@@ -66,6 +66,7 @@ from .sessions import (
 )
 from .settlement import AdoptionRequest, AdoptRevision, VerifyAdoption
 from .until import Failed, FailureReason, FromDispatch, Inherited, ReplyError, Until, Watch, Within
+from .waits import WaitOn
 
 
 class InspectRequest(RequestBase):
@@ -187,6 +188,11 @@ class RequestRecord(OutcomeValue):
     """
     dispatched_at: Seconds | None = None
     """When the shell first dispatched a request whose limit counts from then, else None."""
+    addressed_by: tuple[RequestId, ...]
+    """The reconciliation commands (inspections, cancels, blocks) sent about this record.
+
+    Each is added when it is registered, so a blocked record names what can still end it.
+    """
 
     @property
     def retry_wait_until(self) -> float | None:
@@ -324,6 +330,17 @@ class RecoveryCheck(Value):
     target: RequestId
     inspection: RequestId | None = None
     resolution: Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"] = "pending"
+    wait: WaitOn | None
+    """What a pending check waits on: its target while that is open, the inspections recovery
+    sent about the target and the children it left, and the owned jobs that settle children
+    their job ledger tracks. Only a pending check waits."""
+
+    @model_validator(mode="after")
+    def waits_only_while_pending(self) -> RecoveryCheck:
+        """A resolved or blocked check waits on nothing."""
+        if self.wait is not None and self.resolution != "pending":
+            raise ContractValidationError("wait", f"a {self.resolution} recovery check waits")
+        return self
 
 
 class RecoveryBarrier(Value):
@@ -354,6 +371,30 @@ class RecoveryBarrier(Value):
         return self
 
 
+HOST_LOG_LENGTH = 2
+"""Host epochs core keeps: the current one and the one before it, which bound the last downtime."""
+
+
+class HostEpoch(Value):
+    """One lease acquisition (an epoch): when its host started and when it last proved itself alive.
+
+    ``alive_at`` is the host's last recorded lease renewal while the epoch is current. When the
+    next epoch opens it becomes the later of that and the host's last commit, the last moment
+    the host is known to have been alive.
+    """
+
+    epoch: Count
+    started_at: Seconds
+    alive_at: Seconds
+
+    @model_validator(mode="after")
+    def alive_after_start(self) -> HostEpoch:
+        """A host proves itself alive no earlier than it started."""
+        if self.alive_at < self.started_at:
+            raise ContractValidationError("alive_at", "a host is alive no earlier than it started")
+        return self
+
+
 class RecordsState(Value):
     """Records state lifecycle contract."""
 
@@ -366,6 +407,18 @@ class RecordsState(Value):
     records: tuple[RequestRecord, ...] = ()
     children: tuple[ChildLease, ...] = ()
     recovery: RecoveryBarrier = RecoveryBarrier()
+    hosts: tuple[HostEpoch, ...] = Field(max_length=HOST_LOG_LENGTH)
+    """The latest host epochs, oldest first; the last is the recovery barrier's epoch."""
+
+    @model_validator(mode="after")
+    def host_log(self) -> RecordsState:
+        """Epochs strictly increase and the newest is the one recovery started."""
+        epochs = [host.epoch for host in self.hosts]
+        if epochs != sorted(set(epochs)):
+            raise ContractValidationError("hosts", "host epochs must strictly increase")
+        if epochs and epochs[-1] != self.recovery.epoch:
+            raise ContractValidationError("hosts", "the newest host epoch is the recovery epoch")
+        return self
 
     def positions(self, request_id: RequestId | None) -> tuple[int, ...]:
         """Where the records of ``request_id`` sit in ``records``: one place, or none.
@@ -587,17 +640,19 @@ class RequestObserved(OutcomeValue):
 
 
 class RecoveryStarted(Value):
-    """Recovery started lifecycle contract."""
+    """A host acquired the lease: epoch ``epoch`` starts at ``now_at``."""
 
     kind: Literal["recovery_started"] = "recovery_started"
     epoch: Count
     now_at: Seconds
-    last_alive: Seconds | None = None
-    """When an earlier host last proved itself alive (its last durable write or lease renewal).
 
-    ``None`` when no earlier host is known (the first host, or a caller that does not know),
-    so no time is credited to open limits.
-    """
+
+class HostRenewed(Value):
+    """The current epoch's host renewed its lease at ``now_at``, so it was alive then."""
+
+    kind: Literal["host_renewed"] = "host_renewed"
+    epoch: Count
+    now_at: Seconds
 
 
 class RecoveryReady(Value):
@@ -655,6 +710,20 @@ class BlockedRecordStalled(Value):
     request_id: RequestId
 
 
+class RecoveryCheckWaitLapsed(Value):
+    """Internal signal: nothing a pending recovery check names can still move it.
+
+    Raised by the step at quiescence while recovery waits on the check's target, when every
+    request the check names has ended and every entity it names stopped waiting. What the check
+    waited on may have settled its target meanwhile (a session it waited on became known), so
+    recovery resolves the check again from the current state and names what it waits on now.
+    Never shell input.
+    """
+
+    kind: Literal["recovery_check_wait_lapsed"] = "recovery_check_wait_lapsed"
+    target: RequestId
+
+
 class OperationRetireRequested(Value):
     """Explicit retirement of a registered owned operation, resolved by records."""
 
@@ -695,9 +764,34 @@ type RecordsEvent = Annotated[
     | RetryDue
     | RequestUndispatchable
     | BlockedRecordStalled
-    | OperationRetireRequested,
+    | RecoveryCheckWaitLapsed
+    | OperationRetireRequested
+    | HostRenewed,
     Field(discriminator="kind"),
 ]
+
+
+def success_without_reply(observation: Observation) -> bool:
+    """Whether a turn observation proves a success whose reply only its owner event carries."""
+    return (
+        observation.terminal
+        and observation.accepted
+        and observation.status == ObservationStatus.SUCCEEDED
+    )
+
+
+def reply_owed(
+    observation: Observation, facts: RequestObserved | TargetObservation | RequestRecord
+) -> bool:
+    """Whether a plain turn's observation proves a success whose reply only its owner event carries.
+
+    *facts* is the answer or the record that stored it: both hold the same suspension and output.
+    """
+    return (
+        success_without_reply(observation)
+        and facts.suspension is None
+        and facts.outcome_json is None
+    )
 
 
 def request_lifecycle(request: Request) -> LifecycleClass:

@@ -26,7 +26,6 @@ from vibesys.run.profilers import (
 from vs_core.api import StopMode
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunStopped
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -58,7 +57,7 @@ if TYPE_CHECKING:
         StopTimer,
     )
     from vs_sandbox.api import ComputeBackendImpl, HostResource
-    from vs_sim.api import Threads
+    from vs_sim.api import BlockingRunner, Network, Threads
 
 
 def _create_session(
@@ -89,10 +88,12 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     ) = None,
     agent_client_factory: Callable[..., AgentClientProtocol],
     backend_factory: Callable[..., ComputeBackendImpl],
-    profiler_preflight: ProfilerPreflight | None = None,
+    profiler_preflight: ProfilerPreflight,
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
     stop_timer: StopTimer,
     timing: RunTiming,
+    blocking: BlockingRunner,
+    network: Network,
     invocation_store_factory: Callable[[RunState, AgentSessionKey], AgentInvocationStore],
 ) -> RunEnd:
     """Compose the private runtime host and run one validated plugin.
@@ -116,6 +117,8 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
         options=options,
         stop_timer=stop_timer,
         timing=timing,
+        blocking=blocking,
+        network=network,
         invocation_store_factory=invocation_store_factory,
     ) as core_host:
         return await drive_core_run(core_host, integration)
@@ -137,7 +140,7 @@ class _LocalRunSession:
         registry: OrchestrationRegistry,
         implementations: SessionImplementations,
     ) -> None:
-        validate_run_request(request)
+        validate_run_request(request, git=implementations.git)
         self._request = request
         self._implementations = implementations
         self._sink = sink
@@ -154,8 +157,12 @@ class _LocalRunSession:
         )
         self._integration = LocalRunIntegration(
             implementations.git_repository,
-            implementations.slurm_process,
             implementations.state_stores,
+            clock=implementations.timing.clock,
+            git=implementations.git,
+            github=implementations.github,
+            threads=implementations.timing.threads,
+            slurm_processes=implementations.slurm_processes,
         )
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -165,7 +172,7 @@ class _LocalRunSession:
         self._ready_listener: Callable[[RunReady], None] | None = None
         self._resources: RunResources | None = None
         self._auxiliary_scope: InProcessAuxiliaryAgents | None = None
-        self._threads = implementations.threads or OsThreads()
+        self._threads = implementations.timing.threads
         self._auxiliary_lock = self._threads.lock()
         self._closed = False
         self._unsubscribe: Callable[[], None] | None = None
@@ -202,9 +209,7 @@ class _LocalRunSession:
     def _handle_resources(self, resources: RunResources) -> None:
         self._resources = resources
         if self._ready_listener is not None:
-            self._ready_listener(
-                _run_ready(resources, self._registry, self._implementations.agent_providers)
-            )
+            self._ready_listener(_run_ready(resources, self._registry, self._implementations))
 
     def _run_id(self) -> str:
         """Use the provisioned ID once a custom runtime has created its run."""
@@ -308,6 +313,8 @@ class _LocalRunSession:
                 stateless_tool_servers=self._implementations.stateless_tool_servers,
                 stop_timer=self._implementations.stop_timer,
                 timing=self._implementations.timing,
+                blocking=self._implementations.blocking,
+                network=self._implementations.network,
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.status.value == "succeeded"
@@ -452,19 +459,25 @@ class InProcessAuxiliaryAgents:
 def _run_ready(
     resources: RunResources,
     registry: OrchestrationRegistry,
-    agent_providers: tuple[str, ...],
+    implementations: SessionImplementations,
 ) -> RunReady:
     """Project private resource facts to the narrow frontend contract."""
     project = resources.project_resources
     environment = resources.environment_resources
+    store = open_run_store(
+        project.project,
+        registry=registry,
+        git=implementations.git,
+        threads=implementations.timing.threads,
+    )
     return RunReady(
-        record=open_run_store(project.project, registry=registry).get_record(project.state.run_id),
+        record=store.get_record(project.state.run_id),
         log_directory=environment.request.log_dir,
         frontend_state_directory=project.project.state.local_namespace(
             project.state.run_id, "server"
         ).external_directory(),
         agent_provider=resources.provider,
         agent_model=resources.model,
-        agent_providers=agent_providers,
+        agent_providers=implementations.agent_providers,
         role_models=resources.role_models,
     )

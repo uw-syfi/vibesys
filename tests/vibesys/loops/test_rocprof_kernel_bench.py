@@ -77,6 +77,7 @@ from rocprof_kernel_bench_under_test import (  # noqa: E402  (module must load f
     MIN_PAIRS_FOR_VERDICT,
     MIN_SAMPLES_FOR_TREND,
     MIN_SAMPLES_FOR_VERDICT,
+    DriverLogIncompleteError,
     _is_monotonic_increasing,
     _is_valid_pair,
     _load_pairs,
@@ -85,6 +86,7 @@ from rocprof_kernel_bench_under_test import (  # noqa: E402  (module must load f
     _print_verdict,
     assess_paired,
     assess_unpaired,
+    parse_driver_log,
     summarize_series,
 )
 
@@ -395,7 +397,7 @@ def test_print_verdict_reports_inconclusive_without_pairs_line(capsys, kb):  # n
 def test_cmd_parse_extracts_wall_ms_lines(tmp_path, capsys, kb):  # noqa: ANN001, ANN201  # LW-920370; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     log = tmp_path / "driver.log"
     log.write_text(
-        "starting up\nwall_ms: 12.3\nnoise line\nwall_ms: 11.9\nwall_ms: 1.2e1\n",
+        "starting up\nwall_ms: 12.3\nnoise line\nwall_ms: 11.9\nwall_ms: 1.2e1\nwall_ms_done: 3\n",
         encoding="utf-8",
     )
 
@@ -403,6 +405,44 @@ def test_cmd_parse_extracts_wall_ms_lines(tmp_path, capsys, kb):  # noqa: ANN001
 
     payload = json.loads(capsys.readouterr().out)
     assert payload == {"wall_ms": [12.3, 11.9, 12.0]}
+
+
+def _whole_log(values: list[float]) -> str:
+    lines = [f"wall_ms: {v!r}" for v in values] + [f"wall_ms_done: {len(values)}"]
+    return "\n".join(lines) + "\n"
+
+
+@given(st.lists(st.floats(min_value=0.001, max_value=1e6), max_size=8))
+def test_parse_driver_log_round_trips_a_whole_log(values: list[float]) -> None:
+    assert parse_driver_log(_whole_log(values)) == values
+
+
+@given(
+    st.lists(st.floats(min_value=0.001, max_value=1e6), max_size=6),
+    st.data(),
+)
+def test_parse_driver_log_refuses_every_proper_prefix_of_a_log(
+    values: list[float], data: st.DataObject
+) -> None:
+    """A log cut anywhere (mid-number or at a line boundary) never reads as a run."""
+    whole = _whole_log(values)
+    cut = data.draw(st.integers(min_value=0, max_value=len(whole) - 1))
+    with pytest.raises(DriverLogIncompleteError):
+        parse_driver_log(whole[:cut])
+
+
+def test_parse_driver_log_refuses_a_count_that_disagrees_and_lines_after_done() -> None:
+    with pytest.raises(DriverLogIncompleteError):
+        parse_driver_log("wall_ms: 1.0\nwall_ms_done: 2\n")
+    with pytest.raises(DriverLogIncompleteError):
+        parse_driver_log("wall_ms: 1.0\nwall_ms_done: 1\nwall_ms: 2.0\n")
+
+
+def test_cmd_parse_exits_on_a_log_cut_mid_number(tmp_path: Path, kb: ModuleType) -> None:
+    log = tmp_path / "driver.log"
+    log.write_text("wall_ms: 12.3\nwall_ms: 12", encoding="utf-8")
+    with pytest.raises(SystemExit):
+        kb.cmd_parse(argparse.Namespace(log=str(log)))
 
 
 def test_cmd_compare_prints_verdict(tmp_path, capsys, kb):  # noqa: ANN001, ANN201  # LW-920371; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
@@ -432,7 +472,7 @@ def test_cmd_verdict_prints_verdict(tmp_path, capsys, kb):  # noqa: ANN001, ANN2
 
 def test_main_dispatches_parse(tmp_path, capsys, kb):  # noqa: ANN001, ANN201  # LW-920373; this parameter's type is intentionally left loose; annotating it now is separate cleanup work; tracked migration debt from the pre-manifest ratchet scheme
     log = tmp_path / "driver.log"
-    log.write_text("wall_ms: 5.0\n", encoding="utf-8")
+    log.write_text("wall_ms: 5.0\nwall_ms_done: 1\n", encoding="utf-8")
 
     kb.main(["parse", str(log)])
 

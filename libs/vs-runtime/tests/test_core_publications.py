@@ -17,6 +17,7 @@ from vs_project.api import (
     Project,
     StateDocumentDamagedError,
     StateNamespace,
+    StateStore,
     StoreFence,
 )
 from vs_runtime.api.core import (
@@ -51,6 +52,28 @@ class _FenceRaceStore(FakeStateStore):
     def mutate_if_fenced(self, fence: StoreFence, now: float, mutation: Callable[[], None]) -> bool:
         self.fenced_mutation_used = True
         return super().mutate_if_fenced(fence, now, mutation)
+
+
+@dataclass(frozen=True)
+class _FencedLease:
+    """A lease that judges each write with one fence at one time, as a host would."""
+
+    store: StateStore
+    fence: StoreFence
+    now_at: float
+
+    def renew(self, *, now_at: float, lease_duration: float) -> None:
+        del now_at, lease_duration
+
+    def verify(self, *, now_at: float) -> bool:
+        return self.store.verify(self.fence, max(now_at, self.now_at))
+
+    def write_if_held(self, mutation: Callable[[], None]) -> bool:
+        return self.store.mutate_if_fenced(self.fence, self.now_at, mutation)
+
+
+def _context(store: StateStore, fence: StoreFence, now_at: float) -> PublicationContext:
+    return PublicationContext(now_at=now_at, lease=_FencedLease(store, fence, now_at))
 
 
 @dataclass(frozen=True)
@@ -99,14 +122,14 @@ async def test_publish_replay_conflict_sequence_and_epoch(
     shell.advance()
     namespace = Project.open(tmp_path).state.state_store_namespace("run")
     delivery = (
-        JournalPublicationDelivery(namespace, OperationRegistry(), store)
+        JournalPublicationDelivery(namespace, OperationRegistry())
         if production
-        else FakePublicationDelivery(store)
+        else FakePublicationDelivery()
     )
     # Obtain a token through the public lease API on a separate run epoch.
     token = store.acquire("next", now=10, duration=10)
     assert token is not None
-    context = PublicationContext(fence=token, now_at=10)
+    context = _context(store, token, 10)
     publication = shell.record.pending_publications[0]
     await delivery.publish(publication, context)
     await delivery.publish(publication, context)
@@ -123,7 +146,7 @@ async def test_publish_replay_conflict_sequence_and_epoch(
     next_token = store.acquire("third", now=20, duration=10)
     assert next_token is not None
     with pytest.raises(ContractError, match="fence"):
-        await delivery.publish(publication, PublicationContext(fence=token, now_at=20))
+        await delivery.publish(publication, _context(store, token, 20))
     assert delivery.read() == (publication,)
 
 
@@ -153,15 +176,11 @@ async def test_takeover_cannot_overwrite_a_current_hosts_acknowledged_publicatio
     )
     paused_namespace = _PausingReadNamespace(real_namespace, store, gates)
     registry = OperationRegistry()
-    old_delivery = JournalPublicationDelivery(
-        cast("StateNamespace", paused_namespace), registry, store
-    )
-    current_delivery = JournalPublicationDelivery(real_namespace, registry, store)
+    old_delivery = JournalPublicationDelivery(cast("StateNamespace", paused_namespace), registry)
+    current_delivery = JournalPublicationDelivery(real_namespace, registry)
 
     def publish_old() -> PublicationAcknowledgement:
-        return asyncio.run(
-            old_delivery.publish(first, PublicationContext(fence=old_fence, now_at=19))
-        )
+        return asyncio.run(old_delivery.publish(first, _context(store, old_fence, 19)))
 
     def take_over_and_publish() -> tuple[PublicationAcknowledgement, PublicationAcknowledgement]:
         gates.takeover_attempted.set()
@@ -169,7 +188,7 @@ async def test_takeover_cannot_overwrite_a_current_hosts_acknowledged_publicatio
         try:
             current_fence = store.acquire("current", now=20, duration=10)
             assert current_fence is not None
-            context = PublicationContext(fence=current_fence, now_at=20)
+            context = _context(store, current_fence, 20)
             first_ack = asyncio.run(current_delivery.publish(first, context))
             second_ack = asyncio.run(current_delivery.publish(second, context))
             return first_ack, second_ack
@@ -204,7 +223,7 @@ async def test_append_before_ack_restart_deduplicates_and_only_advances_storage(
     shell.start("host", now_at=0, lease_duration=10)
     shell.submit(ClockAdvanced(now_at=1), now_at=1)
     shell.advance()
-    delivery = FakePublicationDelivery(store)
+    delivery = FakePublicationDelivery()
     first = shell.record.pending_publications[0]
 
     class AppendThenCrash:
@@ -241,7 +260,7 @@ async def test_publication_drain_acknowledges_every_committed_callback_once(coun
     for index in range(count):
         shell.submit(ClockAdvanced(now_at=index), now_at=index)
         shell.advance()
-    delivery = FakePublicationDelivery(store)
+    delivery = FakePublicationDelivery()
     core = shell.record.envelope.core
     assert await shell.run_until_idle(delivery, now_at=count) is None
     assert shell.record.envelope.core == core
@@ -257,7 +276,7 @@ async def test_unknown_ack_commit_halts_without_duplicate_publication() -> None:
     shell.start("host", now_at=0, lease_duration=10)
     shell.submit(ClockAdvanced(now_at=1), now_at=1)
     shell.advance()
-    delivery = FakePublicationDelivery(store)
+    delivery = FakePublicationDelivery()
     with pytest.raises(RuntimeCommitUncertainError) as failure:
         await shell.publish_one(delivery, now_at=1)
     assert failure.value.candidate_visible
@@ -284,7 +303,7 @@ async def test_a_damaged_journal_is_a_typed_error_that_does_not_echo_it(
 ) -> None:
     namespace = Project.open(tmp_path).state.state_store_namespace("run")
     namespace.write_bytes("publications.json", contents)
-    delivery = JournalPublicationDelivery(namespace, OperationRegistry(), FakeStateStore())
+    delivery = JournalPublicationDelivery(namespace, OperationRegistry())
 
     with pytest.raises(StateDocumentDamagedError, match=expected) as failure:
         delivery.read()

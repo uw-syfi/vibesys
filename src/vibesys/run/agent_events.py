@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from pydantic_core import from_json
+from pydantic import JsonValue, TypeAdapter
+from pydantic_core import to_jsonable_python
 
 from vibesys.events import (
     AgentOutputChannel,
@@ -29,6 +29,8 @@ from vibesys.events import (
     UsageUpdateData,
     make_core_event,
 )
+from vs_decode.api import Unreadable, decode_json
+from vs_sim.api import Clock, utc_datetime
 
 if TYPE_CHECKING:
     from vs_agent.api import (
@@ -42,23 +44,27 @@ if TYPE_CHECKING:
     )
 
 EventSink = Callable[[CoreEvent], object]
+_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_MAX_TOOL_RESULT_BYTES = 8 * 1024 * 1024
+"""A longer tool result is kept as raw text, not parsed."""
 
 
 def _json_safe(args: dict[str, Any]) -> dict[str, Any]:
     """Coerce tool arguments to a JSON-serializable dictionary."""
-    return json.loads(json.dumps(args, default=repr))
+    return to_jsonable_python(args, fallback=repr)
 
 
 def _classify_tool_result(content: str) -> ToolResultPayload | None:
     """Preserve JSON-shaped tool results alongside their raw text.
 
-    The content is whatever the tool printed, so it is parsed by pydantic's
-    parser, which reports deep nesting as a ``ValueError``; ``json.loads``
-    raised ``RecursionError`` out of the agent's callback.
+    The content is whatever the tool printed, so ``vs_decode`` parses it: bounded in
+    size, with nesting bounded by pydantic's parser, where ``json.loads`` raised
+    ``RecursionError`` out of the agent's callback.
     """
-    try:
-        value = from_json(content)
-    except (ValueError, TypeError):
+    value = decode_json(
+        content, _JSON_VALUE, source="tool result", max_bytes=_MAX_TOOL_RESULT_BYTES
+    )
+    if isinstance(value, Unreadable):
         return None
     if isinstance(value, (dict, list)):
         return JsonResultPayload(value=value)
@@ -73,9 +79,10 @@ class CoreAgentEventSink:
     process-global state.
     """
 
-    def __init__(self, sink: EventSink) -> None:
-        """Create an adapter that sends every translated event to ``sink``."""
+    def __init__(self, sink: EventSink, clock: Clock) -> None:
+        """Send every translated event to ``sink``, stamped by epoch ``clock``."""
         self._sink = sink
+        self._clock = clock
 
     def _emit(
         self,
@@ -99,6 +106,7 @@ class CoreAgentEventSink:
         self._sink(
             make_core_event(
                 event_type,
+                timestamp=utc_datetime(self._clock),
                 data=data,
                 agent_kind=agent_kind,
                 round_label=round_label,

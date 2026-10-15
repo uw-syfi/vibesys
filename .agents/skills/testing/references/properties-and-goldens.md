@@ -29,10 +29,10 @@ Guidelines:
 - When the library finds a failure, pin the failing input as an explicit
   example so the regression runs deterministically forever after, and fix the
   code.
-- Two tiers run the same properties. The PR tier (`ci` profile) is
-  derandomized and draws 25 examples, for speed. The nightly workflow runs the
-  `nightly` profile: randomized, 100 examples, with `print_blob` so a failure
-  prints a `@reproduce_failure` line; pin it with `@example(...)`.
+- Two tiers run the same properties. The PR tier is derandomized and draws
+  few examples, for speed. The nightly tier is randomized and draws more, and
+  prints a `@reproduce_failure` line on failure; pin it with `@example(...)`.
+  The per-tier counts live in the profile registration, never restated here.
 - A test whose misses are costly (rare branches, expensive-to-find states)
   should pin its own `@settings(max_examples=...)`; the profile count is only a
   default for tests that do not.

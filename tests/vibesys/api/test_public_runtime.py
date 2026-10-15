@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.core_host_world import open_core_host
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
@@ -19,12 +20,15 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import load_task
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.core_services import CoreCompositionError
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.core import RunTiming
+from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import SystemClock
+from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -86,7 +90,13 @@ def _request(project_root: Path) -> RunRequest:
 def test_root_workspace_capabilities(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
 
     async def exercise() -> None:
         async with open_core_host(_request(project_root), integration, plugin=_PLUGIN) as ctx:
@@ -113,7 +123,13 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
 def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) -> None:
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     backend = _LifecycleBackend()
 
     def backend_factory(*_args: object, **_kwargs: object) -> _LifecycleBackend:
@@ -126,8 +142,12 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
                 integration,
                 plugin=_PLUGIN,
                 options=EmptyOptions(),
-                timing=RunTiming(SystemClock(), 60.0),
+                timing=RunTiming(SystemClock(), 60.0, OsThreads()),
                 backend_factory=backend_factory,
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ):
                 pytest.fail("failed product assembly yielded a run")
 

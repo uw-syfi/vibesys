@@ -10,11 +10,10 @@ logic or an implementation.
 
 - **requests** are typed data the core emits to ask for I/O. Typed outcomes
   return to the core as events.
-- An **interface** is a `typing.Protocol` declared in the `.api` of the library
-  that owns that kind of I/O. Name it by role, with no suffix: `Cluster`,
-  `StateStore`, `AgentSessions`, `CommandRunner`, `Evaluator`, `IssueTracker`. This
-  matches existing names such as `AgentSessions`, `EvaluationStore`, and
-  `Clock`.
+- An **interface** is a `typing.Protocol` (or the language's equivalent)
+  declared in the public module of the library that owns that kind of I/O.
+  Name it by role, with no suffix: `Cluster`, `StateStore`, `CommandRunner`,
+  `Evaluator`, `IssueTracker`, `Clock`.
 - An **implementation** fulfills an interface. Name it `<Variant><Role>`:
   `SlurmCluster`, `FakeCluster`, `DockerSandbox`, `ModalSandbox`.
 - The **shell** is the async driver that runs the core and executes its
@@ -22,16 +21,13 @@ logic or an implementation.
 
 Avoid these names and terms for these concepts:
 
-- A `Protocol` suffix: redundant; "protocol" means wire protocols here, such as
-  `vs-evaluator-protocol`.
+- A `Protocol` suffix: redundant, and "protocol" usually already means a
+  wire protocol.
 - `I` or `Interface` prefixes: redundant with the declared interface type.
-- "provider": means agent CLIs.
-- "driver": means `vs-agent`'s agent drivers.
 - "effects" or "handlers": say requests and implementations.
 - "ports" or "adapters": say interfaces and implementations.
-
-Rename existing outliers `AgentClientProtocol` and `ComputeBackendImpl` when
-touched.
+- Any term the codebase already uses for another concept; its own skill
+  lists those.
 
 ## Core shape
 
@@ -70,8 +66,8 @@ normal return, absent exception, empty result, or `exit_code or 0`.
 This promises one logical completion, not exactly-once external execution.
 Cancellation and release are resumable transitions too: record intent before
 cancelling, and keep ownership until termination is confirmed or explicitly
-unresolved. Use `vs_project.api.Project` to open persistence and workspace
-layout, never rebuild its paths.
+unresolved. Open persistence and workspace layout through the one type that
+owns them; never rebuild their paths.
 
 ## Crash consistency
 
@@ -121,8 +117,8 @@ every real state of that system, including intermediate ones. Cancel is
 `Confirmed | Requested(job_id) | Lost`, not done or error: a cancelled Slurm
 job stays COMPLETING for 30 to 40 seconds and reports as running, and an
 outcome with no "requested, unconfirmed" variant forced an error that ended a
-user-stopped run. Match unions exhaustively with `assert_never`; `ty` enforces
-it. Parse, do not validate: the boundary parses a response into a proof type,
+user-stopped run. Match unions exhaustively with `assert_never`, so the type checker
+enforces it. Parse, do not validate: the boundary parses a response into a proof type,
 and guards accept only proof types, never raw caller-supplied fields. See
 [python.md](python.md).
 
@@ -154,36 +150,30 @@ time delivery, and signal scopes, with no lifecycle decisions. It does not
 change requested admission, retry, settlement, or release policy.
 
 There is no separate library for interfaces. Each top-level I/O library owns
-its interface in `.api` and its implementations internally or in smaller
-libraries it fans out to: `vs-project` owns filesystem and state persistence,
-`vs-slurm` cluster jobs, `vs-agent` agent sessions, `vs-sandbox` containers,
-`vs-evaluation` evaluation execution, and `vs-github` GitHub operations.
+its interface in its public module and its implementations internally or in
+smaller libraries it fans out to, one library per kind of I/O (persistence,
+cluster jobs, agent sessions, containers, and so on).
 
-Declare tach edges in the same change: shell -> core and shell -> each owning
-library's interface. Implementations stay with or below their owning library.
-The core imports no I/O library or interface. Shared pure value contracts may
-live in pure libraries; do not import mixed I/O APIs for their types. Preserve
-one-way dependencies and the [placement rule](../../../../docs/contributing/architecture.md).
+Declare dependency-graph edges in the same change: shell -> core and shell ->
+each owning library's interface. Implementations stay with or below their
+owning library. The core imports no I/O library or interface. Shared pure
+value contracts may live in pure libraries; do not import mixed I/O APIs for
+their types. Preserve one-way dependencies.
 
-## Worked example: DynamicSearch
+## Worked example: a journaled flow
 
-Read [DynamicSearch](../../../../src/vibesys/orchestration/dynamic/search/_search.py)
-and one [workstream flow](../../../../src/vibesys/orchestration/dynamic/search/_workstream.py).
-Then read the
-[story tests](../../../../tests/vibesys/orchestration/dynamic/test_stories.py),
-which drive one hypothesis from baseline to adoption by answering the waits the search opens
-and asserting on the decisions that come back. [Flows](../../../../docs/contributing/flows.md)
-says how a search is written.
+A stateful flow can also be written as ordinary async code over a context
+object, with a runtime that journals what the flow observes and replays it
+after a restart, so the flow holds no hand-written state record:
 
-- A search is ordinary `async def` code over `ctx`: the runtime journals what the flow
-  observes and replays it after a restart, so the flow itself holds no hand-written state
-  record. The flow is pure in the sense that matters here: its only inputs are the config
-  and the journaled values `ctx` returns, and it reaches the world only through `ctx`.
-- Each part of the run (baseline, each workstream) is a flow. Where it waits is where it
-  awaits (`session.turn`, `ctx.evaluation.measure`), so a wait that does not fit the flow's
-  position cannot be written, instead of being an event to reject.
-- A request that asks for work carries its `within` limit, stated by whoever asks; the
-  runtime enforces it and reports expiry as a typed `Failed` value the flow must match.
+- The flow is pure in the sense that matters here: its only inputs are the config
+  and the journaled values the context returns, and it reaches the world only
+  through the context.
+- Each part of the run is a flow. Where it waits is where it awaits, so a wait
+  that does not fit the flow's position cannot be written, instead of being an
+  event to reject.
+- A request that asks for work carries its time limit, stated by whoever asks; the
+  runtime enforces it and reports expiry as a typed failure value the flow must match.
 - A workspace is a resource: it always settles, after the work, after a failure that ends it,
   and after an operator stop.
 - Flows start child flows in a group, so concurrent parts never read each other's state; they

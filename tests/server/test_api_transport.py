@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Never
 
 import pytest
-from tests.server.support import ServerParts, build_server_parts
+from tests.server.support import REQUEST_TIME, ServerParts, build_server_parts
 
 from server.api.protocol import (
     ChatQuery,
@@ -26,7 +26,7 @@ from server.transport.unix_jsonl import (
     UnixJsonlServer,
     validate_socket_path,
 )
-from vs_sim.api import Connection
+from vs_sim.api import Connection, OsThreads, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 
 type _Dial = Callable[[], Connection]
@@ -48,7 +48,9 @@ def _served[T](
         network = SimNetwork(threads)
         try:
             prepare(parts)
-            server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+            server = UnixJsonlServer(
+                socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            )
             server.start()
             try:
                 return body(parts, lambda: network.connect(str(socket_path), HANG_GUARD_S))
@@ -94,7 +96,7 @@ def test_api_routes_chat_to_configured_handler(tmp_path: Path) -> None:
             )
         )
 
-        response = parts.api.execute(ChatQuery(text="what changed?"))
+        response = parts.api.execute(ChatQuery(timestamp=REQUEST_TIME, text="what changed?"))
 
         assert response.chat is not None
         assert response.chat.answer == "agent answer"
@@ -123,7 +125,7 @@ def test_transport_round_trips_the_stop_command(socket_dir: Path) -> None:
     """`command.stop` parses off the wire, dispatches, and acks as pending."""
 
     def body(parts: ServerParts, dial: _Dial) -> None:
-        response = _request(dial, StopCommand(client_id="unix-client"))
+        response = _request(dial, StopCommand(timestamp=REQUEST_TIME, client_id="unix-client"))
 
         assert response["ok"] is True
         assert response["client_id"] == "unix-client"
@@ -138,8 +140,8 @@ def test_transport_supports_multiple_clients_and_replay(socket_dir: Path) -> Non
         socket_dir,
         socket_dir / "logs",
         lambda _parts, dial: (
-            _request(dial, SnapshotQuery()),
-            _request(dial, EventsQuery(after_sequence=0)),
+            _request(dial, SnapshotQuery(timestamp=REQUEST_TIME)),
+            _request(dial, EventsQuery(timestamp=REQUEST_TIME, after_sequence=0)),
         ),
     )
 
@@ -171,7 +173,9 @@ def test_transport_returns_sanitized_request_errors(socket_dir: Path) -> None:
     response = _served(
         socket_dir,
         socket_dir / "logs",
-        lambda _parts, dial: _request(dial, ChatQuery(text="what happened?")),
+        lambda _parts, dial: _request(
+            dial, ChatQuery(timestamp=REQUEST_TIME, text="what happened?")
+        ),
         prepare=lambda parts: parts.chat.install_default_handler(fail_chat),
     )
 
@@ -186,7 +190,10 @@ def test_transport_returns_sanitized_request_errors(socket_dir: Path) -> None:
 def test_subscription_streams_one_consistent_append_batch(socket_dir: Path) -> None:
     def body(parts: ServerParts, dial: _Dial) -> list[dict[str, Any]]:
         client = dial()
-        _send(client, SubscribeRequest(after_sequence=0, client_id="unix-subscriber"))
+        _send(
+            client,
+            SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, client_id="unix-subscriber"),
+        )
         subscribed = _receive(client)
         replay = _receive(client)
         with parts.condition:
@@ -218,7 +225,12 @@ def test_subscription_reports_structured_stream_failure(
 
     def body(parts: ServerParts, dial: _Dial) -> list[dict[str, Any]]:
         client = dial()
-        _send(client, SubscribeRequest(after_sequence=0, client_id="failing-unix-client"))
+        _send(
+            client,
+            SubscribeRequest(
+                timestamp=REQUEST_TIME, after_sequence=0, client_id="failing-unix-client"
+            ),
+        )
         subscribed = _receive(client)
         bootstrap = _receive(client)
         parts.journal.record(EventType.CHAT, "hello", status="answered")
@@ -264,7 +276,9 @@ def test_transport_rejects_overlong_path_before_binding(tmp_path: Path) -> None:
 
     try:
         with pytest.raises(SocketPathTooLongError) as failure:
-            UnixJsonlServer(path, parts.api).start()
+            UnixJsonlServer(
+                path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+            ).start()
 
         assert failure.value.path == path
         assert str(MAX_SOCKET_PATH_BYTES) in str(failure.value)

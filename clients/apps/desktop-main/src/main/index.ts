@@ -19,7 +19,7 @@ import {RunControl} from '@vibesys/feature-run-control/main';
 import type {HostId} from '@vibesys/hosts';
 import {WELCOME_EVENTS} from '@vibesys/ipc';
 import {remember, SettingsStore} from '@vibesys/settings';
-import {app, Menu, net, powerMonitor} from 'electron';
+import {app, ipcMain, Menu, net, powerMonitor} from 'electron';
 import {AppLaunches} from './app-launches.js';
 import {AppLifecycle, realTimers} from './app-lifecycle.js';
 import {
@@ -32,6 +32,7 @@ import {AppStartup} from './app-startup.js';
 import {Desktop} from './desktop.js';
 import {type LaunchPlan, parseLaunch} from './launch-args.js';
 import {WelcomeFeed} from './welcome-feed.js';
+import {rendererGeneration} from './welcome-ipc.js';
 import {AppWindow} from './window.js';
 
 /** The repository checkout this app was built in: This Mac's VibeSys checkout by default. */
@@ -119,7 +120,27 @@ async function openWindow(
     },
     fatal,
   });
-  desktop = new Desktop({window, welcome, hosts, runs, settings, log});
+  desktop = new Desktop({
+    window,
+    welcome,
+    hosts,
+    runs,
+    settings,
+    welcomeIpc: {
+      handle: (channel, listener) =>
+        ipcMain.handle(channel, (event, ...args) =>
+          listener(
+            {
+              senderId: event.sender.id,
+              senderUrl: event.senderFrame?.url ?? null,
+              rendererGeneration: rendererGeneration(event.senderFrame),
+            },
+            ...args,
+          ),
+        ),
+    },
+    log,
+  });
   // A machine that slept has dead connections nobody has noticed yet: check them now.
   powerMonitor.on('resume', () => manager.wake());
   watchNetwork(manager);

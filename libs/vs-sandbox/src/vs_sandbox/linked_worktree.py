@@ -10,8 +10,10 @@ if TYPE_CHECKING:
 # Entries of the shared repository directory that ``git status``, ``git diff``
 # and ``git log`` read. Everything else is withheld: ``hooks`` (code Git would
 # run), ``logs`` (reflogs of every branch), ``worktrees`` (the index and HEAD of
-# every other worktree, including other roles' candidates), and any other entry.
-_SHARED_ENTRIES = ("objects", "refs", "packed-refs", "HEAD", "config", "info", "shallow")
+# every other worktree, including other roles' candidates), ``config`` (remote
+# URLs, which may embed credentials such as ``https://user:token@host/...``, plus
+# ``credential.*``, ``url.*`` and ``http.*`` settings), and any other entry.
+_SHARED_ENTRIES = ("objects", "refs", "packed-refs", "HEAD", "info", "shallow")
 
 
 def linked_worktree_git_paths(workspace: Path) -> tuple[Path, ...]:
@@ -23,7 +25,12 @@ def linked_worktree_git_paths(workspace: Path) -> tuple[Path, ...]:
     ``git`` command in the sandbox fails with "not a git repository". The result
     is the worktree's own gitdir plus only the shared entries listed in
     ``_SHARED_ENTRIES`` that exist, so other worktrees' metadata, reflogs and
-    hooks stay invisible.
+    hooks stay invisible. ``config`` is never among them, so a credential
+    embedded in a remote URL or a ``credential.*``/``url.*``/``http.*`` setting
+    never reaches the sandbox: ``rev-parse``, ``status`` and ``diff`` all work
+    with no repository-level config file present, at the cost of any
+    repository-specific override (for example ``core.autocrlf``) that config
+    would otherwise have supplied.
 
     Limit: Git addresses objects by hash and refs by name inside one shared
     object store and ref namespace, so ``objects`` and ``refs`` still expose every

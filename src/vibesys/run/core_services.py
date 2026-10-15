@@ -53,6 +53,7 @@ from vs_runtime.api.core import (
     report_turns,
     revision_ref,
 )
+from vs_runtime.api.infrastructure import StateValidationPasses
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -60,6 +61,7 @@ if TYPE_CHECKING:
 
     from vs_agent.api import AgentClientProtocol, AgentInvocationStore, AgentSpec
     from vs_core.api import CoreState, LifecycleCapability, RequestRetries, SearchDef
+    from vs_github.api import GitHubClient
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import Project, StateNamespace, StateStore
     from vs_runtime.api import AgentRole, Commands, CorePolicy, RunFacts
@@ -79,7 +81,7 @@ if TYPE_CHECKING:
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
     )
-    from vs_sim.api import SleepingClock
+    from vs_sim.api import BlockingRunner, Network, SleepingClock, Threads
 
 
 class CoreCompositionError(RuntimeError):
@@ -149,6 +151,14 @@ class CoreResources:
     session_spec: SessionSpecFactory
     clock: SleepingClock
     """The run's clock: it places the deadline and later paces the loop on one timeline."""
+    github: GitHubClient
+    """Reaches GitHub, for operation owners that keep their records there."""
+    threads: Threads
+    """Locks the run's receipts and serves its agent evaluation calls."""
+    blocking: BlockingRunner
+    """Runs the request executors' synchronous calls off the event loop."""
+    network: Network
+    """Serves the in-turn agent evaluation socket."""
     measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
     """Hears each measurement stage start and end, for the host's event stream."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
@@ -206,7 +216,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
     receipts = state_dir.local_namespace(run_id, "receipts")
     publications = state_dir.portable_namespace(run_id, "publications")
     artifacts = ArtifactStore(state_dir.portable_namespace(run_id, "artifacts"))
-    receipt_store = ReceiptStore(receipts)
+    receipt_store = ReceiptStore(receipts, resources.threads)
     try:
         plan = policy.plan(_context(resources, artifacts))
         _validate_plan(plan)
@@ -236,6 +246,8 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         raise CoreCompositionError(".".join(map(str, error.path)), error.detail) from error
     bindings = core_bindings(
         receipts=receipts,
+        threads=resources.threads,
+        blocking=resources.blocking,
         workspaces=resources.workspaces,
         measurement=MeasurementServices(resources.evaluation, resources.measurement_observer),
         sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
@@ -379,6 +391,8 @@ def _agent_bridge(
         ScopeWorkspaces(resources.workspaces, StoreWorkspaceReceipts(receipts)),
         AgentEvaluationRecords(OwedSubmissions(receipts), evidence),
         resources.evaluation_diagnostics,
+        network=resources.network,
+        threads=resources.threads,
     )
 
 
@@ -403,6 +417,9 @@ def _catalog(
         variables=plan.prompt_variables,
         commands=resources.commands,
         replies=plan.search.reply_schemas,
+        validation_passes=StateValidationPasses(
+            resources.project.state.local_namespace(resources.run_id, "validation")
+        ),
         local_validation_events=resources.local_validation_events,
     )
     owned = (
@@ -415,6 +432,9 @@ def _catalog(
                 options=resources.options,
                 variables=plan.prompt_variables,
                 templates=policy.prompt_templates,
+                clock=resources.clock,
+                threads=resources.threads,
+                github=resources.github,
             )
         )
     )
@@ -430,7 +450,7 @@ def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:
         resource = "agent client"
         raise CoreCompositionError(resource, detail)
     reported = report_turns(client, resources.agent_lifecycle)
-    return ClientAgentSessions(reported, resources.invocation_slot)
+    return ClientAgentSessions(reported, resources.invocation_slot, threads=resources.threads)
 
 
 def agent_session_spec(

@@ -7,6 +7,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock
+
 if TYPE_CHECKING:
     from pathlib import Path
 from vibesys.api import agent_spec_from_config
@@ -54,6 +57,7 @@ def _build_client(
     return cast(
         "AgentClient",
         build_agent_client(
+            threads=OsThreads(),
             spec=spec,
             backends=kwargs.get("backends"),
             skill_source_dirs=kwargs.get("skill_source_dirs") or [],
@@ -61,6 +65,7 @@ def _build_client(
             use_docker=kwargs.get("use_docker", False),
             require_host_sandbox=kwargs.get("require_host_sandbox", False),
             project_path_policy=kwargs.get("project_path_policy"),
+            clock=ManualClock(),
         ),
     )
 
@@ -258,9 +263,7 @@ class TestAgentLoggerEventHandler:
     def test_agent_logger_event_handler_methods_drive_formatters(self) -> None:
         log_file = MagicMock()
         logger = AgentLogger(
-            log_file=log_file,
-            model_name="m",
-            agent_label="Judge",
+            log_file=log_file, model_name="m", agent_label="Judge", clock=ManualClock()
         )
 
         with (
@@ -291,6 +294,7 @@ class TestAgentLoggerEventHandler:
             event_sink=event_sink,
             model_name="claude-sonnet-4-6",
             agent_label="Implementer",
+            clock=ManualClock(),
         )
 
         usage = {

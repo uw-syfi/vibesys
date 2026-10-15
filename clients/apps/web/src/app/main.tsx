@@ -21,7 +21,7 @@ import {browserLifecycle} from '../platform/lifecycle.js';
 import '../styles.css';
 import {bootPlan} from './boot.js';
 import {createDemoApp, createLiveApp, createLiveCampaignApp, type PreviewPage} from './compose.js';
-import {applySessionTheme, applyWebTheme} from './theme.js';
+import {BrowserWebThemePreferenceStore, createWebThemeController} from './theme.js';
 
 // Remove the launch secret before DOM validation, storage access, or any
 // asynchronous work can fail and leave it in browser-visible history.
@@ -32,7 +32,10 @@ if (scrubbed.pageUrl !== launchUrl) {
 }
 
 markDesktopShell(document.documentElement, window.vibesysDesktop);
-applyWebTheme(document.documentElement, null);
+const theme = createWebThemeController(
+  document.documentElement,
+  new BrowserWebThemePreferenceStore(() => window.localStorage),
+);
 
 const root = document.querySelector('#root');
 if (root === null) throw new Error('Web viewer root is missing');
@@ -96,6 +99,7 @@ function renderDemo(
       initialGatewayError,
       initialGatewayTarget,
       onGatewayConnected: gatewayConnected,
+      theme,
     }),
   );
 }
@@ -108,8 +112,8 @@ function renderLive(webSocketUrl: string, browserSession: string | null): void {
     lifecycle: browserLifecycle(),
     connect: connectRun(hooks => openTransport(url, hooks)),
   });
-  void applySessionTheme(document.documentElement, session);
-  reactRoot.render(<StrictMode>{createLiveApp(session)}</StrictMode>);
+  theme.resolveSessionDefault(session);
+  reactRoot.render(<StrictMode>{createLiveApp(session, theme)}</StrictMode>);
 }
 
 start();

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
-from vs_github.api import GitHubCLI, GitHubClient
 from vs_issue_tracker.errors import IssueTrackerLoadError
+
+if TYPE_CHECKING:
+    from vs_github.api import GitHubClient
 
 _HEADER = "# Experiment Progress\n\n"
 _LABEL = "vibesys:progress-log"
@@ -73,9 +75,9 @@ class MemoryProgressLog:
 class GitHubProgressLog:
     """Run notes stored in comments on a separate tagged GitHub issue."""
 
-    def __init__(self, repository: str, run_id: str, *, cli: GitHubClient | None = None) -> None:
+    def __init__(self, repository: str, run_id: str, *, cli: GitHubClient) -> None:
         """Bind the progress log to the GitHub issue associated with this run."""
-        self._cli = cli or GitHubCLI()
+        self._cli = cli
         self._cli.ensure_authenticated()
         self._cli.ensure_label(repository, _LABEL)
         self._repository = repository
@@ -115,13 +117,20 @@ def open_progress_log(
     local_path: Path,
     repository: str | None = None,
     run_id: str,
+    github: GitHubClient | None = None,
 ) -> ProgressLog:
-    """Construct the selected implementation behind the ProgressLog contract."""
+    """Construct the selected implementation behind the ProgressLog contract.
+
+    ``github`` reaches GitHub; the GitHub backend requires it.
+    """
     if backend == "local":
         return FileProgressLog(local_path)
     if repository is None:
         raise ValueError("repository is required for the GitHub progress backend")  # noqa: TRY003  # lint-waiver: LW-920423 [TRY003]; name the missing progress backend configuration field.
-    return GitHubProgressLog(repository, run_id)
+    if github is None:
+        message = "a GitHub client is required for the GitHub progress backend"
+        raise ValueError(message)
+    return GitHubProgressLog(repository, run_id, cli=github)
 
 
 def _progress_from_comment(comment: dict[str, object]) -> str | None:

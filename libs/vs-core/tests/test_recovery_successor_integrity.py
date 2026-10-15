@@ -8,7 +8,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
-from .restart import restarted
+from .restart import unaddressed
 
 
 class CommandFields(TypedDict):
@@ -51,11 +51,12 @@ def state_with_root() -> tuple[core.CoreState, core.RequestRecord]:
             accepted=True,
             resource_id=core.ResourceId(root="physical"),
         ),
+        addressed_by=(),
     )
     state = state.model_copy(
         update={
             "run": state.run.model_copy(update={"status": core.RunStatus.PAUSED}),
-            "records": core.RecordsState(records=(root,)),
+            "records": core.RecordsState(hosts=(), records=(root,)),
         }
     )
     return state, root
@@ -188,5 +189,5 @@ def test_prepared_query_remains_safe_without_live_mutation_admission(generation:
         isinstance(row, core.InspectRequest) and row.target == record.request_id
         for row in result.requests
     )
-    assert result.state.records.records[:2] == (restarted(root, 10.0, state.run), record)
+    assert tuple(map(unaddressed, result.state.records.records[:2])) == (root, record)
     assert result.state.run.receipts == state.run.receipts

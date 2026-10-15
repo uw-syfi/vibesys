@@ -24,6 +24,7 @@ from server.events import (
     ToolCallData,
     make_event,
 )
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import SimThreads, examples, wait_or_fail
 
 if TYPE_CHECKING:
@@ -75,12 +76,14 @@ class TestEventStore:
         path = tmp_path / "events.jsonl"
         _write_events(path, [_persisted_event(1, "one"), _persisted_event(2, "two")])
 
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
 
         assert [event.text for event in store.read()] == ["one", "two"]
         assert [event.text for event in store.read(after_sequence=1)] == ["two"]
         assert store.read(after_sequence=2) == []
-        appended = store.append(make_event(EventType.OUTPUT, "three"))
+        appended = store.append(
+            make_event(EventType.OUTPUT, "three", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
         assert appended.sequence == 3
         assert appended.run_id == "active-run"
         assert [event.sequence for event in store.read(after_sequence=1)] == [2, 3]
@@ -106,7 +109,7 @@ class TestEventStore:
         assert len(produced_json.encode()) == target
         path = tmp_path / f"event-{len(tuple(tmp_path.iterdir()))}.jsonl"
 
-        recorded = EventStore(path, run_id="run").append(produced)
+        recorded = EventStore(path, run_id="run", threads=OsThreads()).append(produced)
 
         assert len(recorded.model_dump_json().encode()) <= MAX_SERIALIZED_RUN_EVENT_BYTES
         if target <= MAX_SERIALIZED_RUN_EVENT_BYTES:
@@ -158,10 +161,14 @@ class TestEventStore:
         assert len(above.model_dump_json().encode()) > MAX_SERIALIZED_RUN_EVENT_BYTES
 
         recorded_below = EventStore(
-            tmp_path / f"structured-{collection_kind}-below.jsonl", run_id="run"
+            tmp_path / f"structured-{collection_kind}-below.jsonl",
+            run_id="run",
+            threads=OsThreads(),
         ).append(below)
         recorded_above = EventStore(
-            tmp_path / f"structured-{collection_kind}-above.jsonl", run_id="run"
+            tmp_path / f"structured-{collection_kind}-above.jsonl",
+            run_id="run",
+            threads=OsThreads(),
         ).append(above)
 
         assert recorded_below.model_dump_json() == below.model_dump_json()
@@ -187,7 +194,7 @@ class TestEventStore:
         )
         original = path.read_bytes()
 
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
 
         assert [(event.sequence, event.text) for event in store.read()] == [
             (2, "two"),
@@ -196,9 +203,14 @@ class TestEventStore:
         ]
         assert path.read_bytes() == original
         assert [event.text for event in store.read(after_sequence=2)] == ["one", "three"]
-        assert store.append(make_event(EventType.OUTPUT, "four")).sequence == 5
+        assert (
+            store.append(
+                make_event(EventType.OUTPUT, "four", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+            ).sequence
+            == 5
+        )
 
-        reopened = EventStore(path, run_id="reopened-run")
+        reopened = EventStore(path, run_id="reopened-run", threads=OsThreads())
         assert [(event.sequence, event.text) for event in reopened.read()] == [
             (2, "two"),
             (3, "one"),
@@ -218,7 +230,7 @@ class TestEventStore:
             ],
         )
 
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
 
         assert [(event.sequence, event.text) for event in store.read()] == [
             (1, "one"),
@@ -243,7 +255,7 @@ class TestEventStore:
                 for index, sequence in enumerate(raw_sequences)
             ],
         )
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
 
         replayed: list[RunEvent] = []
         cursor = 0
@@ -272,7 +284,7 @@ class TestEventStore:
             return parse(raw)
 
         monkeypatch.setattr(RunEvent, "model_validate_json", counting_parse)
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
         assert parse_count == event_count
 
         for _ in range(20):
@@ -286,7 +298,7 @@ class TestEventStore:
         valid = _persisted_event(1, "complete").model_dump_json()
         path.write_text(valid + "\n" + '{"protocol_version":1')
 
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
 
         assert [event.text for event in store.read()] == ["complete"]
 
@@ -297,10 +309,12 @@ class TestEventStore:
         path = tmp_path / "events.jsonl"
         valid = _persisted_event(1, "complete").model_dump_json()
         path.write_text(valid + "\n" + tail)
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
 
-        store.append(make_event(EventType.OUTPUT, "after repair"))
-        reopened = EventStore(path, run_id="reopened-run")
+        store.append(
+            make_event(EventType.OUTPUT, "after repair", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
+        reopened = EventStore(path, run_id="reopened-run", threads=OsThreads())
 
         assert [(event.sequence, event.text) for event in reopened.read()] == [
             (1, "complete"),
@@ -310,13 +324,15 @@ class TestEventStore:
     def test_append_preserves_a_valid_unterminated_final_record(self, tmp_path: Path) -> None:
         path = tmp_path / "events.jsonl"
         path.write_text(_persisted_event(1, "unterminated").model_dump_json())
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
         assert [event.text for event in store.read()] == ["unterminated"]
 
-        store.append(make_event(EventType.OUTPUT, "appended"))
+        store.append(
+            make_event(EventType.OUTPUT, "appended", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         assert [event.text for event in store.read()] == ["unterminated", "appended"]
-        reopened = EventStore(path, run_id="reopened-run")
+        reopened = EventStore(path, run_id="reopened-run", threads=OsThreads())
         assert [(event.sequence, event.text) for event in reopened.read()] == [
             (1, "unterminated"),
             (2, "appended"),
@@ -332,24 +348,33 @@ class TestEventStore:
         path = tmp_path / "events.jsonl"
         _write_events(path, [_persisted_event(1, "one")])
         original = path.read_bytes()
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
 
-        appended = store.append(make_event(EventType.OUTPUT, "two"))
+        appended = store.append(
+            make_event(EventType.OUTPUT, "two", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         assert path.read_bytes() == original + (appended.model_dump_json() + "\n").encode()
 
     def test_a_missing_final_newline_is_repaired_exactly_once(self, tmp_path: Path) -> None:
         path = tmp_path / "events.jsonl"
         path.write_text(_persisted_event(1, "unterminated").model_dump_json())
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
 
-        store.append(make_event(EventType.OUTPUT, "second"))
-        store.append(make_event(EventType.OUTPUT, "third"))
+        store.append(
+            make_event(EventType.OUTPUT, "second", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
+        store.append(
+            make_event(EventType.OUTPUT, "third", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         raw = path.read_text()
         assert "\n\n" not in raw
         assert len(raw.splitlines()) == 3
-        assert [event.text for event in EventStore(path, run_id="reopened-run").read()] == [
+        assert [
+            event.text
+            for event in EventStore(path, run_id="reopened-run", threads=OsThreads()).read()
+        ] == [
             "unterminated",
             "second",
             "third",
@@ -360,13 +385,18 @@ class TestEventStore:
     ) -> None:
         path = tmp_path / "events.jsonl"
         path.write_text(_persisted_event(1, "unterminated").model_dump_json())
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
         path.unlink()
 
-        appended = store.append(make_event(EventType.OUTPUT, "fresh"))
+        appended = store.append(
+            make_event(EventType.OUTPUT, "fresh", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         assert path.read_bytes() == (appended.model_dump_json() + "\n").encode()
-        assert [event.text for event in EventStore(path, run_id="reopened-run").read()] == ["fresh"]
+        assert [
+            event.text
+            for event in EventStore(path, run_id="reopened-run", threads=OsThreads()).read()
+        ] == ["fresh"]
 
     def test_concatenated_final_records_raise_instead_of_truncating(self, tmp_path: Path) -> None:
         path = tmp_path / "events.jsonl"
@@ -377,7 +407,7 @@ class TestEventStore:
         original = path.read_bytes()
 
         with pytest.raises(ValueError, match=f"byte offset {len(first) + 1} "):
-            EventStore(path, run_id="active-run")
+            EventStore(path, run_id="active-run", threads=OsThreads())
 
         assert path.read_bytes() == original
 
@@ -392,7 +422,7 @@ class TestEventStore:
         original = path.read_bytes()
 
         with pytest.raises(ValueError, match=f"byte offset {len(valid) + 1} ") as excinfo:
-            EventStore(path, run_id="active-run")
+            EventStore(path, run_id="active-run", threads=OsThreads())
 
         assert str(path) in str(excinfo.value)
         assert path.read_bytes() == original
@@ -404,7 +434,7 @@ class TestEventStore:
         path.write_text(first + "\nnot-json\n" + last + "\n")
 
         with pytest.raises(ValueError, match="Invalid JSON"):
-            EventStore(path, run_id="active-run")
+            EventStore(path, run_id="active-run", threads=OsThreads())
 
     def test_append_wakes_multiple_independent_readers(self, tmp_path: Path) -> None:
         threads = SimThreads()
@@ -421,7 +451,9 @@ class TestEventStore:
             ]
             for registered in waiting:
                 wait_or_fail(registered, "a reader to start waiting")
-            appended = store.append(make_event(EventType.OUTPUT, "visible"))
+            appended = store.append(
+                make_event(EventType.OUTPUT, "visible", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+            )
             return appended, [reader.result() for reader in readers]
 
         appended, batches = threads.run(scenario)
@@ -433,8 +465,10 @@ class TestEventStore:
         assert batches[0] is not batches[1]
 
     def test_cached_events_are_isolated_from_reader_mutation(self, tmp_path: Path) -> None:
-        store = EventStore(tmp_path / "events.jsonl", run_id="active-run")
-        appended = store.append(make_event(EventType.OUTPUT, "durable"))
+        store = EventStore(tmp_path / "events.jsonl", run_id="active-run", threads=OsThreads())
+        appended = store.append(
+            make_event(EventType.OUTPUT, "durable", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         first_read = store.read()
         with pytest.raises(ValidationError):
@@ -445,8 +479,10 @@ class TestEventStore:
 
     def test_reader_projections_do_not_disturb_stored_history(self, tmp_path: Path) -> None:
         """The read path builds variants by copy, which the store never sees."""
-        store = EventStore(tmp_path / "events.jsonl", run_id="active-run")
-        store.append(make_event(EventType.OUTPUT, "durable"))
+        store = EventStore(tmp_path / "events.jsonl", run_id="active-run", threads=OsThreads())
+        store.append(
+            make_event(EventType.OUTPUT, "durable", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+        )
 
         projected = store.read()[0].model_copy(update={"text": "projected"})
 
@@ -454,9 +490,13 @@ class TestEventStore:
         assert store.read()[0].text == "durable"
 
     def test_appended_events_are_immutable(self, tmp_path: Path) -> None:
-        store = EventStore(tmp_path / "events.jsonl", run_id="active-run")
+        store = EventStore(tmp_path / "events.jsonl", run_id="active-run", threads=OsThreads())
         appended = store.append(
-            make_event(EventType.TOOL_CALL, data=ToolCallData(tool="Bash", call_id="c1"))
+            make_event(
+                EventType.TOOL_CALL,
+                data=ToolCallData(tool="Bash", call_id="c1"),
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+            )
         )
 
         with pytest.raises(ValidationError):
@@ -469,7 +509,7 @@ class TestEventStore:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         path = tmp_path / "events.jsonl"
-        store = EventStore(path, run_id="active-run")
+        store = EventStore(path, run_id="active-run", threads=OsThreads())
         real_open = Path.open
 
         class FailingCloseStream:
@@ -503,7 +543,9 @@ class TestEventStore:
         monkeypatch.setattr(Path, "open", open_with_close_failure)
 
         with pytest.raises(OSError, match="close failed"):
-            store.append(make_event(EventType.OUTPUT, "ghost"))
+            store.append(
+                make_event(EventType.OUTPUT, "ghost", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
+            )
 
         assert store.read() == []
         assert store.last_sequence == 0

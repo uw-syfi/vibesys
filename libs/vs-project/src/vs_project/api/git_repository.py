@@ -170,8 +170,8 @@ class GitFaultSink(Protocol):
 type GitRepositoryFactory = Callable[[Path, GitFaultSink], GitRepository]
 """Build the implementation serving the worktree at a path, reporting faults to the sink.
 
-``GitTracker`` builds ``CliGitRepository`` when it is given none; a composition that
-wants another implementation (a Fake in tests) passes a factory instead.
+Production wiring passes ``git_repositories(git)``, the configured implementation; a
+composition that wants another one (a Fake in tests) passes its own factory.
 """
 
 

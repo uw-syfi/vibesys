@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Literal
 
-from vs_github.api import GitHubCLI, GitHubClient
+from vs_decode.api import Unreadable, decode_json
 from vs_issue_tracker.core import (
     Issue,
     IssueBoard,
@@ -24,20 +24,22 @@ from vs_issue_tracker.core import (
     timestamp_at,
 )
 from vs_issue_tracker.errors import IssueTrackerLoadError
-from vs_sim.api import SystemClock
 
 if TYPE_CHECKING:
     import builtins
     from collections.abc import Callable
     from pathlib import Path
 
-    from vs_sim.api import Clock
+    from vs_github.api import GitHubClient
+    from vs_sim.api import Clock, Threads
 
 _TYPE_PREFIX = "vibesys:type/"
 _STATUS_PREFIX = "vibesys:status/"
 _PROGRESS_LABEL = "vibesys:progress-log"
 _EVENT_START = "<!-- vibesys:issue-event:v1\n"
 _EVENT_END = "\n-->"
+_MAX_EVENT_BYTES = 256 * 1024
+"""The largest issue event read out of one comment (GitHub caps a comment at 64 KiB)."""
 _KEY_START = "<!-- vibesys:issue-key:v1 "
 _KEY_END = " -->"
 _TYPE_RANK = {IssueType.BUG: 0, IssueType.FEATURE: 1, IssueType.PERF: 2}
@@ -57,15 +59,15 @@ class GitHubIssueTracker(IssueTracker):
         self,
         repository: str,
         *,
-        cli: GitHubClient | None = None,
-        clock: Clock | None = None,
+        cli: GitHubClient,
+        clock: Clock,
     ) -> None:
         """Authenticate, bind to a repository, and ensure metadata labels exist.
 
         ``clock`` (epoch seconds) stamps the events this tracker writes.
         """
-        self._cli = cli or GitHubCLI()
-        self._clock = clock or SystemClock()
+        self._cli = cli
+        self._clock = clock
         self._cli.ensure_authenticated()
         self.repository = repository
         self._ensure_metadata_labels()
@@ -381,13 +383,16 @@ def _events(comments: object) -> list[IssueEvent]:
             continue
         if not body.endswith(_EVENT_END):
             raise IssueTrackerLoadError.issue_event_unclosed()
-        try:
-            value = json.loads(body[len(_EVENT_START) : -len(_EVENT_END)])
-            events.append(IssueEvent.model_validate(value))
-        except (ValueError, RecursionError) as exc:
-            # Anyone who can comment on the issue writes this text; ``json`` raises
-            # ``RecursionError`` once its nesting passes the interpreter's limit.
-            raise IssueTrackerLoadError.invalid_issue_event() from exc
+        # Anyone who can comment on the issue writes this text.
+        event = decode_json(
+            body[len(_EVENT_START) : -len(_EVENT_END)],
+            IssueEvent,
+            source="issue event comment",
+            max_bytes=_MAX_EVENT_BYTES,
+        )
+        if isinstance(event, Unreadable):
+            raise IssueTrackerLoadError.invalid_issue_event()
+        events.append(event)
     return events
 
 
@@ -442,19 +447,31 @@ def _status_labels(status: IssueStatus) -> list[str]:
     return []
 
 
-def open_issue_tracker(
+def open_issue_tracker(  # noqa: PLR0913  # lint-waiver: LW-261401 [PLR0913]; each keyword is one backend's independent input.
+    # > A settings object would only rename the keywords every caller passes, and splitting
+    # > the factory per backend would duplicate the selection it exists to own.
     backend: Literal["local", "github"],
     *,
     local_path: Path,
     repository: str | None = None,
     on_change: Callable[[], None] | None = None,
+    github: GitHubClient | None = None,
+    clock: Clock,
+    threads: Threads,
 ) -> IssueTracker:
-    """Construct the selected issue tracker behind the IssueTracker contract."""
+    """Construct the selected issue tracker behind the IssueTracker contract.
+
+    ``github`` reaches GitHub; the GitHub backend requires it. ``clock`` (epoch seconds)
+    stamps the events the tracker writes, and ``threads`` makes the local board's lock.
+    """
     if backend == "local":
-        return IssueBoard(local_path, on_change=on_change)
+        return IssueBoard(local_path, on_change=on_change, clock=clock, threads=threads)
     if repository is None:
         raise ValueError("repository is required for the GitHub issue backend")  # noqa: TRY003  # lint-waiver: LW-771017 [TRY003]; name the missing backend configuration field.
-    return GitHubIssueTracker(repository)
+    if github is None:
+        message = "a GitHub client is required for the GitHub issue backend"
+        raise ValueError(message)
+    return GitHubIssueTracker(repository, cli=github, clock=clock)
 
 
 __all__ = ["GitHubIssueTracker", "open_issue_tracker"]

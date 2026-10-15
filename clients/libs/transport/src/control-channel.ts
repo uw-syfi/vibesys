@@ -777,14 +777,20 @@ export class ControlChannel {
   }
 
   /**
-   * This attempt failed. The channel is demonstrably not deliverable now, so
-   * whatever was waiting is disposed by the same rule a drop uses and the
-   * schedule decides whether to try again before the completed transition is
-   * reported.
+   * This attempt failed. A permanent typed failure is the answer to all work
+   * this dial owed, so preserve it and stop. A retryable failure means only
+   * that the channel is demonstrably not deliverable now: dispose its waiting
+   * work by the outage rule and let the finite schedule decide whether to try
+   * again before the completed transition is reported.
    */
   #onDialFailure(error: BackendClientError): void {
     if (this.#phase.kind !== 'down') return;
     this.#lastError = error;
+    if (!error.retryable) {
+      this.#failOwed(error);
+      this.#reportState();
+      return;
+    }
     this.#disposeForOutage();
     this.#scheduleRedial();
     this.#reportState();

@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from tests.support.docker_environment import host_container_backend
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import (
     _plugin,
@@ -23,6 +24,7 @@ from tests.vibesys.run.test_core_host_composition import (
 
 from launch.composition import STATELESS_TOOL_SERVERS
 from vibesys.api import catalog
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeAgentInvocationStore
@@ -35,7 +37,9 @@ from vs_core.api import (
 )
 from vs_runtime.api import CoreOperation
 from vs_runtime.api.core import EVALUATION_TOOL_ID, OperationRole, RunTiming
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_runtime.api.testing import FakeStopTimer
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -80,7 +84,13 @@ def _services(tmp_path: Path) -> CoreServices:
         prompt_templates=policy.prompt_templates,
     )
     plugin = type(plugin)(id=plugin.id, agents=plugin.agents, options=EmptyOptions, core=policy)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> CoreServices:
@@ -90,10 +100,14 @@ def _services(tmp_path: Path) -> CoreServices:
                 integration,
                 plugin=plugin,
                 options=EmptyOptions(),
-                timing=RunTiming(clock, 60.0),
+                timing=RunTiming(clock, 60.0, OsThreads()),
                 agent_client_factory=_resumable_client,
                 backend_factory=host_container_backend,
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+                stop_timer=FakeStopTimer(threads=OsThreads()),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ) as host:
                 return host.services
         finally:

@@ -129,6 +129,7 @@ from vs_agent.sessions import (
     Unknown,
     inspect_invocation_journal,
 )
+from vs_agent.shim_clock import STOP_POLL_S, ThreadsClock
 from vs_agent.sink import (
     NULL_AGENT_EVENT_SINK,
     AgentEventSink,
@@ -139,7 +140,7 @@ from vs_agent.spec import AgentBackend, AgentSpec
 from vs_agent.todos import todos_from_tool_call
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Mapping
     from pathlib import Path
     from typing import TextIO
 
@@ -151,6 +152,7 @@ if TYPE_CHECKING:
     from vs_agent.orphans import OrphanReapError, reap_orphaned_agents
     from vs_agent.shim_turns import native_schema, native_schema_problems
     from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
+    from vs_sim.api import Clock, Threads
 
 __all__ = [
     "BASE_ENV_ALLOWLIST",
@@ -169,6 +171,7 @@ __all__ = [
     "NULL_AGENT_EVENT_SINK",
     "NULL_SKILL_SELECTION",
     "SHIPPED_PROVIDERS",
+    "STOP_POLL_S",
     "AgentBackend",
     "AgentCapabilities",
     "AgentClient",
@@ -239,6 +242,7 @@ __all__ = [
     "SkillSelection",
     "SteerOutcome",
     "SteerableAgentClient",
+    "ThreadsClock",
     "TodoItemData",
     "ToolResultPayload",
     "Unknown",
@@ -338,6 +342,9 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
     session_store: SessionStore | None = None,
     events: AgentEventSink = NULL_AGENT_EVENT_SINK,
     agent_homes_dir: Path | None = None,
+    launcher_env: Callable[[], Mapping[str, str]] | None = None,
+    clock: Clock,
+    threads: Threads,
 ) -> AgentClientProtocol:
     """Build an agent service through the application composition module."""
     from vs_agent.factory import (  # noqa: PLC0415  # lint-waiver: LW-010116 [PLC0415]; Keep build_agent_client as build lazy in build_agent_client so unused providers and import cycles stay unloaded.
@@ -360,4 +367,7 @@ def build_agent_client(  # noqa: PLR0913  # lint-waiver: LW-011100 [PLR0913]; pr
         session_store=session_store,
         events=events,
         agent_homes_dir=agent_homes_dir,
+        launcher_env=launcher_env,
+        clock=clock,
+        threads=threads,
     )

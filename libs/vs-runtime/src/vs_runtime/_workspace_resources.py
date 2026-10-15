@@ -15,6 +15,8 @@ from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     create_trusted_evaluation_executor,
 )
+from vs_runtime._workspace_files import file_fingerprint
+from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
 
@@ -33,6 +35,7 @@ if TYPE_CHECKING:
         TrustedEvaluationExecutor,
     )
     from vs_sandbox.api import CommandRunner
+    from vs_sim.api import BlockingRunner, Threads
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +45,18 @@ class WorkspaceRestoreFailed:
     revision: str
 
 
-type WorkspaceResourceEvent = WorkspaceRestoreFailed
+@dataclass(frozen=True, slots=True)
+class RootBaselineDrifted:
+    """An attempt's hold of the exclusive root ended having left a pre-run path changed or gone.
+
+    See ``vs_runtime._workspace_receipts.RootBaselineDrift``, whose fields this mirrors.
+    """
+
+    modified: tuple[str, ...]
+    removed: tuple[str, ...]
+
+
+type WorkspaceResourceEvent = WorkspaceRestoreFailed | RootBaselineDrifted
 type WorkspaceResourceEventSink = Callable[[WorkspaceResourceEvent], object]
 
 
@@ -71,6 +85,8 @@ class WorkspaceResourceFactory:
         skill_selection: SkillSelection,
         host_resources: tuple[HostResource, ...],
         events: WorkspaceResourceEventSink,
+        threads: Threads,
+        blocking: BlockingRunner,
         model_requests: ModelRequestReconciler | None = None,
         root_agent_environment_opener: (
             Callable[[AgentExecutionConfiguration], AgentExecutionEnvironment] | None
@@ -85,6 +101,8 @@ class WorkspaceResourceFactory:
         self._host_resources = host_resources
         self._events = events
         self._model_requests = model_requests
+        self._threads = threads
+        self._blocking = blocking
         self._root_agent_environment_opener = root_agent_environment_opener
 
     @property
@@ -162,6 +180,8 @@ class WorkspaceResourceFactory:
             sandbox=environment.session.sandbox,
             git=git,
             model_requests=self._model_requests,
+            threads=self._threads,
+            blocking=self._blocking,
         )
         host_resources = self._host_resources
         if environment.request.objective is not None:
@@ -324,6 +344,50 @@ class RuntimeWorkspaceResource:
     def unversioned_paths(self) -> tuple[str, ...]:
         """The untracked and ignored paths present now (directories collapsed)."""
         return self._project.git.unversioned_paths()
+
+    def baseline_entries(self, paths: tuple[str, ...]) -> tuple[BaselineEntry, ...]:
+        """Fingerprint *paths* (from :meth:`unversioned_paths`) as they are now.
+
+        A path with a trailing ``/`` is a directory and gets no fingerprint (see
+        ``BaselineEntry``); any other path is fingerprinted as a file.
+        """
+        return tuple(
+            BaselineEntry(
+                path=path,
+                fingerprint=None if path.endswith("/") else file_fingerprint(self.path, path),
+            )
+            for path in paths
+        )
+
+    def baseline_drift(self, entries: tuple[BaselineEntry, ...]) -> RootBaselineDrift:
+        """Compare the tree now to *entries*, a recorded pre-run baseline.
+
+        A directory entry is removed if no directory is there now; an unfingerprinted
+        entry (see ``BaselineEntryKind``) is removed if nothing is there now. A file entry
+        is removed if it is no longer a contained regular file, modified if its content
+        fingerprint no longer matches. Any drift is reported through this resource's
+        event sink.
+        """
+        modified: list[str] = []
+        removed: list[str] = []
+        for entry in entries:
+            target = self.path / entry.path
+            match entry.kind:
+                case BaselineEntryKind.DIRECTORY:
+                    gone = not target.is_dir()
+                case BaselineEntryKind.UNFINGERPRINTED:
+                    gone = not target.exists(follow_symlinks=False)
+                case BaselineEntryKind.FILE:
+                    fingerprint = file_fingerprint(self.path, entry.path)
+                    gone = fingerprint is None
+                    if fingerprint is not None and fingerprint != entry.fingerprint:
+                        modified.append(entry.path)
+            if gone:
+                removed.append(entry.path)
+        drift = RootBaselineDrift(modified=tuple(modified), removed=tuple(removed))
+        if not drift.is_empty:
+            self._events(RootBaselineDrifted(modified=drift.modified, removed=drift.removed))
+        return drift
 
     def find_snapshot(self, label: str) -> str | None:
         """Return the newest commit whose subject is exactly *label*, if any."""

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from tests.support.session_world import (
     SCHEMA,
     SessionHost,
@@ -29,11 +29,14 @@ from vs_core.api import ObservationStatus, ReplyErrorCode
 from vs_project.api import Project
 from vs_runtime.api import AgentId
 from vs_runtime.api.core import ExecutionResult, ReceiptStore
-from vs_sim.api.testing import examples
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock, examples
 
 
 class Named(BaseModel):
     """A reply that carries one id an agent chose."""
+
+    model_config = ConfigDict(extra="forbid")
 
     hypothesis_id: AgentId
 
@@ -44,7 +47,9 @@ _ERRORS = st.text(st.characters(codec="ascii", categories=("L", "N", "P", "Zs"))
 async def _turn(host: SessionHost, base: Path) -> ExecutionResult:
     """Bind the session of ``host`` and dispatch one turn of it, on a store of its own."""
     (base / "project").mkdir()
-    store = ReceiptStore(Project.open(base / "project").state.state_store_namespace("run"))
+    store = ReceiptStore(
+        Project.open(base / "project").state.state_store_namespace("run"), threads=OsThreads()
+    )
     await host.run(ensure_request(), store)
     return await host.run(dispatch_request(), store)
 
@@ -91,7 +96,11 @@ def test_a_provider_that_gave_up_on_the_schema_hands_core_its_last_errors_whole(
     with tempfile.TemporaryDirectory() as raw:
         host = open_host(Path(raw))
         script = FakeTurnScript((AgentOutputSchemaError(reason),))
-        host.client = AgentClient(FakeProvider(script=script))
+        host.client = AgentClient(
+            FakeProvider(script=script, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
+        )
         errors = _failed_with_errors(_dispatch(host))
 
     (error,) = errors

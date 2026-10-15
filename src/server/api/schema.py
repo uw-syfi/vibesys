@@ -12,7 +12,7 @@ import math
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Never
+from typing import TYPE_CHECKING, Any, Never
 
 from pydantic import BaseModel, ConfigDict
 
@@ -96,11 +96,7 @@ class MalformedResponsePayloadSchemaError(TypeError):
 class ProtocolDocument(BaseModel):
     """Root schema document for the public server protocol."""
 
-    model_config = ConfigDict(extra="ignore")
-    unknown_keys_reason: ClassVar[str] = (
-        "Only publishes the JSON Schema and validates nothing; forbidding would add "
-        "additionalProperties: false to the published root and the clients generated from it."
-    )
+    model_config = ConfigDict(extra="forbid")
 
     request: ProtocolRequest
     response: Response
@@ -112,11 +108,7 @@ class ProtocolDocument(BaseModel):
 class HostHelperDocument(BaseModel):
     """Root schema document for the host helper: what a client sends and what it receives."""
 
-    model_config = ConfigDict(extra="ignore")
-    unknown_keys_reason: ClassVar[str] = (
-        "Only publishes the JSON Schema and validates nothing; forbidding would add "
-        "additionalProperties: false to the published root and the clients generated from it."
-    )
+    model_config = ConfigDict(extra="forbid")
 
     request: HelperRequest
     message: HelperMessage

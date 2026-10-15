@@ -24,6 +24,8 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStatus,
 )
 from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -72,7 +74,12 @@ def test_every_dispatched_turn_is_one_start_and_one_finish(
     answer = AgentOutputSchemaError(message) if outcome == "schema_error" else {"value": 1}
     lifecycle = FakeAgentExecutionLifecycleSink()
     client = report_turns(
-        AgentClient(FakeProvider(script=FakeTurnScript((answer,)), on_turn=on_turn)), lifecycle
+        AgentClient(
+            FakeProvider(script=FakeTurnScript((answer,)), on_turn=on_turn, threads=OsThreads()),
+            clock=ManualClock(),
+            threads=OsThreads(),
+        ),
+        lifecycle,
     )
     turn = AgentTurnRequest(
         message=message,

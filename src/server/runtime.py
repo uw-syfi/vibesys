@@ -36,6 +36,12 @@ from server.transport.discovery import (
     CAPABILITY_ROTATION_HEADER as CAPABILITY_ROTATION_HEADER,  # noqa: PLC0414  # lint-waiver: LW-936006 [PLC0414]; re-export the lifecycle HTTP contract through the runtime composition boundary; a wrapper would duplicate a constant and a direct entrypoint-to-transport import would bypass the boundary.
 )
 from server.transport.discovery import (
+    UrlWebHealthProbe as UrlWebHealthProbe,  # noqa: PLC0414  # lint-waiver: LW-257802 [PLC0414]; re-export the gateway health probe through the runtime composition boundary so the entrypoint that builds the real one does not import the transport directly
+)
+from server.transport.discovery import (
+    WebDiscovery as WebDiscovery,  # noqa: PLC0414  # lint-waiver: LW-257803 [PLC0414]; re-export gateway discovery through the runtime composition boundary so entrypoints build it with real roles and tests with Fakes
+)
+from server.transport.discovery import (
     WebGatewayListener as WebGatewayListener,  # noqa: PLC0414  # lint-waiver: LW-102902 [PLC0414]; re-export verified port identity through the runtime composition boundary for operator entrypoints
 )
 from server.transport.discovery import (
@@ -69,7 +75,6 @@ from server.transport.websocket import (
     browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
 )
 from vibesys.api import ConfigurationError, RunStopped
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -79,7 +84,7 @@ if TYPE_CHECKING:
     from server.host_api import RunStatus
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
-    from vs_sim.api import Network, Threads
+    from vs_sim.api import Platform
 
 
 _RunValueT = TypeVar("_RunValueT")
@@ -172,20 +177,24 @@ class ServerRuntime:
         detach: bool = False,
         read_only_log: Path | None = None,
         observer: ServerLifecycleObserver | None = None,
-        threads: Threads | None = None,
-        network: Network | None = None,
+        platform: Platform,
     ) -> None:
         """Compose all server components around one shared condition.
 
+        ``platform`` is the process's time, threads, blocking runner and sockets: its
+        clock counts seconds since the epoch and stamps every journaled event and
+        execution start; its threads make every lock, condition, event and worker
+        thread the server creates; its network binds the Unix control socket and its
+        blocking runner runs the web gateway's synchronous requests.
+
         ``run_id`` names the run every journaled event belongs to, from the
         first; only a read-only reopen (``read_only_log``) takes it from the
-        recorded events instead. ``threads`` supplies every lock, condition,
-        event and worker thread the server creates; it defaults to the
-        operating system's. ``network`` binds the Unix control socket; it
-        defaults to the operating system's Unix sockets.
+        recorded events instead.
         """
-        self.threads = threads or OsThreads()
-        self.network = network
+        clock = platform.clock
+        self.platform = platform
+        self.threads = platform.threads
+        self.network = platform.network
         self.runs = runs
         self.socket_path = socket_path
         self.web = web
@@ -202,8 +211,11 @@ class ServerRuntime:
         # client learns it can dial without polling the filesystem.
         self.transport_listening = self.threads.event()
         self.condition = self.threads.condition(self.threads.rlock())
-        self.journal = WireJournal(self.condition, threads=self.threads)
-        self.executions = ExecutionTracker(self.condition, self.journal)
+        self._clock = clock
+        self.journal = WireJournal(self.condition, clock=clock, threads=self.threads)
+        self.executions = ExecutionTracker(
+            self.condition, self.journal, clock=clock, threads=self.threads
+        )
         self.controller = RunController(self.condition, self.journal, self.executions)
         if read_only_log is not None:
             self._attach_journal = partial(self.controller.attach_read_only, read_only_log)
@@ -229,6 +241,8 @@ class ServerRuntime:
             self.executions,
             self.journal,
             self.chat,
+            clock=clock,
+            threads=self.threads,
         )
         self.chat.set_fallback_answer(RunInspector(self.integration).answer)
         self.controls = RunControlSlot(self.condition)
@@ -240,6 +254,7 @@ class ServerRuntime:
             self.chat,
             self.integration,
             controls=self.controls,
+            clock=clock,
             project_scope=_project_scope(project_root) if project_root is not None else None,
             tui_defaults=tui_defaults,
             threads=self.threads,
@@ -289,7 +304,7 @@ class ServerRuntime:
                     self.handle = None
                     self.session = None
 
-        return asyncio.run(execute())
+        return self.threads.run_async(execute())
 
     def run(self, run: Callable[[], _RunValueT]) -> _RunValueT | None:
         """Serve requests while executing ``run`` in the calling thread."""
@@ -306,7 +321,11 @@ class ServerRuntime:
             with ExitStack() as transports:
                 transport = transports.enter_context(
                     UnixJsonlServer(
-                        self.socket_path, self.api, subscriptions, self.threads, self.network
+                        self.socket_path,
+                        self.api,
+                        threads=self.threads,
+                        network=self.network,
+                        subscriptions=subscriptions,
                     )
                 )
                 # Registered after the transport, so it runs before the
@@ -328,6 +347,9 @@ class ServerRuntime:
                             allowed_origins=self.web_origins,
                             subscriptions=subscriptions,
                             instance_path=self.instance_path,
+                            clock=self._clock,
+                            threads=self.threads,
+                            request_runner=self.platform.blocking,
                         )
                     )
                     if self.web
@@ -377,7 +399,9 @@ class ServerRuntime:
         would otherwise let a client see the connection close before the
         terminal status that explains it. The wait is bounded: a client that
         stopped reading cannot hold the server open. A server that already
-        waited for its clients to leave finds no stream to wait for.
+        waited for its clients to leave finds no stream to wait for. The
+        shared tracker closes subscription admission atomically with this
+        wait, so a reconnect cannot arrive outside the drained set.
         """
         transport.wait_until_delivered(self.api.latest_sequence, DETACHED_DRAIN_TIMEOUT_SECONDS)
 

@@ -12,6 +12,7 @@ from hypothesis import strategies as st
 
 from vs_agent.api import AgentClient, AgentQuotaError, AgentTurnRequest, QuotaCondition
 from vs_agent.api.testing import FakeProvider, FakeTurnScript
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 def _quota(detail: str = "limit") -> AgentQuotaError:
@@ -45,8 +46,10 @@ def _invoke(client: AgentClient, workspace: Path) -> str:
 
 
 def _client(answers: tuple[AgentQuotaError | str, ...]) -> AgentClient:
-    driver = FakeProvider(script=FakeTurnScript(answers=answers))
-    return AgentClient(driver, provider="mock", model_name="m")
+    driver = FakeProvider(script=FakeTurnScript(answers=answers), threads=SimThreads())
+    return AgentClient(
+        driver, provider="mock", model_name="m", clock=ManualClock(), threads=SimThreads()
+    )
 
 
 def test_without_a_gate_the_quota_error_reaches_the_caller(tmp_path: Path) -> None:

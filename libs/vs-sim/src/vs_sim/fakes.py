@@ -6,16 +6,18 @@ import asyncio
 import signal
 import subprocess
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from vs_sim.gate import arrival
+from vs_sim.loopback_http import HttpReply
 from vs_sim.processes import (
-    CapturedTextProcess,
     ForegroundChild,
     MergedOutputProcess,
     PipedProcess,
+    ProcessGroupUnreaped,
     ProcessOutcome,
     ProcessSpec,
+    ProcessTimedOut,
     RunningProcess,
 )
 from vs_sim.states import Changes, wait_for_state
@@ -26,6 +28,7 @@ if TYPE_CHECKING:
 
     from vs_sim.clock import Sleeper
     from vs_sim.probes import ProbeResult
+    from vs_sim.processes import ProcessRun
 
 
 class InlineBlockingRunner:
@@ -157,6 +160,10 @@ class FakeProcessSignaller:
         self.opened: list[int] = []
         self.terminated: list[int] = []
 
+    def exists(self, pid: int) -> bool:
+        """Whether ``pid`` is one of the live ids."""
+        return pid in self.live_pids
+
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, evaluate ``current``, and record a permitted termination."""
         if pid not in self.live_pids:
@@ -181,6 +188,8 @@ class ProcessScript:
     """Make stdout the process's input (a ``cat``), after ``stdout``."""
     runs_until_signalled: bool = False
     """Never ends by itself: only ``terminate`` or ``kill`` ends it."""
+    survives_kill: bool = False
+    """Something it started outlives a kill of its group, so a run that times out leaves it."""
 
 
 class _ScriptedProcess:
@@ -240,6 +249,50 @@ class FakeProcessLauncher:
 
 
 @dataclass
+class FakeProcesses:
+    """Runs scripted commands to completion; records every spec it was asked to run.
+
+    The script describes each command (:class:`ProcessScript`) or raises the ``OSError`` a
+    program that cannot start raises. Each run takes its time on ``pass_time``: its
+    ``duration_s``, or the whole timeout when it outlives it. Pass ``threads.sleep`` in a
+    simulation, or a manual clock's ``advance``, so a caller's deadline sees the time its
+    commands took. A command whose ``duration_s`` exceeds the timeout, or one that
+    ``runs_until_signalled``, times out as the real group would after being killed, and one
+    that ``survives_kill`` is left unreaped. A never-ending command without a timeout would
+    hang the caller, so the Fake refuses it.
+    """
+
+    script: Callable[[ProcessSpec], ProcessScript]
+    pass_time: Callable[[float], None]
+    """Lets the given number of seconds pass for the caller, as a real run would take them."""
+    ran: list[ProcessSpec] = field(default_factory=list)
+    first_pid: int = 1000
+    """The process ID of the first run; each later run gets the next one."""
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        """Record ``spec``, let its running time pass, and end it the way its script says."""
+        pid = self.first_pid + len(self.ran)
+        self.ran.append(spec)
+        script = self.script(spec)
+        endless = script.runs_until_signalled
+        if timeout is not None and (endless or script.duration_s > timeout):
+            self._elapse(timeout)
+            if script.survives_kill:
+                return ProcessGroupUnreaped(timeout, pid, f"process {pid} survived the kill")
+            return ProcessTimedOut(timeout, script.stdout, script.stderr)
+        if endless:
+            message = f"{spec.argv[0]} never ends and the caller set no timeout"
+            raise AssertionError(message)
+        self._elapse(script.duration_s)
+        stdout = script.stdout + (spec.input if script.echo_input else b"")
+        return ProcessOutcome(script.returncode, stdout, script.stderr)
+
+    def _elapse(self, seconds: float) -> None:
+        if seconds > 0:
+            self.pass_time(seconds)
+
+
+@dataclass
 class FakePipedProcessLauncher:
     """Record synchronous piped process starts and create each process through a Fake factory."""
 
@@ -273,40 +326,6 @@ class FakeMergedOutputProcessLauncher:
         request = (tuple(argv), cwd, dict(env))
         self.started.append(request)
         return self.factory(*request)
-
-
-class _CapturedTextProcessFactory(Protocol):
-    def __call__(
-        self,
-        argv: tuple[str, ...],
-        *,
-        pipe_stdin: bool,
-        cwd: Path | None,
-        env: Mapping[str, str] | None,
-    ) -> CapturedTextProcess: ...
-
-
-@dataclass
-class FakeCapturedTextProcessLauncher:
-    """Record captured text-process starts and create each process through a Fake factory."""
-
-    factory: _CapturedTextProcessFactory
-    started: list[tuple[tuple[str, ...], bool, Path | None, Mapping[str, str] | None]] = field(
-        default_factory=list
-    )
-
-    def start(
-        self,
-        argv: tuple[str, ...],
-        *,
-        pipe_stdin: bool,
-        cwd: Path | None = None,
-        env: Mapping[str, str] | None = None,
-    ) -> CapturedTextProcess:
-        """Record the complete start request and return its scripted process."""
-        request = (tuple(argv), pipe_stdin, cwd, env)
-        self.started.append(request)
-        return self.factory(argv, pipe_stdin=pipe_stdin, cwd=cwd, env=env)
 
 
 @dataclass(frozen=True)
@@ -457,3 +476,38 @@ class ScriptedStreamingCommand:
         if scripted.blocks:
             raise subprocess.TimeoutExpired(command, timeout_seconds, scripted.stdout, stderr)
         return subprocess.CompletedProcess(command, scripted.returncode, scripted.stdout, stderr)
+
+
+class FakeLoopbackHttp:
+    """Loopback HTTP whose servers are ports a test serves by hand."""
+
+    def __init__(self) -> None:
+        """Start with nothing listening."""
+        self._served: dict[int, Callable[[str], HttpReply]] = {}
+        self.requests: list[tuple[int, str, dict[str, str]]] = []
+
+    def serve(self, port: int, answer: Callable[[str], HttpReply]) -> None:
+        """Answer requests to ``port`` with ``answer(target)``."""
+        self._served[port] = answer
+
+    def stop(self, port: int) -> None:
+        """Stop answering on ``port``, as if its server went away."""
+        self._served.pop(port, None)
+
+    def get(
+        self,
+        port: int,
+        target: str,
+        *,
+        timeout: float,
+        max_bytes: int,
+        headers: Mapping[str, str] | None = None,
+    ) -> HttpReply | None:
+        """Record the request and its headers; the served answer cut to ``max_bytes``, or ``None``."""
+        del timeout
+        self.requests.append((port, target, dict(headers or {})))
+        answer = self._served.get(port)
+        if answer is None:
+            return None
+        reply = answer(target)
+        return HttpReply(reply.status, reply.body[:max_bytes])

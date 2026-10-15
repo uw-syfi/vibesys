@@ -10,16 +10,23 @@ Skills (load them, in every language):
 - Before writing or changing any code, use the `software-design` skill
   (`.agents/skills/software-design/`): deep modules with declared public
   interfaces, one-way dependencies and data flow, and fitting a change to the
-  existing design instead of extending a violating pattern.
+  existing design instead of extending a violating pattern. For modules,
+  imports, interfaces and packages here, also use `change-module-graph`.
 - Before writing, changing, or reviewing any test, use the `testing` skill
   (`.agents/skills/testing/`). Tests exercise public APIs only, use Fakes
   instead of patching or mocks, favor property-based tests, and are never flaky
   (a test's result must never depend on timing; every wait needs a bound that
-  only guards against hangs). Deterministic-tier tests and product code use no
-  real time, threads, processes, sockets, or signals outside `vs_sim`
-  (`tests/quality/test_real_apis_confined.py`); only the real tiers
+  only guards against hangs). Also use `write-vibesys-tests` for this
+  repository's harness. Deterministic-tier tests and product code use no
+  real time, threads, processes, sockets, or signals outside `vs_sim`. Ruff
+  `TID251` bans time; `tests/quality/test_real_apis_confined.py` covers
+  threads, processes, sockets, and signals. Only the real tiers
   (`sim_real_tiers`: `tests/e2e`, `tests/slurm_cluster`,
   `tests/minimal_container`) drive real systems.
+- Prefer a type, lint rule or check over a written rule; a written rule names
+  its enforcement or says why there is none (the `enforce-rules` skill). All
+  skills are indexed in [`.agents/skills/README.md`](.agents/skills/README.md);
+  change them with the `write-skills` skill.
 
 Architecture:
 
@@ -66,11 +73,11 @@ Checks:
 - Treat lint suppressions as explicit opt-outs. Add one only after considering
   reasonable lint-compliant alternatives, and explain in the source comment why
   each would make the design more hacky than keeping the current code.
-- While iterating, run `./scripts/check_format.sh`, `./scripts/check_lint.sh`,
-  and the narrowest relevant `uv run pytest` target. Before opening or updating
-  a PR, run `./scripts/check_ci.sh`: it runs CI's Python checks from
-  `.repoctl/checks.toml` and stops at the first failure. Size limits and
-  lint-waiver mechanics are in
+- Run `./scripts/check_format.sh`, `./scripts/check_lint.sh`, and only the
+  checks and tests the change can affect; CI runs the rest on the PR. A docs- or
+  skills-only change runs no test suite. `./support/repoctl/repoctl test` runs
+  the checks CI would select for the change. Size limits and lint-waiver mechanics
+  are in
   [`docs/contributing/coding-best-practices.md`](docs/contributing/coding-best-practices.md).
 
 When preparing a pull request, use the repository PR template at

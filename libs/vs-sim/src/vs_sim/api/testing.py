@@ -14,7 +14,11 @@ from vs_sim.contracts import (
     CommandProbeContract,
     ForegroundLauncherContract,
     ForegroundUnderTest,
+    LoopbackHttpContract,
+    LoopbackHttpUnderTest,
     ProbeUnderTest,
+    ProcessesContract,
+    ProcessesUnderTest,
     ProcessLauncherContract,
     ProcessSignallerContract,
     ProcessSignallerUnderTest,
@@ -37,12 +41,14 @@ from vs_sim.crash import (
     swept,
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
+from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
-    FakeCapturedTextProcessLauncher,
     FakeForegroundChild,
     FakeForegroundLauncher,
+    FakeLoopbackHttp,
     FakeMergedOutputProcessLauncher,
     FakePipedProcessLauncher,
+    FakeProcesses,
     FakeProcessLauncher,
     FakeProcessSignaller,
     FakeSignalSource,
@@ -69,18 +75,27 @@ from vs_sim.seeds import (
     replay_hint,
     seed_for_test,
 )
+from vs_sim.signal_relay_contracts import (
+    MainThreadWakeContract,
+    MainThreadWakeUnderTest,
+    RelayUnderTest,
+    SignalRelayContract,
+)
 from vs_sim.sim import WORLDS, Sim, UnknownWorldError, WorldFactory, WorldRegistry
 from vs_sim.sim_network import SimNetwork
 from vs_sim.sim_threads import SimBlockingRunner, SimDeadlockError, SimThreads
-from vs_sim.states import Changes, wait_for_async_state, wait_for_state
+from vs_sim.states import Changes, wait_for_async_state, wait_for_state, yield_until
 from vs_sim.threads import TGKILL_SUPPORTED, non_main_thread_ids, send_to_thread
 from vs_sim.trace import EventTrace, TraceEvent
 from vs_sim.virtual import (
+    SIM_MONOTONIC_ORIGIN,
+    SIM_WALL_EPOCH,
     WORKER_GUARD_S,
     IdleDriver,
     VirtualClock,
     VirtualDeadlockError,
     VirtualTimeLimitError,
+    WallClockView,
     current_virtual_clock,
     run_virtual,
 )
@@ -99,6 +114,8 @@ __all__ = [
     "OVERSIZED_BYTES",
     "SCHEDULE_SEED_OPTION",
     "SEED_OPTION",
+    "SIM_MONOTONIC_ORIGIN",
+    "SIM_WALL_EPOCH",
     "TGKILL_SUPPORTED",
     "WORKER_GUARD_S",
     "WORLDS",
@@ -112,13 +129,16 @@ __all__ = [
     "CrashableClock",
     "Depth",
     "EventTrace",
-    "FakeCapturedTextProcessLauncher",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
+    "FakeLoopbackHttp",
+    "FakeMainThreadWake",
     "FakeMergedOutputProcessLauncher",
     "FakePipedProcessLauncher",
     "FakeProcessLauncher",
     "FakeProcessSignaller",
+    "FakeProcesses",
+    "FakeSignalRelay",
     "FakeSignalSource",
     "ForegroundLauncherContract",
     "ForegroundScript",
@@ -128,6 +148,10 @@ __all__ = [
     "HostCrashedError",
     "IdleDriver",
     "InlineBlockingRunner",
+    "LoopbackHttpContract",
+    "LoopbackHttpUnderTest",
+    "MainThreadWakeContract",
+    "MainThreadWakeUnderTest",
     "ManualClock",
     "NetworkContract",
     "NetworkUnderTest",
@@ -138,12 +162,16 @@ __all__ = [
     "ProcessSignallerContract",
     "ProcessSignallerUnderTest",
     "ProcessUnderTest",
+    "ProcessesContract",
+    "ProcessesUnderTest",
+    "RelayUnderTest",
     "RestartLimitError",
     "Restarted",
     "RunnerUnderTest",
     "ScheduledRule",
     "ScriptedProbe",
     "ScriptedStreamingCommand",
+    "SignalRelayContract",
     "SignalSourceContract",
     "SignalSourceUnderTest",
     "Sim",
@@ -163,6 +191,7 @@ __all__ = [
     "VirtualClock",
     "VirtualDeadlockError",
     "VirtualTimeLimitError",
+    "WallClockView",
     "WorldFactory",
     "WorldRegistry",
     "accept_or_fail",
@@ -200,4 +229,5 @@ __all__ = [
     "wait_or_fail",
     "wait_until_started",
     "wait_until_started_sync",
+    "yield_until",
 ]

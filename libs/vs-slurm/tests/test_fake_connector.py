@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
+from vs_sim.api import OsProcesses, ProcessOutcome, ProcessRun, ProcessSpec
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterObservation,
@@ -44,25 +43,33 @@ from vs_slurm.fake_connector import (
 # test-isolation: public wiring constructs the production implementation for transport contracts.
 from vs_slurm.wiring import SlurmCluster
 
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+
+def _unpaused(seconds: float) -> None:
+    """The pause of a wait whose job is terminal at its first poll: it is never called."""
+    message = f"the job was not terminal at its first poll (pause of {seconds} s)"
+    raise AssertionError(message)
+
+
+class _InProcessConnector:
+    """The executable connector's request handling, answered in-process."""
+
+    def __init__(self, state: Path) -> None:
+        self._state = state
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        del timeout
+        assert spec.input
+        answer = handle(self._state, json.loads(spec.input))
+        return ProcessOutcome(0, json.dumps(answer).encode(), b"")
 
 
 def _runner(state: Path, remote_root: str = "/remote/runs") -> SlurmJobRunner:
-    def connector(
-        argv: Sequence[str], *, stdin: str | None, timeout: float
-    ) -> subprocess.CompletedProcess[str]:
-        # The executable reads one request from stdin; answer it in-process.
-        del timeout
-        assert stdin is not None
-        return subprocess.CompletedProcess(argv, 0, json.dumps(handle(state, json.loads(stdin))))
-
     config = SlurmConfig(
         name="fake",
         remote_workspace_root=remote_root,
         transport=SlurmConnectorTransport(kind="connector", command=("fake-connector",)),
     )
-    return SlurmJobRunner(config, process=connector, clock=ManualClock())
+    return SlurmJobRunner(config, processes=_InProcessConnector(state), clock=ManualClock())
 
 
 def test_a_submitted_job_stays_pending_until_it_is_cancelled(tmp_path: Path) -> None:
@@ -102,11 +109,11 @@ def test_an_executing_cluster_runs_the_staged_job_before_its_first_poll(tmp_path
 
     job = runner.submit(request)
     assert runner.poll(job) is SlurmJobStatus.COMPLETED
-    failed = runner.run(SlurmJobRequest(workspace=workspace, command=("false",)))
+    failed = runner.run(SlurmJobRequest(workspace=workspace, command=("false",)), pause=_unpaused)
 
     assert failed.exit_code != 0
     assert failed.job_id != job.job_id
-    assert "staged" in runner.run(request).output
+    assert "staged" in runner.run(request, pause=_unpaused).output
 
 
 def _racing_mv(directory: Path) -> Path:
@@ -132,7 +139,7 @@ def test_publishing_never_reports_success_when_a_competitor_took_the_target(
     monkeypatch.setenv("PATH", f"{shims}{os.pathsep}{os.environ['PATH']}")
 
     with pytest.raises(SlurmError, match="exit code 74"):
-        runner.run(SlurmJobRequest(workspace=workspace, command=("true",)))
+        runner.run(SlurmJobRequest(workspace=workspace, command=("true",)), pause=_unpaused)
 
 
 def test_an_executing_cluster_holds_jobs_until_they_are_cancelled(tmp_path: Path) -> None:
@@ -161,6 +168,7 @@ def test_the_ssh_stand_in_answers_like_the_connector(tmp_path: Path) -> None:
                 host="fake", ssh_command=(*program, "ssh"), rsync_command=(*program, "rsync")
             ),
         ),
+        processes=OsProcesses(),
         clock=ManualClock(),
     )
 
@@ -285,6 +293,7 @@ def test_ssh_cluster_preserves_operation_identity_with_both_fake_modes(
                 host="fake", ssh_command=(*program, "ssh"), rsync_command=(*program, "rsync")
             ),
         ),
+        processes=OsProcesses(),
         clock=ManualClock(),
     )
     first = SlurmCluster(runner, state_root=tmp_path / "first-cache")

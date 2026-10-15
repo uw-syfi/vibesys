@@ -2,7 +2,7 @@
 
 ``Project`` is the entry point for repository state. The exported records and
 errors describe its configuration, run state, Git integration, and task paths.
-``strip_ansi`` is also public for consumers of ``RunLogger`` output.
+``strip_ansi`` and ``read_latest_run_log`` are public for consumers of ``RunLogger`` output.
 
 Runs use one version 5 manifest containing an ``OrchestrationDescriptor``.
 """
@@ -15,12 +15,13 @@ from vs_project._git_backend import (
     GIT_BACKEND_ENV,
     GitBackend,
     GitBackendError,
+    git_repositories,
     open_git_repository,
     pygit2_installed,
     select_git_backend,
 )
 from vs_project._git_events import GitTrackerEvents, NullGitTrackerEvents
-from vs_project._git_process import run_git
+from vs_project._git_process import Git, GitText
 from vs_project._git_remote import GitRemoteRepository
 from vs_project._git_tracker import FrameworkSnapshotStatus, GitTracker
 from vs_project._layout import (
@@ -48,6 +49,12 @@ from vs_project._manifests import (
     RunExecutionRecord,
     RunResourceRequest,
 )
+from vs_project._private_directory import (
+    PrivateDirectoryError,
+    ensure_private_directory,
+    user_runtime_root,
+)
+from vs_project._run_logs import RunLogText, read_latest_run_log
 from vs_project._socket import (
     MAX_SOCKET_PATH_BYTES,
     SocketPathTooLongError,
@@ -144,6 +151,7 @@ __all__ = [
     "FakeStateStore",
     "FakeStateStores",
     "FrameworkSnapshotStatus",
+    "Git",
     "GitBackend",
     "GitBackendError",
     "GitCommandError",
@@ -155,6 +163,7 @@ __all__ = [
     "GitRepositoryFactory",
     "GitSnapshotFile",
     "GitSnapshotPlan",
+    "GitText",
     "GitTimeoutError",
     "GitTracker",
     "GitTrackerEvents",
@@ -168,6 +177,7 @@ __all__ = [
     "OrchestrationRunManifest",
     "PatchStyle",
     "Pathspec",
+    "PrivateDirectoryError",
     "Project",
     "ProjectError",
     "ProjectGitIntegration",
@@ -183,6 +193,7 @@ __all__ = [
     "Revision",
     "RunEnvironmentRecord",
     "RunExecutionRecord",
+    "RunLogText",
     "RunLogger",
     "RunResourceRequest",
     "SocketPathTooLongError",
@@ -210,13 +221,16 @@ __all__ = [
     "UnsafeProjectPathError",
     "atomic_write_bytes",
     "decode_state_document",
+    "ensure_private_directory",
     "generate_run_id",
+    "git_repositories",
     "is_project_state_path",
     "open_git_repository",
     "pygit2_installed",
-    "run_git",
+    "read_latest_run_log",
     "select_git_backend",
     "strip_ansi",
+    "user_runtime_root",
     "validate_run_id",
     "validate_socket_path",
     "validate_state_namespace",

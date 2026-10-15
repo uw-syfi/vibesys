@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt, model_validator
 
 import vs_agent.api as _agent_api
 
@@ -131,13 +131,20 @@ class FrameworkSource(StrEnum):
 class EventPayload(BaseModel):
     """Immutable base for structured core event payloads.
 
-    Payloads ignore keys they do not declare, so core events recorded before
-    the retired ``driver`` attribution was removed still load. ``CoreEvent``
-    itself rejects unknown keys.
+    Payloads reject keys they do not declare. A payload that drops a field lists it in
+    ``retired_keys``, so history recorded before the removal still replays.
     """
 
-    model_config = ConfigDict(frozen=True, extra="ignore")
-    unknown_keys_reason: ClassVar[str] = "Recorded events replay after a payload field is removed."
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    retired_keys: ClassVar[frozenset[str]] = frozenset()
+    """Keys a payload once declared: dropped when recorded history replays, never written."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_keys(cls, data: object) -> object:
+        if cls.retired_keys and isinstance(data, dict):
+            return {key: value for key, value in data.items() if key not in cls.retired_keys}
+        return data
 
 
 class InvocationStartedData(EventPayload):
@@ -167,6 +174,9 @@ class AgentExecutionActivityData(EventPayload):
 
 class AgentExecutionStartedData(EventPayload):
     """Semantic context for a prompt-to-result agent execution."""
+
+    retired_keys: ClassVar[frozenset[str]] = frozenset({"driver"})
+    """``driver`` was always ``"agentshim"`` and was removed in #1486."""
 
     kind: Literal["agent_execution_started"] = "agent_execution_started"
     stage: str
@@ -740,11 +750,13 @@ class CoreEvent(BaseModel):
 def make_core_event(
     event_type: CoreEventType,
     text: str = "",
+    *,
+    timestamp: datetime,
     **fields: object,
 ) -> CoreEvent:
-    """Create an unrecorded event using the current UTC time."""
+    """Create an unrecorded event that happened at ``timestamp``."""
     return CoreEvent.model_validate(
-        {"timestamp": datetime.now(UTC), "type": event_type, "text": text, **fields}
+        {"timestamp": timestamp, "type": event_type, "text": text, **fields}
     )
 
 

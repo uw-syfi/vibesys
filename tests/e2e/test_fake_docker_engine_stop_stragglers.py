@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import join_or_fail
 
 if TYPE_CHECKING:
@@ -38,6 +39,7 @@ def test_a_stop_after_a_lost_signal_request_still_ends_the_program(tmp_path: Pat
         agent_uid=os.getuid(),
         agent_gid=os.getgid(),
         docker=engine,
+        threads=OsThreads(),
     )
     sandbox.start()
     try:

@@ -15,6 +15,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.core_host_world import open_core_host
 from tests.support.docker_environment import fake_docker_environment
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
@@ -27,7 +28,8 @@ from vibesys.api import (
 )
 from vibesys.api.request import load_task
 from vibesys.run.integration import LocalRunIntegration
-from vs_sim.api.testing import examples
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -68,7 +70,13 @@ def _request(project_root: Path) -> RunRequest:
 
 def _run_restore(request: RunRequest, code: str, memory: str) -> None:
     """Exercise declared-memory restore through a real product-composed run."""
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
 
     async def exercise() -> None:
         async with open_core_host(request, integration, plugin=_PLUGIN) as run:

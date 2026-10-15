@@ -30,6 +30,7 @@ from vs_agent.api.testing import (
     assistant_text,
 )
 from vs_prompts.api import TemplateRenderer
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,11 +59,15 @@ def test_executor_initial_and_strict_continuation_share_one_conversation(
                 answer={"value": 7},
                 on_turn=calls.append,
                 turn=[assistant_text('{"value":7}')],
-            )
+                threads=SimThreads(),
+            ),
+            clock=ManualClock(),
+            threads=SimThreads(),
         )
     else:
         executor = FakeAgentClient(
-            capabilities=AgentCapabilities(provider_session_resume=True, session_reuse=True)
+            capabilities=AgentCapabilities(provider_session_resume=True, session_reuse=True),
+            threads=SimThreads(),
         )
         executor.set_response("worker", {"value": 7}).on_invoke(calls.append)
         executor.stream_output("worker", ['{"value":7}'])
@@ -76,7 +81,7 @@ def test_executor_initial_and_strict_continuation_share_one_conversation(
         mcp_servers=(MCPServerSpec("diagnostic", "diagnostic", runtime_env=(("TOKEN", "fresh"),)),),
     )
     initial = AgentTurnRequest(message="work", output_schema=Reply, invocation_id="initial")
-    sessions = ClientAgentSessions(executor, FakeAgentInvocationStore())
+    sessions = ClientAgentSessions(executor, FakeAgentInvocationStore(), threads=SimThreads())
     try:
         first = sessions.start(key, spec, initial)
         assert isinstance(first, Completed)
@@ -116,10 +121,15 @@ def test_cancelling_and_releasing_one_key_leaves_the_client_usable_for_others(
     tmp_path: Path, implementation: str
 ) -> None:
     if implementation == "client":
-        executor: AgentTurnExecutor = AgentClient(FakeProvider(answer={"value": 7}))
+        executor: AgentTurnExecutor = AgentClient(
+            FakeProvider(answer={"value": 7}, threads=SimThreads()),
+            clock=ManualClock(),
+            threads=SimThreads(),
+        )
     else:
         fake = FakeAgentClient(
-            capabilities=AgentCapabilities(provider_session_resume=True, session_reuse=True)
+            capabilities=AgentCapabilities(provider_session_resume=True, session_reuse=True),
+            threads=SimThreads(),
         )
         fake.set_response("worker", {"value": 7})
         executor = fake

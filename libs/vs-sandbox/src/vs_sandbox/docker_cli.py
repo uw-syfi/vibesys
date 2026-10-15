@@ -5,15 +5,19 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sandbox.process_execution import (
-    CapturedProcessRequest,
-    CapturedProcessRunner,
-    OwnedProcessRunner,
-    start_process_group,
+from vs_sandbox.process_execution import start_process_group
+from vs_sim.api import (
+    ProcessGroupUnreaped,
+    ProcessOutcome,
+    ProcessSpec,
+    ProcessTimedOut,
+    ProcessTimeoutError,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from vs_sim.api import Processes
 
 # Signals every process whose environment carries the marker in ``$1`` with
 # signal number ``$2``. Passed as ``sh -c SCRIPT sh MARKER SIGNAL`` so the
@@ -52,38 +56,42 @@ class DockerCli(Protocol):
 class SubprocessDockerCli:
     """The real ``docker`` binary on ``PATH``."""
 
-    def __init__(self, *, processes: CapturedProcessRunner | None = None) -> None:
-        """Own synchronous Docker commands through *processes*."""
-        self._processes = processes or OwnedProcessRunner()
+    def __init__(self, *, processes: Processes) -> None:
+        """Run synchronous Docker commands through *processes*."""
+        self._processes = processes
 
     def run(
         self, argv: Sequence[str], *, timeout_seconds: float
     ) -> subprocess.CompletedProcess[str]:
-        """Run *argv* with captured output, in a session of its own.
+        """Run *argv* with captured output, in a process group of its own.
 
         Ctrl-C signals the terminal's whole foreground process group. A
         lifecycle command (``run``, ``stop``, ``rm``) that shared it would die
         mid-flight and leave its container running or half-created, so the
         run's own teardown, not the terminal, decides when these end. A
-        timeout kills and reaps the entire local session's process group before
+        timeout kills and reaps the command's whole process group before
         :class:`subprocess.TimeoutExpired` reaches the caller.
         """
         arguments = list(argv)
-        result = self._processes.run(
-            CapturedProcessRequest(
-                argv=arguments,
-                stdin=None,
-                timeout=timeout_seconds,
-                start_new_session=True,
-            )
-        )
-        return subprocess.CompletedProcess(
-            arguments,
-            result.returncode,
-            result.stdout,
-            result.stderr,
-        )
+        match self._processes.run(ProcessSpec(tuple(arguments)), timeout=timeout_seconds):
+            case ProcessOutcome(returncode=returncode, stdout=stdout, stderr=stderr):
+                return subprocess.CompletedProcess(
+                    arguments, returncode, _text(stdout), _text(stderr)
+                )
+            case ProcessTimedOut(stdout=stdout, stderr=stderr):
+                raise ProcessTimeoutError(
+                    arguments, timeout_seconds, output=stdout or None, stderr=stderr or None
+                )
+            case ProcessGroupUnreaped(detail=detail):
+                error = ProcessTimeoutError(arguments, timeout_seconds)
+                error.add_note(detail)
+                raise error
 
     def spawn(self, argv: Sequence[str]) -> subprocess.Popen[str]:
         """Start *argv* in its own process group."""
         return start_process_group(argv, env=None, cwd=None)
+
+
+def _text(output: bytes) -> str:
+    """Decode captured output as ``subprocess.run(text=True)`` does, with universal newlines."""
+    return output.decode().replace("\r\n", "\n").replace("\r", "\n")

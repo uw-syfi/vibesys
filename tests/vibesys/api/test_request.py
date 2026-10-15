@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from tests.support import run_test_command
+from tests.support.real_git import REAL_GIT
 
 import vibesys.api.request
 from launch import validate_run_request
@@ -109,9 +110,9 @@ def test_experiment_origin_matches_is_false_for_a_non_matching_repo(tmp_path: Pa
         check=True,
     )
 
-    assert experiment_origin_matches(tmp_path, "example/target-repo") is False
+    assert experiment_origin_matches(tmp_path, "example/target-repo", git=REAL_GIT) is False
 
 
 def test_experiment_origin_matches_is_false_without_a_git_repo(tmp_path: Path) -> None:
     """A destination that is not a git repository at all also reports no match."""
-    assert experiment_origin_matches(tmp_path, "example/target-repo") is False
+    assert experiment_origin_matches(tmp_path, "example/target-repo", git=REAL_GIT) is False

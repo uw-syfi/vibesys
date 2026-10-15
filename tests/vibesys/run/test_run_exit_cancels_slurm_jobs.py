@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.docker_environment import host_container_backend
+from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
 from vibesys.api._session import run_plugin
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_task
@@ -27,7 +29,8 @@ from vs_core.api import StopMode
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, RunStopped
-from vs_sim.api import SystemClock
+from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import ManualClock
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
 
 if TYPE_CHECKING:
@@ -102,7 +105,13 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
     _write_slurm_config(config_path, state, "ssh")
     project_root = tmp_path / "project"
     _write_project(project_root)
-    integration = LocalRunIntegration()
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=OsThreads(),
+        slurm_processes=REAL_PROCESSES,
+    )
     submitted_ids: list[str] = []
 
     async def exercise() -> None:
@@ -113,12 +122,16 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
                 _PLUGIN,
                 EmptyOptions(),
                 agent_client_factory=lambda **_: FakeAgentClient(
-                    capabilities=AgentCapabilities(provider_session_resume=True)
+                    capabilities=AgentCapabilities(provider_session_resume=True),
+                    threads=OsThreads(),
                 ),
                 backend_factory=host_container_backend,
-                stop_timer=asyncio.sleep,
-                timing=RunTiming(SystemClock(), 60.0),
+                stop_timer=SystemClock().sleep,
+                timing=RunTiming(SystemClock(), 60.0, OsThreads()),
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
+                blocking=ThreadBlockingRunner(),
+                network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             )
         )
         # The run's input-baseline measurement is queued on the held cluster; stopping the run

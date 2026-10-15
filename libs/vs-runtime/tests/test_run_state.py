@@ -3,13 +3,14 @@
 from pathlib import Path
 
 import pytest
+from tests.support.real_git import real_git_tracker
 
 from vs_project.api import GitTracker, NullGitTrackerEvents, Project
 from vs_runtime.api.infrastructure import RunState
 
 
 def _tracker(root: Path, run_id: str) -> GitTracker:
-    return GitTracker(root, run_id=run_id, events=NullGitTrackerEvents())
+    return real_git_tracker(root, run_id=run_id, events=NullGitTrackerEvents())
 
 
 def test_run_state_rejects_different_project_and_git_roots(tmp_path: Path) -> None:

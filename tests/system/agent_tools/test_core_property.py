@@ -84,6 +84,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
 from vs_runtime.api.testing import FakePublicationDelivery, ScriptedExecutors
 from vs_runtime.contracts import AgentRole, AgentTool
+from vs_sim.api import OsThreads, UnixNetwork, yield_now
 from vs_sim.api.testing import VirtualClock, examples, run_virtual
 
 if TYPE_CHECKING:
@@ -408,7 +409,7 @@ class Agent:
         arrived = asyncio.create_task(slow.arrived.wait())
         await asyncio.wait({first, arrived}, return_when=asyncio.FIRST_COMPLETED)
         retry = asyncio.create_task(self.bridge.answer(frame))
-        await asyncio.sleep(0)
+        await yield_now()
         slow.hold.set()
         arrived.cancel()
         _, answered = await asyncio.gather(first, retry, return_exceptions=True)
@@ -622,11 +623,13 @@ def _play(
             workspaces,
             AgentEvaluationRecords(ledgers[-1], SynthesizedEvidence()),
             diagnostics.append,
+            network=UnixNetwork(),
+            threads=OsThreads(),
         )
         bridge.attach(views[-1], clock)
         return bridge
 
-    delivery = FakePublicationDelivery(store)  # the subscribers outlive the host
+    delivery = FakePublicationDelivery()  # the subscribers outlive the host
     mortality = Mortality()
     agent = Agent(turns, workspaces, make_bridge, diagnostics=diagnostics, mortality=mortality)
     executors = AgentExecutors(
@@ -661,7 +664,10 @@ def _play(
         views.append(ShellView(shell))
         ledgers.append(
             OwedSubmissions(
-                ReceiptStore(cast("StateNamespace", FaultingNamespace(namespace, crash.ledger_at)))
+                ReceiptStore(
+                    cast("StateNamespace", FaultingNamespace(namespace, crash.ledger_at)),
+                    threads=OsThreads(),
+                )
             )
         )
         agent.view, agent.shell = views[-1], shell

@@ -79,7 +79,7 @@ def execute_command(  # noqa: PLR0913  # lint-waiver: LW-731010 [PLR0913]; the s
     launch: Callable[[], StoppableProcess],
     signal_remote: SignalSender | None = None,
     grace_seconds: float = DEFAULT_TERMINATION_GRACE_SECONDS,
-    threads: Threads | None = None,
+    threads: Threads,
 ) -> CommandResult:
     """Run *command* through *launch* under the module's result contract.
 

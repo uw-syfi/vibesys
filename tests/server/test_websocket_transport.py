@@ -27,13 +27,14 @@ from urllib.request import urlopen
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import DEADLOCK_GUARD_S, build_server_parts
+from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, build_server_parts
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
 from websockets.protocol import State
 
 from entrypoints import web as web_entrypoint
+from entrypoints.production import production_web_discovery
 from server.api.protocol import (
     ChatQuery,
     EventBatchMessage,
@@ -59,9 +60,11 @@ from server.transport.websocket import (
     _connection_closed,
     _content_type,
 )
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     Gate,
+    ManualClock,
     examples,
     join_or_fail,
     start_thread,
@@ -108,6 +111,8 @@ if TYPE_CHECKING:
 _SEND_CEILING_PATH = Path("/proc/sys/net/ipv4/tcp_wmem")
 _SEND_CEILING_FALLBACK_BYTES = 4 * 1024 * 1024
 _BURST_CEILING_MULTIPLE = 2
+_DISCOVERY = production_web_discovery()
+"""Finds the real gateways these tests start on this host."""
 _BURST_PAYLOAD_BUDGET_BYTES = 64 * 1024 * 1024
 _STALL_EVENT_BYTES = 64 * 1024
 # Capping the peer's receive buffer takes the second, receive-side absorber out
@@ -252,7 +257,13 @@ def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -
     image = b"\x89PNG\r\n\x1a\n\x00\xff\x80"
     (assets / "assets" / "logo.png").write_bytes(image)
 
-    with WebSocketGateway(parts.api, assets_dir=assets) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        assets_dir=assets,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         with urlopen(gateway.url, timeout=2) as response:  # noqa: S310  # lint-waiver: LW-101021 [S310]; connect only to the loopback URL produced by the gateway under test
             assert response.status == 200
             assert response.read() == b"<!doctype html><title>VibeSys</title>"
@@ -262,7 +273,7 @@ def test_gateway_serves_assets_and_round_trips_protocol_frames(tmp_path: Path) -
             assert response.headers["Content-Type"] == "image/png"
             assert response.read() == image
 
-        response = asyncio.run(_request(gateway, SnapshotQuery()))
+        response = asyncio.run(_request(gateway, SnapshotQuery(timestamp=REQUEST_TIME)))
 
     assert response["ok"] is True
     assert response["snapshot"]["status"] == "running"
@@ -450,7 +461,13 @@ def test_gateway_rejects_a_declared_origin_no_browser_can_send(tmp_path: Path, o
     # an unparseable origin a 500 on every route instead of a startup error,
     # and an origin no browser can send is dead configuration either way.
     with pytest.raises(ValueError, match="is not an origin a browser can send") as failure:
-        WebSocketGateway(parts.api, allowed_origins=(origin,))
+        WebSocketGateway(
+            parts.api,
+            allowed_origins=(origin,),
+            clock=ManualClock(),
+            threads=OsThreads(),
+            request_runner=ThreadBlockingRunner(),
+        )
 
     # The operator has to be able to find the value they typed.
     assert repr(origin) in str(failure.value)
@@ -472,14 +489,22 @@ def test_gateway_accepts_the_origin_a_browser_sends_for_a_differently_spelled_de
         "http://[0:0:0:0:0:0:0:1]:5173",
     )
 
-    with WebSocketGateway(parts.api, allowed_origins=declared) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        allowed_origins=declared,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         assert gateway.allowed_origins == {
             "http://localhost:5173",
             "https://proxy.example",
             "http://127.0.0.1",
             "http://[::1]:5173",
         }
-        response = asyncio.run(_request(gateway, SnapshotQuery(), origin="http://localhost:5173"))
+        response = asyncio.run(
+            _request(gateway, SnapshotQuery(timestamp=REQUEST_TIME), origin="http://localhost:5173")
+        )
 
     assert response["ok"] is True
 
@@ -496,7 +521,14 @@ def _asset_gateway(tmp_path: Path, *, allowed_origins: Sequence[str] = ()) -> We
     (assets / "assets" / "index.js").write_bytes(_BUNDLE_BODY)
     # Lives at the assets root, so only a traversal out of `/assets/` reaches it.
     (assets / "operator-notes.txt").write_text("not part of the bundle\n")
-    return WebSocketGateway(parts.api, assets_dir=assets, allowed_origins=allowed_origins)
+    return WebSocketGateway(
+        parts.api,
+        assets_dir=assets,
+        allowed_origins=allowed_origins,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    )
 
 
 # Routing one normalized target makes trailing slashes and `.`/`..` segments
@@ -897,7 +929,9 @@ def _fetch_body(port: int, path: str) -> tuple[int, bytes]:
 def test_gateway_rejects_wrong_origin_and_capability_token(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
 
-    with WebSocketGateway(parts.api) as gateway:
+    with WebSocketGateway(
+        parts.api, clock=ManualClock(), threads=OsThreads(), request_runner=ThreadBlockingRunner()
+    ) as gateway:
         asyncio.run(_assert_rejected(gateway.websocket_url, "http://evil.example"))
         asyncio.run(
             _assert_rejected(
@@ -910,8 +944,16 @@ def test_gateway_rejects_wrong_origin_and_capability_token(tmp_path: Path) -> No
 def test_gateway_accepts_an_explicit_browser_harness_origin(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
 
-    with WebSocketGateway(parts.api, allowed_origins=("http://127.0.0.1:5173",)) as gateway:
-        response = asyncio.run(_request(gateway, SnapshotQuery(), origin="http://127.0.0.1:5173"))
+    with WebSocketGateway(
+        parts.api,
+        allowed_origins=("http://127.0.0.1:5173",),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
+        response = asyncio.run(
+            _request(gateway, SnapshotQuery(timestamp=REQUEST_TIME), origin="http://127.0.0.1:5173")
+        )
 
     assert response["ok"] is True
 
@@ -973,7 +1015,7 @@ class _RecordingRequestApi:
 
     def execute(self, request: ProtocolRequest) -> Response:
         self.executed.append(request)
-        return Response(request_id=request.request_id)
+        return Response(timestamp=REQUEST_TIME, request_id=request.request_id)
 
 
 class _HeldBootstrapRunner:
@@ -1005,14 +1047,18 @@ class _HeldBootstrapRunner:
 async def _assert_initial_bootstrap_isolated(
     gateway: WebSocketGateway, runner: _HeldBootstrapRunner
 ) -> None:
-    snapshot = SnapshotQuery()
+    snapshot = SnapshotQuery(timestamp=REQUEST_TIME)
     async with (
         asyncio.timeout(DEADLOCK_GUARD_S),
         _gateway_connection(gateway) as stream,
         _gateway_connection(gateway) as control,
     ):
         try:
-            await stream.send(SubscribeRequest(client_id="held-bootstrap").model_dump_json())
+            await stream.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME, client_id="held-bootstrap"
+                ).model_dump_json()
+            )
             first_stream_frame = asyncio.create_task(stream.recv())
             await runner.bootstrap_entered.wait(first_stream_frame)
 
@@ -1033,7 +1079,12 @@ async def _assert_initial_bootstrap_isolated(
 def test_initial_bootstrap_does_not_block_another_established_websocket(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
     runner = _HeldBootstrapRunner(parts.api.subscription_bootstrap)
-    with WebSocketGateway(parts.api, request_runner=cast("BlockingRunner", runner)) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        request_runner=cast("BlockingRunner", runner),
+        clock=ManualClock(),
+        threads=OsThreads(),
+    ) as gateway:
         asyncio.run(_assert_initial_bootstrap_isolated(gateway, runner))
     parts.close()
 
@@ -1044,7 +1095,11 @@ async def _assert_shutdown_drains_initial_bootstrap(
     closing = None
     async with _gateway_connection(gateway) as stream:
         try:
-            await stream.send(SubscribeRequest(client_id="shutdown-bootstrap").model_dump_json())
+            await stream.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME, client_id="shutdown-bootstrap"
+                ).model_dump_json()
+            )
             first_stream_frame = asyncio.create_task(stream.recv())
             await runner.bootstrap_entered.wait(first_stream_frame)
 
@@ -1068,7 +1123,12 @@ async def _assert_shutdown_drains_initial_bootstrap(
 def test_gateway_shutdown_drains_a_started_initial_bootstrap(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
     runner = _HeldBootstrapRunner(parts.api.subscription_bootstrap)
-    gateway = WebSocketGateway(parts.api, request_runner=cast("BlockingRunner", runner))
+    gateway = WebSocketGateway(
+        parts.api,
+        request_runner=cast("BlockingRunner", runner),
+        clock=ManualClock(),
+        threads=OsThreads(),
+    )
     gateway.start()
     try:
         asyncio.run(_assert_shutdown_drains_initial_bootstrap(gateway, runner))
@@ -1083,9 +1143,9 @@ async def _assert_chat_connection_is_isolated(
     runner: _HeldChatRequestRunner,
     api: _RecordingRequestApi,
 ) -> None:
-    held_chat = ChatQuery(text="hold this chat")
-    same_connection_snapshot = SnapshotQuery()
-    other_connection_snapshot = SnapshotQuery()
+    held_chat = ChatQuery(timestamp=REQUEST_TIME, text="hold this chat")
+    same_connection_snapshot = SnapshotQuery(timestamp=REQUEST_TIME)
+    other_connection_snapshot = SnapshotQuery(timestamp=REQUEST_TIME)
     async with (
         asyncio.timeout(DEADLOCK_GUARD_S),
         _gateway_connection(gateway) as chat,
@@ -1143,7 +1203,10 @@ def test_chat_request_does_not_block_another_websocket_or_reorder_its_own() -> N
     runner = _HeldChatRequestRunner()
     api = _RecordingRequestApi()
     with WebSocketGateway(
-        cast("RunApi", api), request_runner=cast("BlockingRunner", runner)
+        cast("RunApi", api),
+        request_runner=cast("BlockingRunner", runner),
+        clock=ManualClock(),
+        threads=OsThreads(),
     ) as gateway:
         asyncio.run(_assert_chat_connection_is_isolated(gateway, runner, api))
 
@@ -1156,7 +1219,7 @@ async def _assert_shutdown_drains_started_request(
     closing = None
     async with _gateway_connection(gateway) as websocket:
         try:
-            request = ChatQuery(text="finish during shutdown")
+            request = ChatQuery(timestamp=REQUEST_TIME, text="finish during shutdown")
             await websocket.send(request.model_dump_json())
             response = asyncio.create_task(websocket.recv())
             await runner.entered(request).wait(response)
@@ -1180,7 +1243,12 @@ async def _assert_shutdown_drains_started_request(
 def test_gateway_shutdown_drains_a_started_request_before_closing_its_loop() -> None:
     runner = _HeldChatRequestRunner()
     api = _RecordingRequestApi()
-    gateway = WebSocketGateway(cast("RunApi", api), request_runner=cast("BlockingRunner", runner))
+    gateway = WebSocketGateway(
+        cast("RunApi", api),
+        request_runner=cast("BlockingRunner", runner),
+        clock=ManualClock(),
+        threads=OsThreads(),
+    )
     gateway.start()
     try:
         asyncio.run(_assert_shutdown_drains_started_request(gateway, runner, api))
@@ -1203,7 +1271,9 @@ def test_gateway_uses_unknown_request_id_for_malformed_public_frames(
 ) -> None:
     parts = build_server_parts(tmp_path / "logs")
 
-    with WebSocketGateway(parts.api) as gateway:
+    with WebSocketGateway(
+        parts.api, clock=ManualClock(), threads=OsThreads(), request_runner=ThreadBlockingRunner()
+    ) as gateway:
         response = asyncio.run(_raw_request(gateway, raw))
 
     assert response["ok"] is False
@@ -1233,7 +1303,14 @@ def test_gateway_lifecycle_and_asset_edge_cases(tmp_path: Path) -> None:
     (assets / "assets" / "app.js").write_text("console.log('ok')")
 
     port = _unused_port()
-    gateway = WebSocketGateway(parts.api, assets_dir=assets, port=port)
+    gateway = WebSocketGateway(
+        parts.api,
+        assets_dir=assets,
+        port=port,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    )
     with pytest.raises(RuntimeError, match="not running"):
         _ = gateway.url
     with pytest.raises(RuntimeError, match="not running"):
@@ -1275,7 +1352,9 @@ def test_gateway_lifecycle_and_asset_edge_cases(tmp_path: Path) -> None:
     with gateway:
         assert gateway.bound_port > 0
 
-    no_assets = WebSocketGateway(parts.api)
+    no_assets = WebSocketGateway(
+        parts.api, clock=ManualClock(), threads=OsThreads(), request_runner=ThreadBlockingRunner()
+    )
     missing_root = asyncio.run(
         no_assets._process_request(  # noqa: SLF001  # lint-waiver: LW-101028 [SLF001]; exercise the missing-assets response directly
             cast("ServerConnection", None),
@@ -1295,7 +1374,14 @@ def test_gateway_retries_after_a_failed_bind_without_holding_its_instance_claim(
 
     with socket.create_server(("127.0.0.1", 0)) as held:
         port = held.getsockname()[1]
-        gateway = WebSocketGateway(parts.api, port=port, instance_path=instance_path)
+        gateway = WebSocketGateway(
+            parts.api,
+            port=port,
+            instance_path=instance_path,
+            clock=ManualClock(),
+            threads=OsThreads(),
+            request_runner=ThreadBlockingRunner(),
+        )
         with pytest.raises(WebSocketBindError) as failure:
             gateway.start()
         first_line = str(failure.value).splitlines()[0]
@@ -1327,7 +1413,7 @@ class _StalledPublication:
         self.first_worker: threading.Thread | None = None
         self.old_port = 0
 
-    def wait_for_ready(self, ready: threading.Event) -> bool:
+    def wait_for_ready(self, ready: Event) -> bool:
         if self._first_wait:
             self._first_wait = False
             if self._timeout_first:
@@ -1335,13 +1421,13 @@ class _StalledPublication:
                 return False
         return ready.wait(HANG_GUARD_S)
 
-    def wait_before_serve(self, stop: threading.Event) -> None:
+    def wait_before_serve(self, stop: Event) -> None:
         del stop
 
     def wait_before_listener_start(self, stop: Event, bound_port: int) -> None:
         del stop, bound_port
 
-    def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
+    def wait_before_publication(self, stop: Event, bound_port: int) -> None:
         del stop
         if self.entered.is_set():
             return
@@ -1368,7 +1454,14 @@ def test_gateway_timeout_retires_stalled_publication_before_immediate_retry(
     parts = build_server_parts(tmp_path / "logs")
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
     startup = _StalledPublication()
-    gateway = WebSocketGateway(parts.api, instance_path=instance_path, startup=startup)
+    gateway = WebSocketGateway(
+        parts.api,
+        instance_path=instance_path,
+        startup=startup,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    )
     retry_record: WebInstanceRecord | None = None
 
     with ThreadPoolExecutor(max_workers=1) as starts:
@@ -1395,7 +1488,7 @@ def test_gateway_timeout_retires_stalled_publication_before_immediate_retry(
             retry_record = WebInstanceRecord.read(instance_path)
             assert retry_record is not None
             assert retry_record.port == gateway.bound_port
-            assert WebInstanceRecord.discover(instance_path) == retry_record
+            assert _DISCOVERY.discover(instance_path) == retry_record
         finally:
             startup.timeout.set()
             startup.release.set()
@@ -1403,7 +1496,7 @@ def test_gateway_timeout_retires_stalled_publication_before_immediate_retry(
             startup.join_first_worker()
             if retry_record is not None:
                 assert WebInstanceRecord.read(instance_path) == retry_record
-                assert WebInstanceRecord.discover(instance_path) == retry_record
+                assert _DISCOVERY.discover(instance_path) == retry_record
             gateway.close()
             parts.close()
 
@@ -1415,7 +1508,14 @@ def test_gateway_publication_uses_capability_rotated_while_its_record_was_staged
     parts = build_server_parts(tmp_path / "logs")
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
     startup = _StalledPublication(timeout_first=False)
-    gateway = WebSocketGateway(parts.api, instance_path=instance_path, startup=startup)
+    gateway = WebSocketGateway(
+        parts.api,
+        instance_path=instance_path,
+        startup=startup,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    )
     with ThreadPoolExecutor(max_workers=1) as starts:
         start = starts.submit(gateway.start)
         try:
@@ -1428,7 +1528,7 @@ def test_gateway_publication_uses_capability_rotated_while_its_record_was_staged
             assert record is not None
             assert record.token == rotated_token
             assert record.url == gateway.url
-            assert WebInstanceRecord.discover(instance_path) == record
+            assert _DISCOVERY.discover(instance_path) == record
         finally:
             startup.release.set()
             gateway.close()
@@ -1437,7 +1537,9 @@ def test_gateway_publication_uses_capability_rotated_while_its_record_was_staged
 
 def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
-    gateway = WebSocketGateway(parts.api)
+    gateway = WebSocketGateway(
+        parts.api, clock=ManualClock(), threads=OsThreads(), request_runner=ThreadBlockingRunner()
+    )
 
     class FakeConnection:
         def __init__(self, frames: list[object]) -> None:
@@ -1490,7 +1592,11 @@ def test_gateway_handles_text_protocol_errors_and_subscriptions(tmp_path: Path) 
         origin = f"http://127.0.0.1:{gateway.bound_port}"
         messages: list[dict[str, Any]] = []
         async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-            await websocket.send(SubscribeRequest(client_id="browser-client").model_dump_json())
+            await websocket.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME, client_id="browser-client"
+                ).model_dump_json()
+            )
             messages.append(json.loads(await websocket.recv()))
             messages.append(json.loads(await websocket.recv()))
         return messages
@@ -1568,7 +1674,7 @@ async def _assert_subscription_failure_lifecycle(
     """Assert the public subscription frames and the normal close that follows."""
     origin = f"http://127.0.0.1:{gateway.bound_port}"
     async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-        request = SubscribeRequest(client_id="failing-browser-client")
+        request = SubscribeRequest(timestamp=REQUEST_TIME, client_id="failing-browser-client")
         await websocket.send(request.model_dump_json())
         async with asyncio.timeout(DEADLOCK_GUARD_S):
             messages = [json.loads(await websocket.recv()) for _ in expected_types]
@@ -1588,8 +1694,13 @@ async def _assert_subscription_failure_lifecycle(
 
 
 def test_gateway_converts_control_api_timeout_into_response() -> None:
-    with WebSocketGateway(cast("RunApi", _ControlTimeoutApi())) as gateway:
-        response = asyncio.run(_request(gateway, SnapshotQuery()))
+    with WebSocketGateway(
+        cast("RunApi", _ControlTimeoutApi()),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
+        response = asyncio.run(_request(gateway, SnapshotQuery(timestamp=REQUEST_TIME)))
 
     assert response["ok"] is False
     assert response["error"] == "Request timed out"
@@ -1600,7 +1711,12 @@ def test_gateway_acknowledges_subscription_before_bootstrap_failure(tmp_path: Pa
     parts = build_server_parts(tmp_path / "logs")
     api = _SubscriptionFailureApi(parts.api, "bootstrap")
 
-    with WebSocketGateway(cast("RunApi", api)) as gateway:
+    with WebSocketGateway(
+        cast("RunApi", api),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         asyncio.run(
             _assert_subscription_failure_lifecycle(
                 gateway,
@@ -1613,7 +1729,12 @@ def test_gateway_reports_post_handshake_stream_failure_in_band(tmp_path: Path) -
     parts = build_server_parts(tmp_path / "logs")
     api = _SubscriptionFailureApi(parts.api, "checkpoint")
 
-    with WebSocketGateway(cast("RunApi", api)) as gateway:
+    with WebSocketGateway(
+        cast("RunApi", api),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         asyncio.run(
             _assert_subscription_failure_lifecycle(
                 gateway,
@@ -1637,7 +1758,12 @@ def test_gateway_reports_subscription_api_timeout_in_band(
     parts = build_server_parts(tmp_path / "logs")
     api = _SubscriptionFailureApi(parts.api, failure, TimeoutError)
 
-    with WebSocketGateway(cast("RunApi", api)) as gateway:
+    with WebSocketGateway(
+        cast("RunApi", api),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         asyncio.run(_assert_subscription_failure_lifecycle(gateway, expected_types))
 
 
@@ -1680,7 +1806,11 @@ class _HalfOpenPeer:
 
     def subscribe(self) -> None:
         """Send one masked subscribe frame."""
-        payload = SubscribeRequest(client_id="half-open-peer").model_dump_json().encode()
+        payload = (
+            SubscribeRequest(timestamp=REQUEST_TIME, client_id="half-open-peer")
+            .model_dump_json()
+            .encode()
+        )
         mask = secrets.token_bytes(4)
         masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
         length = (
@@ -1782,11 +1912,24 @@ def test_a_half_open_subscriber_is_reaped_by_the_keepalive_and_lets_the_run_fini
         write_deadline_seconds=300.0,
     )
     parts = build_server_parts(tmp_path / "logs")
-    tracker = SubscriptionTracker()
+    tracker = SubscriptionTracker(threads=OsThreads())
     try:
         with (
-            UnixJsonlServer(socket_dir / "half-open.sock", parts.api, tracker) as unix,
-            WebSocketGateway(parts.api, subscriptions=tracker, limits=limits) as gateway,
+            UnixJsonlServer(
+                socket_dir / "half-open.sock",
+                parts.api,
+                tracker,
+                threads=OsThreads(),
+                network=UnixNetwork(),
+            ) as unix,
+            WebSocketGateway(
+                parts.api,
+                subscriptions=tracker,
+                limits=limits,
+                clock=ManualClock(),
+                threads=OsThreads(),
+                request_runner=ThreadBlockingRunner(),
+            ) as gateway,
         ):
             peer = _HalfOpenPeer(gateway)
             try:
@@ -1839,11 +1982,24 @@ def test_a_subscriber_that_stops_draining_is_abandoned_at_the_write_deadline(
         send_buffer_bytes=1024,
     )
     parts = build_server_parts(tmp_path / "logs")
-    tracker = SubscriptionTracker()
+    tracker = SubscriptionTracker(threads=OsThreads())
     try:
         with (
-            UnixJsonlServer(socket_dir / "stalled.sock", parts.api, tracker) as unix,
-            WebSocketGateway(parts.api, subscriptions=tracker, limits=limits) as gateway,
+            UnixJsonlServer(
+                socket_dir / "stalled.sock",
+                parts.api,
+                tracker,
+                threads=OsThreads(),
+                network=UnixNetwork(),
+            ) as unix,
+            WebSocketGateway(
+                parts.api,
+                subscriptions=tracker,
+                limits=limits,
+                clock=ManualClock(),
+                threads=OsThreads(),
+                request_runner=ThreadBlockingRunner(),
+            ) as gateway,
         ):
             peer = _HalfOpenPeer(gateway, receive_buffer=_PEER_RECEIVE_BUFFER_BYTES)
             try:
@@ -1884,8 +2040,14 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
     bound that was exceeded, not as wording.
     """
     parts = build_server_parts(tmp_path / "logs")
-    tracker = SubscriptionTracker()
-    gateway = WebSocketGateway(parts.api, subscriptions=tracker)
+    tracker = SubscriptionTracker(threads=OsThreads())
+    gateway = WebSocketGateway(
+        parts.api,
+        subscriptions=tracker,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    )
 
     class FakeTransport:
         def __init__(self) -> None:
@@ -1925,7 +2087,9 @@ def test_a_write_that_never_drains_abandons_the_peer_and_frees_its_subscription(
             ``aborts == 1`` below counts only ``_send``'s own abort.
             """
 
-    connection = StalledConnection([SubscribeRequest(client_id="stalled").model_dump_json()])
+    connection = StalledConnection(
+        [SubscribeRequest(timestamp=REQUEST_TIME, client_id="stalled").model_dump_json()]
+    )
 
     with caplog.at_level(logging.DEBUG, logger="server.transport.websocket"):
         asyncio.run(
@@ -1982,7 +2146,9 @@ async def _replay_batches(gateway: WebSocketGateway, watermark: int) -> list[str
     origin = f"http://127.0.0.1:{gateway.bound_port}"
     frames: list[str] = []
     async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
-        await websocket.send(SubscribeRequest(client_id="backlog-client").model_dump_json())
+        await websocket.send(
+            SubscribeRequest(timestamp=REQUEST_TIME, client_id="backlog-client").model_dump_json()
+        )
         assert json.loads(await _next_frame(websocket))["type"] == "subscribed"
         while True:
             frame = await _next_frame(websocket)
@@ -2030,7 +2196,9 @@ def test_a_backlog_past_the_frame_cap_is_delivered_instead_of_closing_the_connec
     unchunked = len(expected.model_dump_json().encode())
     assert unchunked > 2 * _CLIENT_FRAME_CAP, unchunked
 
-    with WebSocketGateway(parts.api) as gateway:
+    with WebSocketGateway(
+        parts.api, clock=ManualClock(), threads=OsThreads(), request_runner=ThreadBlockingRunner()
+    ) as gateway:
         frames = asyncio.run(_replay_batches(gateway, parts.api.latest_sequence))
     parts.close()
 
@@ -2107,7 +2275,13 @@ def test_a_chunked_batch_reaches_the_peer_whole_and_within_the_stated_send_cap(
     unchunked = len(expected.model_dump_json().encode())
     limits = WebSocketLimits(send_frame_bytes=_CHUNKED_SEND_FRAME_BYTES)
 
-    with WebSocketGateway(parts.api, limits=limits) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        limits=limits,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         frames = asyncio.run(_replay_batches(gateway, parts.api.latest_sequence))
     parts.close()
 
@@ -2153,10 +2327,16 @@ def test_an_inbound_frame_past_the_stated_cap_is_refused_by_the_gateway(
         async with connect(
             gateway.websocket_url, origin=cast("Origin", origin), max_size=None
         ) as websocket:
-            await websocket.send(SteerCommand(text=text).model_dump_json())
+            await websocket.send(SteerCommand(timestamp=REQUEST_TIME, text=text).model_dump_json())
             return json.loads(await _next_frame(websocket))
 
-    with WebSocketGateway(parts.api, limits=limits) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        limits=limits,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         accepted = asyncio.run(probe(gateway, "s" * 3000))
         with pytest.raises(ConnectionClosedError) as refused:
             asyncio.run(probe(gateway, "s" * 8000))
@@ -2179,8 +2359,15 @@ def test_gateway_publishes_and_cleans_project_instance_record(tmp_path: Path) ->
     (assets / "index.html").write_text("ok")
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
 
-    with WebSocketGateway(parts.api, assets_dir=assets, instance_path=instance_path) as gateway:
-        record = WebInstanceRecord.discover(instance_path)
+    with WebSocketGateway(
+        parts.api,
+        assets_dir=assets,
+        instance_path=instance_path,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
+        record = _DISCOVERY.discover(instance_path)
         assert record is not None
         assert record.url == gateway.url
         health_url = f"http://127.0.0.1:{gateway.bound_port}/health?token={gateway.token}"
@@ -2200,7 +2387,14 @@ def test_browser_session_survives_launch_capability_rotation(
     (assets / "index.html").write_text("ok")
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
 
-    with WebSocketGateway(parts.api, assets_dir=assets, instance_path=instance_path) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        assets_dir=assets,
+        instance_path=instance_path,
+        clock=ManualClock(1_000.0),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         old_token = gateway.token
         page_origin = f"http://127.0.0.1:{gateway.bound_port}"
         status, headers = _fetch(
@@ -2220,7 +2414,7 @@ def test_browser_session_survives_launch_capability_rotation(
             origin = cast("Origin", page_origin)
             async with connect(gateway.websocket_url, origin=origin) as attached:
                 assert web_entrypoint.main(["rotate", "--instance", str(instance_path)]) == 0
-                await attached.send(SnapshotQuery().model_dump_json())
+                await attached.send(SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json())
                 assert json.loads(await attached.recv())["ok"] is True
                 await _assert_rejected(
                     f"ws://127.0.0.1:{gateway.bound_port}/ws"
@@ -2232,22 +2426,22 @@ def test_browser_session_survives_launch_capability_rotation(
                 origin=origin,
                 additional_headers={"Cookie": cookie},
             ) as resumed:
-                await resumed.send(SnapshotQuery().model_dump_json())
+                await resumed.send(SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json())
                 assert json.loads(await resumed.recv())["ok"] is True
             async with connect(
                 f"ws://127.0.0.1:{gateway.bound_port}/ws?session={browser_session}",
                 origin=origin,
             ) as harness:
-                await harness.send(SnapshotQuery().model_dump_json())
+                await harness.send(SnapshotQuery(timestamp=REQUEST_TIME).model_dump_json())
                 assert json.loads(await harness.recv())["ok"] is True
 
         asyncio.run(rotate_with_an_attached_socket())
 
-        replacement = WebInstanceRecord.discover(instance_path)
+        replacement = _DISCOVERY.discover(instance_path)
         assert replacement is not None
         assert replacement.token == gateway.token
         assert replacement.token != old_token
-        assert replacement.started_at > 0
+        assert replacement.started_at == 1_000.0
         assert replacement.url in capsys.readouterr().out
         assert _fetch(gateway.bound_port, "/")[0] == 403
         assert _fetch(gateway.bound_port, "/", {"Cookie": cookie})[0] == 200
@@ -2271,7 +2465,14 @@ def test_capability_rotation_failure_rolls_back_with_a_gateway_response(tmp_path
     (assets / "index.html").write_text("ok")
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
 
-    with WebSocketGateway(parts.api, assets_dir=assets, instance_path=instance_path) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        assets_dir=assets,
+        instance_path=instance_path,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         record = WebInstanceRecord.read(instance_path)
         assert record is not None
         old_token = gateway.token
@@ -2317,13 +2518,21 @@ def test_a_browser_stream_reports_what_it_delivered_so_a_closing_server_can_wait
     anything and the browser lost the event that said why the run ended.
     """
     parts = build_server_parts(tmp_path / "logs")
-    tracker = SubscriptionTracker()
-    gateway = WebSocketGateway(parts.api, subscriptions=tracker)
+    tracker = SubscriptionTracker(threads=OsThreads())
+    gateway = WebSocketGateway(
+        parts.api,
+        subscriptions=tracker,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    )
     caught_up: list[bool] = []
 
     async def subscribe() -> None:
         async with _gateway_connection(gateway) as websocket:
-            await websocket.send(SubscribeRequest(client_id="browser").model_dump_json())
+            await websocket.send(
+                SubscribeRequest(timestamp=REQUEST_TIME, client_id="browser").model_dump_json()
+            )
             assert json.loads(await websocket.recv())["type"] == "subscribed"
             assert json.loads(await websocket.recv())["type"] == "event_batch"
             caught_up.append(
@@ -2340,3 +2549,32 @@ def test_a_browser_stream_reports_what_it_delivered_so_a_closing_server_can_wait
     parts.close()
 
     assert caught_up == [True, True]
+
+
+def test_terminal_drain_refuses_a_late_browser_subscription(tmp_path: Path) -> None:
+    """A subscribe after terminal drain is refused, not acknowledged outside it."""
+    parts = build_server_parts(tmp_path / "logs")
+    tracker = SubscriptionTracker(threads=OsThreads())
+    request = SubscribeRequest(timestamp=REQUEST_TIME, client_id="late-browser")
+
+    async def subscribe(gateway: WebSocketGateway) -> dict[str, Any]:
+        async with _gateway_connection(gateway) as websocket:
+            await websocket.send(request.model_dump_json())
+            return cast("dict[str, Any]", json.loads(await websocket.recv()))
+
+    with WebSocketGateway(
+        parts.api,
+        subscriptions=tracker,
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
+        assert tracker.wait_until_delivered(parts.api.latest_sequence, 0.0)
+        refusal = asyncio.run(subscribe(gateway))
+    parts.close()
+
+    assert refusal["type"] == "protocol_error"
+    assert refusal["code"] == "subscription_admission_closed"
+    assert refusal["diagnostic"]["code"] == "subscription_admission_closed"
+    assert refusal["request_id"] == request.request_id
+    assert refusal["client_id"] == request.client_id

@@ -10,6 +10,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_async_ops.api import drain, finish
+from vs_sim.api import yield_now
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -34,9 +35,9 @@ class _Work:
 
 async def _cancel_repeatedly(caller: asyncio.Task[object], times: int) -> None:
     for _ in range(times):
-        await asyncio.sleep(0)  # let the caller reach (or re-enter) its wait
+        await yield_now()  # let the caller reach (or re-enter) its wait
         caller.cancel()
-    await asyncio.sleep(0)
+    await yield_now()
 
 
 async def _cancelled_caller_outcome(
@@ -109,7 +110,7 @@ async def test_finish_returns_the_result_and_raises_the_failure_when_not_cancell
 async def test_a_task_that_was_itself_cancelled_raises_cancelled_error() -> None:
     work = _Work()
     caller = asyncio.ensure_future(finish(work.task))
-    await asyncio.sleep(0)
+    await yield_now()
     work.task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await caller

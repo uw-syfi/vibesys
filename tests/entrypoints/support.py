@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from entrypoints.server import GATEWAY_STOP_TIMEOUT_SECONDS
 from server.runtime import (
@@ -13,6 +14,9 @@ from server.runtime import (
     WebPortObservation,
     WebPortState,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 INSTANCE_PATH = Path("/project/.vibesys/web-gateway.json")
 GATEWAY_PID = 4321
@@ -190,3 +194,16 @@ class FakePortGateway:
     def sleep(self, seconds: float) -> None:
         """Advance the deterministic clock."""
         self.sleeps.append(seconds)
+
+
+class FakeWebInstanceFinder:
+    """Answer gateway discovery through *answer* (no gateway when omitted), recording each read."""
+
+    def __init__(self, answer: Callable[..., WebInstanceRecord | None] | None = None) -> None:
+        self._answer = answer
+        self.reads: list[tuple[Path, bool]] = []
+
+    def discover(self, path: Path, *, cleanup_stale: bool = True) -> WebInstanceRecord | None:
+        """Record the read and return the scripted answer."""
+        self.reads.append((path, cleanup_stale))
+        return None if self._answer is None else self._answer(path, cleanup_stale=cleanup_stale)

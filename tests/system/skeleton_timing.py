@@ -53,6 +53,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import VirtualClock, run_virtual
 from vs_slurm.api import SlurmJobStatus
 
@@ -64,6 +65,10 @@ if TYPE_CHECKING:
         CoreRuntimeBindings,
         ExecutionContext,
         ExecutionOutcome,
+        Publication,
+        PublicationAcknowledgement,
+        PublicationContext,
+        PublicationDelivery,
         RuntimeRecord,
     )
     from vs_slurm.api import ClusterSubmitOutcome, SlurmBatchRequest, SlurmJobRequest
@@ -314,17 +319,23 @@ def open_timed_world(
 
 @dataclass
 class Observed:
-    """What the run's commits showed: when the run first read as paused."""
+    """What the run's commits showed: when the run first read as paused, and host liveness."""
 
     clock: VirtualClock
     paused_at: float | None = None
+    alive: list[tuple[float, float]] = field(default_factory=list)
+    """For each commit, its virtual time and the latest time core holds the host alive at."""
 
     def committed(self, previous: object, current: RuntimeRecord[Any]) -> None:
-        """Note the first commit that leaves the run paused."""
+        """Note the first commit that leaves the run paused, and every commit's liveness."""
         del previous
-        paused = current.envelope.core.run.status == core.RunStatus.PAUSED
+        state = current.envelope.core
+        paused = state.run.status == core.RunStatus.PAUSED
         if paused and self.paused_at is None:
             self.paused_at = self.clock.now()
+        self.alive.append(
+            (self.clock.now(), max(state.records.hosts[-1].alive_at, state.run.now_at))
+        )
 
 
 @dataclass(frozen=True)
@@ -352,6 +363,8 @@ class Timed:
     """The run's state when the loop returned."""
     failure: Exception | None = None
     """What the loop raised (halting the run); None when it returned or was cancelled."""
+    alive: tuple[tuple[float, float], ...] = ()
+    """For each commit, its virtual time and the latest time core held the host alive at."""
 
     @property
     def wall_s(self) -> float:
@@ -374,6 +387,23 @@ class Plan:
     pause_when: Callable[[TurnTimeline, HoldingCluster], bool] | None = None
     control_poll_s: float = 30.0
     observe_s: float = 1.0
+    publish_s: float = 0.0
+    """How long each publication takes to deliver, on the virtual clock."""
+
+
+@dataclass
+class _SlowDelivery:
+    """Delivers each publication through ``inner`` after ``seconds`` of virtual time."""
+
+    inner: PublicationDelivery
+    clock: VirtualClock
+    seconds: float
+
+    async def publish(
+        self, publication: Publication, context: PublicationContext
+    ) -> PublicationAcknowledgement:
+        await self.clock.sleep(self.seconds)
+        return await self.inner.publish(publication, context)
 
 
 def run_timed(strategy: SkeletonStrategy, plan: Plan) -> Timed:
@@ -436,11 +466,10 @@ async def _play(path: Path, clock: VirtualClock, strategy: SkeletonStrategy, pla
             observe_interval=plan.observe_s,
             observe_backoff_cap=plan.observe_s,
         )
-        channel = RuntimeRunControlChannel(_ignore)
+        channel = RuntimeRunControlChannel(_ignore, threads=OsThreads())
         process = world.runtime()
-        host = CoreRunHost(
-            process.shell, process.delivery, clock, RunControlBridge(channel, _Steers())
-        )
+        delivery = _SlowDelivery(process.delivery, clock, plan.publish_s)
+        host = CoreRunHost(process.shell, delivery, clock, RunControlBridge(channel, _Steers()))
         config = RunLoopConfig(
             host_id="timed",
             lease_duration=LEASE,
@@ -491,6 +520,7 @@ async def _play(path: Path, clock: VirtualClock, strategy: SkeletonStrategy, pla
             holds,
             process.shell.record.envelope.core,
             failure if isinstance(failure, Exception) else None,
+            tuple(observed.alive),
         )
 
 

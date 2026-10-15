@@ -42,7 +42,6 @@ from vs_agent.session_environment import (
 )
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
 from vs_sandbox.api import build_host_sandbox
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -83,6 +82,8 @@ the host one.
 """
 
 TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = (30.0, 60.0, 120.0, 240.0, 480.0)
+LAUNCH_SHELL_ENVIRONMENT: Callable[[], Mapping[str, str]] = agentshim.interactive_env
+"""The interactive login shell's environment, which agentshim reads once per process."""
 """Waits in seconds before each retry of a turn that failed on a transient provider error.
 
 agentshim classifies the failure (``agentshim.FailureKind.TRANSIENT``: an
@@ -303,11 +304,11 @@ class ConfinedSessionLauncher:
         transient_retry_delays: Sequence[float] = TRANSIENT_RETRY_DELAYS_S,
         agent_homes: Path | None = None,
         env_passthrough: Sequence[str] = (),
-        launcher_env: Callable[[], Mapping[str, str]] = agentshim.interactive_env,
+        launcher_env: Callable[[], Mapping[str, str]] = LAUNCH_SHELL_ENVIRONMENT,
         transport: agentshim.TransportKind | None = None,
-        clock: agentshim.Clock | None = None,
+        clock: agentshim.Clock,
         ids: agentshim.IdAllocator | None = None,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Configure one provider; ``executor_factory`` replaces the base executor.
 
@@ -347,9 +348,11 @@ class ConfinedSessionLauncher:
         mode's budget: a container check crosses a ``docker exec`` and is given
         four times as long as a host one.
 
-        ``clock`` and ``ids`` replace agentshim's wall clock and random turn ids,
-        so a test measures turn timeouts and retry waits on a fake clock and
-        names turns reproducibly; production leaves them ``None``.
+        ``clock`` is the time agentshim measures turn timeouts and retry waits
+        on (:class:`~vs_agent.shim_clock.ThreadsClock` over the run's threads
+        in production, a fake in a test). ``ids`` replaces agentshim's random
+        turn ids so a test names turns reproducibly; production leaves it
+        ``None``.
 
         ``transient_retry_delays`` are the waits before each retry of a turn
         that failed on a transient provider error; see
@@ -379,7 +382,7 @@ class ConfinedSessionLauncher:
         self._agent_homes = agent_homes
         self._env_passthrough = validate_env_names(env_passthrough)
         self._dropped_names_logged = False
-        self._threads = threads or OsThreads()
+        self._threads = threads
         self._dropped_names_lock = self._threads.lock()
         self._launcher_env = launcher_env
         self._transport = transport

@@ -9,12 +9,12 @@ limit ends there, and the next one starts on the fallback.
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vs_runtime._agent_execution import AgentExecutionConfiguration
+    from vs_sim.api import Threads
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,11 +38,14 @@ class ProviderFallback:
     arrives on a third.
     """
 
-    def __init__(self, target: FallbackTarget | None) -> None:
-        """Start with no provider replaced; ``target`` is None when none is configured."""
+    def __init__(self, target: FallbackTarget | None, threads: Threads) -> None:
+        """Start with no provider replaced; ``target`` is None when none is configured.
+
+        ``threads`` makes the lock that the session openers and the operator share.
+        """
         self._target = target
         self._replaced: set[str] = set()
-        self._lock = threading.Lock()
+        self._lock = threads.lock()
 
     @property
     def target(self) -> FallbackTarget | None:

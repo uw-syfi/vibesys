@@ -85,6 +85,33 @@ def test_a_crash_recovery_cannot_tell_ends_the_run_blocked() -> None:
             ends_as_it_must(crossing)
 
 
+# Second deaths in the host that ends a blocked run: one while it inspects again after the
+# block, one while it closes the attempt scope on the way out.
+_AFTER_A_BLOCK = (
+    Crossing(Boundary.EXECUTOR_REQUEST, "inspect_request", 2),
+    Crossing(Boundary.EXECUTOR_REQUEST, "close_attempt_scope", 1),
+)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("second", _AFTER_A_BLOCK, ids=name)
+def test_a_restart_after_recovery_blocked_keeps_the_run_blocked(second: Crossing) -> None:
+    """A restart learns nothing about a record recovery blocked on, so recovery stays blocked.
+
+    Before, the next host rebuilt its checks from the records alone. An unknown answer about a
+    record core had already ended counted as settled, recovery opened, and the search resumed:
+    it ended the run as a plain failure, or, when the dead host had already stopped the run as
+    blocked, its finish was refused and the runtime halted.
+    """
+    (blocked,) = (c for c in all_crossings() if name(c) in BLOCKED_ENDINGS)
+    assert second in following(blocked, depth=len(all_crossings()))
+    plan = FaultPlan(seed=2, rules=(rule(blocked), rule(second)))
+    summary = run(plan).summary
+    replay = f"replay with {plan.model_dump_json()}"
+    assert summary.stalled is None, f"{summary.stalled}; {replay}"
+    assert summary.outcome == "blocked", replay
+
+
 @pytest.mark.slow
 def test_a_turn_whose_limit_passed_while_no_host_was_alive_still_runs() -> None:
     """The walk that found it: the turn's dispatch began and never reached the agent, then three
@@ -102,3 +129,22 @@ def test_a_turn_whose_limit_passed_while_no_host_was_alive_still_runs() -> None:
         ),
     )
     assert_converges(run(plan).summary, f"replay with {plan.model_dump_json()}", crashes=4)
+
+
+def test_an_ensure_checked_before_its_session_is_known_resolves_when_the_session_is() -> None:
+    """The walk #2428 reports: the host dies as a turn's receipt begins, then as the turn goes out.
+
+    Recovery inspects the session's ensure while the session is still unknown, so the answer
+    cannot show the session holds the ensured resource. The check waits on the session; the
+    turn's reply makes the session known a step later (it rides the session's owner event), and
+    the check is resolved again then. Before, the check named only its answered inspection and
+    the run halted with an orphaned recovery-check wait.
+    """
+    plan = FaultPlan(
+        seed=2,
+        rules=(
+            rule(Crossing(Boundary.DURABLE_WRITE, RECEIPT_BEGUN, 6)),
+            rule(Crossing(Boundary.EXECUTOR_REQUEST, "dispatch_turn", 2)),
+        ),
+    )
+    assert_converges(run(plan).summary, f"replay with {plan.model_dump_json()}", crashes=2)

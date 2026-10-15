@@ -38,6 +38,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.operation_fixtures import SCOPE
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -63,7 +64,9 @@ def _inspect(target: str) -> InspectRequest:
 
 class _Setup:
     def __init__(self, base: Path) -> None:
-        self.store = ReceiptStore(Project.open(base).state.state_store_namespace("run"))
+        self.store = ReceiptStore(
+            Project.open(base).state.state_store_namespace("run"), threads=OsThreads()
+        )
         self.inspector = RecordedRequestInspector(self.store, ObservationFactory(self.store))
 
     async def inspect(self, target: str) -> Inspected:

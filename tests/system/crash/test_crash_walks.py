@@ -28,7 +28,15 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import Phase, given, settings
 from hypothesis import strategies as st
-from tests.support.crash_harness import after_crash, all_crossings, rule, run, straight_run
+from tests.support.crash_harness import (
+    BLOCKED_ENDINGS,
+    after_crash,
+    all_crossings,
+    name,
+    rule,
+    run,
+    straight_run,
+)
 from tests.vibesys.dynamic_world import DynamicWorld
 from tests.vibesys.evolve_world import EvolveWorld
 from tests.vibesys.orchestration.issue_queue._replies import evaluated, implemented, judged
@@ -69,16 +77,25 @@ def test_a_skeleton_run_that_dies_several_times_ends_and_runs_each_effect_once(
     _skeleton_walk(draw, deaths)
 
 
+def _converging(crossings: tuple[Crossing, ...]) -> tuple[Crossing, ...]:
+    """*crossings* without those a death at which is known to end the run blocked.
+
+    ``BLOCKED_ENDINGS`` lists them, and ``test_crash_regressions`` checks that they end blocked;
+    a walk through one could never end as the straight run does.
+    """
+    return tuple(crossing for crossing in crossings if name(crossing) not in BLOCKED_ENDINGS)
+
+
 def _skeleton_walk(draw: st.DataObject, deaths: int) -> None:
     rules: list[FaultRule] = []
-    offered: tuple[Crossing, ...] = all_crossings()[:-1]
+    offered = _converging(all_crossings()[:-1])
     for _ in range(deaths):
         if not offered:
             break
         crossing = _death(draw, offered, restarted=bool(rules))
         rules.append(rule(crossing))
         calls = run(FaultPlan(seed=len(rules), rules=tuple(rules))).gate.calls
-        offered = after_crash(calls, crossing)[:-1]
+        offered = _converging(after_crash(calls, crossing)[:-1])
     plan = FaultPlan(seed=len(rules), rules=tuple(rules))
     replay = f"replay with {plan.model_dump_json()}"
     summary, straight = run(plan).summary, straight_run().summary

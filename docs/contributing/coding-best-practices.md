@@ -113,13 +113,14 @@ grows and then names unrelated code.
 Run the narrowest relevant test first, then broaden when the change crosses
 module boundaries.
 
-Before opening or updating a PR, run the one command that runs CI's Python
-checks (`python_quality` and `python_types` in `.repoctl/checks.toml`, through
-`support/repoctl`, which needs Go). It stops at the first failing command and
-names it. It does not run the full test suite.
+CI runs the full check suite on every PR, so you need not run it locally before
+opening one. To run the checks CI would select for your change (including uncommitted
+files), use repoctl, which needs Go:
 
 ```bash
-./scripts/check_ci.sh
+./support/repoctl/repoctl test --dry-run   # list the selected checks
+./support/repoctl/repoctl test             # run them
+./support/repoctl/repoctl run-checks --group python_quality   # one CI group
 ```
 
 Faster commands for iterating:

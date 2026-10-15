@@ -67,8 +67,8 @@ if TYPE_CHECKING:
 
     from vs_runtime.contracts import CandidateWorkspace, Workspaces
     from vs_sandbox.api.slurm import SlurmExecutionPolicy
-    from vs_sim.api import Clock
-    from vs_slurm.api import Cluster, SlurmConfig, SlurmProcess
+    from vs_sim.api import Clock, Processes, Sleeper
+    from vs_slurm.api import Cluster, SlurmConfig
 
 _CLEANUP_FAILURE = "cleanup failed"
 
@@ -122,13 +122,19 @@ class SemanticSlurmEvaluationExecutor:
         *,
         stage_failure_text: StageFailureText,
         clock: Clock,
+        sleeper: Sleeper,
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
-        process: SlurmProcess | None = None,
+        processes: Processes | None = None,
     ) -> None:
-        """Bind external Slurm policy to semantic evaluation state; ``clock`` times job deadlines."""
+        """Bind external Slurm policy to semantic evaluation state.
+
+        ``clock`` times job deadlines; ``sleeper`` paces the polls of running jobs. Each
+        executor uses ``cluster``, or reaches the configured cluster by starting ``processes``.
+        """
         self._stage_failure_text = stage_failure_text
         self._clock = clock
+        self._sleeper = sleeper
         self._config = config
         self._policy = policy
         self._plan = plan
@@ -138,7 +144,7 @@ class SemanticSlurmEvaluationExecutor:
         self._handle_root = handle_root
         self._admission = admission or SharedSlurmAdmission(config.evaluation_capacity)
         self._cluster = cluster
-        self._process = process
+        self._processes = processes
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
         self._availability = self._make_executor(workspaces.root.path)
@@ -291,9 +297,10 @@ class SemanticSlurmEvaluationExecutor:
             handle_root=self._handle_root,
             supported_evidence_kinds=self._supported_evidence_kinds(),
             clock=self._clock,
+            sleeper=self._sleeper,
             admission=self._admission,
             cluster=self._cluster,
-            process=self._process,
+            processes=self._processes,
         )
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:

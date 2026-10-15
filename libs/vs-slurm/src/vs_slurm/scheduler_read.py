@@ -8,6 +8,10 @@ shell prints :data:`READ_END` on a line of its own only after the query
 succeeded, and an answer without that last line is incomplete, which a
 caller reports as unknown, never as absent.
 
+Any other writer that finishes its stdout with an end line of its own (the profile
+capture's summary) is read with :func:`unframed` under that line, so one rule decides
+whether a reply is whole.
+
 Fakes that answer scheduler queries use :func:`split_framed` to find the
 query inside a framed command and append :data:`READ_END` to its answer.
 """
@@ -23,9 +27,14 @@ def framed(command: str) -> str:
     return command + _SUFFIX
 
 
-def unframed(stdout: str) -> str | None:
-    """The query's own output, or None when the end line did not arrive whole."""
-    body, marker, rest = stdout.rpartition(READ_END)
+def unframed(stdout: str, end: str = READ_END) -> str | None:
+    """The output before its last line ``end``, or None when that line did not arrive whole.
+
+    The rule is the same for any reply that a writer finishes with an end line: a
+    scheduler query framed by :func:`framed`, or a capture's summary that prints its
+    own. Nothing may follow the end line.
+    """
+    body, marker, rest = stdout.rpartition(end)
     if not marker or rest != "\n" or (body and not body.endswith("\n")):
         return None
     return body

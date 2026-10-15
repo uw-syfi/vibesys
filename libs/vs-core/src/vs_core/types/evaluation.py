@@ -38,6 +38,7 @@ from .evaluation_history import (
 )
 from .job_observations import JobProgress, MeasurementFailure, TimedOut
 from .until import Within
+from .waits import WaitOn
 
 
 class SnapshotResultRef(Value):
@@ -223,15 +224,22 @@ class EvidenceRef(Value):
 
 
 class ObservePacing(Value):
-    """When core next polls one job.
+    """How far one job's polls have backed off.
 
-    next_at is the core time at which the next ObserveOwnedJob is issued, or None
-    while a poll is outstanding or the job needs none. retries counts consecutive
-    unknown polls, and sets the backoff delay.
+    retries counts consecutive polls that did not move the job (unknown answers, and polls
+    that ended without an answer the job took), and sets the delay before the next one. When
+    the next poll goes out is the job's wait (``OwnedJob.wait``).
     """
 
-    next_at: Seconds | None = None
     retries: Count = 0
+
+
+def _job_wait(*, terminal: bool, wait: WaitOn | None) -> None:
+    """A live job waits on its poll or its poll timer; an ended job waits on nothing."""
+    if terminal != (wait is None):
+        raise ContractValidationError(
+            "wait", "a job waits exactly while it is not terminal (on its poll or poll timer)"
+        )
 
 
 class OwnedJob(Value):
@@ -254,6 +262,15 @@ class OwnedJob(Value):
     released: bool = False
     evidence: tuple[EvidenceRef, ...] = ()
     pacing: ObservePacing = ObservePacing()
+    wait: WaitOn | None = None
+    """What the live job waits on: its next poll's timer, or the poll in flight. A terminal
+    job waits on nothing."""
+
+    @model_validator(mode="after")
+    def waits_while_live(self) -> OwnedJob:
+        """Only a live job waits, and it always names what will move it."""
+        _job_wait(terminal=self.terminal, wait=self.wait)
+        return self
 
 
 class RegisteredOwnedJob(Value):
@@ -280,6 +297,15 @@ class RegisteredOwnedJob(Value):
     children: tuple[ResourceId, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
     pacing: ObservePacing = ObservePacing()
+    wait: WaitOn | None = None
+    """What the live job waits on: its operation request until that names the job, then
+    its next poll's timer or the poll in flight. A terminal job waits on nothing."""
+
+    @model_validator(mode="after")
+    def waits_while_live(self) -> RegisteredOwnedJob:
+        """Only a live job waits, and it always names what will move it."""
+        _job_wait(terminal=self.terminal, wait=self.wait)
+        return self
 
 
 class ContinuationPhase(StrEnum):
@@ -718,8 +744,22 @@ class DeadlineReached(Value):
     now_at: Seconds
 
 
+class JobWaitLapsed(Value):
+    """A request a live job waits on ended without moving the job.
+
+    Internal signal raised once a step's other signals settle, never shell input: the poll
+    blocked at its bound, or the job refused its answer (stale or foreign). The job polls
+    again after its backoff instead of waiting on a request that is over.
+    """
+
+    kind: Literal["job_wait_lapsed"] = "job_wait_lapsed"
+    job: RequestId
+    """The job's own request: a measurement's submission, or a registered operation."""
+    request_id: RequestId
+
+
 class ObservationsDue(Value):
-    """Core time reached now_at: poll every job whose next_at has come.
+    """Core time reached now_at: poll every job whose wait timer has come.
 
     Internal signal raised whenever the clock advances, never shell input.
     """
@@ -984,6 +1024,7 @@ type EvaluationEvent = Annotated[
     | TurnSuspended
     | DeadlineReached
     | ObservationsDue
+    | JobWaitLapsed
     | ContinuationJobsChanged
     | JobTerminationRequested
     | ContinuationRetireRequested

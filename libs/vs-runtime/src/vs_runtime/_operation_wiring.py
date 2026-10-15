@@ -30,6 +30,7 @@ from vs_runtime._capture_command_operation import CaptureCommandOwner
 from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._evidence_operations import InterpretEvidenceOwner, RetainRevisionOwner
 from vs_runtime._export_patch_operation import ExportPatchOwner
+from vs_runtime._local_validation import LocalValidator
 from vs_runtime._observation_factory import ObservationFactory
 from vs_runtime._operation_catalog import OperationCatalog, OperationEntry, RefusalReason
 from vs_runtime._operation_receipts import NamespaceOperationReceipts
@@ -58,7 +59,9 @@ if TYPE_CHECKING:
     from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._local_validation import LocalValidationEvents
     from vs_runtime._operation_catalog import OperationOwner
+    from vs_runtime._validation_passes import ValidationPasses
     from vs_runtime.contracts import Commands, RevisionLedger, Workspaces
+    from vs_sim.api import Threads
 
 
 class OperationRole(StrEnum):
@@ -131,6 +134,7 @@ class OperationPorts:
     evidence: EvidenceLookup
     commit_of: Callable[[RevisionRef], str | None]
     retention_label: str
+    validation_passes: ValidationPasses
     variables: Mapping[str, object] = field(default_factory=dict)
     commands: Commands | None = None
     replies: Mapping[SchemaRef, type[BaseModel]] = field(default_factory=dict)
@@ -147,7 +151,7 @@ def _command_owner(role: OperationRole, ports: OperationPorts) -> OperationOwner
         return None
     return ValidateLocalOwner(
         ports.workspaces,
-        ports.commands,
+        LocalValidator(ports.commands, ports.validation_passes),
         ports.ledger,
         ports.commit_of,
         ports.artifacts,
@@ -218,16 +222,18 @@ def bind_operations(
     catalog: OperationCatalog,
     receipts: StateNamespace,
     *,
+    threads: Threads,
     base: CoreRuntimeBindings | None = None,
 ) -> CoreRuntimeBindings:
     """Startup gate and shell bindings: reject unowned required operations, then execute the catalog.
 
     Raises ``ContractError`` naming the first required operation that is missing
-    or refused. ``base`` supplies the other executor roles unchanged.
+    or refused. ``base`` supplies the other executor roles unchanged; ``threads``
+    locks the receipt store.
     """
     catalog.require_owned(declaration)
     selected = base or CoreRuntimeBindings()
-    store = ReceiptStore(receipts)
+    store = ReceiptStore(receipts, threads)
     operations = RegisteredOperationRequests(
         catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
     )

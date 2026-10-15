@@ -14,12 +14,13 @@ implementations against the same cases).
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
     from types import TracebackType
 
 
@@ -109,6 +110,14 @@ class Worker(Protocol):
         ...
 
 
+class ThreadLocal[T](Protocol):
+    """A value each thread sees its own copy of, made on that thread's first ``get``."""
+
+    def get(self) -> T:
+        """The calling thread's value."""
+        ...
+
+
 class Threads(Protocol):
     """Everything product code uses to run work on other threads and to wait on them.
 
@@ -136,12 +145,20 @@ class Threads(Protocol):
         """A new, cleared event."""
         ...
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        """A per-thread value; each thread's starts as ``initial()``."""
+        ...
+
     def sleep(self, seconds: float) -> None:
         """Block the calling thread for about ``seconds``; other threads run meanwhile."""
         ...
 
     def now(self) -> float:
         """Monotonic seconds; only differences are meaningful."""
+        ...
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        """Run ``main`` to completion on a new event loop on the calling thread."""
         ...
 
 
@@ -171,6 +188,10 @@ class OsThreads:
         """A ``threading.Event``."""
         return threading.Event()
 
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        """A ``threading.local`` holding each thread's value."""
+        return OsThreadLocal(initial)
+
     def sleep(self, seconds: float) -> None:
         """``time.sleep``."""
         time.sleep(max(seconds, 0.0))
@@ -178,3 +199,23 @@ class OsThreads:
     def now(self) -> float:
         """``time.monotonic``."""
         return time.monotonic()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        """``asyncio.run``."""
+        return asyncio.run(main)
+
+
+class OsThreadLocal[T](threading.local):
+    """A ``threading.local`` value: every OS thread sees its own."""
+
+    def __init__(self, initial: Callable[[], T]) -> None:
+        """Make each thread's value with ``initial`` the first time that thread asks."""
+        self._initial = initial
+
+    def get(self) -> T:
+        """The calling thread's value, made by ``initial`` on its first call."""
+        try:
+            return self._value
+        except AttributeError:
+            self._value: T = self._initial()
+            return self._value

@@ -144,6 +144,7 @@ export function snapshotResponse(overrides: Partial<RunSnapshot> = {}): Protocol
   return {
     ok: true,
     request_id: 'request-1',
+    timestamp: '2026-01-01T00:00:00Z',
     snapshot: {
       run_id: 'run-1',
       sequence: 0,

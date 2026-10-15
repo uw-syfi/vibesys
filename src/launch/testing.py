@@ -2,57 +2,16 @@
 
 from __future__ import annotations
 
-import asyncio
+from functools import partial
 from typing import TYPE_CHECKING
 
-from launch import LaunchSettings
-from launch import create_session as _create_session
 from launch.agents import BuiltInSessionAgents
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
-from vs_runtime.api.testing import FakeStopTimer
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from vibesys.api import OrchestrationRegistry, RunRequest, RunSession
-    from vibesys.api.contracts import EventSink
-    from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec
-    from vs_project.api import GitRepositoryFactory, StateStoreFactory
-    from vs_runtime.api.infrastructure import StopTimer
-    from vs_sandbox.api import ComputeBackendImpl
-    from vs_slurm.api import SlurmProcess
-
-
-# lint-waiver: LW-125701 [PLR0913]; a settings bundle would hide the individual
-# > Fake replacements in existing callers; merging their factories would couple
-# > independently owned libraries.
-def create_session(  # noqa: PLR0913
-    request: RunRequest,
-    *,
-    sink: EventSink,
-    registry: OrchestrationRegistry,
-    agent_client_factory: Callable[..., AgentClientProtocol],
-    backend_factory: Callable[..., ComputeBackendImpl],
-    stop_timer: StopTimer = asyncio.sleep,
-    git_repository: GitRepositoryFactory | None = None,
-    slurm_process: SlurmProcess | None = None,
-    state_stores: StateStoreFactory | None = None,
-) -> RunSession:
-    """Execute real built-in wiring with caller-owned Fake implementations."""
-    return _create_session(
-        request,
-        sink=sink,
-        settings=LaunchSettings(
-            registry,
-            agent_client_factory,
-            backend_factory,
-            stop_timer,
-            git_repository=git_repository,
-            slurm_process=slurm_process,
-            state_stores=state_stores,
-        ),
-    )
+    from vs_agent.api import AgentEventSink, AgentSpec
+    from vs_sim.api import Threads
 
 
 class FakeSessionAgents(BuiltInSessionAgents):
@@ -62,13 +21,16 @@ class FakeSessionAgents(BuiltInSessionAgents):
     built-in implementation. Only the external agent execution is replaced.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, threads: Threads) -> None:
         """Create a fresh Fake agent client for each auxiliary conversation."""
-        super().__init__(client_factory=_fake_client)
+        super().__init__(client_factory=partial(_fake_client, threads=threads))
 
 
-def _fake_client(*, spec: AgentSpec, events: AgentEventSink, **_kwargs: object) -> FakeAgentClient:
+def _fake_client(
+    *, spec: AgentSpec, events: AgentEventSink, threads: Threads, **_kwargs: object
+) -> FakeAgentClient:
     client = FakeAgentClient(
+        threads=threads,
         backend_name=spec.backend.value,
         provider=spec.provider,
         model=spec.model,
@@ -79,4 +41,4 @@ def _fake_client(*, spec: AgentSpec, events: AgentEventSink, **_kwargs: object) 
     return client
 
 
-__all__ = ["FakeSessionAgents", "FakeStopTimer", "create_session"]
+__all__ = ["FakeSessionAgents"]

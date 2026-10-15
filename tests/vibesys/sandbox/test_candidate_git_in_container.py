@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support import run_test_command
 from tests.support.workspace_world import open_workspace_env
 
 from vibesys.run.environment import open_run_environment
@@ -25,6 +26,7 @@ from vs_project.api.testing import GitKind
 from vs_runtime.api.infrastructure import DockerEnvironment, SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api.slurm import load_slurm_operator_settings
+from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
@@ -107,6 +109,10 @@ class _ContainerView:
             for at, mounted in self._container.mounts.items()
         )
 
+    def mounted_host_files(self) -> list[Path]:
+        """Every regular file any bind mount makes visible inside the container."""
+        return [host for host in self._container.mounts.values() if host.is_file()]
+
 
 def _git_lookup_problems(view: _ContainerView, workspace: Path) -> list[str]:
     """Walk Git's lookup of *workspace*'s repository through the container's mounts."""
@@ -138,7 +144,7 @@ def _problems_of_every_candidate(
     tmp_path: Path, make_environment: object, candidates: int
 ) -> list[str]:
     engine = daemon_engine(tmp_path)
-    backend = DaemonBackend(engine)
+    backend = DaemonBackend(engine, threads=OsThreads())
     environment = make_environment(tmp_path, engine)  # ty: ignore[call-non-callable]
     found: list[str] = []
 
@@ -197,3 +203,67 @@ def test_a_candidate_container_can_use_git_in_its_worktree_and_reaches_no_other_
     tmp_path: Path, make_environment: object
 ) -> None:
     assert _problems_of_every_candidate(tmp_path, make_environment, candidates=3) == []
+
+
+# A fake token, not a real credential: proves no mounted file carries it, not that this
+# exact string is unsafe.
+_EMBEDDED_MARKER = "sshh-do-not-leak-fdbb21"
+
+
+@pytest.mark.parametrize("make_environment", [_docker, _slurm], ids=["docker", "slurm"])
+def test_a_candidate_container_cannot_read_the_shared_repository_s_credential(
+    tmp_path: Path, make_environment: object
+) -> None:
+    """Regression for #2101.
+
+    The shared repository's Git ``config`` can hold a remote URL of the form
+    ``https://user:token@host/...``, embedding a credential. A candidate's
+    container must never see it, in a file mounted at any path.
+    """
+    engine = daemon_engine(tmp_path)
+    backend = DaemonBackend(engine, threads=OsThreads())
+    environment = make_environment(tmp_path, engine)  # ty: ignore[call-non-callable]
+    views: list[_ContainerView] = []
+
+    def open_session(request: RunEnvironmentRequest) -> RunEnvironmentSession:
+        return open_run_environment(environment, request)
+
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        run_test_command(
+            [
+                "git",
+                "remote",
+                "add",
+                "origin",
+                f"https://user:{_EMBEDDED_MARKER}@example.invalid/repo.git",
+            ],
+            cwd=workspaces.root.path,
+            check=True,
+            capture_output=True,
+        )
+        candidate = await workspaces.create_candidate()
+        views.append(_owner_of(engine.containers(), candidate.path))
+
+    world = tmp_path / "world"
+    world.mkdir()
+    with open_workspace_env(
+        world,
+        git=GitKind.REAL,
+        backend=backend,
+        open_session=open_session,
+        owns_candidate_worktrees=True,
+    ) as env:
+        try:
+            asyncio.run(exercise(env.hosts[0]))
+        finally:
+            for host in reversed(env.hosts):
+                with suppress(Exception):
+                    asyncio.run(host.close())
+
+    (view,) = views
+    leaked = [
+        path
+        for path in view.mounted_host_files()
+        if _EMBEDDED_MARKER in path.read_text(encoding="utf-8", errors="ignore")
+    ]
+    assert leaked == []

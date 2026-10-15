@@ -30,6 +30,7 @@ from tests.support.light_imports import BUDGET_MS, is_heavy, loaded_modules
 from server.host_api import InstanceStatus, LiveInstanceRecord, RunPhase, RunStatus
 from server.registry import FileInstanceStore, instance_root
 from server.transport.unix_jsonl import UnixJsonlServer
+from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import swept
 
 if TYPE_CHECKING:
@@ -49,7 +50,8 @@ _SCENARIOS = tuple(
         )
     )
 )
-_MODULE_CEILING = 330
+# vs_decode (the bounded JSON decode lib vs_project reads state through) adds 3 modules.
+_MODULE_CEILING = 333
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
@@ -180,7 +182,9 @@ def test_run_connect_makes_the_channel_a_relay_to_the_run(
                 vibesys_version="0+e2e",
             )
         )
-        with UnixJsonlServer(socket_path, parts.api):
+        with UnixJsonlServer(
+            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+        ):
             channel = _HelperChannel(env)
             channel.send(_HELLO)
             assert channel.receive()["type"] == "hello"

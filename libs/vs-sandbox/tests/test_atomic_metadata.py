@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from typing import TYPE_CHECKING
 
 import pytest
@@ -11,10 +10,12 @@ import pytest
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.slurm import (
     SlurmCapturePlan,
+    SlurmCapturePlanError,
     read_slurm_capture_plan,
     write_slurm_capture_plan,
 )
-from vs_sim.api.testing import file_size_limit
+from vs_sandbox.api.testing import ScriptedDockerCli, docker_result
+from vs_sim.api.testing import SimThreads, file_size_limit
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,39 +33,26 @@ def test_capture_plan_interrupted_at_every_byte_remains_readable(tmp_path: Path)
         assert not list(path.parent.glob(".*.tmp"))
 
 
+def test_a_capture_plan_that_is_not_a_regular_file_is_invalid_not_a_hang(tmp_path: Path) -> None:
+    # Reading a FIFO blocks until a writer appears; the reader must refuse it instead.
+    path = tmp_path / "capture.json"
+    os.mkfifo(path)
+
+    with pytest.raises(SlurmCapturePlanError, match="invalid Slurm capture plan"):
+        read_slurm_capture_plan(path)
+
+
 def test_docker_metadata_interrupted_at_every_byte_preserves_last_document(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
-    executable = tmp_path / "bin" / "docker"
-    executable.parent.mkdir()
-    executable.write_text(
-        f"""#!{sys.executable}
-import sys
-from pathlib import Path
-state = Path({str(tmp_path / "container-state")!r})
-args = sys.argv[1:]
-container = "test-container"
-if args and args[0] == "run" and args[-2:] == ["sleep", "infinity"]:
-    if state.exists():
-        sys.exit(64)
-    state.write_bytes(b"running")
-    print(container)
-elif args == ["exec", container, "sh", "-c", "id -u agent && id -g agent"]:
-    if not state.exists() or state.read_bytes() != b"running":
-        sys.exit(64)
-    print({os.getuid()})
-    print({os.getgid()})
-elif args == ["stop", container] and state.exists():
-    state.write_bytes(b"stopped")
-elif args == ["rm", "-f", container] and state.exists():
-    state.unlink()
-else:
-    sys.exit(64)
-"""
+    docker = ScriptedDockerCli()
+    docker.on(("docker", "run"), docker_result(stdout="test-container\n"))
+    docker.on(
+        ("docker", "exec", "test-container", "sh", "-c", "id -u agent && id -g agent"),
+        docker_result(stdout=f"{os.getuid()}\n{os.getgid()}\n"),
     )
-    executable.chmod(0o700)
-    monkeypatch.setenv("PATH", f"{executable.parent}:{os.environ['PATH']}")
-    sandbox = DockerSandbox(str(tmp_path), image="test-image")
+    docker.always(docker_result())
+    sandbox = DockerSandbox(str(tmp_path), image="test-image", docker=docker, threads=SimThreads())
     path = tmp_path / ".docker_metadata.json"
     sandbox.start()
     try:

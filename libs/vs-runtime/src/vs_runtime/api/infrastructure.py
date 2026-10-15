@@ -88,8 +88,8 @@ from vs_runtime._local_validation import (
     LocalValidationEvents,
     LocalValidationRecipeError,
     LocalValidationRecipeErrorKind,
+    LocalValidator,
     ValidationRecipe,
-    run_local_validation,
 )
 from vs_runtime._macos_cpu_profiler import (
     Capability as MacOSProfilerCapability,
@@ -249,7 +249,9 @@ from vs_runtime._trusted_evaluation_preparation import (
     remote_evaluator_setup_command,
     required_evaluator_tools_root,
 )
+from vs_runtime._validation_passes import StateValidationPasses, ValidationPasses
 from vs_runtime._workspace_resources import (
+    RootBaselineDrifted,
     WorkspaceResourceEvent,
     WorkspaceResourceEventSink,
     WorkspaceResourceFactory,
@@ -277,11 +279,12 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime.api import AgentRole
+    from vs_sim.api import Threads
 
 
-def create_run_control_channel(events: RunControlEventSink) -> RunControlChannel:
-    """Create one thread-safe cooperative run-control channel."""
-    return RuntimeRunControlChannel(events)
+def create_run_control_channel(events: RunControlEventSink, threads: Threads) -> RunControlChannel:
+    """Create one thread-safe cooperative run-control channel, locked by ``threads``."""
+    return RuntimeRunControlChannel(events, threads)
 
 
 type AgentConfigurationResolver = Callable[[AgentRole], AgentExecutionConfiguration]
@@ -291,14 +294,19 @@ def create_workspace_runtime(
     *,
     workspace_resources: WorkspaceResourceProvider,
     blocking: BlockingOperations,
+    validation_passes: ValidationPasses,
 ) -> WorkspaceRuntime:
-    """Create one owner for workspace handles and the commands and evaluation over them."""
+    """Create one owner for workspace handles and the commands and evaluation over them.
+
+    ``validation_passes`` is the runtime-owned record of trusted local-validation passes;
+    it must live outside every workspace.
+    """
     workspaces = RuntimeWorkspaces(workspace_resources, runner=blocking.runner)
     commands = RuntimeCommands(workspaces, blocking)
     return WorkspaceRuntime(
         workspaces=workspaces,
         commands=commands,
-        evaluation=RuntimeWorkspaceEvaluation(workspaces, commands),
+        evaluation=RuntimeWorkspaceEvaluation(workspaces, commands, validation_passes),
     )
 
 
@@ -349,10 +357,14 @@ class NativeCpuProfilerPreflight:
 def preflight_native_cpu_profiler(
     kind: NativeCpuProfilerKind,
     *,
-    detect_linux: Callable[[], LinuxProfilerCapability] = detect_linux_profiler,
+    detect_linux: Callable[[], LinuxProfilerCapability],
     detect_macos: Callable[[], MacOSProfilerCapability] = detect_macos_profiler,
 ) -> NativeCpuProfilerPreflight:
-    """Detect one native CPU profiler and return policy-neutral host facts."""
+    """Detect one native CPU profiler and return policy-neutral host facts.
+
+    ``detect_linux`` probes ``perf``; `detect_linux_profiler` over the host's processes is
+    the real probe.
+    """
     if not isinstance(kind, NativeCpuProfilerKind):
         message = f"kind must be a NativeCpuProfilerKind, got {type(kind).__name__}."
         raise TypeError(message)
@@ -467,6 +479,7 @@ __all__ = [
     "LocalValidationEvents",
     "LocalValidationRecipeError",
     "LocalValidationRecipeErrorKind",
+    "LocalValidator",
     "MacOSProfileResult",
     "MacOSProfilerCapability",
     "MacOSProfilerDiagnostic",
@@ -505,6 +518,7 @@ __all__ = [
     "QuotaPolicy",
     "RecordState",
     "ResolvedEvaluatorPackage",
+    "RootBaselineDrifted",
     "RunControlChannel",
     "RunControlEventSink",
     "RunControlTransition",
@@ -536,6 +550,7 @@ __all__ = [
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
     "StageFailureText",
+    "StateValidationPasses",
     "StopGraceError",
     "StopTimer",
     "Switch",
@@ -551,6 +566,7 @@ __all__ = [
     "TrustedEvaluationPlan",
     "TrustedEvaluatorRequirements",
     "TrustedMetricDeclaration",
+    "ValidationPasses",
     "ValidationRecipe",
     "WaitFor",
     "WorkspaceEvaluationSpec",
@@ -618,7 +634,6 @@ __all__ = [
     "resolve_sdk_source",
     "run_environment_deprecation",
     "run_environment_record",
-    "run_local_validation",
     "signal_of",
     "stop_gated_evaluation",
     "summarize_linux_profile",

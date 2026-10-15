@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import closing
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.support.real_git import REAL_PROCESSES
 
 from vs_agent.api import NULL_SKILL_SELECTION, AgentBackend, AgentSpec
 from vs_project.api import (
@@ -16,6 +18,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import FakeGitRepositories, run_execution_record
+from vs_runtime.api.core import BaselineEntryKind
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     AgentPaths,
@@ -33,13 +36,15 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeAgentExecutionEnvironment, unconfined_host_environment
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api import OsThreads, ThreadBlockingRunner
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_project.api import OrchestrationRunManifest
     from vs_runtime.api import OrchestrationResumeDecision
-    from vs_runtime.api.infrastructure import RunEnvironmentSession
+    from vs_runtime.api.infrastructure import RunEnvironmentSession, WorkspaceResourceEvent
     from vs_sandbox.api import CommandRunner
 
 
@@ -93,6 +98,7 @@ def _effects() -> ProjectRunEffects:
         git_repository=_DISK.repository,
         log_emit=emit,
         on_log_ready=lambda _path: None,
+        clock=ManualClock(),
     )
 
 
@@ -131,10 +137,13 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
             run_id="workspace-resource-test",
             framework_root=tmp_path,
             project_path_policy=ProjectPathPolicy(),
+            clock=ManualClock(),
+            slurm_processes=REAL_PROCESSES,
         ),
         open_session,
+        clock=ManualClock(),
     )
-    events: list[WorkspaceRestoreFailed] = []
+    events: list[WorkspaceResourceEvent] = []
     factory = WorkspaceResourceFactory(
         project,
         environment,
@@ -144,6 +153,8 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
         skill_selection=NULL_SKILL_SELECTION,
         host_resources=(),
         events=events.append,
+        threads=OsThreads(),
+        blocking=ThreadBlockingRunner(),
     )
     revision = factory.root.revision
     assert revision is not None
@@ -181,8 +192,11 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
             cli_provider="codex",
             run_id="workspace-resource-test",
             framework_root=tmp_path,
+            clock=ManualClock(),
+            slurm_processes=REAL_PROCESSES,
         ),
         lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
+        clock=ManualClock(),
     )
     opened = FakeAgentExecutionEnvironment(project_path_policy=ProjectPathPolicy())
     configurations: list[AgentExecutionConfiguration] = []
@@ -203,6 +217,8 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
         host_resources=(),
         events=lambda _event: None,
         root_agent_environment_opener=open_agent,
+        threads=OsThreads(),
+        blocking=ThreadBlockingRunner(),
     )
     configuration = AgentExecutionConfiguration("worker", AgentSpec(backend=AgentBackend.STUB))
 
@@ -238,6 +254,8 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             objective=agent_objective,
             objective_document=authored,
             git_history_root=project.git.history_root,
+            clock=ManualClock(),
+            slurm_processes=REAL_PROCESSES,
         )
         objective_paths: list[str] = []
 
@@ -250,7 +268,9 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             objective_paths.append(session.view.paths.objective)
             return session
 
-        with closing(open_run_environment_resources(request, open_session)) as environment:
+        with closing(
+            open_run_environment_resources(request, open_session, clock=ManualClock())
+        ) as environment:
             factory = WorkspaceResourceFactory(
                 project,
                 environment,
@@ -260,6 +280,8 @@ def test_candidate_environment_uses_the_runs_verified_objective(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
+                threads=OsThreads(),
+                blocking=ThreadBlockingRunner(),
             )
             revision = (
                 project.git.trusted_input_baseline
@@ -284,3 +306,65 @@ def test_candidate_environment_uses_the_runs_verified_objective(
                     )
             finally:
                 candidate.close()
+
+
+def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (root / "weights.bin").write_bytes(b"w" * 3_000_000)
+    (root / "cache").mkdir()
+    outside = tmp_path / "host-secret"
+    outside.write_text("secret", encoding="utf-8")
+    (root / "planted").symlink_to(outside)
+    project = open_project_run_resources(
+        _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
+    )
+    environment = open_run_environment_resources(
+        RunEnvironmentRequest(
+            log_dir=project.logger.log_dir,
+            workspace=root,
+            ref_dir=None,
+            backend=FakeComputeBackend(),
+            agent_backend="stub",
+            cli_provider="codex",
+            run_id="workspace-resource-test",
+            framework_root=tmp_path,
+            clock=ManualClock(),
+            slurm_processes=REAL_PROCESSES,
+        ),
+        lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
+        clock=ManualClock(),
+    )
+    factory = WorkspaceResourceFactory(
+        project,
+        environment,
+        evaluation_plan=TrustedEvaluationPlan(),
+        memory_paths=(),
+        skill_source_dirs=(),
+        skill_selection=NULL_SKILL_SELECTION,
+        host_resources=(),
+        events=lambda _event: None,
+        threads=OsThreads(),
+        blocking=ThreadBlockingRunner(),
+    )
+
+    os.mkfifo(root / "pipe")
+    entries = factory.root.baseline_entries(("weights.bin", "planted", "cache/", "pipe"))
+
+    kinds = {entry.path: entry.kind for entry in entries}
+    assert kinds == {
+        "weights.bin": BaselineEntryKind.FILE,
+        "planted": BaselineEntryKind.UNFINGERPRINTED,
+        "cache/": BaselineEntryKind.DIRECTORY,
+        "pipe": BaselineEntryKind.UNFINGERPRINTED,
+    }
+    # Nothing changed yet: a path that could not be fingerprinted is not "removed".
+    assert factory.root.baseline_drift(entries).is_empty
+    (root / "pipe").unlink()
+    assert factory.root.baseline_drift(entries).removed == ("pipe",)
+    (root / "weights.bin").unlink()
+    (root / "weights.bin").symlink_to(outside)
+    assert "weights.bin" in factory.root.baseline_drift(entries).removed
+    environment.close()
+    project.close()

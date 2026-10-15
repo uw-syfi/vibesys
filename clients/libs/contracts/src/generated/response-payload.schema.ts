@@ -90,6 +90,7 @@ const responsePayloadSchema: Record<string, unknown> = {
       "type": "array"
     },
     "AgentExecutionActivityData": {
+      "additionalProperties": false,
       "description": "Complete current activity for an active agent execution.",
       "properties": {
         "kind": {
