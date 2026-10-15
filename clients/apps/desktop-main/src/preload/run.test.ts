@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {createRequire} from 'node:module';
-import type {MainToPage, PageToMain} from '@vibesys/ipc';
+import type {MainToPage, PageToMain, RunLogsRequest} from '@vibesys/ipc';
 
 const createRunPreload = createRequire(import.meta.url)('./run.cjs') as typeof import('./run.cjs');
 
@@ -27,7 +27,13 @@ class FakePreload {
   readonly platform = 'test';
   readonly ports: FakePort[] = [];
   readonly attached: object[] = [];
+  readonly logRequests: RunLogsRequest[] = [];
   #wake: (() => void) | null = null;
+
+  logs(request: RunLogsRequest): Promise<unknown> {
+    this.logRequests.push(request);
+    return Promise.resolve({ok: true, instanceId: '0123456789ab', streams: []});
+  }
 
   createChannel(): {port: FakePort; remote: object} {
     const port = new FakePort();
@@ -66,6 +72,17 @@ function connection() {
 }
 
 describe('run preload bridge', () => {
+  test('passes a logs request to the main process and its answer back', async () => {
+    const capabilities = new FakePreload();
+    const bridge = createRunPreload(capabilities);
+    expect(await bridge.logs({kind: 'list'})).toEqual({
+      ok: true,
+      instanceId: '0123456789ab',
+      streams: [],
+    });
+    expect(capabilities.logRequests).toEqual([{kind: 'list'}]);
+  });
+
   test('exposes platform, connection attachment, wake, and exact incoming byte credit', () => {
     const capabilities = new FakePreload();
     const bridge = createRunPreload(capabilities);

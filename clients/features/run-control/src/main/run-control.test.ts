@@ -1011,3 +1011,59 @@ describe('RunControl over the FakeHelper', () => {
     await secondLease[Symbol.asyncDispose]();
   });
 });
+
+describe('RunControl logs', () => {
+  test("serves a page's logs from its binding's instance over one logs channel", async () => {
+    const w = world();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    const store = w.link.helper.logStore;
+    store.open(RUN_A, '000001', {kind: 'startup_step', stage: 'building_image'}, 'docker build');
+    store.write(RUN_A, '000001', new TextEncoder().encode('building image 7/8: WORKDIR\n'));
+    await w.runs.attach(HOST, RUN_A);
+    const spawned = w.link.helper.spawned;
+
+    const listed = await w.runs.logs('run-a', {kind: 'list'});
+    expect(listed).toMatchObject({ok: true, instanceId: RUN_A, streams: [{id: '000001'}]});
+    const read = await w.runs.logs('run-a', {
+      kind: 'read',
+      read: {
+        instance_id: RUN_A,
+        stream_id: '000001',
+        start: {tail_bytes: 4096},
+        max_bytes: 4096,
+        wait_ms: 0,
+      },
+    });
+    expect(read).toMatchObject({ok: true, chunk: {data: 'building image 7/8: WORKDIR\n'}});
+    expect(w.link.helper.spawned).toBe(spawned + 1);
+
+    const logsChannel = w.link.helper.channels.at(-1);
+    w.runs.detach('run-a');
+    await logsChannel?.process.exit;
+    expect(logsChannel?.process.running).toBe(false);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('refuses a read that names another instance, and a page with no run', async () => {
+    const w = world();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    await w.runs.attach(HOST, RUN_A);
+    const read = {
+      instance_id: RUN_B,
+      stream_id: '000001',
+      start: {offset: 0},
+      max_bytes: 4096,
+      wait_ms: 0,
+    };
+
+    expect(await w.runs.logs('run-a', {kind: 'read', read})).toMatchObject({
+      ok: false,
+      failure: {code: 'unknown_instance'},
+    });
+    expect(await w.runs.logs('run-z', {kind: 'list'})).toMatchObject({
+      ok: false,
+      failure: {code: 'unknown_instance'},
+    });
+    await w.connection[Symbol.asyncDispose]();
+  });
+});

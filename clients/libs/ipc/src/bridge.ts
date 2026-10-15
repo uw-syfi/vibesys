@@ -11,6 +11,8 @@
  * both sides honest.
  */
 
+import type {RunLogsRequest} from './run-logs.js';
+
 /** The platforms the desktop shell reports (`process.platform` values it supports). */
 export const DESKTOP_PLATFORMS = ['darwin', 'win32', 'linux'] as const;
 
@@ -39,8 +41,17 @@ export interface DesktopBridge {
   onWake(listener: () => void): void;
 }
 
+/**
+ * The run page's logs half: one request about the logs of the run the page is bound to
+ * (`run-logs.ts`). It resolves with the request's `RunLogsReply`, which carries expected failures,
+ * and rejects only when the main process refused the request.
+ */
+export interface DesktopLogs {
+  logs(request: RunLogsRequest): Promise<unknown>;
+}
+
 /** What the run preload exposes on `window.vibesysDesktop`. */
-export interface DesktopPreload extends DesktopBridge {
+export interface DesktopPreload extends DesktopBridge, DesktopLogs {
   readonly platform: string;
 }
 

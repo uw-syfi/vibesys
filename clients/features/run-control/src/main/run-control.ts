@@ -22,6 +22,7 @@ import {
   type ConnectionLease,
   connectionStatus,
   type HostConnection,
+  type LogsLease,
   type Phase,
 } from '@vibesys/connection';
 import type {
@@ -37,7 +38,13 @@ import {
   hostLabel,
   instanceObservation,
 } from '@vibesys/hosts';
-import type {ChromeState, HarnessChoice, StartOutcome} from '@vibesys/ipc';
+import type {
+  ChromeState,
+  HarnessChoice,
+  RunLogsReply,
+  RunLogsRequest,
+  StartOutcome,
+} from '@vibesys/ipc';
 import type {ResumeRunId, StopView} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {type RelayPort, relay} from './relay.js';
@@ -82,8 +89,22 @@ interface Binding {
    * record says nothing about the run, so only a server seen live, then gone, has ended.
    */
   seenLive: boolean;
+  /**
+   * The binding's lease on its host's logs channel, taken by the page's first logs request and
+   * released with the binding.
+   */
+  logs: LogsLease | null;
   /** Retire this binding's connection lease once and report when cleanup settles. */
   readonly release: () => PromiseLike<void>;
+}
+
+/** Release a binding's connection lease and, when its page asked for logs, its logs lease. */
+function releaseLeases(lease: ConnectionLease, binding: Binding | null): PromiseLike<void> {
+  const logs = binding?.logs ?? null;
+  if (binding !== null) binding.logs = null;
+  const released = lease[Symbol.asyncDispose]();
+  if (logs === null) return released;
+  return Promise.all([logs[Symbol.asyncDispose](), released]).then(() => undefined);
 }
 
 /** One target (host, instance) a call is navigating toward, from claim to bind or abandonment. */
@@ -330,6 +351,34 @@ export class RunControl {
     });
   }
 
+  /**
+   * Answer one logs request from `runId`'s run page, over its host's logs channel. The run's
+   * instance id comes from the binding, which took it from the record the app attached to: a
+   * listing names it, and a read that names another instance is refused.
+   */
+  logs<R extends RunLogsRequest>(runId: string, request: R): Promise<RunLogsReply<R>>;
+  async logs(runId: string, request: RunLogsRequest): Promise<RunLogsReply<RunLogsRequest>> {
+    const run = this.#bindings.get(runId);
+    if (run === undefined) {
+      return {
+        ok: false,
+        failure: {code: 'unknown_instance', message: `run ${runId} is not attached`},
+      };
+    }
+    run.logs ??= run.connection.openLogs();
+    if (request.kind === 'list') return run.logs.list(run.instanceId);
+    if (request.read.instance_id !== run.instanceId) {
+      return {
+        ok: false,
+        failure: {
+          code: 'unknown_instance',
+          message: `this page is bound to instance ${run.instanceId}, not ${request.read.instance_id}`,
+        },
+      };
+    }
+    return run.logs.read(request.read);
+  }
+
   /** End `runId`'s page; the run itself keeps going on its host. Safe when `runId` is not bound. */
   detach(runId: string): void {
     this.#releaseBinding(runId);
@@ -536,7 +585,7 @@ export class RunControl {
       pendingObservations.splice(0);
       for (const unsubscribe of subscriptions.splice(0).reverse()) unsubscribe();
       try {
-        leaseRelease = lease[Symbol.asyncDispose]();
+        leaseRelease = releaseLeases(lease, binding);
       } catch (error) {
         leaseRelease = Promise.reject(error);
       }
@@ -565,6 +614,7 @@ export class RunControl {
         page: {wake: () => page?.wake(), close: closePage},
         status: connectionStatus(connection.phase),
         seenLive: false,
+        logs: null,
         release,
       };
       binding = provisional;
