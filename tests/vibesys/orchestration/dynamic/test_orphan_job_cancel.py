@@ -38,7 +38,7 @@ from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from vs_core.api import CoreEvent, CoreState, Request, RequestRecord
-    from vs_core.testing.drive import Answer, Trace
+    from vs_core.testing.drive import Answer, Script, Trace
 
 
 @dataclass
@@ -103,7 +103,7 @@ def _executors() -> Executors:
     )
 
 
-def _drive(script: object, **overrides: object) -> Trace:
+def _drive(script: Script, **overrides: object) -> Trace:
     selected = config()
     hosting = replace(
         harness(selected), shell_events=True, deadline_at=1_000_000.0, max_steps=2000, **overrides

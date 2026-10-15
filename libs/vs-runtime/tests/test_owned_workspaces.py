@@ -178,6 +178,13 @@ class _Provider:
         self.created.append(resource)
         return resource
 
+    def leftover_candidates(self) -> tuple[str, ...]:
+        """No candidate outlives this provider: each lives only in ``created``."""
+        return ()
+
+    def remove_leftover(self, workspace_id: str, /) -> None:
+        del workspace_id
+
 
 class _LiveOnlyProvider(_Provider):
     """An environment that cannot open isolated candidates."""

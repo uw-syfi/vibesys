@@ -1622,6 +1622,12 @@ class _FaultyResources:
             None if resource is None else cast("WorkspaceResource", _FaultyResource(self, resource))
         )
 
+    def leftover_candidates(self) -> tuple[str, ...]:
+        return self._inner.leftover_candidates()
+
+    def remove_leftover(self, workspace_id: str, /) -> None:
+        self._inner.remove_leftover(workspace_id)
+
 
 class _FaultyResource:
     def __init__(self, owner: _FaultyResources, resource: WorkspaceResource) -> None:
