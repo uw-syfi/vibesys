@@ -48,8 +48,8 @@ def spans_of(run: FlowRun[Config], kind: core.SpanType) -> list[core.Span]:
 
 def span_of(run: FlowRun[Config], root: str) -> core.Span:
     """The span ``root``; it must exist."""
-    found = run.trace().span(core.SpanId(root=root))
-    assert found is not None, f"no span {root}: {[s.id.root for s in run.trace().spans]}"
+    found = run.trace().span(root)
+    assert found is not None, f"no span {root}: {[s.id for s in run.trace().spans]}"
     return found
 
 

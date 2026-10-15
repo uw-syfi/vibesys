@@ -53,7 +53,7 @@ _WORK_IN_PROGRESS = (Pending, Signal, Task, Group)
 
 def operation_span(decision: DecisionId) -> SpanId:
     """The span of the operation issued as ``decision``."""
-    return SpanId(root=f"op:{decision.root}")
+    return f"op:{decision.root}"
 
 
 class Trace:
@@ -86,7 +86,7 @@ class Trace:
             return resumed
         number = self._occurrences.get(path, 0) + 1
         self._occurrences[path] = number
-        span_id = SpanId(root=f"{_FLOW}{path}#{number}")
+        span_id = f"{_FLOW}{path}#{number}"
         stop = SpanStop(requested_at=self._stop_time()) if stopped else None
         self._spans[span_id] = Span(
             id=span_id,
@@ -254,7 +254,7 @@ class Trace:
 
 
 def _path_of(span_id: SpanId) -> str:
-    return span_id.root.removeprefix(_FLOW).rpartition("#")[0]
+    return span_id.removeprefix(_FLOW).rpartition("#")[0]
 
 
 def _outcome(message: str) -> SpanFailure:
@@ -269,11 +269,11 @@ def _waited(source: Source[object]) -> tuple[SpanWaitKind, str]:
     """What waiting on ``source`` is, as a kind and a reference."""
     match source:
         case Pending():
-            return SpanWaitKind.OPERATION, operation_span(source.decision).root
+            return SpanWaitKind.OPERATION, operation_span(source.decision)
         case Signal():
             return SpanWaitKind.OPERATION, source.label
-        case Task(span=SpanId() as child):
-            return SpanWaitKind.SLOT, child.root
+        case Task(span=str() as child):
+            return SpanWaitKind.SLOT, child
         case Group():
             return SpanWaitKind.SLOT, "group"
         case _:

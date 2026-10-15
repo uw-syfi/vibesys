@@ -8,12 +8,14 @@ replay yields the same spans, ids and times.
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Annotated
 
-from vs_core.types.common import Identity, Seconds, Value
+from pydantic import Field
 
+from vs_core.types.common import Seconds, Value
 
-class SpanId(Identity):
-    """A span's identity: ``flow:<path>#<n>`` for a flow task, ``op:<decision id>`` for an operation."""
+type SpanId = Annotated[str, Field(pattern=r"^(flow|op):\S*$")]
+"""A span's identity: ``flow:<path>#<n>`` for a flow task, ``op:<decision id>`` for an operation."""
 
 
 class SpanType(StrEnum):

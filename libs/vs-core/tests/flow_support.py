@@ -132,5 +132,5 @@ def assert_trace_well_formed(trace: core.RunTrace, now: float) -> None:
 
 def assert_trace_ended(trace: core.RunTrace) -> None:
     """A run that finished has no span still running, waiting or pending."""
-    still = [span.id.root for span in trace.spans if span.status in _OPEN]
+    still = [span.id for span in trace.spans if span.status in _OPEN]
     assert not still, f"spans open after the run finished: {still}"
