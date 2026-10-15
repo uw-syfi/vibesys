@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from tests.support.core_plugins import EmptyOptions, capability_plugin
 from tests.support.docker_environment import host_container_backend
 
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.host import open_product_core_host
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
@@ -57,6 +58,7 @@ async def open_core_host(
         stop_timer=FakeStopTimer(threads=OsThreads()),
         blocking=ThreadBlockingRunner(),
         network=UnixNetwork(),
+        profiler_preflight=FakeProfilerPreflight(),
     ) as host:
         yield host
 

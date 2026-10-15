@@ -16,6 +16,7 @@ from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
 from vibesys.api._session import run_plugin
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import AgentCfg, Config
 from vibesys.constants import ComputeBackend
@@ -173,6 +174,7 @@ def _open(
                 stop_timer=FakeStopTimer(threads=OsThreads()),
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ) as host:
                 return host.services
         finally:
@@ -430,6 +432,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
+            profiler_preflight=FakeProfilerPreflight(),
         )
         return end.status
 

@@ -88,7 +88,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     ) = None,
     agent_client_factory: Callable[..., AgentClientProtocol],
     backend_factory: Callable[..., ComputeBackendImpl],
-    profiler_preflight: ProfilerPreflight | None = None,
+    profiler_preflight: ProfilerPreflight,
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None,
     stop_timer: StopTimer,
     timing: RunTiming,

@@ -20,6 +20,7 @@ from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
 
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.candidates.api import run_deadline_at
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
@@ -119,6 +120,7 @@ def _run(
                 stop_timer=FakeStopTimer(threads=OsThreads()),
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ) as host:
                 return await drive_core_run(host, integration)
         finally:

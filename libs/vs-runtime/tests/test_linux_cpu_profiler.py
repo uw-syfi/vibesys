@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import subprocess
+from functools import partial
 from pathlib import Path
-from typing import Never, cast
+from typing import TYPE_CHECKING, Never, cast
 
 import pytest
 
@@ -18,10 +18,25 @@ from vs_runtime.api.infrastructure import (
     preflight_native_cpu_profiler,
     summarize_linux_profile,
 )
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vs_sim.api import ProcessSpec
+
+
+def _processes(script: Callable[[ProcessSpec], ProcessScript]) -> FakeProcesses:
+    """Run ``perf`` through ``script``; each run takes no time."""
+    return FakeProcesses(script, pass_time=ManualClock().advance)
+
+
+def _never_runs(spec: ProcessSpec) -> Never:
+    raise AssertionError(spec.argv)
 
 
 def test_detect_capability_rejects_non_linux() -> None:
-    capability = detect_linux_profiler(system="Darwin")
+    capability = detect_linux_profiler(system="Darwin", processes=_processes(_never_runs))
 
     assert capability.tool is LinuxProfilerTool.NONE
     assert capability.diagnostics == (LinuxProfilerDiagnostic.NOT_LINUX,)
@@ -29,7 +44,10 @@ def test_detect_capability_rejects_non_linux() -> None:
 
 def test_detect_capability_reports_missing_perf() -> None:
     capability = detect_linux_profiler(
-        system="Linux", which=lambda _name: None, read_int=lambda _path: 1
+        system="Linux",
+        processes=_processes(_never_runs),
+        which=lambda _name: None,
+        read_int=lambda _path: 1,
     )
 
     assert capability.tool is LinuxProfilerTool.NONE
@@ -61,25 +79,29 @@ def test_preflight_marks_perf_stat_failure_unusable() -> None:
 
 def test_preflight_rejects_unparsed_profiler_kind() -> None:
     with pytest.raises(TypeError, match="NativeCpuProfilerKind"):
-        preflight_native_cpu_profiler(cast("NativeCpuProfilerKind", "linux"))
+        preflight_native_cpu_profiler(
+            cast("NativeCpuProfilerKind", "linux"),
+            detect_linux=partial(detect_linux_profiler, processes=_processes(_never_runs)),
+        )
 
 
 def test_detect_capability_reports_restrictions_and_stat_failure() -> None:
     calls: list[list[str]] = []
 
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(spec: ProcessSpec) -> ProcessScript:
+        command = list(spec.argv)
         calls.append(command)
         if command[1] == "--version":
-            return subprocess.CompletedProcess(command, 0, "perf version 6.8\n", "")
+            return ProcessScript(stdout=b"perf version 6.8\n")
         if command[1] == "stat":
-            return subprocess.CompletedProcess(command, 255, "", "No permission")
+            return ProcessScript(returncode=255, stderr=b"No permission")
         raise AssertionError(command)
 
     restrictions = iter((3, 1))
     capability = detect_linux_profiler(
         system="Linux",
         which=lambda _name: "/usr/bin/perf",
-        run=fake_run,
+        processes=_processes(fake_run),
         read_int=lambda _path: next(restrictions),
     )
 
@@ -92,14 +114,14 @@ def test_detect_capability_reports_restrictions_and_stat_failure() -> None:
 
 
 def test_detect_capability_handles_perf_version_exception() -> None:
-    def fake_run(_command: list[str], **_kwargs: object) -> Never:
+    def fake_run(_spec: ProcessSpec) -> Never:
         _failure_message = "cannot execute perf"
         raise OSError(_failure_message)
 
     capability = detect_linux_profiler(
         system="Linux",
         which=lambda _name: "/usr/bin/perf",
-        run=fake_run,
+        processes=_processes(fake_run),
         read_int=lambda _path: None,
     )
 
@@ -109,15 +131,16 @@ def test_detect_capability_handles_perf_version_exception() -> None:
 
 
 def test_detect_capability_handles_perf_stat_exception() -> None:
-    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+    def fake_run(spec: ProcessSpec) -> ProcessScript:
+        command = list(spec.argv)
         if command[1] == "--version":
-            return subprocess.CompletedProcess(command, 0, "", "perf version 6.9\n")
-        raise subprocess.TimeoutExpired(command, 10)
+            return ProcessScript(stderr=b"perf version 6.9\n")
+        return ProcessScript(runs_until_signalled=True)
 
     capability = detect_linux_profiler(
         system="Linux",
         which=lambda _name: "/usr/bin/perf",
-        run=fake_run,
+        processes=_processes(fake_run),
         read_int=lambda _path: None,
     )
 
@@ -155,26 +178,25 @@ def test_collect_persists_perf_artifacts_and_summary(tmp_path: Path) -> None:
         kptr_restrict=0,
     )
 
-    def fake_run(command: list[str], *, timeout: int | None) -> subprocess.CompletedProcess[str]:
-        del timeout
+    def fake_run(spec: ProcessSpec) -> ProcessScript:
+        command = list(spec.argv)
         if command[1] == "stat":
             output = Path(command[command.index("-o") + 1])
             output.write_text(
                 "1000,,cycles\n500,,instructions\n10,,context-switches\n1,,cpu-migrations\n",
                 encoding="utf-8",
             )
-            return subprocess.CompletedProcess(command, 0, "", "")
+            return ProcessScript()
         if command[1] == "record":
             output = Path(command[command.index("-o") + 1])
             output.write_bytes(b"perf data")
-            return subprocess.CompletedProcess(command, 0, "", "")
+            return ProcessScript()
         if command[1] == "report":
-            return subprocess.CompletedProcess(
-                command,
-                0,
-                "  65.00% bench queue-candidate.so [.] enqueue\n"
-                "  20.00% bench queue-candidate.so [.] dequeue\n",
-                "",
+            return ProcessScript(
+                stdout=(
+                    b"  65.00% bench queue-candidate.so [.] enqueue\n"
+                    b"  20.00% bench queue-candidate.so [.] dequeue\n"
+                )
             )
         raise AssertionError(command)
 
@@ -182,7 +204,7 @@ def test_collect_persists_perf_artifacts_and_summary(tmp_path: Path) -> None:
         ["bench", "--scenario", "spsc"],
         tmp_path,
         capability=capability,
-        effects=LinuxProfilerEffects(run=fake_run, now=lambda: 100.0),
+        effects=LinuxProfilerEffects(now=lambda: 100.0, processes=_processes(fake_run)),
     )
 
     assert result.status == "ok"
@@ -208,12 +230,12 @@ def test_collect_reports_failed_stat_record_and_missing_counters(tmp_path: Path)
         kptr_restrict=None,
     )
 
-    def fake_run(command: list[str], *, timeout: int | None) -> subprocess.CompletedProcess[str]:
-        del timeout
+    def fake_run(spec: ProcessSpec) -> ProcessScript:
+        command = list(spec.argv)
         if command[1] == "stat":
-            return subprocess.CompletedProcess(command, 255, "", "stat failed")
+            return ProcessScript(returncode=255, stderr=b"stat failed")
         if command[1] == "record":
-            raise subprocess.TimeoutExpired(command, 3)
+            return ProcessScript(runs_until_signalled=True)
         raise AssertionError(command)
 
     result = collect_linux_profile(
@@ -221,7 +243,7 @@ def test_collect_reports_failed_stat_record_and_missing_counters(tmp_path: Path)
         tmp_path,
         capability=capability,
         timeout=3,
-        effects=LinuxProfilerEffects(run=fake_run, now=lambda: 100.0),
+        effects=LinuxProfilerEffects(now=lambda: 100.0, processes=_processes(fake_run)),
     )
 
     assert result.status == "error"
@@ -241,23 +263,23 @@ def test_collect_reports_failed_perf_report(tmp_path: Path) -> None:
         kptr_restrict=None,
     )
 
-    def fake_run(command: list[str], *, timeout: int | None) -> subprocess.CompletedProcess[str]:
-        del timeout
+    def fake_run(spec: ProcessSpec) -> ProcessScript:
+        command = list(spec.argv)
         if command[1] == "stat":
             Path(command[command.index("-o") + 1]).write_text("1,,cycles\n", encoding="utf-8")
-            return subprocess.CompletedProcess(command, 0, "", "")
+            return ProcessScript()
         if command[1] == "record":
             Path(command[command.index("-o") + 1]).write_bytes(b"perf data")
-            return subprocess.CompletedProcess(command, 0, "", "")
+            return ProcessScript()
         if command[1] == "report":
-            return subprocess.CompletedProcess(command, 1, "", "report failed")
+            return ProcessScript(returncode=1, stderr=b"report failed")
         raise AssertionError(command)
 
     result = collect_linux_profile(
         ["bench"],
         tmp_path,
         capability=capability,
-        effects=LinuxProfilerEffects(run=fake_run, now=lambda: 100.0),
+        effects=LinuxProfilerEffects(now=lambda: 100.0, processes=_processes(fake_run)),
     )
 
     assert result.status == "error"
@@ -289,7 +311,10 @@ def test_collect_degrades_when_perf_unavailable(tmp_path: Path) -> None:
     )
 
     result = collect_linux_profile(
-        ["bench"], tmp_path, capability=capability, effects=LinuxProfilerEffects(now=lambda: 100.0)
+        ["bench"],
+        tmp_path,
+        capability=capability,
+        effects=LinuxProfilerEffects(now=lambda: 100.0, processes=_processes(_never_runs)),
     )
 
     assert result.status == "error"

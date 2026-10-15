@@ -258,7 +258,7 @@ depends_on = ["vibesys.api.contracts", "vibesys.plugin_catalog", "vs_project", "
 
 [[modules]]
 path = "vibesys.api.testing"
-depends_on = ["vibesys.api._session", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run.contracts", "vs_agent", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys.api._session", "vibesys.api.contracts", "vibesys.api.profilers", "vibesys.api.session", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run.contracts", "vs_agent", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration"
@@ -990,7 +990,7 @@ expose = ["create_evaluation", "trusted_evaluation_plan"]
 from = ["vibesys.run.evaluation"]
 
 [[interfaces]]
-expose = ["ProfilerPreflight", "ProfilerToolOffer", "WITHHELD_TOOLS_ENV", "profiler_tool_offer", "native_profiler_preflight", "resolve_run_profiler", "validate_attribution_command", "validate_run_request"]
+expose = ["NativeProfilerPreflight", "ProfilerPreflight", "ProfilerToolOffer", "WITHHELD_TOOLS_ENV", "profiler_tool_offer", "resolve_run_profiler", "validate_attribution_command", "validate_run_request"]
 from = ["vibesys.run.profilers"]
 
 [[interfaces]]
@@ -1092,7 +1092,7 @@ expose = ["RunHandle", "Runs"]
 
 [[interfaces]]
 from = ["vibesys.api.wiring"]
-expose = ["AgentToolContext", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "create_session", "platform_skill_selection"]
+expose = ["AgentToolContext", "NativeProfilerPreflight", "ProfilerPreflight", "RunResources", "SessionAgents", "SessionImplementations", "create_session", "platform_skill_selection"]
 
 [[interfaces]]
 from = ["vibesys.api.catalog"]
@@ -1112,7 +1112,7 @@ depends_on = ["vibesys.api.auxiliary", "vibesys.run", "vibesys.run.profilers", "
 
 [[interfaces]]
 from = ["vibesys.api.assembly"]
-expose = ["ProfilerPreflight", "SessionAgents", "SessionImplementations"]
+expose = ["NativeProfilerPreflight", "ProfilerPreflight", "SessionAgents", "SessionImplementations"]
 
 [[modules]]
 path = "vs_core"

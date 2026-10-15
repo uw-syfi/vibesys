@@ -24,6 +24,7 @@ from tests.vibesys.run.test_core_host_composition import (
 
 from launch.composition import STATELESS_TOOL_SERVERS
 from vibesys.api import catalog
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeAgentInvocationStore
@@ -106,6 +107,7 @@ def _services(tmp_path: Path) -> CoreServices:
                 stop_timer=FakeStopTimer(threads=OsThreads()),
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ) as host:
                 return host.services
         finally:

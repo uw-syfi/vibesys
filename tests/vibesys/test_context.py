@@ -17,6 +17,7 @@ from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import task_path, write_task
 
 from launch import built_in_orchestrations, open_run_store
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import BUNDLED_RESOURCES, Config
 from vibesys.constants import ComputeBackend
@@ -235,6 +236,7 @@ def _create_context(
             ),
             resume_policy=registration.resume_policy,
             backend_factory=options.get("backend_factory") or _RecordingBackendFactory(),
+            profiler_preflight=FakeProfilerPreflight(),
         )
     except BaseException as construction_error:
         try:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from vibesys.api.profilers import ProfilerKind, ProfilerPreflightResult
 from vibesys.api.store import (
     RunDocument,
     RunRecordFacts,
@@ -119,4 +120,23 @@ class FakeRunRecord:
         self._patches[(base, head, paths)] = error
 
 
-__all__ = ["FakeRunHandle", "FakeRunRecord", "FakeRuns", "FakeStopTimer"]
+@dataclass
+class FakeProfilerPreflight:
+    """A native profiler probe that touches no host: every probe reports ``usable``."""
+
+    usable: bool = True
+    probed: list[ProfilerKind] = field(default_factory=list)
+
+    def __call__(self, kind: ProfilerKind, /) -> ProfilerPreflightResult:
+        """Record ``kind`` and answer with the scripted usability."""
+        self.probed.append(kind)
+        return ProfilerPreflightResult(kind, self.usable)
+
+
+__all__ = [
+    "FakeProfilerPreflight",
+    "FakeRunHandle",
+    "FakeRunRecord",
+    "FakeRuns",
+    "FakeStopTimer",
+]

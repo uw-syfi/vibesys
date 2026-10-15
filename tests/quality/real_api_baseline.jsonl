@@ -25,7 +25,6 @@
 {"path": "libs/vs-project/tests/test_state_store_contract.py", "rule": "executor", "count": 2}
 {"path": "libs/vs-project/tests/test_state_store_contract.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-runtime/src/vs_runtime/_artifact_store.py", "rule": "fs_sync", "count": 5}
-{"path": "libs/vs-runtime/src/vs_runtime/_linux_cpu_profiler.py", "rule": "subprocess", "count": 9}
 {"path": "libs/vs-runtime/src/vs_runtime/_macos_cpu_profiler.py", "rule": "subprocess", "count": 12}
 {"path": "libs/vs-runtime/src/vs_runtime/_receipt_store.py", "rule": "fs_sync", "count": 2}
 {"path": "libs/vs-runtime/src/vs_runtime/_slot_meter.py", "rule": "fs_sync", "count": 3}
@@ -34,7 +33,6 @@
 {"path": "libs/vs-runtime/tests/test_bounded_stop.py", "rule": "executor", "count": 1}
 {"path": "libs/vs-runtime/tests/test_docker_evaluator_tools.py", "rule": "subprocess", "count": 2}
 {"path": "libs/vs-runtime/tests/test_event_journal.py", "rule": "executor", "count": 1}
-{"path": "libs/vs-runtime/tests/test_linux_cpu_profiler.py", "rule": "subprocess", "count": 17}
 {"path": "libs/vs-runtime/tests/test_macos_cpu_profiler.py", "rule": "subprocess", "count": 4}
 {"path": "libs/vs-runtime/tests/test_run_control.py", "rule": "threading", "count": 3}
 {"path": "libs/vs-runtime/tests/test_trusted_benchmark_partial.py", "rule": "subprocess", "count": 2}

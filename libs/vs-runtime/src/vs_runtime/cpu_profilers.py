@@ -1,11 +1,13 @@
-"""The native CPU profiler mechanism, importable with nothing but the standard library.
+"""The native CPU profiler mechanism, importable with nothing but the standard library and vs_sim.
 
 The linux-cpu profiler's MCP server runs in the agent container on the
 container's own interpreter, which holds only the standard library, ``pydantic``
 and ``mcp``, with the framework's source roots on its path. ``vs_runtime.api``
 imports the whole run runtime and its third-party dependencies, so the server
 reaches its mechanism here instead. This module and the private modules it
-re-exports must import nothing outside the standard library (a test pins that).
+re-exports must import nothing outside the standard library and ``vs_sim.api``,
+which has no dependencies of its own and whose ``Processes`` runs the profiler's
+commands.
 """
 
 from __future__ import annotations

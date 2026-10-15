@@ -20,6 +20,7 @@ from vibesys.api import (
     RunRequest,
 )
 from vibesys.api.request import load_task
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.core_services import CoreCompositionError
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
@@ -146,6 +147,7 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
                 stop_timer=FakeStopTimer(threads=OsThreads()),
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ):
                 pytest.fail("failed product assembly yielded a run")
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.run.profilers import ProfilerPreflight
+from vibesys.run.profilers import NativeProfilerPreflight, ProfilerPreflight
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -80,6 +80,8 @@ class SessionImplementations:
     """Runs the run's GitHub CLI commands."""
     slurm_processes: Processes
     """Starts the Slurm transport's programs (ssh, rsync, a connector) for the run's evaluations."""
+    profiler_preflight: ProfilerPreflight
+    """Checks native profiler availability on the host."""
     stateless_tool_servers: Mapping[str, Callable[[object], ToolServerDescriptor | None]] | None = (
         None
     )
@@ -88,8 +90,11 @@ class SessionImplementations:
     """Builds the run's ``GitRepository`` implementations; ``None`` opens the configured one."""
     state_stores: StateStoreFactory | None = None
     """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
-    profiler_preflight: ProfilerPreflight | None = None
-    """Checks native profiler availability; ``None`` uses the host implementation."""
 
 
-__all__ = ["ProfilerPreflight", "SessionAgents", "SessionImplementations"]
+__all__ = [
+    "NativeProfilerPreflight",
+    "ProfilerPreflight",
+    "SessionAgents",
+    "SessionImplementations",
+]

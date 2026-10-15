@@ -17,7 +17,7 @@ from launch.composition import STATELESS_TOOL_SERVERS
 from vibesys.api.request import validate_descriptor as _validate_descriptor
 from vibesys.api.request import validate_run_request as _validate_run_request
 from vibesys.api.store import open_run_store as _open_run_store
-from vibesys.api.wiring import SessionImplementations
+from vibesys.api.wiring import NativeProfilerPreflight, SessionImplementations
 from vibesys.api.wiring import create_session as _create_session
 from vs_agent.api import SHIPPED_PROVIDERS, AgentInvocationState, build_agent_client
 from vs_github.api import GitHubCLI
@@ -77,7 +77,7 @@ class LaunchSettings:
     state_stores: StateStoreFactory | None = None
     """Opens each run's ``StateStore``; ``None`` is the local crash-atomic one."""
     profiler_preflight: ProfilerPreflight | None = None
-    """Checks native profiler availability; ``None`` uses the host implementation."""
+    """Checks native profiler availability; ``None`` probes the host through ``processes``."""
 
 
 def create_session(
@@ -119,7 +119,11 @@ def create_session(
         implementations=SessionImplementations(
             agent_client_factory=client_factory,
             backend_factory=backend_factory,
-            profiler_preflight=settings.profiler_preflight,
+            profiler_preflight=(
+                NativeProfilerPreflight(settings.processes)
+                if settings.profiler_preflight is None
+                else settings.profiler_preflight
+            ),
             agents=agents,
             stop_timer=timing.clock.sleep if settings.stop_timer is None else settings.stop_timer,
             timing=timing,

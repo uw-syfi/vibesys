@@ -60,13 +60,17 @@ def test_command_line_tools_shim_falls_back_to_sample() -> None:
     assert MacOSProfilerDiagnostic.COMMAND_LINE_TOOLS_ONLY in capability.diagnostics
 
 
+def _no_linux_probe() -> Never:
+    raise AssertionError
+
+
 def test_preflight_reports_sample_as_usable() -> None:
     capability = MacOSProfilerCapability(
         MacOSProfilerTool.SAMPLE, None, None, "/usr/bin/sample", None
     )
 
     result = preflight_native_cpu_profiler(
-        NativeCpuProfilerKind.MACOS, detect_macos=lambda: capability
+        NativeCpuProfilerKind.MACOS, detect_linux=_no_linux_probe, detect_macos=lambda: capability
     )
 
     assert result.usable

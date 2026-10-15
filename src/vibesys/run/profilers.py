@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
 from vibesys.composition import agent_spec_from_config
@@ -23,6 +24,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironment,
     ToolSite,
     build_run_environment,
+    detect_linux_profiler,
     make_run_environment_spec,
     preflight_native_cpu_profiler,
     validate_run_environment_profile,
@@ -33,6 +35,7 @@ if TYPE_CHECKING:
 
     from vibesys.run.contracts import RunRequest
     from vs_project.api import Git
+    from vs_sim.api import Processes
 
 
 WITHHELD_TOOLS_ENV = "VIBESYS_PROFILER_WITHHELD_TOOLS"
@@ -78,19 +81,30 @@ class ProfilerPreflight(Protocol):
         ...
 
 
-def native_profiler_preflight(kind: ProfilerKind) -> ProfilerPreflightResult:
-    """Adapt runtime-native host checks into profiler policy results."""
-    native_kind = {
-        ProfilerKind.LINUX_CPU: NativeCpuProfilerKind.LINUX,
-        ProfilerKind.MACOS_CPU: NativeCpuProfilerKind.MACOS,
-    }[kind]
-    capability = preflight_native_cpu_profiler(native_kind)
-    return ProfilerPreflightResult(
-        kind,
-        capability.usable,
-        capability.diagnostics,
-        capability.details,
-    )
+@dataclass(frozen=True)
+class NativeProfilerPreflight:
+    """Adapt runtime-native host checks into profiler policy results.
+
+    ``processes`` runs the host's profiler probes (``perf --version`` and a trial ``perf stat``).
+    """
+
+    processes: Processes
+
+    def __call__(self, kind: ProfilerKind, /) -> ProfilerPreflightResult:
+        """Probe the native profiler behind ``kind`` on this host."""
+        native_kind = {
+            ProfilerKind.LINUX_CPU: NativeCpuProfilerKind.LINUX,
+            ProfilerKind.MACOS_CPU: NativeCpuProfilerKind.MACOS,
+        }[kind]
+        capability = preflight_native_cpu_profiler(
+            native_kind, detect_linux=partial(detect_linux_profiler, processes=self.processes)
+        )
+        return ProfilerPreflightResult(
+            kind,
+            capability.usable,
+            capability.diagnostics,
+            capability.details,
+        )
 
 
 def profiler_tool_problem(kind: ProfilerKind, environment: RunEnvironment) -> str | None:
@@ -142,11 +156,14 @@ def resolve_run_profiler(
     request: RunRequest,
     environment: RunEnvironment,
     *,
-    preflight: bool = True,
-    native_preflight: ProfilerPreflight = native_profiler_preflight,
+    native_preflight: ProfilerPreflight | None,
     log: Callable[[str], None] | None = None,
 ) -> ProfilerKind:
-    """Resolve and validate the profiler selected for one product run."""
+    """Resolve and validate the profiler selected for one product run.
+
+    ``native_preflight`` probes the resolved native profiler on this host when the
+    environment needs a local probe; ``None`` resolves without probing.
+    """
     config = request.config
     try:
         choice = resolve_profiler_choice(
@@ -172,7 +189,7 @@ def resolve_run_profiler(
     if choice.reason is not None and log is not None:
         log(f"[profiler] --profiler auto chose 'none': {choice.reason}.")
     resolved = _require_runnable_tool(request, environment, resolved, log)
-    if preflight and environment.requires_local_profiler_preflight:
+    if native_preflight is not None and environment.requires_local_profiler_preflight:
         result = preflight_profiler_kind(resolved, native_preflight=native_preflight)
         if not result.usable:
             if request.profiler_kind is not ProfilerKind.AUTO:
@@ -267,7 +284,7 @@ def validate_run_request(
                 )
             ) from exc
     environment = build_run_environment(request.run_environment or make_run_environment_spec())
-    resolve_run_profiler(request, environment, preflight=False)
+    resolve_run_profiler(request, environment, native_preflight=None)
     if attribution_command is not None:
         _require_attribution_runnable(attribution_command, environment)
 
@@ -286,8 +303,8 @@ def validate_attribution_command(request: RunRequest, command: tuple[str, ...] |
 
 __all__ = [
     "WITHHELD_TOOLS_ENV",
+    "NativeProfilerPreflight",
     "ProfilerToolOffer",
-    "native_profiler_preflight",
     "profiler_tool_offer",
     "resolve_run_profiler",
     "validate_attribution_command",

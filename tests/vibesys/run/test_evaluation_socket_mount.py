@@ -18,6 +18,7 @@ from tests.vibesys.run.test_core_host_composition import _plugin, _request, _wri
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
 
 from vibesys.api.request import RunEnvironmentSpec
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.evaluation_socket import evaluation_socket_path
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
@@ -88,6 +89,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
             stop_timer=FakeStopTimer(threads=OsThreads()),
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
+            profiler_preflight=FakeProfilerPreflight(),
         ) as host:
             for _ in range(candidates):
                 await host.workspaces.create_candidate()

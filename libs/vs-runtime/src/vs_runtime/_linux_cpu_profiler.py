@@ -7,12 +7,17 @@ import json
 import platform
 import shlex
 import shutil
-import subprocess
-from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+from vs_sim.api import ProcessGroupUnreaped, ProcessOutcome, ProcessSpec, ProcessTimedOut
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vs_sim.api import Processes
 
 
 class LinuxProfilerTool(StrEnum):
@@ -81,7 +86,29 @@ class _MetadataInput:
     call_graph: str
 
 
-Runner = Callable[..., subprocess.CompletedProcess[str]]
+@dataclass(frozen=True)
+class _TextRun:
+    """How a profiler command ended, with its output decoded as text."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _run_text(processes: Processes, command: list[str], *, timeout: float | None) -> _TextRun:
+    """Run ``command`` to completion; a command that outlives ``timeout`` raises ``TimeoutError``."""
+    match processes.run(ProcessSpec(tuple(command)), timeout=timeout):
+        case ProcessOutcome(returncode=returncode, stdout=stdout, stderr=stderr):
+            return _TextRun(
+                returncode,
+                stdout.decode(errors="replace"),
+                stderr.decode(errors="replace"),
+            )
+        case ProcessTimedOut(timeout=limit):
+            message = f"{command[0]} did not finish within {limit:g} seconds"
+            raise TimeoutError(message)
+        case ProcessGroupUnreaped(detail=detail):
+            raise TimeoutError(detail)
 
 
 _PERF_EVENT_PARANOID_THRESHOLD = 2
@@ -98,11 +125,14 @@ def _read_int(path: Path) -> int | None:
 def detect_capability(
     *,
     system: str | None = None,
+    processes: Processes,
     which: Callable[[str], str | None] = shutil.which,
-    run: Runner = subprocess.run,
     read_int: Callable[[Path], int | None] = _read_int,
 ) -> Capability:
-    """Report whether Linux ``perf`` can be invoked for diagnostic profiling."""
+    """Report whether Linux ``perf`` can be invoked for diagnostic profiling.
+
+    ``processes`` runs the ``perf`` probes.
+    """
     if (system or platform.system()) != "Linux":
         return Capability(
             LinuxProfilerTool.NONE,
@@ -135,9 +165,9 @@ def detect_capability(
         )
 
     try:
-        version = run([perf_path, "--version"], capture_output=True, text=True, timeout=5)
+        version = _run_text(processes, [perf_path, "--version"], timeout=5)
         perf_version = (version.stdout or version.stderr).strip() or None
-    except (OSError, subprocess.SubprocessError):
+    except OSError:
         diagnostics.append(DiagnosticCode.PERF_UNAVAILABLE)
         return Capability(
             LinuxProfilerTool.NONE,
@@ -149,15 +179,10 @@ def detect_capability(
         )
 
     try:
-        stat = run(
-            [perf_path, "stat", "-e", "cycles", "--", "true"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        stat = _run_text(processes, [perf_path, "stat", "-e", "cycles", "--", "true"], timeout=10)
         if stat.returncode != 0:
             diagnostics.append(DiagnosticCode.PERF_STAT_UNAVAILABLE)
-    except (OSError, subprocess.SubprocessError):
+    except OSError:
         diagnostics.append(DiagnosticCode.PERF_STAT_UNAVAILABLE)
 
     return Capability(
@@ -170,25 +195,16 @@ def detect_capability(
     )
 
 
-def _run_text(
-    command: list[str],
-    *,
-    timeout: int | None,
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(  # noqa: S603  # lint-waiver: LW-009001 [S603]; this boundary executes the caller-selected argv as the workload being profiled.
-        command, capture_output=True, text=True, timeout=timeout, check=False
-    )
-
-
 @dataclass(frozen=True)
 class LinuxProfilerEffects:
     """Injected process and clock effects for Linux profile collection.
 
-    ``now`` stamps the collection's start and end, in seconds since the epoch.
+    ``now`` stamps the collection's start and end, in seconds since the epoch, and
+    ``processes`` runs ``perf`` and the profiled workload.
     """
 
     now: Callable[[], float]
-    run: Callable[..., subprocess.CompletedProcess[str]] = _run_text
+    processes: Processes
 
 
 def _parse_perf_stat_csv(path: Path) -> tuple[dict[str, str], ...]:
@@ -232,7 +248,7 @@ def collect(  # noqa: PLR0913  # lint-waiver: LW-009000 [PLR0913]; preserve the 
     effects: LinuxProfilerEffects,
 ) -> CollectionResult:
     """Run separate diagnostic ``perf stat`` and ``perf record`` workloads."""
-    capability = capability or detect_capability()
+    capability = capability or detect_capability(processes=effects.processes)
     output_dir.mkdir(parents=True, exist_ok=True)
     started = effects.now()
     diagnostics = list(capability.diagnostics)
@@ -315,7 +331,7 @@ def collect(  # noqa: PLR0913  # lint-waiver: LW-009000 [PLR0913]; preserve the 
     for name, profiler_command in (("stat", stat_command), ("record", record_command)):
         executed[name] = profiler_command
         try:
-            result = effects.run(profiler_command, timeout=timeout)
+            result = _run_text(effects.processes, profiler_command, timeout=timeout)
             returncodes[name] = result.returncode
             stderr[name] = result.stderr[-4000:]
             if result.returncode != 0:
@@ -324,7 +340,7 @@ def collect(  # noqa: PLR0913  # lint-waiver: LW-009000 [PLR0913]; preserve the 
                     if name == "stat"
                     else DiagnosticCode.PERF_RECORD_UNAVAILABLE
                 )
-        except (OSError, subprocess.SubprocessError) as exc:
+        except OSError as exc:
             returncodes[name] = None
             stderr[name] = str(exc)
             diagnostics.append(
@@ -337,14 +353,14 @@ def collect(  # noqa: PLR0913  # lint-waiver: LW-009000 [PLR0913]; preserve the 
     if record_path.is_file():
         executed["report"] = report_command
         try:
-            report = effects.run(report_command, timeout=60)
+            report = _run_text(effects.processes, report_command, timeout=60)
             returncodes["report"] = report.returncode
             stderr["report"] = report.stderr[-4000:]
             report_text = report.stdout
             report_path.write_text(report_text, encoding="utf-8")
             if report.returncode != 0:
                 diagnostics.append(DiagnosticCode.PERF_REPORT_UNAVAILABLE)
-        except (OSError, subprocess.SubprocessError) as exc:
+        except OSError as exc:
             returncodes["report"] = None
             stderr["report"] = str(exc)
             diagnostics.append(DiagnosticCode.PERF_REPORT_UNAVAILABLE)

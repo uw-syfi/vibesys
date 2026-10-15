@@ -357,10 +357,14 @@ class NativeCpuProfilerPreflight:
 def preflight_native_cpu_profiler(
     kind: NativeCpuProfilerKind,
     *,
-    detect_linux: Callable[[], LinuxProfilerCapability] = detect_linux_profiler,
+    detect_linux: Callable[[], LinuxProfilerCapability],
     detect_macos: Callable[[], MacOSProfilerCapability] = detect_macos_profiler,
 ) -> NativeCpuProfilerPreflight:
-    """Detect one native CPU profiler and return policy-neutral host facts."""
+    """Detect one native CPU profiler and return policy-neutral host facts.
+
+    ``detect_linux`` probes ``perf``; `detect_linux_profiler` over the host's processes is
+    the real probe.
+    """
     if not isinstance(kind, NativeCpuProfilerKind):
         message = f"kind must be a NativeCpuProfilerKind, got {type(kind).__name__}."
         raise TypeError(message)

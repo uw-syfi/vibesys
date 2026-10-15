@@ -22,6 +22,7 @@ from tests.vibesys.run.test_core_host_composition import _plugin, _request, _wri
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
 
 from vibesys.api.request import RunEnvironmentSpec
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities, build_agent_client
@@ -99,6 +100,7 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
             stop_timer=FakeStopTimer(threads=OsThreads()),
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
+            profiler_preflight=FakeProfilerPreflight(),
         ) as host:
             lookup = cast(
                 "Callable[[Path], DockerSandbox | None]", given_to_client["workspace_sandboxes"]
@@ -215,6 +217,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
             stop_timer=FakeStopTimer(threads=OsThreads()),
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
+            profiler_preflight=FakeProfilerPreflight(),
         ) as host:
             turns.root_containers = {c.container_id for c in engine.containers()}
             paths = [

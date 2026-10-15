@@ -24,6 +24,7 @@ from tests.vibesys.run.test_core_host_composition import (
     _write_project,
 )
 
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.core_services import CoreCompositionError
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
@@ -95,6 +96,7 @@ def _compose(
                 stop_timer=FakeStopTimer(threads=OsThreads()),
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             ):
                 return
         finally:

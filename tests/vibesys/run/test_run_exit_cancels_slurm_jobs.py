@@ -16,6 +16,7 @@ from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
 from vibesys.api._session import run_plugin
+from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import load_task
@@ -130,6 +131,7 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
                 invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),
+                profiler_preflight=FakeProfilerPreflight(),
             )
         )
         # The run's input-baseline measurement is queued on the held cluster; stopping the run

@@ -49,7 +49,6 @@ from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
 from vibesys.run.profilers import (
     ProfilerPreflight,
-    native_profiler_preflight,
     resolve_run_profiler,
     validate_run_request,
 )
@@ -160,7 +159,7 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
         | None
     ) = None,
     backend_factory: Callable[..., ComputeBackendImpl],
-    profiler_preflight: ProfilerPreflight | None = None,
+    profiler_preflight: ProfilerPreflight,
 ) -> "_PreparedRun":
     """Open one project context and register its resources with ``ownership``.
 
@@ -195,7 +194,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         | None
     ) = None,
     backend_factory: Callable[..., ComputeBackendImpl],
-    profiler_preflight: ProfilerPreflight | None = None,
+    profiler_preflight: ProfilerPreflight,
 ) -> "_PreparedRun":
     validate_run_request(request, git=integration.git)
     bundle = request.input_bundle
@@ -302,9 +301,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             resolved_profiler_kind = resolve_run_profiler(
                 request,
                 environment,
-                native_preflight=(
-                    native_profiler_preflight if profiler_preflight is None else profiler_preflight
-                ),
+                native_preflight=profiler_preflight,
                 log=buffered_logs.append,
             )
 

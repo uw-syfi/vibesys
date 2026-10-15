@@ -123,7 +123,9 @@ def test_a_profiler_is_runnable_where_it_resolves_or_refused_with_a_named_reason
         logs: list[str] = []
         label = f"{env_name}/{domain.value}/{backend.value}/{requested.value}"
         try:
-            resolved = resolve_run_profiler(request, environment, preflight=False, log=logs.append)
+            resolved = resolve_run_profiler(
+                request, environment, native_preflight=None, log=logs.append
+            )
         except ConfigurationError as error:
             diagnostic = error.diagnostic
             assert diagnostic.code in _NAMED_REFUSALS, label
@@ -155,7 +157,7 @@ def test_linux_cpu_is_refused_where_the_editor_container_has_no_perf(
     )
 
     with pytest.raises(ConfigurationError) as refused:
-        resolve_run_profiler(request, environments["slurm-agent-gpu"], preflight=False)
+        resolve_run_profiler(request, environments["slurm-agent-gpu"], native_preflight=None)
 
     assert refused.value.diagnostic.code == "profiler_tool_unavailable"
     message = refused.value.diagnostic.message
@@ -176,7 +178,7 @@ def test_auto_falls_back_to_none_with_a_logged_reason_when_the_tool_cannot_run(
     logs: list[str] = []
 
     resolved = resolve_run_profiler(
-        request, environments["slurm-agent-gpu"], preflight=False, log=logs.append
+        request, environments["slurm-agent-gpu"], native_preflight=None, log=logs.append
     )
 
     assert resolved is ProfilerKind.NONE

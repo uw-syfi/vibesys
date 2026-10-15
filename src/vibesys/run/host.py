@@ -138,7 +138,7 @@ class _ProductHostFactory:
         | None
     )
     options: BaseModel
-    profiler_preflight: ProfilerPreflight | None = None
+    profiler_preflight: ProfilerPreflight
     stateless_tool_servers: Mapping[str, StatelessToolServer] | None = None
     core_services: CoreServices | None = field(default=None, init=False)
     local_evaluation: Evaluation | None = field(default=None, init=False)
@@ -550,7 +550,7 @@ async def open_product_core_host(  # noqa: PLR0913  # lint-waiver: LW-948092 [PL
     projector: CommittedStateProjector | None = None,
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None,
     backend_factory: Callable[..., ComputeBackendImpl],
-    profiler_preflight: ProfilerPreflight | None = None,
+    profiler_preflight: ProfilerPreflight,
     stop_timer: StopTimer,
     timing: RunTiming,
     blocking: BlockingRunner,

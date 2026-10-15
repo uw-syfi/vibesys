@@ -7,7 +7,7 @@ tests drive the same names it imports, from ``vs_runtime.cpu_profilers``.
 from __future__ import annotations
 
 import shlex
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Never
 
 from hypothesis import given
 from hypothesis import strategies as st
@@ -22,9 +22,12 @@ from vs_runtime.cpu_profilers import (
     parse_profile_command,
     summarize_linux_profile,
 )
+from vs_sim.api.testing import FakeProcesses, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vs_sim.api import ProcessSpec
 
 
 def test_the_container_surface_is_the_same_mechanism_the_host_api_exposes() -> None:
@@ -54,5 +57,10 @@ def test_an_empty_output_directory_summarizes_without_metadata(tmp_path: Path) -
     assert summarize_linux_profile(tmp_path)["metadata"] is None
 
 
+def _never_runs(spec: ProcessSpec) -> Never:
+    raise AssertionError(spec.argv)
+
+
 def test_capability_detection_names_a_tool() -> None:
-    assert detect_linux_profiler(system="Darwin").tool.value
+    processes = FakeProcesses(_never_runs, pass_time=ManualClock().advance)
+    assert detect_linux_profiler(system="Darwin", processes=processes).tool.value

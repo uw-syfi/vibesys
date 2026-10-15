@@ -13,7 +13,7 @@ from vs_runtime.cpu_profilers import (
     parse_profile_command,
     summarize_linux_profile,
 )
-from vs_sim.api import SystemClock
+from vs_sim.api import OsProcesses, SystemClock
 
 # The same common runtime is staged beside each standalone profiler bundle.
 for _common_name in ("_common", "profilers_common"):
@@ -28,11 +28,12 @@ StrictFastMCP = importlib.import_module("strict_arguments").StrictFastMCP
 def build_server() -> FastMCP:
     """Build the profiler MCP server."""
     mcp = StrictFastMCP("vibesys-linux-cpu-profiler")
+    processes = OsProcesses()
 
     @mcp.tool()
     def capabilities() -> dict:
         """Report Linux perf availability and host profiling restrictions."""
-        capability = detect_linux_profiler()
+        capability = detect_linux_profiler(processes=processes)
         return {
             "selected": capability.tool.value,
             "perf_path": capability.perf_path,
@@ -57,7 +58,7 @@ def build_server() -> FastMCP:
             timeout=timeout,
             frequency=frequency,
             call_graph=call_graph,
-            effects=LinuxProfilerEffects(now=SystemClock().now),
+            effects=LinuxProfilerEffects(now=SystemClock().now, processes=processes),
         )
         return {
             "status": result.status,
