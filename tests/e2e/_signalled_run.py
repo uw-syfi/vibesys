@@ -15,9 +15,9 @@ from pathlib import Path
 from tests.support.docker_environment import host_container_backend
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.skeleton_strategy import SkeletonStrategy
-from tests.support.timing import real_timing
 from tests.vibesys.orchestration.plugin import capability_plugin
 
+from entrypoints.production import production_timing
 from entrypoints.run import supervise
 from headless import run as render_run
 from launch import LaunchSettings, default_runs
@@ -67,7 +67,7 @@ def main(project_root: Path, slurm_config: Path) -> None:
         LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_resumable_client,

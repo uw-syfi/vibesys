@@ -37,10 +37,10 @@ from tests.support.loop_spec import loop_spec
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.slurm_environment import with_fake_image_build
 from tests.support.task_project import write_task
-from tests.support.timing import real_timing
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
+from entrypoints.production import production_timing
 from launch import LaunchSettings
 from vibesys.api import (
     CoreEventType,
@@ -650,7 +650,7 @@ def run_request(  # noqa: PLR0913
             backend_factory=backend_factory or host_container_backend,
             stop_timer=stop_timer or FakeStopTimer(threads=OsThreads()),
             timing=(
-                real_timing()
+                production_timing()
                 if clock is None
                 else RunTiming(clock, PRODUCTION_LEASE_SECONDS, OsThreads())
             ),

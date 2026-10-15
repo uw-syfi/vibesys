@@ -20,15 +20,19 @@ from vs_sim.api import (
 if TYPE_CHECKING:
     from vibesys.api import Runs
 
-__all__ = ["production_runs", "production_web_discovery"]
+__all__ = ["production_runs", "production_timing", "production_web_discovery"]
+
+
+def production_timing() -> RunTiming:
+    """Wall time, real threads and the production lease: the one definition of a real run's timing."""
+    return RunTiming(SystemClock(), PRODUCTION_LEASE_SECONDS, OsThreads())
 
 
 def production_runs() -> Runs:
     """The in-process launcher over wall time, real threads, processes, sockets and the production lease."""
-    timing = RunTiming(SystemClock(), PRODUCTION_LEASE_SECONDS, OsThreads())
     return default_runs(
         LaunchSettings(
-            timing=timing,
+            timing=production_timing(),
             processes=OsProcesses(),
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),

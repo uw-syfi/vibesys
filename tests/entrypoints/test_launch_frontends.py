@@ -10,9 +10,9 @@ import pytest
 from tests.support.core_plugins import failing_plugin
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
-from tests.support.timing import real_timing
 
 from entrypoints.headless import print_uncaught
+from entrypoints.production import production_timing
 from entrypoints.run import run_headless
 from launch import LaunchSettings, default_runs
 from server.runtime import ServerRuntime
@@ -88,7 +88,7 @@ def _runs(clients: list[FakeAgentClient] | None = None, *, real_git: bool = Fals
         LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=agent_factory,
@@ -140,7 +140,7 @@ def _rejecting_runs(plan: Callable[[CoreRunContext], CorePlan]) -> Runs:
         LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_fake_agent,
@@ -212,7 +212,7 @@ def test_launch_rejects_invalid_builtin_options_before_execution(tmp_path: Path)
     async def execute() -> None:
         runs = default_runs(
             LaunchSettings(
-                timing=real_timing(),
+                timing=production_timing(),
                 processes=REAL_PROCESSES,
                 agent_client_factory=_fake_agent,
                 blocking=ThreadBlockingRunner(),

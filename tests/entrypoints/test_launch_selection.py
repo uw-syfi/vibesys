@@ -9,8 +9,8 @@ import pytest
 from tests.entrypoints.test_launch_frontends import _request
 from tests.support.core_plugins import failing_plugin
 from tests.support.real_git import REAL_GIT, REAL_PROCESSES
-from tests.support.timing import real_timing
 
+from entrypoints.production import production_timing
 from launch import (
     LaunchSettings,
     default_runs,
@@ -117,7 +117,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
     backend_factory = FalseyFakeBackendFactory()
     agents = FalseyFakeSessionAgents(agents_factory)
     settings = FalseyLaunchSettings(
-        timing=real_timing(),
+        timing=production_timing(),
         processes=REAL_PROCESSES,
         registry=registry,
         agent_client_factory=agents_factory,
@@ -193,7 +193,7 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
         LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=lambda **_kwargs: FakeAgentClient(

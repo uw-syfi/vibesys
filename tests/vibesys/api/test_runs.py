@@ -13,8 +13,8 @@ from tests.support.docker_environment import fake_docker_environment
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
-from tests.support.timing import real_timing
 
+from entrypoints.production import production_timing
 from entrypoints.run import supervise
 from launch import LaunchSettings, default_runs
 from vibesys.api import (
@@ -79,7 +79,7 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
         LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_fake_agent,
@@ -176,7 +176,7 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
         LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
             agent_client_factory=_fake_agent,

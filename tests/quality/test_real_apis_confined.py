@@ -36,6 +36,12 @@ reach.
   ``asyncio.open_connection``/``start_server`` family and the loop's ``create_connection``/
   ``create_server``/``sock_*``; ``signal`` also counts the loop's ``add_signal_handler``;
 * ``fs_sync``: ``os.fsync``/``fdatasync``/``sync`` and ``fcntl`` (locks);
+* tests only, ``real_impl``: a reference to a real implementation behind a ``vs_sim``
+  interface (``OsThreads``, ``SystemClock``, ``ThreadBlockingRunner``, ``Platform.real`` and
+  the rest of ``REAL_IMPLEMENTATIONS``), or to a shared helper that hands one out
+  (``production_timing``, ``production_runs``, ``REAL_PROCESSES``), counted where the test
+  uses it. ``tests/support`` is scanned like any test directory, so a helper cannot hide
+  a real construction from the tests that call it;
 * tests only: a bare ``.wait()``, ``.join()``, ``.get()`` or ``.communicate()`` with no
   argument (not awaited, and not handed to ``create_task``-style wrappers, which build a
   coroutine and park nothing), and a signal sent to the test's own process
@@ -192,6 +198,42 @@ REAL_NAMES: dict[str, str] = {
         "fcntl.ioctl",
     ),
 }
+# The real implementations behind the vs_sim interfaces, and the test helpers that hand them
+# out. Product code builds these at its entrypoints; a deterministic test takes the simulators
+# and Fakes, so each reference here (a construction, or a use of a shared real helper) counts
+# in the test that makes it, not only in the helper module that builds it.
+REAL_IMPLEMENTATIONS: dict[str, str] = _names(
+    "real_impl",
+    *(
+        f"vs_sim.api.{name}"
+        for name in (
+            "OsThreads",
+            "SystemClock",
+            "MonotonicClock",
+            "ThreadBlockingRunner",
+            "UnixNetwork",
+            "OsProcesses",
+            "LoopSignalSource",
+            "PidfdProcessSignaller",
+            "SubprocessLauncher",
+            "InheritedStdioLauncher",
+            "SubprocessCapturedTextProcessLauncher",
+            "SubprocessMergedOutputProcessLauncher",
+            "SubprocessPipedProcessLauncher",
+            "SubprocessProbe",
+            "SubprocessStreamingCommand",
+            "SystemRandomSource",
+            "UrllibLoopbackHttp",
+            "Platform.real",
+        )
+    ),
+    "entrypoints.production.production_runs",
+    "entrypoints.production.production_timing",
+    "entrypoints.production.production_web_discovery",
+    "tests.support.real_git.REAL_PROCESSES",
+    "tests.support.real_git.REAL_GIT",
+)
+REAL_NAMES.update(REAL_IMPLEMENTATIONS)
 # Method names that reach a real facility from any object (an event loop is the usual one).
 REAL_METHODS: dict[str, str] = {
     **_names("executor", "run_in_executor"),
@@ -211,8 +253,11 @@ REAL_METHODS: dict[str, str] = {
         "sock_sendall",
     ),
 }
-PRODUCT_RULES = tuple(sorted(set(REAL_NAMES.values()) | set(REAL_METHODS.values())))
-TEST_RULES = (*PRODUCT_RULES, "bare_wait", "self_signal")
+# Product code builds real implementations at its entrypoints, so only tests count them here.
+PRODUCT_RULES = tuple(
+    sorted((set(REAL_NAMES.values()) | set(REAL_METHODS.values())) - {"real_impl"})
+)
+TEST_RULES = (*PRODUCT_RULES, "real_impl", "bare_wait", "self_signal")
 WAIT_ATTRS = frozenset({"wait", "join", "get", "communicate"})
 # Calls whose coroutine argument runs on the loop, where it is cancellable.
 COROUTINE_WRAPPERS = frozenset(
@@ -223,7 +268,15 @@ SIGNAL_SENDERS = frozenset({"os.kill", "os.killpg", "signal.raise_signal", "sign
 Key = tuple[str, str]
 
 _SHARED_ROOTS = ("os", "sys", "asyncio")
-_OWN_ROOTS = sorted({key.split(".")[0] for key in REAL_NAMES} - set(_SHARED_ROOTS))
+_OWN_ROOTS = sorted(
+    {key.split(".")[0] for key in REAL_NAMES if key not in REAL_IMPLEMENTATIONS}
+    - set(_SHARED_ROOTS)
+)
+# The implementations' roots (vs_sim, tests) are imported everywhere, so the prefilter looks
+# for their names instead (``Platform`` stands for ``Platform.real``).
+_IMPLEMENTATION_NAMES = sorted(
+    {key.split(".")[-1] for key in REAL_IMPLEMENTATIONS} - {"real"} | {"Platform"}
+)
 _LEAVES = sorted({key.split(".")[-1] for key in REAL_NAMES if key.split(".")[0] in _SHARED_ROOTS})
 # A cheap superset of the sources `violations` can count, so most files are never parsed: an
 # import of a root only a real API uses, any use of a name inside a root the repository shares
@@ -233,6 +286,7 @@ _MAYBE = re.compile(
     rf"|\b(?:{'|'.join(_SHARED_ROOTS)})\.(?:{'|'.join(_LEAVES)})"
     rf"|\bfrom (?:{'|'.join(_SHARED_ROOTS)})\b|\bimport (?:{'|'.join(_SHARED_ROOTS)})\s+as\b"
     rf"|\.(?:{'|'.join(REAL_METHODS)})\b|\bfrom\s+\S+\s+import\s+\*"
+    rf"|\b(?:{'|'.join(_IMPLEMENTATION_NAMES)})\b"
     r"|raise_signal|pthread_kill|getpid|import_module|__import__"
     r"|getattr\(\s*[\w.]+\s*,\s*[\"']"
     r"|\.(?:wait|join|get|communicate)\(\s*\)"
@@ -553,6 +607,24 @@ PLANTED = {
         "threading",
     ),
     "__import__": ("def test_a():\n    __import__('socket')\n", "socket"),
+    "real threads": (
+        "from vs_sim.api import OsThreads\n\ndef test_a():\n    OsThreads()\n",
+        "real_impl",
+    ),
+    "real platform": (
+        "from vs_sim.api import Platform\n\ndef test_a():\n    Platform.real()\n",
+        "real_impl",
+    ),
+    "production timing": (
+        "from entrypoints.production import production_timing\n\n"
+        "def test_a():\n    production_timing()\n",
+        "real_impl",
+    ),
+    "shared real processes": (
+        "from tests.support.real_git import REAL_PROCESSES\n\n"
+        "def test_a(run):\n    run(REAL_PROCESSES)\n",
+        "real_impl",
+    ),
 }
 CLEAN = {
     "awaited wait": "async def test_a(event):\n    await event.wait()\n",
@@ -573,6 +645,10 @@ CLEAN = {
         "from vs_sim.api.testing import start_thread\n\ndef test_a():\n    start_thread(print)\n"
     ),
     "shadowing local": "def test_a(time):\n    time.sleep(1)\n",
+    "simulated platform": (
+        "from vs_sim.api import Platform\nfrom vs_sim.api.testing import Sim, SimThreads\n\n"
+        "def test_a(p: Platform):\n    Sim(seed=1).threads()\n    SimThreads()\n"
+    ),
 }
 
 
@@ -644,6 +720,7 @@ def test_the_prefilter_never_hides_a_countable_source() -> None:
 def test_product_rules_leave_out_test_only_rules() -> None:
     source, _ = PLANTED["bare wait"]
     assert not violations(source, PRODUCT_RULES)
+    assert not violations(PLANTED["real threads"][0], PRODUCT_RULES)
     assert violations(PLANTED["subprocess"][0], PRODUCT_RULES) == Counter(subprocess=1)
 
 

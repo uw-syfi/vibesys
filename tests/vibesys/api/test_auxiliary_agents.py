@@ -14,8 +14,8 @@ from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
-from tests.support.timing import real_timing
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, create_session, default_runs
 from launch.agents import BuiltInSessionAgents
 from launch.testing import FakeSessionAgents
@@ -134,7 +134,7 @@ def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
     return LaunchSettings(
         blocking=ThreadBlockingRunner(),
         network=UnixNetwork(),
-        timing=real_timing(),
+        timing=production_timing(),
         processes=REAL_PROCESSES,
         agents=FakeSessionAgents(OsThreads()) if request.param else None,
         backend_factory=host_container_backend,
@@ -174,7 +174,7 @@ def _session(tmp_path: Path, settings: LaunchSettings | None = None) -> _LocalRu
             registry=registry,
             settings=(
                 LaunchSettings(
-                    timing=real_timing(),
+                    timing=production_timing(),
                     processes=REAL_PROCESSES,
                     blocking=ThreadBlockingRunner(),
                     network=UnixNetwork(),
@@ -421,7 +421,7 @@ def test_independent_auxiliary_scope_survives_session_close(
         settings = LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=registry,
             backend_factory=host_container_backend,

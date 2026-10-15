@@ -21,8 +21,8 @@ from hypothesis import strategies as st
 from tests.support.docker_environment import host_container_backend
 from tests.support.real_git import REAL_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
-from tests.support.timing import real_timing
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, create_session, validate_run_request
 from vibesys.api import Config, ConfigurationError, OrchestrationDescriptor, RunRequest
 from vibesys.api.request import RunEnvironmentSpec, load_task
@@ -168,7 +168,7 @@ def test_session_construction_refuses_a_host_command_whose_interpreter_is_missin
             request,
             sink=record,
             settings=LaunchSettings(
-                timing=real_timing(),
+                timing=production_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),

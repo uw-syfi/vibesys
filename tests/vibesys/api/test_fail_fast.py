@@ -9,8 +9,8 @@ from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
-from tests.support.timing import real_timing
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, create_session
 from vibesys.api import (
     ComputeBackend,
@@ -88,7 +88,7 @@ def test_incompatible_profiler_is_rejected_at_session_construction(
             request,
             sink=record,
             settings=LaunchSettings(
-                timing=real_timing(),
+                timing=production_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),
@@ -147,7 +147,7 @@ def test_collection_in_repository_fails_before_session_start(
             request,
             sink=record,
             settings=LaunchSettings(
-                timing=real_timing(),
+                timing=production_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),

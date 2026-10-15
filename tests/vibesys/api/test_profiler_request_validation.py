@@ -11,8 +11,8 @@ from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
-from tests.support.timing import real_timing
 
+from entrypoints.production import production_timing
 from launch import LaunchSettings, create_session
 from vibesys.api import (
     AgentOutputChunkData,
@@ -179,7 +179,7 @@ def test_profile_workload_requirement_precedes_provisioning(
                 request,
                 sink=record,
                 settings=LaunchSettings(
-                    timing=real_timing(),
+                    timing=production_timing(),
                     processes=REAL_PROCESSES,
                     backend_factory=host_container_backend,
                     blocking=ThreadBlockingRunner(),
@@ -193,7 +193,7 @@ def test_profile_workload_requirement_precedes_provisioning(
             request,
             sink=record,
             settings=LaunchSettings(
-                timing=real_timing(),
+                timing=production_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),
@@ -227,7 +227,7 @@ def test_incompatible_profiler_is_a_typed_early_configuration_failure(
             request,
             sink=discard,
             settings=LaunchSettings(
-                timing=real_timing(),
+                timing=production_timing(),
                 processes=REAL_PROCESSES,
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),
@@ -258,7 +258,7 @@ def test_auto_native_preflight_failure_records_none_without_profiler_support(
         settings=LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=_profiler_registry(),
             backend_factory=backend,
@@ -313,7 +313,7 @@ def test_auto_native_preflight_failure_through_default_launch_wiring(
         settings=LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=_profiler_registry(),
             backend_factory=_RecordingBackendFactory(),
@@ -345,7 +345,7 @@ def test_explicit_native_preflight_failure_precedes_backend_and_project_effects(
         settings=LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             registry=_profiler_registry(),
             backend_factory=backend,

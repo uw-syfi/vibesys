@@ -50,10 +50,10 @@ from tests.support.loop_invariants import (
 )
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.slurm_environment import with_fake_image_build
-from tests.support.timing import real_timing
 
 import launch
 from entrypoints.cli import build_run_request, parse_cli_invocation
+from entrypoints.production import production_timing
 from entrypoints.run import supervise
 from headless import HeadlessRenderer
 from headless import run as render_run
@@ -808,7 +808,7 @@ def test_core_path_runs_the_fake_slurm_search(
         LaunchSettings(
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
-            timing=real_timing(),
+            timing=production_timing(),
             processes=REAL_PROCESSES,
             agent_client_factory=_core_agents,
             backend_factory=host_container_backend,
