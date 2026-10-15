@@ -1598,3 +1598,173 @@ def test_product_code_parses_json_only_through_vs_decode() -> None:
         "these modules no longer parse JSON directly; remove them from PARSE_EDGE_MODULES:\n"
         + "\n".join(stale)
     )
+
+
+# ---- real defaults: product code takes its system interfaces, it does not build them -----
+#
+# A component that falls back to a real implementation when a caller passes nothing
+# (``threads or OsThreads()``, ``field(default_factory=OsThreads)``, a ``Threads | None =
+# None`` parameter) runs on real threads in every test that forgets to pass one, and the
+# test still passes. So outside the entrypoints, product code takes ``Threads``,
+# ``Processes``, ``Clock`` and the other ``vs_sim.api`` interfaces as required arguments;
+# only an entrypoint builds the real implementations. ``REAL_DEFAULT_PENDING`` lists the
+# files not yet converted, each with the work that converts it. It may only shrink.
+
+ENTRYPOINT_PREFIXES = ("src/entrypoints/",)
+SYSTEM_INTERFACES = frozenset(
+    {
+        "BlockingRunner",
+        "Clock",
+        "MonotonicClock",
+        "Network",
+        "PipedProcessLauncher",
+        "Platform",
+        "ProcessLauncher",
+        "Processes",
+        "SignalSource",
+        "Threads",
+    }
+)
+REAL_IMPLEMENTATION_LEAVES = frozenset(
+    key.split(".")[-1] for key in REAL_IMPLEMENTATIONS if not key.endswith(".real")
+)
+
+_LANE_A = "lane A (Git, Slurm, Docker and the piped launcher, #2600 and #2607)"
+_LANE_B = "lane B (runtime, server and entrypoints)"
+_SANDBOX_WIRING = "the vs-sandbox GPU and SkyPilot wiring: thread Threads and Network down"
+REAL_DEFAULT_PENDING: dict[str, str] = {
+    "libs/vs-agent/src/vs_agent/images.py": _LANE_A,
+    "libs/vs-runtime/src/vs_runtime/_semantic_slurm_evaluation.py": _LANE_A,
+    "libs/vs-runtime/src/vs_runtime/api/slurm_evaluation_stack.py": _LANE_B,
+    "libs/vs-sandbox/src/vs_sandbox/accelerator_discovery.py": _SANDBOX_WIRING,
+    "libs/vs-sandbox/src/vs_sandbox/agent_gpu.py": _LANE_A,
+    "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py": _SANDBOX_WIRING,
+    "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": (
+        "the Fake takes its Threads from the test (75 call sites)"
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py": _SANDBOX_WIRING,
+    "libs/vs-sandbox/src/vs_sandbox/host_command_broker.py": (
+        f"{_LANE_B}: SlurmEnvironment has no Threads or Network to hand the broker"
+    ),
+    "libs/vs-sandbox/src/vs_sandbox/host_sandbox.py": _SANDBOX_WIRING,
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py": _SANDBOX_WIRING,
+    "libs/vs-sandbox/src/vs_sandbox/skypilot_runner.py": _SANDBOX_WIRING,
+    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": _LANE_A,
+    "libs/vs-slurm/src/vs_slurm/fake_cluster.py": "the Fake takes its Clock from the test",
+    "src/launch/__init__.py": f"{_LANE_A}: slurm_processes",
+    "src/vibesys/run/slurm_evaluation.py": _LANE_A,
+}
+
+
+def _leaf(expr: ast.expr) -> str | None:
+    if isinstance(expr, ast.Name):
+        return expr.id
+    if isinstance(expr, ast.Attribute):
+        return expr.attr
+    return None
+
+
+def _builds_real(expr: ast.expr) -> bool:
+    return isinstance(expr, ast.Call) and _leaf(expr.func) in REAL_IMPLEMENTATION_LEAVES
+
+
+def _optional_interface(annotation: ast.expr | None, default: ast.expr | None) -> bool:
+    """``x: Threads | None = None``: a system interface a caller may leave out."""
+    if not (isinstance(default, ast.Constant) and default.value is None):
+        return False
+    if not (isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr)):
+        return False
+    sides = (annotation.left, annotation.right)
+    return any(_leaf(side) in SYSTEM_INTERFACES for side in sides)
+
+
+def _parameter_defaults(arguments: ast.arguments) -> Iterable[tuple[ast.arg, ast.expr | None]]:
+    positional = [*arguments.posonlyargs, *arguments.args]
+    padding = [None] * (len(positional) - len(arguments.defaults))
+    yield from zip(positional, [*padding, *arguments.defaults], strict=True)
+    yield from zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
+
+
+def real_defaults(source: str) -> list[int]:
+    """The lines where *source* falls back to a real implementation or lets a caller omit one."""
+    lines: list[int] = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+            if _builds_real(node.values[-1]):
+                lines.append(node.lineno)
+        elif isinstance(node, ast.keyword) and node.arg == "default_factory":
+            if _leaf(node.value) in REAL_IMPLEMENTATION_LEAVES:
+                lines.append(node.value.lineno)
+        elif isinstance(node, ast.arguments):
+            lines.extend(
+                arg.lineno
+                for arg, default in _parameter_defaults(node)
+                if _optional_interface(arg.annotation, default)
+            )
+        elif isinstance(node, ast.ClassDef):
+            # A field a caller may omit; ``self.x: Clock | None = None`` in a method is state.
+            lines.extend(
+                stmt.lineno
+                for stmt in node.body
+                if isinstance(stmt, ast.AnnAssign)
+                and _optional_interface(stmt.annotation, stmt.value)
+            )
+    return sorted(lines)
+
+
+PLANTED_DEFAULTS = {
+    "or_default": "def f(threads=None):\n    return threads or OsThreads()\n",
+    "dotted_or_default": "def f(clock=None):\n    return clock or vs_sim.api.SystemClock()\n",
+    "default_factory": "@dataclass\nclass A:\n    threads: Threads = field(default_factory=OsThreads)\n",
+    "optional_param": "def f(*, threads: Threads | None = None) -> None: ...\n",
+    "optional_positional": "def f(clock: None | Clock = None) -> None: ...\n",
+    "optional_field": "@dataclass\nclass A:\n    processes: Processes | None = None\n",
+}
+ALLOWED_DEFAULTS = {
+    "required": "def f(*, threads: Threads) -> None: ...\n",
+    "or_fake": "def f(threads=None):\n    return threads or SimThreads()\n",
+    "optional_other": "def f(log: Logger | None = None) -> None: ...\n",
+    "optional_without_default": "def f(threads: Threads | None) -> None: ...\n",
+    "optional_state": "class A:\n    def f(self):\n        self._clock: Clock | None = None\n",
+    "built_and_passed": "def main() -> None:\n    run(threads=OsThreads())\n",
+}
+
+
+@pytest.mark.parametrize("case", sorted(PLANTED_DEFAULTS))
+def test_a_planted_real_default_is_found(case: str) -> None:
+    assert len(real_defaults(PLANTED_DEFAULTS[case])) == 1
+
+
+@pytest.mark.parametrize("case", sorted(ALLOWED_DEFAULTS))
+def test_a_required_or_fake_interface_is_not_a_real_default(case: str) -> None:
+    assert real_defaults(ALLOWED_DEFAULTS[case]) == []
+
+
+def test_every_pending_real_default_is_a_product_file_with_its_owner() -> None:
+    for relative, owner in REAL_DEFAULT_PENDING.items():
+        assert _is_product(relative), relative
+        assert not relative.startswith(ENTRYPOINT_PREFIXES), relative
+        assert (REPO / relative).is_file(), relative
+        assert owner.strip(), relative
+
+
+def test_product_code_outside_entrypoints_has_no_real_defaults() -> None:
+    found: dict[str, list[int]] = {}
+    for path in _python_files(PRODUCT_ROOTS):
+        relative = path.relative_to(REPO).as_posix()
+        if relative.startswith((*EXEMPT_PREFIXES, *ENTRYPOINT_PREFIXES)):
+            continue
+        if lines := real_defaults(path.read_text(encoding="utf-8")):
+            found[relative] = lines
+    stale = sorted(set(REAL_DEFAULT_PENDING) - set(found))
+    assert not stale, (
+        f"these files no longer have a real default; remove them from REAL_DEFAULT_PENDING: {stale}"
+    )
+    new = {
+        relative: lines for relative, lines in found.items() if relative not in REAL_DEFAULT_PENDING
+    }
+    assert not new, (
+        "product code takes its Threads, Processes, Clock and other vs_sim.api interfaces as "
+        "required arguments; only an entrypoint (src/entrypoints) builds the real ones:\n"
+        + "\n".join(f"{relative}: lines {lines}" for relative, lines in sorted(new.items()))
+    )
