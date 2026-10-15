@@ -57,7 +57,7 @@ def _run_porcupine_checker(history):
         history_path = Path(tmp.name)
     try:
         proc = subprocess.run(
-            ["go", "run", ".", "--history", str(history_path)],
+            ["go", "run", "-mod=vendor", ".", "--history", str(history_path)],
             cwd=checker_dir,
             capture_output=True,
             text=True,

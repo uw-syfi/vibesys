@@ -19,6 +19,8 @@ Notes:
 - Omit `--use-reference` to check a candidate `main.py` exposing `VibeSysKVStore`.
 - The checker records a concurrent operation history before validating linearizability.
 - Linearizability is checked with [Porcupine](https://github.com/anishathalye/porcupine).
+- The trusted checker vendors its pinned Go dependency and runs with `-mod=vendor`, so
+  correctness checks never download modules from the network.
 - Go must be installed locally to run the checker.
 
 ## Running the benchmark

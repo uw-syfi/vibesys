@@ -107,3 +107,12 @@ jobs = ["evaluators", "examples", "python"]
 native_languages = ["go"]
 native_targets = ["resources/evaluators/queue"]
 pnpm_packages = []
+
+[[cases]]
+name = "native evaluator tests select the examples job"
+paths = ["tests/e2e/test_kvstore_default_gate_e2e.py"]
+jobs = ["examples", "python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
