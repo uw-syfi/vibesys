@@ -27,6 +27,7 @@ from vibesys.run.logs import (
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationRequest,
+    EvaluationState,
     EvaluationStep,
     EvidenceFingerprints,
     EvidenceKind,
@@ -35,6 +36,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import InMemoryEvaluationNamespace
 from vs_logs.api import MemoryLogStore, StreamOutcome
+from vs_logs.api.testing import MemoryVolume, no_warning
 from vs_logs.read import Tail, reader_of
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -117,7 +119,7 @@ class _Hooks:
 
 
 def _store() -> MemoryLogStore[LogOwner]:
-    return MemoryLogStore(LOG_OWNER, threads=SimThreads())
+    return MemoryLogStore(LOG_OWNER, threads=SimThreads(), warn=no_warning)
 
 
 def _read(reader: LogReader[LogOwner], info: StreamInfo[LogOwner]) -> bytes:
@@ -230,6 +232,36 @@ async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires
         (GateStage(execution_id=_HANDLE, gate=GateKind.BENCHMARK, attempt=1), StreamOutcome.ENDED),
     ]
     assert [_read(reader, info) for info in streams] == [b"ok", BENCHMARK_OUTPUT.encode()]
+
+
+@pytest.mark.asyncio
+async def test_a_slurm_stage_whose_log_disk_is_full_still_measures(tmp_path: Path) -> None:
+    """Copying a stage's output into a full store loses log bytes, never the measurement."""
+    volume = MemoryVolume()
+    warnings: list[str] = []
+    store = MemoryLogStore(LOG_OWNER, threads=SimThreads(), warn=warnings.append, volume=volume)
+    tries = TryHandles()
+    stack = await build_stack(tmp_path, stage_output=tries.stage_output(stage_output_opener(store)))
+    executor = RetryingEvaluationExecutor(
+        stack.executor, _RETRIES, InMemoryEvaluationNamespace(), tries=tries
+    )
+    volume.capacity = 200  # the first stage's index record fits, and little else
+
+    await executor.submit(_request(stack.snapshot, "official", _STAGES), handle_id=_HANDLE)
+    ended = await yield_until(
+        lambda: executor.poll(_HANDLE),
+        lambda polled: polled.phase is PollPhase.ENDED,
+        "the measurement to end",
+    )
+    await executor.close()
+
+    assert ended.terminal is not None
+    assert ended.terminal.state is EvaluationState.SUCCEEDED
+    reader = reader_of(store, LOG_OWNER)
+    first = reader.list_streams()[0]
+    assert first.owner == GateStage(execution_id=_HANDLE, gate=GateKind.ACCURACY, attempt=1)
+    assert b"ok".startswith(_read(reader, first))
+    assert warnings
 
 
 @pytest.mark.asyncio

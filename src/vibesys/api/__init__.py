@@ -90,11 +90,9 @@ from vibesys.events import (
     WorkspaceSnapshotData,
 )
 from vibesys.log_owners import (
-    AgentInvocation,
     GateStage,
     LogOwner,
     RunNarration,
-    SlurmJob,
     StartupStep,
     ToolBuild,
 )
@@ -110,7 +108,6 @@ __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
     "AgentExecutionStartedData",
-    "AgentInvocation",
     "AgentOutputChannel",
     "AgentOutputChunkData",
     "AgentSpec",
@@ -177,7 +174,6 @@ __all__ = [
     "RunStore",
     "RunView",
     "Runs",
-    "SlurmJob",
     "StartupStep",
     "TodoItemData",
     "TodoUpdateData",

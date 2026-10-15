@@ -17,7 +17,8 @@ stream a :data:`SlurmStageOutputOpener` opens for each stage:
 Every byte reaches a stream once and in order. A file that shrank or was replaced is
 reported (logged, and its stream ends failed) and read no further, so no byte is repeated.
 Reading is advisory: a lost remote read is retried at the next poll and never fails the
-evaluation.
+evaluation. Writing needs no guard: an ``OutputSink`` never raises (a log stream that
+cannot write degrades instead), and neither does exiting an opened stream.
 """
 
 from __future__ import annotations

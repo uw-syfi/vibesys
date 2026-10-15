@@ -25,8 +25,6 @@ const STREAMS: readonly LogStream[] = [
     'failed',
   ),
   stream('000004', {kind: 'tool_build', name: 'nsys'}, 'abandoned'),
-  stream('000005', {kind: 'agent_invocation', invocation_id: 'inv-1'}, 'ended'),
-  stream('000006', {kind: 'slurm_job', execution_id: 'exec-7', job_id: '4242'}, null),
   stream('000007', {kind: 'from_a_newer_writer'}, null),
 ];
 
@@ -38,6 +36,7 @@ const OUTCOMES: readonly LogListOutcome[] = [
   {ok: true, instanceId: TARGET.instanceId, streams: []},
   {ok: false, failure: {code: 'transport', message: 'dropped'}},
   {ok: false, failure: {code: 'feature_not_negotiated', message: 'no logs'}},
+  {ok: false, failure: {code: 'log_store_corrupt', message: 'unreadable index'}},
 ];
 
 describe('inspector log streams', () => {
@@ -52,9 +51,7 @@ describe('inspector log streams', () => {
       ['Run narration', ['Run narration (running)']],
       ['Startup', ['Startup / building image (ended)']],
       ['Gates', ['Gate accuracy (attempt 2), exec-7 (failed)']],
-      ['Agent invocations', ['Agent invocation inv-1 (ended)']],
       ['Tool builds', ['Tool build / nsys (abandoned)']],
-      ['Slurm jobs', ['Slurm job 4242 (running)']],
       ['Other', ['from a newer writer (running)']],
     ]);
     expect(
@@ -142,6 +139,25 @@ describe('inspectorLogsMachine', () => {
     expect(inspectorLogsNotice(view)).toContain('does not serve logs');
     expect(inspectorLogsNotice({...view, listing: 'loaded', listFailure: null})).toBe(
       'This run recorded no logs.',
+    );
+  });
+
+  test('the notice says a failed listing retries only when a retry can help', () => {
+    const view = {
+      open: true,
+      listing: 'failed' as const,
+      listFailure: {code: 'transport' as const, message: 'dropped'},
+      groups: [],
+      shown: null,
+      lines: [],
+      earlier: false,
+      complete: false,
+      readFailure: null,
+    };
+    expect(inspectorLogsNotice(view)).toBe("Could not list this run's logs (dropped); retrying.");
+    const corrupt = {code: 'log_store_corrupt' as const, message: 'unreadable index'};
+    expect(inspectorLogsNotice({...view, listFailure: corrupt})).toBe(
+      "Could not list this run's logs (unreadable index).",
     );
   });
 });

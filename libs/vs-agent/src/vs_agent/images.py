@@ -523,9 +523,11 @@ class DockerBuildRunner(Protocol):
 class _GuardedSink:
     """Forward drained chunks to the caller's sink, keeping its first failure for later.
 
-    A drain keeps reading after the sink fails: a drain that stopped would leave the
-    child blocked on a full pipe until its timeout. The failure is raised once both
-    pipes have drained, and the sink receives nothing after it.
+    By the ``OutputSink`` contract a sink never raises (a log stream degrades instead),
+    so a failure here is a programming error in the sink, which aborts the build. The
+    guard only decides how: a drain keeps reading after the sink fails, since a drain
+    that stopped would leave the child blocked on a full pipe until its timeout, and the
+    failure is raised once both pipes have drained. The sink receives nothing after it.
     """
 
     def __init__(self, sink: OutputSink, errors: queue.SimpleQueue[Exception]) -> None:

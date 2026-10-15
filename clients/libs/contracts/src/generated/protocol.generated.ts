@@ -778,7 +778,7 @@ export type RequestId19 = string | null;
 export type ClientId19 = string;
 export type Code2 = string;
 export type Message1 = string;
-export type LogOwner = StartupStep | GateStage | AgentInvocation | ToolBuild | SlurmJob | RunNarration;
+export type LogOwner = StartupStep | GateStage | ToolBuild | RunNarration;
 export type Kind44 = "startup_step";
 /**
  * Where an opening environment is, in the order it gets there.
@@ -787,14 +787,9 @@ export type EnvironmentStartupStage = "building_image" | "starting_container";
 export type Kind45 = "gate_stage";
 export type ExecutionId2 = string;
 export type Attempt4 = number;
-export type Kind46 = "agent_invocation";
-export type InvocationId2 = string;
-export type Kind47 = "tool_build";
+export type Kind46 = "tool_build";
 export type Name = string;
-export type Kind48 = "slurm_job";
-export type ExecutionId3 = string;
-export type JobId = string;
-export type Kind49 = "run_narration";
+export type Kind47 = "run_narration";
 export type At = string;
 /**
  * A line's severity: the standard ``logging`` level at or below the record's.
@@ -2031,32 +2026,17 @@ export interface GateStage {
   attempt: Attempt4;
 }
 /**
- * One agent invocation, as the invocation events identify it.
- */
-export interface AgentInvocation {
-  kind: Kind46;
-  invocation_id: InvocationId2;
-}
-/**
  * Building or pulling a tool the run needs, such as a profiler.
  */
 export interface ToolBuild {
-  kind: Kind47;
+  kind: Kind46;
   name: Name;
-}
-/**
- * A Slurm job an execution submitted; its log is the job's own output file.
- */
-export interface SlurmJob {
-  kind: Kind48;
-  execution_id: ExecutionId3;
-  job_id: JobId;
 }
 /**
  * The run's own narration for humans: what it is doing, warnings, tracebacks.
  */
 export interface RunNarration {
-  kind: Kind49;
+  kind: Kind47;
 }
 /**
  * One narration record, as one JSON line of a narration stream.

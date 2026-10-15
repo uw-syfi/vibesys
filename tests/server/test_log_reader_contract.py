@@ -15,17 +15,31 @@ import pytest
 from pydantic import JsonValue, TypeAdapter
 from tests.server.host_helper_support import FakeLogReader
 
-from server.host_api import LogOffset, LogPipe, LogPipeSpan, LogStreamOutcome, LogTail
+from server.host_api import (
+    HelperError,
+    HelperErrorCode,
+    LogOffset,
+    LogPipe,
+    LogPipeSpan,
+    LogsListRequest,
+    LogsReadRequest,
+    LogStreamOutcome,
+    LogTail,
+)
 from server.host_helper_logs import (
+    HelperLogs,
     LogReader,
     RunLocation,
     UnknownInstanceError,
     UnknownLogStreamError,
+    list_logs,
+    read_log,
 )
 from server.host_helper_os import StoreLogReader
 from vs_logs.api import FileLogStore, LogLimits, LogStream, StreamOutcome
+from vs_logs.api.testing import no_warning
 from vs_sim.api import OutputStream
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -176,6 +190,7 @@ class TestStoreLogReader(LogReaderContract):
             directory,
             TypeAdapter(dict[str, JsonValue]),
             threads=SimThreads(schedule_seed=0),
+            warn=no_warning,
             limits=limits,
         )
         location = RunLocation(project_root="/project", run_id="run-1")
@@ -198,3 +213,34 @@ class TestStoreLogReader(LogReaderContract):
             ),
             close=lambda stream_id, outcome: streams[stream_id].close(StreamOutcome(outcome.value)),
         )
+
+
+def test_a_store_whose_index_does_not_decode_is_a_typed_error_not_an_internal_one(
+    tmp_path: Path,
+) -> None:
+    """A corrupt store answers with an error the client does not retry, on list and read."""
+    (tmp_path / "index.jsonl").write_bytes(b'{"kind":"opened","stream_id":"000001"\n')
+    location = RunLocation(project_root="/project", run_id="run-1")
+    reader = StoreLogReader(
+        lambda instance_id: location if instance_id == _INSTANCE else None, lambda _: tmp_path
+    )
+    clock = ManualClock()
+    logs = HelperLogs(reader, clock)
+
+    listed = list_logs(LogsListRequest(request_id="l", deadline_ms=1, instance_id=_INSTANCE), logs)
+    read = read_log(
+        LogsReadRequest(
+            request_id="r",
+            deadline_ms=10_000,
+            instance_id=_INSTANCE,
+            stream_id="000001",
+            start=LogOffset(offset=0),
+            max_bytes=64,
+        ),
+        logs,
+        SimThreads().event(),  # never set: a corrupt store answers before any wait
+    )
+
+    for reply in (listed, read):
+        assert isinstance(reply, HelperError), reply
+        assert reply.code is HelperErrorCode.LOG_STORE_CORRUPT
