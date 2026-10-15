@@ -1219,13 +1219,17 @@ class WebSocketGateway:
             # fields and would retry the same broken replay as a capability
             # fallback. Match the Unix transport: acknowledge first, then let
             # the subscription boundary report the failure in band.
+            # Snapshot once through the blocking-work owner: its sequence and
+            # run identity are one journal generation, and folding it cannot
+            # occupy the gateway loop while the subscription is degraded.
+            snapshot = await _run_owned_blocking(self._request_runner, self.api.snapshot)
             await self._send(
                 websocket,
                 SubscribedMessage(
                     request_id=request.request_id,
                     client_id=request.client_id,
-                    run_id=self.api.snapshot().run_id,
-                    latest_sequence=self.api.latest_sequence,
+                    run_id=snapshot.run_id,
+                    latest_sequence=snapshot.sequence,
                 ).model_dump_json(),
             )
             raise

@@ -210,12 +210,14 @@ class _ClientSession:
             # subscribe first; the failure then reaches the client as a
             # stream error, exactly as it did when the replay was read after
             # the handshake.
+            # Keep both fields in the same event-store generation.
+            snapshot = api.snapshot()
             self._write_message(
                 SubscribedMessage(
                     request_id=request.request_id,
                     client_id=request.client_id,
-                    run_id=api.snapshot().run_id,
-                    latest_sequence=api.latest_sequence,
+                    run_id=snapshot.run_id,
+                    latest_sequence=snapshot.sequence,
                 )
             )
             raise
