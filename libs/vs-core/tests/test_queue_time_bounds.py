@@ -143,16 +143,137 @@ def _apply(run: Run, step: Step, *, dispatch_polls: bool) -> None:
         assert notice.queued_s == after.queue_credit
 
 
-def _check_timeouts(run: Run) -> None:
-    for wait in run.world.state.evaluation.continuations:
+type Job = core.OwnedJob | core.RegisteredOwnedJob
+BUDGET = LIMITS.queue_wait_budget
+
+
+def _settled(job: Job) -> bool:
+    return job.terminal and job.status is not core.ObservationStatus.PENDING
+
+
+def _bound(job: Job, stated: float, run_deadline: float) -> tuple[float, core.WaitEnd]:
+    """The oracle: when work on ``job`` with the stated limit ``stated`` ends, and why.
+
+    The limit plus the job's credit. A job whose latest fact is pending (and came before
+    that) may still earn the cap, or runs out of queue budget first, whichever comes first
+    (the limit on a tie). A limit carried past the run deadline ends with the run.
+    """
+    at, by = stated + job.queue_credit, core.WaitEnd.LIMIT
+    if _pending(job) and job.observation is not None and at > job.observation.observed_at:
+        budget_at = job.observation.observed_at + BUDGET - job.queue_credit
+        at, by = (
+            (at + CAP, core.WaitEnd.LIMIT)
+            if at + CAP <= budget_at
+            else (budget_at, core.WaitEnd.QUEUE_BUDGET)
+        )
+    ceiling = max(run_deadline, stated)
+    return (at, by) if at <= ceiling else (ceiling, core.WaitEnd.RUN_END)
+
+
+def _wait_bounds(
+    state: core.CoreState, wait: core.Continuation, stated: float
+) -> dict[core.ResourceId, tuple[float, core.WaitEnd]]:
+    """The oracle bound of each job ``wait`` still waits on: unsettled, budget not spent."""
+    spent = {item.resource_id for item in wait.spent}
+    return {
+        resource: _bound(_job(state, resource), stated, state.run.deadline_at)
+        for resource in wait.jobs
+        if not _settled(_job(state, resource)) and resource not in spent
+    }
+
+
+def _check_waits(run: Run, before: core.CoreState) -> None:
+    """Every wait ended, and every job it ended alone, exactly at its derived bound.
+
+    A job's bound is derived from its facts before the step or after it (a new fact can
+    move it into the past); a wait still open after a step has no job whose bound passed.
+    """
+    # Core's clock: a step the executor never reports (a fact after a job's end) moves nothing.
+    state = run.world.state
+    now = state.run.now_at
+    earlier = {row.continuation_id: row for row in before.evaluation.continuations}
+    for wait in state.evaluation.continuations:
+        previous = earlier[wait.continuation_id]
+        if previous.timeout is not None:
+            assert wait.timeout == previous.timeout
+            continue
+        # The oracle's bounds, from the job facts before and after the step.
+        derived = (
+            _wait_bounds(before, previous, run.world.stated_at),
+            _wait_bounds(state, previous, run.world.stated_at),
+        )
+        for item in wait.spent[len(previous.spent) :]:
+            # A job ended alone exactly when its own queue budget ran out.
+            assert item.by is core.WaitEnd.QUEUE_BUDGET
+            assert any(
+                bounds.get(item.resource_id) == (item.at, core.WaitEnd.QUEUE_BUDGET)
+                for bounds in derived
+            )
+            assert item.at <= now
         timeout = wait.timeout
         if timeout is None:
+            assert all(
+                at > now for at, _ in _wait_bounds(state, wait, run.world.stated_at).values()
+            )
             continue
-        assert timeout.by in core.WaitEnd
-        assert timeout.deadline_at <= timeout.reached_at
-        if timeout.by is not core.WaitEnd.QUEUE_BUDGET:
-            # A wait never ends before its stated limit unless its queue budget is spent.
+        assert timeout.reached_at == now
+        spent = {item.resource_id: item for item in wait.spent}
+        ended = (timeout.deadline_at, timeout.by)
+        if ended[1] is core.WaitEnd.QUEUE_BUDGET:
+            # Every other job settled after the last budget ran out: the wait ended then.
+            assert spent
+            assert timeout.deadline_at == max(item.at for item in spent.values())
+            assert all(_settled(_job(state, r)) or r in spent for r in wait.jobs)
+        else:
+            # The earliest bound of a job it still waited on ended the whole wait.
+            assert any(
+                bounds and min(bounds.values()) == ended
+                for bounds in (
+                    {r: b for r, b in d.items() if b[1] is not core.WaitEnd.QUEUE_BUDGET}
+                    for d in derived
+                )
+            )
             assert timeout.deadline_at >= run.world.stated_at
+        assert timeout.deadline_at <= now
+        # The wait froze on the facts before the step's event or after it.
+        assert tuple(item.resource_id for item in timeout.unfinished) in {
+            tuple(r for r in wait.jobs if r in spent or not _settled(_job(facts, r)))
+            for facts in (before, state)
+        }
+        for item in timeout.unfinished:
+            assert item == spent.get(item.resource_id, item)
+            if item.resource_id not in spent:
+                assert (item.at, item.by) == ended
+
+
+def _check_record(run: Run, before: core.CoreState, heard: list[core.StrategyEvent]) -> None:
+    """A decision's record ends exactly at its derived bound, and only by a limit."""
+    if run.world.decision is None:
+        return
+    (job,) = run.world.jobs
+    assert job.submit is not None
+    assert job.submit.request_id is not None
+    for failure in heard:
+        if not isinstance(failure, core.Failed) or failure.decision != run.world.decision:
+            continue
+        # No fact of a poll or a job's end ever reaches the decision as a failure.
+        assert failure.reason in ENDS_OF_A_DECISION_WAIT
+        assert failure.limit_at is not None
+        record = run.world.state.records.record(job.submit.request_id)
+        assert record is not None
+        derived = {
+            _bound(_job(state, job.resource_id), record.until.at, state.run.deadline_at)
+            for state in (before, run.world.state)
+        }
+        by = (
+            core.WaitEnd.QUEUE_BUDGET
+            if failure.reason is core.FailureReason.QUEUE_BUDGET_SPENT
+            else core.WaitEnd.LIMIT
+        )
+        assert (failure.limit_at, by) in derived or (
+            by is core.WaitEnd.LIMIT and (failure.limit_at, core.WaitEnd.RUN_END) in derived
+        )
+        assert failure.limit_at <= run.world.state.run.now_at
 
 
 def _decision_failures(run: Run) -> list[core.Failed]:
@@ -188,21 +309,24 @@ def test_every_wait_on_a_job_ends_once_by_a_bound_derived_from_its_queue_time(
 ) -> None:
     run = Run(BUILDERS[source](LIMITS))
     for step in history:
+        before, heard = run.world.state, len(run.events)
         _apply(run, step, dispatch_polls=dispatch_polls)
-        _check_timeouts(run)
+        if run.world.waits:
+            _check_waits(run, before)
+        _check_record(run, before, run.events[heard:])
     # The run's end bounds everything: past it, every wait and record has ended.
+    before, heard = run.world.state, len(run.events)
     run.now = max(run.now, run.world.state.run.deadline_at) + 1.0
     run.feed(core.ClockAdvanced(now_at=run.now), dispatch_polls=False)
-    _check_timeouts(run)
+    if run.world.waits:
+        _check_waits(run, before)
+    _check_record(run, before, run.events[heard:])
     assert _work_ended(run)
     resumed = [e for e in run.events if isinstance(e, core.ResumeAuthorized)]
     assert len({e.continuation_id for e in resumed}) == len(resumed)
     if run.world.decision is not None:
-        failures = _decision_failures(run)
-        # A strategy decision hears at most one failure, and no poll's failure ever reaches it.
-        assert len(failures) <= 1
-        if not run.ended:
-            assert {failure.reason for failure in failures} <= ENDS_OF_A_DECISION_WAIT
+        # A strategy decision hears at most one failure.
+        assert len(_decision_failures(run)) <= 1
 
 
 def _queue(source: Source, until: float, gap: float) -> Run:
