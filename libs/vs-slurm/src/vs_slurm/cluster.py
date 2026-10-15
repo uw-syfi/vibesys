@@ -32,6 +32,7 @@ from .cluster_types import (
     collection_problem,
     validate_operation_id,
 )
+from .errors import SlurmError, SlurmSubmissionRejectedError
 from .remote_operations import RemoteOperationError, RemoteOperationEvidence
 from .runner import (
     _BATCH_RESULT_ROOT,
@@ -39,13 +40,11 @@ from .runner import (
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
-    SlurmError,
     SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobRunner,
     SlurmJobStatus,
     SlurmPhase,
-    SlurmSubmissionRejectedError,
     _validate_batch_request,
     _validate_request,
 )
