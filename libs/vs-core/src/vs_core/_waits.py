@@ -58,6 +58,9 @@ from .types.common import (
 )
 from .types.evaluation import ContinuationPhase, JobWaitLapsed, OwnedJob, RegisteredOwnedJob
 from .types.records import (
+    BlockRequest,
+    CancelOwnedResource,
+    InspectRequest,
     RecoveryCheckWaitLapsed,
     RecoveryPhase,
     RequestPhase,
@@ -360,9 +363,40 @@ def _session_waits_of(sessions: SessionsState) -> dict[WaitSubject, WaitOn]:
     }
 
 
-def _open(records: RecordsState, request_id: RequestId) -> bool:
+def _open(
+    records: RecordsState, request_id: RequestId, seen: frozenset[RequestId] = frozenset()
+) -> bool:
+    """Whether something of this epoch can still end the request.
+
+    A request still waiting on its executor can, unless a dead host dispatched it: no call of
+    this epoch is behind it, so only a command of this epoch about it (an inspection, a
+    re-send it proves safe, a cancel or a block, named in ``addressed_by``) can end it. A
+    reconciliation command that ended still carries the commands sent about it (an
+    inspection of a cancel), and a wait on the command follows them to the record it
+    addresses. A canonical record that ended has nothing left to wait for.
+    """
     record = records.record(request_id)
-    return record is not None and record_waits(record.phase)
+    if record is None or request_id in seen:
+        return False
+    waiting = record_waits(record.phase)
+    if waiting and not _dispatched_by_dead_host(records, record):
+        return True
+    if not waiting and not _reconciliation_command(record):
+        return False
+    return any(_open(records, command, seen | {request_id}) for command in record.addressed_by)
+
+
+def _dispatched_by_dead_host(records: RecordsState, record: RequestRecord) -> bool:
+    """Whether a host of an earlier epoch made the request's latest dispatch."""
+    return (
+        record.phase != RequestPhase.PREPARED
+        and record.dispatched_in is not None
+        and record.dispatched_in < records.recovery.epoch
+    )
+
+
+def _reconciliation_command(record: RequestRecord) -> bool:
+    return isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
 
 
 def _request_open(core: CoreState, request_id: RequestId) -> bool:

@@ -243,7 +243,9 @@ def _dispatched(
             pass
         case _:
             raise ContractError(("phase",), f"{record.phase.value} request cannot be dispatched")
-    updated = record.model_copy(update={"phase": RequestPhase.DISPATCHED})
+    updated = record.model_copy(
+        update={"phase": RequestPhase.DISPATCHED, "dispatched_in": state.recovery.epoch}
+    )
     if record.limit_from_dispatch is not None and record.dispatched_at is None:
         updated = updated.model_copy(
             update={

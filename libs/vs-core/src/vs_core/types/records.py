@@ -188,6 +188,12 @@ class RequestRecord(OutcomeValue):
     """
     dispatched_at: Seconds | None = None
     """When the shell first dispatched a request whose limit counts from then, else None."""
+    dispatched_in: Count | None = None
+    """The host epoch whose dispatch is the request's latest, else None (never dispatched).
+
+    A request a dead host dispatched has no executor call of this epoch behind it: only an
+    inspection or a re-send of this epoch can still answer it (``_waits._open``).
+    """
     addressed_by: tuple[RequestId, ...]
     """The reconciliation commands (inspections, cancels, blocks) sent about this record.
 

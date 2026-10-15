@@ -899,24 +899,36 @@ def _finish(
     return AreaChange(state=state.model_copy(update={"recovery": barrier}), signals=signals)
 
 
+def _restart_command(
+    state: RecordsState, context: RecordsContext, event: RecoveryStarted, record: RequestRecord
+) -> tuple[RecordsState, tuple[Outbound, ...]]:
+    """What a new epoch does with an earlier epoch's open inspection, cancel or block."""
+    if isinstance(record.request, InspectRequest) or record.phase == RequestPhase.PREPARED:
+        return _requeue_lost_inspection(state, context, event, record), ()
+    if record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING):
+        return state, (_probe(_inspection(record, event.epoch), context),)
+    return state, ()
+
+
 def _requeue_lost_inspection(
     state: RecordsState, context: RecordsContext, event: RecoveryStarted, record: RequestRecord
 ) -> RecordsState:
-    """An earlier epoch's inspection that never reported is issued again, not left open.
+    """An earlier epoch's inspection that never reported, or command never sent, goes out.
 
-    Its target is inspected afresh by this epoch, but the old request would stay in flight
-    for good and hold the run open. An inspection only reads, so issuing it again is safe.
-    It goes out with a fresh reconciliation bound from the restart, as this epoch's own
-    inspections do, whether it was in flight or only prepared when the host died: no deadline
-    ever ends an inspection, so one issued with a bound that passed while the host was down
-    would be dropped by the shell unanswered and hold the run open just the same.
+    Its target is inspected afresh by this epoch, but the old request would stay open until
+    its bound and hold its waiters on nothing. An inspection only reads, so issuing it again
+    is safe; a cancel or a block still PREPARED never went out, so sending it is its first
+    send. A cancel or a block a dead host dispatched is not sent again: it closes only by
+    an inspection of it (``_start``), whose proof decides a re-send. It goes out with a
+    fresh reconciliation bound from the restart, as this epoch's own inspections do: one
+    issued with a bound that passed while the host was down would lapse unanswered.
     """
-    if not (
-        isinstance(record.request, InspectRequest)
-        and record.phase
-        in (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
-        and record.observation is None
-    ):
+    open_phases = (
+        (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+        if isinstance(record.request, InspectRequest)
+        else (RequestPhase.PREPARED,)
+    )
+    if not (record.phase in open_phases and record.observation is None):
         return state
     bound = max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound
     requeued = record.model_copy(
@@ -1008,7 +1020,8 @@ def _start(
                 for child in updated.children
             )
         ):
-            updated = _requeue_lost_inspection(updated, context, event, record)
+            updated, sent = _restart_command(updated, context, event, record)
+            requests.extend(sent)
             continue
         resolution = _aggregate_resolution(record, context, updated)
         inspection = (

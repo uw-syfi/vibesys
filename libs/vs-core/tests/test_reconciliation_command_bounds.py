@@ -13,7 +13,9 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 
+from .test_proof_ownership_regressions import stopped
 from .test_recovery_successor_integrity import persisted_command, state_with_root
+from .test_silent_executor_deadline import _silent
 
 _SESSION = core.EnsureSession(
     request_id=core.RequestId(root="root"),
@@ -128,3 +130,87 @@ def test_an_open_reconciliation_command_ends_at_its_limit_and_not_before(
 
     assert phase_at(early) == phase
     assert phase_at(50.0 + late) == core.RequestPhase.BLOCKED
+
+
+def _closing_with(*commands: core.RequestRecord) -> tuple[core.CoreState, core.RequestRecord]:
+    """A closing run in epoch 1 holding a blocked record that names *commands*."""
+    state = _silent(core.RequestPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
+    record = state.records.records[0]
+    assert record.observation is not None
+    held = record.model_copy(
+        update={
+            "observation": record.observation.model_copy(
+                update={"accepted": True, "resource_id": core.ResourceId(root="lease")}
+            ),
+            "addressed_by": tuple(
+                command.request_id
+                for command in commands
+                if getattr(command.request, "target", None) == record.request_id
+            ),
+        }
+    )
+    records = state.records.model_copy(update={"records": (held, *commands)})
+    return stopped(state.model_copy(update={"records": records})), held
+
+
+def _sent(
+    kind: str, target: core.RequestRecord, phase: core.RequestPhase, epoch: int
+) -> core.RequestRecord:
+    request = _command(kind, target).model_copy(
+        update={"request_id": core.RequestId(root=f"{kind}-of-{target.request_id.root}")}
+    )
+    return target.model_copy(
+        update={
+            "request_id": request.request_id,
+            "request": request,
+            "payload_digest": request.request_id.root,
+            "phase": phase,
+            "observation": None,
+            "lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE,
+            "until": core.Until(at=10**6),
+            "addressed_by": (),
+            "dispatched_in": epoch,
+        }
+    )
+
+
+def _held_wait_live(state: core.CoreState, held: core.RequestRecord) -> bool:
+    [wait] = [
+        wait
+        for wait in core.waits(state)
+        if wait.waiter == core.WaitKind.BLOCKED_RECORD and held.request_id.root in wait.subject
+    ]
+    return wait.producer is not None
+
+
+@given(
+    kind=st.sampled_from(["inspect", "cancel", "block"]),
+    phase=st.sampled_from([core.RequestPhase.DISPATCHED, core.RequestPhase.RECONCILING]),
+    epoch=st.integers(min_value=0, max_value=1),
+)
+def test_a_command_a_dead_host_dispatched_is_not_live_by_itself(
+    kind: str, phase: core.RequestPhase, epoch: int
+) -> None:
+    """REVIEW-8 P2-2: a dead epoch's command no longer holds a closing run's wait silently.
+
+    Sent in this epoch, it is live. Sent by a dead host and not inspected since, no call of
+    this epoch is behind it: the wait on it has no producer, so the step ends the blocked
+    record or reports the orphan instead of waiting for good.
+    """
+    state, held = _closing_with()
+    command = _sent(kind, held, phase, epoch)
+    state, held = _closing_with(command)
+    assert _held_wait_live(state, held) == (epoch == 1)
+
+
+@given(kind=st.sampled_from(["cancel", "block"]), inspected_in=st.integers(0, 1))
+def test_an_inspection_of_a_command_carries_the_wait_on_the_command(
+    kind: str, inspected_in: int
+) -> None:
+    """REVIEW-8 part 2 item 4: the wait follows a command to the inspection sent about it."""
+    state, held = _closing_with()
+    command = _sent(kind, held, core.RequestPhase.DISPATCHED, 0)
+    inspection = _sent("inspect", command, core.RequestPhase.DISPATCHED, inspected_in)
+    command = command.model_copy(update={"addressed_by": (inspection.request_id,)})
+    state, held = _closing_with(command, inspection)
+    assert _held_wait_live(state, held) == (inspected_in == 1)
