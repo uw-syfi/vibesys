@@ -953,6 +953,7 @@ describe('core state projection', () => {
         metric: 'ops',
         value: 42,
         unit: 'ops/s',
+        timestamp: timestamp(8),
       },
     ]);
   });
@@ -1987,6 +1988,7 @@ describe('typed framework events', () => {
         metric: 'tok_per_sec',
         value: 42.5,
         unit: 'tok/s',
+        timestamp: timestamp(7),
       },
     ]);
   });
@@ -2006,6 +2008,7 @@ describe('typed framework events', () => {
         metric: 'tok_per_sec',
         value: 42.5,
         unit: 'tok/s',
+        timestamp: timestamp(7),
       },
     ]);
     // The reused gate still reports itself in the transcript, as a reused PASS
@@ -2799,6 +2802,176 @@ describe('winner selection state', () => {
       revision: 'baseline-rev',
       settlementId: null,
     });
+  });
+});
+
+describe('workstream telemetry state', () => {
+  it('starts with no workstreams', () => {
+    expect(initialCoreState().workstreams).toEqual({});
+  });
+
+  it('folds a successful workstream finish', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'workstream_finished', {
+        round_label: 'round-3',
+        data: {
+          kind: 'workstream_finished',
+          setup_failure: false,
+          refunded: false,
+          repeated_error: false,
+        },
+      }),
+    );
+    expect(Object.values(state.workstreams)).toEqual([
+      {
+        roundKey: {kind: 'number', number: 3},
+        roundNumber: 3,
+        roundLabel: 'round-3',
+        finished: true,
+        finishedAt: timestamp(1),
+        finishedAtSequence: 1,
+        setupFailure: false,
+        refunded: false,
+        repeatedError: false,
+        lastError: null,
+        usage: {
+          inputTokens: 0,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          outputTokens: 0,
+          totalCostUsd: 0,
+        },
+      },
+    ]);
+  });
+
+  it('folds the failure detail a repeated, refunded setup failure carries', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(2, 'workstream_finished', {
+        round_label: 'round-4',
+        data: {
+          kind: 'workstream_finished',
+          setup_failure: true,
+          refunded: true,
+          repeated_error: true,
+          last_error: {
+            kind: 'out-of-budget',
+            role: 'implementer',
+            turns: 5,
+            limit: 5,
+            text: 'ran out of turns',
+          },
+        },
+      }),
+    );
+    const [record] = Object.values(state.workstreams);
+    expect(record?.lastError).toEqual({
+      kind: 'out-of-budget',
+      role: 'implementer',
+      turns: 5,
+      limit: 5,
+      text: 'ran out of turns',
+    });
+    expect(record?.setupFailure).toBe(true);
+    expect(record?.refunded).toBe(true);
+    expect(record?.repeatedError).toBe(true);
+  });
+
+  it('accumulates token usage across multiple turns of the same workstream', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'turn_usage_recorded', {
+        round_label: 'round-1',
+        agent_kind: 'implementer',
+        data: {
+          kind: 'turn_usage_recorded',
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_creation_input_tokens: 5,
+          cache_read_input_tokens: 1,
+          total_cost_usd: 0.01,
+        },
+      }),
+    );
+    state = reduceEvent(
+      state,
+      fixtureEvent(2, 'turn_usage_recorded', {
+        round_label: 'round-1',
+        agent_kind: 'reviewer',
+        data: {
+          kind: 'turn_usage_recorded',
+          input_tokens: 50,
+          output_tokens: 10,
+          total_cost_usd: 0.02,
+        },
+      }),
+    );
+    const [record] = Object.values(state.workstreams);
+    expect(record?.usage).toEqual({
+      inputTokens: 150,
+      cacheCreationInputTokens: 5,
+      cacheReadInputTokens: 1,
+      outputTokens: 30,
+      totalCostUsd: 0.03,
+    });
+  });
+
+  it('keeps a workstream finish and its usage on the same record', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'turn_usage_recorded', {
+        round_label: 'round-2',
+        data: {kind: 'turn_usage_recorded', input_tokens: 10, output_tokens: 2},
+      }),
+    );
+    state = reduceEvent(
+      state,
+      fixtureEvent(2, 'workstream_finished', {
+        round_label: 'round-2',
+        data: {
+          kind: 'workstream_finished',
+          setup_failure: false,
+          refunded: false,
+          repeated_error: false,
+        },
+      }),
+    );
+    const [record] = Object.values(state.workstreams);
+    expect(record?.finished).toBe(true);
+    expect(record?.usage).toEqual({
+      inputTokens: 10,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      outputTokens: 2,
+      totalCostUsd: 0,
+    });
+  });
+
+  it('ignores a workstream finish with no round scope', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'workstream_finished', {
+        data: {
+          kind: 'workstream_finished',
+          setup_failure: false,
+          refunded: false,
+          repeated_error: false,
+        },
+      }),
+    );
+    expect(state.workstreams).toEqual({});
+  });
+
+  it('ignores a turn usage event with no round scope', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'turn_usage_recorded', {
+        data: {kind: 'turn_usage_recorded', input_tokens: 10},
+      }),
+    );
+    expect(state.workstreams).toEqual({});
   });
 });
 

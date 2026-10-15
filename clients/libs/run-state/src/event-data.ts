@@ -26,6 +26,7 @@ import {
 } from './state.js';
 import {appendTranscript, eventToTranscriptEntry, RUN_TRANSCRIPT} from './transcript-fold.js';
 import type {TranscriptFolder} from './transcript-folder.js';
+import {workstreamsWithFinish, workstreamsWithUsage} from './workstream.js';
 
 type RunEventData = NonNullable<RunEvent['data']>;
 
@@ -135,10 +136,8 @@ const EVENT_DATA_HANDLERS = {
   run_configured: ignoredEventData,
   framework_warning: ignoredEventData,
   winner_selected: runEventData(applyWinnerSelectedData),
-  // No client projection consumes either yet; declared so the dispatch table stays exhaustive
-  // over the generated protocol rather than silently forward-compatible with these two.
-  workstream_finished: ignoredEventData,
-  turn_usage_recorded: ignoredEventData,
+  workstream_finished: runEventData(applyWorkstreamFinishedData),
+  turn_usage_recorded: runEventData(applyTurnUsageData),
 } satisfies Record<EventDataKind, EventDataHandlers>;
 
 export function eventDataHandlers(data: RunEvent['data']): EventDataHandlers | null | undefined {
@@ -192,6 +191,24 @@ function applyWinnerSelectedData(state: CoreState, event: RunEvent): CoreState {
       settlementId: data.settlement_id ?? null,
     },
   });
+}
+
+function applyWorkstreamFinishedData(
+  state: CoreState,
+  event: RunEvent,
+  sequence: number,
+): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'workstream_finished') return state;
+  const workstreams = workstreamsWithFinish(state.workstreams, event, data, sequence);
+  return workstreams === state.workstreams ? state : cloneCoreStateWith(state, {workstreams});
+}
+
+function applyTurnUsageData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'turn_usage_recorded') return state;
+  const workstreams = workstreamsWithUsage(state.workstreams, event, data);
+  return workstreams === state.workstreams ? state : cloneCoreStateWith(state, {workstreams});
 }
 
 function applyExperimentsChangedData(

@@ -21,6 +21,7 @@ import {
   rehydrateRunMapProvenance,
 } from './run-map.js';
 import type {TranscriptEntry} from './transcript-fold.js';
+import type {WorkstreamMap} from './workstream.js';
 
 export type AgentExecutionMode = 'thinking' | 'responding' | 'tool' | 'waiting';
 
@@ -266,6 +267,13 @@ export interface CoreState {
   readonly quota: QuotaState;
   readonly winner: WinnerSelection | null;
   readonly benchmarks: readonly BenchmarkRecord[];
+  /**
+   * Per-workstream (round) terminal facts folded from `workstream_finished` and
+   * `turn_usage_recorded`, keyed internally by the event's `round_label`. Join with `rounds` by
+   * `RoundKey` (see `sameRoundKey`) for a round's lifecycle timing; a round with neither event yet
+   * has no entry here.
+   */
+  readonly workstreams: WorkstreamMap;
   readonly diagnostics: readonly CoreDiagnostic[];
   /** Sequence of the latest semantic experiment invalidation. */
   readonly experimentsRevision: number;
@@ -318,6 +326,7 @@ export function initialCoreState(): CoreState {
     quota: {sequence: 0, pause: null, lastSwitch: null},
     winner: null,
     benchmarks: [],
+    workstreams: {},
     diagnostics: [],
     experimentsRevision: 0,
     typedToolEvents: false,
