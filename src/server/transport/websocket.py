@@ -39,6 +39,7 @@ from server.transport.discovery import (
     WebInstanceRecord,
 )
 from server.transport.subscriptions import (
+    DeliveryWatermark,
     StreamDelivery,
     SubscriptionAdmissionClosedError,
     SubscriptionTracker,
@@ -1240,7 +1241,7 @@ class WebSocketGateway:
         cursor, reported_floor, store_id = await self._write_bootstrap(
             websocket, request, bootstrap
         )
-        delivery.delivered(cursor)
+        delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
         while True:
             changed = await _run_owned_blocking(
                 self._request_runner,
@@ -1263,7 +1264,7 @@ class WebSocketGateway:
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True
                 )
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             checkpoint = await _run_owned_blocking(
                 self._request_runner,
@@ -1282,7 +1283,7 @@ class WebSocketGateway:
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True
                 )
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             await self._send_event_batch(
                 websocket,
@@ -1295,7 +1296,7 @@ class WebSocketGateway:
                 ),
             )
             cursor = checkpoint.through_sequence
-            delivery.delivered(cursor)
+            delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
 
     async def _write_stream_error(
         self,
