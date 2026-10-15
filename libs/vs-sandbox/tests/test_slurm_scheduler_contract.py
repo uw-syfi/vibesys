@@ -34,7 +34,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
-from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec, yield_now
+from vs_sim.api import DISCARD, OutputSink, ProcessOutcome, ProcessRun, ProcessSpec, yield_now
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     CANCEL_REACTIONS,
@@ -169,7 +169,10 @@ class _Faults:
         """Fail the ``index``-th command from now (0 is the next one) with a transport error."""
         self._countdown = index
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(
+        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
+    ) -> ProcessRun:
+        del output
         if self._countdown is not None:
             if self._countdown == 0:
                 self._countdown = None

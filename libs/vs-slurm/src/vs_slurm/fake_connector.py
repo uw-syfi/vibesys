@@ -61,7 +61,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
-from vs_sim.api import OutputStream, ProcessOutcome, ProcessOutputTooLarge
+from vs_sim.api import (
+    DISCARD,
+    OutputStream,
+    ProcessOutcome,
+    ProcessOutputTooLarge,
+    forward_output,
+)
 
 from . import fake_shell
 from .connector_protocol import (
@@ -74,7 +80,7 @@ from .scheduler_read import split_framed
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sim.api import ProcessRun, ProcessSpec
+    from vs_sim.api import OutputSink, ProcessRun, ProcessSpec
 
     from .runner import SlurmJobStatus
 
@@ -607,7 +613,9 @@ class FakeConnector:
         """
         self._intercept = intercept
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(
+        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
+    ) -> ProcessRun:
         """Answer a connector request without a transport subprocess; it takes no time."""
         del timeout
         request = _decode_connector_request(spec.input)
@@ -616,7 +624,9 @@ class FakeConnector:
             if self._intercept is None
             else self._intercept(request, self._answer)
         )
-        return _connector_process_result(response, max_output_bytes=spec.max_output_bytes)
+        return forward_output(
+            _connector_process_result(response, max_output_bytes=spec.max_output_bytes), output
+        )
 
     def _answer(self, request: dict[str, object]) -> dict[str, object]:
         query, end = split_framed(str(request.get("command", "")))
