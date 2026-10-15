@@ -21,6 +21,7 @@ from pydantic import (
 
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import DomainName
+from vibesys.inputs._plan import TaskPlan, check_plan_documents, render_plan
 from vs_project.api import Project, RunResourceRequest
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageNotFoundError,
@@ -358,6 +359,8 @@ class InputManifest(BaseModel):
     environment: EnvironmentInput | None = None
     workspace: WorkspaceInput | None = None
     evaluator: EvaluatorInput | None = None
+    plan: TaskPlan | None = None
+    """The design a plan-mode run follows; inert otherwise."""
 
     @model_validator(mode="after")
     def _validate_cross_references(self) -> InputManifest:
@@ -412,6 +415,8 @@ def render_input_manifest(manifest: InputManifest) -> str:
     _append_profile(lines, manifest)
     _append_workspace_sources(lines, manifest)
     _append_evaluator(lines, manifest)
+    if manifest.plan is not None:
+        lines += render_plan(manifest.plan)
     return "\n".join(lines) + "\n"
 
 
@@ -676,6 +681,11 @@ class InputBundle(BaseModel):
         return environment.modal.entrypoint
 
     @property
+    def plan(self) -> TaskPlan | None:
+        """Return the implementation plan the task declares, if any."""
+        return self.manifest.plan
+
+    @property
     def workspace_sources(self) -> tuple[WorkspaceSource, ...]:
         """Return the pinned workspace sources declared by the manifest."""
         if self.manifest.workspace is None:
@@ -728,6 +738,8 @@ def load_project_task(project: Project, task: TaskDirectory) -> InputBundle:
     evaluator_package, resolved_commands = _resolve_evaluator_commands(root, manifest)
     reference_path = _resolve_reference_path(task)
     evaluator_path = _resolve_evaluator_source_path(task, manifest)
+    if manifest.plan is not None:
+        check_plan_documents(task, manifest.plan)
 
     return InputBundle(
         root=root,
