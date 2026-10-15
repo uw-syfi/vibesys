@@ -39,7 +39,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationPlan,
     SlurmExecutionPolicy,
 )
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock
 from vs_slurm.api import (
     ClusterSubmitOutcome,
     FakeCluster,
@@ -218,6 +218,8 @@ async def build_stack(
         clock=clock if clock is not None else ManualClock(),
         # Pacing moves a timeline of its own, so polling never brings a deadline nearer.
         sleeper=ManualClock(),
+        blocking=InlineBlockingRunner(),
+        processes=NO_PROCESSES,
         cluster=cluster,
     )
     return Stack(executor, cluster, snapshot)

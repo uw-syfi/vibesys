@@ -32,7 +32,7 @@ from vs_evaluation.api import (
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
 from vs_sim.api import yield_now
-from vs_sim.api.testing import ManualClock, examples
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, examples
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterSubmitOutcome,
@@ -47,6 +47,7 @@ from vs_slurm.api import (
 from vs_slurm.api import SlurmBatchStageResult as _StageResult
 
 _POLL_INTERVAL_S = 1.0
+_BLOCKING = InlineBlockingRunner()
 # The executor waits this long for a cancelled job to end before it leaves the
 # evaluation CANCELING. It exceeds the profile's longest COMPLETING time.
 _CONFIRMATION_S = 120.0
@@ -174,6 +175,8 @@ def _stack(
         cluster=cluster,
         # Pacing is the Fake's clock: waiting for the scheduler advances it.
         sleeper=cluster.manual_clock,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         cancel_confirmation_seconds=_CONFIRMATION_S,
         clock=ManualClock(),
     )
@@ -283,6 +286,8 @@ def _parked_submitter(
         handle_root=root / "handles",
         cluster=cluster,
         sleeper=sleeper,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         cancel_confirmation_seconds=_CONFIRMATION_S,
         clock=ManualClock(),
     )

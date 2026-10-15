@@ -27,7 +27,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationExecutor,
     SlurmStagePayload,
 )
-from vs_sim.api.testing import ManualClock, yield_until
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, yield_until
 from vs_slurm.api import (
     ClusterSubmitOutcome,
     FakeCluster,
@@ -42,6 +42,8 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 pytestmark = pytest.mark.asyncio
+
+_BLOCKING = InlineBlockingRunner()
 
 _HOLDER = "holder-evaluation"
 _WAITER = "waiting-evaluation"
@@ -104,6 +106,8 @@ def _executor(root: Path, cluster: _QueuedCluster) -> SlurmEvaluationExecutor:
         admission=SharedSlurmAdmission(1),
         # Pacing is free: the holder's wait loop never sleeps on the wall clock.
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         clock=ManualClock(),
     )
 

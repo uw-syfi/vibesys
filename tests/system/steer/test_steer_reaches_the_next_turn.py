@@ -21,7 +21,7 @@ from tests.support.skeleton_world import (
     Implementation,
     open_skeleton_world,
 )
-from tests.support.workspace_world import RUN_ID
+from tests.support.workspace_world import RUN_ID, ExecutionTopology
 
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
@@ -48,8 +48,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import FakeRunControlEventSink
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock, SimThreads, clock_from
+from vs_sim.api.testing import Sim, SimBlockingRunner, SimThreads, clock_from
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -98,7 +97,7 @@ class Sent:
         self.messages.append(request.message)
 
 
-def _agents(sent: Sent) -> Callable[[Path], SessionHost]:
+def _agents(sent: Sent, sim: Sim, threads: SimThreads) -> Callable[[Path], SessionHost]:
     def open_agents(root: Path) -> SessionHost:
         writer = CandidateWriter(root)
 
@@ -107,9 +106,9 @@ def _agents(sent: Sent) -> Callable[[Path], SessionHost]:
             writer(request)
 
         client = AgentClient(
-            FakeProvider(answer=writer.answer, on_turn=on_turn, threads=OsThreads()),
-            clock=ManualClock(),
-            threads=OsThreads(),
+            FakeProvider(answer=writer.answer, on_turn=on_turn, threads=threads),
+            clock=sim.wall_clock,
+            threads=threads,
         )
         resolver = MessageResolver(
             root,
@@ -140,15 +139,25 @@ async def _run(world: World, channel: RuntimeRunControlChannel) -> CoreState:
     return process.shell.record.envelope.core
 
 
-async def test_a_steer_queued_before_the_turn_reaches_it_once_and_is_recorded(
-    tmp_path: Path,
+def test_a_steer_queued_before_the_turn_reaches_it_once_and_is_recorded(
+    tmp_path: Path, sim: Sim
 ) -> None:
     sent = Sent()
-    sink = FakeRunControlEventSink()
-    channel = RuntimeRunControlChannel(sink, threads=SimThreads())
-    channel.queue_steer(STEER)
-    with open_skeleton_world(tmp_path, agents=_agents(sent)) as world:
-        core = await _run(world, channel)
+    threads = sim.threads()
+    execution = ExecutionTopology(threads=threads, blocking=SimBlockingRunner(threads))
+
+    async def scenario() -> tuple[CoreState, FakeRunControlEventSink]:
+        sink = FakeRunControlEventSink()
+        channel = RuntimeRunControlChannel(sink, threads=threads)
+        channel.queue_steer(STEER)
+        with open_skeleton_world(
+            tmp_path,
+            agents=_agents(sent, sim, threads),
+            execution=execution,
+        ) as world:
+            return await _run(world, channel), sink
+
+    core, sink = sim.run(scenario(), threads=threads)
 
     assert core.run.status == RunStatus.TERMINAL
     assert len(sent.messages) == 1
@@ -164,11 +173,21 @@ async def test_a_steer_queued_before_the_turn_reaches_it_once_and_is_recorded(
     ]
 
 
-async def test_a_run_with_no_steer_sends_the_turn_no_operator_input(tmp_path: Path) -> None:
+def test_a_run_with_no_steer_sends_the_turn_no_operator_input(tmp_path: Path, sim: Sim) -> None:
     sent = Sent()
-    channel = RuntimeRunControlChannel(FakeRunControlEventSink(), threads=SimThreads())
-    with open_skeleton_world(tmp_path, agents=_agents(sent)) as world:
-        core = await _run(world, channel)
+    threads = sim.threads()
+    execution = ExecutionTopology(threads=threads, blocking=SimBlockingRunner(threads))
+
+    async def scenario() -> CoreState:
+        channel = RuntimeRunControlChannel(FakeRunControlEventSink(), threads=threads)
+        with open_skeleton_world(
+            tmp_path,
+            agents=_agents(sent, sim, threads),
+            execution=execution,
+        ) as world:
+            return await _run(world, channel)
+
+    core = sim.run(scenario(), threads=threads)
 
     assert len(sent.messages) == 1
     assert "operator" not in sent.messages[0]

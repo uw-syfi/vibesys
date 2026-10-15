@@ -63,9 +63,26 @@ if TYPE_CHECKING:
         WorkspaceResourceProvider,
     )
     from vs_sandbox.api import CommandRunner, ComputeBackendImpl
-    from vs_sim.api import BlockingRunner, Processes
+    from vs_sim.api import BlockingRunner, Processes, Threads
 
 RUN_ID = "workspace-requests"
+
+
+@dataclass(frozen=True)
+class ExecutionTopology:
+    """The threads and blocking boundary one system-test world shares.
+
+    Keeping the pair together prevents a simulated world from sending work to a real
+    executor, where a simulator-backed lock could be used by unrelated worker threads.
+    """
+
+    threads: Threads
+    blocking: BlockingRunner
+
+    @classmethod
+    def production(cls) -> ExecutionTopology:
+        """Use the production thread and blocking implementations."""
+        return cls(threads=OsThreads(), blocking=ThreadBlockingRunner())
 
 
 @dataclass
@@ -106,6 +123,7 @@ class WorkspaceEnv:
 
     project: Project
     factory: WorkspaceResourceProvider
+    execution: ExecutionTopology
     hosts: list[RuntimeWorkspaces] = field(default_factory=list)
     git_disk: FakeGitRepositories | Git = REAL_GIT
     """The in-memory repositories of a world on ``GitKind.FAKE``; ``REAL_GIT`` on real Git."""
@@ -113,11 +131,11 @@ class WorkspaceEnv:
     def start_host(self, runner: BlockingRunner | None = None) -> RuntimeWorkspaces:
         """Start another host over the same disk state, as after a process restart.
 
-        *runner* runs the host's blocking operations (worker threads by default).
+        *runner* overrides the world's blocking boundary for this host.
         """
         runtime = create_workspace_runtime(
             workspace_resources=self.factory,
-            blocking=BlockingOperations(runner or ThreadBlockingRunner()),
+            blocking=BlockingOperations(self.execution.blocking if runner is None else runner),
             validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
@@ -150,6 +168,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     wrap_git: Callable[[GitRepository], GitRepository] | None = None,
     events: WorkspaceResourceEventSink | None = None,
     slurm_processes: Processes = NO_PROCESSES,
+    execution: ExecutionTopology | None = None,
 ) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
@@ -162,8 +181,10 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     case can stand between the run and Git, for example to kill the host at a Git step.
     ``events`` observes workspace resource events (for example a reported baseline drift);
     the default discards them. ``slurm_processes`` runs the Slurm transport's commands; the
-    default refuses to start any.
+    default refuses to start any. ``execution`` keeps threads and blocking operations on
+    one scheduler; production implementations are used by default.
     """
+    active_execution = execution if execution is not None else ExecutionTopology.production()
     disk = FakeGitRepositories() if git is GitKind.FAKE else REAL_GIT
     root = tmp_path / "project"
     root.mkdir()
@@ -227,9 +248,14 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=events or (lambda _event: None),
-                threads=OsThreads(),
-                blocking=ThreadBlockingRunner(),
+                threads=active_execution.threads,
+                blocking=active_execution.blocking,
             )
-            env = WorkspaceEnv(project.project, factory, git_disk=disk)
+            env = WorkspaceEnv(
+                project.project,
+                factory,
+                execution=active_execution,
+                git_disk=disk,
+            )
             env.start_host()
             yield env

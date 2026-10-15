@@ -35,7 +35,7 @@ from vs_evaluation.api import (
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
 from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec, yield_now
-from vs_sim.api.testing import ManualClock, examples
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, examples
 from vs_slurm.api import (
     CANCEL_REACTIONS,
     LIFETIMES,
@@ -66,6 +66,7 @@ if TYPE_CHECKING:
     from vs_sim.api import Sleeper
 
 _POLL_INTERVAL_S = 10.0
+_BLOCKING = InlineBlockingRunner()
 # The executor waits this long for a cancelled job to end before it leaves the
 # evaluation CANCELING. It exceeds every recorded teardown.
 _CONFIRMATION_S = 120.0
@@ -293,6 +294,8 @@ def _executor(world: _World, sleeper: Sleeper | None = None) -> SlurmEvaluationE
         handle_root=world.root / "handles",
         cluster=world.cluster,
         sleeper=sleeper or world.clock,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         cancel_confirmation_seconds=_CONFIRMATION_S,
         # The job deadline is not under test here, and worlds leap the scheduler clock far
         # past it; a separate clock that never moves keeps it out of every outcome.

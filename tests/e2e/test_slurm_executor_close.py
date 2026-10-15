@@ -15,8 +15,8 @@ import pytest
 from vs_evaluation.api import EvaluationRequest, EvaluationStep
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
-from vs_sim.api import SystemClock
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api import SystemClock, ThreadBlockingRunner
+from vs_sim.api.testing import NO_PROCESSES, wait_until_started
 from vs_slurm.api import (
     ClusterInspectOutcome,
     ClusterTarget,
@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _HANDLE = "eval-held-inspect"
+_BLOCKING = ThreadBlockingRunner()
 
 
 class _HeldInspectCluster(FakeCluster):
@@ -99,6 +100,8 @@ async def test_close_waits_for_every_cluster_call_still_running_in_a_thread(
             cluster=cluster,
             clock=SystemClock(),
             sleeper=SystemClock(),
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
         )
 
     first = executor()

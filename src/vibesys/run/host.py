@@ -388,7 +388,10 @@ class _ProductHostFactory:
         )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
         executor = self._semantic_executor(
-            self.integration, resources, workspaces, namespace, self.timing.clock
+            resources,
+            workspaces,
+            namespace,
+            self.timing.clock,
         )
         configuration = partial(self._agent_configuration, resources)
         return build_core_services(
@@ -475,9 +478,8 @@ class _ProductHostFactory:
             ),
         )
 
-    @staticmethod
     def _semantic_executor(
-        integration: LocalRunIntegration,
+        self,
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
@@ -497,7 +499,8 @@ class _ProductHostFactory:
             namespace.external_directory() / "slurm-provider-handles",
             clock=clock,
             sleeper=clock,
-            processes=integration.slurm_processes,
+            blocking=self.blocking,
+            processes=self.integration.slurm_processes,
         )
 
     async def stop_new_work(self) -> None:

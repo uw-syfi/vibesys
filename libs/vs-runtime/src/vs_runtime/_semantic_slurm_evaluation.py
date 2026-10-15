@@ -67,7 +67,7 @@ if TYPE_CHECKING:
 
     from vs_runtime.contracts import CandidateWorkspace, Workspaces
     from vs_sandbox.api.slurm import SlurmExecutionPolicy
-    from vs_sim.api import Clock, Processes, Sleeper
+    from vs_sim.api import BlockingRunner, Clock, Processes, Sleeper
     from vs_slurm.api import Cluster, SlurmConfig
 
 _CLEANUP_FAILURE = "cleanup failed"
@@ -123,14 +123,16 @@ class SemanticSlurmEvaluationExecutor:
         stage_failure_text: StageFailureText,
         clock: Clock,
         sleeper: Sleeper,
+        blocking: BlockingRunner,
+        processes: Processes,
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
-        processes: Processes | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state.
 
         ``clock`` times job deadlines; ``sleeper`` paces the polls of running jobs. Each
         executor uses ``cluster``, or reaches the configured cluster by starting ``processes``.
+        ``blocking`` owns calls into that synchronous cluster.
         """
         self._stage_failure_text = stage_failure_text
         self._clock = clock
@@ -145,6 +147,7 @@ class SemanticSlurmEvaluationExecutor:
         self._admission = admission or SharedSlurmAdmission(config.evaluation_capacity)
         self._cluster = cluster
         self._processes = processes
+        self._blocking = blocking
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
         self._availability = self._make_executor(workspaces.root.path)
@@ -301,6 +304,7 @@ class SemanticSlurmEvaluationExecutor:
             admission=self._admission,
             cluster=self._cluster,
             processes=self._processes,
+            blocking=self._blocking,
         )
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:

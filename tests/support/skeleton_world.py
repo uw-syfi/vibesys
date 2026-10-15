@@ -31,7 +31,12 @@ from tests.support.skeleton_strategy import (
     Implementation,
     SkeletonStrategy,
 )
-from tests.support.workspace_world import RUN_ID, WorkspaceEnv, open_workspace_env
+from tests.support.workspace_world import (
+    RUN_ID,
+    ExecutionTopology,
+    WorkspaceEnv,
+    open_workspace_env,
+)
 
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
@@ -79,8 +84,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock, clock_from, current_virtual_clock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, clock_from, current_virtual_clock
 from vs_slurm.api import (
     SlurmConfig,
     SlurmSshTransport,
@@ -109,7 +113,7 @@ if TYPE_CHECKING:
         TurnYields,
     )
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
-    from vs_sim.api import Clock, SleepingClock
+    from vs_sim.api import Clock, SleepingClock, Threads
 
 LEASE = 100.0
 # A Slurm job that has not ended this long after it was submitted is cancelled and fails: well
@@ -276,6 +280,8 @@ class World:
             clock=self.job_clock,
             sleeper=_LoopPacing(),
             cluster=self.cluster,
+            blocking=self.env.execution.blocking,
+            processes=NO_PROCESSES,
         )
         self.evaluations.append(evaluation)
         if self.timed is not None:
@@ -297,8 +303,8 @@ class World:
                 else self.yields(workspaces, self.env.receipts_namespace()),
             ),
             operations=self.operations,
-            threads=OsThreads(),
-            blocking=ThreadBlockingRunner(),
+            threads=self.env.execution.threads,
+            blocking=self.env.execution.blocking,
         )
         # The skeleton checks for orphan waits after every commit, so a stall fails where it starts.
         bindings = dataclasses.replace(bindings, check_liveness=True)
@@ -469,12 +475,12 @@ class CandidateResolver(FakeSessionResolver):
         return dataclasses.replace(spec, workspace=self.writer.worktree())
 
 
-def _open_agents(root: Path) -> SessionHost:
+def _open_agents(root: Path, threads: Threads) -> SessionHost:
     writer = CandidateWriter(root)
     client = AgentClient(
-        FakeProvider(answer=writer.answer, on_turn=writer, threads=OsThreads()),
+        FakeProvider(answer=writer.answer, on_turn=writer, threads=threads),
         clock=ManualClock(),
-        threads=OsThreads(),
+        threads=threads,
     )
     resolver = CandidateResolver(
         root,
@@ -528,14 +534,20 @@ def open_skeleton_world(  # noqa: PLR0913  # lint-waiver: LW-731842 [PLR0913]; e
     timed: tuple[Clock, float] | None = None,
     agents: Callable[[Path], SessionHost] | None = None,
     git: GitKind = GitKind.FAKE,
+    execution: ExecutionTopology | None = None,
 ) -> Iterator[World]:
     """A fresh run on in-memory Git (or ``git=GitKind.REAL``, real Git) with the Fake Slurm cluster.
 
+    ``execution`` owns the threads and blocking boundary of every component in the world.
     Closes every host on exit.
     """
-    with open_workspace_env(tmp_path, git=git) as env:
+    with open_workspace_env(tmp_path, git=git, execution=execution) as env:
         vcs = world_git(tmp_path / "project", env.git_disk)
-        hosted = (agents or _open_agents)(tmp_path / "project")
+        hosted = (
+            _open_agents(tmp_path / "project", env.execution.threads)
+            if agents is None
+            else agents(tmp_path / "project")
+        )
         if isinstance(hosted.resolver, CandidateResolver) and hosted.resolver.writer is not None:
             hosted.resolver.writer.use(vcs)
         yield World(
