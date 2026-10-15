@@ -252,6 +252,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     required_evaluator_tools_root,
 )
 from vs_runtime._validation_passes import StateValidationPasses, ValidationPasses
+from vs_runtime._workspace_holds import WorkspaceHolds, core_workspace_holds
 from vs_runtime._workspace_resources import (
     RootBaselineDrifted,
     WorkspaceResourceEvent,
@@ -268,7 +269,6 @@ from vs_runtime._workspace_runtime import (
     WorkspaceEvaluationSpec,
     WorkspaceRuntime,
 )
-from vs_runtime._workspace_holds import WorkspaceHolds, core_workspace_holds
 from vs_runtime._workspaces import (
     OwnedWorkspaces,
     RuntimeWorkspace,
@@ -589,8 +589,8 @@ __all__ = [
     "build_trusted_benchmark_command",
     "classify",
     "collect_linux_profile",
-    "core_workspace_holds",
     "collect_macos_profile",
+    "core_workspace_holds",
     "create_managed_conversation",
     "create_model_request_reconciler",
     "create_run_control_channel",

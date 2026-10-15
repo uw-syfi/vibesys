@@ -636,10 +636,7 @@ class RuntimeWorkspaces:
         """The candidate workspace IDs a host stop keeps; ``None`` while core is not followed."""
         if self._holds is None:
             return None
-        holds = self._holds()
-        if holds.final:
-            return frozenset()
-        return frozenset(member_workspace_id(member) for member in holds.members)
+        return self._holds().workspace_ids()
 
     async def release_unheld(self) -> None:
         """Discard every candidate worktree on disk that core no longer references.

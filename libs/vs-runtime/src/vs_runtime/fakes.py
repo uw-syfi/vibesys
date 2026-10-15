@@ -476,12 +476,7 @@ class FakeWorkspaces:
         """Remove the worktrees a dead host left that core no longer references."""
         if self._holds is None:
             return
-        holds = self._holds()
-        kept = (
-            frozenset()
-            if holds.final
-            else frozenset(member_workspace_id(member) for member in holds.members)
-        )
+        kept = self._holds().workspace_ids()
         for leftover in self.leaked_candidates():
             if leftover.id not in kept:
                 leftover.discard_leftover()
