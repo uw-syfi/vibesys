@@ -54,7 +54,9 @@ _SCENARIOS = tuple(
 # vs_project._workspace_tree (GitTracker restores preserved memory by descriptor) adds 1;
 # vs_project._nested_repositories (host Git refuses a work tree holding a nested repository)
 # adds 1.
-_MODULE_CEILING = 335
+# server.host_helper_logs (the logs handlers: chunk cuts and the long poll) adds 1; the
+# vs_logs reader itself loads on the first logs request, never for hello (asserted below).
+_MODULE_CEILING = 336
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
