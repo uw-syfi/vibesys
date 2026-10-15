@@ -71,10 +71,11 @@ import os
 import uuid
 from dataclasses import dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from pydantic import TypeAdapter
 
+from vs_async_ops.api import drain
 from vs_core.api import (
     AgentCall,
     AgentMeasurementRequested,
@@ -140,7 +141,7 @@ if TYPE_CHECKING:
     from vs_runtime._workspace_receipts import WorkspaceReceipts
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_runtime.contracts import AgentRole
-    from vs_sim.api import Clock, Connection, Listener, Network, Threads
+    from vs_sim.api import Clock, Connection, Event, Listener, Network, Threads
 
 EVALUATION_TOOL_ID = "evaluation"
 """The ``AgentRole.extra_tools`` id that asks for this bridge's tools."""
@@ -163,6 +164,53 @@ _WAIT_REFUSALS = {
     SuspensionRefusal.JOB_NOT_OWNED: ToolRefusal.UNKNOWN_HANDLES,
     SuspensionRefusal.DEADLINE_EXCEEDED: ToolRefusal.WAIT_DEADLINE,
 }
+
+
+class _LoopCall[T]:
+    """One worker-to-loop call from admission through its terminal outcome.
+
+    The worker publishes this owner before scheduling the callback that creates
+    its task.  That lets bridge shutdown settle both calls whose task exists and
+    calls whose start callback is still queued.
+    """
+
+    def __init__(self, work: Coroutine[object, object, T], done: Event) -> None:
+        self.work = work
+        self.done = done
+        self.task: asyncio.Task[T] | None = None
+        self.start_error: BaseException | None = None
+        self.cancelled_before_start = False
+
+    def cancel_unstarted(self) -> None:
+        """Close work that never became a task and wake its waiting worker."""
+        if self.task is not None or self.cancelled_before_start or self.start_error is not None:
+            return
+        self.cancelled_before_start = True
+        self.work.close()
+        self.done.set()
+
+    def fail_unstarted(self, error: BaseException) -> None:
+        """Preserve a loop-scheduling failure without leaking its coroutine."""
+        if self.task is not None or self.cancelled_before_start or self.start_error is not None:
+            return
+        self.start_error = error
+        self.work.close()
+        self.done.set()
+
+    def cancelled(self) -> bool:
+        """Whether shutdown refused this call or cancelled its running task."""
+        return self.cancelled_before_start or (self.task is not None and self.task.cancelled())
+
+    def result(self) -> T:
+        """Return or raise the terminal task/scheduling outcome."""
+        if self.start_error is not None:
+            raise self.start_error
+        if self.cancelled_before_start:
+            raise asyncio.CancelledError
+        if self.task is None:
+            message = "agent evaluation loop call has no terminal outcome"
+            raise RuntimeError(message)
+        return self.task.result()
 
 
 def _owned_wait(
@@ -355,6 +403,11 @@ def _nothing() -> None:
     """The acknowledgement of an answer that carries no handle."""
 
 
+async def _invoke(callback: Callable[[], None]) -> None:
+    """Run one synchronous event-loop effect as bridge-owned async work."""
+    callback()
+
+
 @dataclass
 class _Scoped:
     """One scope's last snapshot, and the submissions and recorded wait of its current turn."""
@@ -432,6 +485,7 @@ class AgentEvaluationBridge:
         self._listener: Listener | None = None
         self._guard = self._threads.lock()
         self._open: set[Connection] = set()
+        self._calls: set[_LoopCall[Any]] = set()
         self._closing = False
         self._lock = asyncio.Lock()
 
@@ -499,21 +553,41 @@ class AgentEvaluationBridge:
             raise
 
     async def close(self) -> None:
-        """Stop accepting calls, hang up on every open connection, and remove the socket.
+        """Stop admission and drain every call before run resources are released.
 
-        A client that never finishes its call cannot hold the run open: hanging up wakes
-        the worker reading from it.
+        Closing the sockets wakes workers still reading frames or receipts. Calls that
+        already crossed onto the event loop are separately owned here: queued calls are
+        refused before they start, and running tasks are cancelled and drained. Thus no
+        workspace, receipt-store, or shell access can outlive this method.
         """
         listener, self._listener = self._listener, None
         with self._guard:
             self._closing = True
             open_connections, self._open = self._open, set()
+            calls = tuple(self._calls)
+            queued = tuple(call for call in calls if call.task is None)
+            active = tuple(call for call in calls if call.task is not None)
+            for call in queued:
+                self._calls.discard(call)
         if listener is not None:
             listener.close()
         for connection in open_connections:
             connection.close()
-        with contextlib.suppress(FileNotFoundError):
-            self._socket_path.unlink()
+        for call in queued:
+            call.cancel_unstarted()
+        tasks = tuple(call.task for call in active if call.task is not None)
+        for task in tasks:
+            task.cancel()
+        try:
+            await drain(*tasks)
+        finally:
+            # A task's done callback is queued on this same loop. ``drain`` may
+            # observe an already-done task before that callback runs, so settle
+            # the worker explicitly as well; the callback remains idempotent.
+            for call in active:
+                self._settle_call(call)
+            with contextlib.suppress(FileNotFoundError):
+                self._socket_path.unlink()
 
     def _accept_loop(self, listener: Listener, loop: asyncio.AbstractEventLoop) -> None:
         while True:
@@ -560,7 +634,17 @@ class AgentEvaluationBridge:
             # The client says it read the whole reply before it closes; an abandoned
             # connection ends without the line and leaves the submission owed.
             if _read_frame(connection) == RECEIPT_LINE:
-                loop.call_soon_threadsafe(acknowledge)
+                acknowledged = self._on_loop(loop, _invoke(acknowledge))
+                if not acknowledged.cancelled():
+                    # Like an answer failure above, a receipt-store failure belongs to
+                    # this call worker and remains visible to the thread owner.
+                    try:
+                        acknowledged.result()
+                    except OSError as error:
+                        # The outer OSError handler owns only connection failures. Preserve a
+                        # durable-store failure as a worker error instead of misclassifying it.
+                        message = "agent evaluation receipt acknowledgement failed"
+                        raise RuntimeError(message) from error
         except OSError:
             pass
         finally:
@@ -570,19 +654,57 @@ class AgentEvaluationBridge:
 
     def _on_loop[T](
         self, loop: asyncio.AbstractEventLoop, work: Coroutine[object, object, T]
-    ) -> asyncio.Task[T]:
-        """Run ``work`` as a task on ``loop`` and wait, on this worker, until it is done."""
-        done = self._threads.event()
-        tasks: list[asyncio.Task[T]] = []
+    ) -> _LoopCall[T]:
+        """Publish, schedule and synchronously await one event-loop call."""
+        call = _LoopCall(work, self._threads.event())
+        with self._guard:
+            if self._closing:
+                admitted = False
+            else:
+                self._calls.add(call)
+                admitted = True
+        if not admitted:
+            call.cancel_unstarted()
+            return call
 
         def start() -> None:
-            task = loop.create_task(work)
-            tasks.append(task)
-            task.add_done_callback(lambda _task: done.set())
+            with self._guard:
+                if call not in self._calls:
+                    return
+                try:
+                    task = loop.create_task(work)
+                except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-281101 [BLE001]; any loop task-acquisition failure must close the unpublished coroutine and wake its worker.
+                    # > Exception plus CancelledError/SystemExit handlers would duplicate one ownership transition; the original error is re-raised by ``call.result``.
+                    self._calls.discard(call)
+                    call.fail_unstarted(error)
+                    return
+                call.task = task
+            task.add_done_callback(partial(self._call_ended, call))
 
-        loop.call_soon_threadsafe(start)
-        done.wait()
-        return tasks[0]
+        try:
+            loop.call_soon_threadsafe(start)
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-281102 [BLE001]; a closed/stopping loop must settle the worker for every scheduling failure.
+            # > This is the event-loop ownership boundary. Restricting the catch to
+            # > today's RuntimeError would leak the coroutine if another loop
+            # > implementation reports failed acquisition differently.
+            with self._guard:
+                unstarted = call in self._calls and call.task is None
+                if unstarted:
+                    self._calls.discard(call)
+            if unstarted:
+                call.fail_unstarted(error)
+        call.done.wait()
+        return call
+
+    def _call_ended(self, call: _LoopCall[Any], _task: asyncio.Task[Any]) -> None:
+        """Settle one completed loop call and release its waiting worker."""
+        self._settle_call(call)
+
+    def _settle_call(self, call: _LoopCall[Any]) -> None:
+        """Forget one call and wake its worker, idempotently."""
+        with self._guard:
+            self._calls.discard(call)
+        call.done.set()
 
     async def answer(self, frame: bytes) -> tuple[bytes, Callable[[], None]]:
         """The reply to one frame, and the call that records that the agent received it.
