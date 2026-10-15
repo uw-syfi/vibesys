@@ -43,6 +43,7 @@ from server.host_api import (
     HelloRequest,
     HelperError,
     HelperErrorCode,
+    HelperFeature,
     HelperMessage,
     HelperReply,
     HelperRequest,
@@ -100,6 +101,8 @@ _JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 class ChannelState:
     """What one channel knows: the handshake, requests in flight, watches, the hand-over."""
 
+    offered: frozenset[HelperFeature] = frozenset(HelperFeature)
+    """The features this helper serves (``HelperHost.offered_features``); ``hello`` negotiates among them."""
     negotiated: Negotiated | None = None
     pending: Mapping[str, float] = field(default_factory=dict)
     """Replies still owed to the client, by id, with their deadline."""
@@ -393,7 +396,7 @@ def _admission(
     refusal: HelperError | None = None
     if state.negotiated is None:
         if isinstance(request, HelloRequest):
-            negotiated = negotiate(request, vibesys_version)
+            negotiated = negotiate(request, vibesys_version, state.offered)
             if isinstance(negotiated, HelperError):
                 refusal = negotiated
             else:
@@ -575,7 +578,7 @@ class _Channel:
         self._inbox = inbox
         self._output = output
         self._threads = threads
-        self._state = ChannelState()
+        self._state = ChannelState(offered=host.offered_features())
         self._events: list[ChannelEvent] = []
         self._held: dict[str, Connection] = {}
         self._watches: dict[str, tuple[Event, Event]] = {}

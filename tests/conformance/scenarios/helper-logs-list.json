@@ -1,0 +1,78 @@
+{
+  "id": "helper-logs-list",
+  "protocol": "host-helper",
+  "title": "List an instance's log streams",
+  "description": "After negotiating logs, logs.list names the instance's recorded streams, oldest first, with owner, command, size and whether each is closed.",
+  "role": "logs",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "logs"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.list",
+        "request_id": "l",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.list",
+        "request_id": "l",
+        "streams": [
+          {
+            "id": "image_build",
+            "owner": {
+              "kind": "startup_step",
+              "step": "image_build"
+            },
+            "command": "docker build .",
+            "size": 66,
+            "closed": false,
+            "last_activity": 1700000000.0
+          },
+          {
+            "id": "server",
+            "owner": {
+              "kind": "server_process"
+            },
+            "command": null,
+            "size": 42,
+            "closed": true,
+            "last_activity": 1700000000.0
+          }
+        ]
+      }
+    }
+  ]
+}

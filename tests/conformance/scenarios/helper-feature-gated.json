@@ -98,6 +98,46 @@
         "request_id": "c",
         "code": "feature_not_negotiated"
       }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.list",
+        "request_id": "ll",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "ll",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "lr",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "stream_id": "image_build",
+        "start": {
+          "tail_bytes": 1024
+        },
+        "max_bytes": 65536,
+        "wait_ms": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "lr",
+        "code": "feature_not_negotiated"
+      }
     }
   ]
 }

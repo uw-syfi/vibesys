@@ -46,6 +46,8 @@ from server.host_api import (
     InstancesUnwatchRequest,
     InstancesWatchRequest,
     LiveInstanceRecord,
+    LogsListRequest,
+    LogsReadRequest,
     PathEntry,
     PathsCompleteReply,
     PathsCompleteRequest,
@@ -67,6 +69,7 @@ from server.host_api import (
     TasksListReply,
     TasksListRequest,
 )
+from server.host_helper_logs import HelperLogs, list_logs, read_log
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
@@ -93,8 +96,13 @@ class Negotiated:
     features: frozenset[HelperFeature]
 
 
-def negotiate(request: HelloRequest, vibesys_version: str) -> Negotiated | HelperError:
-    """The highest version both ends speak and the features both know, or ``incompatible``."""
+def negotiate(
+    request: HelloRequest, vibesys_version: str, offered: frozenset[HelperFeature]
+) -> Negotiated | HelperError:
+    """The highest version both ends speak and the ``offered`` features the client asked for.
+
+    Returns ``incompatible`` when no version is shared.
+    """
     low, high = HELPER_PROTOCOL_VERSIONS
     client_low, client_high = request.client_versions
     version = min(high, client_high)
@@ -109,7 +117,7 @@ def negotiate(request: HelloRequest, vibesys_version: str) -> Negotiated | Helpe
             supported_versions=HELPER_PROTOCOL_VERSIONS,
             vibesys_version=vibesys_version,
         )
-    known = {feature.value: feature for feature in HelperFeature}
+    known = {feature.value: feature for feature in offered}
     return Negotiated(
         version=version,
         features=frozenset(known[name] for name in request.features if name in known),
@@ -246,6 +254,13 @@ class HelperHost:
     checkout: CheckoutProbe
     dialer: Dialer
     vibesys_version: str
+    logs: HelperLogs | None
+    """The run log store; ``None`` on a host that has none, which then does not offer ``logs``."""
+
+    def offered_features(self) -> frozenset[HelperFeature]:
+        """The features this host can serve: every one, less ``logs`` without a log store."""
+        absent = {HelperFeature.LOGS} if self.logs is None else set()
+        return frozenset(HelperFeature) - absent
 
 
 def split_prefix(prefix: str, home: str) -> tuple[str, str]:
@@ -378,7 +393,7 @@ def _answer(request: HelperRequest, host: HelperHost) -> HelperReply | HelperErr
     reply: HelperReply | HelperError
     match request:
         case HelloRequest():
-            negotiated = negotiate(request, host.vibesys_version)
+            negotiated = negotiate(request, host.vibesys_version, host.offered_features())
             reply = (
                 negotiated
                 if isinstance(negotiated, HelperError)
@@ -406,10 +421,8 @@ def _answer(request: HelperRequest, host: HelperHost) -> HelperReply | HelperErr
         case RunStopRequest(instance_id=instance_id, force=force):
             result = host.registry.stop(instance_id, host.stop_effects, force=force)
             reply = RunStopReply(request_id=request_id, result=result)
-        case PingRequest():
-            reply = PingReply(request_id=request_id)
-        case PathsCompleteRequest():
-            reply = complete_path(request, host.directories)
+        case PingRequest() | PathsCompleteRequest() | LogsListRequest() | LogsReadRequest():
+            reply = _host_read_reply(request, host)
         case InstancesWatchRequest() | InstancesUnwatchRequest() | RunConnectRequest():
             message = f"{request.type} is answered by the channel, not executed"
             reply = _error(request_id, HelperErrorCode.INTERNAL, message)
@@ -430,6 +443,29 @@ def _instances_reply(
         ):
             inspection = host.inspector.inspect(instance_id, include_log=include_log)
             return InstancesInspectReply(request_id=request_id, inspection=inspection)
+
+
+def _host_read_reply(
+    request: PingRequest | PathsCompleteRequest | LogsListRequest | LogsReadRequest,
+    host: HelperHost,
+) -> HelperReply | HelperError:
+    """Answer a request that only reads the channel or the host.
+
+    The channel admits a ``logs`` request only when ``hello`` offered the feature,
+    which it does only for a host with a log store.
+    """
+    match request:
+        case PingRequest(request_id=request_id):
+            return PingReply(request_id=request_id)
+        case PathsCompleteRequest():
+            return complete_path(request, host.directories)
+        case LogsListRequest() | LogsReadRequest() if host.logs is None:
+            message = f"{request.type} needs a log store, which this host does not have"
+            return _error(request.request_id, HelperErrorCode.INTERNAL, message)
+        case LogsListRequest():
+            return list_logs(request, host.logs)
+        case LogsReadRequest():
+            return read_log(request, host.logs)
 
 
 _CONNECT_ERRORS: Final[Mapping[ChannelEndOutcome, HelperErrorCode]] = {

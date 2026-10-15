@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import posixpath
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from server.host_api import (
@@ -18,11 +18,20 @@ from server.host_api import (
     DetachedLaunchFailure,
     InstanceStatus,
     LiveInstanceRecord,
+    LogOffset,
+    LogStream,
+    LogTail,
     RunPhase,
     RunStatus,
     parse_helper_message,
 )
 from server.host_helper import serve_channel
+from server.host_helper_logs import (
+    HelperLogs,
+    StoredBytes,
+    UnknownInstanceError,
+    UnknownLogStreamError,
+)
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import HelperHost, PathHints, Scan, ScannedEntry
 from server.instances import ControlSocketStopRequester
@@ -42,7 +51,9 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import Any
 
-    from vs_sim.api import Network, Threads, Worker
+    from pydantic import JsonValue
+
+    from vs_sim.api import Clock, Network, Threads, Worker
     from vs_sim.api.testing import SimThreads
 
 HOME = "/home/user"
@@ -138,6 +149,113 @@ def record(
     )
 
 
+@dataclass
+class _FakeStream:
+    owner: dict[str, JsonValue]
+    command: str | None
+    held: bytearray = field(default_factory=bytearray)
+    oldest: int = 0
+    """The offset of ``held[0]``; bytes before it were evicted."""
+    closed: bool = False
+    last_activity: float = 0.0
+
+    @property
+    def end(self) -> int:
+        return self.oldest + len(self.held)
+
+
+@dataclass
+class FakeLogReader:
+    """An in-memory log store with the ``LogReader`` contract, and the writes a test makes to it.
+
+    Writes stamp ``last_activity`` from ``clock``; ``evict`` drops a stream's oldest
+    bytes the way a capped store does. Callers on several simulated threads share it
+    under ``threads``' lock, as the real store's index is shared.
+    """
+
+    clock: Clock
+    threads: Threads
+    instances: dict[str, dict[str, _FakeStream]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self._lock = self.threads.lock()
+
+    def open(
+        self,
+        instance_id: str,
+        stream_id: str,
+        owner: dict[str, JsonValue],
+        command: str | None = None,
+    ) -> None:
+        with self._lock:
+            streams = self.instances.setdefault(instance_id, {})
+            streams[stream_id] = _FakeStream(owner, command, last_activity=self.clock.now())
+
+    def write(self, instance_id: str, stream_id: str, data: bytes) -> None:
+        with self._lock:
+            stream = self.instances[instance_id][stream_id]
+            assert not stream.closed
+            stream.held += data
+            stream.last_activity = self.clock.now()
+
+    def close(self, instance_id: str, stream_id: str) -> None:
+        with self._lock:
+            stream = self.instances[instance_id][stream_id]
+            stream.closed = True
+            stream.last_activity = self.clock.now()
+
+    def evict(self, instance_id: str, stream_id: str, before: int) -> None:
+        with self._lock:
+            stream = self.instances[instance_id][stream_id]
+            drop = max(0, min(before, stream.end) - stream.oldest)
+            del stream.held[:drop]
+            stream.oldest += drop
+
+    def streams(self, instance_id: str) -> tuple[LogStream, ...]:
+        with self._lock:
+            streams = self._instance(instance_id)
+            return tuple(
+                LogStream(
+                    id=stream_id,
+                    owner=stream.owner,
+                    command=stream.command,
+                    size=stream.end,
+                    closed=stream.closed,
+                    last_activity=stream.last_activity,
+                )
+                for stream_id, stream in streams.items()
+            )
+
+    def read(
+        self, instance_id: str, stream_id: str, start: LogOffset | LogTail, max_bytes: int
+    ) -> StoredBytes:
+        with self._lock:
+            streams = self._instance(instance_id)
+            if stream_id not in streams:
+                raise UnknownLogStreamError(stream_id)
+            stream = streams[stream_id]
+            match start:
+                case LogOffset(offset=offset):
+                    first = max(offset, stream.oldest)
+                    truncated = offset < stream.oldest
+                case LogTail(tail_bytes=tail_bytes):
+                    first = max(stream.end - tail_bytes, stream.oldest)
+                    truncated = False
+            index = first - stream.oldest
+            return StoredBytes(
+                offset=first,
+                data=bytes(stream.held[index : index + max_bytes]),
+                end=stream.end,
+                closed=stream.closed,
+                truncated_before=truncated,
+            )
+
+    def _instance(self, instance_id: str) -> dict[str, _FakeStream]:
+        if instance_id not in self.instances:
+            raise UnknownInstanceError(instance_id)
+        return self.instances[instance_id]
+
+
 def failed_launch(_: Path, __: tuple[str, ...]) -> DetachedLaunchFailure:
     """A launch that starts nothing."""
     return DetachedLaunchFailure(
@@ -153,7 +271,7 @@ def fake_host(
     directories: FakeDirectories | None = None,
     launcher: FakeRunLauncher | None = None,
 ) -> HelperHost:
-    """A helper host over Fakes, on ``threads``' clock and ``network``."""
+    """A helper host over Fakes, on ``threads``' clock and ``network``, with no log store."""
     instance_store = store or FakeInstanceStore()
     return HelperHost(
         registry=LiveRegistry(instance_store, threads),
@@ -175,7 +293,13 @@ def fake_host(
         checkout=FakeCheckout(),
         dialer=network,
         vibesys_version=VIBESYS_VERSION,
+        logs=None,
     )
+
+
+def with_logs(host: HelperHost, logs: FakeLogReader, threads: Threads) -> HelperHost:
+    """``host`` with ``logs`` as its log store, waited on with ``threads``' clock: it offers ``logs``."""
+    return replace(host, logs=HelperLogs(logs, threads, threads.sleep))
 
 
 @dataclass

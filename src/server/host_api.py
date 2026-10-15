@@ -22,6 +22,8 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
 ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
 ``TaskList``, the inspection documents, and the host helper's messages:
+the log streams' ``LogStream``, ``LogChunk``, ``LogOffset``, ``LogTail`` and limits
+(``LOGS_READ_MAX_BYTES``, ``LOGS_READ_MIN_BYTES``, ``LOGS_WAIT_MAX_MS``),
 ``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
 ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
 members, ``HelperMessage`` and its members, ``HelperErrorCode``, and a relayed
@@ -603,6 +605,8 @@ class HelperFeature(StrEnum):
     """``paths.complete``: directory completion for a typed path on the host."""
     INSTANCES_INSPECT = "instances_inspect"
     """``instances.inspect``: retained metadata and an optional bounded log tail."""
+    LOGS = "logs"
+    """``logs.list`` and ``logs.read``: a run's recorded log streams, read in bounded chunks."""
 
 
 RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -742,11 +746,70 @@ class PathsCompleteRequest(_HelperRequest):
     directory, and a trailing ``/`` lists the directory itself."""
 
 
+LOGS_READ_MAX_BYTES: Final = 64 * 1024
+"""The most bytes one ``logs.read`` returns, so a reply stays a small helper line."""
+LOGS_READ_MIN_BYTES: Final = 4
+"""The fewest bytes one ``logs.read`` may ask for: one whole UTF-8 character, so every read of
+available bytes makes progress."""
+LOGS_WAIT_MAX_MS: Final = 30_000
+"""The longest a ``logs.read`` waits at the end of an open stream for more bytes."""
+
+LogStreamId = Annotated[str, StringConstraints(min_length=1, max_length=255)]
+"""A recorded stream's id, unique within its instance; opaque to the client."""
+
+LogOwner = dict[str, JsonValue]
+"""What a stream is for (a startup step, a gate stage, an agent invocation, ...).
+
+TODO(live-log-visibility PR 2): replace this opaque JSON object with the owner
+union vibesys defines there, so clients get the generated discriminated type.
+"""
+
+
+class LogOffset(BaseModel):
+    """Read from this byte offset of the stream."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    offset: NonNegativeInt
+
+
+class LogTail(BaseModel):
+    """Read the last ``tail_bytes`` bytes the stream holds, from the first line start in them."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tail_bytes: Annotated[int, Field(ge=1, le=LOGS_READ_MAX_BYTES)]
+
+
+class LogsListRequest(_HelperRequest):
+    """The log streams recorded for one instance, live or ended."""
+
+    type: Literal["logs.list"] = "logs.list"
+    instance_id: InstanceId
+
+
+class LogsReadRequest(_HelperRequest):
+    """One bounded chunk of a stream; at the end of an open stream, wait up to ``wait_ms`` for more.
+
+    A wait ends as soon as bytes arrive or the stream closes, and always before
+    the request's deadline, so a follower keeps exactly one read in flight.
+    """
+
+    type: Literal["logs.read"] = "logs.read"
+    instance_id: InstanceId
+    stream_id: LogStreamId
+    start: LogOffset | LogTail
+    max_bytes: Annotated[int, Field(ge=LOGS_READ_MIN_BYTES, le=LOGS_READ_MAX_BYTES)]
+    wait_ms: Annotated[int, Field(ge=0, le=LOGS_WAIT_MAX_MS)] = 0
+
+
 HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
     InstancesUnwatchRequest: HelperFeature.INSTANCES_WATCH,
     PathsCompleteRequest: HelperFeature.PATHS_COMPLETE,
+    LogsListRequest: HelperFeature.LOGS,
+    LogsReadRequest: HelperFeature.LOGS,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
@@ -763,7 +826,9 @@ HelperRequest = Annotated[
     | RunStopRequest
     | RunConnectRequest
     | PingRequest
-    | PathsCompleteRequest,
+    | PathsCompleteRequest
+    | LogsListRequest
+    | LogsReadRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -945,6 +1010,71 @@ class PathsCompleteReply(_HelperReply):
     """More directories match than were returned, or the directory was too large to read whole."""
 
 
+class LogStream(BaseModel):
+    """One recorded log stream of an instance, as its store indexes it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: LogStreamId
+    owner: LogOwner
+    command: str | None
+    """The command whose output the stream holds, for display; ``None`` for narration."""
+    size: NonNegativeInt
+    """How many bytes were ever written: the offset the next byte will have."""
+    closed: bool
+    """No byte will be written after ``bytes``."""
+    last_activity: _StartedAt
+    """When the stream was last written or closed, in seconds since the epoch."""
+
+
+class LogsListReply(_HelperReply):
+    """The instance's streams, oldest first."""
+
+    type: Literal["logs.list"] = "logs.list"
+    streams: tuple[LogStream, ...]
+
+
+class LogChunk(BaseModel):
+    """Bytes ``[offset, next_offset)`` of a stream, decoded as UTF-8 text.
+
+    The helper cuts a chunk that more bytes follow after the last line end in
+    its window, or, with no line end there, before a character the window
+    splits; so ``data`` decodes without loss except for bytes that are not
+    UTF-8, which become U+FFFD. ``next_offset - offset`` counts bytes.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    offset: NonNegativeInt
+    """Where ``data`` starts: later than asked when the asked-for bytes were evicted
+    (``truncated_before``), or when a tail read skipped to the next line start."""
+    data: str = Field(json_schema_extra={"x-vibesys-max-utf8-bytes": 3 * LOGS_READ_MAX_BYTES})
+    next_offset: NonNegativeInt
+    """Where the next read continues."""
+    eof: bool
+    """``next_offset`` is the end of what the stream holds now (an unfinished last
+    character of an open stream is held back until it is complete)."""
+    closed: bool
+    """The stream is closed: once ``eof``, no more bytes will come."""
+    truncated_before: bool
+    """Bytes the read asked for, before ``offset``, were evicted and are gone."""
+
+    @model_validator(mode="after")
+    def _ordered(self) -> LogChunk:
+        span = self.next_offset - self.offset
+        if span < 0 or span > LOGS_READ_MAX_BYTES:
+            message = "next_offset must follow offset by at most LOGS_READ_MAX_BYTES"
+            raise ValueError(message)
+        return self
+
+
+class LogsReadReply(_HelperReply):
+    """One chunk of the stream."""
+
+    type: Literal["logs.read"] = "logs.read"
+    chunk: LogChunk
+
+
 class HelperErrorCode(StrEnum):
     """Why a request failed; a closed set."""
 
@@ -982,6 +1112,10 @@ class HelperErrorCode(StrEnum):
     """The run's socket exists but this user may not connect to it."""
     CONNECT_FAILED = "connect_failed"
     """Connecting to the run's socket failed another way."""
+    UNKNOWN_INSTANCE = "unknown_instance"
+    """``logs.list`` or ``logs.read`` named an instance this host recorded no logs for."""
+    UNKNOWN_LOG_STREAM = "unknown_log_stream"
+    """``logs.read`` named a stream the instance does not have."""
     INTERNAL = "internal"
     """The helper failed; ``message`` says how."""
 
@@ -1016,6 +1150,8 @@ HelperReply = (
     | RunConnectReply
     | PingReply
     | PathsCompleteReply
+    | LogsListReply
+    | LogsReadReply
 )
 """A request's result; its ``type`` is the request's."""
 
