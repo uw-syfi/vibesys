@@ -1,0 +1,29 @@
+/*
+ * The styles of the primitives this package renders: Button, StatusChip, Combobox's input, and
+ * Dialog's sheet and card, drawn from the tokens. `tokens.css` is generated with this file appended
+ * (`pnpm --dir clients/libs/ui generate:tokens`): an app imports that one file first and styles its
+ * own layout after it.
+ */
+:root { font: 13px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
+* { box-sizing: border-box; }
+button, input { font: inherit; color: inherit; -webkit-app-region: no-drag; }
+button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+button:hover { background: var(--hover); }
+button:disabled { cursor: default; opacity: 0.55; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.link { border: none; background: none; color: var(--accent); padding: 2px 4px; }
+/* StatusChip: a button when pressable, otherwise a span drawn the same way. */
+.chip { display: inline-flex; gap: 6px; align-items: center; border-radius: 999px; }
+span.chip { border: 1px solid var(--line); padding: 4px 10px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.error { background: var(--error); }
+input[type="text"], input:not([type]) { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+input:focus, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.muted { color: var(--muted); }
+.error { color: var(--error); white-space: pre-wrap; }
+.warn { color: var(--warn); }
+.ok { color: var(--ok); }
+/* Dialogs are modal <dialog>s: the platform makes the page behind inert and handles Esc. */
+dialog.sheet { padding: 0; border: none; background: transparent; color: var(--text); max-width: none; max-height: none; }
+dialog.sheet::backdrop { background: var(--scrim); }
+.card { width: min(680px, 92vw); max-height: 86vh; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; box-shadow: var(--elevation-overlay); }
