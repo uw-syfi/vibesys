@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -50,6 +51,8 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
+    from contextvars import Context
+    from typing import Any
 
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
     from vs_sim.api import (
@@ -71,6 +74,7 @@ _FRAMES = hostile_json_frames((_FOREIGN_CALL,))
 _LARGEST_FRAME = 1 << 16
 """The bridge's line bound; only a frame past it may go unanswered."""
 _UNBOUNDED_ANSWER_RETURNED = "an unbounded answer must be cancelled by bridge close"
+_RECEIPT_STORE_UNAVAILABLE = "receipt store unavailable"
 
 
 class _BlockingAnswerBridge(AgentEvaluationBridge):
@@ -109,6 +113,24 @@ class _RecordingAcknowledgementBridge(AgentEvaluationBridge):
 
         def acknowledge() -> None:
             self.acknowledged_after_close.append(self.close_returned)
+
+        return b"answer", acknowledge
+
+
+class _FailingAcknowledgementBridge(AgentEvaluationBridge):
+    """A bridge whose receipt-store effect exposes durable-store failure ownership."""
+
+    def arm(self, acknowledgement_started: Event) -> None:
+        """Expose the instant immediately before the receipt-store failure."""
+        self.acknowledgement_started = acknowledgement_started
+
+    async def answer(self, frame: bytes) -> tuple[bytes, Callable[[], None]]:
+        """Answer successfully, then fail while durably recording its receipt."""
+        del frame
+
+        def acknowledge() -> None:
+            self.acknowledgement_started.set()
+            raise OSError(_RECEIPT_STORE_UNAVAILABLE)
 
         return b"answer", acknowledge
 
@@ -543,6 +565,108 @@ def test_close_fences_a_receipt_read_before_its_acknowledgement(tmp_path: Path) 
 
     assert reply == b"answer\n"
     assert acknowledgements == ()
+
+
+def test_a_receipt_store_failure_remains_a_worker_failure(tmp_path: Path) -> None:
+    """A durable-store OSError must not be mistaken for a disconnected client."""
+    clock = VirtualClock()
+    threads = SimThreads(clock)
+    network = SimNetwork(threads)
+    acknowledgement_started = threads.event()
+    bridge = cast(
+        "_FailingAcknowledgementBridge",
+        _bridge(
+            tmp_path,
+            network,
+            threads,
+            bridge_type=_FailingAcknowledgementBridge,
+        ),
+    )
+    bridge.arm(acknowledgement_started)
+    runner = SimBlockingRunner(threads)
+
+    def client() -> bytes:
+        connection = network.connect(ADDRESS, HANG_GUARD_S)
+        try:
+            connection.send(b"call\n", HANG_GUARD_S)
+            reply = _reply_line(connection)
+            connection.send(RECEIPT_LINE, HANG_GUARD_S)
+            return reply
+        finally:
+            connection.close()
+
+    async def main() -> bytes:
+        await bridge.serve()
+        try:
+            reply = await runner.run(client)
+            assert await runner.run(acknowledgement_started.wait, HANG_GUARD_S)
+            for _ in range(16):
+                if threads.errors:
+                    break
+                await yield_now()
+            return reply
+        finally:
+            await bridge.close()
+
+    reply = run_virtual(clock, main(), driver=threads)
+
+    assert reply == b"answer\n"
+    assert len(threads.errors) == 1
+    assert isinstance(threads.errors[0], RuntimeError)
+    assert str(threads.errors[0]) == "agent evaluation receipt acknowledgement failed"
+    assert isinstance(threads.errors[0].__cause__, OSError)
+
+
+def test_a_task_creation_failure_settles_the_published_call(tmp_path: Path) -> None:
+    """A loop that rejects task ownership must close the work and wake its worker."""
+    clock = VirtualClock()
+    threads = SimThreads(clock)
+    network = SimNetwork(threads)
+    bridge = _bridge(tmp_path, network, threads)
+    runner = SimBlockingRunner(threads)
+    client_waiting = threads.event()
+    release_client = threads.event()
+    creation_failure = RuntimeError("task creation refused")
+    rejected: list[Coroutine[Any, Any, Any]] = []
+
+    def client() -> bytes:
+        client_waiting.set()
+        assert release_client.wait(HANG_GUARD_S)
+        return _call(network, b"call\n")
+
+    async def main() -> bytes:
+        await bridge.serve()
+        loop = asyncio.get_running_loop()
+        client_task = asyncio.create_task(runner.run(client))
+        assert await runner.run(client_waiting.wait, HANG_GUARD_S)
+        original_factory = loop.get_task_factory()
+
+        def fail_answer_creation(
+            event_loop: asyncio.AbstractEventLoop,
+            coroutine: Coroutine[Any, Any, Any],
+            context: Context | None = None,
+        ) -> asyncio.Task[Any]:
+            if not rejected:
+                rejected.append(coroutine)
+                raise creation_failure
+            if original_factory is not None:
+                return original_factory(event_loop, coroutine, context=context)
+            return asyncio.Task(coroutine, loop=event_loop, context=context)
+
+        loop.set_task_factory(fail_answer_creation)
+        try:
+            release_client.set()
+            return await client_task
+        finally:
+            loop.set_task_factory(original_factory)
+            await bridge.close()
+
+    reply = run_virtual(clock, main(), driver=threads)
+
+    assert isinstance(REPLY.validate_json(reply), SocketFailure)
+    assert threads.errors == [creation_failure]
+    assert len(rejected) == 1
+    assert inspect.getcoroutinestate(rejected[0]) == inspect.CORO_CLOSED
 
 
 @settings(deadline=None, max_examples=examples(pr=8, nightly=300))
