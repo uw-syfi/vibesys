@@ -32,9 +32,9 @@ export function CheckList(props: {readonly items: readonly CheckItem[]}): JSX.El
             <Icon name={STATES[item.state].icon} label={STATES[item.state].word} />
           </span>
           <span className="vs-check-text">
-            <Text style="body-strong">{item.label}</Text>
+            <Text variant="body-strong">{item.label}</Text>
             {item.detail === undefined ? null : (
-              <Text style="small" tone="muted">
+              <Text variant="small" tone="muted">
                 {item.detail}
               </Text>
             )}

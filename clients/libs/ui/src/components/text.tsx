@@ -4,7 +4,7 @@ import type {StyleWithVars} from './css-vars.js';
 
 /** The color text is drawn in: the body's, secondary, or a status. */
 export type TextTone = 'default' | 'muted' | 'ok' | 'warn' | 'err';
-/** The element a `Text` renders, for the document outline; its look comes from `style` alone. */
+/** The element a `Text` renders, for the document outline; its look comes from `variant` alone. */
 export type TextElement = 'span' | 'p' | 'div' | 'h1' | 'h2' | 'h3' | 'h4';
 
 function typeStyle(style: TextStyle): StyleWithVars {
@@ -19,19 +19,22 @@ function typeStyle(style: TextStyle): StyleWithVars {
   };
 }
 
-/** Text in one of the type scale's styles. A `section` label is `muted` unless `tone` says otherwise. */
+/**
+ * Text in one of the type scale's styles (`variant`). A `section` label is `muted` unless `tone`
+ * says otherwise. The prop is not named `style`, which strict packages may not pass to anything.
+ */
 export function Text(props: {
-  readonly style?: TextStyle;
+  readonly variant?: TextStyle;
   readonly tone?: TextTone;
   readonly as?: TextElement;
   /** For a region or control to be named by this text (`aria-labelledby`). */
   readonly id?: string;
   readonly children: ReactNode;
 }): JSX.Element {
-  const {style = 'body', as: Element = 'span'} = props;
-  const tone = props.tone ?? (style === 'section' ? 'muted' : 'default');
+  const {variant = 'body', as: Element = 'span'} = props;
+  const tone = props.tone ?? (variant === 'section' ? 'muted' : 'default');
   return (
-    <Element className="vs-text" id={props.id} data-tone={tone} style={typeStyle(style)}>
+    <Element className="vs-text" id={props.id} data-tone={tone} style={typeStyle(variant)}>
       {props.children}
     </Element>
   );

@@ -33,14 +33,14 @@ export function SidebarItem(
         </span>
       )}
       <span className="vs-sidebar-text">
-        <Text style={props.detail === undefined ? 'body' : 'body-strong'}>{props.label}</Text>
+        <Text variant={props.detail === undefined ? 'body' : 'body-strong'}>{props.label}</Text>
         {props.detail === undefined ? null : (
-          <Text style="small" tone="muted">
+          <Text variant="small" tone="muted">
             {props.detail}
           </Text>
         )}
       </span>
-      {props.count === undefined ? null : <Text style="section">{String(props.count)}</Text>}
+      {props.count === undefined ? null : <Text variant="section">{String(props.count)}</Text>}
     </>
   );
   const shared = {
@@ -81,7 +81,7 @@ export function SidebarSection(props: {
   return (
     <section className="vs-sidebar-section" aria-label={props.title}>
       <span className="vs-sidebar-title">
-        <Text style="section">{props.title}</Text>
+        <Text variant="section">{props.title}</Text>
       </span>
       {props.children}
       {showAll === undefined ? null : showAll.href !== undefined ? (

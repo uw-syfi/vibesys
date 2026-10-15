@@ -15,12 +15,12 @@ export function KeyValue(props: {readonly items: readonly KeyValueItem[]}): JSX.
       {props.items.map(item => (
         <div key={item.key} className="vs-key-value-row">
           <dt>
-            <Text style="small" tone="muted">
+            <Text variant="small" tone="muted">
               {item.key}
             </Text>
           </dt>
           <dd>
-            <Text style={item.mono === true ? 'code' : 'small'}>{item.value}</Text>
+            <Text variant={item.mono === true ? 'code' : 'small'}>{item.value}</Text>
           </dd>
         </div>
       ))}
@@ -36,10 +36,10 @@ export function Stat(props: {
 }): JSX.Element {
   return (
     <div className="vs-stat">
-      <Text style="section">{props.label}</Text>
-      <Text style="metric">{props.value}</Text>
+      <Text variant="section">{props.label}</Text>
+      <Text variant="metric">{props.value}</Text>
       {props.sub === undefined ? null : (
-        <Text style="small" tone="muted">
+        <Text variant="small" tone="muted">
           {props.sub}
         </Text>
       )}
@@ -55,7 +55,7 @@ export function EmptyState(props: {
 }): JSX.Element {
   return (
     <div className="vs-empty">
-      <Text style="heading">{props.title}</Text>
+      <Text variant="heading">{props.title}</Text>
       {props.body === undefined ? null : <Text tone="muted">{props.body}</Text>}
       {props.action === undefined ? null : <div className="vs-empty-action">{props.action}</div>}
     </div>

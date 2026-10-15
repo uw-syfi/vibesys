@@ -14,9 +14,9 @@ export interface ChartTick {
 }
 
 /** The drawing's own coordinates: the SVG scales to its container's width. */
-const WIDTH = 600;
-const HEIGHT = 220;
-const PLOT = {left: 56, right: 592, top: 12, bottom: 188};
+const WIDTH = 1000;
+const HEIGHT = 300;
+const PLOT = {left: 56, right: 990, top: 12, bottom: 266};
 
 interface Scale {
   readonly x: (value: number) => number;

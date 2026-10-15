@@ -22,13 +22,15 @@ function items(list: HTMLElement | null): HTMLElement[] {
 /**
  * A button that opens a menu of `items` in a raised panel under it. Enter, Space or the down arrow
  * opens it on the first item; the arrows, Home and End move; Esc closes it and gives the focus back
- * to the button; choosing an item, or moving the focus out, closes it.
+ * to the button; choosing an item, or moving the focus out, closes it. The panel lines up with
+ * the button's `end` edge (the default, for a button at the end of a row) or its `start` edge.
  */
 export function Menu(
   props: ButtonFace & {
     readonly items: readonly MenuItem[];
     readonly variant?: ButtonVariant;
     readonly size?: 'sm' | 'md';
+    readonly align?: 'start' | 'end';
   },
 ): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -96,6 +98,7 @@ export function Menu(
           ref={list}
           id={menuId}
           className="vs-menu-list"
+          data-align={props.align ?? 'end'}
           role="menu"
           aria-label={props.label ?? props.text}
           tabIndex={-1}

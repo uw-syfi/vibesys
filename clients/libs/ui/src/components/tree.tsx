@@ -143,11 +143,11 @@ export function TreeRow(props: {
         <StatusDot tone={props.state.tone} label={props.state.label} />
       )}
       <span className="vs-tree-text">
-        <Text style={group ? 'body' : 'body-strong'} tone={group ? 'muted' : 'default'}>
+        <Text variant={group ? 'body' : 'body-strong'} tone={group ? 'muted' : 'default'}>
           {props.title}
         </Text>
         {props.subtitle === undefined ? null : (
-          <Text style={group ? 'code' : 'small'} tone="muted">
+          <Text variant={group ? 'code' : 'small'} tone="muted">
             {props.subtitle}
           </Text>
         )}

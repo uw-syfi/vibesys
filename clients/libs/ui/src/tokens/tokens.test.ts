@@ -12,7 +12,10 @@ import {
   CONTRAST_PAIRS,
   contrastRatio,
   DEFAULT_THEMES,
+  LOG_ERR_MIX,
   MOTION,
+  mixHex,
+  TEXT_FLOOR,
   THEMES,
   type ThemeMode,
   type ThemeName,
@@ -92,6 +95,16 @@ describe('contrast floors', () => {
             ];
       }),
     );
+    expect(failures).toEqual([]);
+  });
+
+  test('standard error in the log pane reads on the log background in every theme', () => {
+    const {role, share, into, on} = LOG_ERR_MIX;
+    const failures = THEME_NAMES.flatMap(name => {
+      const {colors} = THEMES[name];
+      const ratio = contrastRatio(mixHex(colors[role], share, colors[into]), colors[on]);
+      return ratio >= TEXT_FLOOR ? [] : [`${name}: --log-err on ${on} is ${ratio.toFixed(2)}:1`];
+    });
     expect(failures).toEqual([]);
   });
 });

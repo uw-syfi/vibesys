@@ -1,3 +1,4 @@
+import {LOG_ERR_MIX} from './contrast.js';
 import {
   ELEVATION,
   FONT_STACKS,
@@ -83,6 +84,7 @@ function scaleDeclarations(): string[] {
 function derivedDeclarations(): string[] {
   return [
     `--selection: ${mix('accent', MIX.selection, 'bg')};`,
+    `--log-err: ${mix(LOG_ERR_MIX.role, LOG_ERR_MIX.share, LOG_ERR_MIX.into)};`,
     ...TONES.flatMap(tone => [
       `--chip-${tone}-bg: ${mix(tone, MIX.fill, 'panel')};`,
       `--chip-${tone}-border: ${mix(tone, MIX.border, 'panel')};`,

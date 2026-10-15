@@ -651,6 +651,10 @@ body {
   background: var(--panel);
   box-shadow: var(--elevation-raised);
 }
+.vs-menu-list[data-align="start"] {
+  right: auto;
+  left: 0;
+}
 .vs-menu-item {
   display: flex;
   align-items: center;
@@ -1021,7 +1025,7 @@ button.vs-stage-head {
   height: var(--log-sm);
 }
 .vs-log-line[data-stream="err"] {
-  color: var(--err);
+  color: var(--log-err);
 }
 .vs-log-jump {
   position: absolute;

@@ -34,7 +34,7 @@ export function Scrubber(props: {
     <div className="vs-scrubber">
       <div className="vs-scrubber-head">
         <label className="vs-scrubber-label" htmlFor={id}>
-          <Text style="code">{props.position}</Text>
+          <Text variant="code">{props.position}</Text>
         </label>
         <Chip
           tone={props.live ? 'live' : 'neutral'}

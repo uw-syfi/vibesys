@@ -59,7 +59,7 @@ export function Dialog(props: {
     >
       {props.open ? (
         <div className="vs-dialog-card">
-          <Text as="h2" style="heading" id={titleId}>
+          <Text as="h2" variant="heading" id={titleId}>
             {props.title}
           </Text>
           <div className="vs-dialog-body">{props.children}</div>

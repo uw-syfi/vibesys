@@ -31,10 +31,10 @@ function StageHead(props: {readonly stage: Stage}): JSX.Element {
     <>
       <StatusDot tone={DOTS[stage.state].tone} label={DOTS[stage.state].word} />
       <span className="vs-stage-label">
-        <Text style="body-strong">{stage.label}</Text>
+        <Text variant="body-strong">{stage.label}</Text>
       </span>
       {stage.elapsed === undefined ? null : (
-        <Text style="code" tone="muted">
+        <Text variant="code" tone="muted">
           {stage.elapsed}
         </Text>
       )}
