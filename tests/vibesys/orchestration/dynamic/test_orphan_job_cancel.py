@@ -180,8 +180,9 @@ class _LateJobId:
 def test_a_job_whose_id_arrives_after_its_submission_ended_is_cancelled() -> None:
     """The job a late ``sbatch`` answer names is cancelled once its id is known.
 
-    Regression: core asked to end only the jobs whose id it knew when the submission ended,
-    so a job named later stayed queued, holding its nodes, with nothing waiting on it.
+    The submission first ends at its limit with no job id known; the late answer ends it
+    again, and that second end, with the id known, asks for the cancel. A guard: the re-sent
+    cancel of a blocked one must leave this path working.
     """
     script = _LateJobId(inner=_executors())
     trace = _drive(script, during_turn=script.during)

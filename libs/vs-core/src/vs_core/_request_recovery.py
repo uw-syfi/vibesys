@@ -1751,9 +1751,9 @@ def _orphaned_jobs(
     limit or a watch, nothing waits on the job any longer: evaluation cancels it rather than
     leave it in the scheduler's queue, holding nodes nobody will read. A cancel of such a job
     that ends blocked at its bound proved nothing, so core asks again, within the backend's
-    retry limit (``cancel_settled``). A job whose id arrives only after its submission ended
-    is cancelled when the id arrives (``_measurements``). A job an agent submitted is its
-    wait's to end (``_continuations``).
+    retry limit (``cancel_settled``); each such cancel's own end brings it back here. A job
+    whose id arrives only after its submission ended is cancelled when that late answer ends
+    the submission again. A job an agent submitted is its wait's to end (``_continuations``).
     """
     source = _orphan_source(state, context, record)
     if source is None:

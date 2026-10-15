@@ -1792,10 +1792,11 @@ def cancel_settled(records: RecordsState, run: RunState, resource: ResourceId) -
 
     A cancel blocked at its bound proved nothing: the executor's cancel failed or its outcome
     is unknown, and the job may still run. It still proves nothing once a closing run settles
-    it (``failure`` keeps why core ended it without a result). It does not count, so the job's next observation
-    asks for a new cancel (its id names that observation) instead of holding the run closing
-    until the job ends by itself. The backend's ``request_retries.limit`` bounds those
-    re-sends; past it core waits for the job's own end, as it did before any retry.
+    it (``failure`` keeps why core ended it without a result). It does not count, so core
+    asks for a new cancel (on the job's next observation, or as the blocked cancel ends when
+    nothing polls the job) instead of leaving the job to end by itself. The backend's
+    ``request_retries.limit`` bounds those re-sends; past it core waits for the job's own
+    end, as it did before any retry.
     """
     cancels = tuple(
         row for row in records.about_resource(resource) if isinstance(row.request, CancelOwnedJob)
@@ -1829,25 +1830,6 @@ def _termination_inspected(context: EvaluationContext, job: OwnedJob | Registere
     return any(
         isinstance(row.request, InspectOwnedJob) and row.request_id.root.startswith(prefix)
         for row in context.records.about_resource(job.resource_id)
-    )
-
-
-def _orphaned(
-    state: EvaluationState, context: EvaluationContext, job: OwnedJob | RegisteredOwnedJob
-) -> bool:
-    """Whether core ended the strategy's submission that started *job*, so nothing reads it.
-
-    Such a job is cancelled (``_request_recovery``), also when its id arrives only after the
-    submission ended, and again after a cancel that blocked at its bound. A job an agent
-    submitted is its wait's to end.
-    """
-    if not isinstance(job, OwnedJob):
-        return False
-    source = context.records.record(job.submission_id)
-    return (
-        source is not None
-        and source.failure is not None
-        and not any(call.request_id == job.submission_id for call in state.agent_calls)
     )
 
 
@@ -1885,12 +1867,7 @@ def _cancel_scope_jobs(
         if job.resource_id is not None
         and not job.terminal
         and not _cancel_requested(context, job.resource_id)
-        and (
-            job.scope == scope
-            or job.scope in closing
-            or _termination_inspected(context, job)
-            or _orphaned(state, context, job)
-        )
+        and (job.scope == scope or job.scope in closing or _termination_inspected(context, job))
         for request in _terminate(
             state, context, job.resource_id, cancel_unconfirmed=_inspected(context, job.resource_id)
         ).requests
