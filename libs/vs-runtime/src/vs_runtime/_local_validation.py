@@ -23,6 +23,7 @@ from pydantic import (
     field_validator,
 )
 
+from vs_project.api.workspace_tree import WorkspacePathError, relative_parts
 from vs_runtime._workspace_files import (
     WorkspaceFileProblem,
     WorkspaceFileProblemKind,
@@ -30,7 +31,6 @@ from vs_runtime._workspace_files import (
     read_agent_model,
     write_for_agent,
 )
-from vs_runtime._workspace_tree import WorkspacePathError, relative_parts
 from vs_runtime.contracts import WorkspaceAccess, validate_workspace_writable_paths
 
 if TYPE_CHECKING:

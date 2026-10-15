@@ -201,6 +201,38 @@ def test_session_setup_materializes_skills_once(
     assert calls == [(tmp_path, [skill])]
 
 
+def test_a_session_launch_never_follows_a_symlink_the_agent_planted(tmp_path: Path) -> None:
+    """Regression: launch-time skill setup replaced ``host-data/alpha`` through a link."""
+    client = AgentClient(
+        _FakeLauncher([_FakeSession(results=[AgentTurnResult("done")])]),
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+    skill = tmp_path / "source" / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# alpha\n")
+    outside = tmp_path / "host-data"
+    (outside / "alpha").mkdir(parents=True)
+    (outside / "alpha" / "keep.txt").write_text("host file\n")
+    workspace = tmp_path / "workspace"
+    (workspace / ".claude").mkdir(parents=True)
+    (workspace / ".claude" / "skills").symlink_to(outside, target_is_directory=True)
+
+    client.run(
+        session_spec=_spec(workspace=workspace, skills=(skill,)),
+        turn=AgentTurnRequest("one"),
+        session_key=_key("impl"),
+    )
+
+    assert sorted(p.relative_to(outside).as_posix() for p in outside.rglob("*")) == [
+        "alpha",
+        "alpha/keep.txt",
+    ]
+    assert (outside / "alpha" / "keep.txt").read_text() == "host file\n"
+    assert (workspace / "alpha" / "SKILL.md").read_text() == "# alpha\n"
+
+
 def test_client_forwards_turn_events_to_caller_observer() -> None:
     event = AgentEvent(AgentEventKind.TEXT, text="chunk")
     session = _FakeSession(results=[AgentTurnResult("done")], emitted=[event])

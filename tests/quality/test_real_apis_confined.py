@@ -800,7 +800,7 @@ REAL_API_EDGES: dict[Key, str] = {
         )
         for rule in ("signal", "socket", "threading")
     },
-    ("libs/vs-runtime/src/vs_runtime/_workspace_tree.py", "fs_sync"): (
+    ("libs/vs-project/src/vs_project/_workspace_tree.py", "fs_sync"): (
         "syncs the directory descriptor a file was renamed in; vs_project's path-based "
         "directory sync would resolve the agent's tree again"
     ),
@@ -935,10 +935,6 @@ type Edge = tuple[EdgeKind, str]
 # parse JSON or TOML directly. Everything else asks the owner of the data. Keep one line
 # per module: its kind, and a note naming the data.
 FILE_IO_EDGE_MODULES: dict[str, Edge] = {
-    "libs/vs-agent/src/vs_agent/cli_common.py": (
-        EdgeKind.AGENT_WORKSPACE,
-        "installs skill trees where the agent CLI reads them",
-    ),
     "libs/vs-agent/src/vs_agent/images.py": (
         EdgeKind.GENERATOR,
         "content-addresses the build context it hands to docker build",
@@ -1013,6 +1009,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "atomic, durable state document writes and reads",
     ),
     "libs/vs-project/src/vs_project/_state_store.py": (EdgeKind.STORE, "the local StateStore"),
+    "libs/vs-project/src/vs_project/_workspace_tree.py": (
+        EdgeKind.AGENT_WORKSPACE,
+        "every host read or write of an agent-chosen path, walked by descriptor",
+    ),
     "libs/vs-project/src/vs_project/git_contract_scaffold.py": (
         EdgeKind.FAKE,
         "builds working trees for the GitRepository contract suite",
@@ -1061,10 +1061,6 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "libs/vs-runtime/src/vs_runtime/_receipt_store.py": (EdgeKind.STORE, "evaluation receipts"),
     "libs/vs-runtime/src/vs_runtime/_skills.py": (EdgeKind.PACKAGED_RESOURCE, "skill trees"),
     "libs/vs-runtime/src/vs_runtime/_slot_meter.py": (EdgeKind.STORE, "the slot usage meter"),
-    "libs/vs-runtime/src/vs_runtime/_workspace_tree.py": (
-        EdgeKind.AGENT_WORKSPACE,
-        "every host read or write of an agent-chosen path, walked by descriptor",
-    ),
     "libs/vs-runtime/src/vs_runtime/api/operation_fixtures.py": (
         EdgeKind.FAKE,
         "the effect log file",

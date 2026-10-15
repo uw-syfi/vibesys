@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from vs_decode.api import Unreadable, decode_json
-from vs_runtime._workspace_tree import (
+from vs_project.api.workspace_tree import (
     EntryKind,
     WorkspacePathError,
     WorkspaceTree,

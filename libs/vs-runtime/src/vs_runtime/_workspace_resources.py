@@ -6,6 +6,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
+from vs_project.api.workspace_tree import EntryKind
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
     AgentExecutionScope,
@@ -18,7 +19,6 @@ from vs_runtime._trusted_evaluation import (
 from vs_runtime._workspace_files import entry_kind, file_fingerprint
 from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
-from vs_runtime._workspace_tree import EntryKind
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:

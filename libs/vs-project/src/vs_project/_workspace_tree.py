@@ -17,23 +17,26 @@ from __future__ import annotations
 import errno
 import itertools
 import os
+import shutil
 import stat
+from collections.abc import Callable
 from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from vs_project.api import LocalAtomicWriteEffects, atomic_write_bytes
+from vs_project._state_io import LocalAtomicWriteEffects, atomic_write_bytes
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from io import FileIO
 
-    from vs_project.api import AtomicWriteStream
+    from vs_project._state_io import AtomicWriteStream
 
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
-_TEMPORARY_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+_CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 _TEMPORARY_ATTEMPTS = 64
 _READ_CHUNK_BYTES = 1024 * 1024
 _temporary_names = itertools.count()
@@ -69,6 +72,20 @@ def relative_parts(relative: str) -> tuple[str, ...]:
         message = f"{relative} escapes the workspace through '..'"
         raise WorkspacePathError(message)
     return path.parts
+
+
+type CopyIgnore = Callable[[str, list[str]], set[str]]
+"""Like ``shutil.copytree``'s ``ignore``: a source directory and names, to the names to skip."""
+
+
+@dataclass(frozen=True, slots=True)
+class CopiedTree:
+    """What :meth:`WorkspaceTree.copy_in` copied, relative to the copied directory."""
+
+    copied: frozenset[PurePosixPath]
+    """Every directory and regular file copied."""
+    links: tuple[PurePosixPath, ...]
+    """The source symlinks not ignored, which were not copied."""
 
 
 class WorkspaceTree:
@@ -162,6 +179,56 @@ class WorkspaceTree:
                         files.append(child)
         return tuple(PurePosixPath(*parts).as_posix() for parts in sorted(files))
 
+    def make_directories(self, relative: str) -> None:
+        """Create the directory ``relative`` and any missing directories above it."""
+        with self._directory(relative_parts(relative), create=True):
+            pass
+
+    def remove(self, relative: str) -> None:
+        """Remove whatever ``relative`` names, a directory with everything below it.
+
+        A symlink is removed itself, never followed, at the end of the path and
+        anywhere below it; one on the way to it is refused. Missing is not an error.
+        """
+        parts = _file_parts(relative)
+        try:
+            with self._parent(parts, create=False) as parent:
+                mode = os.stat(parts[-1], dir_fd=parent, follow_symlinks=False).st_mode
+                if stat.S_ISDIR(mode):
+                    # The descriptor-based rmtree opens every directory below with
+                    # ``O_NOFOLLOW`` and removes entries by name inside it.
+                    shutil.rmtree(parts[-1], dir_fd=parent)
+                else:
+                    os.unlink(parts[-1], dir_fd=parent)
+        except (FileNotFoundError, NotADirectoryError):
+            return
+
+    def symlink(self, relative: str, target: str) -> None:
+        """Create the symlink ``relative`` with the contents ``target``; never followed here."""
+        parts = _file_parts(relative)
+        with self._parent(parts, create=False) as parent:
+            os.symlink(target, parts[-1], dir_fd=parent)
+
+    def copy_in(self, source: Path, relative: str, *, ignore: CopyIgnore) -> CopiedTree:
+        """Copy the host directory ``source`` to the new directory ``relative``.
+
+        ``source`` is host-owned and read by path; ``relative`` must not exist and is
+        filled only through descriptors opened below it. Regular files keep their mode
+        bits and times, directories are created fresh, and symlinks are not copied but
+        listed for the caller to recreate with :meth:`symlink` once it knows what was
+        copied. ``ignore`` is called like ``shutil.copytree``'s: with a source directory
+        and its entry names, returning the names to skip.
+        """
+        parts = _file_parts(relative)
+        copy = _TreeCopy(ignore)
+        with self._parent(parts, create=False) as parent:
+            descriptor = _make_directory(parent, parts[-1])
+            try:
+                copy.directory(source, descriptor, PurePosixPath())
+            finally:
+                os.close(descriptor)
+        return CopiedTree(copied=frozenset(copy.copied), links=tuple(sorted(copy.links)))
+
     @contextmanager
     def _parent(self, parts: tuple[str, ...], *, create: bool) -> Iterator[int]:
         with self._directory(parts[:-1], create=create) as parent:
@@ -203,6 +270,55 @@ def _file_parts(relative: str) -> tuple[str, ...]:
     return parts
 
 
+def _make_directory(parent: int, name: str) -> int:
+    """Create ``name`` in ``parent`` and open it; an existing entry is refused."""
+    os.mkdir(name, dir_fd=parent)
+    return _open_component(name, _DIRECTORY_FLAGS, parent, name)
+
+
+class _TreeCopy:
+    """One :meth:`WorkspaceTree.copy_in`: what it copied and the links it left out."""
+
+    def __init__(self, ignore: CopyIgnore) -> None:
+        self._ignore = ignore
+        self.copied: list[PurePosixPath] = []
+        self.links: list[PurePosixPath] = []
+
+    def directory(self, source: Path, descriptor: int, inside: PurePosixPath) -> None:
+        """Copy the entries of the host directory ``source`` into ``descriptor``."""
+        with os.scandir(source) as it:
+            entries = list(it)
+        skipped = self._ignore(os.fspath(source), [entry.name for entry in entries])
+        for entry in entries:
+            if entry.name in skipped:
+                continue
+            child = inside / entry.name
+            if entry.is_symlink():
+                self.links.append(child)
+            elif entry.is_dir(follow_symlinks=False):
+                made = _make_directory(descriptor, entry.name)
+                try:
+                    self.directory(Path(entry.path), made, child)
+                finally:
+                    os.close(made)
+                self.copied.append(child)
+            elif entry.is_file(follow_symlinks=False):
+                _copy_file(Path(entry.path), descriptor, entry.name)
+                self.copied.append(child)
+
+
+def _copy_file(source: Path, directory: int, name: str) -> None:
+    """Copy the host file ``source`` to the new file ``name`` in ``directory``."""
+    with source.open("rb") as reader:
+        status = os.fstat(reader.fileno())
+        descriptor = os.open(name, _CREATE_FLAGS, 0o600, dir_fd=directory)
+        with os.fdopen(descriptor, "wb") as writer:
+            shutil.copyfileobj(reader, writer, _READ_CHUNK_BYTES)
+            writer.flush()
+            os.fchmod(writer.fileno(), stat.S_IMODE(status.st_mode))
+            os.utime(writer.fileno(), ns=(status.st_atime_ns, status.st_mtime_ns))
+
+
 def _open_component(name: str, flags: int, directory: int, shown: str) -> int:
     """Open one path component in ``directory``; a symlink there is refused."""
     try:
@@ -235,7 +351,7 @@ class _DirectoryAtomicWrite:
         for _ in range(_TEMPORARY_ATTEMPTS):
             temporary = f".{self._name}.{next(_temporary_names)}.tmp"
             try:
-                descriptor = os.open(temporary, _TEMPORARY_FLAGS, 0o600, dir_fd=self._directory)
+                descriptor = os.open(temporary, _CREATE_FLAGS, 0o600, dir_fd=self._directory)
             except FileExistsError:
                 continue
             with os.fdopen(descriptor, "wb") as stream:
@@ -262,6 +378,8 @@ class _DirectoryAtomicWrite:
 
 
 __all__ = [
+    "CopiedTree",
+    "CopyIgnore",
     "EntryKind",
     "NotRegularFileError",
     "WorkspacePathError",

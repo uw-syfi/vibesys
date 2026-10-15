@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import os
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_runtime.api.infrastructure import (
+from vs_project.api.workspace_tree import (
     EntryKind,
     NotRegularFileError,
     WorkspacePathError,
@@ -91,12 +91,32 @@ def _expected(
 
 
 def _outside_snapshot(root: Path) -> dict[str, bytes]:
-    outside = root / "outside"
+    """Every file's bytes and every directory (as ``b""``) below ``root/outside``."""
     return {
-        path.relative_to(outside).as_posix(): path.read_bytes()
-        for path in outside.rglob("*")
-        if path.is_file()
+        key: entry
+        for key, entry in _entries(root).items()
+        if key == "outside" or key.startswith("outside/")
     }
+
+
+def _entries(root: Path) -> dict[str, bytes]:
+    """Every entry below ``root``, seen without following a symlink.
+
+    A file maps to its bytes, a directory to ``b"/"`` and a symlink to ``b"->"`` and its
+    target, so a removal, a write or a replaced link all change the map.
+    """
+    entries: dict[str, bytes] = {}
+    for directory, names, files in os.walk(root):
+        for name in (*names, *files):
+            path = Path(directory, name)
+            key = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                entries[key] = b"->" + os.fsencode(path.readlink())
+            elif path.is_dir():
+                entries[key] = b"/"
+            elif path.is_file():
+                entries[key] = path.read_bytes()
+    return entries
 
 
 @settings(max_examples=examples(pr=40, nightly=600), deadline=None)
@@ -163,3 +183,82 @@ def test_files_below_refuses_a_symlink_at_any_depth(tmp_path: Path) -> None:
     (tmp_path / "inputs" / "deep" / "link").symlink_to(tmp_path)
     with open_workspace_tree(tmp_path) as tree, pytest.raises(WorkspacePathError):
         tree.files_below("inputs")
+
+
+def _without(entries: dict[str, bytes], removed: str) -> dict[str, bytes]:
+    return {
+        key: value
+        for key, value in entries.items()
+        if key != removed and not key.startswith(f"{removed}/")
+    }
+
+
+@settings(max_examples=examples(pr=25, nightly=400), deadline=None)
+@given(spec=_tree_specs, query=_queries)
+def test_a_removal_takes_only_the_entry_the_path_names_never_through_a_symlink(
+    spec: list[tuple[list[str], str]], query: tuple[bool, list[str]]
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        workspace = _build(root, spec)
+        before = _entries(root)
+        expected = _expected(workspace, query, last_may_be_symlink=True)
+        try:
+            with open_workspace_tree(workspace) as tree:
+                tree.remove(_query_text(query))
+        except WorkspacePathError:
+            assert _entries(root) == before
+            return
+        assert expected is not None
+        assert expected != workspace
+        assert _entries(root) == _without(before, expected.relative_to(root).as_posix())
+
+
+def _host_skill(root: Path) -> Path:
+    source = root / "source"
+    (source / "references" / "deep").mkdir(parents=True)
+    (source / "SKILL.md").write_text("# skill\n")
+    (source / "references" / "deep" / "note.md").write_text("note\n")
+    (source / "run.sh").write_text("#!/bin/sh\n")
+    (source / "run.sh").chmod(0o755)
+    (source / "skipped").mkdir()
+    (source / "skipped" / "secret").write_text("secret\n")
+    (source / "alias.md").symlink_to("SKILL.md")
+    return source
+
+
+@settings(max_examples=examples(pr=10, nightly=400), deadline=None)
+@given(spec=_tree_specs, query=_queries)
+def test_a_copy_lands_only_at_the_new_directory_the_path_names(
+    spec: list[tuple[list[str], str]], query: tuple[bool, list[str]]
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        workspace = _build(root, spec)
+        source = _host_skill(root / "host")
+        before = _entries(root)
+        expected = _expected(workspace, query)
+        try:
+            with open_workspace_tree(workspace) as tree:
+                copied = tree.copy_in(
+                    source, _query_text(query), ignore=lambda _, names: {"skipped"} & set(names)
+                )
+        except (WorkspacePathError, OSError):
+            assert _entries(root) == before
+            return
+        assert expected is not None
+        prefix = expected.relative_to(root).as_posix()
+        assert prefix not in before
+        added = {k: v for k, v in _entries(root).items() if k not in before}
+        assert added == {
+            prefix: b"/",
+            f"{prefix}/SKILL.md": b"# skill\n",
+            f"{prefix}/run.sh": b"#!/bin/sh\n",
+            f"{prefix}/references": b"/",
+            f"{prefix}/references/deep": b"/",
+            f"{prefix}/references/deep/note.md": b"note\n",
+        }
+        assert {k: v for k, v in _entries(root).items() if k in before} == before
+        assert os.access(expected / "run.sh", os.X_OK)
+        assert copied.links == (PurePosixPath("alias.md"),)
+        assert PurePosixPath("skipped") not in copied.copied
