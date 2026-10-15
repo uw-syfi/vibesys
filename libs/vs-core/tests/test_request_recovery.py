@@ -163,7 +163,24 @@ def normalize_scope_reopen(request: OperationRequest) -> ScopeReopenNormalizatio
     )
 
 
+class RegisteredWriteRequest(OperationRequest):
+    """A registered idempotent write, the one kind whose resource core cancels itself."""
+
+    kind: Literal["test.write"] = "test.write"
+    lifecycle: Literal[LifecycleClass.IDEMPOTENT_WRITE] = LifecycleClass.IDEMPOTENT_WRITE
+    outcome_model: ClassVar[type[BaseModel]] = RegisteredOutcome
+
+
+WRITE_SCHEMA = OperationSchemaRef(
+    kind="test.write",
+    request_schema=SchemaRef(name="write", version=1),
+    outcome_schema=SchemaRef(name="write-result", version=1),
+    lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
+)
+WRITE_DESCRIPTOR = OperationDescriptor(**WRITE_SCHEMA.model_dump(), inspect=True, cancel=True)
+
 REGISTERED_REQUESTS = {
+    "test.write": RegisteredWriteRequest,
     "cluster.owned": RegisteredJobRequest,
     "agent.turn": RegisteredTurnRequest,
     "evaluation.scope.reopen": ScopedAdmissionReopen,
@@ -207,25 +224,26 @@ def pending_operation(
         request_id=record.request_id,
         scope=record.request.scope,
         operation_id=OperationId(root=identity),
-        operation=OperationWire(
-            schema_ref=OperationSchemaRef(
-                kind="test.write",
-                request_schema=SchemaRef(name="write", version=1),
-                outcome_schema=SchemaRef(name="write-result", version=1),
-                lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
-            ),
-            payload_json="{}",
-        ),
+        operation=OperationWire(schema_ref=WRITE_SCHEMA, payload_json="{}"),
         retry_limit=0,
     )
     return record.model_copy(update={"request": request, "payload_digest": fixture_digest(request)})
 
 
 def recovering_state(*records: RequestRecord) -> CoreState:
-    """Reloaded state starts behind the required barrier, retaining all ledgers."""
+    """Reloaded state starts behind the required barrier, retaining all ledgers.
+
+    A record of ``pending_operation`` brings its kind's registration, so a reload decodes it.
+    """
     state = initial_state()
+    writes = any(
+        isinstance(record.request, ExecuteRegisteredOperation)
+        and record.request.operation.schema_ref == WRITE_SCHEMA
+        for record in records
+    )
     return state.model_copy(
         update={
+            "registry": (WRITE_DESCRIPTOR,) if writes else state.registry,
             "records": RecordsState(hosts=(), records=records, recovery=RecoveryBarrier()),
             "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
         }
