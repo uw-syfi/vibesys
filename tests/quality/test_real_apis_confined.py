@@ -22,12 +22,13 @@ reach.
 
 * ``threading``, ``subprocess``, ``socket``, ``signal`` (every reference to the
   module or to a name imported from it);
-* ``process``: anything that starts or reaps a process or interpreter: ``multiprocessing``,
+* ``process``: anything that starts or reaps a process: ``multiprocessing``,
   ``pty``, ``os.fork``/``exec*``/``spawn*``/``posix_spawn*``/``system``/``popen``/``wait*``/
-  ``kill``/``killpg``/``pipe*``/``openpty``, ``asyncio.create_subprocess_*``, the loop's
-  ``subprocess_exec``/``subprocess_shell``/``connect_*_pipe``, and ``sys.executable``. A
-  ``[sys.executable, "-m", ...]`` command line handed to a runner launches a real interpreter
-  even though no ``subprocess`` name appears, so naming the interpreter is the counted act;
+  ``kill``/``killpg``/``pipe*``/``openpty``, ``asyncio.create_subprocess_*``, and the loop's
+  ``subprocess_exec``/``subprocess_shell``/``connect_*_pipe``;
+* ``interpreter``: ``sys.executable``. A ``[sys.executable, "-m", ...]`` command line handed
+  to a runner launches a real interpreter even though no ``subprocess`` name appears, so
+  naming the interpreter is the counted act;
 * ``executor``: ``concurrent.futures`` executors, ``asyncio.to_thread``, ``run_in_executor``;
 * ``socket_io``: network and descriptor multiplexing outside ``socket``: ``select``,
   ``selectors``, ``ssl``, ``socketserver``, ``http.client``, ``http.server``,
@@ -44,7 +45,11 @@ Not seen: a name built at run time (``getattr(os, name)``), ``from os import *``
 bare string such as ``"python3"``, and ``eval``/``exec``.
 
 Product code is ``src/`` and ``libs/*/src``; ``libs/vs-sim`` is exempt as the owner of the
-real adapters. Existing uses are recorded with exact counts in
+real adapters. ``REAL_API_EDGES`` exempts a rule in one product file, with its reason: a
+separate program that runs where ``vs_sim`` cannot be imported, or a file that only names
+the interpreter's path. A module whose only logic is the call itself is listed there rather
+than wrapped to clear the scan; a module with policy over the primitive (when to kill,
+escalate, reap or retry) moves onto ``vs_sim``. Existing uses are recorded with exact counts in
 ``real_api_baseline.jsonl``. The check fails when a count grows, when a new file appears,
 and when a count shrinks without the baseline being lowered, so the list only gets
 shorter. To shrink it, move the site onto a ``vs_sim`` interface or Fake and lower the
@@ -106,7 +111,6 @@ REAL_NAMES: dict[str, str] = {
         "process",
         "multiprocessing",
         "pty",
-        "sys.executable",
         "asyncio.create_subprocess_exec",
         "asyncio.create_subprocess_shell",
         *(
@@ -128,6 +132,7 @@ REAL_NAMES: dict[str, str] = {
             )
         ),
     ),
+    **_names("interpreter", "sys.executable"),
     **_names(
         "executor",
         "asyncio.to_thread",
@@ -483,11 +488,11 @@ PLANTED = {
     "interpreter command": (
         "import sys\n\ndef test_a(runner):\n"
         "    runner.run([sys.executable, '-m', 'vs_slurm.fake_connector'])\n",
-        "process",
+        "interpreter",
     ),
     "from sys": (
         "from sys import executable\n\ndef test_a():\n    cmd = [executable, '-c', '1']\n",
-        "process",
+        "interpreter",
     ),
     "to_thread": (
         "import asyncio\n\nasync def test_a(f):\n    await asyncio.to_thread(f)\n",
@@ -706,8 +711,84 @@ def test_deterministic_tests_use_no_real_time_threads_processes_or_sockets(
     )
 
 
+_SEPARATE_PROGRAM = "a separate program that runs where vs_sim cannot be imported"
+
+# The product files that may use one real API, each with its reason. Keep one line per
+# (file, rule).
+REAL_API_EDGES: dict[Key, str] = {
+    **{
+        ("libs/vs-sandbox/src/vs_sandbox/host_command_client.py", rule): (
+            f"{_SEPARATE_PROGRAM}: the stdlib-only client staged into the agent container"
+        )
+        for rule in ("signal", "socket", "threading")
+    },
+    ("libs/vs-sandbox/src/vs_sandbox/landlock.py", "process"): (
+        f"{_SEPARATE_PROGRAM}: the confinement launcher execs the confined command"
+    ),
+    **{
+        ("libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py", rule): (
+            f"{_SEPARATE_PROGRAM}: the stdlib-only Modal evaluator helper; only its main "
+            "builds the real effects"
+        )
+        for rule in ("fs_sync", "socket_io", "subprocess", "threading")
+    },
+    **{
+        ("libs/vs-sandbox/src/vs_sandbox/skypilot_evaluator.py", rule): (
+            f"{_SEPARATE_PROGRAM}: the stdlib-only SkyPilot evaluator helper"
+        )
+        for rule in ("fs_sync", "socket")
+    },
+    ("libs/vs-agent/src/vs_agent/host_resource_declarations.py", "interpreter"): (
+        "reads the interpreter's path to declare it as a host resource; starts nothing"
+    ),
+    ("libs/vs-agent/src/vs_agent/shim_translation.py", "interpreter"): (
+        "names the interpreter in a command a launcher starts; starts nothing itself"
+    ),
+    ("libs/vs-faults/src/vs_faults/connector.py", "interpreter"): (
+        "names the interpreter in the connector command a launcher starts"
+    ),
+    ("libs/vs-runtime/src/vs_runtime/_run_environment.py", "interpreter"): (
+        "passes the interpreter's path to the run environment's settings"
+    ),
+    ("libs/vs-sandbox/src/vs_sandbox/fake_docker_engine.py", "interpreter"): (
+        "names the interpreter in the exec client command a launcher starts"
+    ),
+    ("libs/vs-sandbox/src/vs_sandbox/host_sandbox.py", "interpreter"): (
+        "names the interpreter in the confined command a launcher starts"
+    ),
+    ("libs/vs-sandbox/src/vs_sandbox/slurm_policy.py", "interpreter"): (
+        "reads the interpreter's file name to allow it in a Slurm policy; starts nothing"
+    ),
+    ("src/entrypoints/launcher.py", "interpreter"): (
+        "entrypoint: names the interpreter in the commands it starts and hands to children"
+    ),
+    ("src/entrypoints/server.py", "interpreter"): (
+        "entrypoint: names the interpreter in the helper command it starts"
+    ),
+    ("src/entrypoints/web.py", "interpreter"): (
+        "entrypoint: names the interpreter in the server command it starts"
+    ),
+}
+
+
+def test_every_real_api_edge_is_a_product_file_with_a_reason() -> None:
+    for (relative, rule), reason in REAL_API_EDGES.items():
+        assert _is_product(relative), relative
+        assert (REPO / relative).is_file(), relative
+        assert rule in PRODUCT_RULES, (relative, rule)
+        assert reason.strip(), relative
+
+
 def test_product_code_reaches_real_apis_only_through_vs_sim() -> None:
-    found = scan(_python_files(PRODUCT_ROOTS), PRODUCT_RULES, ())
+    scanned = scan(_python_files(PRODUCT_ROOTS), PRODUCT_RULES, ())
+    stale = sorted(set(REAL_API_EDGES) - set(scanned))
+    assert not stale, (
+        "these files no longer use the real API they are listed for; remove them from "
+        f"REAL_API_EDGES: {stale}"
+    )
+    listed_twice = sorted(set(REAL_API_EDGES) & set(_baseline(product=True)))
+    assert not listed_twice, f"in both REAL_API_EDGES and the baseline: {listed_twice}"
+    found = {key: count for key, count in scanned.items() if key not in REAL_API_EDGES}
     problems = ratchet_problems(found, _baseline(product=True))
     assert not problems, (
         "product code takes the vs_sim.api interfaces (Threads, BlockingRunner, "
