@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
@@ -19,7 +21,8 @@ from vibesys.api import (
 )
 from vibesys.events import GateKind
 from vibesys.log_owners import LOG_OWNER
-from vibesys.run.logs import RUN_LOG_OWNER, open_run_log_store
+from vibesys.run.logs import RUN_LOG_OWNER, open_run_log_store, open_run_logs
+from vs_logs.api import NarrationHandler, NarrationLevel, NarrationLine, StreamOutcome
 from vs_logs.read import Tail, open_log_directory
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
@@ -27,6 +30,7 @@ from vs_sim.api import OutputStream
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 _IDS = st.text(min_size=1, max_size=12)
@@ -82,3 +86,67 @@ def test_the_run_store_lives_in_the_runs_log_directory_and_reads_back_typed_owne
     (info,) = reader.list_streams()
     assert info.owner == StartupStep(stage=EnvironmentStartupStage.BUILDING_IMAGE)
     assert reader.read(info.stream_id, Tail(100), 100).data == b"step 1/3\n"
+
+
+@contextmanager
+def _narration_logger(name: str, handler: NarrationHandler) -> Iterator[logging.Logger]:
+    """A logger of the test's own that does not propagate, so the root logger is left alone."""
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    logger.addHandler(handler)
+    try:
+        yield logger
+    finally:
+        logger.removeHandler(handler)
+
+
+def test_the_run_opens_one_narration_stream_and_flushes_what_was_logged_before(
+    tmp_path: Path,
+) -> None:
+    warnings: list[str] = []
+    handler = NarrationHandler(warn=warnings.append)
+    with _narration_logger("vibesys.run.test", handler) as logger:
+        logger.info("before the store opened")
+        with open_run_logs(
+            tmp_path, "run-1", threads=SimThreads(), warn=warnings.append, narration=handler
+        ) as scope:
+            logger.warning("while the run runs")
+            build = StartupStep(stage=EnvironmentStartupStage.BUILDING_IMAGE)
+            with scope.open(build, "build") as stream:
+                stream.write(OutputStream.STDOUT, b"step\n")
+        logger.error("after the run closed its logs")
+
+    reader = open_log_directory(
+        Project.log_directory_for(tmp_path, "run-1") / "streams", RUN_LOG_OWNER
+    )
+    narration, startup = reader.list_streams()
+    assert (narration.owner, narration.outcome) == (RunNarration(), StreamOutcome.ENDED)
+    assert startup.owner == StartupStep(stage=EnvironmentStartupStage.BUILDING_IMAGE)
+    data = reader.read(narration.stream_id, Tail(1 << 16), 1 << 16).data
+    lines = [NarrationLine.model_validate_json(line) for line in data.splitlines()]
+    assert [(line.level, line.logger, line.message) for line in lines] == [
+        (NarrationLevel.INFO, "vibesys.run.test", "before the store opened"),
+        (NarrationLevel.WARNING, "vibesys.run.test", "while the run runs"),
+    ]
+    assert warnings == []
+
+
+def test_a_run_whose_store_cannot_open_goes_on_and_says_so(tmp_path: Path) -> None:
+    streams = Project.log_directory_for(tmp_path, "run-1") / "streams"
+    streams.parent.mkdir(parents=True)
+    streams.write_text("a file where the store's directory goes")
+    warnings: list[str] = []
+    handler = NarrationHandler(warn=warnings.append)
+    with (
+        _narration_logger("vibesys.run.unavailable", handler) as logger,
+        open_run_logs(
+            tmp_path, "run-1", threads=SimThreads(), warn=warnings.append, narration=handler
+        ) as scope,
+    ):
+        logger.info("still logging")
+        with scope.open(RunNarration(), "anything") as stream:
+            stream.write(OutputStream.STDOUT, b"kept nowhere visible\n")
+    assert len(warnings) == 1
+    assert "unavailable" in warnings[0]
+    assert not handler.waiting

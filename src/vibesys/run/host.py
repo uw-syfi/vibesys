@@ -26,7 +26,7 @@ from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profile
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
-from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor
+from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -67,7 +67,7 @@ if TYPE_CHECKING:
         RunFacts,
         Workspaces,
     )
-    from vs_runtime.api.core import RunTiming
+    from vs_runtime.api.core import RunTiming, StageOutputOpener
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
         OwnedWorkspaces,
@@ -158,6 +158,7 @@ class _ProductHostFactory:
             plugin.agents,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
         _require_supported_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
         resources = open_run_resources(
@@ -331,6 +332,7 @@ class _ProductHostFactory:
             self.request.config,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
         # One client serves every role, so each role's own model and effort ride the spec.
         base = replace(
@@ -387,10 +389,16 @@ class _ProductHostFactory:
             project.state, AgentSessionKey.for_member("core", "run")
         )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
+        # Each stage's output goes to the run's log store under its gate, named by the
+        # measurement's handle and try, as its gate events name it: an in-process stage's as
+        # its command prints it, a Slurm stage's as each scheduler poll reads it.
+        tries = TryHandles()
+        stage_output = tries.stage_output(resources.stage_output)
         executor = self._semantic_executor(
             resources,
             workspaces,
             namespace,
+            stage_output,
             ledger_identity=(project.project.state.load_project().project_id, project.state.run_id),
         )
         configuration = partial(self._agent_configuration, resources)
@@ -405,11 +413,17 @@ class _ProductHostFactory:
                 evaluation=RetryingEvaluationExecutor(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces, clock=self.timing.clock),
+                    else PollingEvaluationExecutor(
+                        evaluation,
+                        workspaces,
+                        clock=self.timing.clock,
+                        stage_output=stage_output,
+                    ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
                         project.state.run_id, "core-evaluation-tries"
                     ),
+                    tries=tries,
                 ),
                 environment=self._core_environment(resources),
                 roles=self._offered_roles(resources),
@@ -492,6 +506,7 @@ class _ProductHostFactory:
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
+        stage_output: StageOutputOpener,
         *,
         ledger_identity: tuple[str, str],
     ) -> SlurmSemanticEvaluationExecutor | None:
@@ -512,6 +527,7 @@ class _ProductHostFactory:
             sleeper=clock,
             processes=self.integration.system.slurm_processes,
             ledger_identity=ledger_identity,
+            stage_output=stage_output,
         )
 
     async def stop_new_work(self) -> None:

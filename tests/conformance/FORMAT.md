@@ -100,7 +100,7 @@ TypeScript fold without either owning the wire values.
 
 A scenario with `"protocol": "host-helper"` is one channel to the host helper
 (`docs/contributing/desktop-connection.md`, "The host helper") instead of a run-protocol connection.
-Its `role` is `control` or `run`, its `transports` are `["stdio"]`, and it has no `decisions` and no
+Its `role` is `control`, `run` or `logs`, its `transports` are `["stdio"]`, and it has no `decisions` and no
 `clients`. A `c2s` frame's `type` must be a helper request and an `s2c` expectation's a helper
 message, both read from the generated `host-helper.schema.json`. Every helper request must be sent by
 at least one helper scenario, so a new method cannot land without one. Replies are matched as subsets

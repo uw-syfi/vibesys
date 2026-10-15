@@ -114,6 +114,7 @@ async function openWindow(
   const window = new AppWindow({
     log,
     connect: (port, runId) => runs.connect(port, runId),
+    logs: (runId, request) => runs.logs(runId, request),
     closed: runId => {
       runs.detach(runId);
       changed();

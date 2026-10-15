@@ -3236,6 +3236,65 @@
         }
       ]
     },
+    "NarrationLevel": {
+      "description": "A line's severity: the standard ``logging`` level at or below the record's.",
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL"
+      ],
+      "title": "NarrationLevel",
+      "type": "string"
+    },
+    "NarrationLine": {
+      "additionalProperties": false,
+      "description": "One narration record, as one JSON line of a narration stream.",
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "level": {
+          "$ref": "#/$defs/NarrationLevel"
+        },
+        "logger": {
+          "title": "Logger",
+          "type": "string"
+        },
+        "thread": {
+          "title": "Thread",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "traceback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Traceback"
+        }
+      },
+      "required": [
+        "at",
+        "level",
+        "logger",
+        "thread",
+        "message"
+      ],
+      "title": "NarrationLine",
+      "type": "object"
+    },
     "OutputData": {
       "additionalProperties": false,
       "description": "Captured line of server output and its stream.",
@@ -6105,6 +6164,9 @@
     },
     "log_owner": {
       "$ref": "#/$defs/LogOwner"
+    },
+    "narration_line": {
+      "$ref": "#/$defs/NarrationLine"
     }
   },
   "required": [
@@ -6113,7 +6175,8 @@
     "event",
     "snapshot",
     "server_message",
-    "log_owner"
+    "log_owner",
+    "narration_line"
   ],
   "title": "ProtocolDocument",
   "type": "object"

@@ -1,6 +1,7 @@
 import {WebSession} from '@vibesys/run-session';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
+import {desktopLogSource} from '../platform/desktop-logs.js';
 import {desktopBridge, desktopSessionOptions, markDesktopShell} from '../platform/desktop-shell.js';
 import {browserLifecycle} from '../platform/lifecycle.js';
 import '../styles.css';
@@ -29,5 +30,6 @@ if (bridge === null) {
 } else {
   const session = new WebSession(desktopSessionOptions(bridge, browserLifecycle()));
   theme.resolveSessionDefault(session);
-  reactRoot.render(<StrictMode>{createLiveApp(session, theme)}</StrictMode>);
+  const logs = desktopLogSource(window.vibesysDesktop);
+  reactRoot.render(<StrictMode>{createLiveApp(session, theme, logs)}</StrictMode>);
 }

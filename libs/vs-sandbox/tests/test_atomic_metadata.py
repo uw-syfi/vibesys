@@ -52,8 +52,14 @@ def test_docker_metadata_interrupted_at_every_byte_preserves_last_document(
         docker_result(stdout=f"{os.getuid()}\n{os.getgid()}\n"),
     )
     docker.always(docker_result())
-    sandbox = DockerSandbox(str(tmp_path), image="test-image", docker=docker, threads=SimThreads())
-    path = tmp_path / ".docker_metadata.json"
+    sandbox = DockerSandbox(
+        str(tmp_path / "workspace"),
+        image="test-image",
+        docker=docker,
+        threads=SimThreads(),
+        log_path=tmp_path / "logs" / "docker.log",
+    )
+    path = tmp_path / "logs" / "docker.metadata.json"
     sandbox.start()
     try:
         sandbox.save_symlink_commands(["old"])

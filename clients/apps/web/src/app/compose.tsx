@@ -18,10 +18,17 @@ import {
   type GatewayConnectState,
   GatewayForm,
 } from '@vibesys/feature-gateway-connect/renderer';
-import {RunPage} from '@vibesys/feature-run-view/renderer';
+import {
+  createStartupLogStore,
+  RunPage,
+  type StartupLogStore,
+} from '@vibesys/feature-run-view/renderer';
+import {type StartupLogView, startupLogObservation} from '@vibesys/feature-run-view/state';
+import type {RunLogSource} from '@vibesys/logs';
 import type {RunStore, WebSession} from '@vibesys/run-session';
-import {hasRunEnded} from '@vibesys/run-state';
+import {type CoreState, hasRunEnded} from '@vibesys/run-state';
 import type {Store} from '@vibesys/store';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import {Button, Dialog} from '@vibesys/ui';
 import {type JSX, type ReactNode, useEffect, useState, useSyncExternalStore} from 'react';
 import {bootstrapGateway, fetchCampaignFixture} from '../platform/backend.js';
@@ -255,14 +262,59 @@ export function createLiveCampaignApp(stream: CampaignStream): PreviewPage {
   };
 }
 
-/** The live page over `session`, which this starts, shared with the desktop entry. */
-export function createLiveApp(session: WebSession, theme: WebThemeController): JSX.Element {
+/**
+ * The live page over `session`, which this starts, shared with the desktop entry. `logs` is the
+ * run's log source where the page can read logs (the desktop shell); without one the page shows no
+ * startup log panel.
+ */
+export function createLiveApp(
+  session: WebSession,
+  theme: WebThemeController,
+  logs: RunLogSource | null = null,
+): JSX.Element {
   void session.start();
   return (
     <WebAppShell theme={theme}>
-      <Live session={session} run={session.store} />
+      <Live session={session} run={session.store} logs={logs} />
     </WebAppShell>
   );
+}
+
+/** The browser's timers, for the startup log panel's retries. */
+const BROWSER_SCHEDULE: ScheduleTimeout = (callback, delayMs) => {
+  const timer = setTimeout(callback, delayMs);
+  return () => clearTimeout(timer);
+};
+const NO_SUBSCRIPTION = (): (() => void) => NOTHING;
+const NO_VIEW = (): StartupLogView | null => null;
+
+/**
+ * The startup log panel's store for this page, created and closed with the page's effect so a
+ * remount (StrictMode included) never reuses a closed store, and told what the run says about
+ * the panel each time that changes.
+ */
+function useStartupLog(
+  logs: RunLogSource | null,
+  run: CoreState,
+): {readonly view: StartupLogView; readonly send: StartupLogStore['send']} | null {
+  const [store, setStore] = useState<StartupLogStore | null>(null);
+  useEffect(() => {
+    if (logs === null) return;
+    const created = createStartupLogStore(logs, BROWSER_SCHEDULE);
+    setStore(created);
+    return () => {
+      created.close();
+      setStore(null);
+    };
+  }, [logs]);
+  const {visible, stage} = startupLogObservation(run);
+  useEffect(() => store?.send({type: 'observe', visible, stage}), [store, visible, stage]);
+  const view = useSyncExternalStore(
+    store?.subscribe ?? NO_SUBSCRIPTION,
+    store?.getState ?? NO_VIEW,
+    store?.getState ?? NO_VIEW,
+  );
+  return store === null || view === null ? null : {view, send: store.send};
 }
 
 function WebAppShell({
@@ -282,12 +334,21 @@ function WebAppShell({
 
 type RunView = 'run' | 'campaign';
 
-function Live({session, run}: {readonly session: WebSession; readonly run: RunStore}): JSX.Element {
+function Live({
+  session,
+  run,
+  logs,
+}: {
+  readonly session: WebSession;
+  readonly run: RunStore;
+  readonly logs: RunLogSource | null;
+}): JSX.Element {
   const iterations = useSyncExternalStore(run.subscribe, run.getIterations, run.getIterations);
   const state = useStore(run);
   const sessionState = useStore(session);
   const [view, setView] = useState<RunView>('run');
   const now = useNow(SYSTEM_CLOCK, state.status === 'starting');
+  const startupLog = useStartupLog(logs, state);
   // Created once for this page's lifetime, over the same session the run page reads: it
   // subscribes to `session.store`, which (unlike the session's own transport) supports multiple
   // independent subscribers, so this coexists with the run page's own subscription below.
@@ -320,6 +381,7 @@ function Live({session, run}: {readonly session: WebSession; readonly run: RunSt
       onRetryReplay={NOTHING}
       onCommand={session.command}
       now={now}
+      startupLog={startupLog}
       headerAction={
         <>
           {toggle}

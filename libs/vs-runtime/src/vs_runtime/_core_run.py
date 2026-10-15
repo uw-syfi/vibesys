@@ -310,7 +310,9 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     naming the bound when the lease is still held after it.
 
     Once started, the host's ``workspaces`` follow core's recovered state: worktrees a
-    stopped host left that core no longer references are discarded now.
+    stopped host left that core no longer references are discarded now. If following or
+    sweeping those workspaces fails or is cancelled, startup releases its newly acquired
+    lease before propagating the interruption.
     """
     give_up_at = host.clock.now() + config.lease_duration
     while True:
@@ -328,7 +330,19 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
             await host.clock.sleep(min(config.recovery_poll_interval, remaining))
         else:
             break
-    await _follow_core(host)
+    try:
+        await _follow_core(host)
+    except BaseException as start_error:
+        try:
+            host.shell.release_lease(now_at=host.clock.now())
+        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-114090 [BLE001]; cancellation and other startup failures must retain their identity if lease rollback also fails.
+            # > Catching only Exception would let an unexpected BaseException from the release
+            # > boundary replace startup; separate handlers would duplicate one rollback rule.
+            start_error.add_note(
+                "Additional error while releasing the lease after core startup failed: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+        raise
 
 
 async def _follow_core(host: CoreRunHost) -> None:

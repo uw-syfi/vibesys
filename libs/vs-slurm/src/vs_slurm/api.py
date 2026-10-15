@@ -9,6 +9,8 @@ gateways can provide a versioned JSON connector executable.
 
 from typing import Protocol
 
+from vs_sim.api import ByteSource, OutputStream
+
 from .cluster import SlurmCluster
 from .cluster_types import (
     ClusterCancelOutcome,
@@ -114,6 +116,8 @@ from .ledger_listing import (
 )
 from .ledger_store import RemoteEvaluationLedger
 from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
+from .remote_file import MAX_READ_BYTES as MAX_REMOTE_READ_BYTES
+from .remote_file import RemoteFileAnswerError, SlurmFileSource
 from .runner import (
     SERVICE_NOT_READY_EXIT_CODE,
     STAGE_TIMEOUT_EXIT_CODES,
@@ -193,6 +197,7 @@ __all__ = [
     "LIFETIMES",
     "MAX_CONNECTOR_REQUEST_BYTES",
     "MAX_CONNECTOR_RESPONSE_BYTES",
+    "MAX_REMOTE_READ_BYTES",
     "MAX_TRANSPORT_STREAM_BYTES",
     "PORT_PLACEHOLDER",
     "REQUESTS_FILE",
@@ -249,6 +254,7 @@ __all__ = [
     "QueueRow",
     "Queued",
     "RemoteEvaluationLedger",
+    "RemoteFileAnswerError",
     "ResolveSubmission",
     "Resolved",
     "Running",
@@ -275,6 +281,7 @@ __all__ = [
     "SlurmConnectorTransport",
     "SlurmError",
     "SlurmFileArtifact",
+    "SlurmFileSource",
     "SlurmJobHandle",
     "SlurmJobRequest",
     "SlurmJobResult",
@@ -376,6 +383,16 @@ class Cluster(Protocol):
         observed: ClusterObservation | None = None,
     ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown."""
+        ...
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        """What stage ``index`` of the batch has written to ``stream`` so far, as it grows.
+
+        The source reads the stage's output file where the job writes it; it raises
+        ``FileNotFoundError`` until the stage has started. Reading it never changes the job.
+        """
         ...
 
 

@@ -269,6 +269,7 @@ def _restore_descriptor_options(
     execution_cli = {
         "agent_backend": manifest.execution.agent_backend,
         "cli_provider": manifest.execution.cli_provider,
+        "model": manifest.execution.model,
         "compute_backend": manifest.execution.compute_backend,
         "profiler": manifest.execution.requested_profiler,
     }

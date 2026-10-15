@@ -22,11 +22,13 @@ from vs_sandbox.container_runtime import (
 )
 from vs_sandbox.docker_cli import EXEC_MARKER_ENV, SIGNAL_EXEC_SCRIPT
 from vs_sandbox.process_execution import shell_exit_status
+from vs_sim.api import DISCARD, OutputStream
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from vs_sim.api import PipedProcess, PipedProcessLauncher
+    from vs_sandbox.fake_docker_command import DockerResult
+    from vs_sim.api import OutputSink, PipedProcess, PipedProcessLauncher
 
 # The container program's parent, standing in for the ``docker exec`` client.
 # It starts the program in a session of its own (the daemon's side), records
@@ -304,6 +306,7 @@ class FakeDockerEngine:
         self._signal_requests_unreadable = 0
         self._runs_lost_after_creating: list[bool] = []
         self._removals_lost = 0
+        self._pull_progress = ""
 
     def containers(self) -> tuple[FakeContainer, ...]:
         """Every container the daemon still holds, stopped ones included."""
@@ -328,6 +331,10 @@ class FakeDockerEngine:
         gave up waiting). The daemon has created the container either way.
         """
         self._runs_lost_after_creating = list(outcomes)
+
+    def pulls_on_run(self, progress: str) -> None:
+        """Make every later ``docker run`` print *progress* to stderr, as pulling its image does."""
+        self._pull_progress = progress
 
     def removals_lost(self, count: int) -> None:
         """Fault: the next *count* ``docker rm`` clients die by ``SIGKILL`` before the daemon acts.
@@ -362,10 +369,15 @@ class FakeDockerEngine:
         self._signal_requests_unreadable = count
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink = DISCARD
     ) -> subprocess.CompletedProcess[str]:
-        """Run one ``docker`` subcommand to completion."""
-        arguments = tuple(argv)
+        """Run one ``docker`` subcommand to completion, writing what it printed to *output*."""
+        result = self._answer(tuple(argv), timeout_seconds)
+        output.write(OutputStream.STDOUT, result.stdout.encode())
+        output.write(OutputStream.STDERR, result.stderr.encode())
+        return result
+
+    def _answer(self, arguments: tuple[str, ...], timeout_seconds: float) -> DockerResult:
         self.calls.append(arguments)
         match arguments[1]:
             case "run":
@@ -457,7 +469,7 @@ class FakeDockerEngine:
             if self._runs_lost_after_creating.pop(0):
                 raise subprocess.TimeoutExpired(arguments, 0)
             return subprocess.CompletedProcess(arguments, 130, "", "")
-        return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", "")
+        return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", self._pull_progress)
 
     def _end(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         if arguments[1] == "rm" and self._removals_lost:

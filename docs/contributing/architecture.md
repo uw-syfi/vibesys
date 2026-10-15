@@ -140,6 +140,7 @@ graph TD
     entrypoints --> vs_decode
     entrypoints --> vs_github
     entrypoints --> vs_issue_tracker
+    entrypoints --> vs_logs
     entrypoints --> vs_mcp
     entrypoints --> vs_project
     entrypoints --> vs_runtime
@@ -186,6 +187,7 @@ graph TD
     vs_agent --> vs_prompts
     vs_agent --> vs_sandbox
     vs_agent --> vs_sim
+    vs_async_ops --> vs_sim
     vs_dst --> vs_core
     vs_dst --> vs_project
     vs_dst --> vs_runtime

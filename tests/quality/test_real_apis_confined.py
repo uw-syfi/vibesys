@@ -884,6 +884,10 @@ REAL_API_EDGES: dict[Key, str] = {
     ("src/entrypoints/web.py", "interpreter"): (
         "entrypoint: names the interpreter in the server command it starts"
     ),
+    ("src/entrypoints/detached_run.py", "threading"): (
+        "entrypoint: installs and restores threading.excepthook, a process-global interpreter "
+        "hook no vs_sim interface stands in for; it starts no thread"
+    ),
     **{
         ("src/entrypoints/server.py", rule): (
             "entrypoint: starts the detached web gateway in its own session with the log "
@@ -985,9 +989,9 @@ REAL_API_PENDING: dict[Key, Pending] = {
         "the repair container runs subprocess.run itself; route it through DockerCli",
     ),
     ("libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py", "subprocess"): Pending(
-        8,
+        4,
         Owner.LANE_A,
-        "_run_docker_command goes through DockerCli; the in-container install program is an edge",
+        "type only: the injected tool runner's CompletedProcess and TimeoutExpired",
     ),
     ("libs/vs-sandbox/src/vs_sandbox/fake_docker_command.py", "subprocess"): Pending(
         2, Owner.LANE_A, "type only: result type aliases"

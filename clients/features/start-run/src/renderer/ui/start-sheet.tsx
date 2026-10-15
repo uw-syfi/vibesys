@@ -1,12 +1,21 @@
 /**
- * "Start a run": a project, its tasks (listed by the host), extra arguments, and Start. While the
- * start runs the form is read-only; Cancel (or Esc) then cancels the start ("Cancelling…").
+ * "Start a run": a project, its tasks (listed by the host), the model (one of the host's vetted
+ * pairs, or the project default; hidden when the host cannot take a choice), extra arguments, and
+ * Start. While the start runs the form is read-only; Cancel (or Esc) then cancels the start
+ * ("Cancelling…").
  */
 
 import type {HostKey} from '@vibesys/hosts';
 import {Button, Dialog} from '@vibesys/ui';
 import type {InputHTMLAttributes, JSX, ReactNode} from 'react';
-import {type StartAction, type StartState, startable, type Tasks} from '../../state/start.js';
+import {
+  chosenHarness,
+  type Harnesses,
+  type StartAction,
+  type StartState,
+  startable,
+  type Tasks,
+} from '../../state/start.js';
 
 /**
  * Renders the project field: a host path input the app supplies (another feature completes paths
@@ -59,12 +68,80 @@ function TaskChoices(props: {
   }
 }
 
+/** The value of the picker's "Project default" option; every other option is a list index. */
+const PROJECT_DEFAULT = '';
+
+function HarnessPicker(props: {
+  readonly harnesses: Harnesses;
+  readonly enabled: boolean;
+  readonly start: (action: StartAction) => void;
+}): ReactNode {
+  const harnesses = props.harnesses;
+  switch (harnesses.kind) {
+    case 'unsupported':
+      return null;
+    case 'loading':
+      return <span className="muted">Reading the vetted models…</span>;
+    case 'failed':
+      return (
+        <span className="muted">
+          Could not read the vetted models ({harnesses.error}); the project default applies.
+        </span>
+      );
+    case 'listed': {
+      const {list, picked} = harnesses;
+      const index =
+        picked === null
+          ? -1
+          : list.findIndex(
+              option => option.provider === picked.provider && option.model === picked.model,
+            );
+      const providers = [...new Set(list.map(option => option.provider))];
+      return (
+        <label className="harness">
+          Model
+          <select
+            aria-label="Model"
+            value={index < 0 ? PROJECT_DEFAULT : String(index)}
+            disabled={!props.enabled}
+            onChange={event => {
+              const option =
+                event.target.value === PROJECT_DEFAULT
+                  ? undefined
+                  : list[Number(event.target.value)];
+              const value =
+                option === undefined ? null : {provider: option.provider, model: option.model};
+              props.start({type: 'harness', value});
+            }}
+          >
+            <option value={PROJECT_DEFAULT}>Project default (agent.toml)</option>
+            {providers.map(provider => (
+              <optgroup key={provider} label={provider}>
+                {list.map((option, at) =>
+                  option.provider === provider ? (
+                    <option key={option.model} value={String(at)}>
+                      {option.default ? `${option.model} (default)` : option.model}
+                    </option>
+                  ) : null,
+                )}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+      );
+    }
+  }
+}
+
 function summary(state: Form): string {
   const task = state.kind === 'starting' ? state.task : startable(state);
   if (task === null) return 'Pick a project, then one of its tasks.';
+  const harness = chosenHarness(state);
+  const chosen =
+    harness === null ? '' : ` --cli-provider ${harness.provider} --model ${harness.model}`;
   const args = state.args.trim();
   const extra = args === '' ? '' : ` ${args}`;
-  return `Runs vibesys --detach --task ${task}${extra} in ${state.project.trim()}. Agent runs cost tokens.`;
+  return `Runs vibesys --detach --task ${task}${chosen}${extra} in ${state.project.trim()}. Agent runs cost tokens.`;
 }
 
 function status(state: Form): {text: string; error: boolean} {
@@ -109,6 +186,7 @@ function StartForm(props: {
       <div className="tasks">
         <TaskChoices tasks={tasks} enabled={editing} start={start} />
       </div>
+      <HarnessPicker harnesses={state.harnesses} enabled={editing} start={start} />
       <div className="row">
         <input
           value={state.args}

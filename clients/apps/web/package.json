@@ -33,7 +33,8 @@
     "@vibesys/feature-campaign": "workspace:*",
     "@vibesys/feature-conversation": "workspace:*",
     "@vibesys/run-state": "workspace:*",
-    "@vibesys/ui": "workspace:*"
+    "@vibesys/ui": "workspace:*",
+    "@vibesys/logs": "workspace:*"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0",

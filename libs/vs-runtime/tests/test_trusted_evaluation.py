@@ -28,7 +28,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
 from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
-from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher
+from vs_sim.api import DISCARD, Capture, OsThreads, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import (
     InlineBlockingRunner,
     Sim,
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
     from vs_project.api import GitTracker
     from vs_sandbox.api import CommandRunner
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 
 _MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -105,6 +105,39 @@ def test_accuracy_applies_setup_timeout_and_preserves_streams(tmp_path: Path) ->
     assert result.stderr == "warning\n"
     assert sandbox.calls[0].command == "check"
     assert sandbox.calls[0].timeout == 10
+
+
+def test_only_the_stage_command_writes_to_the_stage_output(tmp_path: Path) -> None:
+    """Each stage's command, and no framework command around it, writes to its sink."""
+    printed = f'step 1\n{_MARKER}\n{{"score": 4.5}}\n{_END_MARKER}\n'
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(
+            output=printed + "warn\n", exit_code=0, stdout=printed, stderr="warn\n"
+        )
+    )
+    executor = _executor(
+        tmp_path,
+        TrustedEvaluationPlan(
+            accuracy_command="check",
+            benchmark_command="bench",
+            benchmark_contract=ScalarBenchmarkContract(
+                output_argument="--output-json", metric="score"
+            ),
+        ),
+        sandbox,
+    )
+    accuracy_output, benchmark_output = Capture(1 << 16), Capture(1 << 16)
+
+    accuracy = asyncio.run(executor.accuracy(output=accuracy_output))
+    benchmark = asyncio.run(executor.benchmark(output=benchmark_output))
+
+    assert accuracy.passed
+    assert benchmark.passed
+    assert benchmark.row == {"score": 4.5}
+    # The benchmark's cleanup ran too, and wrote to no stage's stream.
+    assert sandbox.calls[-1].command.startswith("rm -f -- ")
+    for output in (accuracy_output, benchmark_output):
+        assert (output.stdout, output.stderr) == (printed.encode(), b"warn\n")
 
 
 def test_accuracy_rejects_trusted_input_changes_without_execution(tmp_path: Path) -> None:
@@ -174,9 +207,10 @@ class _TruncatingRunner(FakeCommandRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
         del cancel  # every command here finishes at once
-        super().execute(command, timeout=timeout)
+        super().execute(command, timeout=timeout, output=output)
         if command.startswith("rm -f -- ") and "--output-json" in command:
             head = "evaluator log line\n" * 10
             return CommandResult(
@@ -438,8 +472,9 @@ class _FailingSandbox:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
-        del cancel  # every command here finishes at once
+        del cancel, output  # every command here finishes at once and prints nothing
         del timeout
         self.calls.append(command)
         message = "sandbox unavailable"
@@ -528,8 +563,9 @@ class _BlockingSandbox:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
-        del cancel  # every command here finishes at once
+        del cancel, output  # every command here finishes at once and prints nothing
         del timeout
         self.calls.append(command)
         self.started.set()
@@ -568,8 +604,9 @@ class _CancellableSandbox(_BlockingSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
-        del timeout
+        del timeout, output
         assert cancel is not None
         self.calls.append(command)
         self.started.set()
