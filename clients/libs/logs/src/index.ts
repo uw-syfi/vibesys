@@ -24,6 +24,7 @@ export {
   logFollowMachineFor,
   startLogFollower,
 } from './follower.js';
+export {type LogListOutcome, logsUnsupported, type RunLogSource} from './source.js';
 export {
   DEFAULT_LOG_VIEW_BOUNDS,
   emptyLogView,

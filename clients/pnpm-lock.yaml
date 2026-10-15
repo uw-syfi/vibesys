@@ -604,6 +604,9 @@ importers:
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../hosts
+      '@vibesys/logs':
+        specifier: workspace:*
+        version: link:../logs
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../machine
