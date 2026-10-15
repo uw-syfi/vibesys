@@ -27,6 +27,7 @@ import {ConnectionError} from '../shell/helper-channel.js';
 import type {Link} from '../shell/link.js';
 import type {SpawnedProcess} from '../shell/process.js';
 import type {Cause} from '../state/host-connection.js';
+import {FakeLogStore, UnknownLogStream} from './fake-log-store.js';
 import {type FakeProcess, fakeProcess} from './fake-process.js';
 
 type Reply = Record<string, unknown>;
@@ -163,7 +164,10 @@ export class FakeHelper {
     'instances_watch',
     'paths_complete',
     'instances_inspect',
+    'logs',
   ]);
+  /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
+  logStore = new FakeLogStore();
   readonly #pendingAnswers = new Map<HelperRequest['type'], PendingAnswer[]>();
   /** How many of them have exited. */
   exited = 0;
@@ -472,6 +476,41 @@ class HelperSession {
       case 'paths.complete':
         this.#complete(id, request.prefix);
         return;
+      case 'logs.list':
+      case 'logs.read':
+        this.#logs(request);
+        return;
+    }
+  }
+
+  #logs(request: Extract<HelperRequest, {type: 'logs.list' | 'logs.read'}>): void {
+    const helper = this.#helper;
+    const id = request.request_id;
+    const known =
+      helper.logStore.has(request.instance_id) ||
+      [...helper.host.instances, ...helper.host.ended].some(
+        entry => entry.id === request.instance_id,
+      );
+    if (!known) {
+      this.#send(this.#error(id, 'unknown_instance', `no logs for ${request.instance_id}`));
+      return;
+    }
+    if (request.type === 'logs.list') {
+      const streams = helper.logStore.streams(request.instance_id);
+      this.#send({type: 'logs.list', request_id: id, streams});
+      return;
+    }
+    try {
+      const chunk = helper.logStore.read(
+        request.instance_id,
+        request.stream_id,
+        request.start,
+        request.max_bytes,
+      );
+      this.#send({type: 'logs.read', request_id: id, chunk});
+    } catch (error) {
+      if (!(error instanceof UnknownLogStream)) throw error;
+      this.#send(this.#error(id, 'unknown_log_stream', `no log stream ${request.stream_id}`));
     }
   }
 

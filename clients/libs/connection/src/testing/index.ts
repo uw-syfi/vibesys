@@ -9,5 +9,6 @@
  * Its one consumer, this package's own `host-connection.test.ts`, imports it by its relative path.
  */
 export {ECHO_SERVER, FakeHelper, FakeLink, record} from './fake-helper.js';
+export {FakeLogStore, type LogStoreFixture} from './fake-log-store.js';
 export {deferredKillProcess, fakeProcess} from './fake-process.js';
 export {phaseReached} from './phase-reached.js';

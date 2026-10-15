@@ -3,13 +3,15 @@
 Each scenario is one channel served by :func:`server.host_helper.serve_channel` over
 Fakes on simulated threads, with an empty registry and no project at the paths the
 scenarios name. The ``logs`` group's host also has a log store holding the streams
-:func:`_seeded_logs` writes. ``tests/e2e/test_host_helper.py`` replays the other
+``fixtures/helper-log-store.json`` describes. ``tests/e2e/test_host_helper.py`` replays the other
 groups over stdio against a real helper command.
 """
 
 from __future__ import annotations
 
 import itertools
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -29,8 +31,6 @@ from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from pydantic import JsonValue
-
 _RUNNER = "host-helper"
 _SCENARIOS = tuple(
     itertools.chain.from_iterable(
@@ -38,25 +38,23 @@ _SCENARIOS = tuple(
     )
 )
 _LOGS = frozenset(runner_group(_RUNNER, "logs"))
-_INSTANCE = "0123456789ab"
+_LOG_STORE = Path(__file__).parent / "fixtures" / "helper-log-store.json"
 
 
 def _seeded_logs(threads: SimThreads) -> FakeLogReader:
-    """Stream 000001: an open 66-byte image build on stdout. Stream 000002: a failed
-    42-byte server stream on stderr, evicted before offset 14."""
+    """The log store ``fixtures/helper-log-store.json`` describes, which every runner seeds."""
+    fixture = json.loads(_LOG_STORE.read_text())
     logs = FakeLogReader(threads)
-    build_owner: dict[str, JsonValue] = {"kind": "startup_step", "step": "image_build"}
-    logs.open(_INSTANCE, "000001", build_owner, "docker build .")
-    logs.write(
-        _INSTANCE,
-        "000001",
-        b"Step 1/8 : FROM python\nStep 2/8 : WORKDIR /app\nStep 3/8 : RUN make",
-    )
-    logs.open(_INSTANCE, "000002", {"kind": "server_process"}, "vibesys")
-    server = b"".join(b"line %d\n" % line for line in range(6))
-    logs.write(_INSTANCE, "000002", server, LogPipe.STDERR)
-    logs.evict(_INSTANCE, "000002", 14)
-    logs.close(_INSTANCE, "000002", LogStreamOutcome.FAILED)
+    for instance_id, streams in fixture["instances"].items():
+        for stream in streams:
+            logs.open(instance_id, stream["id"], stream["owner"], stream["command"])
+            for write in stream["writes"]:
+                logs.write(
+                    instance_id, stream["id"], write["text"].encode(), LogPipe(write["pipe"])
+                )
+            logs.evict(instance_id, stream["id"], stream["evict_before"])
+            if stream["outcome"] is not None:
+                logs.close(instance_id, stream["id"], LogStreamOutcome(stream["outcome"]))
     return logs
 
 
