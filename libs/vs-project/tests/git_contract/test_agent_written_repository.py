@@ -135,7 +135,9 @@ def _record_as_gitlink(root: Path) -> str:
     outer = pygit2.Repository(str(root))
     nested = pygit2.Repository(str(root / "sub"))
     outer.index.read()
-    outer.index.add(pygit2.IndexEntry("sub", nested.head.target, pygit2.enums.FileMode.COMMIT))
+    outer.index.add(
+        pygit2.IndexEntry("sub", nested.head.peel(pygit2.Commit).id, pygit2.enums.FileMode.COMMIT)
+    )
     outer.index.write()
     return _commit_index(outer, "gitlink")
 
