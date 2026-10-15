@@ -96,6 +96,7 @@ from .ledger import (
 )
 from .ledger import encode as encode_ledger_document
 from .ledger_actions import (
+    Kept,
     NotInLedger,
     Withdrawn,
     WithdrawOutcome,
@@ -235,6 +236,7 @@ __all__ = [
     "FakeEvaluationLedger",
     "IssuedCommand",
     "JobLife",
+    "Kept",
     "LeaseVerdict",
     "Leased",
     "LedgerArtifact",

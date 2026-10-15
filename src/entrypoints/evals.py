@@ -24,6 +24,7 @@ from vs_project.api import Project, ProjectError
 from vs_sim.api import OsProcesses, SystemClock
 from vs_slurm.api import (
     EntryPhase,
+    Kept,
     LedgerError,
     LedgerListing,
     LedgerRow,
@@ -205,6 +206,8 @@ def format_withdrawal(outcome: WithdrawOutcome) -> str:
             return f"{entry_id(key)}: withdrawn; no queued or running job to cancel"
         case Withdrawn(key=key, cancelled_job=job):
             return f"{entry_id(key)}: withdrawn; cancelled Slurm job {job}"
+        case Kept(key=key):
+            return f"{entry_id(key)}: kept; a run leased it or its job finished meanwhile"
         case NotInLedger(key=key):
             return f"{entry_id(key)}: not in the ledger"
         case WithdrawUnknown(key=key, reason=reason):

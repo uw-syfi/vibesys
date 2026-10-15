@@ -15,17 +15,19 @@ from typing import TYPE_CHECKING
 
 from .cluster_types import ClusterObservation, ClusterUnknown
 from .ledger import (
-    Leased,
     LedgerEntry,
     LedgerError,
     LedgerRecord,
     LedgerState,
+    Unleased,
     lease_verdict,
     settlement,
     transitioned,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .api import Cluster, EvaluationLedger
     from .cluster_types import ClusterCollectOutcome
     from .scheduler_states import SlurmJobStatus
@@ -39,6 +41,18 @@ class Withdrawn:
     operation_id: str
     cancelled_job: str | None
     already: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class Kept:
+    """The request no longer met the withdrawal's condition when it was read; nothing changed.
+
+    Only a conditional withdrawal (the sweep's) ends this way: a run leased the
+    request, or its job settled, after the caller decided to withdraw it.
+    """
+
+    key: str
+    operation_id: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +70,7 @@ class WithdrawUnknown:
     reason: str
 
 
-WithdrawOutcome = Withdrawn | NotInLedger | WithdrawUnknown
+WithdrawOutcome = Withdrawn | Kept | NotInLedger | WithdrawUnknown
 
 
 # Each lost compare-and-swap costs one more read; a race is lost only to a writer
@@ -65,30 +79,48 @@ _ROUNDS = 8
 
 
 def withdraw(
-    ledger: EvaluationLedger, cluster: Cluster, key: str, *, reason: str
+    ledger: EvaluationLedger,
+    cluster: Cluster,
+    key: str,
+    *,
+    reason: str,
+    still: Callable[[LedgerEntry], bool] | None = None,
 ) -> WithdrawOutcome:
     """Cancel the request's job if it is live, then record its attempt as withdrawn.
 
     The record changes by compare-and-swap: when a submitter records its job
     between this read and this write, the write loses, and the next round
     cancels the job it recorded. A failed or withdrawn attempt is final.
+
+    ``still`` is the condition the withdrawal holds under (the sweep's: no run
+    leases the request and its job has not settled). Every round tests it on
+    its own fresh read, before it cancels anything, and ends with ``Kept`` once
+    it fails, so a run that leased the request, or a collector that settled it,
+    after the caller decided keeps its job and its result.
     """
     for _ in range(_ROUNDS):
-        outcome = _withdraw_once(ledger, cluster, key, reason=reason)
+        outcome = _withdraw_once(ledger, cluster, key, reason=reason, still=still)
         if outcome is not None:
             return outcome
     return WithdrawUnknown(key, "the request kept changing while it was withdrawn")
 
 
 def _withdraw_once(
-    ledger: EvaluationLedger, cluster: Cluster, key: str, *, reason: str
+    ledger: EvaluationLedger,
+    cluster: Cluster,
+    key: str,
+    *,
+    reason: str,
+    still: Callable[[LedgerEntry], bool] | None,
 ) -> WithdrawOutcome | None:
-    """One read, cancel and swap; None when another writer won the swap."""
+    """One read, check, cancel and swap; None when another writer won the swap."""
     try:
         entry = ledger.read(key)
         if entry is None:
             return NotInLedger(key)
         record = entry.record
+        if still is not None and not still(entry):
+            return Kept(key, record.operation_id)
         if record.state.final:
             return Withdrawn(key, record.operation_id, None, already=True)
         cancelled = _cancel_live(cluster, record)
@@ -185,6 +217,12 @@ def sweep_unleased(
     COMPLETED is left for the next ask, which collects it (only a collected
     result settles ``completed``; it costs one cluster call per sweep until then).
     """
+
+    def sweepable(entry: LedgerEntry) -> bool:
+        if entry.record.state.settled:
+            return False
+        return isinstance(lease_verdict(entry, now=now, grace_seconds=grace_seconds), Unleased)
+
     outcomes: list[WithdrawOutcome] = []
     for key in ledger.list_keys():
         try:
@@ -195,9 +233,7 @@ def sweep_unleased(
         if entry is None:
             continue
         outcomes.extend(_cancel_orphans(cluster, entry))
-        if entry.record.state.settled:
-            continue
-        if isinstance(lease_verdict(entry, now=now, grace_seconds=grace_seconds), Leased):
+        if not sweepable(entry):
             continue
         if entry.record.state is LedgerState.SUBMITTED:
             observed = cluster.inspect(entry.record.operation_id)
@@ -207,13 +243,16 @@ def sweep_unleased(
                 except LedgerError as error:
                     outcomes.append(WithdrawUnknown(key, str(error)))
                 continue  # settled failed, or completed and waiting for a run to collect it
-        outcomes.append(
-            withdraw(ledger, cluster, key, reason=f"no run leased it for {grace_seconds:.0f} s")
-        )
+        reason = f"no run leased it for {grace_seconds:.0f} s"
+        # Decided on this read; ``withdraw`` tests it again on each of its own.
+        outcome = withdraw(ledger, cluster, key, reason=reason, still=sweepable)
+        if not isinstance(outcome, Kept):
+            outcomes.append(outcome)
     return tuple(outcomes)
 
 
 __all__ = [
+    "Kept",
     "NotInLedger",
     "WithdrawOutcome",
     "WithdrawUnknown",
