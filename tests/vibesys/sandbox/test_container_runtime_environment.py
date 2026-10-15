@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.constants import ComputeBackend
 from vibesys.run.environment import open_run_environment
@@ -38,7 +37,7 @@ from vs_sandbox.api import (
     SandboxKind,
 )
 from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry, ScriptedDockerCli
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -148,7 +147,7 @@ def _request(
         evaluator_requirements=TrustedEvaluatorRequirements(),
         docker_in_docker=docker_in_docker,
         clock=ManualClock(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
 
 

@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
@@ -38,7 +38,7 @@ from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -83,7 +83,7 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     clock = VirtualClock(at=0.0)
 
@@ -199,7 +199,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     clock = VirtualClock(at=0.0)
     turns = _Turns()

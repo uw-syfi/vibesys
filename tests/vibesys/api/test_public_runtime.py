@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.core_host_world import open_core_host
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions, capability_plugin
 
@@ -28,7 +28,7 @@ from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -95,7 +95,7 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
 
     async def exercise() -> None:
@@ -128,7 +128,7 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     backend = _LifecycleBackend()
 

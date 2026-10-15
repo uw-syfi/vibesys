@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.support import run_test_command
-from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.run.environment import open_run_environment
 from vs_runtime.api.infrastructure import (
@@ -33,6 +32,7 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import ComputeBackend, ProjectPathPolicy, SubprocessDockerCli
 from vs_sandbox.local_compute_backend import LocalBackend
 from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
+from vs_sim.api.testing import NO_PROCESSES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -89,7 +89,7 @@ def candidate(tmp_path: Path) -> Iterator[tuple[RunEnvironmentSession, Path, Pat
         project_path_policy=ProjectPathPolicy(),
         git_history_root=project,
         clock=MonotonicClock(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     session = open_run_environment(build_run_environment(RunEnvironmentSpec("docker")), request)
     try:

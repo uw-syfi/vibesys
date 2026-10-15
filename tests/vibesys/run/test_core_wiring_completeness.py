@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, ClassVar, Literal
 
 from tests.support.docker_environment import host_container_backend
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import (
     _plugin,
@@ -39,7 +39,7 @@ from vs_runtime.api import CoreOperation
 from vs_runtime.api.core import EVALUATION_TOOL_ID, OperationRole, RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -89,7 +89,7 @@ def _services(tmp_path: Path) -> CoreServices:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     clock = VirtualClock(at=0.0)
 

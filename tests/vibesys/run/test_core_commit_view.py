@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.skeleton_world import drive, open_skeleton_world
 from tests.support.workspace_world import RUN_ID
 
@@ -18,7 +18,7 @@ from vibesys.events import CoreEvent, CoreEventType, WinnerSelectedData
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import RuntimeRecord, winner_selection
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -42,7 +42,7 @@ async def test_one_core_run_notifies_the_listener_per_commit_and_announces_its_w
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     heard: list[CoreEvent] = []
     integration.events.subscribe(heard.append)

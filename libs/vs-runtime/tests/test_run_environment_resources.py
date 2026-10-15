@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import REAL_PROCESSES
 
 from vs_runtime.api.infrastructure import (
     AgentPaths,
@@ -16,7 +15,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -86,7 +85,7 @@ def _request(tmp_path: Path, backend: _Backend) -> RunEnvironmentRequest:
         framework_root=tmp_path,
         project_path_policy=ProjectPathPolicy(),
         clock=ManualClock(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
 
 

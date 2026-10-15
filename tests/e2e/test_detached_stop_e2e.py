@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 from tests.server.support import REQUEST_TIME
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
 from server.api.protocol import SubscribeRequest
@@ -45,7 +45,7 @@ from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
 from vs_sim.api import OsThreads, PidfdProcessSignaller, Platform, SystemClock, UnixNetwork
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api.testing import HANG_GUARD_S, NO_PROCESSES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -165,7 +165,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     integration.events.subscribe(runtime.integration.project_event)
     threads = OsThreads()

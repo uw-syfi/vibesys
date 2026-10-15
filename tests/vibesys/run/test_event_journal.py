@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from vibesys.events import (
     AgentExecutionStartedData,
@@ -19,7 +19,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStarted,
     AgentExecutionStatus,
 )
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,7 +36,7 @@ def test_a_semantic_event_uses_the_unified_durable_stream(tmp_path: Path) -> Non
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     try:
         integration.attach(tmp_path, run_id="run-winner")
@@ -57,7 +57,7 @@ def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     try:
         integration.attach(tmp_path, run_id="run-1")
@@ -105,14 +105,14 @@ def test_local_integrations_own_isolated_agent_event_streams(tmp_path: Path) -> 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     second = LocalRunIntegration(
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     try:
         first.attach(tmp_path / "first", run_id="run-1")

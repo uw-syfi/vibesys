@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.detached_run import RecordPublisher
 from entrypoints.production import production_runs
@@ -49,7 +49,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.images import TaskImageBuildError
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
 from vs_sim.api import OsThreads, Platform, SystemClock
-from vs_sim.api.testing import HANG_GUARD_S
+from vs_sim.api.testing import HANG_GUARD_S, NO_PROCESSES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -94,7 +94,7 @@ def _serve(
             git=REAL_GIT,
             github=NO_GITHUB,
             threads=OsThreads(),
-            slurm_processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
         )
         try:
             with registry.register(instance_id) as hold:

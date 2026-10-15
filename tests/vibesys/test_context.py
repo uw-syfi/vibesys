@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment
 from tests.support.host_environment import unconfined_host_spec
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import task_path, write_task
 
 from launch import built_in_orchestrations, open_run_store
@@ -54,7 +54,7 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 
 class _PortableStateProbe(BaseModel):
@@ -224,7 +224,7 @@ def _create_context(
                 git=REAL_GIT,
                 github=NO_GITHUB,
                 threads=SimThreads(),
-                slurm_processes=REAL_PROCESSES,
+                slurm_processes=NO_PROCESSES,
             ),
             ownership=ownership,
             agent_specs=resolve_agent_specs(
@@ -492,7 +492,7 @@ def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> Non
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     try:
         with _create_context(project, evaluator=evaluator, integration=integration) as ctx:
@@ -867,7 +867,7 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
 
     def reject_resources(_resources: object) -> None:

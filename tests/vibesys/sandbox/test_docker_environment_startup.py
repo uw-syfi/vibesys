@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.run.environment import open_run_environment
 from vs_agent.api.images import ImageBuildProgress, TaskImageBuildError
@@ -19,7 +18,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
 )
 from vs_runtime.api.testing import DaemonBackend, daemon_engine
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -51,7 +50,7 @@ def _open(
         evaluator_requirements=TrustedEvaluatorRequirements(),
         startup=observed.append,
         clock=ManualClock(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     environment = DockerEnvironment(DockerEnvironmentConfig(docker=engine, build_runner=runner))
     open_run_environment(environment, request).close()

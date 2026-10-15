@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.core_host_world import open_core_host
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
@@ -34,7 +34,7 @@ from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -125,7 +125,7 @@ def _candidate_container_counts(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
 
     async def exercise() -> tuple[bool, int, int, int]:

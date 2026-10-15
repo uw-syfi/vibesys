@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.core_host_world import open_core_host
 from tests.support.docker_environment import fake_docker_environment
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 
 from vibesys.config import Config
@@ -20,7 +20,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import WorkspaceRestoreError
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +61,7 @@ def test_root_workspace_revision_restore_and_retention_contract(tmp_path: Path) 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
 
     async def exercise() -> None:

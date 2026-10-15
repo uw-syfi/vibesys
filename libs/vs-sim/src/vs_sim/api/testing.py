@@ -43,6 +43,7 @@ from vs_sim.crash import (
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
+    NO_PROCESSES,
     FakeForegroundChild,
     FakeForegroundLauncher,
     FakeLoopbackHttp,
@@ -56,6 +57,8 @@ from vs_sim.fakes import (
     GatedBlockingRunner,
     InlineBlockingRunner,
     ProcessScript,
+    ProcessStartRefusedError,
+    RefusingProcesses,
     ScriptedProbe,
     ScriptedStreamingCommand,
     StreamedRun,
@@ -117,6 +120,7 @@ from vs_sim.waits import (
 __all__ = [
     "DEEP_NESTING",
     "HANG_GUARD_S",
+    "NO_PROCESSES",
     "OVERSIZED_BYTES",
     "SCHEDULE_SEED_OPTION",
     "SEED_OPTION",
@@ -167,9 +171,11 @@ __all__ = [
     "ProcessScript",
     "ProcessSignallerContract",
     "ProcessSignallerUnderTest",
+    "ProcessStartRefusedError",
     "ProcessUnderTest",
     "ProcessesContract",
     "ProcessesUnderTest",
+    "RefusingProcesses",
     "RelayUnderTest",
     "RestartLimitError",
     "Restarted",

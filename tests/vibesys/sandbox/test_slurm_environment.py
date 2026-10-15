@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import REAL_PROCESSES
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     plan_of,
     resolved,
@@ -34,7 +33,7 @@ from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_e
 from vs_sandbox.api import DockerSandbox, SandboxKind
 from vs_sandbox.api.slurm import SlurmPolicyError, load_slurm_operator_settings
 from vs_sim.api import SubprocessProbe
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -177,7 +176,7 @@ def _request(
         benchmark_command=benchmark,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         clock=ManualClock(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
 
 

@@ -12,7 +12,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
@@ -28,7 +28,7 @@ from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, VirtualClock, run_virtual
 
 
 def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]:
@@ -60,7 +60,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     clock = VirtualClock(at=0.0)
 

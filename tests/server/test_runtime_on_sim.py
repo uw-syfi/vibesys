@@ -16,7 +16,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.server.support import REQUEST_TIME, sim_platform
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
 from server.api.protocol import StopCommand, SubscribeRequest
@@ -29,6 +29,7 @@ from vs_core.api import StopMode
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import (
     HANG_GUARD_S,
+    NO_PROCESSES,
     ManualClock,
     SimNetwork,
     SimThreads,
@@ -375,7 +376,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
             git=REAL_GIT,
             github=NO_GITHUB,
             threads=OsThreads(),
-            slurm_processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
         )
         integration.events.subscribe(runtime.integration.project_event)
 

@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.real_git import REAL_PROCESSES
 
 from vs_project.api import RunEnvironmentRecord
 from vs_runtime.api.infrastructure import (
@@ -29,7 +28,7 @@ from vs_sandbox.api import (
     backend_is_host_only,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
 _BACKENDS = st.sampled_from(list(ComputeBackend))
 _PLATFORMS = st.sampled_from(["darwin", "linux", "win32", "freebsd14", "cygwin"])
@@ -88,7 +87,7 @@ def _request(tmp_path: Path) -> RunEnvironmentRequest:
         environment_bind_mounts=(),
         project_path_policy=ProjectPathPolicy(),
         clock=ManualClock(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
 
 

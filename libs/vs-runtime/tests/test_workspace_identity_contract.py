@@ -15,7 +15,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
-from tests.support.real_git import REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import REAL_GIT
 
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_core.api import HostFence, HostId, Until
@@ -60,7 +60,7 @@ from vs_runtime.api.testing import (
     MemoryValidationPasses,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads, examples
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -141,7 +141,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     run_id="workspace-contract",
                     framework_root=Path(scratch),
                     clock=ManualClock(),
-                    slurm_processes=REAL_PROCESSES,
+                    slurm_processes=NO_PROCESSES,
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),

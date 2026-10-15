@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 
 from vibesys.config import Config
@@ -72,7 +72,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -230,7 +230,7 @@ def _measure_with_lost_command(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     request = ProjectRunRequest(
         project_root=root,
@@ -270,7 +270,7 @@ def _measure_with_lost_command(
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
                 clock=ManualClock(),
-                slurm_processes=REAL_PROCESSES,
+                slurm_processes=NO_PROCESSES,
             ),
             lambda _request: _Session(sandbox),
             clock=ManualClock(),

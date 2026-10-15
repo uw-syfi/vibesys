@@ -11,7 +11,6 @@ from unittest.mock import MagicMock
 
 import pytest
 from tests.support import run_test_command
-from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.constants import ComputeBackend
 from vibesys.inputs import (
@@ -73,7 +72,7 @@ from vs_sandbox.api.slurm import (
     read_slurm_capture_plan,
 )
 from vs_sim.api import ProcessOutcome, ProcessSpec, UnixNetwork
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -242,6 +241,7 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
         "run_id": "run-123",
         "framework_root": tmp_path / "framework",
         "clock": ManualClock(),
+        "slurm_processes": NO_PROCESSES,
     }
     package_root = overrides.pop("evaluator_package_root", None)
     tools_root = overrides.pop("evaluator_tools_root", None)
@@ -260,7 +260,7 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
             )
     values.update(overrides)
     log_dir.mkdir(exist_ok=True)
-    return RunEnvironmentRequest(**values, slurm_processes=REAL_PROCESSES)
+    return RunEnvironmentRequest(**values)
 
 
 #: The profiles these tests drive container setup with. agentshim registers
@@ -627,7 +627,14 @@ rsync_command = ["/bin/true"]
     outside.mkdir()
     session = _open(
         build_run_environment(_slurm_spec(config_path)),
-        _request(tmp_path, FakeBackend(), run_owned_roots=(worktrees,)),
+        _request(
+            tmp_path,
+            FakeBackend(),
+            run_owned_roots=(worktrees,),
+            slurm_processes=FakeProcesses(
+                lambda _spec: ProcessScript(), pass_time=ManualClock().advance
+            ),
+        ),
     )
     profiler_env = dict(session.view.profiler_mcp_env)
     socket = Path(profiler_env["VIBESYS_SLURM_BROKER_SOCKET"])
@@ -1910,7 +1917,7 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         run_id="20260429-100000-runa",
         framework_root=tmp_path / "framework",
         clock=ManualClock(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     req_b = RunEnvironmentRequest(
         log_dir=log_b,
@@ -1922,7 +1929,7 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         run_id="20260429-100100-runb",
         framework_root=tmp_path / "framework",
         clock=ManualClock(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     _open(env, req_a)
     _open(env, req_b)

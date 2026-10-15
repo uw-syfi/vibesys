@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 from tests.slurm_cluster.cluster import docker
-from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.config import BUNDLED_RESOURCES, PROJECT_ROOT
 from vibesys.orchestration.profilers import (
@@ -45,6 +44,7 @@ from vs_sandbox.api import (
 )
 from vs_sandbox.api.slurm import load_slurm_operator_settings
 from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SystemClock
+from vs_sim.api.testing import NO_PROCESSES
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -246,7 +246,7 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
         profiler_support_name=definition.support_name,
         profiler_support_extra=profiler_support_extra(definition),
         clock=MonotonicClock(),
-        slurm_processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
     )
     environment = SlurmEnvironment(
         load_slurm_operator_settings(_slurm_config(directory)),

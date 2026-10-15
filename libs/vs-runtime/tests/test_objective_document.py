@@ -6,7 +6,6 @@ from tempfile import TemporaryDirectory
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from tests.support.real_git import REAL_PROCESSES
 
 from vs_runtime.api.infrastructure import (
     RunEnvironmentPresentation,
@@ -15,7 +14,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
 
 def test_materializes_exact_objective_at_the_selected_destination(tmp_path: Path) -> None:
@@ -118,7 +117,7 @@ def test_candidate_objective_verification_uses_run_root_and_requires_exact_text(
             objective=objective,
             objective_document=document,
             clock=ManualClock(),
-            slurm_processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
         )
         presentation = RunEnvironmentPresentation(prompt_notes="")
         with unconfined_host_environment().prepare(request).open(presentation) as session:

@@ -304,6 +304,28 @@ class FakeProcesses:
             self.pass_time(seconds)
 
 
+class ProcessStartRefusedError(AssertionError):
+    """A test that runs no process started one."""
+
+
+class RefusingProcesses:
+    """Starts nothing: any run fails the test, naming the command it tried to run.
+
+    For a test whose code takes a :class:`~vs_sim.processes.Processes` it must never use.
+    A test that does need a command to run scripts it with :class:`FakeProcesses` instead.
+    """
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        """Fail: this test runs no process."""
+        del timeout
+        message = f"this test runs no process, but ran {' '.join(spec.argv)}"
+        raise ProcessStartRefusedError(message)
+
+
+NO_PROCESSES = RefusingProcesses()
+"""Shared :class:`RefusingProcesses`; it holds no state."""
+
+
 @dataclass
 class FakePipedProcessLauncher:
     """Record synchronous piped process starts and create each process through a Fake factory."""
