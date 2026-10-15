@@ -314,41 +314,47 @@ class _Client:
     events: list[dict[str, Any]] = field(default_factory=list)
     drops: int = 0
     cursor: int = 0
+    store: str = ""
+    read: int = 0
     read_from_log: bool = False
 
     def follow(self, runtime: ServerRuntime) -> None:
         assert runtime.transport_listening.wait(HANG_GUARD_S)
-        store = ""
-        read = 0
         while True:
             try:
-                connection = self.network.connect(str(self.socket_path), HANG_GUARD_S)
-            except ConnectionRefusedError:
-                return  # the server is gone: read_log takes over
+                ended = self._read_until_drop()
+            except ConnectionError:
+                return  # the server closed between connections: read_log takes over
+            if ended or self.drops > 0:
+                return  # the end, or the server hung up before it: read_log takes over
+            self.drops += 1
+
+    def _read_until_drop(self) -> bool:
+        """Subscribe from the cursor and fold batches until the end or the drawn drop."""
+        connection = self.network.connect(str(self.socket_path), HANG_GUARD_S)
+        try:
             request = SubscribeRequest(
-                timestamp=REQUEST_TIME, after_sequence=self.cursor, store_id=store
+                timestamp=REQUEST_TIME, after_sequence=self.cursor, store_id=self.store
             )
             connection.send(request.model_dump_json().encode() + b"\n")
             for message in _messages(connection):
-                read += 1
-                if self.drops == 0 and (read >= self.drop_after or _is_terminal(message)):
+                self.read += 1
+                if self.drops == 0 and (self.read >= self.drop_after or _is_terminal(message)):
                     # The connection drops before this message is folded: at the drawn
                     # point, or at the latest just before the end, so every seed drops once.
-                    break
+                    return False
                 if message["type"] == "event_batch":
-                    if message.get("store_id", "") != store:
+                    if message.get("store_id", "") != self.store:
                         # A new store supersedes what this client folded.
                         self.events.clear()
-                    store = message.get("store_id", "")
+                    self.store = message.get("store_id", "")
                     self.events.extend(message["events"])
                     self.cursor = max(self.cursor, message["through_sequence"])
                 if self.ended:
-                    connection.close()
-                    return
+                    return True
+            return False
+        finally:
             connection.close()
-            if self.drops > 0:
-                return  # the server hung up before the end: read_log takes over
-            self.drops += 1
 
     def read_log(self, runtime: ServerRuntime) -> None:
         """After the server closed, fold what the run logged past this client's cursor."""
