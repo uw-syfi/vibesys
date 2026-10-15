@@ -11,12 +11,13 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from vs_sim.api import ProcessSpec
+from vs_sim.api import OutputStream, ProcessOutcome, ProcessOutputTooLarge, ProcessSpec
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     CANCEL_REACTIONS,
     INITIAL_LIFE,
     LIFETIMES,
+    MAX_CONNECTOR_REQUEST_BYTES,
     AccountingRow,
     ClusterCancelRequested,
     ClusterObservation,
@@ -354,8 +355,9 @@ def test_a_connector_prints_sacct_states_as_the_real_command_does(tmp_path: Path
     replies = {}
     for flag in ("", "-P "):
         command = f"sacct -n {flag}-X -j {observed.job_id} --format=State,ExitCode"
-        request = json.dumps({"operation": "exec", "command": command})
+        request = json.dumps({"version": 1, "operation": "exec", "command": command})
         reply = connector.run(ProcessSpec(("c",), input=request.encode()), timeout=1)
+        assert isinstance(reply, ProcessOutcome)
         replies[flag] = json.loads(reply.stdout)["stdout"]
 
     assert replies == {"": "OUT_OF_ME+    0:125\n", "-P ": "OUT_OF_MEMORY|0:125\n"}
@@ -444,8 +446,9 @@ def test_a_connector_refuses_squeue_and_scancel_for_a_purged_job_as_slurm_does(
     assert isinstance(observed, ClusterObservation)
     replies = {}
     for command in (f"squeue -h -j {observed.job_id} -o %T", f"scancel {observed.job_id}"):
-        request = json.dumps({"operation": "exec", "command": command})
+        request = json.dumps({"version": 1, "operation": "exec", "command": command})
         reply = connector.run(ProcessSpec(("c",), input=request.encode()), timeout=1)
+        assert isinstance(reply, ProcessOutcome)
         replies[command.split()[0]] = json.loads(reply.stdout)
 
     assert {name: (r["returncode"], r["stderr"].strip()) for name, r in replies.items()} == {
@@ -455,3 +458,51 @@ def test_a_connector_refuses_squeue_and_scancel_for_a_purged_job_as_slurm_does(
             f"scancel: error: Kill job error on job id {observed.job_id}: Invalid job id specified",
         ),
     }
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        json.dumps({"operation": "exec", "command": "hostname"}).encode(),
+        json.dumps(
+            {"version": 1, "operation": "exec", "command": "hostname", "unknown": True}
+        ).encode(),
+        json.dumps(
+            {
+                "version": 1,
+                "operation": "exec",
+                "command": "x" * MAX_CONNECTOR_REQUEST_BYTES,
+            }
+        ).encode(),
+    ],
+    ids=["missing-version", "unknown-field", "oversized"],
+)
+def test_trace_connector_enforces_the_connector_request_contract(
+    tmp_path: Path, payload: bytes
+) -> None:
+    _runner_instance, connector, _clock = _runner(
+        tmp_path, LIFETIMES["normal-run"], CANCEL_REACTIONS["cancel-running"]
+    )
+
+    with pytest.raises(TypeError):
+        connector.run(ProcessSpec(("trace-connector",), input=payload), timeout=1)
+
+
+def test_trace_connector_enforces_the_connector_response_bound(tmp_path: Path) -> None:
+    _runner_instance, connector, _clock = _runner(
+        tmp_path, LIFETIMES["normal-run"], CANCEL_REACTIONS["cancel-running"]
+    )
+    request = json.dumps(
+        {
+            "version": 1,
+            "operation": "exec",
+            "command": "squeue -h -j 999 -o %T|%r|%S",
+        }
+    ).encode()
+
+    result = connector.run(
+        ProcessSpec(("trace-connector",), input=request, max_output_bytes=1), timeout=1
+    )
+
+    assert isinstance(result, ProcessOutputTooLarge)
+    assert (result.limit, result.stream, result.stdout) == (1, OutputStream.STDOUT, b"{")

@@ -5,7 +5,7 @@ from __future__ import annotations
 import secrets
 import socketserver
 import threading
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from vs_decode.api import Unreadable, decode_json
 from vs_sandbox.slurm_broker_protocol import (
@@ -34,6 +34,12 @@ if TYPE_CHECKING:
 SlurmProcessBrokerError = SlurmTransportRequestError
 
 
+class _ReplyWriter(Protocol):
+    def write(self, data: bytes, /) -> object:
+        """Write one complete broker response."""
+        ...
+
+
 class _BrokerServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
 
@@ -51,7 +57,15 @@ class _BrokerHandler(socketserver.StreamRequestHandler):
             payload: BrokerReply = BrokerRan(ok=True, result=server.owner.execute(call))
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-930076 [BLE001]; this process boundary converts arbitrary transport and validation failures into one bounded protocol response, while narrower catches could terminate the broker thread without replying.
             payload = BrokerRefused(ok=False, error=str(error))
-        self.wfile.write(payload.model_dump_json().encode() + b"\n")
+        _write_reply(self.wfile, payload)
+
+
+def _write_reply(stream: _ReplyWriter, payload: BrokerReply) -> None:
+    """Finish a request unless its client has already abandoned the connection."""
+    try:
+        stream.write(payload.model_dump_json().encode() + b"\n")
+    except (BrokenPipeError, ConnectionResetError):
+        return
 
 
 class BrokerRequestError(ValueError):
@@ -86,9 +100,6 @@ class SlurmProcessBroker:
 
         ``processes`` runs each validated transport program with the host's credentials.
         """
-        if not policy.available:
-            message = policy.unavailable_reason or "Slurm transport cannot be brokered"
-            raise TypeError(message)
         self._policy = policy
         self.socket_path = socket_path
         self.token = secrets.token_urlsafe(32)
@@ -142,13 +153,13 @@ class SlurmProcessBroker:
         if not secrets.compare_digest(call.token, self.token):
             raise SlurmTransportRequestError.invalid_capability()
         spec = ProcessSpec(call.argv, input=b"" if call.stdin is None else call.stdin.encode())
-        self._policy.authorize(spec)
         timeout = min(call.timeout, self._policy.timeout_seconds)
         # As in vs_slurm's own transport, the program runs in its own process group:
         # Ctrl-C aimed at the run's terminal cannot kill an in-flight sbatch (its job
         # id would be lost) or the scancel a stopping gate requests.
-        run = self._processes.run(
-            spec,
+        run = self._policy.run(
+            ProcessSpec(spec.argv, input=spec.input, max_output_bytes=call.max_output_bytes),
+            processes=self._processes,
             timeout=timeout,
         )
         match run:

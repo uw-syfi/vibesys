@@ -10,15 +10,29 @@ from __future__ import annotations
 
 import hashlib
 import os
+import secrets
 import shlex
+import shutil
 import stat
+import tempfile
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, BinaryIO, Literal, Protocol
+
+from vs_sim.api import ProcessOutcome
+
+from .connector_protocol import MAX_TRANSPORT_STREAM_BYTES
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Iterable, Sequence
+
+    from vs_sim.api import Processes, ProcessRun, ProcessSpec
+
+_DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+_READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+_CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+_COPY_CHUNK_BYTES = 1024 * 1024
 
 
 class _ExecResponse(Protocol):
@@ -281,3 +295,310 @@ def _publish_command(
 def _update_field(digest: _Digest, value: bytes) -> None:
     digest.update(len(value).to_bytes(8, byteorder="big"))
     digest.update(value)
+
+
+class _LocalTransferError(OSError):
+    """A brokered local path could not be staged without crossing its authorized root."""
+
+
+@dataclass(frozen=True, slots=True)
+class _AuthorizedLocalPath:
+    root: Path
+    relative: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _LocalTransfer:
+    target: _AuthorizedLocalPath
+    direction: Literal["upload", "download"]
+    kind: Literal["file", "tree"]
+    operand_index: int = 0
+    trailing_slash: bool = False
+
+
+def _authorize_local_path(value: str, roots: tuple[Path, ...]) -> _AuthorizedLocalPath:
+    """Resolve a canonical local spelling to one root-relative descriptor walk."""
+    path = Path(value)
+    if "\x00" in value or not path.is_absolute() or str(path) != value or ".." in path.parts:
+        raise _LocalTransferError
+    candidates: list[_AuthorizedLocalPath] = []
+    for root in roots:
+        try:
+            relative = path.relative_to(root)
+        except ValueError:
+            continue
+        candidates.append(_AuthorizedLocalPath(root, relative.parts))
+    if not candidates:
+        raise _LocalTransferError
+    return max(candidates, key=lambda candidate: len(candidate.root.parts))
+
+
+def _run_staged_transfer(
+    *,
+    transfer: _LocalTransfer,
+    processes: Processes,
+    timeout: float,
+    rewrite: Callable[[str], ProcessSpec],
+) -> ProcessRun:
+    """Run a transfer only against a private snapshot, then safely publish downloads."""
+    try:
+        temporary = tempfile.TemporaryDirectory(prefix="vibesys-slurm-broker-")
+    except OSError as error:
+        raise _LocalTransferError from error
+    with temporary as raw:
+        staged = Path(raw) / "transfer"
+        try:
+            try:
+                if transfer.direction == "upload":
+                    _copy_from_authorized(transfer.target, staged, kind=transfer.kind)
+                elif transfer.kind == "tree":
+                    staged.mkdir()
+            except (OSError, RuntimeError, ValueError) as error:
+                raise _LocalTransferError from error
+            local = str(staged) + ("/" if transfer.trailing_slash else "")
+            rewritten = rewrite(local)
+            bounded = replace(
+                rewritten,
+                max_output_bytes=min(rewritten.max_output_bytes, MAX_TRANSPORT_STREAM_BYTES),
+            )
+            result = processes.run(bounded, timeout=timeout)
+            if (
+                transfer.direction == "download"
+                and isinstance(result, ProcessOutcome)
+                and result.returncode == 0
+            ):
+                try:
+                    _publish_to_authorized(staged, transfer.target, kind=transfer.kind)
+                except (OSError, RuntimeError, ValueError) as error:
+                    raise _LocalTransferError from error
+            return result
+        finally:
+            _make_staged_tree_removable(staged)
+
+
+def _copy_from_authorized(
+    source: _AuthorizedLocalPath, destination: Path, *, kind: Literal["file", "tree"]
+) -> None:
+    root = os.open(source.root, _DIRECTORY_FLAGS)
+    try:
+        if kind == "tree":
+            directory = _open_directory(root, source.relative, create=False)
+            try:
+                destination.mkdir()
+                _copy_tree_out(directory, destination)
+            finally:
+                os.close(directory)
+        else:
+            descriptor = _open_file(root, source.relative)
+            try:
+                _copy_descriptor_to_path(descriptor, destination)
+            finally:
+                os.close(descriptor)
+    finally:
+        os.close(root)
+
+
+def _publish_to_authorized(
+    source: Path, destination: _AuthorizedLocalPath, *, kind: Literal["file", "tree"]
+) -> None:
+    root = os.open(destination.root, _DIRECTORY_FLAGS)
+    try:
+        if kind == "tree":
+            status = source.stat(follow_symlinks=False)
+            if not stat.S_ISDIR(status.st_mode):
+                raise _LocalTransferError
+            target = _open_directory(root, destination.relative, create=True)
+            try:
+                with os.scandir(source) as entries:
+                    _copy_tree_in(entries, target)
+                os.fchmod(target, stat.S_IMODE(status.st_mode))
+                os.utime(target, ns=(status.st_atime_ns, status.st_mtime_ns))
+            finally:
+                os.close(target)
+        else:
+            if not destination.relative:
+                raise _LocalTransferError
+            parent = _open_directory(root, destination.relative[:-1], create=True)
+            try:
+                descriptor = os.open(source, _READ_FLAGS)
+                if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                    os.close(descriptor)
+                    raise _LocalTransferError
+                with os.fdopen(descriptor, "rb", buffering=0) as reader:
+                    _atomic_copy_in(reader, parent, destination.relative[-1])
+            finally:
+                os.close(parent)
+    finally:
+        os.close(root)
+
+
+def _open_directory(root: int, parts: tuple[str, ...], *, create: bool) -> int:
+    current = os.dup(root)
+    try:
+        for part in parts:
+            if create:
+                with suppress(FileExistsError):
+                    os.mkdir(part, dir_fd=current)
+            child = os.open(part, _DIRECTORY_FLAGS, dir_fd=current)
+            os.close(current)
+            current = child
+    except BaseException:
+        os.close(current)
+        raise
+    else:
+        return current
+
+
+def _open_file(root: int, parts: tuple[str, ...]) -> int:
+    if not parts:
+        raise _LocalTransferError
+    parent = _open_directory(root, parts[:-1], create=False)
+    try:
+        descriptor = os.open(parts[-1], _READ_FLAGS, dir_fd=parent)
+    finally:
+        os.close(parent)
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise _LocalTransferError
+    return descriptor
+
+
+def _copy_tree_out(source: int, destination: Path) -> None:
+    root_status = os.fstat(source)
+    with os.scandir(source) as iterator:
+        entries = sorted(iterator, key=lambda entry: entry.name)
+    for entry in entries:
+        status = os.stat(entry.name, dir_fd=source, follow_symlinks=False)
+        target = destination / entry.name
+        if stat.S_ISDIR(status.st_mode):
+            child = os.open(entry.name, _DIRECTORY_FLAGS, dir_fd=source)
+            try:
+                target.mkdir()
+                _copy_tree_out(child, target)
+            finally:
+                os.close(child)
+        elif stat.S_ISREG(status.st_mode):
+            descriptor = os.open(entry.name, _READ_FLAGS, dir_fd=source)
+            try:
+                _copy_descriptor_to_path(descriptor, target)
+            finally:
+                os.close(descriptor)
+        elif stat.S_ISLNK(status.st_mode):
+            target.symlink_to(os.readlink(entry.name, dir_fd=source))
+            os.utime(
+                target,
+                ns=(status.st_atime_ns, status.st_mtime_ns),
+                follow_symlinks=False,
+            )
+        else:
+            raise _LocalTransferError
+    destination.chmod(stat.S_IMODE(root_status.st_mode))
+    os.utime(destination, ns=(root_status.st_atime_ns, root_status.st_mtime_ns))
+
+
+def _copy_descriptor_to_path(source: int, destination: Path) -> None:
+    status = os.fstat(source)
+    if not stat.S_ISREG(status.st_mode):
+        raise _LocalTransferError
+    with (
+        os.fdopen(os.dup(source), "rb", buffering=0) as reader,
+        destination.open("xb", buffering=0) as writer,
+    ):
+        shutil.copyfileobj(reader, writer, _COPY_CHUNK_BYTES)
+        os.fchmod(writer.fileno(), stat.S_IMODE(status.st_mode))
+        os.utime(writer.fileno(), ns=(status.st_atime_ns, status.st_mtime_ns))
+
+
+def _copy_tree_in(entries: Iterable[os.DirEntry[str]], destination: int) -> None:
+    for entry in sorted(entries, key=lambda item: item.name):
+        status = entry.stat(follow_symlinks=False)
+        if stat.S_ISDIR(status.st_mode):
+            with suppress(FileExistsError):
+                os.mkdir(entry.name, dir_fd=destination)
+            child = os.open(entry.name, _DIRECTORY_FLAGS, dir_fd=destination)
+            try:
+                with os.scandir(entry.path) as nested:
+                    _copy_tree_in(nested, child)
+                os.fchmod(child, stat.S_IMODE(status.st_mode))
+                os.utime(child, ns=(status.st_atime_ns, status.st_mtime_ns))
+            finally:
+                os.close(child)
+        elif stat.S_ISREG(status.st_mode):
+            with Path(entry.path).open("rb") as reader:
+                _atomic_copy_in(reader, destination, entry.name)
+        elif stat.S_ISLNK(status.st_mode):
+            temporary = _temporary_name(entry.name)
+            try:
+                os.symlink(Path(entry.path).readlink(), temporary, dir_fd=destination)
+                os.utime(
+                    temporary,
+                    ns=(status.st_atime_ns, status.st_mtime_ns),
+                    dir_fd=destination,
+                    follow_symlinks=False,
+                )
+                os.replace(
+                    temporary,
+                    entry.name,
+                    src_dir_fd=destination,
+                    dst_dir_fd=destination,
+                )
+            finally:
+                with suppress(FileNotFoundError):
+                    os.unlink(temporary, dir_fd=destination)
+        else:
+            raise _LocalTransferError
+
+
+def _atomic_copy_in(source: BinaryIO, directory: int, name: str) -> None:
+    status = os.fstat(source.fileno())
+    temporary = _temporary_name(name)
+    try:
+        descriptor = os.open(temporary, _CREATE_FLAGS, 0o600, dir_fd=directory)
+        with os.fdopen(descriptor, "wb", buffering=0) as writer:
+            shutil.copyfileobj(source, writer, _COPY_CHUNK_BYTES)
+            os.fchmod(writer.fileno(), stat.S_IMODE(status.st_mode))
+            os.utime(writer.fileno(), ns=(status.st_atime_ns, status.st_mtime_ns))
+        os.replace(temporary, name, src_dir_fd=directory, dst_dir_fd=directory)
+    finally:
+        with suppress(FileNotFoundError):
+            os.unlink(temporary, dir_fd=directory)
+
+
+def _temporary_name(name: str) -> str:
+    return f".{name}.vibesys-{secrets.token_hex(12)}.tmp"
+
+
+def _make_staged_tree_removable(path: Path) -> None:
+    """Restore owner access needed for ``TemporaryDirectory`` cleanup."""
+    try:
+        status = path.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if not stat.S_ISDIR(status.st_mode):
+        return
+    path.chmod(stat.S_IMODE(status.st_mode) | 0o700, follow_symlinks=False)
+    root = os.open(path, _DIRECTORY_FLAGS)
+    try:
+        _make_staged_directories_removable(root)
+    finally:
+        os.close(root)
+
+
+def _make_staged_directories_removable(directory: int) -> None:
+    with os.scandir(directory) as iterator:
+        entries = sorted(iterator, key=lambda entry: entry.name)
+    for entry in entries:
+        status = os.stat(entry.name, dir_fd=directory, follow_symlinks=False)
+        if not stat.S_ISDIR(status.st_mode):
+            continue
+        os.chmod(
+            entry.name,
+            stat.S_IMODE(status.st_mode) | 0o700,
+            dir_fd=directory,
+            follow_symlinks=False,
+        )
+        child = os.open(entry.name, _DIRECTORY_FLAGS, dir_fd=directory)
+        try:
+            _make_staged_directories_removable(child)
+        finally:
+            os.close(child)

@@ -79,3 +79,30 @@ def test_a_connector_response_rejects_unknown_fields_and_versions() -> None:
     )
 
     assert isinstance(decoded, Unreadable)
+
+
+def test_connector_response_bound_counts_the_complete_json_envelope() -> None:
+    empty = SlurmConnectorResponse(version=1, returncode=0, stdout="", stderr="")
+    overhead = len(empty.model_dump_json().encode())
+    at_limit = empty.model_copy(update={"stdout": "x" * (MAX_CONNECTOR_RESPONSE_BYTES - overhead)})
+    encoded = at_limit.model_dump_json().encode()
+
+    assert len(encoded) == MAX_CONNECTOR_RESPONSE_BYTES
+    accepted = decode_json(
+        encoded,
+        SlurmConnectorResponse,
+        source="test response",
+        max_bytes=MAX_CONNECTOR_RESPONSE_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    oversized = at_limit.model_copy(update={"stdout": f"{at_limit.stdout}x"})
+    refused = decode_json(
+        oversized.model_dump_json().encode(),
+        SlurmConnectorResponse,
+        source="test response",
+        max_bytes=MAX_CONNECTOR_RESPONSE_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+
+    assert accepted == at_limit
+    assert isinstance(refused, Unreadable)

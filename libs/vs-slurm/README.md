@@ -126,9 +126,17 @@ host-owned broker. For a connector, the broker runs only the exact configured
 command and accepts only the version-1 request schema. Every transfer's local
 path must remain under the run-owned roots and every remote path under
 `remote_workspace_root/name`; unknown keys, operations, versions, and
-non-normalized paths are refused before the connector starts. Connector
+non-normalized paths are refused before the connector starts. Local path
+spellings containing `.` or `..` components are invalid. The broker walks a
+local path from its authorized root without following links and gives the
+transport only a private staged snapshot; successful downloads are published
+back through the same descriptor-rooted boundary. Staging retains regular-file
+and directory modes and modification times, including executable bits.
+Replacing a checked path can therefore neither change an upload nor redirect a download. Connector
 credentials remain owned by the host process and are not mounted into the
-editor container.
+editor container. A complete connector response, including its JSON envelope,
+is limited to 1 MiB so the two brokered process streams always fit the broker's
+bounded response frame.
 
 ## Recoverable job lifecycle
 

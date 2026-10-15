@@ -65,7 +65,13 @@ from vs_runtime.api.testing import (
     MemoryValidationPasses,
 )
 from vs_sim.api import ProcessSpec
-from vs_sim.api.testing import OVERSIZED_BYTES, ManualClock, hostile_json_frames
+from vs_sim.api.testing import (
+    OVERSIZED_BYTES,
+    FakeProcesses,
+    ManualClock,
+    ProcessScript,
+    hostile_json_frames,
+)
 from vs_slurm.api import SlurmConfig, SlurmConnectorTransport, slurm_transport_broker_policy
 
 if TYPE_CHECKING:
@@ -294,7 +300,16 @@ def _connector_broker_request(frame: bytes, workspace: Path) -> None:
         transport=SlurmConnectorTransport(kind="connector", command=("connector",)),
     )
     policy = slurm_transport_broker_policy(config, local_roots=(workspace,))
-    policy.authorize(ProcessSpec(("connector",), input=frame))
+    policy.run(
+        ProcessSpec(("connector",), input=frame),
+        processes=FakeProcesses(
+            lambda _spec: ProcessScript(
+                stdout=b'{"version":1,"returncode":0,"stdout":"","stderr":""}'
+            ),
+            pass_time=ManualClock().advance,
+        ),
+        timeout=1,
+    )
 
 
 _DECODERS = {

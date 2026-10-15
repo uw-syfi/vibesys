@@ -62,7 +62,11 @@ from vs_sandbox.api.slurm import (
     write_slurm_capture_plan,
     write_slurm_operator_toml,
 )
-from vs_slurm.api import SlurmConfig, slurm_transport_broker_policy
+from vs_slurm.api import (
+    SlurmConfig,
+    slurm_transport_broker_available,
+    slurm_transport_broker_policy,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -250,8 +254,7 @@ def _mode(settings: SlurmOperatorSettings) -> _Mode:
     shell_command = settings.agent_gpu_shell_command
     if settings.agent_gpu is not None and shell_command is not None:
         return _AgentGpuMode(settings.agent_gpu, shell_command)
-    policy = slurm_transport_broker_policy(settings.config)
-    return _ClusterOnly(remote_capture=policy.available)
+    return _ClusterOnly(remote_capture=slurm_transport_broker_available(settings.config))
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,9 +276,9 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
     The agent never runs on the host. Trusted accuracy and benchmark work is not
     brokered to the container: the framework runs it through the cluster executor, and
-    the agent requests it through the evaluation tool. For an SSH cluster the host owns
-    one broker whose socket the container reaches, which carries the profiler server's
-    transport.
+    the agent requests it through the evaluation tool. For an SSH or connector cluster
+    the host owns one broker whose socket the container reaches, which carries the
+    profiler server's transport.
 
     The operator may also let the agent run its own GPU commands as Slurm jobs
     (``[vibesys.agent_gpu]`` in the operator file, local transport only). A second
@@ -602,9 +605,6 @@ def _start_transport_broker(
         *plans.support_paths.values(),
     )
     policy = slurm_transport_broker_policy(config, local_roots=roots)
-    if not policy.available:
-        message = policy.unavailable_reason or "Slurm transport cannot serve remote capture"
-        raise ValueError(message)
     broker = SlurmProcessBroker(
         policy,
         new_broker_socket_path(),

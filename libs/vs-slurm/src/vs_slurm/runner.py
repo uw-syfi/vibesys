@@ -12,7 +12,7 @@ import tempfile
 import uuid
 from collections.abc import Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -28,6 +28,7 @@ from vs_sim.api import (
     ProcessTimeoutError,
 )
 
+from . import connector_protocol
 from .config import (
     PORT_PLACEHOLDER,
     SlurmConfig,
@@ -37,15 +38,6 @@ from .config import (
     SlurmService,
     SlurmSshTransport,
     shell_join_with_port,
-)
-from .connector_protocol import (
-    MAX_CONNECTOR_RESPONSE_BYTES,
-    SlurmConnectorExecRequest,
-    SlurmConnectorGetRequest,
-    SlurmConnectorPutRequest,
-    SlurmConnectorRequest,
-    SlurmConnectorResponse,
-    SlurmConnectorSyncToRequest,
 )
 from .remote_operations import (
     RemoteOperationClaim,
@@ -1391,12 +1383,19 @@ class _ProcessTransport:
         return argv
 
     def _run(
-        self, argv: Sequence[str], *, operation: str, stdin: str | None = None
+        self,
+        argv: Sequence[str],
+        *,
+        operation: str,
+        stdin: str | None = None,
+        max_output_bytes: int | None = None,
     ) -> _TransportResponse:
         """Run one transport program; its output is UTF-8 (``UnicodeDecodeError`` otherwise)."""
         spec = ProcessSpec(
             tuple(self._launch(argv)), input=b"" if stdin is None else stdin.encode()
         )
+        if max_output_bytes is not None:
+            spec = replace(spec, max_output_bytes=max_output_bytes)
         try:
             run = self._processes.run(spec, timeout=self._timeout)
         except FileNotFoundError as exc:
@@ -1567,9 +1566,10 @@ class _ConnectorTransport(_ProcessTransport):
         self._config = config
 
     def exec(self, command: str) -> _TransportResponse:
-        return self._request(
-            SlurmConnectorExecRequest(version=1, operation="exec", command=command), "exec"
+        request = connector_protocol.SlurmConnectorExecRequest(
+            version=1, operation="exec", command=command
         )
+        return self._request(request, "exec")
 
     def sync_to(
         self,
@@ -1579,53 +1579,49 @@ class _ConnectorTransport(_ProcessTransport):
         delete: bool,
         excludes: Sequence[str],
     ) -> None:
-        self._request(
-            SlurmConnectorSyncToRequest(
-                version=1,
-                operation="sync_to",
-                local_dir=str(local.resolve()),
-                remote_dir=remote.as_posix(),
-                delete=delete,
-                excludes=tuple(excludes),
-            ),
-            "sync_to",
+        request = connector_protocol.SlurmConnectorSyncToRequest(
+            version=1,
+            operation="sync_to",
+            local_dir=str(local.resolve()),
+            remote_dir=remote.as_posix(),
+            delete=delete,
+            excludes=tuple(excludes),
         )
+        self._request(request, "sync_to")
 
     def put(self, local: Path, remote: PurePosixPath) -> None:
-        self._request(
-            SlurmConnectorPutRequest(
-                version=1,
-                operation="put",
-                local_path=str(local.resolve()),
-                remote_path=remote.as_posix(),
-            ),
-            "put",
+        request = connector_protocol.SlurmConnectorPutRequest(
+            version=1,
+            operation="put",
+            local_path=str(local.resolve()),
+            remote_path=remote.as_posix(),
         )
+        self._request(request, "put")
 
     def get(self, remote: PurePosixPath, local: Path, *, kind: Literal["file", "tree"]) -> None:
-        self._request(
-            SlurmConnectorGetRequest(
-                version=1,
-                operation="get",
-                remote_path=remote.as_posix(),
-                local_path=str(local.resolve()),
-                kind=kind,
-            ),
-            "get",
+        request = connector_protocol.SlurmConnectorGetRequest(
+            version=1,
+            operation="get",
+            remote_path=remote.as_posix(),
+            local_path=str(local.resolve()),
+            kind=kind,
         )
+        self._request(request, "get")
 
-    def _request(self, request: SlurmConnectorRequest, operation: str) -> _TransportResponse:
+    def _request(
+        self, request: connector_protocol.SlurmConnectorRequest, operation: str
+    ) -> _TransportResponse:
         result = self._run(
             self._config.command,
             operation=operation,
             stdin=request.model_dump_json(),
+            max_output_bytes=connector_protocol.MAX_CONNECTOR_RESPONSE_BYTES,
         )
-        source = f"connector {operation} response"
         response = decode_json(
             result.stdout,
-            SlurmConnectorResponse,
-            source=source,
-            max_bytes=MAX_CONNECTOR_RESPONSE_BYTES,
+            connector_protocol.SlurmConnectorResponse,
+            source=f"connector {operation} response",
+            max_bytes=connector_protocol.MAX_CONNECTOR_RESPONSE_BYTES,
         )
         if isinstance(response, Unreadable):
             raise SlurmError.invalid_connector_response(operation)

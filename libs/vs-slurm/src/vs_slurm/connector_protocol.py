@@ -10,13 +10,20 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 MAX_CONNECTOR_REQUEST_BYTES = 1024 * 1024
 """Maximum UTF-8 size of one connector request document."""
 
-MAX_CONNECTOR_RESPONSE_BYTES = 256 * 1024 * 1024
-"""Maximum UTF-8 size of one connector response document."""
+MAX_TRANSPORT_STREAM_BYTES = 1024 * 1024
+"""Maximum bytes retained from either stream of one brokered transport process.
+
+The broker wraps both streams in a 16 MiB JSON frame. One MiB per stream leaves room even
+when every byte needs JSON's six-byte ``\\u00xx`` spelling, as well as the reply envelope.
+"""
+
+MAX_CONNECTOR_RESPONSE_BYTES = MAX_TRANSPORT_STREAM_BYTES
+"""Maximum UTF-8 size of one connector response document, including its envelope."""
 
 
 def _canonical_local_path(value: str) -> str:
     path = Path(value)
-    if "\x00" in value or not path.is_absolute() or str(path) != value:
+    if "\x00" in value or not path.is_absolute() or str(path) != value or ".." in path.parts:
         message = "must be an absolute normalized local path"
         raise ValueError(message)
     return value
@@ -123,6 +130,7 @@ class SlurmConnectorResponse(BaseModel):
 __all__ = [
     "MAX_CONNECTOR_REQUEST_BYTES",
     "MAX_CONNECTOR_RESPONSE_BYTES",
+    "MAX_TRANSPORT_STREAM_BYTES",
     "SLURM_CONNECTOR_REQUEST",
     "SlurmConnectorExecRequest",
     "SlurmConnectorGetRequest",

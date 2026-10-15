@@ -3,25 +3,33 @@
 from __future__ import annotations
 
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, assert_never
 
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 
 from .config import SlurmConfig, SlurmConnectorTransport, SlurmLocalTransport, SlurmSshTransport
 from .connector_protocol import (
     MAX_CONNECTOR_REQUEST_BYTES,
+    MAX_TRANSPORT_STREAM_BYTES,
     SLURM_CONNECTOR_REQUEST,
     SlurmConnectorGetRequest,
     SlurmConnectorPutRequest,
+    SlurmConnectorRequest,
     SlurmConnectorSyncToRequest,
+)
+from .staging import (
+    _authorize_local_path,
+    _LocalTransfer,
+    _LocalTransferError,
+    _run_staged_transfer,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_sim.api import ProcessSpec
+    from vs_sim.api import Processes, ProcessRun, ProcessSpec
 
 _SSH_SUFFIX_LENGTH = 3
 _RSYNC_OPERAND_COUNT = 2
@@ -78,27 +86,25 @@ class SlurmTransportRequestError(PermissionError):
         suffix = f": invalid fields {', '.join(locations)}" if locations else ""
         return cls(f"Slurm connector request is malformed{suffix}")
 
+    @classmethod
+    def unavailable_local_transport(cls) -> SlurmTransportRequestError:
+        """Reject exposing the local operator shell through a host broker."""
+        return cls(
+            "the local Slurm transport executes an operator shell on the host and cannot be "
+            "safely exposed to the editor container"
+        )
+
 
 class SlurmTransportBrokerPolicy(Protocol):
-    """Authorize the one host process a confined Slurm client asks to start."""
-
-    @property
-    def available(self) -> bool:
-        """Whether this transport can safely be exposed through the broker."""
-        ...
-
-    @property
-    def unavailable_reason(self) -> str | None:
-        """Why the transport cannot be exposed, or ``None`` when it can."""
-        ...
+    """Atomically authorize and run one confined client's host transport request."""
 
     @property
     def timeout_seconds(self) -> float:
         """The operator's maximum duration for one transport call."""
         ...
 
-    def authorize(self, spec: ProcessSpec) -> None:
-        """Return for an allowed process request; raise without running otherwise."""
+    def run(self, spec: ProcessSpec, *, processes: Processes, timeout: float) -> ProcessRun:
+        """Run the exact authorized request; raise before side effects when it is refused."""
         ...
 
 
@@ -108,10 +114,8 @@ class _SshBrokerPolicy:
     remote_root: PurePosixPath
     local_roots: tuple[Path, ...]
     timeout_seconds: float
-    available: bool = True
-    unavailable_reason: str | None = None
 
-    def authorize(self, spec: ProcessSpec) -> None:
+    def run(self, spec: ProcessSpec, *, processes: Processes, timeout: float) -> ProcessRun:
         ssh = self.transport.ssh_command
         rsync = self.transport.rsync_command
         if spec.argv[: len(ssh)] == ssh:
@@ -121,12 +125,28 @@ class _SshBrokerPolicy:
                 self.transport.host,
             ):
                 raise SlurmTransportRequestError.unauthorized_destination()
-            return
+            return _run_bounded(spec, processes=processes, timeout=timeout)
         if spec.argv[: len(rsync)] != rsync:
             raise SlurmTransportRequestError.unauthorized_executable()
-        self._authorize_rsync(spec.argv[len(rsync) :])
+        try:
+            transfer = self._authorize_rsync(spec.argv[len(rsync) :])
+            return _run_staged_transfer(
+                transfer=transfer,
+                processes=processes,
+                timeout=timeout,
+                rewrite=lambda local: replace(
+                    spec,
+                    argv=(
+                        *spec.argv[: transfer.operand_index],
+                        local,
+                        *spec.argv[transfer.operand_index + 1 :],
+                    ),
+                ),
+            )
+        except _LocalTransferError as error:
+            raise SlurmTransportRequestError.local_path_denied() from error
 
-    def _authorize_rsync(self, argv: tuple[str, ...]) -> None:
+    def _authorize_rsync(self, argv: tuple[str, ...]) -> _LocalTransfer:
         try:
             separator = argv.index("--")
         except ValueError as error:
@@ -152,8 +172,18 @@ class _SshBrokerPolicy:
             raise SlurmTransportRequestError.unauthorized_destination()
         remote_index = remote_indexes[0]
         remote = operands[remote_index].split(":", 1)[1].rstrip("/")
-        _authorize_remote_path(PurePosixPath(remote), self.remote_root)
-        _authorize_local_path(Path(operands[1 - remote_index].rstrip("/")), self.local_roots)
+        _authorize_remote_path(remote, self.remote_root)
+        local_index = 1 - remote_index
+        local_operand = operands[local_index]
+        tree = local_operand.endswith("/") or operands[remote_index].endswith("/")
+        target = _authorize_local_path(local_operand.rstrip("/"), self.local_roots)
+        return _LocalTransfer(
+            target=target,
+            direction="upload" if remote_index == 1 else "download",
+            kind="tree" if tree else "file",
+            operand_index=len(self.transport.rsync_command) + separator + 1 + local_index,
+            trailing_slash=local_operand.endswith("/"),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,10 +192,8 @@ class _ConnectorBrokerPolicy:
     remote_root: PurePosixPath
     local_roots: tuple[Path, ...]
     timeout_seconds: float
-    available: bool = True
-    unavailable_reason: str | None = None
 
-    def authorize(self, spec: ProcessSpec) -> None:
+    def run(self, spec: ProcessSpec, *, processes: Processes, timeout: float) -> ProcessRun:
         if spec.argv != self.command:
             raise SlurmTransportRequestError.unauthorized_executable()
         request = decode_json(
@@ -177,46 +205,78 @@ class _ConnectorBrokerPolicy:
         )
         if isinstance(request, Unreadable):
             raise SlurmTransportRequestError.invalid_connector_request(request)
-        match request:
-            case SlurmConnectorSyncToRequest(local_dir=local, remote_dir=remote):
-                _authorize_local_path(Path(local), self.local_roots)
-                _authorize_remote_path(PurePosixPath(remote), self.remote_root)
-            case SlurmConnectorPutRequest(local_path=local, remote_path=remote):
-                _authorize_local_path(Path(local), self.local_roots)
-                _authorize_remote_path(PurePosixPath(remote), self.remote_root)
-            case SlurmConnectorGetRequest(remote_path=remote, local_path=local):
-                _authorize_remote_path(PurePosixPath(remote), self.remote_root)
-                _authorize_local_path(Path(local), self.local_roots)
-            case _:
-                return
+        try:
+            match request:
+                case SlurmConnectorSyncToRequest(local_dir=local, remote_dir=remote):
+                    _authorize_remote_path(remote, self.remote_root)
+                    transfer = _LocalTransfer(
+                        _authorize_local_path(local, self.local_roots), "upload", "tree"
+                    )
+                case SlurmConnectorPutRequest(local_path=local, remote_path=remote):
+                    _authorize_remote_path(remote, self.remote_root)
+                    transfer = _LocalTransfer(
+                        _authorize_local_path(local, self.local_roots), "upload", "file"
+                    )
+                case SlurmConnectorGetRequest(remote_path=remote, local_path=local):
+                    _authorize_remote_path(remote, self.remote_root)
+                    transfer = _LocalTransfer(
+                        _authorize_local_path(local, self.local_roots), "download", request.kind
+                    )
+                case _:
+                    return _run_bounded(spec, processes=processes, timeout=timeout)
+            return _run_staged_transfer(
+                transfer=transfer,
+                processes=processes,
+                timeout=timeout,
+                rewrite=lambda local: replace(
+                    spec,
+                    input=_connector_with_local_path(request, local).model_dump_json().encode(),
+                ),
+            )
+        except _LocalTransferError as error:
+            raise SlurmTransportRequestError.local_path_denied() from error
 
 
-@dataclass(frozen=True, slots=True)
-class _UnavailableBrokerPolicy:
-    timeout_seconds: float
-    available: bool = False
-    unavailable_reason: str | None = (
-        "the local Slurm transport executes an operator shell on the host and cannot be "
-        "safely exposed to the editor container"
+def _run_bounded(spec: ProcessSpec, *, processes: Processes, timeout: float) -> ProcessRun:
+    bounded = replace(
+        spec,
+        max_output_bytes=min(spec.max_output_bytes, MAX_TRANSPORT_STREAM_BYTES),
     )
-
-    def authorize(self, spec: ProcessSpec) -> None:
-        del spec
-        raise SlurmTransportRequestError(self.unavailable_reason)
+    return processes.run(bounded, timeout=timeout)
 
 
-def _authorize_remote_path(path: PurePosixPath, root: PurePosixPath) -> None:
-    if path != root and root not in path.parents:
+def _connector_with_local_path(request: SlurmConnectorRequest, local: str) -> SlurmConnectorRequest:
+    match request:
+        case SlurmConnectorSyncToRequest():
+            return request.model_copy(update={"local_dir": local})
+        case SlurmConnectorPutRequest():
+            return request.model_copy(update={"local_path": local})
+        case SlurmConnectorGetRequest():
+            return request.model_copy(update={"local_path": local})
+        case _:
+            raise AssertionError
+
+
+def _authorize_remote_path(value: str, root: PurePosixPath) -> None:
+    path = PurePosixPath(value)
+    if (
+        not path.is_absolute()
+        or path.as_posix() != value
+        or ".." in path.parts
+        or (path != root and root not in path.parents)
+    ):
         raise SlurmTransportRequestError.remote_path_denied()
 
 
-def _authorize_local_path(path: Path, roots: tuple[Path, ...]) -> None:
-    try:
-        resolved = path.resolve()
-    except (OSError, RuntimeError) as error:
-        raise SlurmTransportRequestError.local_path_denied() from error
-    if not any(resolved == root or root in resolved.parents for root in roots):
-        raise SlurmTransportRequestError.local_path_denied()
+def slurm_transport_broker_available(config: SlurmConfig) -> bool:
+    """Return whether *config* has a bounded transport capability safe to broker."""
+    match config.transport:
+        case SlurmSshTransport() | SlurmConnectorTransport():
+            return True
+        case SlurmLocalTransport():
+            return False
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 def slurm_transport_broker_policy(
@@ -237,11 +297,14 @@ def slurm_transport_broker_policy(
         case SlurmConnectorTransport(command=command):
             return _ConnectorBrokerPolicy(command, remote, roots, timeout)
         case SlurmLocalTransport():
-            return _UnavailableBrokerPolicy(timeout)
+            raise SlurmTransportRequestError.unavailable_local_transport()
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 __all__ = [
     "SlurmTransportBrokerPolicy",
     "SlurmTransportRequestError",
+    "slurm_transport_broker_available",
     "slurm_transport_broker_policy",
 ]

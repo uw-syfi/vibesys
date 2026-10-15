@@ -42,6 +42,7 @@ from .config import (
 from .connector_protocol import (
     MAX_CONNECTOR_REQUEST_BYTES,
     MAX_CONNECTOR_RESPONSE_BYTES,
+    MAX_TRANSPORT_STREAM_BYTES,
     SLURM_CONNECTOR_REQUEST,
     SlurmConnectorExecRequest,
     SlurmConnectorGetRequest,
@@ -118,6 +119,7 @@ from .trace_replay import (
 from .transport_broker import (
     SlurmTransportBrokerPolicy,
     SlurmTransportRequestError,
+    slurm_transport_broker_available,
     slurm_transport_broker_policy,
 )
 
@@ -128,6 +130,7 @@ __all__ = [
     "LIFETIMES",
     "MAX_CONNECTOR_REQUEST_BYTES",
     "MAX_CONNECTOR_RESPONSE_BYTES",
+    "MAX_TRANSPORT_STREAM_BYTES",
     "PORT_PLACEHOLDER",
     "REQUESTS_FILE",
     "SCHEDULER_READ_END",
@@ -218,6 +221,7 @@ __all__ = [
     "phase_of",
     "runtime_content_identity",
     "shell_join_with_port",
+    "slurm_transport_broker_available",
     "slurm_transport_broker_policy",
     "split_framed_scheduler_query",
     "status_of",
