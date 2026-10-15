@@ -16,6 +16,10 @@ implementation to:
   truncation marker (see :func:`~vs_sandbox.execution.bounded_execution_result`).
 * A normal exit reports the command's status. A signalled command reports
   ``128 + N`` (shell convention), never a negative number.
+* When the launched process is the client of a remote command (a
+  ``docker exec``) and a signal the runner did not send ends that client, the
+  command is stopped where it runs, a notice is appended to ``stderr``, and
+  the exit code is ``None``: the client's death is not the command's status.
 * A timeout stops the command's whole process tree, keeps the output written
   before the stop, appends the timeout notice to ``stderr``, and reports exit
   code 124 (GNU ``timeout``'s status, which the benchmark failure
@@ -24,6 +28,9 @@ implementation to:
   ``stderr``; the exit code is the status the stopped command ended with.
 * A command that cannot be launched reports exit code 1 and the error on
   ``stderr``; no execution error raises.
+* A stop whose remote processes (a container exec's) cannot be shown to have
+  ended raises :class:`~vs_sandbox.execution.CommandStopUnconfirmedError`, which
+  carries the result the stop would have returned.
 """
 
 from __future__ import annotations
@@ -31,7 +38,11 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
-from vs_sandbox.execution import CommandResult, bounded_execution_result
+from vs_sandbox.execution import (
+    CommandResult,
+    CommandStopUnconfirmedError,
+    bounded_execution_result,
+)
 from vs_sandbox.process_execution import (
     DEFAULT_TERMINATION_GRACE_SECONDS,
     CancelSignal,
@@ -84,8 +95,8 @@ def execute_command(  # noqa: PLR0913  # lint-waiver: LW-731010 [PLR0913]; the s
     """Run *command* through *launch* under the module's result contract.
 
     *launch* starts the command as a process group leader with piped output
-    (:func:`~vs_sandbox.process_execution.start_process_group`, wrapped in a
-    :class:`~vs_sandbox.process_execution.PopenProcess`), or is a test's Fake
+    (a ``vs_sim`` piped process wrapped in a
+    :class:`~vs_sandbox.process_execution.PipedStoppableProcess`), or is a test's Fake
     :class:`~vs_sandbox.process_execution.StoppableProcess`. *signal_remote* signals the command's processes where they actually
     live when that is outside the launched group. *threads* is the clock the
     timeout is measured on.
@@ -125,6 +136,12 @@ def result_of(outcome: ProcessOutcome, timeout: int, max_output_chars: int) -> C
         exit_code = TIMEOUT_EXIT_CODE
     elif outcome.stopped is ProcessStop.CANCELLED:
         stderr = _with_notice(stderr, "Error: Command was cancelled.")
+    elif outcome.stopped is ProcessStop.CLIENT_LOST:
+        stderr = _with_notice(
+            stderr,
+            "Error: the client relaying this command was killed by a signal;"
+            " the command was stopped and its own exit status is unknown.",
+        )
     result = bounded_execution_result(
         stdout=outcome.stdout,
         stderr=stderr,
@@ -132,6 +149,8 @@ def result_of(outcome: ProcessOutcome, timeout: int, max_output_chars: int) -> C
         max_output_chars=max_output_chars,
     )
     result.cancelled = outcome.stopped is ProcessStop.CANCELLED
+    if outcome.unconfirmed is not None:
+        raise CommandStopUnconfirmedError(result, outcome.unconfirmed.survivors)
     return result
 
 

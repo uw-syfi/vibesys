@@ -23,10 +23,10 @@ from pydantic import (
     field_validator,
 )
 
+from vs_project.api.workspace_tree import WorkspacePathError, relative_parts
 from vs_runtime._workspace_files import (
     WorkspaceFileProblem,
     WorkspaceFileProblemKind,
-    contained_path,
     hash_inputs,
     read_agent_model,
     write_for_agent,
@@ -367,11 +367,13 @@ class LocalValidator:
         read and is never read back.
         """
         recipes = _load_recipes(workspace.path, recipe_artifact)
-        if contained_path(workspace.path, report_location) is None:
+        try:
+            relative_parts(report_location)
+        except WorkspacePathError as error:
             raise LocalValidationRecipeError(
                 LocalValidationRecipeErrorKind.INVALID_ARTIFACT,
                 "local validation report location escapes the workspace",
-            )
+            ) from error
         sink = events or _NoLocalValidationEvents()
         results: list[FrameworkValidationResult] = []
         restore_required = False

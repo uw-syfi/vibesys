@@ -36,7 +36,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vs_sandbox.accelerator_discovery import AcceleratorDiscovery, SystemAcceleratorDiscovery
 from vs_sandbox.compute_backends import (
     ComputeBackend,
     ContentionMonitor,
@@ -47,11 +46,12 @@ from vs_sandbox.compute_backends import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from vs_sandbox.accelerator_discovery import AcceleratorDiscovery
     from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, PipedProcessLauncher, Threads
 
 # ROCm PyTorch image. Carries the ROCm runtime + a matching torch build.
 # Pinned rather than ``:latest`` for reproducibility and because the
@@ -93,9 +93,10 @@ class RocmBackend:
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
-        accelerator_discovery: AcceleratorDiscovery | None = None,
+        accelerator_discovery: AcceleratorDiscovery,
         docker: DockerCli,
         threads: Threads,
+        launcher: PipedProcessLauncher,
         clock: Clock,
         events: object | None = None,
     ) -> None:
@@ -107,10 +108,11 @@ class RocmBackend:
         self.image = image or _DEFAULT_IMAGE
         self._docker = docker
         self._threads = threads
+        self._launcher = launcher
         # No per-device auto-selection yet; pinning is via HIP_VISIBLE_DEVICES.
         # Kept for ComputeBackendImpl parity.
         self.selected_device = None
-        discovery = accelerator_discovery or SystemAcceleratorDiscovery()
+        discovery = accelerator_discovery
         inventory = discovery.discover_rocm()
         self._devices = inventory.device_nodes
 
@@ -165,6 +167,7 @@ class RocmBackend:
                 env=env,
                 lifecycle_hooks=lifecycle_hooks,
                 threads=self._threads,
+                launcher=self._launcher,
             )
 
         if kind is SandboxKind.DOCKER:

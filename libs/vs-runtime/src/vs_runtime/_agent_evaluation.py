@@ -120,6 +120,7 @@ from vs_evaluation.api.tools import (
     CORE_EVALUATION_TOOLS,
     core_evaluation_mcp_descriptor,
 )
+from vs_project.api import NestedRepositoryError
 from vs_runtime._agent_tool_errors import ToolRefusal, ToolRefusedError, render_tool_refusal
 from vs_runtime._core_loop import AdmissionBusyError
 from vs_runtime._evaluation_jobs import handle_for
@@ -755,11 +756,14 @@ class AgentEvaluationBridge:
         would give every call a fresh identity and its own budget.
         """
         last = scoped.last_revision
-        if last is not None and await workspace.matches_revision(last):
-            return last
-        revision = await workspace.snapshot_and_retain(
-            _SNAPSHOT_LABEL, retention_label=_SNAPSHOT_LABEL
-        )
+        try:
+            if last is not None and await workspace.matches_revision(last):
+                return last
+            revision = await workspace.snapshot_and_retain(
+                _SNAPSHOT_LABEL, retention_label=_SNAPSHOT_LABEL
+            )
+        except NestedRepositoryError as error:
+            raise ToolRefusedError(ToolRefusal.NESTED_REPOSITORY) from error
         scoped.last_revision = revision
         return revision
 

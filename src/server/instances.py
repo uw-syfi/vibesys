@@ -53,7 +53,8 @@ class ControlSocketStopRequester:
             return False
         try:
             connection.send(
-                StopCommand(timestamp=utc_datetime(self._clock)).model_dump_json().encode() + b"\n"
+                StopCommand(timestamp=utc_datetime(self._clock)).model_dump_json().encode() + b"\n",
+                self._timeout,
             )
             line = _read_line(connection, self._timeout)
         except OSError:

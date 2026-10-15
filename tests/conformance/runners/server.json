@@ -2,6 +2,9 @@
   "id": "server",
   "description": "Scenarios executed against the real Unix and WebSocket server transports.",
   "groups": {
+    "active-checkpoint": [
+      "active-execution-checkpoint-fragmentation"
+    ],
     "bootstrap": [
       "full-replay-bootstrap",
       "tail-bootstrap-spine-prepend"

@@ -6,8 +6,12 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vs_sim.processes import ProcessOutcome, ProcessSpec
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from vs_sim.processes import Processes
 
 
 @dataclass(frozen=True)
@@ -51,3 +55,29 @@ class SubprocessProbe:
         except (OSError, subprocess.SubprocessError):
             return None
         return ProbeResult(completed.returncode, completed.stdout, completed.stderr)
+
+
+class ProcessesProbe:
+    """Runs the command through a :class:`~vs_sim.processes.Processes`, so the run owns what starts.
+
+    A command that cannot start, outlives the timeout, or writes past the output cap is
+    unavailable, as for any probe.
+    """
+
+    def __init__(self, processes: Processes) -> None:
+        """Start commands with ``processes``."""
+        self._processes = processes
+
+    def run(self, argv: Sequence[str], *, timeout_seconds: float) -> ProbeResult | None:
+        """Run ``argv`` and decode its output; undecodable bytes are replaced."""
+        try:
+            run = self._processes.run(ProcessSpec(tuple(argv)), timeout=timeout_seconds)
+        except OSError:
+            return None
+        if not isinstance(run, ProcessOutcome):
+            return None
+        return ProbeResult(
+            run.returncode,
+            run.stdout.decode(errors="replace"),
+            run.stderr.decode(errors="replace"),
+        )

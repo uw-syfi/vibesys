@@ -60,7 +60,7 @@ from vs_core.api import (
 from vs_core.api.testing import sample_limits
 from vs_core.testing.drive import Answer, Harness, Running, Succeeded, new_run
 from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall, WaitCall
-from vs_project.api import FakeStateStore
+from vs_project.api import FakeStateStore, NestedRepositoryError
 from vs_runtime.api.core import (
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
@@ -183,19 +183,27 @@ class Workspace:
     retention commit carries its own metadata); the same content gives the same snapshot.
     """
 
-    def __init__(self, edits: list[str], slow: SlowSnapshot) -> None:
+    def __init__(self, edits: list[str], slow: SlowSnapshot, nested: tuple[str, ...]) -> None:
         self._edits = edits
         self._slow = slow
+        self._nested = nested
 
     async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
         """The current content as a snapshot revision, the same one until the next edit."""
         del label, retention_label
         await self._slow.pass_through()
+        self._refuse_nested()
         return _commit(f"snapshot:{self._edits[-1]}")
 
     async def matches_revision(self, revision: str) -> bool:
         """Whether nothing changed since the snapshot ``revision``."""
+        self._refuse_nested()
         return revision == _commit(f"snapshot:{self._edits[-1]}")
+
+    def _refuse_nested(self) -> None:
+        """Refuse as host Git does while the agent keeps a repository in its workspace."""
+        if self._nested:
+            raise NestedRepositoryError(self._nested)
 
 
 class Workspaces:
@@ -204,6 +212,8 @@ class Workspaces:
     def __init__(self) -> None:
         self.edits = [_commit("edit:0")]
         self.slow = SlowSnapshot()
+        self.nested: tuple[str, ...] = ()
+        """The ``.git`` paths the agent left below its workspace root."""
 
     def edit(self) -> None:
         """The agent changed its candidate."""
@@ -212,7 +222,7 @@ class Workspaces:
     async def workspace_of(self, scope: Scope) -> SnapshotWorkspace | None:
         """The one workspace."""
         del scope
-        return Workspace(self.edits, self.slow)
+        return Workspace(self.edits, self.slow, self.nested)
 
 
 class ShellView:
@@ -272,11 +282,13 @@ class Crash:
     the middle of an agent's call; the agent's later calls fail until a new host starts, and
     the dead host's loop is stopped at its next publication, so what it had admitted and not
     yet committed may or may not reach the record. ``publish_at`` is the n-th publication of
-    the process, where it dies between requests. Either, both or neither may be set.
+    the process, where it dies between requests, or (``mid_request``) at that publication
+    even while requests run. Either, both or neither may be set.
     """
 
     ledger_at: int | None = None
     publish_at: int | None = None
+    mid_request: bool = False
 
 
 @dataclass
@@ -289,11 +301,20 @@ class Mortality:
 
 
 class MortalDelivery:
-    """The publication ledger of a host that can die at a publication or once marked dead."""
+    """The publication ledger of a host that can die at a publication or once marked dead.
 
-    def __init__(self, inner: FakePublicationDelivery, mortality: Mortality) -> None:
+    The loop may deliver a publication while requests run, so the host dies at the first
+    publication from the ``publish_at``-th on that ``idle`` allows: one that finds none
+    running (a death between requests, which the scripted executors' answers can recover
+    from), or any, for a crash drawn ``mid_request``.
+    """
+
+    def __init__(
+        self, inner: FakePublicationDelivery, mortality: Mortality, idle: Callable[[], bool]
+    ) -> None:
         self._inner = inner
         self._mortality = mortality
+        self._idle = idle
 
     def read(self) -> tuple[Publication, ...]:
         """The acknowledged publication history."""
@@ -304,7 +325,10 @@ class MortalDelivery:
     ) -> PublicationAcknowledgement:
         """Publish, unless the process is dead or dies at this publication."""
         self._mortality.published += 1
-        if self._mortality.dead or self._mortality.published == self._mortality.publish_at:
+        due = self._mortality.publish_at
+        if self._mortality.dead or (
+            due is not None and self._mortality.published >= due and self._idle()
+        ):
             raise ProcessKilledError
         return await self._inner.publish(publication, context)
 
@@ -673,7 +697,11 @@ def _play(
         agent.view, agent.shell = views[-1], shell
         agent.bridge = make_bridge()
         mortality.dead, mortality.published, mortality.publish_at = False, 0, crash.publish_at
-        return CoreRunHost(shell, MortalDelivery(delivery, mortality), clock)
+        return CoreRunHost(
+            shell,
+            MortalDelivery(delivery, mortality, lambda: crash.mid_request or not shell.in_flight),
+            clock,
+        )
 
     config = RunLoopConfig(host_id="property", lease_duration=LEASE, max_dispatches=400)
     died = False
@@ -784,6 +812,22 @@ def test_an_admission_refused_for_a_busy_queue_is_busy_and_is_journaled() -> Non
     assert played.agent.diagnostics == [
         "agent evaluation call refused as busy: AdmissionBusyError: admission needs an idle input queue"
     ]
+
+
+async def _nest_a_repository_then_submit(agent: Agent) -> None:
+    """The agent clones a repository into its workspace and submits; then it removes it."""
+    agent.workspaces.nested = ("vendor/lib/.git",)
+    scope = Scope(owner=ATTEMPT.attempt_id, generation=0)
+    assert not await agent.call(agent.token(scope), ("submit",), count=False)
+    agent.workspaces.nested = ()
+
+
+def test_a_submit_from_a_workspace_holding_a_nested_repository_is_refused_not_halted() -> None:
+    """Host Git refuses the snapshot; the agent is told how to fix it and the run goes on."""
+    played = play((Turn(at_start=_nest_a_repository_then_submit),), 1)
+    check(played)
+    assert len(played.agent.errors) == 1
+    assert "nested Git repository" in played.agent.errors[0]
 
 
 def _failing_admission(error: Exception | None) -> Callable[[Agent], Awaitable[None]]:
@@ -958,6 +1002,8 @@ _CRASH = st.builds(
     Crash,
     ledger_at=st.none() | st.integers(0, 10),
     publish_at=st.none() | st.integers(1, 12),
+    # A death with a request running ends loudly (UnrecoverableRestartError) or recovers.
+    mid_request=st.booleans(),
 )
 
 

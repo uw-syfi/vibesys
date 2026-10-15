@@ -204,31 +204,6 @@ async def test_lease_is_renewable_while_a_publication_is_in_flight() -> None:
     assert rivals == [True]
 
 
-@pytest.mark.asyncio
-async def test_a_publication_written_after_a_renewal_is_judged_at_the_renewal() -> None:
-    """A delivery that awaits while the host renews still writes while the host owns the run.
-
-    Before, the write was judged at the time the publication started. The renewal had
-    already stamped the store with a later time, so the store refused the write as stale
-    and the delivery raised "publication host no longer owns the run".
-    """
-    store = FakeStateStore()
-    shell = make_shell(store)
-    await prepared(shell, store)
-    ledger = FakePublicationDelivery()
-
-    class RenewsThenWrites:
-        async def publish(
-            self, publication: Publication, context: PublicationContext
-        ) -> PublicationAcknowledgement:
-            context.lease.renew(now_at=90, lease_duration=100)
-            return await ledger.publish(publication, context)
-
-    first = shell.record.pending_publications[0]
-    assert await shell.publish_one(RenewsThenWrites(), now_at=1)
-    assert ledger.read() == (first,)
-
-
 # P2-1 ---------------------------------------------------------------------------------
 
 

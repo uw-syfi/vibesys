@@ -9,9 +9,15 @@ from typing import Any
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter, ValidationError
 
-from server.api.protocol import ProtocolRequest, Response, ServerMessage
+from server.api.protocol import (
+    MAX_ACTIVE_EXECUTIONS_CHUNKS,
+    ProtocolRequest,
+    Response,
+    ServerMessage,
+)
 from server.api.schema import (
     fully_populated_response,
     host_helper_json_schema,
@@ -355,8 +361,142 @@ def test_committed_schema_reuses_the_active_execution_list_definition() -> None:
         "$ref": "#/$defs/ActiveExecutions"
     }
     assert definitions["EventBatchMessage"]["properties"]["active_executions"] == {
-        "$ref": "#/$defs/ActiveExecutions"
+        "anyOf": [
+            {"$ref": "#/$defs/ActiveExecutions"},
+            {"type": "null"},
+        ]
     }
+    assert definitions["EventBatchMessage"]["properties"]["active_executions_checkpoint_id"] == {
+        "anyOf": [
+            {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            {"type": "null"},
+        ],
+        "default": None,
+        "title": "Active Executions Checkpoint Id",
+    }
+    ordinary, deferred = definitions["EventBatchMessage"]["oneOf"]
+    assert ordinary["properties"]["active_executions"] == {"$ref": "#/$defs/ActiveExecutions"}
+    assert ordinary["properties"]["active_executions_checkpoint_id"] == {
+        "default": None,
+        "title": "Active Executions Checkpoint Id",
+        "type": "null",
+    }
+    assert deferred["properties"]["active_executions"] == {"type": "null"}
+    assert deferred["properties"]["active_executions_checkpoint_id"] == {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string",
+    }
+    assert set(deferred["required"]) >= {
+        "type",
+        "events",
+        "active_executions",
+        "active_executions_checkpoint_id",
+    }
+
+    chunk = definitions["ActiveExecutionsChunkMessage"]
+    assert chunk["properties"]["payload"]["maxLength"] == 64 * 1024
+    assert chunk["properties"]["chunk_count"]["maximum"] == MAX_ACTIVE_EXECUTIONS_CHUNKS
+    assert set(chunk["required"]) >= {
+        "checkpoint_id",
+        "chunk_index",
+        "chunk_count",
+        "payload",
+        "through_sequence",
+        "store_id",
+        "history_after_sequence",
+    }
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_fields", "outcome"),
+    [
+        ({}, "accepted"),
+        ({"active_executions": []}, "accepted"),
+        ({"active_executions_checkpoint_id": None}, "accepted"),
+        (
+            {
+                "active_executions": None,
+                "active_executions_checkpoint_id": "a" * 64,
+            },
+            "accepted",
+        ),
+        ({"active_executions": None}, "rejected"),
+        (
+            {
+                "active_executions": None,
+                "active_executions_checkpoint_id": None,
+            },
+            "rejected",
+        ),
+        (
+            {
+                "active_executions": [],
+                "active_executions_checkpoint_id": "a" * 64,
+            },
+            "rejected",
+        ),
+        ({"active_executions_checkpoint_id": "a" * 64}, "rejected"),
+    ],
+)
+def test_draft_2020_schema_enforces_deferred_checkpoint_relationship(
+    checkpoint_fields: dict[str, object], outcome: str
+) -> None:
+    document = _committed_schema()
+    Draft202012Validator.check_schema(document)
+    validator = Draft202012Validator(
+        {"$ref": "#/$defs/EventBatchMessage", "$defs": document["$defs"]}
+    )
+    errors = list(validator.iter_errors({"type": "event_batch", "events": [], **checkpoint_fields}))
+    assert ("accepted" if errors == [] else "rejected") == outcome
+
+
+@pytest.mark.parametrize(
+    "checkpoint_fields",
+    [
+        {"active_executions": None},
+        {
+            "active_executions": None,
+            "active_executions_checkpoint_id": None,
+        },
+        {
+            "active_executions": [],
+            "active_executions_checkpoint_id": "a" * 64,
+        },
+        {"active_executions_checkpoint_id": "a" * 64},
+    ],
+)
+def test_server_message_rejects_inconsistent_deferred_checkpoint_fields(
+    checkpoint_fields: dict[str, object],
+) -> None:
+    """The Python source contract owns the relation enforced by every client."""
+    with pytest.raises(
+        ValidationError,
+        match=("active_executions_checkpoint_id is present exactly when active_executions is null"),
+    ):
+        TypeAdapter(ServerMessage).validate_python(
+            {"type": "event_batch", "events": [], **checkpoint_fields}
+        )
+
+
+@pytest.mark.parametrize(
+    "checkpoint_fields",
+    [
+        {},
+        {"active_executions": []},
+        {"active_executions_checkpoint_id": None},
+        {
+            "active_executions": None,
+            "active_executions_checkpoint_id": "a" * 64,
+        },
+    ],
+)
+def test_server_message_accepts_consistent_deferred_checkpoint_fields(
+    checkpoint_fields: dict[str, object],
+) -> None:
+    message = TypeAdapter(ServerMessage).validate_python(
+        {"type": "event_batch", "events": [], **checkpoint_fields}
+    )
+    assert message.type == "event_batch"
 
 
 @pytest.mark.parametrize("alias", TAGGED_UNION_ALIASES)

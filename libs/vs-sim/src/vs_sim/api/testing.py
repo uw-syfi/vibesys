@@ -16,6 +16,8 @@ from vs_sim.contracts import (
     ForegroundUnderTest,
     LoopbackHttpContract,
     LoopbackHttpUnderTest,
+    PipedProcessContract,
+    PipedUnderTest,
     ProbeUnderTest,
     ProcessesContract,
     ProcessesUnderTest,
@@ -41,12 +43,13 @@ from vs_sim.crash import (
     swept,
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
+from vs_sim.fake_piped_process import ScriptedPipedProcess
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
+    NO_PROCESSES,
     FakeForegroundChild,
     FakeForegroundLauncher,
     FakeLoopbackHttp,
-    FakeMergedOutputProcessLauncher,
     FakePipedProcessLauncher,
     FakeProcesses,
     FakeProcessLauncher,
@@ -55,10 +58,14 @@ from vs_sim.fakes import (
     ForegroundScript,
     GatedBlockingRunner,
     InlineBlockingRunner,
+    PipedStart,
     ProcessScript,
+    ProcessStartRefusedError,
+    RefusingProcesses,
     ScriptedProbe,
     ScriptedStreamingCommand,
     StreamedRun,
+    refused_starts,
 )
 from vs_sim.faults import CallCounter, ScheduledRule, fault_stream, match_rule
 from vs_sim.file_effects import file_size_limit
@@ -82,8 +89,22 @@ from vs_sim.signal_relay_contracts import (
     SignalRelayContract,
 )
 from vs_sim.sim import WORLDS, Sim, UnknownWorldError, WorldFactory, WorldRegistry
-from vs_sim.sim_network import SimNetwork
-from vs_sim.sim_threads import SimBlockingRunner, SimDeadlockError, SimThreads
+from vs_sim.sim_network import (
+    DEFAULT_BUFFER_BYTES,
+    End,
+    FiredFault,
+    LinkFault,
+    LinkFaultKind,
+    SimNetwork,
+)
+from vs_sim.sim_threads import (
+    SimBlockingRunner,
+    SimDeadlockError,
+    SimMisuseError,
+    SimThreads,
+    loop_threads,
+    undriven_threads,
+)
 from vs_sim.states import Changes, wait_for_async_state, wait_for_state, yield_until
 from vs_sim.threads import TGKILL_SUPPORTED, non_main_thread_ids, send_to_thread
 from vs_sim.trace import EventTrace, TraceEvent
@@ -110,7 +131,9 @@ from vs_sim.waits import (
 
 __all__ = [
     "DEEP_NESTING",
+    "DEFAULT_BUFFER_BYTES",
     "HANG_GUARD_S",
+    "NO_PROCESSES",
     "OVERSIZED_BYTES",
     "SCHEDULE_SEED_OPTION",
     "SEED_OPTION",
@@ -128,18 +151,19 @@ __all__ = [
     "CommandProbeContract",
     "CrashableClock",
     "Depth",
+    "End",
     "EventTrace",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
     "FakeLoopbackHttp",
     "FakeMainThreadWake",
-    "FakeMergedOutputProcessLauncher",
     "FakePipedProcessLauncher",
     "FakeProcessLauncher",
     "FakeProcessSignaller",
     "FakeProcesses",
     "FakeSignalRelay",
     "FakeSignalSource",
+    "FiredFault",
     "ForegroundLauncherContract",
     "ForegroundScript",
     "ForegroundUnderTest",
@@ -148,6 +172,8 @@ __all__ = [
     "HostCrashedError",
     "IdleDriver",
     "InlineBlockingRunner",
+    "LinkFault",
+    "LinkFaultKind",
     "LoopbackHttpContract",
     "LoopbackHttpUnderTest",
     "MainThreadWakeContract",
@@ -155,20 +181,26 @@ __all__ = [
     "ManualClock",
     "NetworkContract",
     "NetworkUnderTest",
+    "PipedProcessContract",
+    "PipedStart",
+    "PipedUnderTest",
     "ProbeUnderTest",
     "ProbedClock",
     "ProcessLauncherContract",
     "ProcessScript",
     "ProcessSignallerContract",
     "ProcessSignallerUnderTest",
+    "ProcessStartRefusedError",
     "ProcessUnderTest",
     "ProcessesContract",
     "ProcessesUnderTest",
+    "RefusingProcesses",
     "RelayUnderTest",
     "RestartLimitError",
     "Restarted",
     "RunnerUnderTest",
     "ScheduledRule",
+    "ScriptedPipedProcess",
     "ScriptedProbe",
     "ScriptedStreamingCommand",
     "SignalRelayContract",
@@ -177,6 +209,7 @@ __all__ = [
     "Sim",
     "SimBlockingRunner",
     "SimDeadlockError",
+    "SimMisuseError",
     "SimNetwork",
     "SimThreads",
     "SleeperContract",
@@ -209,10 +242,12 @@ __all__ = [
     "get_or_fail",
     "hostile_json_frames",
     "join_or_fail",
+    "loop_threads",
     "match_rule",
     "non_main_thread_ids",
     "pairwise_rows",
     "random_for",
+    "refused_starts",
     "replay_hint",
     "restart_until_done",
     "run_in_child",
@@ -223,6 +258,7 @@ __all__ = [
     "start_thread",
     "stop_process",
     "swept",
+    "undriven_threads",
     "using_depth",
     "wait_for_async_state",
     "wait_for_state",

@@ -28,15 +28,23 @@ simulated thread.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import heapq
 import itertools
 import threading
+import weakref
 from collections import deque
 from typing import TYPE_CHECKING, Self, cast
 
 from vs_sim.concurrency import OsThreadLocal
 from vs_sim.randomness import SeededRandom
-from vs_sim.virtual import SIM_MONOTONIC_ORIGIN, VirtualClock, VirtualTimeLimitError, run_hosted
+from vs_sim.virtual import (
+    SIM_MONOTONIC_ORIGIN,
+    VirtualClock,
+    VirtualTimeLimitError,
+    current_virtual_loop,
+    run_hosted,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -50,6 +58,10 @@ class SimDeadlockError(RuntimeError):
     """No thread can run and no timer is pending, yet some thread still waits."""
 
 
+class SimMisuseError(RuntimeError):
+    """A simulator was used in a way whose outcome would depend on the real scheduler."""
+
+
 class _Killed(BaseException):
     """Raised inside a parked thread to unwind it when the run ends."""
 
@@ -61,6 +73,48 @@ class _OutsideThread:
 
 
 _OUTSIDE = _OutsideThread()
+
+_CREATED: list[weakref.ref[SimThreads]] = []
+"""Every simulator built since the last :func:`undriven_threads` call."""
+
+
+def undriven_threads() -> tuple[str, ...]:
+    """Names of threads spawned on simulators that nothing drove, since the last call.
+
+    A thread spawned on a simulator that no :meth:`SimThreads.run` or virtual loop drives
+    never runs, so a test that relies on it passes whatever the thread would have done.
+    The test harness calls this after each test; each such simulator is closed here.
+    """
+    made = [ref() for ref in _CREATED]
+    _CREATED.clear()
+    names: list[str] = []
+    for threads in made:
+        if threads is None:
+            continue
+        names.extend(threads.never_ran())
+        threads.close()
+    return tuple(names)
+
+
+def loop_threads() -> SimThreads:
+    """The simulated threads of the virtual loop the caller runs on, created on first use.
+
+    Code that runs on a loop started by :func:`~vs_sim.virtual.run_virtual` without a
+    ``driver`` can still hand blocking work to simulated threads: the loop adopts the
+    returned simulator as its driver, on the loop's clock, schedule seed and trace, and
+    closes it when the run ends. Every call on one loop returns the same object.
+
+    Raises:
+        RuntimeError: the caller is not on a virtual loop, or the loop's driver is not a
+            :class:`SimThreads`.
+    """
+    loop = current_virtual_loop()
+    if loop.driver is None:
+        loop.adopt(SimThreads(loop.clock, schedule_seed=loop.schedule_seed, trace=loop.trace))
+    if not isinstance(loop.driver, SimThreads):
+        message = f"the virtual loop is driven by {type(loop.driver).__name__}, not SimThreads"
+        raise RuntimeError(message)  # noqa: TRY004  # LW-163851 [TRY004]; a missing precondition of the call, not a bad argument type.
+    return loop.driver
 
 
 class _SimThread:
@@ -324,15 +378,20 @@ class SimThreads:
         self._by_ident: dict[int, _SimThread] = {}
         self._yield_to_driver = threading.Semaphore(0)
         self._closed = False
+        self._driven = False
+        self._outside_ident = threading.get_ident()
+        self._executor = _SimExecutor(self)
         self.errors: list[BaseException] = []
         """Exceptions that ended threads, in the order they happened."""
+        _CREATED.append(weakref.ref(self))
 
     # ----- the Threads interface -----
 
     def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> SimWorker:
         """Start ``target`` as a simulated thread; it first runs when the baton reaches it."""
+        me = self.caller()
         thread = self._spawn(target, name, daemon=daemon)
-        self.switch_point(self.caller())
+        self.switch_point(me)
         return SimWorker(self, thread)
 
     def _spawn(self, target: Callable[[], object], name: str, *, daemon: bool) -> _SimThread:
@@ -415,6 +474,7 @@ class SimThreads:
             VirtualTimeLimitError: the next timer is past the clock's ``limit``, so the run is
                 stuck rather than slow.
         """
+        self._driven = True
         outcome: list[T] = []
         first = self._start_main(main, outcome)
         try:
@@ -507,8 +567,44 @@ class SimThreads:
     # ----- inside the scheduler -----
 
     def caller(self) -> _SimThread | _OutsideThread:
-        """The simulated thread running this code, or a stand-in for any other caller."""
-        return self._by_ident.get(threading.get_ident(), _OUTSIDE)
+        """The simulated thread running this code, or the one real thread that drives them.
+
+        Every caller that is not a simulated thread is the same stand-in, so only one real
+        thread may use a simulator: the one that built it (the test's, or the event loop's
+        that drives it). Two would share lock ownership and race on its state. The thread
+        is fixed at construction, so a worker that uses the simulator fails on every run,
+        not only on the runs where a pool happens to hand the work to a second worker.
+
+        Raises:
+            SimMisuseError: a real thread other than the one that built this simulator used it.
+        """
+        ident = threading.get_ident()
+        thread = self._by_ident.get(ident)
+        if thread is not None:
+            return thread
+        if ident != self._outside_ident:
+            message = (
+                f"real thread {threading.current_thread().name!r} used a SimThreads built on "
+                "another real thread; run the work as a simulated thread (spawn it from "
+                "SimThreads.run or Sim.run) instead of on a real one"
+            )
+            raise SimMisuseError(message)
+        return _OUTSIDE
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        """Runs each submitted call as a new simulated thread, in place of a real thread pool."""
+        return self._executor
+
+    def attach(self) -> None:
+        """Mark this simulator as driven by a virtual loop from now on."""
+        self._driven = True
+
+    def never_ran(self) -> tuple[str, ...]:
+        """Names of threads spawned on a simulator that nothing ever drove."""
+        if self._driven:
+            return ()
+        return tuple(thread.name for thread in self._threads)
 
     def _entry(self, thread: _SimThread) -> None:
         thread.go.acquire()
@@ -604,10 +700,48 @@ class _LoopWake:
         self._woken.clear()
 
     def wake(self) -> None:
-        # Only a simulated thread can hand over the baton; a real worker thread's callback
-        # reaches the loop through its wakeup pipe, which the loop reads in a real select.
-        if not isinstance(self._sim.caller(), _OutsideThread):
-            self._woken.set()
+        # Only a simulated thread can hand over the baton. A thread outside the simulation
+        # that schedules a callback would otherwise leave the loop asleep until its next
+        # timer, so it is refused loudly.
+        if isinstance(self._sim.caller(), _OutsideThread):
+            message = "a thread outside the simulation cannot wake a loop started by run_async"
+            raise RuntimeError(message)  # noqa: TRY004  # LW-988825 [TRY004]; the caller is outside the simulation, not an argument of the wrong type.
+            # > TypeError would say an argument has the wrong type; no argument is wrong here.
+        self._woken.set()
+
+    def now(self) -> float:
+        return self._sim.now()
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        return self._sim.executor
+
+
+class _SimExecutor(concurrent.futures.Executor):
+    """Runs each submitted call as a new simulated thread."""
+
+    def __init__(self, sim: SimThreads) -> None:
+        self._sim = sim
+        self._count = itertools.count()
+
+    def submit[T](
+        self, fn: Callable[..., T], /, *args: object, **kwargs: object
+    ) -> concurrent.futures.Future[T]:
+        future: concurrent.futures.Future[T] = concurrent.futures.Future()
+
+        def call() -> None:
+            if not future.set_running_or_notify_cancel():
+                return
+            try:
+                result = fn(*args, **kwargs)
+            except BaseException as error:  # noqa: BLE001  # LW-096717 [BLE001]; the future carries any failure back to its awaiter, as a thread pool's does.
+                # > Catching less would kill the simulated thread and leave the awaiter hanging.
+                future.set_exception(error)
+            else:
+                future.set_result(result)
+
+        self._sim.spawn(call, name=f"executor-{next(self._count)}")
+        return future
 
 
 class SimBlockingRunner:

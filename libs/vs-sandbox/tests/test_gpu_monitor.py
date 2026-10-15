@@ -29,7 +29,13 @@ from vs_sandbox.api.testing import (
     TelemetryHarness,
     docker_result,
 )
-from vs_sim.api.testing import ManualClock, SimThreads, examples
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ManualClock,
+    ScriptedProbe,
+    SimThreads,
+    examples,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -359,7 +365,11 @@ class TestMonitorLifecycle:
 
     def test_stop_without_start(self, tmp_path: Path) -> None:
         mon = GpuContentionMonitor(
-            log_dir=tmp_path, gpu_uuid=GPU_A, threads=SimThreads(), clock=ManualClock()
+            log_dir=tmp_path,
+            gpu_uuid=GPU_A,
+            telemetry=FakeGpuTelemetry(),
+            threads=SimThreads(),
+            clock=ManualClock(),
         )
         mon.stop()  # should not raise
 
@@ -429,6 +439,8 @@ class TestReselectGpu:
             threads=ctx.threads,
             docker=docker,
             clock=ManualClock(),
+            launcher=FakePipedProcessLauncher(),
+            probe=ScriptedProbe(lambda _argv: None),
         )
         backend_impl.selected_device = selected_gpu
         ctx.backend_impl = backend_impl

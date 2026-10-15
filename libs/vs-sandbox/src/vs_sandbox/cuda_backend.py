@@ -21,7 +21,7 @@ from vs_sandbox.gpu_monitor import (
     NvidiaSmiTelemetry,
     pick_gpu,
 )
-from vs_sim.api import SubprocessProbe, Threads, utc_datetime
+from vs_sim.api import Threads, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sandbox.local_shell import LocalShellRunner
-    from vs_sim.api import Clock, CommandProbe
+    from vs_sim.api import Clock, CommandProbe, PipedProcessLauncher
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
@@ -67,7 +67,7 @@ class CudaBackend:
 
     name = ComputeBackend.CUDA
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's five collaborators (GPU telemetry, threads, Docker CLI, command probe, contention events) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's six collaborators (GPU telemetry, threads, process launcher, Docker CLI, command probe, contention events) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
         self,
         log_dir: Path,
         *,
@@ -75,8 +75,9 @@ class CudaBackend:
         image: str | None = None,
         gpu_telemetry: GpuTelemetry | None = None,
         threads: Threads,
+        launcher: PipedProcessLauncher,
         docker: DockerCli,
-        probe: CommandProbe | None = None,
+        probe: CommandProbe,
         clock: Clock,
         events: GpuContentionEvents | None = None,
     ) -> None:
@@ -85,9 +86,10 @@ class CudaBackend:
         ``clock`` counts seconds since the epoch; it stamps each GPU selection in ``gpu.json``.
         """
         self._clock = clock
-        self._probe: CommandProbe = probe or SubprocessProbe()
+        self._probe = probe
         self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry(probe=self._probe)
         self._threads = threads
+        self._launcher = launcher
         self._docker = docker
         self._events = events
         self.log_dir = Path(log_dir)
@@ -146,6 +148,7 @@ class CudaBackend:
                 env=env,
                 lifecycle_hooks=lifecycle_hooks,
                 threads=self._threads,
+                launcher=self._launcher,
             )
         elif kind is SandboxKind.DOCKER:
             sandbox = docker_sandbox_class(

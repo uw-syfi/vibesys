@@ -12,7 +12,7 @@ from tests.support.docker_environment import (
     fake_docker_environment,
     host_container_backend,
 )
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 
 from vibesys.config import Config
@@ -40,11 +40,16 @@ from vs_runtime.api import (
     RuntimeContractError,
     Workspace,
 )
-from vs_runtime.api.testing import FakeWorkspace
+from vs_runtime.api.testing import FakeWorkspace, idle_environment_system
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock, wait_or_fail, wait_until_started
+from vs_sim.api.testing import (
+    ManualClock,
+    SimThreads,
+    wait_or_fail,
+    wait_until_started,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -184,7 +189,7 @@ def _run_project(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> _Result:
@@ -415,7 +420,7 @@ def test_the_adapter_evaluates_a_task_and_reports_each_gate_as_events(tmp_path: 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> None:
@@ -455,9 +460,9 @@ def test_a_docker_gate_runs_in_a_throwaway_candidate_not_the_live_root(tmp_path:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
 
     async def exercise() -> bool:
         async with open_core_host(
@@ -487,10 +492,10 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
     sandbox = _BlockingEvaluationSandbox()
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     # Docker gates run in a throwaway candidate, so hold every Docker workspace.
     backend.script_sandbox_for_kind(SandboxKind.DOCKER, sandbox)
 

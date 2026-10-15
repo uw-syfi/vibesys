@@ -27,6 +27,7 @@ from vs_sim.api import ProcessTimeoutError
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
     ManualClock,
+    PipedStart,
     ScriptedStreamingCommand,
     SimThreads,
     StreamedRun,
@@ -84,6 +85,10 @@ class _FakePipedProcess:
             self._on_kill()
         if self._kill_error is not None:
             raise self._kill_error
+
+    def terminate_group(self) -> None:
+        """These runners stop a process group only with SIGKILL."""
+        raise AssertionError
 
     def cancel_output(self) -> None:
         """Record that active reads were asked to return."""
@@ -176,7 +181,7 @@ def test_runner_drains_large_multiline_and_unterminated_streams_into_bounded_tai
         stderr=stderr,
         wait_results=(23,),
     )
-    launcher = FakePipedProcessLauncher(lambda _argv, _cwd: process)
+    launcher = FakePipedProcessLauncher(lambda _start: process)
     threads = SimThreads()
 
     result = threads.run(
@@ -208,7 +213,7 @@ def test_runner_drains_large_multiline_and_unterminated_streams_into_bounded_tai
     assert "earlier Docker output characters truncated" in diagnostic
     assert diagnostic.endswith(stderr_end)
     assert len(diagnostic) <= 1000
-    assert launcher.started == [(("docker", "build"), tmp_path)]
+    assert launcher.started == [PipedStart(("docker", "build"), tmp_path)]
     assert process.group_kills == 0
     assert process.stdout.closed
     assert process.stderr.closed
@@ -216,7 +221,7 @@ def test_runner_drains_large_multiline_and_unterminated_streams_into_bounded_tai
 
 def test_runner_streams_complete_and_unterminated_progress_lines(tmp_path: Path) -> None:
     process = _FakePipedProcess(stderr="first\nsecond")
-    launcher = FakePipedProcessLauncher(lambda _argv, _cwd: process)
+    launcher = FakePipedProcessLauncher(lambda _start: process)
     threads = SimThreads()
     observed: list[str] = []
 
@@ -244,7 +249,7 @@ def test_docker_runner_contract_caps_each_progress_line(
         threads = SimThreads()
         runner = SubprocessDockerBuildRunner(
             threads=threads,
-            processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+            processes=FakePipedProcessLauncher(lambda _start: process),
         )
         threads.run(
             lambda: runner.run(
@@ -293,7 +298,7 @@ def test_timeout_kills_reaps_and_closes_the_fake_process_group(tmp_path: Path) -
     dockerfile = tmp_path / "Dockerfile"
     dockerfile.write_text("FROM scratch\n", encoding="utf-8")
     process = _FakePipedProcess(wait_results=(None, -9))
-    launcher = FakePipedProcessLauncher(lambda _argv, _cwd: process)
+    launcher = FakePipedProcessLauncher(lambda _start: process)
     threads = SimThreads()
     runner = SubprocessDockerBuildRunner(threads=threads, processes=launcher)
 
@@ -318,7 +323,7 @@ def test_normal_exit_and_inherited_writer_share_one_cleanup_deadline(tmp_path: P
     process = _FakePipedProcess(wait_results=(0, -9), on_kill=threads.request_kill)
     runner = SubprocessDockerBuildRunner(
         threads=threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=5,
     )
     started_at = threads.now()
@@ -350,7 +355,7 @@ def test_runtime_kill_failure_does_not_skip_remaining_cleanup(tmp_path: Path) ->
     )
     runner = SubprocessDockerBuildRunner(
         threads=threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=5,
     )
 
@@ -383,7 +388,7 @@ def test_timeout_preserves_original_error_when_cleanup_fails(
     threads = SimThreads()
     runner = SubprocessDockerBuildRunner(
         threads=threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=5,
     )
 
@@ -438,8 +443,8 @@ def test_an_agent_image_build_that_never_finishes_is_stopped_with_its_output() -
     """The stalled build's process group is killed and the error names the step and output."""
     stalled = _FakePipedProcess(stderr=_STALLED_BUILD_OUTPUT, wait_results=(None, -9))
 
-    def start(argv: Sequence[str], _cwd: Path | None) -> _FakePipedProcess:
-        if argv[1] == "build":
+    def start(request: PipedStart) -> _FakePipedProcess:
+        if request.argv[1] == "build":
             return stalled
         return _FakePipedProcess(stdout=_IMAGE_ID)
 

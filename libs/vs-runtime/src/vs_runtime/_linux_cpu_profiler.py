@@ -12,7 +12,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from vs_sim.api import ProcessGroupUnreaped, ProcessOutcome, ProcessSpec, ProcessTimedOut
+from vs_sim.api import (
+    ProcessGroupUnreaped,
+    ProcessOutcome,
+    ProcessOutputTooLarge,
+    ProcessSpec,
+    ProcessTimedOut,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -109,6 +115,9 @@ def _run_text(processes: Processes, command: list[str], *, timeout: float | None
             raise TimeoutError(message)
         case ProcessGroupUnreaped(detail=detail):
             raise TimeoutError(detail)
+        case ProcessOutputTooLarge(limit=limit, stream=stream):
+            message = f"{command[0]} wrote more than {limit} bytes to {stream}"
+            raise OSError(message)
 
 
 _PERF_EVENT_PARANOID_THRESHOLD = 2

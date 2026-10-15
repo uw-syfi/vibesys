@@ -15,8 +15,14 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox.api import SubprocessDockerCli
 from vs_sandbox.api.slurm import BrokeredProcesses, SlurmProcessBroker
-from vs_sim.api import OsProcesses, ProcessOutcome, ProcessSpec, UnixNetwork
-from vs_slurm.api import SlurmConfig, SlurmSshTransport
+from vs_sim.api import (
+    OsProcesses,
+    ProcessOutcome,
+    ProcessSpec,
+    SubprocessPipedProcessLauncher,
+    UnixNetwork,
+)
+from vs_slurm.api import SlurmConfig, SlurmSshTransport, slurm_transport_broker_policy
 
 if TYPE_CHECKING:
     import pytest
@@ -25,9 +31,9 @@ if TYPE_CHECKING:
 def test_docker_lifecycle_commands_run_outside_the_terminals_process_group() -> None:
     probe = "import os, sys; print(os.getpgid(0) == os.getpid() != int(sys.argv[1]))"
 
-    result = SubprocessDockerCli(processes=OsProcesses()).run(
-        [sys.executable, "-c", probe, str(os.getpgid(0))], timeout_seconds=30
-    )
+    result = SubprocessDockerCli(
+        processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+    ).run([sys.executable, "-c", probe, str(os.getpgid(0))], timeout_seconds=30)
 
     assert result.stdout.strip() == "True"
 
@@ -55,7 +61,9 @@ def test_slurm_broker_preserves_stdin_environment_cwd_and_complete_streams(
         transport_timeout_seconds=30,
     )
     broker = SlurmProcessBroker(
-        config, tmp_path / "broker.sock", local_roots=(tmp_path,), processes=OsProcesses()
+        slurm_transport_broker_policy(config, local_roots=(tmp_path,)),
+        tmp_path / "broker.sock",
+        processes=OsProcesses(),
     )
     broker.start()
     try:

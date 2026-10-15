@@ -9,7 +9,7 @@ mounted at its host path, and the client runs under the image's plain
 Skipped unless ``VIBESYS_E2E_DOCKER=1`` and ``docker`` is on PATH:
 
 ```bash
-VIBESYS_E2E_DOCKER=1 uv run pytest libs/vs-sandbox/tests/test_host_command_bridge_e2e.py -q -s
+VIBESYS_E2E_DOCKER=1 uv run pytest tests/e2e/test_host_command_bridge_docker_e2e.py -q -s
 ```
 """
 
@@ -33,10 +33,12 @@ from vs_sandbox.api.slurm import (
     HOST_COMMAND_CLIENT,
     AgentGpuConfig,
     AgentGpuLauncher,
+    BrokerTransport,
     GpuCommands,
     HostCommandBroker,
     RunRoots,
 )
+from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -48,8 +50,10 @@ _ENABLE_ENV = "VIBESYS_E2E_DOCKER"
 _IMAGE = "python:3.12-slim"
 _CLIENT_IN_CONTAINER = "/opt/vibesys/vibesys-gpu"
 # Stands in for srun and scancel: records its argv and cwd, then runs what follows
-# `--`. Without a `--` it is scancel, and it reports the cancellation on a FIFO the
-# test blocks on, so the test waits for the event itself rather than polling for it.
+# `--`. Without a `--` it is scancel, or the squeue check after it (the one asking
+# for a headerless listing, answered with no job). scancel reports the
+# cancellation on a FIFO the test blocks on, so the test waits for the event
+# itself rather than polling for it.
 # Stands in for the Slurm shell: it receives the command line (`srun ...` or
 # `scancel ...`) as its one argument, as the local transport's shell does.
 _FAKE_SLURM = """\
@@ -60,7 +64,7 @@ with open({log!r}, "a") as log:
 if "--" in sys.argv:
     command = sys.argv[sys.argv.index("--") + 1 :]
     os.execvp(command[0], command)
-if {cancelled!r}:
+if {cancelled!r} and "--noheader" not in sys.argv:
     with open({cancelled!r}, "w") as fifo:
         fifo.write(" ".join(sys.argv[1:]))
 """
@@ -87,7 +91,14 @@ def _broker(
             "max_time_minutes": 60,
         }
     )
-    launcher = AgentGpuLauncher(config, (sys.executable, str(fake)))
+    threads = OsThreads()
+    launcher = AgentGpuLauncher(
+        config,
+        (sys.executable, str(fake)),
+        probe=SubprocessProbe(),
+        processes=SubprocessPipedProcessLauncher(),
+        threads=threads,
+    )
     env = dict(os.environ)
     workspace = tmp_path / "workspace"
     (workspace / "sub").mkdir(parents=True)
@@ -95,6 +106,7 @@ def _broker(
         tmp_path / "broker.sock",
         roots=RunRoots((workspace,)),
         gpu=GpuCommands(config, _NoConfinement(), env, launcher=launcher),
+        transport=BrokerTransport(UnixNetwork(), threads),
     )
     broker.start()
     try:

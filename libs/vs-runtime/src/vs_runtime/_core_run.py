@@ -41,6 +41,7 @@ from vs_core.api import (
     ControlInput,
     CoreState,
     RecoveryPhase,
+    RequestPhase,
     RunControlEvent,
     RunResultProposal,
     RunStatus,
@@ -48,6 +49,7 @@ from vs_core.api import (
     StopMode,
     orphan_waits,
     project,
+    unreleased_records,
 )
 from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
@@ -552,7 +554,12 @@ class _Loop:
             await self._wait_while_running(due)
             return
         paused = core.run.status == RunStatus.PAUSED
-        recovering = core.records.recovery.phase != RecoveryPhase.READY
+        # Recovery that the loop already stopped as blocked reopens on nothing: polling it
+        # would only wait out the deadline before the same stall.
+        recovering = core.records.recovery.phase != RecoveryPhase.READY and not (
+            core.records.recovery.phase == RecoveryPhase.BLOCKED
+            and any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+        )
         past_deadline = now >= core.run.deadline_at
         if due is None and not paused and (not recovering or past_deadline):
             raise RunStalledError(_describe(core, self._stall_notes()))
@@ -640,10 +647,19 @@ def _describe(core: CoreState, notes: Sequence[str]) -> str:
     ]
     if waiting:
         text += f"; attempts waiting for a release {waiting}"
+    # A completed owned job or turn whose release is unproven holds closure, though no
+    # record is open: name it, or the report blames the strategy for a release core lacks.
+    unreleased = [
+        f"{record.request.kind}:{record.request_id.root}"
+        for record in unreleased_records(core)
+        if record.phase == RequestPhase.COMPLETED
+    ]
+    if unreleased:
+        text += f"; completed records whose release is unproven {unreleased}"
     orphans = [f"{wait.waiter.value} {wait.subject}" for wait in orphan_waits(core)]
     if orphans:
         text += f"; waits nothing will end {orphans}"
-    if not open_records and not waiting and not orphans:
+    if not open_records and not waiting and not unreleased and not orphans:
         text += f"; {_unfinished(core)}"
     if notes:
         text += f"; {'; '.join(notes)}"

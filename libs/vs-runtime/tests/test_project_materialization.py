@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from tests.support.real_git import REAL_GIT
 
+from vs_project.api.workspace_tree import WorkspacePathError
 from vs_runtime.api.infrastructure import (
     FreshProjectError,
     FreshProjectErrorKind,
@@ -18,6 +23,7 @@ from vs_runtime.api.infrastructure import (
     WorkspaceSourceValue,
 )
 from vs_runtime.api.testing import FakeGitRunner, FakeProjectMaterializationEffects
+from vs_sim.api.testing import examples
 
 
 def _materializer(
@@ -311,3 +317,70 @@ def test_git_source_records_resolved_commit_and_strips_metadata(tmp_path: Path) 
             "strip_git": True,
         }
     ]
+
+
+def _host_tree(root: Path) -> dict[str, str | None]:
+    """Every entry below ``root``: a file's text, ``None`` for a directory, ``->`` for a link."""
+    entries: dict[str, str | None] = {}
+    for path in sorted(root.rglob("*")):
+        key = path.relative_to(root).as_posix()
+        if path.is_symlink():
+            entries[key] = f"->{path.readlink()}"
+        elif path.is_dir():
+            entries[key] = None
+        else:
+            entries[key] = path.read_text()
+    return entries
+
+
+_SKILL_DESTINATION = (".claude", "skills", "alpha")
+
+
+@settings(max_examples=examples(pr=8, nightly=200), deadline=None)
+@given(
+    depth=st.integers(min_value=1, max_value=len(_SKILL_DESTINATION) + 1),
+    isolated=st.booleans(),
+)
+def test_a_resumed_copy_never_follows_a_symlink_planted_in_the_project(
+    *, depth: int, isolated: bool
+) -> None:
+    """Regression: the resume-time skill refresh cleared and filled a linked host directory.
+
+    ``depth`` names the component of ``.claude/skills/alpha/references`` that the agent
+    replaced, in an earlier copy, with a symlink to a host directory.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        scratch = Path(directory)
+        source = scratch / "source" / "alpha"
+        (source / "references").mkdir(parents=True)
+        (source / "SKILL.md").write_text("# fresh\n")
+        (source / "references" / "note.md").write_text("note\n")
+        outside = scratch / "host-data"
+        for mirror in ("", "skills/", "alpha/", "references/"):
+            (outside / mirror).mkdir(parents=True, exist_ok=True)
+            (outside / mirror / "keep.txt").write_text("host file\n")
+        root = scratch / "project"
+        parts = (*_SKILL_DESTINATION, "references")
+        (root.joinpath(*parts)).mkdir(parents=True)
+        planted_path = root.joinpath(*parts[:depth])
+        shutil.rmtree(planted_path)
+        planted_path.symlink_to(outside, target_is_directory=True)
+        before = _host_tree(outside)
+        destination = root.joinpath(*_SKILL_DESTINATION)
+        materializer = _materializer(
+            root, effects=FakeProjectMaterializationEffects(isolated=isolated)
+        )
+
+        try:
+            materializer.materialize(
+                (ProjectTreeCopy(src=source, dest=destination),), existing=True
+            )
+        except WorkspacePathError:
+            assert depth < len(_SKILL_DESTINATION)
+        else:
+            assert depth >= len(_SKILL_DESTINATION)
+            assert not destination.is_symlink()
+            assert (destination / "SKILL.md").read_text() == "# fresh\n"
+            assert (destination / "references" / "note.md").read_text() == "note\n"
+
+        assert _host_tree(outside) == before

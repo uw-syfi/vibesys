@@ -77,11 +77,7 @@ export function RunPage({
           switch, or a resume that clears one) remounts rather than inheriting the previous
           episode's resume-click `pending`/`result` state, which the component itself only
           tracks for its own, current fact. */}
-      <QuotaBanner
-        key={run.quota.sequence}
-        banner={quotaBanner(run)}
-        command={events.onCommand}
-      />
+      <QuotaBanner key={run.quota.sequence} banner={quotaBanner(run)} command={events.onCommand} />
       <RunSummary run={run} iterations={iterations} />
       <div className="run-layout">
         <RoundRail

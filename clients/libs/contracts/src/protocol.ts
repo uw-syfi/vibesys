@@ -17,8 +17,15 @@ export type RunSnapshot = ProtocolDocument['snapshot'];
 /** Run lifecycle statuses the backend reports. Source: `RunStatus` in `src/server/run_lifecycle.py`. */
 export type RunStatus = RunSnapshot['status'];
 export type ServerMessage = ProtocolDocument['server_message'];
+/** The complete authoritative list staged from active-execution checkpoint chunks. */
+export type ActiveExecutions = NonNullable<RunSnapshot['active_executions']>;
 /** The `event_batch` arm of `ServerMessage`: a run of events plus cursor metadata. */
 export type EventBatchMessage = Extract<ServerMessage, {type: 'event_batch'}>;
+/** One transport-bounded piece of an authoritative active-execution checkpoint. */
+export type ActiveExecutionsChunkMessage = Extract<
+  ServerMessage,
+  {type: 'active_executions_chunk'}
+>;
 export type Diagnostic = NonNullable<ProtocolResponse['diagnostic']>;
 export type HypothesisEntry = NonNullable<ProtocolResponse['experiments']>[number];
 export type ExperimentUpdate = NonNullable<ProtocolResponse['experiment_update']>;

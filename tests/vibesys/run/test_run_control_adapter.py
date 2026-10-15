@@ -6,13 +6,13 @@ import json
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from vibesys.api import CoreEventType, RunStopped
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_runtime.api.testing import idle_environment_system
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,8 +25,8 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     integration.attach(tmp_path, run_id="run-1")
     unsubscribe = integration.events.subscribe(

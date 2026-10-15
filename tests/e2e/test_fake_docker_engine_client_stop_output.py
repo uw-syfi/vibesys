@@ -10,13 +10,11 @@ from __future__ import annotations
 
 import os
 import signal
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from vs_sandbox.api.testing import FakeDockerEngine
+from vs_sim.api import SubprocessPipedProcessLauncher
 from vs_sim.api.testing import HANG_GUARD_S
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_a_stop_delivers_output_written_before_the_client_read_it(tmp_path: Path) -> None:
@@ -26,7 +24,7 @@ def test_a_stop_delivers_output_written_before_the_client_read_it(tmp_path: Path
     os.mkfifo(workspace / "started")
     os.mkfifo(workspace / "go")
     os.mkfifo(workspace / "written")
-    engine = FakeDockerEngine(tmp_path / "state")
+    engine = FakeDockerEngine(tmp_path / "state", launcher=SubprocessPipedProcessLauncher())
     created = engine.run(
         ("docker", "run", "-d", "-v", f"{workspace}:/w", "--workdir", "/w", "image"),
         timeout_seconds=30,
@@ -38,14 +36,36 @@ def test_a_stop_delivers_output_written_before_the_client_read_it(tmp_path: Path
     # Freeze the client before the program writes, so the output sits unread in the
     # pipes when the stop arrives: the interleaving a loaded host produces by chance.
     (workspace / "started").read_text(encoding="utf-8")
-    os.kill(client.pid, signal.SIGSTOP)
-    os.waitpid(client.pid, os.WUNTRACED)
+    client_pid = _exec_client_pid(tmp_path / "state")
+    os.kill(client_pid, signal.SIGSTOP)
+    os.waitpid(client_pid, os.WUNTRACED)
     (workspace / "go").write_text("go\n", encoding="utf-8")
     (workspace / "written").read_text(encoding="utf-8")
-    os.kill(client.pid, signal.SIGTERM)
-    os.kill(client.pid, signal.SIGCONT)
-    stdout, stderr = client.communicate(timeout=HANG_GUARD_S)
+    client.terminate_group()
+    os.kill(client_pid, signal.SIGCONT)
+    stdout = client.stdout.read()
+    stderr = client.stderr.read()
+    status = client.wait(HANG_GUARD_S)
     engine.run(("docker", "rm", "-f", container), timeout_seconds=30)
 
     assert (stdout, stderr) == ("out", "err")
-    assert client.returncode == -signal.SIGTERM
+    assert status == -signal.SIGTERM
+
+
+def _exec_client_pid(state_dir: Path) -> int:
+    """The pid of the engine's one exec client, whose spec names *state_dir*."""
+    marker = str(state_dir).encode()
+    pids = [
+        int(entry.name)
+        for entry in Path("/proc").iterdir()
+        if entry.name.isdigit() and marker in _cmdline(entry)
+    ]
+    assert len(pids) == 1, pids
+    return pids[0]
+
+
+def _cmdline(process: Path) -> bytes:
+    try:
+        return (process / "cmdline").read_bytes()
+    except OSError:
+        return b""

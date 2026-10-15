@@ -53,7 +53,8 @@ def _resources() -> ResolvedSkyPilotResources:
 
 
 class _Runner(SkyPilotJobRunner):
-    def __init__(self) -> None:
+    def __init__(self, output: str = "out\n") -> None:
+        self.output = output
         self.ensure_calls = 0
         self.released: list[str] = []
         self.commands: list[tuple[str, ...]] = []
@@ -90,7 +91,7 @@ class _Runner(SkyPilotJobRunner):
         assert job_started is not None
         self.commands.append(tuple(command))
         job_started(9)
-        stdout_sink("out\n")
+        stdout_sink(self.output)
         stderr_sink("err\n")
         return JobResult(JobStatus.COMPLETED, 0, 9, "out\n", "err\n", cluster_name)
 
@@ -109,13 +110,20 @@ class _Runner(SkyPilotJobRunner):
 
 
 class _Setup:
-    def __init__(self, tmp_path: Path, network: SimNetwork, threads: SimThreads) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        network: SimNetwork,
+        threads: SimThreads,
+        runner: _Runner | None = None,
+    ) -> None:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         (workspace / "candidate.py").write_text("candidate")
         state = scratch_state_directory(tmp_path, "skypilot")
         self.network = network
-        self.runner = _Runner()
+        self.runner = runner or _Runner()
+        self.logs: list[str] = []
         self.bridge = SkyPilotBridge(
             runner=self.runner,
             cluster_name="lease",
@@ -127,7 +135,7 @@ class _Setup:
             benchmark_output_argument=None,
             state_namespace=StateNamespace(project_root=tmp_path, root=state, portable=False),
             socket_path=tmp_path / _ADDRESS,
-            log=lambda _: None,
+            log=self.logs.append,
             network=network,
             threads=threads,
         )
@@ -244,3 +252,35 @@ def test_a_failed_bind_releases_the_allocation_and_reports_the_error(tmp_path: P
         assert setup.runner.released == ["lease"]
 
     _run(tmp_path, scenario)
+
+
+def test_a_client_that_stops_reading_is_disconnected_and_frees_its_request(
+    tmp_path: Path,
+) -> None:
+    """REVIEW-11 P2-1: an unread client cannot hold the handler, and so the cluster, for ever."""
+    threads = SimThreads()
+    setup = _Setup(
+        tmp_path, SimNetwork(threads, buffer_bytes=4096), threads, _Runner(output="x" * (64 << 10))
+    )
+    stalled_for: list[float] = []
+
+    def scenario(setup: _Setup) -> None:
+        setup.bridge.start()
+        client = setup.dial()
+        try:
+            started = threads.now()
+            client.send(encode_message(EvaluationRequest(kind="accuracy", invocation_id="c" * 32)))
+            # The client never reads; the bridge's output fills the buffer and then waits.
+            while not any("disconnecting" in line for line in setup.logs):
+                assert threads.now() - started < HANG_GUARD_S
+                threads.sleep(1)
+            stalled_for.append(threads.now() - started)
+        finally:
+            setup.bridge.close()
+            client.close()
+        assert setup.runner.released == ["lease"]
+
+    threads.run(lambda: scenario(setup))
+
+    assert 30 <= stalled_for[0] < 32
+    assert not any("did not stop" in line for line in setup.logs)

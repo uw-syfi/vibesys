@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.core_host_world import open_core_host
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import capability_plugin
 
@@ -31,10 +31,11 @@ from vibesys.api import (
 from vibesys.api.request import RunEnvironmentSpec, load_task
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeDockerBuildRunner
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -87,7 +88,7 @@ def _candidate_container_counts(
     """Return (supported, containers before, with a candidate, after discarding it)."""
     project_root = root / "project"
     _write_project(project_root)
-    engine = FakeDockerEngine(root / "engine")
+    engine = FakeDockerEngine(root / "engine", launcher=FakePipedProcessLauncher())
     options: dict[str, object] = {"build_runner": FakeDockerBuildRunner(), "docker": engine}
     if image is not None:
         options["image"] = image
@@ -117,7 +118,13 @@ def _candidate_container_counts(
         events: object | None = None,
     ) -> _DaemonBackend:
         del clock, events  # the fake backend records no timestamps and has no device to watch
-        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(
+            log_dir,
+            log=log,  # ty: ignore[invalid-argument-type]
+            image=image,
+            threads=OsThreads(),
+            launcher=FakePipedProcessLauncher(),
+        )
         made.engine = engine
         return made
 
@@ -126,7 +133,7 @@ def _candidate_container_counts(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> tuple[bool, int, int, int]:

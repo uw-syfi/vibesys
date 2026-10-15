@@ -29,10 +29,9 @@ import pytest
 from hypothesis import Phase, given, settings
 from hypothesis import strategies as st
 from tests.support.crash_harness import (
-    BLOCKED_ENDINGS,
     after_crash,
     all_crossings,
-    name,
+    ends_blocked,
     rule,
     run,
     straight_run,
@@ -77,31 +76,32 @@ def test_a_skeleton_run_that_dies_several_times_ends_and_runs_each_effect_once(
     _skeleton_walk(draw, deaths)
 
 
-def _converging(crossings: tuple[Crossing, ...]) -> tuple[Crossing, ...]:
-    """*crossings* without those a death at which is known to end the run blocked.
-
-    ``BLOCKED_ENDINGS`` lists them, and ``test_crash_regressions`` checks that they end blocked;
-    a walk through one could never end as the straight run does.
-    """
-    return tuple(crossing for crossing in crossings if name(crossing) not in BLOCKED_ENDINGS)
-
-
 def _skeleton_walk(draw: st.DataObject, deaths: int) -> None:
     rules: list[FaultRule] = []
-    offered = _converging(all_crossings()[:-1])
+    calls: Sequence[Crossing] = all_crossings()
+    offered = calls[:-1]
+    blocked = False
     for _ in range(deaths):
         if not offered:
             break
         crossing = _death(draw, offered, restarted=bool(rules))
+        blocked = blocked or ends_blocked(calls, crossing)
         rules.append(rule(crossing))
         calls = run(FaultPlan(seed=len(rules), rules=tuple(rules))).gate.calls
-        offered = _converging(after_crash(calls, crossing)[:-1])
+        offered = after_crash(calls, crossing)[:-1]
     plan = FaultPlan(seed=len(rules), rules=tuple(rules))
     replay = f"replay with {plan.model_dump_json()}"
     summary, straight = run(plan).summary, straight_run().summary
     assert summary.stalled is None, f"{summary.stalled}; {replay}"
     assert summary.status == RunStatus.TERMINAL, replay
     assert summary.crashes == len(rules), replay
+    # A death that ends the run blocked stops it early: each effect ran at most once.
+    assert (summary.outcome == "blocked") == blocked, replay
+    if blocked:
+        assert set(summary.sbatch_calls) <= {1}, replay
+        assert len(summary.sbatch_calls) <= len(straight.sbatch_calls), replay
+        assert set(summary.agent_dispatches) <= set(straight.agent_dispatches), replay
+        return
     assert summary.sbatch_calls == straight.sbatch_calls, replay
     assert summary.agent_dispatches == straight.agent_dispatches, replay
     if summary.outcome == straight.outcome:

@@ -47,8 +47,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -63,7 +62,6 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
 
-pytestmark = pytest.mark.asyncio
 
 # Each example builds a run. A pull request draws a sample; the nightly depth searches deeper.
 _EXAMPLES = settings(
@@ -270,7 +268,7 @@ _KINDS = (
 def _requests_over(base: Path, jobs: PollingEvaluationExecutor) -> MeasurementRequests:
     project = Project.open(base / "project")
     return MeasurementRequests(
-        jobs, ReceiptStore(project.state.state_store_namespace("run"), threads=OsThreads())
+        jobs, ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
     )
 
 

@@ -63,6 +63,7 @@ from .types.records import (
     ChildObservationWatermark,
     InspectRequest,
     Outbound,
+    ReconciliationCommandLapsed,
     ReconciliationDeadline,
     RecoveryBarrier,
     RecoveryCheck,
@@ -898,26 +899,60 @@ def _finish(
     return AreaChange(state=state.model_copy(update={"recovery": barrier}), signals=signals)
 
 
+def _restart_command(
+    state: RecordsState, context: RecordsContext, event: RecoveryStarted, record: RequestRecord
+) -> tuple[RecordsState, tuple[Outbound, ...]]:
+    """What a new epoch does with an earlier epoch's open inspection, cancel or block.
+
+    A cancel or block the dead host dispatched is inspected, and lives until the answer with
+    a fresh bound from the restart, like the inspection itself: kept at the dead host's
+    bound, a restart after it would lapse the command on the first tick, before the
+    inspection's "never began" proof could send it again.
+    """
+    if isinstance(record.request, InspectRequest) or record.phase == RequestPhase.PREPARED:
+        return _requeue_lost_inspection(state, context, event, record), ()
+    if record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING):
+        bound = _fresh_bound(context, event)
+        kept = record.model_copy(
+            update={"until": record.until.model_copy(update={"at": max(record.until.at, bound)})}
+        )
+        state = state.model_copy(
+            update={
+                "records": tuple(
+                    kept if row.request_id == record.request_id else row for row in state.records
+                )
+            }
+        )
+        return state, (_probe(_inspection(kept, event.epoch), context),)
+    return state, ()
+
+
+def _fresh_bound(context: RecordsContext, event: RecoveryStarted) -> float:
+    """The reconciliation bound a command of the epoch ``event`` opens gets from its start."""
+    return max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound
+
+
 def _requeue_lost_inspection(
     state: RecordsState, context: RecordsContext, event: RecoveryStarted, record: RequestRecord
 ) -> RecordsState:
-    """An earlier epoch's inspection that never reported is issued again, not left open.
+    """An earlier epoch's inspection that never reported, or command never sent, goes out.
 
-    Its target is inspected afresh by this epoch, but the old request would stay in flight
-    for good and hold the run open. An inspection only reads, so issuing it again is safe.
-    It goes out with a fresh reconciliation bound from the restart, as this epoch's own
-    inspections do, whether it was in flight or only prepared when the host died: no deadline
-    ever ends an inspection, so one issued with a bound that passed while the host was down
-    would be dropped by the shell unanswered and hold the run open just the same.
+    Its target is inspected afresh by this epoch, but the old request would stay open until
+    its bound and hold its waiters on nothing. An inspection only reads, so issuing it again
+    is safe; a cancel or a block still PREPARED never went out, so sending it is its first
+    send. A cancel or a block a dead host dispatched is not sent again: it closes only by
+    an inspection of it (``_start``), whose proof decides a re-send. It goes out with a
+    fresh reconciliation bound from the restart, as this epoch's own inspections do: one
+    issued with a bound that passed while the host was down would lapse unanswered.
     """
-    if not (
-        isinstance(record.request, InspectRequest)
-        and record.phase
-        in (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
-        and record.observation is None
-    ):
+    open_phases = (
+        (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+        if isinstance(record.request, InspectRequest)
+        else (RequestPhase.PREPARED,)
+    )
+    if not (record.phase in open_phases and record.observation is None):
         return state
-    bound = max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound
+    bound = _fresh_bound(context, event)
     requeued = record.model_copy(
         update={
             "phase": RequestPhase.PREPARED,
@@ -1007,7 +1042,8 @@ def _start(
                 for child in updated.children
             )
         ):
-            updated = _requeue_lost_inspection(updated, context, event, record)
+            updated, sent = _restart_command(updated, context, event, record)
+            requests.extend(sent)
             continue
         resolution = _aggregate_resolution(record, context, updated)
         inspection = (
@@ -1571,6 +1607,7 @@ def _deadline(
         and isinstance(observation_for(record, observation), Proven)
         and _resource_identified(record, context, observation)
         and not isinstance(resolved_observation(observation), Proven)
+        and _cancelled_here(record)
     ):
         resources.append(observation.resource_id)
     resources.extend(
@@ -1610,6 +1647,43 @@ def _deadline(
         signals=signals,
         requests=tuple(requests),
         events=events,
+    )
+
+
+def _lapse_command(
+    state: RecordsState, context: RecordsContext, event: ReconciliationCommandLapsed
+) -> AreaChange[RecordsState]:
+    """End an inspection, cancel or block that is still open at its limit.
+
+    Left open, it would count as live forever for every wait that names it. The command has
+    no owner to tell; its target's fate is decided by whatever waits on the command.
+    """
+    _deadline_target(state, event.request_id)
+    command = state.record(event.request_id)
+    now_at = max(context.run.now_at, event.now_at)
+    if command is None or not command_open(command) or now_at < command.until.at:
+        return AreaChange(state=state)
+    blocked = command.model_copy(update={"phase": RequestPhase.BLOCKED})
+    return AreaChange(state=_replace_record(state, blocked))
+
+
+def _cancelled_here(record: RequestRecord) -> bool:
+    """Whether the record's own resource is cancelled here, by ``CancelOwnedResource``.
+
+    That command reaches the operations executor, which holds receipts for registered
+    operations only: it can end an operation's resource and nothing else. Every other
+    resource is released by the area that owns it, through the command whose outcome that
+    area already defines, so sending a generic cancel for it only adds a command that is
+    answered "unknown". Evaluation terminates an owned job (``CancelOwnedJob``) at the job's
+    own deadline or the run's close, within its retry limit. A turn's session is cancelled
+    through ``_lost_turn`` (``CancelTurn``). Sessions closes a session's lease when the block
+    wakes the session's wait (``CloseSession``), and an attempt's retirement discards its
+    workspace (``DiscardWorkspace``). A request that only names a resource another request
+    owns has nothing of its own to release.
+    """
+    return isinstance(record.request, ExecuteRegisteredOperation) and record.lifecycle not in (
+        LifecycleClass.OWNED_JOB,
+        LifecycleClass.SESSION_TURN,
     )
 
 
@@ -1696,24 +1770,6 @@ def _replace_record(state: RecordsState, record: RequestRecord) -> RecordsState:
     )
 
 
-def _answered_open(record: RequestRecord) -> bool:
-    """A record whose executor answered without concluding, so nothing is in flight for it.
-
-    RECONCILING is an Unknown or an unproven acceptance; DISPATCHED with an observation is
-    a retryable failure (never PENDING, which is progress). Both wait for an inspection or a later observation that no
-    live request is going to produce. A DISPATCHED record with no observation may still be
-    executing, so it is not here.
-    """
-    if record.phase == RequestPhase.RECONCILING:
-        return True
-    observation = record.observation
-    return (
-        record.phase == RequestPhase.DISPATCHED
-        and observation is not None
-        and observation.retryable
-    )
-
-
 def _canonical(record: RequestRecord) -> bool:
     return not isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
 
@@ -1727,14 +1783,30 @@ def is_open(record: RequestRecord) -> bool:
     )
 
 
+def command_open(record: RequestRecord) -> bool:
+    """An inspection, cancel or block that has not ended: its limit ends it if nothing else."""
+    return not _canonical(record) and record.phase in (
+        RequestPhase.PREPARED,
+        RequestPhase.DISPATCHED,
+        RequestPhase.RECONCILING,
+    )
+
+
 def overdue_reconciliations(
     state: RecordsState, now_at: float
-) -> tuple[ReconciliationDeadline, ...]:
-    """One deadline event per open canonical record whose limit has passed."""
-    return tuple(
-        ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
-        for record in state.records
-        if is_open(record) and record.until.at <= now_at
+) -> tuple[ReconciliationDeadline | ReconciliationCommandLapsed, ...]:
+    """One deadline event per open record, or lapse per open command, whose limit has passed."""
+    return (
+        *(
+            ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
+            for record in state.records
+            if is_open(record) and record.until.at <= now_at
+        ),
+        *(
+            ReconciliationCommandLapsed(request_id=record.request_id, now_at=now_at)
+            for record in state.records
+            if command_open(record) and record.until.at <= now_at
+        ),
     )
 
 
@@ -1744,7 +1816,7 @@ def next_reconciliation_at(state: RecordsState) -> float | None:
         (
             max(record.until.at, _awaiting_report(state, record) or record.until.at)
             for record in state.records
-            if is_open(record)
+            if is_open(record) or command_open(record)
         ),
         default=None,
     )
@@ -1761,12 +1833,12 @@ def advance(
             return _observe(state, context, event)
         case ReconciliationDeadline():
             return _deadline(state, context, event)
+        case ReconciliationCommandLapsed():
+            return _lapse_command(state, context, event)
         case RecoveryCheckWaitLapsed():
             return _recheck(state, context, event)
         case RecoveryReady():
-            if event.epoch != state.recovery.epoch:
-                return AreaChange(state=state)
-            if state.recovery.phase != RecoveryPhase.READY:
+            if event.epoch == state.recovery.epoch and state.recovery.phase != RecoveryPhase.READY:
                 raise ContractError(
                     ("recovery",), "readiness requires resolved current-epoch checks"
                 )

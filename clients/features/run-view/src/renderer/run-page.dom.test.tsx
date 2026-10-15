@@ -492,9 +492,9 @@ test('a later quota pause does not inherit an earlier, unrelated one’s resume 
   const mounted = await mountRun(pausedByQuota(), fake.send);
   await act(async () => button(mounted.container, 'Resume').click());
   await act(async () => fake.replies[0]?.resolve(ack('resume')));
-  expect(
-    mounted.container.querySelector('[data-testid="quota-banner"]')?.textContent,
-  ).toContain('resume consumed');
+  expect(mounted.container.querySelector('[data-testid="quota-banner"]')?.textContent).toContain(
+    'resume consumed',
+  );
 
   await act(async () => mounted.render(pausedAgainByDifferentProvider()));
   const banner = mounted.container.querySelector<HTMLElement>('[data-testid="quota-banner"]');

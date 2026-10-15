@@ -46,6 +46,7 @@ from vs_runtime._effect_fence import (
     FenceKey,
     FenceKind,
     NothingHeld,
+    OwnerNotApplied,
 )
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 from vs_runtime._operation_catalog import (
@@ -508,9 +509,9 @@ class RegisteredOperationRequests:
             return closure
         if closure.live:
             return Indeterminate("a delivery of the operation may still be running it")
-        match await _inspect(owner, decoded, context):
-            case NotApplied() as answer:
-                return self._fences.cleared(closure, self._fences.not_applied(closure, answer))
+        match await self._fences.ask_owner(closure, lambda: _inspect(owner, decoded, context)):
+            case OwnerNotApplied() as evidence:
+                return self._fences.cleared(closure, evidence)
             case confirmed:
                 return confirmed
 

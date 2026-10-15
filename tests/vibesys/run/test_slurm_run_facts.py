@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 from tests.support.core_host_world import open_core_host
 from tests.support.core_plugins import capability_plugin
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     plan_of,
@@ -35,9 +35,10 @@ from vs_agent.api import reap_orphaned_agents
 from vs_agent.api.testing import FakeConfinement, FakeDockerBuildRunner
 from vs_core.api import AssessmentKind
 from vs_project.api import OrchestrationDescriptor
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -79,7 +80,7 @@ def _request(root: Path, config: Path) -> RunRequest:
             {
                 "config_path": str(config),
                 "build_runner": FakeDockerBuildRunner(),
-                "docker": FakeDockerEngine(),
+                "docker": FakeDockerEngine(launcher=FakePipedProcessLauncher()),
                 "orphan_reaper": partial(
                     reap_orphaned_agents, confinement_for=lambda _id: FakeConfinement()
                 ),
@@ -108,7 +109,7 @@ def _facts(tmp_path: Path, plugin: OrchestrationPlugin) -> RunFacts:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> RunFacts:

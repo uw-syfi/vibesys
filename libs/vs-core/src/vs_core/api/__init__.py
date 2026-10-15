@@ -30,6 +30,7 @@ from vs_core._measurement_recipe import (
     MeasurementRecipe,
     StageBudget,
 )
+from vs_core._ownership import unreleased_records
 from vs_core._projection import (
     attempt_view,
     evidence_view,
@@ -436,6 +437,7 @@ from vs_core.types.records import (
     OperationRetireRequested,
     OperationView,
     Outbound,
+    ReconciliationCommandLapsed,
     ReconciliationDeadline,
     ReconciliationRequest,
     RecordsEvent,
@@ -1022,6 +1024,7 @@ __all__ = [
     "PureOption",
     "QueueEntryRetired",
     "ReacquisitionReady",
+    "ReconciliationCommandLapsed",
     "ReconciliationDeadline",
     "ReconciliationRequest",
     "RecordsChange",
@@ -1300,6 +1303,7 @@ __all__ = [
     "trusted_keys",
     "turn_candidate",
     "turn_reply",
+    "unreleased_records",
     "validate_startup",
     "validate_terminal_inputs",
     "verify_encoding",

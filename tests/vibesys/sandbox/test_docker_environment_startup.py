@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.run.environment import open_run_environment
 from vs_agent.api.images import ImageBuildProgress, TaskImageBuildError
@@ -18,9 +17,8 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentRequest,
     TrustedEvaluatorRequirements,
 )
-from vs_runtime.api.testing import DaemonBackend, daemon_engine
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_runtime.api.testing import DaemonBackend, daemon_engine, idle_environment_system
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -37,14 +35,14 @@ _BUILD_OUTPUT = """\
 def _open(
     tmp_path: Path, runner: FakeDockerBuildRunner, observed: list[EnvironmentStartup]
 ) -> None:
-    engine = daemon_engine(tmp_path)
+    engine = daemon_engine(tmp_path, launcher=FakePipedProcessLauncher())
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     request = RunEnvironmentRequest(
         log_dir=tmp_path / "logs",
         workspace=workspace,
         ref_dir=None,
-        backend=DaemonBackend(engine, threads=OsThreads()),
+        backend=DaemonBackend(engine, threads=SimThreads()),
         agent_backend="stub",
         cli_provider=None,
         run_id="run-1",
@@ -52,7 +50,7 @@ def _open(
         evaluator_requirements=TrustedEvaluatorRequirements(),
         startup=observed.append,
         clock=ManualClock(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
     environment = DockerEnvironment(DockerEnvironmentConfig(docker=engine, build_runner=runner))
     open_run_environment(environment, request).close()

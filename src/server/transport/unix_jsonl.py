@@ -11,6 +11,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from server.api.protocol import (
+    MAX_SERVER_MESSAGE_BYTES,
     EventBatchMessage,
     ProtocolErrorMessage,
     Response,
@@ -50,6 +51,14 @@ _ACCEPT_CLOSE_POLL_SECONDS = 0.1
 _ACCEPT_RETRY_BACKOFF_SECONDS = 0.1
 MAX_SOCKET_PATH_BYTES = 103 if sys.platform == "darwin" else 107
 _RECV_BYTES = 65536
+_SEND_BOUND_SECONDS = 30.0
+"""How long one message may wait for a client to make room for it before the server hangs up.
+
+A client that stops reading fills its socket buffer, and an unbounded send would then hold
+its session worker, and its subscription, for ever: an attached server waits for every
+subscriber to leave, so it would never exit. The WebSocket gateway's analogue is
+``TransportLimits.write_deadline_seconds``.
+"""
 MAX_REQUEST_LINE_BYTES = 1024 * 1024
 """The longest request line a session buffers; the WebSocket gateway's inbound frame cap."""
 
@@ -250,7 +259,7 @@ class _ClientSession:
                 cursor, reported_floor, store_id = self._rebootstrap(request, cursor, store_id)
                 delivery.delivered(cursor)
                 continue
-            self._write_message(
+            self._write_event_batch(
                 EventBatchMessage(
                     events=checkpoint.events,
                     through_sequence=checkpoint.through_sequence,
@@ -314,7 +323,7 @@ class _ClientSession:
         clients see the field's default.
         """
         reported_floor = 0 if request.tail is None else bootstrap.floor
-        self._write_message(
+        self._write_event_batch(
             EventBatchMessage(
                 events=bootstrap.events,
                 through_sequence=bootstrap.through_sequence,
@@ -325,6 +334,11 @@ class _ClientSession:
             )
         )
         return bootstrap.through_sequence, reported_floor, bootstrap.store_id
+
+    def _write_event_batch(self, batch: EventBatchMessage) -> None:
+        """Write the same bounded stream-message sequence as the WebSocket gateway."""
+        for message in batch.stream_messages_within(MAX_SERVER_MESSAGE_BYTES):
+            self._write_message(message)
 
     def _write_stream_error(self, request_id: str, client_id: str, error: Exception) -> None:
         """Report a replay or stream failure without hiding a live connection."""
@@ -344,7 +358,15 @@ class _ClientSession:
     def _write_message(self, message: BaseModel) -> None:
         payload = message.model_dump_json()
         try:
-            self._connection.send(payload.encode() + b"\n")
+            self._connection.send(payload.encode() + b"\n", _SEND_BOUND_SECONDS)
+        except TimeoutError as exc:
+            # Part of the message may have gone out, so the stream cannot continue.
+            _LOG.warning(
+                "a client read nothing for %g s while the server was writing to it; "
+                "disconnecting it",
+                _SEND_BOUND_SECONDS,
+            )
+            raise _PeerGoneError from exc
         except OSError as exc:
             raise _PeerGoneError from exc
 
@@ -368,7 +390,9 @@ class UnixJsonlServer:
         """Create a Unix server, optionally sharing subscription accounting.
 
         ``threads`` runs the accept loop and each client, and paces idle
-        streams; ``network`` binds the socket.
+        streams; ``network`` binds the socket. A client that leaves a message
+        unsent for ``_SEND_BOUND_SECONDS`` is disconnected, so it holds neither
+        its worker nor the server's exit.
         """
         self.path = path
         self.api = api

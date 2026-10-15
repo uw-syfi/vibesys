@@ -123,6 +123,8 @@ class _FakeAuxiliaryAgents:
 
     def __init__(self) -> None:
         self.closed = False
+        self.close_calls = 0
+        self.close_failures = 0
 
     def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:
         del launch
@@ -130,6 +132,10 @@ class _FakeAuxiliaryAgents:
         raise AssertionError(message)
 
     def close(self) -> None:
+        self.close_calls += 1
+        if self.close_calls <= self.close_failures:
+            message = "auxiliary agent scope close was killed"
+            raise RuntimeError(message)
         self.closed = True
 
 
@@ -789,6 +795,42 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.integration.close()
     parts.integration.close()
+
+
+@pytest.mark.parametrize("failures", [1, 2])
+def test_a_scope_whose_close_failed_is_closed_again_on_the_next_close(
+    tmp_path: Path, failures: int
+) -> None:
+    """Regression: a failed close latched the adapter, so a retry left the agent scope open."""
+    project, run_id = _project_run(tmp_path / "project")
+    closed: list[str] = []
+
+    class FakeManagedAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message, invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            closed.append("closed")
+
+    parts = build_server_parts(chat_agent_builder=lambda _request: FakeManagedAgent())
+    auxiliary = _attach_test_run(
+        parts,
+        project,
+        run_id,
+        AgentSelection(provider="codex", model="gpt-test"),
+        project.state.log_directory(run_id),
+    )
+    auxiliary.close_failures = failures
+    for _ in range(failures):
+        with pytest.raises(RuntimeError, match="killed"):
+            parts.integration.close()
+    parts.integration.close()
+    parts.integration.close()
+
+    assert auxiliary.closed
+    assert auxiliary.close_calls == failures + 1
+    assert closed == ["closed"]
 
 
 def test_run_started_identity_round_trip_through_the_wire_bridge() -> None:

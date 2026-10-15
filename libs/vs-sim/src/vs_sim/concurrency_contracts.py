@@ -401,6 +401,46 @@ class ThreadsContract:
 
         assert abs(subject.run(lambda: threads.run_async(main())) - 5.0) < 1e-9
 
+    def test_run_async_runs_to_thread_calls_and_carries_their_failures(self) -> None:
+        """``asyncio.to_thread`` on the loop runs the call on a thread and returns its outcome."""
+        subject = self.threads_under_test(0)
+        threads = subject.threads
+        tick = subject.tick
+
+        def blocking(value: str) -> str:
+            threads.sleep(tick)
+            if value == "fail":
+                raise LookupError(value)
+            return value
+
+        async def main() -> list[str]:
+            answered = await asyncio.to_thread(blocking, "answer")
+            try:
+                await asyncio.to_thread(blocking, "fail")
+            except LookupError as error:
+                return [answered, str(error)]
+            return [answered]
+
+        assert subject.run(lambda: threads.run_async(main())) == ["answer", "fail"]
+
+    def test_run_async_loop_time_is_the_threads_monotonic_clock_on_an_exact_clock(self) -> None:
+        """``loop.time()`` reads the same clock as ``Threads.now()``."""
+        subject = self.threads_under_test(0)
+        if not subject.exact:
+            return
+        threads = subject.threads
+
+        async def main() -> list[float]:
+            loop = asyncio.get_running_loop()
+            gaps = [loop.time() - threads.now()]
+            # test-isolation: the loop runs on the simulated timeline, so this costs no wall time
+            await asyncio.sleep(3.0)
+            gaps.append(loop.time() - threads.now())
+            return gaps
+
+        gaps = subject.run(lambda: threads.run_async(main()))
+        assert all(abs(gap) < 1e-9 for gap in gaps), gaps
+
 
 @dataclass(frozen=True)
 class NetworkUnderTest:
@@ -638,6 +678,56 @@ class NetworkContract:
             return timed_out
 
         assert subject.threads.run(program)
+
+    def test_a_peer_that_stops_reading_blocks_an_untimed_writer_until_its_end_closes(
+        self,
+    ) -> None:
+        """A full buffer blocks the writer, as a real socket's does; closing its end frees it.
+
+        The payload exceeds any socket buffer and the peer never reads, so the
+        untimed ``send`` cannot finish. Closing the writer's own end, as a server
+        that hangs up on a client does, ends it with ``OSError``.
+        """
+        subject = self.network_under_test(0)
+        payload = b"x" * (8 << 20)
+
+        def program() -> tuple[bool, bool]:
+            threads = subject.threads.threads
+            address = subject.address("stalled")
+            listener = subject.network.listen(address)
+            accepted = threads.event()
+            done = threads.event()
+            outcome: list[BaseException | None] = []
+
+            def serve() -> None:
+                connection = listener.accept(HANG_GUARD_S)
+                accepted.set()
+                _wait(done, "the writer giving up")
+                connection.close()
+
+            server = threads.spawn(serve, name="server")
+            client = subject.network.connect(address, HANG_GUARD_S)
+            _wait(accepted, "the server accepting")
+
+            def write() -> None:
+                try:
+                    client.send(payload)
+                except OSError as error:
+                    outcome.append(error)
+                else:
+                    outcome.append(None)
+
+            writer = threads.spawn(write, name="writer")
+            threads.sleep(10 * subject.threads.tick)
+            blocked = writer.is_alive()
+            client.close()
+            _join(writer)
+            done.set()
+            _join(server)
+            listener.close()
+            return blocked, isinstance(outcome[0], OSError)
+
+        assert subject.threads.run(program) == (True, True)
 
     def test_sending_to_a_closed_peer_eventually_fails(self) -> None:
         """Writes to a hung-up peer raise ``OSError`` (broken pipe or reset) within a few attempts."""

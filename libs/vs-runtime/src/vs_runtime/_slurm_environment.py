@@ -12,6 +12,7 @@ from vs_runtime._agent_gpu_commands import (
     AGENT_GPU_LAUNCHER,
     agent_gpu_commands,
     agent_gpu_env,
+    agent_gpu_launcher,
 )
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
 from vs_runtime._container_runtime_policy import reject_docker_in_docker
@@ -47,6 +48,7 @@ from vs_runtime._trusted_evaluation_preparation import (
 from vs_sandbox.api import HostResource, HostResourceAccess, SandboxSession
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
+    BrokerTransport,
     GpuCommands,
     HostCommandBroker,
     RunRoots,
@@ -62,7 +64,11 @@ from vs_sandbox.api.slurm import (
     write_slurm_capture_plan,
     write_slurm_operator_toml,
 )
-from vs_slurm.api import SlurmConfig, SlurmSshTransport
+from vs_slurm.api import (
+    SlurmConfig,
+    slurm_transport_broker_available,
+    slurm_transport_broker_policy,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -142,11 +148,11 @@ class _Mode(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class _ClusterOnly:
-    """The agent has no host commands. Profiling is a remote capture over SSH, and unavailable otherwise.
+    """The agent has no host commands; a brokerable transport enables remote capture.
 
-    The capture's profiler server reaches the cluster through a second host
-    broker that exists only for the SSH transport; without it the profiler
-    would have nowhere to run, so none is offered.
+    The capture's profiler server reaches the cluster through a host transport
+    broker. A transport whose authorization policy cannot safely be brokered
+    offers no remote capture.
     """
 
     remote_capture: bool
@@ -233,7 +239,7 @@ class _AgentGpuMode:
             self.config,
             workspace=request.workspace,
             project_path_policy=request.project_path_policy,
-            shell_command=self.shell_command,
+            launcher=agent_gpu_launcher(self.config, self.shell_command, request.system),
             confinement=confinement,
         )
 
@@ -250,7 +256,7 @@ def _mode(settings: SlurmOperatorSettings) -> _Mode:
     shell_command = settings.agent_gpu_shell_command
     if settings.agent_gpu is not None and shell_command is not None:
         return _AgentGpuMode(settings.agent_gpu, shell_command)
-    return _ClusterOnly(remote_capture=isinstance(settings.config.transport, SlurmSshTransport))
+    return _ClusterOnly(remote_capture=slurm_transport_broker_available(settings.config))
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,9 +278,9 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
     The agent never runs on the host. Trusted accuracy and benchmark work is not
     brokered to the container: the framework runs it through the cluster executor, and
-    the agent requests it through the evaluation tool. For an SSH cluster the host owns
-    one broker whose socket the container reaches, which carries the profiler server's
-    transport.
+    the agent requests it through the evaluation tool. For an SSH or connector cluster
+    the host owns one broker whose socket the container reaches, which carries the
+    profiler server's transport.
 
     The operator may also let the agent run its own GPU commands as Slurm jobs
     (``[vibesys.agent_gpu]`` in the operator file, local transport only). A second
@@ -579,6 +585,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             # Only this session's own workspace: with parallel candidates each session has
             # its own broker, and none may run a command in another candidate's worktree.
             roots=RunRoots((request.workspace,)),
+            transport=BrokerTransport(request.system.network, request.system.threads),
             gpu=gpu,
         )
         broker.start()
@@ -591,19 +598,20 @@ def _start_transport_broker(
     plans: _ClusterPlans,
     brokers: list[HostBroker],
 ) -> tuple[tuple[tuple[str, str], ...], tuple[HostResource, ...]]:
-    """Start the profiler's SSH transport broker; return the env naming it and its mount."""
-    if not isinstance(config.transport, SlurmSshTransport):
+    """Start the profiler's transport broker; return the env naming it and its mount."""
+    if plans.capture is None:
         return (), ()
+    roots = (
+        request.workspace,
+        plans.state_root,
+        *request.run_owned_roots,
+        *plans.support_paths.values(),
+    )
+    policy = slurm_transport_broker_policy(config, local_roots=roots)
     broker = SlurmProcessBroker(
-        config,
+        policy,
         new_broker_socket_path(),
-        local_roots=(
-            request.workspace,
-            plans.state_root,
-            *request.run_owned_roots,
-            *plans.support_paths.values(),
-        ),
-        processes=request.slurm_processes,
+        processes=request.system.slurm_processes,
     )
     broker.start()
     brokers.append(broker)

@@ -12,10 +12,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vs_sim.api import CloseOnce, ReleaseStack
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_sandbox.execution import CommandResult, CommandRunner
+    from vs_sim.api import Released
 
 
 def start_sandbox(sandbox: CommandRunner) -> None:
@@ -84,7 +87,7 @@ class SandboxSession[ViewT]:
         self.sandbox = sandbox
         self.view = view
         self._stop_on_close = stop_on_close
-        self._closed = False
+        self._close = CloseOnce()
 
     @classmethod
     def borrowed(cls, sandbox: CommandRunner, view: ViewT) -> SandboxSession[ViewT]:
@@ -106,12 +109,14 @@ class SandboxSession[ViewT]:
         self.close()
 
     def close(self) -> None:
-        """Stop an owned sandbox at most once."""
-        if self._closed:
-            return
-        self._closed = True
+        """Stop an owned sandbox until a stop returns; a failed stop runs again on the next call."""
         if self._stop_on_close:
-            stop_sandbox(self.sandbox)
+            self._close.run(self._stop)
+
+    def _stop(self) -> Released:
+        steps = ReleaseStack()
+        steps.callback(stop_sandbox, self.sandbox)
+        return steps.close()
 
 
 @dataclass(frozen=True)

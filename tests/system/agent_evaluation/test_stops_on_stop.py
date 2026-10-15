@@ -20,8 +20,7 @@ from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall
 from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, drive_core
 from vs_runtime.api.infrastructure import RunStopped, RuntimeRunControlChannel
 from vs_runtime.api.testing import ProbedRunClock
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import VirtualClock, clock_from
+from vs_sim.api.testing import VirtualClock, clock_from, loop_threads
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -113,7 +112,7 @@ async def _stopped_run(
 
 
 async def test_a_stop_while_an_agent_evaluation_runs_starts_no_further_work(tmp_path: Path) -> None:
-    channel = RuntimeRunControlChannel(_ignore, threads=OsThreads())
+    channel = RuntimeRunControlChannel(_ignore, threads=loop_threads())
     holder: list[Scenario] = []
     at_stop: list[int] = []
     stopped_at: list[float] = []

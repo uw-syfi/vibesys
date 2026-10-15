@@ -26,7 +26,7 @@ from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -74,7 +74,7 @@ class FalseyFakeBackendFactory:
 
     def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
         self.calls += 1
-        return FakeComputeBackend()
+        return FakeComputeBackend(threads=SimThreads())
 
 
 class FalseyFakeSessionAgents:
@@ -120,6 +120,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
     settings = FalseyLaunchSettings(
         timing=production_timing(),
         processes=REAL_PROCESSES,
+        piped_processes=FakePipedProcessLauncher(),
         registry=registry,
         agent_client_factory=agents_factory,
         backend_factory=backend_factory,
@@ -201,11 +202,12 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=lambda **_kwargs: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
             ),
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
             git_repository=FakeGitRepositories().repository,
             invocation_store_factory=factory if injected else None,
         )

@@ -34,6 +34,7 @@ from ._proofs import (
 )
 from ._registry import ClosedRecordContradictionError, ContractError
 from ._request_forward import declaration, owner_signals, records_own
+from ._request_recovery import command_open
 from ._session_scope import lost_turn_cancellation
 from ._values import digest
 from .types.attempts import RevisionOperationRequested
@@ -243,7 +244,9 @@ def _dispatched(
             pass
         case _:
             raise ContractError(("phase",), f"{record.phase.value} request cannot be dispatched")
-    updated = record.model_copy(update={"phase": RequestPhase.DISPATCHED})
+    updated = record.model_copy(
+        update={"phase": RequestPhase.DISPATCHED, "dispatched_in": state.recovery.epoch}
+    )
     if record.limit_from_dispatch is not None and record.dispatched_at is None:
         updated = updated.model_copy(
             update={
@@ -284,7 +287,7 @@ def _observed(
         # Another inspection already returned it to PREPARED (two epochs inspected it).
         return change
     if target.reissue is not None and _reissuable(original, target.reissue):
-        return _finish(change, _reissue(change.state, original))
+        return _finish(change, _reissue(change.state, original, context))
     change = _finish(change, _apply(change.state, context, original, target))
     if isinstance(root.request, InspectTurn) and not success_without_reply(target.observation):
         # An inspection that learned nothing new still ends: Sessions must hear that the
@@ -427,7 +430,9 @@ def _reissuable(record: RequestRecord, proof: ReissueProof) -> bool:
     )
 
 
-def _reissue(state: RecordsState, record: RequestRecord) -> AreaChange[RecordsState]:
+def _reissue(
+    state: RecordsState, record: RequestRecord, context: RecordsContext
+) -> AreaChange[RecordsState]:
     """An open request the executor can account for goes out again, unchanged, from PREPARED.
 
     Never begun: no effect started, so the request is simply sent again. Begun without a
@@ -435,13 +440,22 @@ def _reissue(state: RecordsState, record: RequestRecord) -> AreaChange[RecordsSt
     executor inspects the external effect before repeating it. Either way the request is
     neither observed nor reported to its owner: the owner never learns it was interrupted,
     and the replay equals the straight run.
+
+    A command (an inspection, cancel or block) is core's own and has no owner's limit: sent
+    again, it gets a fresh reconciliation bound from now, or a re-send that waited out its
+    first bound would lapse before it is answered.
     """
+    until = record.until
+    if command_open(record):
+        fresh = context.run.now_at + context.run.limits.reconciliation_bound
+        until = until.model_copy(update={"at": max(until.at, fresh)})
     reissued = record.model_copy(
         update={
             "phase": RequestPhase.PREPARED,
             "observation": None,
             "sequence": None,
             "retry_at": None,
+            "until": until,
         }
     )
     return AreaChange(state=_replace(state, reissued))
@@ -684,7 +698,7 @@ def _retry(
         or state.recovery.phase != RecoveryPhase.READY
     ):
         return AreaChange(state=state)
-    return _reissue(state, record)
+    return _reissue(state, record, context)
 
 
 @dataclass(frozen=True)

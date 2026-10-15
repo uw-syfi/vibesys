@@ -7,7 +7,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from vs_core._registry import ContractError
 from vs_core.types.common import THIS_RUN, AttemptRef, DecisionId, InvocationRef, RunFacts, Seconds
@@ -117,12 +117,16 @@ class _Run:
         """Restart the flows of ``base`` from their snapshots with the current code.
 
         The root starts first. A task starts when its group ``start``s its key again, from the
-        latest snapshot of the flow that had that key, with its decision numbering kept.
+        latest snapshot of the flow that had that key, with its decision numbering kept. A task
+        that is not a registered flow has no snapshot: it is dropped with the old code, and if
+        its parent, restarted from its own snapshot, starts that key again, it starts afresh.
         """
         self._begin(view, recorded)
         self.stop, self.published, self.choice = base.stop, base.published, base.choice
         self._issued = {(i.path, i.label): i.count for i in base.issued}
-        self._restorable = {live.path: live for live in base.flows if live.path}
+        self._restorable = {
+            live.path: live for live in base.flows if live.path and live.name is not None
+        }
         root = next(live for live in base.flows if not live.path)
         if root.name != self._root.name or not root.checkpointed:
             raise FlowCodeChanged(0)  # the root resumes only from a snapshot it recorded
@@ -217,7 +221,23 @@ class _Run:
         else:
             text = adapter.dump_json(fn(self._view)).decode()
         self._reads.append(text)
-        return adapter.validate_json(text)
+        return self._decoded(lambda: adapter.validate_json(text))
+
+    def _decoded[V](self, decode: Callable[[], V]) -> V:
+        """``decode()`` of a recorded value; on replay, a value it rejects is a code change.
+
+        The journal and the snapshots hold values the old code wrote. When the current code
+        reads one as a type it no longer fits (the old code read the clock where the new code
+        reads the task), replay has diverged at that point: the driver restarts the flows instead
+        of failing the resume. A value the run produced in this very step must decode, so a
+        failure there stays the error it is.
+        """
+        if self._recorded is None:
+            return decode()
+        try:
+            return decode()
+        except ValidationError as unreadable:
+            raise FlowCodeChanged(-1) from unreadable  # the driver names the journal step
 
     def count(self, task: _Task, label: str) -> int:
         """The next number under ``label`` in ``task``'s flow (1, 2, ...); ids never repeat."""
@@ -335,7 +355,11 @@ class _Run:
 
     @staticmethod
     def _snapshot_of(definition: FlowDef, live: LiveFlow) -> object:
-        return _adapter(definition.snapshot).validate_json(live.snapshot_json)
+        """The snapshot the old code recorded, as the current code's snapshot type."""
+        try:
+            return _adapter(definition.snapshot).validate_json(live.snapshot_json)
+        except ValidationError as unreadable:
+            raise FlowCodeChanged(0) from unreadable  # the snapshot type changed incompatibly
 
     def _launch(self, task: _Task, definition: FlowDef, argument: object) -> None:
         """Start ``task`` as a registered flow on ``argument`` (its first snapshot)."""
@@ -429,7 +453,9 @@ class _Run:
         """The event a recorded item stands for: live and replay both go through here."""
         if isinstance(item, RecordedOperation):
             context = {"operation_registry": self.wiring.registry, "persisted_operation": True}
-            result = OperationResult.model_validate_json(item.result_json, context=context)
+            result = self._decoded(
+                lambda: OperationResult.model_validate_json(item.result_json, context=context)
+            )
             return OperationFinished(decision=item.decision, result=result)
         return item
 

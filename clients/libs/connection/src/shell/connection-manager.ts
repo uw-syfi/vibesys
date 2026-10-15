@@ -138,7 +138,8 @@ export class ConnectionManager implements AsyncDisposable {
 
   /**
    * Bring `host`'s link up now, prompting when the host asks: the user's own sign-in. A connection
-   * stuck on it then tries again.
+   * stuck on it then tries again, including one retained for an attached run after its checkout
+   * was replaced.
    */
   async signIn(host: HostId): Promise<void> {
     const key = hostKey(host);
@@ -153,7 +154,10 @@ export class ConnectionManager implements AsyncDisposable {
     managed.operations += 1;
     try {
       await managed.link.establish(true);
-      this.#shown.get(key)?.connection.dispatch({type: 'user-retry'});
+      // A checkout-replaced connection can still own an attached run. It shares this link and the
+      // user's authentication result, so retry every live connection for the host rather than
+      // only the one currently shown in the welcome view.
+      for (const connection of managed.connections) connection.dispatch({type: 'user-retry'});
     } finally {
       managed.operations -= 1;
       await this.#releaseUnused(key, managed);

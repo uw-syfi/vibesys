@@ -41,6 +41,30 @@ export const WELCOME_CHANNELS = {
   ...RUN_CONTROL_CHANNELS,
 } as const;
 
+type WelcomeChannel = (typeof WELCOME_CHANNELS)[keyof typeof WELCOME_CHANNELS];
+
+/** The complete positional shape of every welcome request at the renderer boundary. */
+const WELCOME_ARGUMENT_COUNTS = {
+  [WELCOME_CHANNELS.overview]: 0,
+  [WELCOME_CHANNELS.hosts]: 0,
+  [WELCOME_CHANNELS.host]: 1,
+  [WELCOME_CHANNELS.setCheckout]: 3,
+  [WELCOME_CHANNELS.cancelCheckout]: 1,
+  [WELCOME_CHANNELS.cancelInspection]: 1,
+  [WELCOME_CHANNELS.signIn]: 1,
+  [WELCOME_CHANNELS.complete]: 2,
+  [WELCOME_CHANNELS.inspect]: 4,
+  [WELCOME_CHANNELS.tasks]: 2,
+  [WELCOME_CHANNELS.start]: 5,
+  [WELCOME_CHANNELS.cancelStart]: 1,
+  [WELCOME_CHANNELS.attach]: 2,
+  [WELCOME_CHANNELS.resume]: 3,
+  [WELCOME_CHANNELS.showRun]: 0,
+  [WELCOME_CHANNELS.showWelcome]: 0,
+  [WELCOME_CHANNELS.retry]: 0,
+  [WELCOME_CHANNELS.stop]: 3,
+} as const satisfies Readonly<Record<WelcomeChannel, number>>;
+
 /**
  * What the welcome preload exposes to the welcome view (`window.vibesysWelcome`): one function per
  * request channel, and one subscription per event. The main process validates every argument.
@@ -69,10 +93,19 @@ export type WelcomeRequest =
  * `Error` naming the unknown channel or the first invalid value.
  */
 export function parseWelcomeRequest(channel: string, args: readonly unknown[]): WelcomeRequest {
+  if (!Object.hasOwn(WELCOME_ARGUMENT_COUNTS, channel)) {
+    throw new Error(`${JSON.stringify(channel)} is not a welcome request`);
+  }
+  const expected = WELCOME_ARGUMENT_COUNTS[channel as WelcomeChannel];
+  if (args.length !== expected) {
+    const noun = expected === 1 ? 'argument' : 'arguments';
+    throw new Error(`${channel} expects ${expected} ${noun}, not ${args.length}`);
+  }
   if (isChannelOf(APP_CHANNELS, channel)) return {kind: 'overview'};
   if (isChannelOf(HOSTS_CHANNELS, channel)) return parseHostsRequest(channel, args);
   if (isChannelOf(START_RUN_CHANNELS, channel)) return parseStartRunRequest(channel, args);
   if (isChannelOf(RUN_CONTROL_CHANNELS, channel)) return parseRunControlRequest(channel, args);
+  // `WELCOME_ARGUMENT_COUNTS` is exhaustive over the same composed channel object.
   throw new Error(`${JSON.stringify(channel)} is not a welcome request`);
 }
 

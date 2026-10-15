@@ -21,8 +21,9 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import logging
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -35,17 +36,23 @@ from vs_sandbox.agent_gpu import (
     GpuLauncher,
 )
 from vs_sandbox.host_command_client import SOCKET_ENV, TOKEN_ENV
-from vs_sim.api import Network, OsThreads, Threads, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from vs_sandbox.job_confinement import JobConfinement
-    from vs_sim.api import Connection, Event, Listener, Worker
+    from vs_sim.api import Connection, Event, Listener, Network, Threads, Worker
 
 _MAX_FRAME_BYTES = 4 * 1024 * 1024
 # How long close() waits for cancelled jobs to be torn down (their scancel round trips).
 _DRAIN_SECONDS = 60.0
+_SEND_BOUND_SECONDS = 30.0
+"""How long one frame may wait for the client to make room before the broker gives up on it.
+
+A client that stops reading would otherwise block the job's output writer, so the job, and
+the Slurm allocation it holds, would never end; giving up cancels the job.
+"""
+_LOG = logging.getLogger(__name__)
 # Variables that would point the job at the agent host's devices or at the
 # broker itself. Slurm sets the device variables for the allocation.
 _DROPPED_ENV_PREFIXES = ("VIBESYS_COMMAND_BROKER_", "SLURM_")
@@ -170,8 +177,8 @@ class GpuCommands:
 class BrokerTransport:
     """The I/O a broker runs on: where its socket lives and the threads that serve it."""
 
-    network: Network = field(default_factory=UnixNetwork)
-    threads: Threads = field(default_factory=OsThreads)
+    network: Network
+    threads: Threads
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,7 +218,10 @@ def _parse_call(frame: bytes) -> GpuCall:
 
 
 def _send(connection: Connection, payload: Mapping[str, object]) -> None:
-    connection.send(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+    """Send one frame; ``TimeoutError`` when the client read nothing for the send bound."""
+    connection.send(
+        json.dumps(payload, separators=(",", ":")).encode() + b"\n", _SEND_BOUND_SECONDS
+    )
 
 
 def _cancel_on_hangup(connection: Connection, cancel: Event) -> None:
@@ -250,8 +260,7 @@ class HostCommandBroker:
 
     *roots* bound where a command may run. *gpu* is the operation the run offers;
     a broker without it refuses every request by name. *transport* is
-    where the socket is bound and what runs the accept loop and the handlers;
-    production uses the defaults, tests pass simulators.
+    where the socket is bound and what runs the accept loop and the handlers.
     """
 
     def __init__(
@@ -259,13 +268,12 @@ class HostCommandBroker:
         socket_path: Path,
         *,
         roots: RunRoots,
+        transport: BrokerTransport,
         gpu: GpuCommands | None = None,
-        transport: BrokerTransport | None = None,
     ) -> None:
         """Bind the private socket, the run's roots, and the operations it offers."""
         self.socket_path = socket_path
         self.token = secrets.token_urlsafe(32)
-        transport = transport or BrokerTransport()
         self._network = transport.network
         self._threads = transport.threads
         self._workspaces = tuple(path.resolve() for path in roots.workspaces)
@@ -372,6 +380,12 @@ class HostCommandBroker:
                 return
             try:
                 _send(connection, {"output": base64.b64encode(chunk).decode()})
+            except TimeoutError:
+                _LOG.warning(
+                    "a command broker client read nothing for %g s; cancelling its job",
+                    _SEND_BOUND_SECONDS,
+                )
+                cancel.set()
             except OSError:
                 cancel.set()
 

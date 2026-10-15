@@ -7,6 +7,17 @@ repository ("Directory not empty: .git"). Every Git command VibeSys starts
 therefore carries ``maintenance.auto=false`` and ``gc.auto=0``; the user's own
 Git commands still maintain their repositories.
 
+Every command also runs no program the repository names: hooks (``core.hooksPath`` is
+``/dev/null``), the file-system monitor (``core.fsmonitor``) and commit or tag signing
+(``gpg.program``). The repository's config, hooks and worktree are agent-writable in a
+workspace, so any of them would run agent-chosen code on the host, unconfined, at the
+next snapshot. Git never enters a nested repository (``diff.ignoreSubmodules``,
+``submodule.recurse``), whose config would name programs too; ``_nested_repositories``
+refuses such a work tree outright, since ``git add`` checks a gitlink regardless. Only the
+work tree's own ``.gitattributes`` and ``.git/info/attributes`` assign attributes: the
+user's global and the system attributes files are off, so attributes that select a
+driver come from the repository alone.
+
 ``tests/architecture/test_git_invocation_boundary.py`` fails when code under
 ``src/`` or ``libs/`` starts Git without going through this module.
 """
@@ -22,6 +33,7 @@ from vs_project.api.git_repository import GitCommandError
 from vs_sim.api import (
     ProcessGroupUnreaped,
     ProcessOutcome,
+    ProcessOutputTooLarge,
     ProcessSpec,
     ProcessTimedOut,
     ProcessTimeoutError,
@@ -33,6 +45,9 @@ if TYPE_CHECKING:
 
     from vs_sim.api import Processes
 
+# The status a run stopped for too much output reports: its group was killed with SIGKILL.
+_KILLED_STATUS = -9
+
 # Variables that make Git operate on a repository other than the one at ``cwd``.
 _SELECTION_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
 
@@ -41,12 +56,27 @@ _NO_BACKGROUND_MAINTENANCE: tuple[tuple[str, str], ...] = (
     ("gc.auto", "0"),
 )
 
+# Programs a repository can make Git run; none runs on the host (see the module docstring).
+_NO_REPOSITORY_PROGRAMS: tuple[tuple[str, str], ...] = (
+    ("core.hooksPath", "/dev/null"),
+    ("core.fsmonitor", "false"),
+    ("commit.gpgSign", "false"),
+    ("tag.gpgSign", "false"),
+    ("diff.ignoreSubmodules", "all"),
+    ("submodule.recurse", "false"),
+    ("core.attributesFile", "/dev/null"),
+)
+
 
 def git_config_env(
     extra_config: Sequence[tuple[str, str]] = (),
 ) -> dict[str, str]:
-    """Return ``GIT_CONFIG_*`` variables for ``extra_config`` plus the no-maintenance pair."""
-    config = (*extra_config, *_NO_BACKGROUND_MAINTENANCE)
+    """Return ``GIT_CONFIG_*`` variables for ``extra_config`` plus the host Git policy.
+
+    The policy (no background maintenance, no repository programs) comes last, so
+    ``extra_config`` cannot override it.
+    """
+    config = (*extra_config, *_NO_BACKGROUND_MAINTENANCE, *_NO_REPOSITORY_PROGRAMS)
     result = {"GIT_CONFIG_COUNT": str(len(config))}
     for index, (key, value) in enumerate(config):
         result[f"GIT_CONFIG_KEY_{index}"] = key
@@ -62,8 +92,9 @@ def git_environment(
     """Return the process environment for one Git command.
 
     Starts from ``os.environ`` without the repository-selection variables and with terminal
-    prompts off, then applies ``overrides`` (which may set them again on purpose), then the Git
-    config that trusts ``safe_directory`` and disables background maintenance.
+    prompts off, then applies ``overrides`` (which may set them again on purpose), then turns
+    off the system attributes file and adds the Git config that trusts ``safe_directory``
+    and carries the host Git policy.
     ``overrides`` cannot set ``GIT_CONFIG_*``: the config is owned here.
     """
     env = {key: value for key, value in os.environ.items() if key not in _SELECTION_VARIABLES}
@@ -71,10 +102,28 @@ def git_environment(
     # reading a credential prompt from the terminal would stop it; it fails instead.
     env["GIT_TERMINAL_PROMPT"] = "0"
     env.update(overrides or {})
+    env["GIT_ATTR_NOSYSTEM"] = "1"
     env = {key: value for key, value in env.items() if not key.startswith("GIT_CONFIG_")}
     safe = (("safe.directory", str(safe_directory)),) if safe_directory is not None else ()
     env.update(git_config_env(safe))
     return env
+
+
+def _require_policy(env: Mapping[str, str]) -> None:
+    """Refuse ``env`` unless its last ``GIT_CONFIG_*`` entries are the host Git policy."""
+    policy = (*_NO_BACKGROUND_MAINTENANCE, *_NO_REPOSITORY_PROGRAMS)
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        count = 0
+    first = count - len(policy)
+    given = tuple(
+        (env.get(f"GIT_CONFIG_KEY_{index}"), env.get(f"GIT_CONFIG_VALUE_{index}"))
+        for index in range(max(first, 0), count)
+    )
+    if first < 0 or given != policy:
+        message = "a Git environment must come from git_environment(), which owns its config"
+        raise ValueError(message)
 
 
 @dataclass(frozen=True)
@@ -117,10 +166,13 @@ class Git:
     ) -> ProcessOutcome:
         """Run ``git <args>`` in ``cwd``; ``args`` excludes the ``git`` executable.
 
-        ``env`` comes from ``git_environment`` and defaults to ``git_environment()``.
+        ``env`` comes from ``git_environment`` and defaults to ``git_environment()``; an
+        ``env`` without the host Git policy raises ``ValueError`` before Git starts.
         """
         argv = (shutil.which("git") or "git", *args)
-        spec = ProcessSpec(argv, cwd=cwd, env=git_environment() if env is None else env)
+        environment = git_environment() if env is None else env
+        _require_policy(environment)
+        spec = ProcessSpec(argv, cwd=cwd, env=environment)
         match self._processes.run(spec, timeout=timeout):
             case ProcessOutcome() as outcome:
                 return outcome
@@ -129,6 +181,16 @@ class Git:
             case ProcessGroupUnreaped(timeout=limit, detail=detail):
                 error = ProcessTimeoutError(list(argv), limit)
                 error.add_note(detail)
+                raise error
+            case ProcessOutputTooLarge(limit=limit, stream=stream, stderr=stderr, detail=detail):
+                error = GitCommandError(
+                    args,
+                    _KILLED_STATUS,
+                    f"git wrote more than {limit} bytes to {stream}; "
+                    f"stderr began: {stderr.decode(errors='replace')}",
+                )
+                if detail:
+                    error.add_note(detail)
                 raise error
 
     def run_text(

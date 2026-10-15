@@ -45,6 +45,11 @@ export type RunControlRequest =
   | {readonly kind: 'show-welcome'}
   | {readonly kind: 'retry'};
 
+function forceStop(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error('force stop must be a boolean');
+  return value;
+}
+
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
 export function parseRunControlRequest(
   channel: ChannelOf<typeof RUN_CONTROL_CHANNELS>,
@@ -66,7 +71,7 @@ export function parseRunControlRequest(
         kind: 'stop',
         host: hostFromKey(first),
         instance: instance(second, 'stop'),
-        force: third === true,
+        force: forceStop(third),
       };
     case RUN_CONTROL_CHANNELS.showRun:
       return {kind: 'show-run'};

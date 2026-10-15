@@ -19,6 +19,7 @@ from vs_sandbox.slurm_broker_protocol import (
     ProcessCall,
 )
 from vs_sim.api import ProcessOutcome, ProcessTimedOut
+from vs_slurm.api import MAX_TRANSPORT_STREAM_BYTES
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -78,6 +79,7 @@ class BrokeredProcesses:
             argv=spec.argv,
             stdin=spec.input.decode() if spec.input else None,
             timeout=timeout,
+            max_output_bytes=min(spec.max_output_bytes, MAX_TRANSPORT_STREAM_BYTES),
         )
         try:
             line = _exchange(

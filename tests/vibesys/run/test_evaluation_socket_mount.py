@@ -12,7 +12,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.vibesys.orchestration.plugin import EmptyOptions
 from tests.vibesys.run.test_core_host_composition import _plugin, _request, _write_project
 from tests.vibesys.run.test_docker_candidate_sandboxes import _DaemonBackend
@@ -25,10 +25,15 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
 from vs_runtime.api.core import RunTiming
-from vs_runtime.api.testing import FakeStopTimer
+from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ManualClock,
+    VirtualClock,
+    run_virtual,
+)
 
 
 def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]:
@@ -37,7 +42,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
     templates = root / "templates"
     templates.mkdir()
     _write_project(project_root)
-    engine = FakeDockerEngine(root / "engine")
+    engine = FakeDockerEngine(root / "engine", launcher=FakePipedProcessLauncher())
 
     def backend_factory(
         _name: object,
@@ -49,7 +54,13 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
         events: object | None = None,
     ) -> _DaemonBackend:
         del clock, events  # the fake backend records no timestamps and has no device to watch
-        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(
+            log_dir,
+            log=log,  # ty: ignore[invalid-argument-type]
+            image=image,
+            threads=OsThreads(),
+            launcher=FakePipedProcessLauncher(),
+        )
         made.engine = engine
         return made
 
@@ -66,7 +77,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
     clock = VirtualClock(at=0.0)
 

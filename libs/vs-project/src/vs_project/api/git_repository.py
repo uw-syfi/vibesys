@@ -32,6 +32,13 @@ Conventions
   exception, and an error is never mapped to an absence unless a method's
   contract says so. ``OSError`` still means the machinery itself (a missing
   ``git`` executable, an unreadable directory) is unavailable.
+* The operations that make Git read the work tree (``tracked_changes_since_head``,
+  ``uncommitted_paths``, ``changed_since``, ``worktree_matches``, ``stage_all`` and
+  ``commit`` with ``only``) raise :class:`NestedRepositoryError` instead of running Git
+  when a repository is nested in the work tree: a ``.git`` below its top level, or a
+  gitlink in the index or the compared tree. Git would check such a repository by running
+  a child Git inside it under that repository's own config and attributes, which an agent
+  writes, so a filter driver the agent names would run on the host.
 * Commits are authored and committed as ``COMMIT_IDENTITY_NAME
   <COMMIT_IDENTITY_EMAIL>``.
 * Nothing here caches. Every read observes the repository as it is now, so
@@ -143,6 +150,28 @@ class StagingError(GitCommandError):
         self.unreadable = tuple(unreadable)
 
 
+class NestedRepositoryError(GitError):
+    """The work tree holds a nested repository, so Git was not run on it.
+
+    ``paths`` names each ``.git`` entry below the top level and each gitlink, relative to
+    the top level. ``scan_limit`` is set instead when the tree held more entries than
+    the scan looks at, so nothing can be said about the rest.
+    """
+
+    def __init__(self, paths: Sequence[str], *, scan_limit: int | None = None) -> None:
+        """Record the nested ``paths``, or the ``scan_limit`` the work tree exceeded."""
+        self.paths = tuple(paths)
+        self.scan_limit = scan_limit
+        if scan_limit is not None:
+            detail = f"the work tree holds more than {scan_limit} entries to check"
+        else:
+            detail = "nested repositories at " + ", ".join(self.paths)
+        super().__init__(
+            f"host Git refuses a work tree that may hold a nested repository: {detail}; "
+            "remove each nested .git (or move the repository out of the workspace)"
+        )
+
+
 @dataclass(frozen=True)
 class RepositoryLocation:
     """Where the repository lives: its Git directory and worktree top level."""
@@ -201,6 +230,15 @@ class GitRepository(Protocol):
         An agent can create a nested ``.git`` after tracking started; without
         pinning, later calls would silently switch repositories. Call once
         after ``initialize`` or at resume (portable).
+        """
+        ...
+
+    def pin(self, location: RepositoryLocation) -> None:
+        """Pin every later call to ``location`` without asking Git where the repository is.
+
+        For a linked worktree whose ``.git`` file the host must not trust: the agent
+        working in it can rewrite it. Take ``location`` from the parent repository's
+        :meth:`linked_worktree_location` (portable).
         """
         ...
 
@@ -322,7 +360,7 @@ class GitRepository(Protocol):
     ) -> str:
         """The unified diff from ``base`` to ``head`` limited to ``pathspecs``.
 
-        No external diff drivers. Raises ``GitCommandError``, or
+        No external diff drivers and no textconv. Raises ``GitCommandError``, or
         ``GitTimeoutError`` past ``timeout`` (cli-only).
         """
         ...
@@ -471,6 +509,15 @@ class GitRepository(Protocol):
         """The commit a linked worktree's ``HEAD`` resolves to.
 
         Raises ``GitCommandError`` when it does not resolve (portable).
+        """
+        ...
+
+    def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        """Where this repository registered its linked worktree ``worktree``.
+
+        Read from this repository's own records, never from ``worktree/.git``.
+        Raises ``GitCommandError`` when ``worktree`` is not a linked worktree of this
+        repository (portable).
         """
         ...
 

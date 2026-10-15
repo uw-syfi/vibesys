@@ -16,6 +16,7 @@ from vs_runtime.contracts import (
     Workspaces,
     member_workspace_id,
 )
+from vs_sim.api import AsyncCloseOnce, NothingLeft, Released, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
@@ -332,12 +333,11 @@ class RuntimeCandidateWorkspace(RuntimeWorkspace):
 
     def __init__(self, owner: RuntimeWorkspaces, resource: WorkspaceResource) -> None:
         super().__init__(owner, resource)
-        self._discard_task: asyncio.Task[None] | None = None
+        self._release = AsyncCloseOnce()
 
     async def discard(self) -> None:
-        if self._discard_task is None:
-            self._discard_task = asyncio.create_task(self._owner._discard(self))  # noqa: SLF001  # lint-waiver: LW-228405 [SLF001]; candidate release is owned by its creating collection.
-        await asyncio.shield(self._discard_task)
+        """Close this candidate; a failed close is tried again by the next call."""
+        await self._release.run(lambda: self._owner._discard(self))  # noqa: SLF001  # lint-waiver: LW-228405 [SLF001]; candidate release is owned by its creating collection.
 
 
 class RuntimeWorkspaces:
@@ -357,7 +357,8 @@ class RuntimeWorkspaces:
         self._candidate_locks: dict[str, asyncio.Lock] = {}
         self._candidates: dict[str, RuntimeCandidateWorkspace] = {}
         self._closed = False
-        self._close_task: asyncio.Task[None] | None = None
+        self._close = AsyncCloseOnce()
+        self._root_release = AsyncCloseOnce()
         self._evaluations: set[asyncio.Task[object]] = set()
         self.access_fence: Callable[[Path], tuple[str, ...]] | None = None
         self.root = RuntimeWorkspace(self, resources.root)
@@ -555,23 +556,24 @@ class RuntimeWorkspaces:
             finally:
                 self._evaluations.discard(task)
 
-    async def _discard(self, candidate: RuntimeCandidateWorkspace) -> None:
+    async def _discard(self, candidate: RuntimeCandidateWorkspace) -> Released:
         async with self._lifecycle_lock:
             resource = self.resource_for(candidate)
-            errors: list[BaseException] = []
             lock = self._candidate_locks[resource.id or ""]
             async with lock, self._root_lock:
+                steps = ReleaseStack()
+                steps.callback(resource.close)
                 try:
-                    await run_sync(self._runner, resource.close)
-                except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228409 [BLE001]; all candidate bookkeeping must close even when one resource close fails.
-                    errors.append(error)
-                finally:
-                    self._candidates.pop(resource.id or "", None)
-                    self._candidate_locks.pop(resource.id or "", None)
-                    candidate._closed = True  # noqa: SLF001  # lint-waiver: LW-228417 [SLF001]; the owning collection terminates its handle after cleanup.
-            if errors:
-                message = "candidate workspace cleanup failed"
-                raise BaseExceptionGroup(message, errors)
+                    proof = await run_sync(self._runner, steps.close)
+                except Exception as error:
+                    # The candidate may still exist, so it stays registered and open: a retry
+                    # or the run's close tries again. Callers read the failure as a group.
+                    message = "candidate workspace cleanup failed"
+                    raise ExceptionGroup(message, [error]) from error
+                self._candidates.pop(resource.id or "", None)
+                self._candidate_locks.pop(resource.id or "", None)
+                candidate._closed = True  # noqa: SLF001  # lint-waiver: LW-228417 [SLF001]; the owning collection terminates its handle after cleanup.
+        return proof
 
     def begin_close(self) -> None:
         """Reject new work and cancel in-flight trusted evaluations before teardown."""
@@ -583,12 +585,10 @@ class RuntimeWorkspaces:
 
     async def close(self) -> None:
         """Close candidate pairs, then the root resource."""
-        if self._close_task is None:
-            self.begin_close()
-            self._close_task = asyncio.create_task(self._close_once())
-        await asyncio.shield(self._close_task)
+        self.begin_close()
+        await self._close.run(self._close_once)
 
-    async def _close_once(self) -> None:
+    async def _close_once(self) -> Released:
         errors: list[BaseException] = []
         async with self._lifecycle_lock:
             candidates = tuple(self._candidates.values())
@@ -597,12 +597,19 @@ class RuntimeWorkspaces:
                 await candidate.discard()
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228410 [BLE001]; run cleanup attempts every candidate in reverse creation order.
                 errors.append(error)
-        async with self._root_lock:
-            try:
-                await run_sync(self._runner, self.root._resource.close)  # noqa: SLF001  # lint-waiver: LW-228420 [SLF001]; collection close releases the root resource after all candidates.
-            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228421 [BLE001]; root cleanup joins candidate cleanup failures.
-                errors.append(error)
         self.root._closed = True  # noqa: SLF001  # lint-waiver: LW-228418 [SLF001]; collection close terminates its root handle with the run.
+        try:
+            await self._root_release.run(self._close_root)
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228421 [BLE001]; root cleanup joins candidate cleanup failures.
+            errors.append(error)
         if errors:
             message = "workspace cleanup failed"
             raise BaseExceptionGroup(message, errors)
+        async with self._lifecycle_lock:
+            return Released.shown_by(NothingLeft(tuple(self._candidates), "candidate workspaces"))
+
+    async def _close_root(self) -> Released:
+        steps = ReleaseStack()
+        steps.callback(self.root._resource.close)  # noqa: SLF001  # lint-waiver: LW-228420 [SLF001]; collection close releases the root resource after all candidates.
+        async with self._root_lock:
+            return await run_sync(self._runner, steps.close)

@@ -15,7 +15,7 @@ from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.support import run_test_command
 from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_proof
-from tests.support.real_git import REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import REAL_GIT
 
 from vs_agent.api import NULL_SKILL_SELECTION
 from vs_core.api import HostFence, HostId, Until
@@ -58,10 +58,10 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaces,
     MemoryValidationPasses,
+    idle_environment_system,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock, examples
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -136,13 +136,13 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     log_dir=project.logger.log_dir,
                     workspace=root,
                     ref_dir=None,
-                    backend=FakeComputeBackend(),
+                    backend=FakeComputeBackend(threads=SimThreads()),
                     agent_backend="stub",
                     cli_provider="codex",
                     run_id="workspace-contract",
                     framework_root=Path(scratch),
                     clock=ManualClock(),
-                    slurm_processes=REAL_PROCESSES,
+                    system=idle_environment_system(),
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),
@@ -160,12 +160,12 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
-                threads=OsThreads(),
-                blocking=ThreadBlockingRunner(),
+                threads=SimThreads(),
+                blocking=InlineBlockingRunner(),
             )
             workspaces = create_workspace_runtime(
                 workspace_resources=resources,
-                blocking=BlockingOperations(runner=ThreadBlockingRunner()),
+                blocking=BlockingOperations(runner=InlineBlockingRunner()),
                 validation_passes=MemoryValidationPasses(),
             ).workspaces
         try:

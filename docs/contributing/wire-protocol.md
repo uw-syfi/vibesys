@@ -37,7 +37,7 @@ The authoritative message taxonomy is three unions in `src/server/api/protocol.p
 | --- | --- | --- |
 | client to server | `ProtocolRequest` | `command.*`, `query.*`, `subscribe` (17 types) |
 | server to client, control | `Response` | one per request, correlated by `request_id` |
-| server to client, stream | `ServerMessage` | `subscribed`, `event`, `event_batch`, `protocol_error` |
+| server to client, stream | `ServerMessage` | `subscribed`, `event`, `event_batch`, `active_executions_chunk`, `protocol_error` |
 
 `PROTOCOL_VERSION` is `1`. Every model sets `extra="forbid"`, which is load bearing: a client probes
 for an optional field by sending it and treating rejection as "this server does not have the field"
@@ -69,10 +69,36 @@ JSONL line; `_write_message` serializes one model and appends `\n`
 Batching is not framing. `event_batch` is one protocol message that carries many events in its
 `events` list. The batch is a payload construct (`EventBatchMessage` in `protocol.py`), produced by
 the server coalescing a watermark-consistent snapshot (`unix_jsonl.py:_stream`), and it crosses the
-wire as a single frame on either transport. A transport never splits or merges frames. The WebSocket
-gateway may send one batch as several whole `event_batch` messages, one frame each, so no frame
-exceeds its send cap (`protocol.py:EventBatchMessage.split_within`); folding them in order is folding
-the batch.
+wire as a single frame on either transport. A transport never splits or merges frames. The server
+may send one batch as several whole `event_batch` messages, one frame each, so no frame exceeds the
+shared client cap (`protocol.py:EventBatchMessage.stream_messages_within`); folding them in order is
+folding the batch. Both Unix JSONL and WebSocket use that projection, so transport choice cannot
+change which checkpoint is deliverable.
+
+An active-execution checkpoint can consume most or all of the cap even before its batch adds events:
+assignments are user-authored and the list describes every concurrent execution. Whenever the
+checkpoint and any one event cannot share a bounded batch, the event frames carry
+`active_executions: null`, meaning "preserve the last complete checkpoint while this replay updates
+it", plus `active_executions_checkpoint_id`, followed by ordered `active_executions_chunk` messages
+with that identity. Their payloads concatenate to the JSON encoding of the generated
+`ActiveExecutions` type. The persistent client stream owns reassembly for one connection generation.
+Each deferred event frame folds exactly once into a private, serializable execution projection while
+the public state retains its last complete execution checkpoint and statuses. After the complete
+payload validates and its SHA-256 matches `checkpoint_id`, the stream emits one synthetic empty,
+non-rebootstrap `event_batch`; folding it atomically publishes the staged execution projection and
+the authoritative checkpoint without retaining or replaying the event frames. An ordinary live
+transfer needs only the completed checkpoint. A rebootstrap transfer rebuilds the same state as the
+unsplit authoritative batch inside that private transaction instead of reconciling into the
+pre-replay fold. A checkpoint prefix is never passed to the run-state fold. Fragments require the
+matching deferred batch immediately before their transfer; a new deferred or ordinary authoritative
+batch supersedes an interrupted transfer and fences its late fragments. A gap, duplicate,
+interleaved unrelated message, changed identity, changed cursor metadata, or content digest mismatch
+is a protocol fault. A disconnect discards staging, so fragments from two connections cannot
+combine. The assembled UTF-8 payload is capped at 16 MiB and a fragment at 64 Ki Unicode code points;
+the 256-fragment generated-schema bound is the matching worst-case count. The server validates the
+aggregate and its complete fragment projection before sending any event frame; an oversize snapshot
+therefore produces a typed `stream_failed` error without advancing the peer's cursor. Every
+serialized fragment still has to fit the transport byte budget.
 
 ### WP-FRAME-TYPE: text frames, UTF-8
 

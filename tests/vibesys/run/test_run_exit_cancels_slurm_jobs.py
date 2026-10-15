@@ -29,6 +29,7 @@ from vs_core.api import StopMode
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, RunStopped
+from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, executing_cluster, recorded_commands
@@ -110,7 +111,7 @@ def test_a_stopped_run_cancels_a_pending_benchmark_job(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(REAL_PROCESSES),
     )
     submitted_ids: list[str] = []
 

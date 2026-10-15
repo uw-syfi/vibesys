@@ -112,6 +112,7 @@ class _LauncherOptions(TypedDict, total=False):
     docker_sandboxes: dict[str, Any] | None
     check_timeout: float | None
     transient_retry_delays: Sequence[float]
+    threads: SimThreads
 
 
 @dataclass
@@ -205,7 +206,7 @@ def _launcher(
         # Zero waits keep the retry tests instant; the schedule is the knob.
         transient_retry_delays=options.get("transient_retry_delays", (0.0, 0.0)),
         clock=FakeClock(),
-        threads=SimThreads(),
+        threads=options.get("threads") or SimThreads(),
     )
     return launcher, fake
 
@@ -1728,7 +1729,7 @@ def test_a_cancelled_resumed_turn_raises_and_keeps_its_conversation(
             return FakeRun(returncode=-15)
         return scripted_turn("codex", text="ok", session_id="thread-1")
 
-    session, fake = _session(tmp_path, "codex", run)
+    session, fake = _session(tmp_path, "codex", run, threads=threads)
     holder.append(fake)
     cancelled: list[agentshim.TurnCancelledError] = []
 
@@ -1768,7 +1769,9 @@ def test_cancel_stops_the_running_provider_process(
 ) -> None:
     del sandbox_builds
     threads = sim.threads()
-    session, fake = _session(tmp_path, provider, scripted_turn(provider, text="ok"))
+    session, fake = _session(
+        tmp_path, provider, scripted_turn(provider, text="ok"), threads=threads
+    )
     reached = threads.event()
 
     class _HoldingObserver:
@@ -1824,7 +1827,7 @@ def test_independent_sessions_run_concurrently(
         release_optimizer.wait(HANG_GUARD_S)
         return scripted_turn(provider, text="optimizer result")
 
-    launcher, _fake = _launcher(provider, run)
+    launcher, _fake = _launcher(provider, run, threads=threads)
     optimizer = launcher.launch(_spec(tmp_path, provider=provider, role="implementer"))
     chat = launcher.launch(
         _spec(

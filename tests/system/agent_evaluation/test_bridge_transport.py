@@ -11,6 +11,7 @@ client.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -33,7 +34,6 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
-from vs_sim.api import OsThreads
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     SimBlockingRunner,
@@ -76,10 +76,10 @@ def _bridge(root: Path, network: SimNetwork, threads: SimThreads) -> AgentEvalua
         policy,
         ScopeWorkspaces(
             cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))),
-            StoreWorkspaceReceipts(ReceiptStore(namespace, threads=OsThreads())),
+            StoreWorkspaceReceipts(ReceiptStore(namespace, threads=SimThreads())),
         ),
         AgentEvaluationRecords(
-            OwedSubmissions(ReceiptStore(namespace, threads=OsThreads())), SynthesizedEvidence()
+            OwedSubmissions(ReceiptStore(namespace, threads=SimThreads())), SynthesizedEvidence()
         ),
         network=network,
         threads=threads,
@@ -98,7 +98,10 @@ def _call(network: SimNetwork, frame: bytes) -> bytes:
     """Send one frame, read the reply line, and hang up without a receipt."""
     connection = network.connect(ADDRESS, HANG_GUARD_S)
     try:
-        connection.send(frame, HANG_GUARD_S)
+        # The bridge reads up to its frame bound and hangs up while the rest of an
+        # oversized frame waits for room, as it would on a real socket.
+        with contextlib.suppress(BrokenPipeError):
+            connection.send(frame, HANG_GUARD_S)
         return _reply_line(connection)
     finally:
         connection.close()

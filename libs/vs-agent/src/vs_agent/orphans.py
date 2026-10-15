@@ -10,7 +10,10 @@ ending them would leave a second agent writing in the same workspace.
 ``Confinement.reap()`` kills the marked agent processes (so a still-running turn
 stops writing before anything else happens), then ``docker rm -f`` removes the
 container. A step that fails raises :class:`OrphanReapError` naming the container:
-the run must not resume while an agent may still be running.
+the run must not resume while an agent may still be running. Whether the removal
+succeeded is read by ``vs_sandbox``'s one Docker lifecycle translator: a container
+already gone or already being removed (one started with ``--rm`` that exited in
+between) is released, not an error.
 """
 
 from __future__ import annotations
@@ -20,7 +23,13 @@ from typing import TYPE_CHECKING
 
 import agentshim
 
-from vs_sandbox.api import RUN_ID_LABEL
+from vs_sandbox.api import (
+    INITIAL_CONTAINER_LIFE,
+    RUN_ID_LABEL,
+    RemovalReading,
+    observe_removal,
+    released,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -73,16 +82,24 @@ def _labelled_containers(docker: DockerCli, run_id: str) -> tuple[str, ...]:
 
 
 def _remove(docker: DockerCli, container_id: str) -> None:
-    _run(docker, ["docker", "rm", "-f", container_id], f"remove orphaned container {container_id}")
+    what = f"remove orphaned container {container_id}"
+    result = _run(docker, ["docker", "rm", "-f", container_id], what, check=False)
+    life = observe_removal(INITIAL_CONTAINER_LIFE, RemovalReading(result.returncode, result.stderr))
+    if not released(life):
+        msg = f"could not {what}: docker exited {result.returncode}: {result.stderr.strip()}"
+        raise OrphanReapError(msg)
 
 
-def _run(docker: DockerCli, argv: list[str], what: str) -> subprocess.CompletedProcess[str]:
+def _run(
+    docker: DockerCli, argv: list[str], what: str, *, check: bool = True
+) -> subprocess.CompletedProcess[str]:
+    """Run *argv*; a client that cannot finish, or (when *check*) a failure, is an error."""
     try:
         result = docker.run(argv, timeout_seconds=_DOCKER_TIMEOUT_SECONDS)
     except (OSError, subprocess.TimeoutExpired) as exc:
         msg = f"could not {what}: {exc}"
         raise OrphanReapError(msg) from exc
-    if result.returncode != 0:
+    if check and result.returncode != 0:
         msg = f"could not {what}: docker exited {result.returncode}: {result.stderr.strip()}"
         raise OrphanReapError(msg)
     return result

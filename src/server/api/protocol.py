@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAliasType
+import hashlib
+from copy import deepcopy
+from typing import TYPE_CHECKING, Annotated, Literal, Never, TypeAliasType
 
-from pydantic import Field, FiniteFloat, JsonValue, TypeAdapter
+from pydantic import ConfigDict, Field, FiniteFloat, JsonValue, TypeAdapter, model_validator
 
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
 from server.chat.options import ChatOptions
@@ -35,12 +37,69 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from datetime import datetime
 
+    from pydantic.json_schema import JsonSchemaValue
+
     from vs_sim.api import Clock
 
 # Both snapshots and streamed batches publish the same execution checkpoint.
 # Naming the list keeps the generated client contract referentially identical,
 # rather than making the generator invent one alias per inline occurrence.
 ActiveExecutions = TypeAliasType("ActiveExecutions", list[ActiveAgentExecution])
+
+# The smallest receive cap among supported presentation clients. Both server
+# transports use it for stream output, so transport choice cannot change which
+# protocol checkpoint is deliverable.
+MAX_SERVER_MESSAGE_BYTES = 1024 * 1024
+# One payload fragment stays comfortably below the smallest supported peer's
+# 1 MiB frame cap even when every code point needs JSON's longest escape. The
+# aggregate bound prevents a peer from making a frontend stage an unreasonable
+# amount of memory. It matches the largest request frame the server accepts, so
+# one assignment that entered through the public protocol remains observable.
+MAX_ACTIVE_EXECUTIONS_CHUNK_CHARACTERS = 64 * 1024
+MAX_ACTIVE_EXECUTIONS_CHECKPOINT_BYTES = 16 * 1024 * 1024
+MAX_ACTIVE_EXECUTIONS_CHUNKS = 256
+
+_ACTIVE_EXECUTIONS_ADAPTER = TypeAdapter(ActiveExecutions)
+_JSON_CONTROL_CHARACTER_LIMIT = 0x20
+_JSON_SINGLE_BYTE_LIMIT = 0x80
+_JSON_TWO_BYTE_LIMIT = 0x800
+_JSON_THREE_BYTE_LIMIT = 0x10000
+_UTF16_HIGH_SURROGATE_START = 0xD800
+_UTF16_LOW_SURROGATE_END = 0xDFFF
+_JSON_SHORT_CONTROL_ESCAPES = frozenset({0x08, 0x09, 0x0A, 0x0C, 0x0D})
+
+
+def _event_batch_json_schema(schema: JsonSchemaValue) -> None:
+    """Publish the two legal checkpoint shapes as complete generated types."""
+    ordinary = deepcopy(schema)
+    deferred = deepcopy(schema)
+    ordinary_properties = ordinary["properties"]
+    deferred_properties = deferred["properties"]
+
+    active_schema = schema["properties"]["active_executions"]
+    checkpoint_id_schema = schema["properties"]["active_executions_checkpoint_id"]
+    ordinary_properties["active_executions"] = deepcopy(active_schema["anyOf"][0])
+    ordinary_properties["active_executions_checkpoint_id"] = {
+        "default": None,
+        "title": checkpoint_id_schema["title"],
+        "type": "null",
+    }
+    deferred_properties["active_executions"] = {"type": "null"}
+    deferred_properties["active_executions_checkpoint_id"] = deepcopy(
+        checkpoint_id_schema["anyOf"][0]
+    )
+    ordinary["required"] = [*schema["required"], "type"]
+    deferred["required"] = [
+        *schema["required"],
+        "type",
+        "active_executions",
+        "active_executions_checkpoint_id",
+    ]
+
+    # Keep the broad properties at the definition root for the repository's
+    # tagged-union normalization, while the complete oneOf arms narrow every
+    # validator and generated TypeScript consumer to the two legal shapes.
+    schema["oneOf"] = [ordinary, deferred]
 
 
 class PauseCommand(Request):
@@ -623,13 +682,44 @@ class EventMessage(ProtocolModel):
     event: RunEvent
 
 
+class ActiveExecutionsChunkMessage(ProtocolModel):
+    """One bounded piece of an atomically replaced execution checkpoint.
+
+    The payload pieces concatenate to the JSON encoding of ``ActiveExecutions``.
+    A client stages one transfer and publishes the decoded list only after all
+    pieces arrive in order. The metadata is copied from the batch whose
+    checkpoint this replaces, so the final publication remains in the same
+    sequence space even when the batch itself was split into event frames.
+    """
+
+    type: Literal["active_executions_chunk"] = "active_executions_chunk"
+    checkpoint_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_index: int = Field(ge=0, lt=MAX_ACTIVE_EXECUTIONS_CHUNKS)
+    chunk_count: int = Field(ge=1, le=MAX_ACTIVE_EXECUTIONS_CHUNKS)
+    payload: str = Field(max_length=MAX_ACTIVE_EXECUTIONS_CHUNK_CHARACTERS)
+    through_sequence: int = Field(ge=0)
+    store_id: str
+    history_after_sequence: int = Field(ge=0)
+
+
 class EventBatchMessage(ProtocolModel):
     """Event batch and cursor metadata sent to subscribers."""
+
+    # The runtime validator below owns construction through Pydantic. The same
+    # invariant must also be visible to JSON Schema validators and generated
+    # TypeScript consumers, so publish the two legal wire shapes explicitly.
+    model_config = ConfigDict(json_schema_extra=_event_batch_json_schema)
 
     type: Literal["event_batch"] = "event_batch"
     events: list[RunEvent]
     through_sequence: int = Field(default=0, ge=0)
-    active_executions: ActiveExecutions = Field(default_factory=list)
+    # ``None`` appears only on event frames whose oversized checkpoint follows
+    # as ``active_executions_chunk`` messages. A list, including an empty one,
+    # remains an authoritative whole replacement.
+    active_executions: ActiveExecutions | None = Field(default_factory=list)
+    # Binds a deferred batch to the fragment transfer that completes it. Null
+    # for every ordinary authoritative checkpoint.
+    active_executions_checkpoint_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     # Names the event store these sequences number. A run attaches its durable
     # log after clients subscribe, and sequences are only comparable within one
     # store, so a batch whose id differs from the previous one supersedes what
@@ -646,6 +736,17 @@ class EventBatchMessage(ProtocolModel):
     # that discovers a different store, leaves this false: its first batch is
     # distinguished by the dial rather than by an in-loop replay transition.
     rebootstrap: bool = False
+
+    @model_validator(mode="after")
+    def _deferred_checkpoint_has_identity(self) -> EventBatchMessage:
+        deferred = self.active_executions is None
+        identified = self.active_executions_checkpoint_id is not None
+        if deferred != identified:
+            message = (
+                "active_executions_checkpoint_id is present exactly when active_executions is null"
+            )
+            raise ValueError(message)
+        return self
 
     def split_within(self, budget: int) -> Iterator[EventBatchMessage]:
         """Split this batch into whole batches that each serialize within *budget* bytes.
@@ -668,51 +769,329 @@ class EventBatchMessage(ProtocolModel):
           would tell the consumer to discard the earlier chunks of the same
           replay.
 
-        Chunking is on serialized size, not on event count: measured on a run of
-        output events the per-event JSON ranges from 282 to 647 bytes, so no
-        count is both safe and economical. The split is computed from measured
-        byte lengths rather than by serializing candidate chunks, which would be
-        quadratic. The arithmetic is exact because compact JSON renders a list
-        as its items joined by commas: a chunk costs its envelope (measured once
-        per spelling of ``rebootstrap``, at the batch's own
-        ``through_sequence``, the longest number any chunk carries) plus each
-        event's own serialization plus one separator between neighbors.
-
-        A chunk always carries at least one whole event, so an event larger than
-        the budget travels alone in an oversized chunk. The recording boundary's
-        per-event serialized-size contract keeps that case below the
-        supported-peer cap; this method neither truncates nor special-cases
-        event payloads. A batch with no events yields itself, so an empty
-        checkpoint still reports its watermark.
+        Chunking is on serialized size, not event count. If one event or the
+        repeated authoritative checkpoint cannot fit, the method fails before
+        yielding anything; callers that need bounded checkpoint fragmentation
+        use :meth:`stream_messages_within` instead.
         """
-        if not self.events:
-            yield self
-            return
-        room = budget - max(
-            len(
-                self.model_copy(update={"events": [], "rebootstrap": flag})
-                .model_dump_json()
-                .encode()
-            )
-            for flag in (False, True)
+        active_size = (
+            None
+            if self.active_executions is None
+            else _active_executions_json_size(self.active_executions)
         )
-        start = 0
-        used = 0
-        for index, event in enumerate(self.events):
-            size = len(event.model_dump_json().encode())
-            if index > start and used + 1 + size > room:
-                yield self.model_copy(
+        batches = _bounded_event_batches(
+            self,
+            budget=budget,
+            active_executions_size=active_size,
+        )
+        if batches is None:
+            _raise_event_batch_budget_error(budget)
+        yield from batches
+
+    def stream_messages_within(
+        self, budget: int
+    ) -> Iterator[EventBatchMessage | ActiveExecutionsChunkMessage]:
+        """Yield bounded stream messages without exposing a partial checkpoint.
+
+        Ordinary checkpoints keep the established event-batch representation.
+        When the checkpoint cannot share a bounded batch with every whole
+        event, event chunks carry ``active_executions: null`` and a typed
+        fragment sequence follows. The transport-neutral client stream stages
+        those fragments and emits one complete synthetic checkpoint batch; raw
+        prefixes are never data-fold input.
+        """
+        active = self.active_executions
+        if active is None:
+            batches = _bounded_event_batches(self, budget=budget)
+            if batches is None:
+                _raise_event_batch_budget_error(budget)
+            yield from batches
+            return
+
+        # Reject a frame budget that cannot carry even the smallest ordinary
+        # checkpoint before walking, sizing, or encoding caller-controlled
+        # checkpoint text.
+        minimum_envelope = self.model_copy(update={"active_executions": [], "events": []})
+        if len(minimum_envelope.model_dump_json().encode()) > budget:
+            _raise_event_batch_budget_error(budget)
+
+        checkpoint_size = _active_executions_json_size(active)
+        event_sizes = [len(event.model_dump_json().encode()) for event in self.events]
+        ordinary_batches = _bounded_event_batches(
+            self,
+            budget=budget,
+            active_executions_size=checkpoint_size,
+            event_sizes=event_sizes,
+        )
+        if ordinary_batches is not None:
+            _encode_active_executions(active, expected_size=checkpoint_size)
+            yield from ordinary_batches
+            return
+
+        # Validate every other frame before materializing the authoritative
+        # checkpoint. An impossible budget therefore cannot make the encoder
+        # allocate a large payload and cannot advance the peer's cursor.
+        checkpoint_id_placeholder = "0" * 64
+        without_checkpoint = self.model_copy(
+            update={
+                "active_executions": None,
+                "active_executions_checkpoint_id": checkpoint_id_placeholder,
+            }
+        )
+        deferred_batches = _bounded_event_batches(
+            without_checkpoint,
+            budget=budget,
+            event_sizes=event_sizes,
+        )
+        if deferred_batches is None:
+            _raise_event_batch_budget_error(budget)
+        template = ActiveExecutionsChunkMessage(
+            checkpoint_id=checkpoint_id_placeholder,
+            chunk_index=MAX_ACTIVE_EXECUTIONS_CHUNKS - 1,
+            chunk_count=MAX_ACTIVE_EXECUTIONS_CHUNKS,
+            payload="",
+            through_sequence=self.through_sequence,
+            store_id=self.store_id,
+            history_after_sequence=self.history_after_sequence,
+        )
+        if len(template.model_dump_json().encode()) > budget:
+            msg = f"frame budget {budget} cannot hold an active-execution checkpoint fragment"
+            raise ValueError(msg)
+
+        payload_bytes = _encode_active_executions(active, expected_size=checkpoint_size)
+        checkpoint_id = hashlib.sha256(payload_bytes).hexdigest()
+        payload = payload_bytes.decode()
+        del payload_bytes
+        template = template.model_copy(update={"checkpoint_id": checkpoint_id})
+        pieces = _checkpoint_pieces(payload, budget=budget, template=template)
+        del payload
+
+        # Validate the complete fragment projection before yielding
+        # any event frame. A locally undeliverable checkpoint therefore becomes
+        # one typed stream error without first advancing the peer's cursor.
+        yield from (
+            batch.model_copy(update={"active_executions_checkpoint_id": checkpoint_id})
+            for batch in deferred_batches
+        )
+        count = len(pieces)
+        for index, piece in enumerate(pieces):
+            yield template.model_copy(
+                update={"chunk_index": index, "chunk_count": count, "payload": piece}
+            )
+
+
+def _raise_event_batch_budget_error(budget: int) -> Never:
+    msg = f"frame budget {budget} cannot hold an event_batch frame"
+    raise ValueError(msg)
+
+
+def _raise_checkpoint_size_error() -> Never:
+    msg = (
+        "active-execution checkpoint exceeds the "
+        f"{MAX_ACTIVE_EXECUTIONS_CHECKPOINT_BYTES}-byte protocol limit"
+    )
+    raise ValueError(msg)
+
+
+def _encode_active_executions(active: ActiveExecutions, *, expected_size: int) -> bytes:
+    """Encode the authoritative checkpoint once after bounded preflight."""
+    payload_bytes = _ACTIVE_EXECUTIONS_ADAPTER.dump_json(active)
+    if len(payload_bytes) > MAX_ACTIVE_EXECUTIONS_CHECKPOINT_BYTES:
+        # The structural preflight accounts exactly for the current typed
+        # contract. Retain this boundary check so a future field cannot weaken
+        # the aggregate limit before its sizing rule is added.
+        _raise_checkpoint_size_error()
+    if len(payload_bytes) != expected_size:
+        msg = "active-execution checkpoint sizing disagrees with its authoritative JSON encoding"
+        raise ValueError(msg)
+    return payload_bytes
+
+
+def _bounded_event_batches(
+    batch: EventBatchMessage,
+    *,
+    budget: int,
+    active_executions_size: int | None = None,
+    event_sizes: list[int] | None = None,
+) -> list[EventBatchMessage] | None:
+    """Return a complete bounded batch projection, or ``None`` if impossible."""
+    sizes = event_sizes
+    if sizes is None:
+        sizes = [len(event.model_dump_json().encode()) for event in batch.events]
+    maximum_sequence = max(
+        (event.sequence for event in batch.events),
+        default=batch.through_sequence,
+    )
+    maximum_sequence = max(maximum_sequence, batch.through_sequence)
+    flags = (batch.rebootstrap,) if not batch.events else (False, True)
+    envelope_size = max(
+        _event_batch_envelope_size(
+            batch,
+            rebootstrap=flag,
+            through_sequence=maximum_sequence,
+            active_executions_size=active_executions_size,
+        )
+        for flag in flags
+    )
+    if not batch.events:
+        return [batch] if envelope_size <= budget else None
+
+    room = budget - envelope_size
+    if any(size > room for size in sizes):
+        return None
+    chunks: list[EventBatchMessage] = []
+    start = 0
+    used = 0
+    for index, size in enumerate(sizes):
+        if index > start and used + 1 + size > room:
+            chunks.append(
+                batch.model_copy(
                     update={
-                        "events": self.events[start:index],
-                        "through_sequence": self.events[index - 1].sequence,
-                        "rebootstrap": self.rebootstrap and start == 0,
+                        "events": batch.events[start:index],
+                        "through_sequence": batch.events[index - 1].sequence,
+                        "rebootstrap": batch.rebootstrap and start == 0,
                     }
                 )
-                start, used = index, 0
-            used += size + (1 if index > start else 0)
-        yield self.model_copy(
-            update={"events": self.events[start:], "rebootstrap": self.rebootstrap and start == 0}
+            )
+            start, used = index, 0
+        used += size + (1 if index > start else 0)
+    chunks.append(
+        batch.model_copy(
+            update={
+                "events": batch.events[start:],
+                "rebootstrap": batch.rebootstrap and start == 0,
+            }
         )
+    )
+    return chunks
+
+
+def _event_batch_envelope_size(
+    batch: EventBatchMessage,
+    *,
+    rebootstrap: bool,
+    through_sequence: int,
+    active_executions_size: int | None,
+) -> int:
+    envelope = batch.model_copy(
+        update={
+            "events": [],
+            "rebootstrap": rebootstrap,
+            "through_sequence": through_sequence,
+        }
+    )
+    if active_executions_size is None:
+        return len(envelope.model_dump_json().encode())
+    empty_checkpoint = envelope.model_copy(update={"active_executions": []})
+    return len(empty_checkpoint.model_dump_json().encode()) - len(b"[]") + active_executions_size
+
+
+def _active_executions_json_size(active: ActiveExecutions) -> int:
+    """Measure canonical checkpoint JSON without allocating its large strings."""
+    size = len(b"[]")
+    for index, execution in enumerate(active):
+        if index:
+            size += len(b",")
+        blank_activity = execution.activity.model_copy(
+            update={
+                "summary": "",
+                "tool": "" if execution.activity.tool is not None else None,
+            }
+        )
+        blank_execution = execution.model_copy(
+            update={
+                "execution_id": "",
+                "agent_kind": "",
+                "round_label": "",
+                "stage": "",
+                "assignment": "",
+                "activity": blank_activity,
+                "provider": "" if execution.provider is not None else None,
+                "model": "" if execution.model is not None else None,
+            }
+        )
+        size += len(blank_execution.model_dump_json().encode())
+        if size > MAX_ACTIVE_EXECUTIONS_CHECKPOINT_BYTES:
+            _raise_checkpoint_size_error()
+        strings = (
+            execution.execution_id,
+            execution.agent_kind,
+            execution.round_label,
+            execution.stage,
+            execution.assignment,
+            execution.activity.summary,
+            execution.activity.tool,
+            execution.provider,
+            execution.model,
+        )
+        for value in strings:
+            if value is None:
+                continue
+            remaining = MAX_ACTIVE_EXECUTIONS_CHECKPOINT_BYTES - size
+            if len(value) > remaining:
+                _raise_checkpoint_size_error()
+            size += _json_string_content_size(value, limit=remaining)
+            if size > MAX_ACTIVE_EXECUTIONS_CHECKPOINT_BYTES:
+                _raise_checkpoint_size_error()
+    return size
+
+
+def _json_string_content_size(value: str, *, limit: int) -> int:
+    """Return Pydantic's JSON-byte cost for string content, bounded by *limit*."""
+    size = 0
+    for character in value:
+        point = ord(character)
+        if point < _JSON_CONTROL_CHARACTER_LIMIT:
+            width = 2 if point in _JSON_SHORT_CONTROL_ESCAPES else 6
+        elif character in {'"', "\\"}:
+            width = 2
+        elif point < _JSON_SINGLE_BYTE_LIMIT:
+            width = 1
+        elif point < _JSON_TWO_BYTE_LIMIT:
+            width = 2
+        elif point < _JSON_THREE_BYTE_LIMIT:
+            # Lone surrogates remain one lower-bound byte here. The single
+            # authoritative Pydantic encoding below retains its standard
+            # UnicodeEncodeError behavior for such invalid text.
+            width = 1 if _UTF16_HIGH_SURROGATE_START <= point <= _UTF16_LOW_SURROGATE_END else 3
+        else:
+            width = 4
+        size += width
+        if size > limit:
+            _raise_checkpoint_size_error()
+    return size
+
+
+def _checkpoint_pieces(
+    payload: str,
+    *,
+    budget: int,
+    template: ActiveExecutionsChunkMessage,
+) -> list[str]:
+    """Split checkpoint JSON on Unicode boundaries under the wire-frame cap."""
+    pieces: list[str] = []
+    offset = 0
+    while offset < len(payload):
+        low = 1
+        high = min(MAX_ACTIVE_EXECUTIONS_CHUNK_CHARACTERS, len(payload) - offset)
+        accepted = 0
+        while low <= high:
+            middle = (low + high) // 2
+            candidate = template.model_copy(update={"payload": payload[offset : offset + middle]})
+            if len(candidate.model_dump_json().encode()) <= budget:
+                accepted = middle
+                low = middle + 1
+            else:
+                high = middle - 1
+        if accepted == 0:
+            msg = f"frame budget {budget} cannot hold an active-execution checkpoint fragment"
+            raise ValueError(msg)
+        pieces.append(payload[offset : offset + accepted])
+        if len(pieces) > MAX_ACTIVE_EXECUTIONS_CHUNKS:
+            msg = "active-execution checkpoint exceeds the protocol fragment-count limit"
+            raise ValueError(msg)
+        offset += accepted
+    return pieces
 
 
 class ProtocolErrorMessage(ProtocolModel):
@@ -751,6 +1130,10 @@ class ProtocolErrorMessage(ProtocolModel):
 
 
 ServerMessage = Annotated[
-    SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage,
+    SubscribedMessage
+    | EventMessage
+    | EventBatchMessage
+    | ActiveExecutionsChunkMessage
+    | ProtocolErrorMessage,
     Field(discriminator="type"),
 ]

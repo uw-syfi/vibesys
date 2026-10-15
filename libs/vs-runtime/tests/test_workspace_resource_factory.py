@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import REAL_PROCESSES
 
 from vs_agent.api import NULL_SKILL_SELECTION, AgentBackend, AgentSpec
 from vs_project.api import (
@@ -33,11 +32,14 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
-from vs_runtime.api.testing import FakeAgentExecutionEnvironment, unconfined_host_environment
+from vs_runtime.api.testing import (
+    FakeAgentExecutionEnvironment,
+    idle_environment_system,
+    unconfined_host_environment,
+)
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from typing import TextIO
@@ -115,7 +117,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
     project = open_project_run_resources(
         _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
     )
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     opened_sessions: list[_Session] = []
 
     def open_session(_request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -138,7 +140,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
             framework_root=tmp_path,
             project_path_policy=ProjectPathPolicy(),
             clock=ManualClock(),
-            slurm_processes=REAL_PROCESSES,
+            system=idle_environment_system(),
         ),
         open_session,
         clock=ManualClock(),
@@ -153,8 +155,8 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
         skill_selection=NULL_SKILL_SELECTION,
         host_resources=(),
         events=events.append,
-        threads=OsThreads(),
-        blocking=ThreadBlockingRunner(),
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
     )
     revision = factory.root.revision
     assert revision is not None
@@ -181,7 +183,7 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
     project = open_project_run_resources(
         _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
     )
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     environment = open_run_environment_resources(
         RunEnvironmentRequest(
             log_dir=project.logger.log_dir,
@@ -193,7 +195,7 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
             run_id="workspace-resource-test",
             framework_root=tmp_path,
             clock=ManualClock(),
-            slurm_processes=REAL_PROCESSES,
+            system=idle_environment_system(),
         ),
         lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
         clock=ManualClock(),
@@ -217,8 +219,8 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
         host_resources=(),
         events=lambda _event: None,
         root_agent_environment_opener=open_agent,
-        threads=OsThreads(),
-        blocking=ThreadBlockingRunner(),
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
     )
     configuration = AgentExecutionConfiguration("worker", AgentSpec(backend=AgentBackend.STUB))
 
@@ -246,7 +248,7 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             log_dir=project.logger.log_dir,
             workspace=root,
             ref_dir=None,
-            backend=FakeComputeBackend(),
+            backend=FakeComputeBackend(threads=SimThreads()),
             agent_backend="stub",
             cli_provider=None,
             run_id="workspace-resource-test",
@@ -255,7 +257,7 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             objective_document=authored,
             git_history_root=project.git.history_root,
             clock=ManualClock(),
-            slurm_processes=REAL_PROCESSES,
+            system=idle_environment_system(),
         )
         objective_paths: list[str] = []
 
@@ -280,8 +282,8 @@ def test_candidate_environment_uses_the_runs_verified_objective(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
-                threads=OsThreads(),
-                blocking=ThreadBlockingRunner(),
+                threads=SimThreads(),
+                blocking=InlineBlockingRunner(),
             )
             revision = (
                 project.git.trusted_input_baseline
@@ -325,13 +327,13 @@ def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Pa
             log_dir=project.logger.log_dir,
             workspace=root,
             ref_dir=None,
-            backend=FakeComputeBackend(),
+            backend=FakeComputeBackend(threads=SimThreads()),
             agent_backend="stub",
             cli_provider="codex",
             run_id="workspace-resource-test",
             framework_root=tmp_path,
             clock=ManualClock(),
-            slurm_processes=REAL_PROCESSES,
+            system=idle_environment_system(),
         ),
         lambda _request: _Session(FakeCommandRunner(), RunEnvironmentView(paths=AgentPaths())),
         clock=ManualClock(),
@@ -345,8 +347,8 @@ def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Pa
         skill_selection=NULL_SKILL_SELECTION,
         host_resources=(),
         events=lambda _event: None,
-        threads=OsThreads(),
-        blocking=ThreadBlockingRunner(),
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
     )
 
     os.mkfifo(root / "pipe")

@@ -49,6 +49,7 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspaceObserved,
 )
+from vs_project.api import NestedRepositoryError
 from vs_runtime._core_identity import core_identity
 from vs_runtime._core_requests import (
     ExecutionContext,
@@ -91,6 +92,8 @@ from vs_runtime._workspace_receipts import (
 from vs_runtime.contracts import RuntimeContractError, WorkspaceRestoreError
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from vs_core.api import Request
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
@@ -384,13 +387,15 @@ class RuntimeWorkspaceRequests:
         if closure.live:
             return _unknown("an ensure of the attempt's workspace is in flight")
         member = candidate_member_id(attempt)
-        leftover = self._workspaces.live_candidate(member)
-        if leftover is None:
-            leftover = await self._workspaces.reattach_candidate(member)
+
+        async def find() -> Callable[[], Awaitable[None]] | None:
+            leftover = self._workspaces.live_candidate(member)
+            if leftover is None:
+                leftover = await self._workspaces.reattach_candidate(member)
+            return None if leftover is None else leftover.discard
+
         try:
-            removed = await self._fences.remove(
-                closure, None if leftover is None else leftover.discard
-            )
+            removed = await self._fences.remove(closure, find)
         except (OSError, BaseExceptionGroup) as error:
             return _unknown(f"an unbound worktree of the attempt was not removed: {error}")
         return _never_held(self._fences.cleared(closure, removed), attempt, _WITHDRAWN)
@@ -734,7 +739,17 @@ class RuntimeWorkspaceRequests:
         # deterministic label rather than commit a second time.
         commit = await workspace.find_snapshot(label) if resumed else None
         if commit is None:
-            commit = await workspace.snapshot_and_retain(label, retention_label=retention_label)
+            try:
+                commit = await workspace.snapshot_and_retain(label, retention_label=retention_label)
+            except NestedRepositoryError as error:
+                # The agent left a repository in its workspace that host Git must not read;
+                # the snapshot fails for good, and the diagnostic says which paths.
+                return _Facts(
+                    ObservationStatus.FAILED,
+                    accepted=True,
+                    resource_id=resource_id,
+                    diagnostic=str(error),
+                )
         else:
             await workspace.retain(commit, label=retention_label)
         self._receipts.record_revision(commit, owner)

@@ -26,12 +26,12 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, cast
 
 from tests.slurm_cluster.cluster import SlurmCluster, build_image, docker
-from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentConfig,
+    EnvironmentSystem,
     RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentSession,
@@ -40,7 +40,13 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend, SubprocessDockerCli
 from vs_sandbox.api.slurm import load_slurm_operator_settings
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
+from vs_sim.api import (
+    MonotonicClock,
+    OsProcesses,
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    UnixNetwork,
+)
 
 if TYPE_CHECKING:
     import threading
@@ -306,8 +312,11 @@ def make_request(
             log_dir,
             log=lambda _: None,
             image="python:3.12-slim",
-            docker=SubprocessDockerCli(processes=OsProcesses()),
+            docker=SubprocessDockerCli(
+                processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+            ),
             threads=OsThreads(),
+            launcher=SubprocessPipedProcessLauncher(),
         ),
         agent_backend="stub",
         cli_provider=None,
@@ -319,7 +328,7 @@ def make_request(
         benchmark_output_argument=BENCHMARK_OUTPUT_ARGUMENT,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         clock=MonotonicClock(),
-        slurm_processes=REAL_PROCESSES,
+        system=_real_system(),
     )
 
 
@@ -399,3 +408,19 @@ def open_candidates(
             for opened in sessions:
                 remove_run_containers(opened.run_id)
             cluster.cancel_all()
+
+
+def _real_system() -> EnvironmentSystem:
+    """The host's own threads, sockets and processes.
+
+    The agent GPU launcher checks and cancels its jobs with ``squeue`` and ``scancel``
+    through ``slurm_processes``, so they reach the real cluster too.
+    """
+    processes = OsProcesses()
+    return EnvironmentSystem(
+        threads=OsThreads(),
+        network=UnixNetwork(),
+        processes=processes,
+        launcher=SubprocessPipedProcessLauncher(),
+        slurm_processes=processes,
+    )

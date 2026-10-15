@@ -22,6 +22,7 @@ from vs_core.api import (
     AttemptView,
     ChildLease,
     ClockAdvanced,
+    CloseSession,
     ContinuationPhase,
     ContractError,
     CoreReducers,
@@ -974,6 +975,102 @@ def test_a_session_whose_request_ended_without_moving_it_waits_on_the_rest(
     else:
         assert woken.wait == waiting.wait
         assert [w.waiter for w in orphan_waits(after)] == [WaitKind.SESSION]
+
+
+@pytest.mark.parametrize("dispatched_in", [None, 1])
+def test_a_closing_session_whose_close_ended_unanswered_closes_once_more(
+    dispatched_in: int | None,
+) -> None:
+    """A close that blocked (sent or not) is sent once more under a new identity.
+
+    The skeleton timing finding: closes issued near the run deadline waited for a slot until
+    the deadline blocked them, and the closing sessions waited on them for good. The second
+    close is the last: when it blocks too, the session is an orphan and the run halts loudly.
+    """
+    ensure = pending_record(phase=RequestPhase.COMPLETED)
+    opened = ensure.request
+    assert isinstance(opened, EnsureSession)
+    resource = ResourceId(root="lease")
+
+    def close(identity: str) -> RequestRecord:
+        request = CloseSession(
+            request_id=RequestId(root=identity),
+            scope=opened.scope,
+            session_id=opened.spec.session_id,
+            resource_id=resource,
+        )
+        return ensure.model_copy(
+            update={
+                "request_id": request.request_id,
+                "request": request,
+                "payload_digest": fixture_digest(request),
+                "phase": RequestPhase.BLOCKED,
+                "dispatched_in": dispatched_in,
+            }
+        )
+
+    blocked = close("close")
+    session = SessionView(
+        spec=opened.spec,
+        scope=opened.scope,
+        generation=0,
+        phase=SessionPhase.CLOSING,
+        resource_id=resource,
+        pending_records=(ensure.request_id, blocked.request_id),
+        wait=WaitOn(requests=(blocked.request_id,)),
+    )
+    state = initial_state()
+    state = state.model_copy(
+        update={
+            "sessions": SessionsState(sessions=(session,)),
+            "records": state.records.model_copy(update={"records": (ensure, blocked)}),
+        }
+    )
+
+    first = step(state, ClockAdvanced(now_at=state.run.now_at + 1.0))
+
+    (again,) = first.requests
+    assert isinstance(again, CloseSession)
+    assert again.request_id not in (blocked.request_id, ensure.request_id)
+    assert again.resource_id == resource
+    (closing,) = first.state.sessions.sessions
+    assert closing.phase == SessionPhase.CLOSING
+    assert again.request_id is not None
+    assert closing.wait == WaitOn(requests=(again.request_id,))
+    assert not orphan_waits(first.state)
+
+    records = first.state.records
+    ended = records.model_copy(
+        update={
+            "records": tuple(
+                row.model_copy(update={"phase": RequestPhase.BLOCKED})
+                if row.request_id == again.request_id
+                else row
+                for row in records.records
+            )
+        }
+    )
+    second = step(
+        first.state.model_copy(update={"records": ended}),
+        ClockAdvanced(now_at=state.run.now_at + 2.0),
+    )
+
+    assert not [r for r in second.requests if isinstance(r, CloseSession)]
+    assert [w.waiter for w in orphan_waits(second.state)] == [WaitKind.SESSION]
+
+    # The same when the core ends the second close itself at its limit: the blocked close
+    # stays among the session's records, so hours of lapses send no third close.
+    later, sent = first.state, []
+    for hours in range(1, 6):
+        stepped = step(later, ClockAdvanced(now_at=state.run.now_at + 3600.0 * hours))
+        later = stepped.state
+        sent += [r for r in stepped.requests if isinstance(r, CloseSession)]
+    assert sent == []
+    phases = {row.request_id: row.phase for row in later.records.records}
+    assert phases[again.request_id] == RequestPhase.BLOCKED
+    (stuck,) = later.sessions.sessions
+    assert again.request_id in stuck.pending_records
+    assert [w.waiter for w in orphan_waits(later)] == [WaitKind.SESSION]
 
 
 def test_which_kinds_may_name_which_is_acyclic() -> None:

@@ -38,23 +38,59 @@ def linked_worktree_git_paths(workspace: Path) -> tuple[Path, ...]:
     separate clone per sandbox, which is a different design. History stays
     immutable because every path is bound read-only.
 
-    A workspace whose ``.git`` is a directory, or that has none, needs nothing
+    The agent can write the workspace's ``.git`` file, so its contents only
+    propose a gitdir; nothing is bound unless Git's own registration, kept outside
+    the workspace, confirms it. The proposed gitdir must be an entry of a
+    ``worktrees`` directory, its ``commondir`` must name that directory's parent,
+    that parent must hold a repository (``HEAD`` and ``objects``), and its
+    ``gitdir`` back-pointer, written by ``git worktree add``, must name this
+    workspace's ``.git``. Any other contents yield an empty tuple, so Git fails
+    inside the sandbox rather than the agent choosing a host path to mount.
+
+    A registration the agent forged in a directory it can write passes those checks,
+    so no shared entry may be a symlink: Git never makes one, and the bind would
+    follow it to whatever host path the agent named (``objects -> ~/.ssh``). A
+    symlinked entry yields an empty tuple.
+
+    A workspace whose ``.git`` is a directory, a symlink, or missing needs nothing
     extra and yields an empty tuple.
     """
+    gitdir = _registered_gitdir(workspace)
+    if gitdir is None:
+        return ()
+    common = gitdir.parent.parent
+    shared = [common / name for name in _SHARED_ENTRIES]
+    if any(path.is_symlink() for path in shared):
+        return ()
+    return (gitdir, *(path for path in shared if path.exists()))
+
+
+def _registered_gitdir(workspace: Path) -> Path | None:
+    """The gitdir the workspace's ``.git`` names, when Git registered it for this workspace."""
     pointer = workspace / ".git"
-    if not pointer.is_file():
-        return ()
-    prefix = "gitdir:"
-    line = pointer.read_text(encoding="utf-8").strip()
+    proposed = _named_path(workspace, ".git", prefix="gitdir:")
+    if proposed is None or proposed.is_relative_to(workspace.resolve()):
+        return None
+    common = proposed.parent.parent
+    registered = (
+        proposed.parent.name == "worktrees"
+        and (common / "HEAD").is_file()
+        and (common / "objects").is_dir()
+        and _named_path(proposed, "commondir") == common
+        and _named_path(proposed, "gitdir") == pointer.resolve()
+    )
+    return proposed if registered else None
+
+
+def _named_path(directory: Path, name: str, *, prefix: str = "") -> Path | None:
+    """The path the one-line file ``directory/name`` holds after ``prefix``, resolved.
+
+    ``None`` when the file is missing, a symlink, or does not start with ``prefix``.
+    """
+    record = directory / name
+    if record.is_symlink() or not record.is_file():
+        return None
+    line = record.read_text(encoding="utf-8").strip()
     if not line.startswith(prefix):
-        return ()
-    gitdir = (workspace / line.removeprefix(prefix).strip()).resolve()
-    if not gitdir.is_dir():
-        return ()
-    paths = [gitdir]
-    commondir_file = gitdir / "commondir"
-    if commondir_file.is_file():
-        common = (gitdir / commondir_file.read_text(encoding="utf-8").strip()).resolve()
-        if common.is_dir():
-            paths.extend(common / name for name in _SHARED_ENTRIES if (common / name).exists())
-    return tuple(path for path in paths if not path.is_relative_to(workspace))
+        return None
+    return (directory / line.removeprefix(prefix).strip()).resolve()

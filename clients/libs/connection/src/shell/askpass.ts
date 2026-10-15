@@ -8,7 +8,7 @@
  * and the app shows as "authentication needed". Questions (`yes/no`) are asked in the clear,
  * everything else with a hidden field.
  */
-import {chmod, mkdir, stat, writeFile} from 'node:fs/promises';
+import {chmod, lstat, mkdir, writeFile} from 'node:fs/promises';
 import {dirname} from 'node:path';
 
 const ASKPASS_SCRIPT = `#!/bin/sh
@@ -43,16 +43,54 @@ export async function installAskpass(path: string): Promise<string> {
   return path;
 }
 
+/** What the filesystem proved about the control path entry itself, without following it. */
+interface ControlDirectoryEntry {
+  readonly kind: 'directory' | 'symbolic-link' | 'other';
+  readonly uid: number;
+  readonly mode: number;
+}
+
+/** The filesystem boundary used to create and inspect the SSH control directory. */
+export interface ControlDirectoryFilesystem {
+  createPrivateDirectory(path: string): Promise<void>;
+  inspectEntry(path: string): Promise<ControlDirectoryEntry>;
+}
+
+const NODE_CONTROL_DIRECTORY_FILESYSTEM: ControlDirectoryFilesystem = {
+  createPrivateDirectory: async path => {
+    await mkdir(path, {mode: 0o700});
+  },
+  inspectEntry: async path => {
+    const info = await lstat(path);
+    return {
+      kind: info.isDirectory() ? 'directory' : info.isSymbolicLink() ? 'symbolic-link' : 'other',
+      uid: info.uid,
+      mode: info.mode,
+    };
+  },
+};
+
 /**
  * A private directory for SSH master sockets: short (Unix socket paths are capped near 104 bytes,
  * and `%C` adds 40), owned by this user, and closed to everyone else.
  */
-export async function controlDirectory(uid: number): Promise<string> {
+export async function controlDirectory(
+  uid: number,
+  filesystem: ControlDirectoryFilesystem = NODE_CONTROL_DIRECTORY_FILESYSTEM,
+): Promise<string> {
   const directory = `/tmp/vsd-${uid}`;
-  await mkdir(directory, {recursive: true, mode: 0o700});
-  const info = await stat(directory);
-  if (info.uid !== uid || (info.mode & 0o077) !== 0) {
-    throw new Error(`${directory} must be owned by you and private; remove it and try again`);
+  try {
+    await filesystem.createPrivateDirectory(directory);
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) {
+      throw error;
+    }
+  }
+  const entry = await filesystem.inspectEntry(directory);
+  if (entry.kind !== 'directory' || entry.uid !== uid || (entry.mode & 0o077) !== 0) {
+    throw new Error(
+      `${directory} must be a real directory owned by you and private; remove it and try again`,
+    );
   }
   return directory;
 }

@@ -44,6 +44,7 @@ from vs_project._git_objects import EMPTY_SNAPSHOT, FileEntry, Snapshot, clean_m
 from vs_project._git_pathspec import PathspecError, Pathspecs
 from vs_project._git_refnames import is_valid_branch_name, is_valid_ref_name
 from vs_project._git_textdiff import detect_changes, render_name_status, render_patch
+from vs_project._nested_repositories import require_no_nested_repository
 from vs_project.api.git_repository import (
     CommitSubject,
     GitCommandError,
@@ -176,6 +177,14 @@ class FakeGitRepository:
         lines = self._exclude_lines(scope.repo) if standard else []
         return baseline_layers(lines, extra)
 
+    def _require_plain_work_tree(self, scope: _Scope, pathspecs: Sequence[Pathspec]) -> None:
+        """Refuse as Git does before it reads a work tree holding a nested repository."""
+        require_no_nested_repository(
+            scope.root,
+            pathspecs,
+            linked_worktrees=(scope.root / path for path in self._skip(scope)),
+        )
+
     def _skip(self, scope: _Scope) -> frozenset[str]:
         """Directories inside this worktree that are other worktrees."""
         return frozenset(
@@ -234,10 +243,20 @@ class FakeGitRepository:
         with self._operation("bind"):
             scope = self._scope(["rev-parse", "--absolute-git-dir", "--show-toplevel"])
             self._pinned = scope.co
-            git_dir = scope.repo.git_dir
-            if scope.co.name is not None:
-                git_dir = git_dir / "worktrees" / scope.co.name
-            return RepositoryLocation(git_dir=git_dir, work_tree=scope.root)
+            return RepositoryLocation(git_dir=self._git_dir_of(scope.co), work_tree=scope.root)
+
+    def pin(self, location: RepositoryLocation) -> None:
+        with self._operation("pin"):
+            checkout = self._disk.exact(location.work_tree)
+            if checkout is None or self._git_dir_of(checkout) != location.git_dir:
+                self._refuse(["rev-parse", "--git-dir"], _NOT_A_REPOSITORY)
+            self._pinned = checkout
+
+    @staticmethod
+    def _git_dir_of(checkout: Checkout) -> Path:
+        if checkout.name is None:
+            return checkout.repo.git_dir
+        return checkout.repo.git_dir / "worktrees" / checkout.name
 
     # -- names ---------------------------------------------------------------
 
@@ -527,6 +546,7 @@ class FakeGitRepository:
         with self._operation("tracked_changes_since_head"):
             command = ["diff", "--name-only", "HEAD", "--", *pathspecs]
             scope = self._scope(command)
+            self._require_plain_work_tree(scope, pathspecs)
             specs = self._specs(pathspecs, command)
             if scope.head is None:
                 self._refuse(command, "fatal: ambiguous argument 'HEAD': unknown revision")
@@ -547,6 +567,7 @@ class FakeGitRepository:
         with self._operation("uncommitted_paths"):
             command = ["status", "--porcelain=v1", "--untracked-files=all", "--", *pathspecs]
             scope = self._scope(command)
+            self._require_plain_work_tree(scope, pathspecs)
             return tuple(sorted(self._status(scope, self._specs(pathspecs, command))))
 
     def unversioned_paths(self, *, include_ignored: bool) -> tuple[str, ...]:
@@ -567,6 +588,7 @@ class FakeGitRepository:
         with self._operation("changed_since"):
             command = ["diff", "--name-only", f"{commit}..HEAD", "--", *pathspecs]
             scope = self._scope(command)
+            self._require_plain_work_tree(scope, pathspecs)
             specs = self._specs(pathspecs, command)
             before = self._snapshot_of(scope, commit)
             if before is None or scope.head is None:
@@ -657,6 +679,7 @@ class FakeGitRepository:
                 return False
             if snapshot is None:
                 return False
+            self._require_plain_work_tree(scope, pathspecs)
             return self._matches(scope, snapshot, specs, include_ignored=include_ignored)
 
     def _matches(
@@ -687,6 +710,7 @@ class FakeGitRepository:
             if found is None:
                 self._staging_failure(command, 128, _NOT_A_REPOSITORY, ())
             scope = _Scope(found.repo, found)
+            self._require_plain_work_tree(scope, pathspecs)
             try:
                 specs = Pathspecs(pathspecs)
             except PathspecError as error:
@@ -809,6 +833,7 @@ class FakeGitRepository:
             tree: Snapshot = scope.co.index
             index = scope.co.index
             if only:
+                self._require_plain_work_tree(scope, only)
                 tree, index = self._partial_tree(scope, command, self._specs(only, command))
             if not allow_empty and dict(tree) == dict(before):
                 self._refuse(command, "nothing to commit", code=1)
@@ -972,6 +997,15 @@ class FakeGitRepository:
                     command, "fatal: ambiguous argument 'HEAD': unknown revision", warn=False
                 )
             return head
+
+    def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        with self._operation("linked_worktree_location"):
+            scope = self._scope(["rev-parse", "--git-common-dir"], warn=False)
+            checkout = self._disk.exact(worktree)
+            if checkout is None or checkout.name is None or checkout.repo is not scope.repo:
+                message = f"fatal: '{worktree}' is not a linked worktree of {scope.repo.git_dir}"
+                self._refuse(["worktree", "list"], message, warn=False)
+            return RepositoryLocation(git_dir=self._git_dir_of(checkout), work_tree=checkout.path)
 
     # -- repository-local ignore rules ---------------------------------------
 

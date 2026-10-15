@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import REAL_PROCESSES
 
 from vibesys.constants import ComputeBackend
 from vibesys.run.environment import open_run_environment
@@ -27,7 +26,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
     build_run_environment,
 )
-from vs_runtime.api.testing import unconfined_host_environment
+from vs_runtime.api.testing import idle_environment_system, unconfined_host_environment
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
     ComputeBackendImpl,
@@ -38,8 +37,12 @@ from vs_sandbox.api import (
     SandboxKind,
 )
 from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry, ScriptedDockerCli
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ManualClock,
+    ScriptedProbe,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -112,7 +115,7 @@ class _DaemonBackend:
             resources=resources,
             docker=self.engine,
             docker_in_docker=docker_in_docker,
-            threads=OsThreads(),
+            threads=SimThreads(),
         )
 
     def ensure_accelerator_available(self) -> None:
@@ -149,13 +152,16 @@ def _request(
         evaluator_requirements=TrustedEvaluatorRequirements(),
         docker_in_docker=docker_in_docker,
         clock=ManualClock(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
 
 
 def _engine(tmp_path: Path, runtimes: Sequence[str]) -> FakeDockerEngine:
     return FakeDockerEngine(
-        tmp_path / "engine", agent_ids=(os.getuid(), os.getgid()), runtimes=runtimes
+        tmp_path / "engine",
+        agent_ids=(os.getuid(), os.getgid()),
+        runtimes=runtimes,
+        launcher=FakePipedProcessLauncher(),
     )
 
 
@@ -237,8 +243,10 @@ def test_a_host_without_a_gpu_fails_before_any_image_is_built(tmp_path: Path) ->
         tmp_path,
         gpu_telemetry=FakeGpuTelemetry(gpus=[]),
         clock=ManualClock(),
-        threads=OsThreads(),
+        threads=SimThreads(),
         docker=ScriptedDockerCli(),
+        launcher=FakePipedProcessLauncher(),
+        probe=ScriptedProbe(lambda _argv: None),
     )
 
     with pytest.raises(CudaAcceleratorUnavailableError, match="NVIDIA GPU"):

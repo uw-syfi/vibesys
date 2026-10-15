@@ -25,7 +25,7 @@ suspected bug against the TUI client's README and
 | Env var | Effect |
 | --- | --- |
 | `VIBESYS_TUI_RUNTIME` | frontend runtime, default `bun` |
-| `VIBESYS_TUI_ENTRYPOINT` | frontend entry, default `dist/index.js` |
+| `VIBESYS_TUI_ENTRYPOINT` | frontend entry, default packaged TUI bundle |
 | `VIBESYS_CONTROL_SOCKET` | socket path (frontend throws if unset) |
 | `VIBESYS_THEME` | theme name (falls back to `dark` if invalid) |
 | `VIBESYS_PYTHON` | backend interpreter |

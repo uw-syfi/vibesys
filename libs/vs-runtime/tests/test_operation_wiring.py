@@ -27,8 +27,7 @@ from vs_runtime.api.core import (
     build_operation_catalog,
 )
 from vs_runtime.api.operation_fixtures import SCENARIO_NAMES, OperationScenario, scenarios
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import SimThreads, examples
 
 _STRATEGY_NAMES = tuple(name for name in SCENARIO_NAMES if name != "echo")
 
@@ -66,13 +65,13 @@ def test_startup_fails_exactly_when_a_required_operation_is_refused(required: li
         refused = [name for name in required if next(i for i in items if i.name == name).refused]
         namespace = project.state.state_store_namespace("run")
         if not refused:
-            bindings = bind_operations(declaration, catalog, namespace, threads=OsThreads())
+            bindings = bind_operations(declaration, catalog, namespace, threads=SimThreads())
             assert isinstance(bindings.executors.operations, RegisteredOperationRequests)
             assert bindings.registry is catalog.registry
             return
         kind = next(i for i in items if i.name == refused[0]).entry.registration.descriptor.kind
         with pytest.raises(ContractError, match=re.escape(kind)):
-            bind_operations(declaration, catalog, namespace, threads=OsThreads())
+            bind_operations(declaration, catalog, namespace, threads=SimThreads())
 
 
 def test_a_refused_operation_is_registered_but_never_offered() -> None:

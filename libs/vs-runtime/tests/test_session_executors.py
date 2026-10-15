@@ -46,8 +46,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStatus,
 )
 from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -99,7 +98,7 @@ class Run:
         """A host: fresh workspaces and executors over the same disk and journal."""
         if len(self.env.hosts) > 1 or hasattr(self, "executors"):
             self.env.start_host()
-        store = ReceiptStore(self.env.receipts_namespace(), threads=OsThreads())
+        store = ReceiptStore(self.env.receipts_namespace(), threads=SimThreads())
         artifacts = ArtifactStore(self.env.project.state.local_namespace(RUN_ID, "artifacts"))
         self.artifacts = artifacts
 
@@ -131,10 +130,10 @@ class Run:
         client = report_turns(
             AgentClient(
                 FakeProvider(
-                    answer={"value": 7}, on_turn=self.provider.on_turn, threads=OsThreads()
+                    answer={"value": 7}, on_turn=self.provider.on_turn, threads=SimThreads()
                 ),
                 clock=ManualClock(),
-                threads=OsThreads(),
+                threads=SimThreads(),
             ),
             self.lifecycle,
         )
@@ -143,8 +142,8 @@ class Run:
             client=client,
             invocation_slot=self.journal,
             store=store,
-            blocking=ThreadBlockingRunner(),
-            threads=OsThreads(),
+            blocking=InlineBlockingRunner(),
+            threads=SimThreads(),
         )
 
     def dispatch(self) -> DispatchTurn:

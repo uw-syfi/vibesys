@@ -723,3 +723,38 @@ def test_the_nightly_depth_runs_every_case_of_a_smoke_directory(suite: pytest.Py
     suite.makepyfile(**{"smoke/test_in": _SMOKE_SUITE})
 
     suite.runpytest_inprocess("--depth=nightly").assert_outcomes(passed=4, xfailed=1)
+
+
+def test_a_test_whose_product_code_swallows_a_refused_process_start_still_fails(
+    suite: pytest.Pytester,
+) -> None:
+    suite.makepyfile(
+        """
+        from pathlib import Path
+
+        from vs_sim.api import ProcessSpec
+        from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher
+
+        def best_effort_cleanup(run):
+            try:
+                run()
+            except Exception:
+                return "cleanup skipped"
+            return "cleaned"
+
+        def test_swallowed_run_refusal():
+            spec = ProcessSpec(argv=("docker", "rm", "x"))
+            assert best_effort_cleanup(lambda: NO_PROCESSES.run(spec, timeout=None)) == "cleanup skipped"
+
+        def test_swallowed_piped_refusal():
+            launcher = FakePipedProcessLauncher()
+            assert best_effort_cleanup(lambda: launcher.start(("git", "status"))) == "cleanup skipped"
+
+        def test_no_refusal():
+            assert best_effort_cleanup(lambda: None) == "cleaned"
+        """
+    )
+    result = suite.runpytest_inprocess()
+    result.assert_outcomes(passed=1, failed=2)
+    result.stdout.fnmatch_lines(["*turned away a process start*docker rm x*"])
+    result.stdout.fnmatch_lines(["*turned away a process start*'git' was started*"])

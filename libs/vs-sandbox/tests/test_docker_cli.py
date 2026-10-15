@@ -2,20 +2,45 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, cast
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sandbox.api import SubprocessDockerCli
-from vs_sim.api import ProcessSpec, ProcessTimeoutError
-from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
+from vs_sim.api import (
+    OutputStream,
+    ProcessOutputTooLarge,
+    ProcessRun,
+    ProcessSpec,
+    ProcessTimeoutError,
+)
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    FakeProcesses,
+    ManualClock,
+    PipedStart,
+    ProcessScript,
+)
+
+if TYPE_CHECKING:
+    from vs_sim.api import PipedProcess
 
 _TIMEOUTS = st.floats(min_value=0.001, max_value=600, allow_nan=False, allow_infinity=False)
 
 
 def _docker(script: ProcessScript, clock: ManualClock) -> tuple[SubprocessDockerCli, FakeProcesses]:
     processes = FakeProcesses(lambda _spec: script, pass_time=clock.advance)
-    return SubprocessDockerCli(processes=processes), processes
+    return SubprocessDockerCli(processes=processes, launcher=_no_spawns()), processes
+
+
+def _no_spawns() -> FakePipedProcessLauncher:
+    def unexpected(start: PipedStart) -> PipedProcess:
+        message = f"unexpected docker spawn {start.argv!r}"
+        raise AssertionError(message)
+
+    return FakePipedProcessLauncher(unexpected)
 
 
 @given(
@@ -76,9 +101,62 @@ def test_a_docker_binary_that_cannot_start_raises_its_os_error() -> None:
     def script(_spec: ProcessSpec) -> ProcessScript:
         raise missing
 
-    docker = SubprocessDockerCli(processes=FakeProcesses(script, pass_time=ManualClock().advance))
+    docker = SubprocessDockerCli(
+        processes=FakeProcesses(script, pass_time=ManualClock().advance), launcher=_no_spawns()
+    )
 
     with pytest.raises(FileNotFoundError) as raised:
         docker.run(["docker", "version"], timeout_seconds=30)
 
     assert raised.value is missing
+
+
+class _StoppedForOutput:
+    """Processes whose every run was stopped for writing past its cap."""
+
+    def __init__(self, stopped: ProcessOutputTooLarge) -> None:
+        self._stopped = stopped
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        del spec, timeout
+        return self._stopped
+
+
+@given(
+    limit=st.integers(min_value=0, max_value=1 << 30),
+    stream=st.sampled_from(OutputStream),
+    detail=st.sampled_from(["", "pid 7 survived"]),
+)
+def test_a_run_stopped_for_too_much_output_raises_naming_the_stream_and_cap(
+    limit: int, stream: OutputStream, detail: str
+) -> None:
+    stopped = ProcessOutputTooLarge(limit, stream, b"", b"", detail)
+    docker = SubprocessDockerCli(
+        processes=_StoppedForOutput(stopped), launcher=FakePipedProcessLauncher()
+    )
+
+    with pytest.raises(
+        OSError, match=f"docker logs wrote more than {limit} bytes to {stream}"
+    ) as raised:
+        docker.run(["docker", "logs"], timeout_seconds=30)
+
+    assert getattr(raised.value, "__notes__", []) == ([detail] if detail else [])
+
+
+@given(arguments=st.lists(st.text(min_size=1, max_size=8), max_size=4))
+def test_a_spawn_starts_its_arguments_through_the_launcher_unchanged(arguments: list[str]) -> None:
+    started = object()
+    launcher = FakePipedProcessLauncher(lambda _start: cast("PipedProcess", started))
+    docker = SubprocessDockerCli(
+        processes=FakeProcesses(_no_runs, pass_time=ManualClock().advance), launcher=launcher
+    )
+
+    process = docker.spawn(["docker", "exec", *arguments])
+
+    assert process is started
+    assert launcher.started == [PipedStart(("docker", "exec", *arguments))]
+
+
+def _no_runs(spec: ProcessSpec) -> ProcessScript:
+    message = f"unexpected docker run {spec.argv!r}"
+    raise AssertionError(message)

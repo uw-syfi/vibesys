@@ -14,7 +14,7 @@ from typing import Literal
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from vibesys.api import IterationKind, IterationStatus, IterationSummary, IterationTree
 from vibesys.events import (
@@ -25,8 +25,8 @@ from vibesys.events import (
 )
 from vibesys.run.contracts import RoundFailureSummary, RoundSummary, RunStatus, RunView
 from vibesys.run.integration import LocalRunIntegration
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock, examples
+from vs_runtime.api.testing import idle_environment_system
+from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 
 class _FakeAgentState(BaseModel):
@@ -94,8 +94,8 @@ def test_commit_projection_preserves_semantics_and_publication_order() -> None:
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     order: list[str] = []
     captured: list[CoreEvent] = []
@@ -214,8 +214,8 @@ def test_commit_events_property_no_double_emission_and_semantic_changes(
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
     captured: list[CoreEvent] = []
@@ -260,8 +260,8 @@ def test_a_commit_of_another_namespace_projects_nothing() -> None:
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)

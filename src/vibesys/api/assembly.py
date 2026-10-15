@@ -26,9 +26,14 @@ if TYPE_CHECKING:
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import Git, GitRepositoryFactory, StateStoreFactory
     from vs_runtime.api.core import RunTiming
-    from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment, StopTimer
+    from vs_runtime.api.infrastructure import (
+        EnvironmentSystem,
+        RunState,
+        ScopedAgentEnvironment,
+        StopTimer,
+    )
     from vs_sandbox.api import ComputeBackendImpl, HostResource
-    from vs_sim.api import BlockingRunner, Network, Processes
+    from vs_sim.api import BlockingRunner, Network
 
 
 class SessionAgents(Protocol):
@@ -78,8 +83,8 @@ class SessionImplementations:
     """Starts the run's Git commands."""
     github: GitHubCLI
     """Runs the run's GitHub CLI commands."""
-    slurm_processes: Processes
-    """Starts the Slurm transport's programs (ssh, rsync, a connector) for the run's evaluations."""
+    system: EnvironmentSystem
+    """The host's threads, sockets and processes the run's environments and evaluations run on."""
     profiler_preflight: ProfilerPreflight
     """Checks native profiler availability on the host."""
     stateless_tool_servers: Mapping[str, Callable[[object], ToolServerDescriptor | None]] | None = (

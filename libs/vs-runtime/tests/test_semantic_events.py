@@ -15,7 +15,7 @@ from vs_runtime.api.core import JournalSemanticEvents, ReceiptStore, RequestExec
 from vs_runtime.api.executor_contexts import context_for
 from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_runtime.api.operation_fixtures import SCOPE
-from vs_sim.api import OsThreads
+from vs_sim.api.testing import SimThreads
 
 pytestmark = pytest.mark.asyncio
 
@@ -32,7 +32,7 @@ def block(request: str, target: str, reason: FailureReason) -> BlockRequest:
 def journal(root: Path) -> JournalSemanticEvents:
     (root / "project").mkdir(exist_ok=True)
     namespace = Project.open(root / "project").state.state_store_namespace("run")
-    return JournalSemanticEvents(ReceiptStore(namespace, threads=OsThreads()), namespace)
+    return JournalSemanticEvents(ReceiptStore(namespace, threads=SimThreads()), namespace)
 
 
 async def test_acknowledgement_covers_the_command_only_and_claims_no_release() -> None:

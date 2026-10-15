@@ -59,12 +59,11 @@
 {"path": "tests/vibesys/agents/test_agent_runners.py", "rule": "mock", "count": 11}
 {"path": "tests/vibesys/agents/test_agent_selection.py", "rule": "mock", "count": 4}
 {"path": "tests/vibesys/agents/test_callbacks.py", "rule": "mock", "count": 3}
-{"path": "tests/vibesys/agents/test_cli_common.py", "rule": "patch", "count": 2}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "mock", "count": 5}
 {"path": "tests/vibesys/backends/test_cuda_backend.py", "rule": "patch", "count": 5}
 {"path": "tests/vibesys/inputs/test_synthesis.py", "rule": "patch", "count": 1}
-{"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 52}
-{"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 75}
+{"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "mock", "count": 23}
+{"path": "tests/vibesys/sandbox/test_modal_evaluator.py", "rule": "patch", "count": 31}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "mock", "count": 7}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "patch", "count": 10}
 {"path": "tests/vibesys/test_config.py", "rule": "mock", "count": 6}

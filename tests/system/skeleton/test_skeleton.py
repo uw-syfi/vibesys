@@ -201,7 +201,7 @@ async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
         )
 
 
-def test_every_request_role_has_a_production_executor(tmp_path: Path) -> None:
+async def test_every_request_role_has_a_production_executor(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path) as world:
         executors = world.bindings().executors
         bound = {
@@ -363,7 +363,12 @@ async def test_a_measurement_that_is_not_evidence_is_the_reason_the_run_has_no_w
     async def measure_it(*_args: object, **_kwargs: object) -> MeasurementResult:
         return result
 
-    ctx = SimpleNamespace(evaluation=SimpleNamespace(measure=measure_it))
+    facts = SimpleNamespace(
+        evaluator_digest=DIGEST,
+        workload_digest=DIGEST,
+        environment_digest=DIGEST,
+    )
+    ctx = SimpleNamespace(evaluation=SimpleNamespace(measure=measure_it), facts=facts)
     baseline = RevisionRef.of_git_commit("a" * 40)
 
     refused = await measure(ctx, SkeletonConfig(), baseline, "baseline")  # ty: ignore[invalid-argument-type]

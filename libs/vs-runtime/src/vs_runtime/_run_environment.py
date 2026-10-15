@@ -32,7 +32,6 @@ import sys
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
-from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
@@ -126,7 +125,7 @@ from vs_sandbox.api.symlink_mounts import (
     find_mount_root,
     symlink_lifecycle_hooks,
 )
-from vs_sim.api import OsProcesses
+from vs_sim.api import CloseOnce, ReleaseStack
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
@@ -144,6 +143,7 @@ if TYPE_CHECKING:
     from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
     from vs_evaluation.api import ProfileField
     from vs_project.api import StateNamespace
+    from vs_runtime._environment_system import EnvironmentSystem
     from vs_sandbox.api import (
         CommandRunner,
         ComputeBackendImpl,
@@ -151,7 +151,7 @@ if TYPE_CHECKING:
         WorkspaceSandbox,
     )
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
-    from vs_sim.api import Clock, Processes
+    from vs_sim.api import Clock
 
 
 @dataclass(frozen=True)
@@ -372,8 +372,8 @@ class RunEnvironmentRequest:
     framework_root: Path
     clock: Clock
     """Measures the agent image build budget."""
-    slurm_processes: Processes
-    """Starts the Slurm transport programs a host broker runs for the agent's container."""
+    system: EnvironmentSystem
+    """The host's threads, sockets and processes the environment's brokers and tools run on."""
     objective: str | None = None
     # Authored run state belongs to git_history_root, including when workspace
     # is a candidate revision that predates the objective's committed document.
@@ -457,7 +457,7 @@ class RunEnvironmentResources:
         request: RunEnvironmentRequest,
         session: RunEnvironmentSession,
         device: DeviceLease,
-        ownership: ExitStack,
+        ownership: ReleaseStack,
         open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
     ) -> None:
         self.request = request
@@ -465,7 +465,7 @@ class RunEnvironmentResources:
         self.device = device
         self._ownership = ownership
         self._open_session = open_session
-        self._closed = False
+        self._close = CloseOnce()
 
     @property
     def view(self) -> RunEnvironmentView:
@@ -489,15 +489,12 @@ class RunEnvironmentResources:
         return self._open_session(request)
 
     def close(self) -> None:
-        """Release owned resources in reverse construction order exactly once."""
-        if self._closed:
-            return
-        self._closed = True
-        self._ownership.close()
+        """Release owned resources in reverse construction order; a failed step runs again next call."""
+        self._close.run(self._ownership.close)
 
 
 def _close_failed_environment_resources(
-    ownership: ExitStack, construction_error: BaseException
+    ownership: ReleaseStack, construction_error: BaseException
 ) -> None:
     try:
         ownership.close()
@@ -515,7 +512,7 @@ def open_run_environment_resources(
     clock: Clock,
 ) -> RunEnvironmentResources:
     """Open a root session and own its newly started device lease; ``clock`` counts epoch seconds."""
-    ownership = ExitStack()
+    ownership = ReleaseStack()
     try:
         with boot_trace.span("environment_open"):
             session = ownership.enter_context(open_session(request))
@@ -541,7 +538,7 @@ def open_workspace_environment_resources(
     device: DeviceLease,
 ) -> RunEnvironmentResources:
     """Open a workspace session while borrowing the root run's device lease."""
-    ownership = ExitStack()
+    ownership = ReleaseStack()
     try:
         session = ownership.enter_context(open_session(request))
         return RunEnvironmentResources(request, session, device, ownership, open_session)
@@ -618,7 +615,9 @@ class RunEnvironment(Protocol):
         """Remove a workspace-relative child and report whether it is absent."""
         ...
 
-    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
         """End the agent processes and containers a dead host left for *run_id*.
 
         Called when a run resumes, before anything else touches its workspace.
@@ -629,8 +628,10 @@ class RunEnvironment(Protocol):
 
 
 class _NoopWorkspaceRecovery:
-    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
-        del run_id, log
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
+        del run_id, system, log
 
     def repair_workspace(
         self,
@@ -933,9 +934,7 @@ class DockerEnvironment:
         if request.docker_in_docker:
             # Fail before the image build when the host has no Sysbox; nothing
             # falls back to the host socket.
-            require_sysbox_runtime(
-                self.config.docker or SubprocessDockerCli(processes=OsProcesses())
-            )
+            require_sysbox_runtime(self._docker(request.system))
             toolchains.add(CONTAINER_RUNTIME_TOOLCHAIN)
             log(DOCKER_IN_DOCKER_NOTICE)
         # The task image, when a task has a Dockerfile, is built by the
@@ -1008,18 +1007,22 @@ class DockerEnvironment:
         log(f"[docker] starting container with image {container_image}")
         return sandbox
 
-    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
         """End the agents and containers a previous host process left for *run_id*."""
         reaper = (
             self.config.orphan_reaper
             if self.config.orphan_reaper is not None
             else reap_orphaned_agents
         )
-        reaper(
-            run_id,
-            docker=self.config.docker or SubprocessDockerCli(processes=OsProcesses()),
-            log=log,
-        )
+        reaper(run_id, docker=self._docker(system), log=log)
+
+    def _docker(self, system: EnvironmentSystem) -> DockerCli:
+        """The configured ``docker`` client, or the host's own over *system*'s processes."""
+        if self.config.docker is not None:
+            return self.config.docker
+        return SubprocessDockerCli(processes=system.processes, launcher=system.launcher)
 
     def repair_workspace(
         self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]
@@ -1073,7 +1076,12 @@ class _SkyPilotRunEnvironmentSession:
     sandbox: CommandRunner
     view: RunEnvironmentView
     bridge: SkyPilotBridge
-    _closed: bool = False
+    _close: CloseOnce = field(init=False, default_factory=CloseOnce)
+    _steps: ReleaseStack = field(init=False, default_factory=ReleaseStack)
+
+    def __post_init__(self) -> None:
+        self._steps.callback(self.bridge.close)
+        self._steps.callback(stop_sandbox, self.sandbox)
 
     def __enter__(self) -> _SkyPilotRunEnvironmentSession:
         return self
@@ -1082,13 +1090,8 @@ class _SkyPilotRunEnvironmentSession:
         self.close()
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            stop_sandbox(self.sandbox)
-        finally:
-            self.bridge.close()
+        """Stop the sandbox and the bridge; a step that failed runs again on the next call."""
+        self._close.run(self._steps.close)
 
 
 class SkyPilotEnvironment(DockerEnvironment):
@@ -1589,6 +1592,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
 
 def _write_runtime_document(log_dir: Path, presentation: str) -> Path:
     """Write the runtime environment document the agent's container mounts read-only."""
+    log_dir.mkdir(parents=True, exist_ok=True)
     write_for_agent(log_dir, _RUNTIME_DOCUMENT_NAME, presentation.encode("utf-8"))
     return log_dir / _RUNTIME_DOCUMENT_NAME
 

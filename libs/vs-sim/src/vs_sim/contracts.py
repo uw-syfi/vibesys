@@ -19,7 +19,15 @@ from typing import TYPE_CHECKING, Any
 from vs_sim.child import run_in_child
 from vs_sim.gate import Gate
 from vs_sim.loopback_http import HttpReply
-from vs_sim.processes import ProcessGroupUnreaped, ProcessOutcome, ProcessSpec, ProcessTimedOut
+from vs_sim.processes import (
+    OutputStream,
+    ProcessGroupUnreaped,
+    ProcessOutcome,
+    ProcessOutputTooLarge,
+    ProcessSpec,
+    ProcessTimedOut,
+    ProcessTimeoutError,
+)
 from vs_sim.randomness import SeededRandom
 from vs_sim.waits import HANG_GUARD_S
 
@@ -30,7 +38,7 @@ if TYPE_CHECKING:
     from vs_sim.clock import Clock, Sleeper
     from vs_sim.loopback_http import LoopbackHttp
     from vs_sim.probes import CommandProbe
-    from vs_sim.processes import ForegroundLauncher, Processes, ProcessLauncher
+    from vs_sim.processes import ForegroundLauncher, PipedProcess, Processes, ProcessLauncher
     from vs_sim.signals import ProcessSignaller, SignalSource
     from vs_sim.streaming import StreamingCommand
 
@@ -638,6 +646,47 @@ class ProcessesContract:
         assert run.timeout == timeout
         assert run.detail
 
+    def test_output_up_to_the_cap_comes_back_and_more_is_cut_and_reported(self) -> None:
+        """Each stream is kept up to the spec's cap; a stream past it stops the run, named."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        for seed in range(_PROCESS_CASES):
+            rng = SeededRandom(seed)
+            limit = rng.randint(0, 12)
+            out, err = (_random_bytes(rng) for _ in "oe")
+            spec = ProcessSpec(subject.exit_with(3, out, err), max_output_bytes=limit)
+            run = subject.processes.run(spec, timeout=HANG_GUARD_S)
+            if len(out) <= limit and len(err) <= limit:
+                assert run == ProcessOutcome(3, out, err), seed
+                continue
+            assert isinstance(run, ProcessOutputTooLarge), (seed, run)
+            assert run.limit == limit, seed
+            assert run.stream in {
+                stream
+                for stream, written in ((OutputStream.STDOUT, out), (OutputStream.STDERR, err))
+                if len(written) > limit
+            }, seed
+            assert out[:limit].startswith(run.stdout), seed
+            assert err[:limit].startswith(run.stderr), seed
+            assert not run.detail, seed
+
+    def test_a_command_writing_past_the_cap_is_stopped_before_its_timeout(self) -> None:
+        """A writer that would never end is killed at the cap, not left to run to its timeout."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        written = b"more than four"
+        spec = ProcessSpec(subject.outlives_timeout(written), max_output_bytes=4)
+        run = subject.processes.run(spec, timeout=HANG_GUARD_S)
+        assert run == ProcessOutputTooLarge(4, OutputStream.STDOUT, written[:4], b""), run
+
+    def test_a_negative_cap_is_refused(self) -> None:
+        """A spec cannot ask for a negative output cap."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        try:
+            ProcessSpec(subject.echo_stdin, max_output_bytes=-1)
+        except ValueError:
+            return
+        message = "a negative max_output_bytes was accepted"
+        raise AssertionError(message)
+
     def test_a_missing_program_fails_to_start(self) -> None:
         """A program that does not exist raises ``OSError`` instead of returning an outcome."""
         subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
@@ -767,6 +816,137 @@ class CommandProbeContract:
         """A command still running at the timeout gives ``None``."""
         subject = self.probe_under_test()
         assert subject.probe.run(subject.blocks_forever, timeout_seconds=0.2) is None
+
+
+@dataclass(frozen=True)
+class PipedUnderTest:
+    """Piped process groups with known behaviour, and how to run a case beside them.
+
+    A real launcher starts a Python one-liner for each; a scripted process is driven
+    by its script. Every case body runs inside ``drive``: the call itself for real
+    processes, ``SimThreads.run`` for scripted ones, whose reads block on simulated
+    threads.
+    """
+
+    writes_then_exits: Callable[[str, str, int], PipedProcess]
+    """``(stdout, stderr, status)``: writes stdout, then stderr, then exits with the status."""
+    merged_writes_then_exits: Callable[[str, str, int], PipedProcess]
+    """The same, started with stderr merged into stdout."""
+    blocks_until_signalled: Callable[[], PipedProcess]
+    """A group that writes nothing and never ends by itself."""
+    descendant_holds_output: Callable[[], PipedProcess]
+    """A leader that exits 0 at once while a descendant that wrote ``ready`` keeps the pipes."""
+    drive: Callable[[Callable[[], object]], object]
+
+
+_PIPED_TEXT = "ab \n"
+
+
+class PipedProcessContract:
+    """Cases for :class:`~vs_sim.processes.PipedProcess`. Implement :meth:`piped_under_test`.
+
+    The cases that matter most to a caller that stops a group: a signal reaches the
+    whole group only while its leader is unreaped, so a descendant still holding a
+    pipe after the leader exited can be stopped until the leader is waited for, and
+    a signal after that changes nothing.
+    """
+
+    def piped_under_test(self) -> PipedUnderTest:
+        """A fresh harness."""
+        raise NotImplementedError
+
+    def test_output_and_status_come_back(self) -> None:
+        """Both pipes carry what the group wrote, to end of file, and ``wait`` its status."""
+        for seed in range(_CASES):
+            rng = SeededRandom(seed)
+            subject = self.piped_under_test()
+            out = "".join(rng.choice(_PIPED_TEXT) for _ in range(rng.randint(0, 20)))
+            err = "".join(rng.choice(_PIPED_TEXT) for _ in range(rng.randint(0, 20)))
+            status = rng.randint(0, 100)
+
+            def case(
+                subject: PipedUnderTest = subject,
+                out: str = out,
+                err: str = err,
+                status: int = status,
+            ) -> object:
+                process = subject.writes_then_exits(out, err, status)
+                return process.stdout.read(), process.stderr.read(), process.wait(None)
+
+            assert subject.drive(case) == (out, err, status), seed
+
+    def test_merged_output_keeps_the_write_order_and_stderr_is_at_end_of_file(self) -> None:
+        """Started merged, stdout carries stdout then stderr, and stderr reads as empty."""
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.merged_writes_then_exits("out\n", "err\n", 0)
+            return process.stdout.read(), process.stderr.read(), process.wait(None)
+
+        assert subject.drive(case) == ("out\nerr\n", "", 0)
+
+    def test_a_timed_wait_on_a_running_group_times_out_and_a_group_signal_ends_it(self) -> None:
+        """``wait`` raises ``ProcessTimeoutError`` while the leader runs; a signal then ends it."""
+        for stop, expected in (
+            ("terminate_group", -signal.SIGTERM),
+            ("kill_group", -signal.SIGKILL),
+        ):
+            subject = self.piped_under_test()
+
+            def case(subject: PipedUnderTest = subject, stop: str = stop) -> object:
+                process = subject.blocks_until_signalled()
+                try:
+                    process.wait(0)
+                except ProcessTimeoutError:
+                    timed_out = True
+                else:
+                    timed_out = False
+                getattr(process, stop)()
+                return timed_out, process.wait(None)
+
+            assert subject.drive(case) == (True, expected), stop
+
+    def test_a_signal_after_the_leader_is_reaped_changes_nothing(self) -> None:
+        """Once ``wait`` returned, group signals are no-ops and ``wait`` repeats the status."""
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.writes_then_exits("", "", 3)
+            first = process.wait(None)
+            process.terminate_group()
+            process.kill_group()
+            return first, process.wait(None)
+
+        assert subject.drive(case) == (3, 3)
+
+    def test_a_signal_before_reaping_reaches_a_descendant_that_holds_the_output(self) -> None:
+        """A leader that exited but is unreaped still lets a group signal end its descendants.
+
+        The descendant's pipe then reaches end of file with nothing more written, and
+        ``wait`` reports the leader's own status.
+        """
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.descendant_holds_output()
+            ready = process.stdout.readline()
+            process.terminate_group()
+            return ready, process.stdout.read(), process.wait(None)
+
+        assert subject.drive(case) == ("ready\n", "", 0)
+
+    def test_cancelled_output_reads_return_while_the_group_still_runs(self) -> None:
+        """``cancel_output`` makes reads return ``""`` without signalling the group."""
+        subject = self.piped_under_test()
+
+        def case() -> object:
+            process = subject.blocks_until_signalled()
+            process.cancel_output()
+            read = process.stdout.read(), process.stderr.read()
+            process.kill_group()
+            return read, process.wait(None)
+
+        assert subject.drive(case) == (("", ""), -signal.SIGKILL)
 
 
 @dataclass(frozen=True)

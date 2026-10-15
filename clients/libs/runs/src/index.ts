@@ -6,6 +6,7 @@ export {isInstanceId, isRunId, isTaskName} from './ids.js';
 export {
   type RecentRun,
   type RecentStatus,
+  recentRunKey,
   recentStatus,
   suggestProjects,
 } from './recent-status.js';

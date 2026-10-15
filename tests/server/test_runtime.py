@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from tests.server.support import REQUEST_TIME, sim_platform
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from websockets.sync.client import connect
 
 from entrypoints.production import production_runs
@@ -41,6 +41,7 @@ from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import RunControlChannel
+from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads, Platform
 from vs_sim.api.testing import ManualClock, SimThreads
 
@@ -269,7 +270,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
     control = _SessionControlStub(integration.control)
 

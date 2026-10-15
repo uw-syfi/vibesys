@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 from hypothesis import given, settings
@@ -13,12 +14,16 @@ from vs_sim.api.testing import (
     EventTrace,
     SimBlockingRunner,
     SimDeadlockError,
+    SimMisuseError,
     SimNetwork,
     SimThreads,
     VirtualClock,
     VirtualDeadlockError,
     examples,
+    join_or_fail,
+    loop_threads,
     run_virtual,
+    undriven_threads,
 )
 
 type Step = tuple[str, int, float]
@@ -379,3 +384,134 @@ def test_one_seed_gives_the_same_trace_for_any_thread_tree(
     second_counts, second_trace = _run_tree(tree, seed, join=join)
     assert first_counts == second_counts
     assert first_trace.first_difference(second_trace) is None
+
+
+@pytest.mark.parametrize("primitive", ["lock", "rlock", "event", "spawn"])
+def test_a_second_real_thread_cannot_use_a_simulator(primitive: str) -> None:
+    sim = SimThreads()
+    lock, rlock, event = sim.lock(), sim.rlock(), sim.event()
+    uses = {
+        "lock": lambda: lock.acquire(blocking=False),
+        "rlock": lambda: rlock.acquire(blocking=False),
+        "event": event.set,
+        "spawn": lambda: sim.spawn(lambda: None, name="late"),
+    }
+    lock.acquire()
+    lock.release()
+    raised: list[BaseException] = []
+
+    def other_real_thread() -> None:
+        try:
+            uses[primitive]()
+        except SimMisuseError as error:
+            raised.append(error)
+
+    worker = threading.Thread(target=other_real_thread)
+    worker.start()
+    join_or_fail(worker)
+
+    assert [type(error) for error in raised] == [SimMisuseError]
+    assert not lock.held_by_caller()
+
+
+def test_a_real_thread_that_did_not_build_the_simulator_cannot_be_its_first_user() -> None:
+    """The first real user does not matter: a pool worker fails on every run, not by chance."""
+    sim = SimThreads()
+    raised: list[BaseException] = []
+
+    def only_user() -> None:
+        try:
+            sim.lock().acquire(blocking=False)
+        except SimMisuseError as error:
+            raised.append(error)
+
+    worker = threading.Thread(target=only_user)
+    worker.start()
+    join_or_fail(worker)
+
+    assert [type(error) for error in raised] == [SimMisuseError]
+
+
+def test_a_thread_spawned_on_an_undriven_simulator_is_reported_as_never_run() -> None:
+    sim = SimThreads()
+    sim.spawn(lambda: None, name="watchdog")
+
+    assert sim.never_ran() == ("watchdog",)
+    assert "watchdog" in undriven_threads()
+
+
+def test_a_driven_simulator_reports_no_stranded_threads() -> None:
+    sim = SimThreads()
+    ran: list[str] = []
+    sim.spawn(lambda: ran.append("early"), name="early", daemon=False)
+    sim.run(lambda: ran.append("main"))
+
+    assert sorted(ran) == ["early", "main"]
+    assert sim.never_ran() == ()
+
+
+@given(seed=SEEDS, calls=st.integers(1, 4))
+@settings(max_examples=15, deadline=None)
+def test_to_thread_on_a_driven_virtual_loop_runs_on_simulated_threads(
+    seed: int, calls: int
+) -> None:
+    """No call reaches a real thread: a simulated lock the loop's thread used still serves it."""
+    clock = VirtualClock()
+    threads = SimThreads(clock, schedule_seed=seed)
+    lock = threads.lock()
+    with lock:
+        pass
+
+    def serve(index: int) -> int:
+        threads.sleep(1.0)
+        with lock:
+            return index
+
+    async def main() -> list[int]:
+        return list(await asyncio.gather(*(asyncio.to_thread(serve, i) for i in range(calls))))
+
+    answers = run_virtual(clock, main(), driver=threads)
+
+    assert answers == list(range(calls))
+    assert clock.now() >= 1.0
+
+
+@given(seed=st.integers(0, 2**16), calls=st.integers(1, 4))
+@settings(max_examples=examples(pr=10, nightly=50), deadline=None)
+def test_a_loop_asks_for_its_simulated_threads_and_blocking_work_overlaps_it(
+    seed: int, calls: int
+) -> None:
+    """Work run through ``loop_threads`` overlaps loop tasks, on one simulator per loop."""
+    clock = VirtualClock()
+
+    async def main() -> tuple[list[int], bool]:
+        threads = loop_threads()
+        runner = SimBlockingRunner(threads)
+        ticks: list[float] = []
+
+        def block(index: int) -> int:
+            threads.sleep(1.0)
+            return index
+
+        async def ticker() -> None:
+            for _ in range(3):
+                await clock.sleep(0.25)
+                ticks.append(clock.now())
+
+        task = asyncio.create_task(ticker())
+        answers = await asyncio.gather(*(runner.run(block, i) for i in range(calls)))
+        await task
+        return list(answers), loop_threads() is threads and len(ticks) == 3
+
+    answers, same = run_virtual(clock, main(), schedule_seed=seed)
+
+    assert answers == list(range(calls))
+    assert same
+
+
+def test_loop_threads_off_a_virtual_loop_is_refused() -> None:
+    async def main() -> None:
+        loop_threads()
+
+    with pytest.raises(RuntimeError, match="virtual loop"):
+        asyncio.run(main())

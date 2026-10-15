@@ -31,6 +31,7 @@ class Connection(Protocol):
             TimeoutError: a peer that stopped reading left no room for all of ``data``
                 within ``timeout`` seconds (``None`` waits for ever). Part of it may
                 have been written.
+            ConnectionError: the connection broke (reset, aborted, timed out).
         """
         ...
 
@@ -39,6 +40,7 @@ class Connection(Protocol):
 
         Raises:
             TimeoutError: nothing arrived within ``timeout`` seconds (``None`` waits for ever).
+            ConnectionError: the connection broke (reset, aborted, timed out).
             OSError: this end was closed.
         """
         ...

@@ -60,15 +60,21 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
-from vs_sim.api import ProcessOutcome
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
+from vs_sim.api import OutputStream, ProcessOutcome, ProcessOutputTooLarge
 
 from . import fake_shell
+from .connector_protocol import (
+    MAX_CONNECTOR_REQUEST_BYTES,
+    SLURM_CONNECTOR_REQUEST,
+    SlurmConnectorResponse,
+)
 from .scheduler_read import split_framed
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sim.api import ProcessSpec
+    from vs_sim.api import ProcessRun, ProcessSpec
 
     from .runner import SlurmJobStatus
 
@@ -392,19 +398,51 @@ def _executing(state: Path, request: dict[str, object]) -> dict[str, object]:
     return {"version": 1, "returncode": returncode, "stdout": stdout, "stderr": stderr}
 
 
+def _decode_connector_request(payload: bytes | str) -> ConnectorRequest:
+    if not payload:
+        raise ValueError(_STDIN_REQUIRED)
+    decoded = decode_json(
+        payload,
+        SLURM_CONNECTOR_REQUEST,
+        source="Fake connector request",
+        max_bytes=MAX_CONNECTOR_REQUEST_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if isinstance(decoded, Unreadable):
+        raise TypeError(str(decoded))
+    return decoded.model_dump(mode="python")
+
+
+def _connector_process_result(response: ConnectorResponse, *, max_output_bytes: int) -> ProcessRun:
+    validated = SlurmConnectorResponse.model_validate(response, strict=True)
+    payload = validated.model_dump_json().encode()
+    if len(payload) > max_output_bytes:
+        return ProcessOutputTooLarge(
+            max_output_bytes,
+            OutputStream.STDOUT,
+            payload[:max_output_bytes],
+            b"",
+        )
+    return ProcessOutcome(0, payload, b"")
+
+
 def handle(state: Path, request: dict[str, object]) -> dict[str, object]:
     """Record one connector request and return its protocol response.
 
     A framed scheduler query (`scheduler_read`) is answered like the bare query,
     with the end line after its output when it succeeds, as a remote shell does.
     """
+    # ``request`` is the decoded JSON document in in-process tests; validate it
+    # with JSON semantics too (JSON arrays are the wire form of tuple fields).
+    request = _decode_connector_request(json.dumps(request))
     query, end = split_framed(str(request.get("command", "")))
     if not end:
-        return _handle(state, request)
+        response = _handle(state, request)
+        return SlurmConnectorResponse.model_validate(response).model_dump(mode="python")
     response = _handle(state, {**request, "command": query})
     if response["returncode"] == 0:
         response = {**response, "stdout": str(response["stdout"]) + end}
-    return response
+    return SlurmConnectorResponse.model_validate(response).model_dump(mode="python")
 
 
 def _handle(state: Path, request: dict[str, object]) -> dict[str, object]:
@@ -569,18 +607,16 @@ class FakeConnector:
         """
         self._intercept = intercept
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessOutcome:
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
         """Answer a connector request without a transport subprocess; it takes no time."""
         del timeout
-        if not spec.input:
-            raise ValueError(_STDIN_REQUIRED)
-        request = json.loads(spec.input)
+        request = _decode_connector_request(spec.input)
         response = (
             self._answer(request)
             if self._intercept is None
             else self._intercept(request, self._answer)
         )
-        return ProcessOutcome(0, json.dumps(response).encode(), b"")
+        return _connector_process_result(response, max_output_bytes=spec.max_output_bytes)
 
     def _answer(self, request: dict[str, object]) -> dict[str, object]:
         query, end = split_framed(str(request.get("command", "")))
@@ -735,7 +771,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     program = arguments[1:2]
     if program in (["ssh"], ["shell"]):
         # ssh [options] -- HOST COMMAND, or the local transport's SHELL COMMAND
-        response = handle(state, {"operation": "exec", "command": arguments[-1]})
+        response = handle(state, {"version": 1, "operation": "exec", "command": arguments[-1]})
         sys.stdout.write(str(response["stdout"]))
         sys.stderr.write(str(response["stderr"]))
         return int(str(response["returncode"]))
@@ -744,7 +780,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.write(json.dumps({"operation": "rsync", "argv": arguments[2:]}) + "\n")
         _rsync(state, arguments[2:])
         return 0
-    sys.stdout.write(json.dumps(handle(state, json.loads(sys.stdin.read()))))
+    request = decode_json(
+        sys.stdin.read(),
+        SLURM_CONNECTOR_REQUEST,
+        source="connector stdin",
+        max_bytes=MAX_CONNECTOR_REQUEST_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if isinstance(request, Unreadable):
+        return 2
+    sys.stdout.write(json.dumps(handle(state, request.model_dump(mode="python"))))
     return 0
 
 

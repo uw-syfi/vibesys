@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
+from vs_project.api.workspace_tree import EntryKind
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
     AgentExecutionScope,
@@ -15,10 +15,11 @@ from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     create_trusted_evaluation_executor,
 )
-from vs_runtime._workspace_files import file_fingerprint
+from vs_runtime._workspace_files import entry_kind, file_fingerprint
 from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
 from vs_sandbox.api import HostResource, HostResourceAccess
+from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -128,7 +129,7 @@ class WorkspaceResourceFactory:
 
     def _wrap_candidate(self, project: _ProjectWorkspaceResources) -> RuntimeWorkspaceResource:
         workspace_id = project.workspace_id
-        ownership = ExitStack()
+        ownership = ReleaseStack()
         try:
             ownership.callback(project.close)
             base = self._environment.request
@@ -162,7 +163,7 @@ class WorkspaceResourceFactory:
         environment: RunEnvironmentResources,
         *,
         workspace_id: str | None,
-        ownership: ExitStack | None = None,
+        ownership: ReleaseStack | None = None,
     ) -> RuntimeWorkspaceResource:
         plan = self._evaluation_plan.model_copy(
             update={
@@ -230,7 +231,7 @@ class RuntimeWorkspaceResource:
         skill_selection: SkillSelection,
         host_resources: tuple[HostResource, ...],
         events: WorkspaceResourceEventSink,
-        ownership: ExitStack | None,
+        ownership: ReleaseStack | None,
         root_agent_environment_opener: (
             Callable[[AgentExecutionConfiguration], AgentExecutionEnvironment] | None
         ),
@@ -249,7 +250,7 @@ class RuntimeWorkspaceResource:
         self._events = events
         self._ownership = ownership
         self._root_agent_environment_opener = root_agent_environment_opener
-        self._closed = False
+        self._close = CloseOnce()
 
     @property
     def id(self) -> str | None:
@@ -371,12 +372,11 @@ class RuntimeWorkspaceResource:
         modified: list[str] = []
         removed: list[str] = []
         for entry in entries:
-            target = self.path / entry.path
             match entry.kind:
                 case BaselineEntryKind.DIRECTORY:
-                    gone = not target.is_dir()
+                    gone = entry_kind(self.path, entry.path) is not EntryKind.DIRECTORY
                 case BaselineEntryKind.UNFINGERPRINTED:
-                    gone = not target.exists(follow_symlinks=False)
+                    gone = entry_kind(self.path, entry.path) is None
                 case BaselineEntryKind.FILE:
                     fingerprint = file_fingerprint(self.path, entry.path)
                     gone = fingerprint is None
@@ -406,7 +406,7 @@ class RuntimeWorkspaceResource:
         return self._project.git.trusted_input_changes()
 
     def is_directory(self, path: str) -> bool:
-        return (self.path / path).is_dir()
+        return entry_kind(self.path, path) is EntryKind.DIRECTORY
 
     def execute(self, command: str, timeout_seconds: int | None) -> CommandExecutionResult:
         return self._environment.session.sandbox.execute(command, timeout=timeout_seconds)
@@ -477,15 +477,13 @@ class RuntimeWorkspaceResource:
         )
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        """Release what this workspace owns; a step that failed runs again on the next call."""
         if self._ownership is not None:
-            self._ownership.close()
+            self._close.run(self._ownership.close)
 
 
 def _close_after_construction_failure(
-    ownership: ExitStack, construction_error: BaseException
+    ownership: ReleaseStack, construction_error: BaseException
 ) -> None:
     try:
         ownership.close()

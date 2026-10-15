@@ -25,25 +25,29 @@ from pydantic import (
 )
 
 from vs_decode.api import decode_json
-from vs_sim.api import (
-    MergedOutputProcess,
-    MergedOutputProcessLauncher,
-    OsThreads,
-    SubprocessMergedOutputProcessLauncher,
-    SubprocessProbe,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
-    from vs_sim.api import CommandProbe, Event, PopenFactory, Threads
+    from vs_sim.api import CommandProbe, Event, PipedProcess, PipedProcessLauncher, Threads
 
 _UNLIMITED = "unlimited"
 _WINDOWS_TIMEOUT_SECONDS = 30
 _CANCEL_GRACE_SECONDS = 30
 _SCANCEL_TIMEOUT_SECONDS = 60
-_READ_BYTES = 65_536
+#: ``scancel`` runs again while its outcome is unknown: it could not start, timed
+#: out, or exited nonzero (an ``ssh`` wrapper that lost its connection exits 255).
+_SCANCEL_ATTEMPTS = 3
+_SQUEUE_TIMEOUT_SECONDS = 30
+#: After a cancel, ``squeue`` is asked this many times, this far apart, whether
+#: the job is gone; a completing job can stay listed for a few seconds.
+_CONFIRM_ATTEMPTS = 6
+_CONFIRM_INTERVAL_SECONDS = 5
+#: How long ``run`` waits for the cancel worker once ``srun`` exited. It bounds
+#: every ``scancel`` attempt; the worker returns at once in every other state.
+_WATCHER_JOIN_SECONDS = _SCANCEL_ATTEMPTS * _SCANCEL_TIMEOUT_SECONDS + _CANCEL_GRACE_SECONDS
+_READ_CHARACTERS = 65_536
 _MAX_QUEUE_MINUTES = 60 * 24 * 365
 
 
@@ -229,15 +233,11 @@ def choose_partition(
     return fits[0] if fits else config.partitions[0]
 
 
-def read_windows(
-    config: AgentGpuConfig, probe: CommandProbe | None = None
-) -> Mapping[str, object] | None:
+def read_windows(config: AgentGpuConfig, probe: CommandProbe) -> Mapping[str, object] | None:
     """Run the operator's window report command, or return ``None`` if unavailable."""
     if config.windows_command is None:
         return None
-    completed = (probe or SubprocessProbe()).run(
-        config.windows_command, timeout_seconds=_WINDOWS_TIMEOUT_SECONDS
-    )
+    completed = probe.run(config.windows_command, timeout_seconds=_WINDOWS_TIMEOUT_SECONDS)
     if completed is None or completed.returncode != 0:
         return None
     report = decode_json(
@@ -305,32 +305,25 @@ class AgentGpuLauncher:
     ``srun`` and ``scancel`` run through *shell_command*, the local transport's
     shell (a login-container wrapper may precede ``bash -c``), so the operator
     names how to reach the Slurm binaries in one place. *processes* owns the
-    local process group and *probe* runs the scheduler report and ``scancel``;
-    tests inject both to drive the lifecycle without a cluster or OS process.
-    The legacy *popen* seam remains accepted and is adapted to *processes*.
+    local process group, *probe* runs the scheduler report and ``scancel``, and
+    *threads* runs the output pump and bounds the waits.
     """
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-189701 [PLR0913]; preserve the published popen and probe parameters while exposing the process and thread interfaces needed for deterministic lifecycle tests.
-        # > Hiding popen in kwargs would silently weaken the constructor contract;
-        # > bundling independent process and thread effects would couple their Fakes.
+    def __init__(
         self,
         config: AgentGpuConfig,
         shell_command: Sequence[str],
         *,
-        popen: PopenFactory | None = None,
-        probe: CommandProbe | None = None,
-        processes: MergedOutputProcessLauncher | None = None,
-        threads: Threads | None = None,
+        probe: CommandProbe,
+        processes: PipedProcessLauncher,
+        threads: Threads,
     ) -> None:
         """Bind the operator configuration and the process boundary."""
         self._config = config
         self._shell = tuple(shell_command)
-        self._probe: CommandProbe = probe or SubprocessProbe()
-        if popen is not None and processes is not None:
-            message = "popen and processes are alternative process-launcher seams"
-            raise ValueError(message)
-        self._processes = processes or SubprocessMergedOutputProcessLauncher(popen)
-        self._threads = threads or OsThreads()
+        self._probe = probe
+        self._processes = processes
+        self._threads = threads
 
     def run(
         self,
@@ -344,7 +337,10 @@ class AgentGpuLauncher:
 
         Returns the command's exit status as ``srun`` reports it. Setting
         *cancel* (from any thread) cancels the job by its unique name, then
-        stops ``srun``; the call still returns only after ``srun`` exits.
+        stops ``srun``; the call still returns only after ``srun`` exits. Stopping
+        a ``docker exec`` or ``ssh`` wrapper does not stop the ``srun`` behind it,
+        so a cancelled job is then looked up in the queue, and one still listed is
+        reported on *write* as unconfirmed.
         """
         partition = choose_partition(self._config, request, read_windows(self._config, self._probe))
         job_name = new_job_name(self._config)
@@ -359,27 +355,36 @@ class AgentGpuLauncher:
             (*self._shell, shlex.join(argv)),
             cwd=command.cwd,
             env=dict(command.env),
+            merge_stderr=True,
         )
         finished = self._threads.event()
+        cancelled = self._threads.event()
         watcher = self._threads.spawn(
-            lambda: self._cancel_when_asked(process, job_name, cancel, finished),
+            lambda: self._cancel_when_asked(process, job_name, cancel, finished, cancelled),
             name="vibesys-gpu-cancel",
             daemon=True,
         )
         try:
-            while chunk := process.read(_READ_BYTES):
-                write(chunk)
-            return process.wait()
+            while chunk := process.stdout.read(_READ_CHARACTERS):
+                write(chunk.encode())
+            status = process.wait(None)
         finally:
             finished.set()
-            watcher.join()
+            watcher.join(_WATCHER_JOIN_SECONDS)
+        if cancelled.is_set() and not self.job_gone(job_name):
+            write(
+                f"[vibesys-gpu] cancel unconfirmed: job {job_name} is still in the "
+                "Slurm queue and may keep its allocation until its time limit\n".encode()
+            )
+        return status
 
     def _cancel_when_asked(
         self,
-        process: MergedOutputProcess,
+        process: PipedProcess,
         job_name: str,
         cancel: Event,
         finished: Event,
+        cancelled: Event,
     ) -> None:
         while not finished.is_set():
             if cancel.wait(0.2):
@@ -388,6 +393,7 @@ class AgentGpuLauncher:
             return
         if finished.is_set():
             return
+        cancelled.set()
         self.cancel(job_name)
         if finished.is_set():
             return
@@ -395,12 +401,37 @@ class AgentGpuLauncher:
         if not finished.wait(_CANCEL_GRACE_SECONDS):
             process.kill_group()
 
-    def cancel(self, job_name: str) -> None:
-        """Cancel this user's job named *job_name*, pending or running."""
-        self._probe.run(
-            (*self._shell, shlex.join(("scancel", f"--name={job_name}", "--me"))),
-            timeout_seconds=_SCANCEL_TIMEOUT_SECONDS,
+    def cancel(self, job_name: str) -> bool:
+        """Cancel this user's job named *job_name*, pending or running.
+
+        Returns whether ``scancel`` reported success. Slurm answers success for a
+        name that matches no job, so success is not proof the job is gone; see
+        :meth:`job_gone`.
+        """
+        argv = (*self._shell, shlex.join(("scancel", f"--name={job_name}", "--me")))
+        for _ in range(_SCANCEL_ATTEMPTS):
+            result = self._probe.run(argv, timeout_seconds=_SCANCEL_TIMEOUT_SECONDS)
+            if result is not None and result.returncode == 0:
+                return True
+        return False
+
+    def job_gone(self, job_name: str) -> bool:
+        """Whether ``squeue`` reports no job of this user named *job_name*, within a bound.
+
+        An unanswered or failed ``squeue`` is not an answer: the job counts as
+        present, so a cancel is never reported confirmed on no evidence.
+        """
+        argv = (
+            *self._shell,
+            shlex.join(("squeue", f"--name={job_name}", "--me", "--noheader", "--format=%i")),
         )
+        for attempt in range(_CONFIRM_ATTEMPTS):
+            if attempt:
+                self._threads.sleep(_CONFIRM_INTERVAL_SECONDS)
+            result = self._probe.run(argv, timeout_seconds=_SQUEUE_TIMEOUT_SECONDS)
+            if result is not None and result.returncode == 0 and not result.stdout.strip():
+                return True
+        return False
 
 
 def resolve_executable(command: tuple[str, ...]) -> tuple[str, ...]:

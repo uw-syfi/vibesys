@@ -178,6 +178,7 @@ files = [
   "tests/architecture/test_unordered_map_evaluator.py",
   "tests/examples/test_prioqueue_evaluator.py",
   "tests/examples/test_queue_evaluator.py",
+  "tests/e2e/test_kvstore_default_gate_e2e.py",
 ]
 roots = ["sdk/vs-evaluator", "resources/evaluators/queue"]
 

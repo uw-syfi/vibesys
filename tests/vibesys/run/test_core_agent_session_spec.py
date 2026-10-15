@@ -14,8 +14,7 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_runtime.api import AgentRole
 from vs_runtime.api.infrastructure import AgentExecutionConfiguration
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import SimThreads, examples
 
 _SHARED = HostResource(Path("/shared"), HostResourceAccess.READ_ONLY, "run-wide mount")
 
@@ -69,7 +68,7 @@ def test_each_role_session_mounts_its_own_configured_resources(
         )
 
     spec_for = agent_session_spec(
-        client=FakeAgentClient(threads=OsThreads()),
+        client=FakeAgentClient(threads=SimThreads()),
         environment=_Environment(),
         specs=dict.fromkeys(role_ids, spec),
         variables=dict,

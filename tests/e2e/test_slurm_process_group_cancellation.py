@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import signal
-import subprocess
 import sys
 import threading
 from contextlib import suppress
@@ -14,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_sandbox.api.slurm import AgentGpuConfig, AgentGpuLauncher, GpuCommand, GpuJobRequest
-from vs_sim.api import ProbeResult
+from vs_sim.api import OsThreads, ProbeResult, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import ScriptedProbe
 
 if TYPE_CHECKING:
@@ -51,8 +50,9 @@ signal.pause()
             default_time_minutes=5,
         ),
         (sys.executable, "-c", wrapper),
-        popen=subprocess.Popen,
         probe=probe,
+        processes=SubprocessPipedProcessLauncher(),
+        threads=OsThreads(),
     )
     cancel = threading.Event()
     output = bytearray()
@@ -80,5 +80,5 @@ signal.pause()
     assert leader_and_group is not None
     assert leader_and_group[1] == leader_and_group[2]
     assert status == -signal.SIGTERM
-    assert len(probe.calls) == 1
-    assert "scancel" in probe.calls[0][0][-1]
+    programs = [argv[-1].split()[0] for argv, _timeout in probe.calls]
+    assert programs == ["scancel", "squeue"]

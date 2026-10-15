@@ -26,6 +26,7 @@ from vibesys.run.profilers import (
 from vs_core.api import StopMode
 from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunStopped
+from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -57,7 +58,7 @@ if TYPE_CHECKING:
         StopTimer,
     )
     from vs_sandbox.api import ComputeBackendImpl, HostResource
-    from vs_sim.api import BlockingRunner, Network, Threads
+    from vs_sim.api import BlockingRunner, Network, Released, Threads
 
 
 def _create_session(
@@ -162,7 +163,7 @@ class _LocalRunSession:
             git=implementations.git,
             github=implementations.github,
             threads=implementations.timing.threads,
-            slurm_processes=implementations.slurm_processes,
+            system=implementations.system,
         )
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
@@ -174,7 +175,7 @@ class _LocalRunSession:
         self._auxiliary_scope: InProcessAuxiliaryAgents | None = None
         self._threads = implementations.timing.threads
         self._auxiliary_lock = self._threads.lock()
-        self._closed = False
+        self._close = CloseOnce()
         self._unsubscribe: Callable[[], None] | None = None
         # A session exists to run its request, so it reads as active from
         # construction (before `start()`/`await_result()`) through to
@@ -243,7 +244,7 @@ class _LocalRunSession:
         it and rejects the request or follows it and owns the completed agent.
         """
         with self._auxiliary_lock:
-            if self._closed:
+            if self._close.started:
                 message = "run session is closed"
                 raise RuntimeError(message)
             resources = self._resources
@@ -257,7 +258,7 @@ class _LocalRunSession:
     def open_auxiliary_agents(self) -> AuxiliaryAgents:
         """Transfer an independent auxiliary scope to the caller."""
         with self._auxiliary_lock:
-            if self._closed:
+            if self._close.started:
                 message = "run session is closed"
                 raise RuntimeError(message)
             resources = self._resources
@@ -402,14 +403,18 @@ class _LocalRunSession:
         self._integration.control.request_stop(mode)
 
     def close(self) -> None:
-        """Close the run-owned auxiliary scope, preserving transferred scopes."""
+        """Close the run-owned auxiliary scope, preserving transferred scopes.
+
+        A scope whose close raised is closed again on the next call.
+        """
         with self._auxiliary_lock:
-            if self._closed:
-                return
-            self._closed = True
-            scope, self._auxiliary_scope = self._auxiliary_scope, None
-        if scope is not None:
-            scope.close()
+            self._close.run(self._release)
+
+    def _release(self) -> Released:
+        steps = ReleaseStack()
+        if self._auxiliary_scope is not None:
+            steps.callback(self._auxiliary_scope.close)
+        return steps.close()
 
 
 class InProcessAuxiliaryAgents:
@@ -425,35 +430,27 @@ class InProcessAuxiliaryAgents:
         self._resources = resources
         self._agents = agents
         self._events = events
-        self._conversations: list[ManagedAgent] = []
+        self._conversations = ReleaseStack()
         self._lock = threads.lock()
-        self._closed = False
+        self._close = CloseOnce()
 
     def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:
         """Create and own one conversation unless the scope has closed."""
         with self._lock:
-            if self._closed:
+            if self._close.started:
                 message = "auxiliary agent scope is closed"
                 raise RuntimeError(message)
             agent = self._agents.create_agent(launch, self._resources, self._events)
-            self._conversations.append(agent)
+            self._conversations.callback(agent.close)
             return agent
 
     def close(self) -> None:
-        """Close every owned conversation in reverse construction order."""
+        """Close every owned conversation in reverse construction order.
+
+        A conversation whose close raised is closed again on the next call.
+        """
         with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            agents, self._conversations = self._conversations, []
-        first_error: BaseException | None = None
-        for agent in reversed(agents):
-            try:
-                agent.close()
-            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-949001 [BLE001]; scope teardown must attempt every owned auxiliary agent even if one cleanup fails.
-                first_error = first_error or exc
-        if first_error is not None:
-            raise first_error
+            self._close.run(self._conversations.close)
 
 
 def _run_ready(

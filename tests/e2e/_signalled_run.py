@@ -31,7 +31,13 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
-from vs_sim.api import LoopSignalSource, OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import (
+    LoopSignalSource,
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    ThreadBlockingRunner,
+    UnixNetwork,
+)
 
 PLUGIN_ID = "slurm-signal"
 
@@ -69,6 +75,7 @@ def main(project_root: Path, slurm_config: Path) -> None:
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            piped_processes=SubprocessPipedProcessLauncher(),
             registry=registry,
             agent_client_factory=_resumable_client,
             backend_factory=host_container_backend,

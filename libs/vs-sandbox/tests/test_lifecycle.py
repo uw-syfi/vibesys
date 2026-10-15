@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_sandbox.api import (
     BeforeReadyContext,
@@ -142,3 +144,21 @@ def test_start_sandbox_rejects_sandbox_without_lifecycle() -> None:
 
 def test_stop_sandbox_ignores_sandbox_without_lifecycle() -> None:
     stop_sandbox(FakeCommandRunner())
+
+
+@given(failures=st.integers(0, 4), extra_closes=st.integers(0, 2))
+def test_an_owned_session_stops_again_after_a_failed_stop_until_one_returns(
+    failures: int, extra_closes: int
+) -> None:
+    """Regression: a stop that raised latched the session closed, so a retry stopped nothing."""
+    sandbox = FakeLifecycleRunner()
+    session = SandboxSession.start(sandbox, "container")
+    sandbox.stop_error = RuntimeError("docker rm -f was killed")
+    for _ in range(failures):
+        with pytest.raises(RuntimeError, match="killed"):
+            session.close()
+    sandbox.stop_error = None
+    for _ in range(1 + extra_closes):
+        session.close()
+
+    assert sandbox.stop_count == failures + 1

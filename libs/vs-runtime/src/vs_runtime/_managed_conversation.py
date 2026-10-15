@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from vs_agent.api import AgentSessionKey, SessionScope
 from vs_project.api import RunLogger
+from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -18,7 +19,7 @@ if TYPE_CHECKING:
     from vs_mcp.api import ToolServerDescriptor
     from vs_runtime._agent_execution import AgentExecutionEnvironment
     from vs_sandbox.api import HostResource
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, Released, Threads
 
 
 class _Closeable(Protocol):
@@ -70,13 +71,15 @@ class _RuntimeManagedConversation:
                 raise ValueError(error)
         self._client = client
         self._spec = spec
-        self._resources = resources
+        self._resources = ReleaseStack()
+        for resource in resources:
+            self._resources.callback(resource.close)
         self._session_key = AgentSessionKey(
             SessionScope.MEMBER,
             f"{spec.member_id}:{uuid.uuid4().hex}",
         )
         self._lock = threads.lock()
-        self._closed = False
+        self._close = CloseOnce()
 
     def turn(self, message: str, *, invocation_id: str | None = None) -> str:
         """Serialize a turn and reuse only this object's provider context."""
@@ -84,7 +87,7 @@ class _RuntimeManagedConversation:
             error = "managed conversation turn message must not be empty"
             raise ValueError(error)
         with self._lock:
-            if self._closed:
+            if self._close.started:
                 error = "managed conversation is closed"
                 raise RuntimeError(error)
             previous = self._client.provider_session_id(self._session_key)
@@ -128,23 +131,15 @@ class _RuntimeManagedConversation:
         )
 
     def close(self) -> None:
-        """Wait for an active turn, then close transferred resources in reverse."""
+        """Wait for an active turn, then close transferred resources in reverse.
+
+        A resource whose close raised is closed again on the next call.
+        """
         with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            first_error: BaseException | None = None
-            for resource in reversed(self._resources):
-                try:
-                    resource.close()
-                # lint-waiver: LW-948028 [BLE001]; cleanup must attempt every transferred resource and preserve the first failure.
-                # > Catching Exception misses cancellation and process-exit failures; a helper
-                # > would still require the same broad catch while obscuring reverse ownership.
-                except BaseException as exc:  # noqa: BLE001
-                    first_error = first_error or exc
-            self._resources = ()
-            if first_error is not None:
-                raise first_error
+            self._close.run(self._release)
+
+    def _release(self) -> Released:
+        return self._resources.close()
 
 
 def create_managed_conversation(

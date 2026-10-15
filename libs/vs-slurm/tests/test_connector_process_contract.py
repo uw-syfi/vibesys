@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api import OsProcesses, ProcessSpec
+from vs_sim.api import OsProcesses, ProcessOutcome, ProcessSpec
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     SlurmConfig,
@@ -180,6 +180,8 @@ def test_an_interceptor_answers_or_forwards_every_request_and_none_restores_the_
         ProcessSpec(("x",), input=_exec_request(f"echo {text}").encode()), timeout=1
     )
 
+    assert isinstance(refused, ProcessOutcome)
+    assert isinstance(forwarded, ProcessOutcome)
     assert json.loads(refused.stdout) == refusal
     assert json.loads(forwarded.stdout)["stdout"] == f"{text}\n"
     assert seen == [f"refuse {text}", f"echo {text}"]

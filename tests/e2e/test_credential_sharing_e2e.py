@@ -32,7 +32,7 @@ from vs_agent.api import auth_bind_mounts, auth_copy_paths
 from vs_agent.api.images import agent_image
 from vs_sandbox.api import SubprocessDockerCli
 from vs_sandbox.docker_sandbox import DockerSandbox
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -71,7 +71,9 @@ def container(tmp_path: Path, host_home: Path) -> Iterator[DockerSandbox]:
         image=agent_image(_BASE_IMAGE, timeout=_BUILD_TIMEOUT_S, clock=MonotonicClock()),
         bind_mounts=auth_bind_mounts(_PROVIDER),
         auth_files=auth_copy_paths(_PROVIDER),
-        docker=SubprocessDockerCli(processes=OsProcesses()),
+        docker=SubprocessDockerCli(
+            processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+        ),
         threads=OsThreads(),
     )
     sandbox.start()

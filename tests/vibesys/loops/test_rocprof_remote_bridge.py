@@ -61,7 +61,7 @@ class _FakeCaptureCluster(FakeCluster):
     """A capture route over the same durable outcomes as the production Cluster."""
 
     def __init__(self, status: str = "ok", *, collection_failure: str | None = None) -> None:
-        super().__init__()
+        super().__init__(clock=ManualClock())
         self.requests: list[SlurmJobRequest] = []
         self.status = status
         self.collection_failure = collection_failure

@@ -58,6 +58,9 @@ from .types.common import (
 )
 from .types.evaluation import ContinuationPhase, JobWaitLapsed, OwnedJob, RegisteredOwnedJob
 from .types.records import (
+    BlockRequest,
+    CancelOwnedResource,
+    InspectRequest,
     RecoveryCheckWaitLapsed,
     RecoveryPhase,
     RequestPhase,
@@ -156,12 +159,18 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
         WaitKind.SESSION: Resolution(
             outcome=Outcome.HALTS_THE_RUN,
             reason="a request that ends without moving its session wakes it, and it waits on its "
-            "other requests still open; once none is left (its last request blocked, or its "
-            "cancel failed), it may hold a lease or a running turn that nothing releases",
+            "other requests still open. Once none is left, an unknown session cancels its turn "
+            "as lost or closes its known lease, and a closing session inspects its unanswered "
+            "turn once and sends its close once more. The run halts when the turn is still not "
+            "ended after that inspection (a turn that may be running is never released), when "
+            "the second close ends unanswered too, or for an ambiguous ensure whose lease core "
+            "does not know",
         ),
         WaitKind.RECOVERY_CHECK: Resolution(
-            outcome=Outcome.HALTS_THE_RUN,
-            reason="a recovery check whose inspection was lost has no deadline of its own",
+            outcome=Outcome.FAILS_WITH_REASON,
+            reason="the check's inspection ends at its own limit (ReconciliationCommandLapsed); "
+            "at the target's limit the check ends blocked and recovery is BLOCKED with the "
+            "target named",
         ),
         WaitKind.OWNED_JOB: Resolution(
             outcome=Outcome.WAITS_AGAIN,
@@ -276,7 +285,7 @@ def stalled_acquisitions(
     and the session sat idle, would stall the run, so the step ends it (``AcquisitionStalled``).
     *in_flight* holds the requests the step sent and has not recorded yet.
     """
-    sent = frozenset(request.request_id for request in in_flight if request.request_id)
+    sent = _taken_on(in_flight)
     return tuple(
         row.invocation
         for row in _acquiring(sessions)
@@ -360,13 +369,75 @@ def _session_waits_of(sessions: SessionsState) -> dict[WaitSubject, WaitOn]:
     }
 
 
-def _open(records: RecordsState, request_id: RequestId) -> bool:
+def _open(
+    records: RecordsState, request_id: RequestId, seen: frozenset[RequestId] = frozenset()
+) -> bool:
+    """Whether something of this epoch can still end the request.
+
+    A request still waiting on its executor can, unless a dead host dispatched it: no call of
+    this epoch is behind it. It is taken on again by a command of this epoch about it, named
+    in ``addressed_by``: one still open, or one this epoch's executor already answered (an
+    inspection that found it still running, so its executor reports on it now). A
+    reconciliation command that ended still carries the commands sent about it (an
+    inspection of a cancel), and a wait on the command follows them to the record it
+    addresses. A canonical record that ended has nothing left to wait for.
+    """
     record = records.record(request_id)
-    return record is not None and record_waits(record.phase)
+    if record is None or request_id in seen:
+        return False
+    waiting = record_waits(record.phase)
+    if waiting and not _dispatched_by_dead_host(records, record):
+        return True
+    if not waiting and not _reconciliation_command(record):
+        return False
+    return any(
+        (waiting and _answered_in_this_epoch(records, command))
+        or _open(records, command, seen | {request_id})
+        for command in record.addressed_by
+    )
+
+
+def _answered_in_this_epoch(records: RecordsState, request_id: RequestId) -> bool:
+    command = records.record(request_id)
+    return (
+        command is not None
+        and not record_waits(command.phase)
+        and command.dispatched_in == records.recovery.epoch
+    )
+
+
+def _taken_on(in_flight: Sequence[Request]) -> frozenset[RequestId]:
+    """The requests a step's unrecorded requests carry: each one, and what a command addresses.
+
+    A command the step sends about a request a dead host dispatched (recovery's inspection
+    of it) takes it on in this epoch before ``addressed_by`` records the command.
+    """
+    sent = {request.request_id for request in in_flight if request.request_id}
+    sent.update(
+        request.target
+        for request in in_flight
+        if isinstance(request, InspectRequest | CancelOwnedResource | BlockRequest)
+    )
+    return frozenset(sent)
+
+
+def _dispatched_by_dead_host(records: RecordsState, record: RequestRecord) -> bool:
+    """Whether a host of an earlier epoch made the request's latest dispatch."""
+    return (
+        record.phase != RequestPhase.PREPARED
+        and record.dispatched_in is not None
+        and record.dispatched_in < records.recovery.epoch
+    )
+
+
+def _reconciliation_command(record: RequestRecord) -> bool:
+    return isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
 
 
 def _request_open(core: CoreState, request_id: RequestId) -> bool:
-    return _open(core.records, request_id)
+    """Whether the ledger holds *request_id* still waiting on its executor, in any epoch."""
+    record = core.records.record(request_id)
+    return record is not None and record_waits(record.phase)
 
 
 def owned_job_subject(job: OwnedJob | RegisteredOwnedJob) -> WaitSubject:
@@ -716,7 +787,7 @@ def stalled_checkpoint_waits(
     ends the waits instead (see ``CheckpointStalled``): this is the resolver every checkpoint
     wait is guaranteed.
     """
-    sent = frozenset(request.request_id for request in in_flight if request.request_id)
+    sent = _taken_on(in_flight)
     return tuple(
         invocation
         for invocation in _checkpoint_waiters(sessions)

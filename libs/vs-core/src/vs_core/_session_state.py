@@ -116,7 +116,11 @@ def _close(session: SessionView, context: SessionsContext, authority: RequestId)
 def _inspect_session(
     session: SessionView, context: SessionsContext, target: RequestId
 ) -> InspectRequest:
-    identity = RequestId(root=encode_identity("inspect-root", target.root))
+    # One inspection per host epoch: a later epoch asks afresh. An answer a dead host's
+    # inspection gave (or never gave) says nothing new to the restarted host, and the same
+    # identity would only hand back that ended request.
+    epoch = str(context.records.recovery.epoch)
+    identity = RequestId(root=encode_identity("inspect-root", epoch, target.root))
     previous = _record(context, identity)
     if previous is not None and isinstance(previous.request, InspectRequest):
         return previous.request

@@ -20,6 +20,7 @@ from functools import cache
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from vs_sandbox.accelerator_discovery import SystemAcceleratorDiscovery
 from vs_sandbox.lifecycle import SandboxLifecycle
 from vs_sandbox.local_shell import LocalShellRunner
 
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, CommandProbe, PipedProcessLauncher, Threads
 
 
 class ComputeBackend(StrEnum):
@@ -164,13 +165,16 @@ def make_local_shell_sandbox(
     env: dict[str, str],
     lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
     threads: Threads,
+    launcher: PipedProcessLauncher,
 ) -> LocalShellRunner:
     """Construct the unconfined local-shell sandbox and run its lifecycle hooks.
 
     Every backend builds the local sandbox the same way, so the construction
     lives here once.
     """
-    sandbox = LocalShellRunner(host_workspace, env=env, inherit_env=True, threads=threads)
+    sandbox = LocalShellRunner(
+        host_workspace, env=env, inherit_env=True, threads=threads, launcher=launcher
+    )
     SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
     return sandbox
 
@@ -217,13 +221,16 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
     image: str | None = None,
     docker: DockerCli,
     threads: Threads,
+    launcher: PipedProcessLauncher,
     clock: Clock,
+    probe: CommandProbe,
     events: object | None = None,
 ) -> ComputeBackendImpl:
     """Construct the registered implementation for one compute stack.
 
-    *docker* runs the backend's ``docker`` commands and *threads* is the clock its
-    sandboxes measure command timeouts on.
+    *docker* runs the backend's ``docker`` commands, *threads* is the clock its
+    sandboxes measure command timeouts on, *launcher* starts its host shell
+    commands, and *probe* runs the status commands (``nvidia-smi``, ``rocm-smi``) it asks.
     ``clock`` counts seconds since the epoch; a backend stamps what it records with it.
     ``events`` is a backend-specific contention-events seam (only the CUDA
     backend reads it today); every registered factory accepts and may ignore
@@ -239,16 +246,76 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
         image=image,
         docker=docker,
         threads=threads,
+        launcher=launcher,
         clock=clock,
+        probe=probe,
         events=events,
+    )
+
+
+# lint-waiver: LW-731481 [PLR0913]; the registry's shared construction keywords, one to one.
+# > Grouping them would only rename the keywords create_compute_backend passes every
+# > registered backend.
+def _rocm_backend(  # noqa: PLR0913
+    log_dir: Path,
+    *,
+    log: Callable[[str], None] | None,
+    image: str | None,
+    docker: DockerCli,
+    threads: Threads,
+    launcher: PipedProcessLauncher,
+    clock: Clock,
+    probe: CommandProbe,
+    events: object | None = None,
+) -> ComputeBackendImpl:
+    """The ROCm backend, discovering its GPUs through ``probe``."""
+    del events  # ROCm watches no contention; accepted so the registry call stays uniform
+    rocm = import_module("vs_sandbox.rocm_backend")
+    return rocm.RocmBackend(
+        log_dir,
+        log=log,
+        image=image,
+        docker=docker,
+        threads=threads,
+        launcher=launcher,
+        clock=clock,
+        accelerator_discovery=SystemAcceleratorDiscovery(probe=probe),
+    )
+
+
+# lint-waiver: LW-731482 [PLR0913]; the registry's shared construction keywords, one to one.
+# > Grouping them would only rename the keywords create_compute_backend passes every
+# > registered backend.
+def _trainium_backend(  # noqa: PLR0913
+    log_dir: Path,
+    *,
+    log: Callable[[str], None] | None,
+    image: str | None,
+    docker: DockerCli,
+    threads: Threads,
+    launcher: PipedProcessLauncher,
+    clock: Clock,
+    probe: CommandProbe,
+    events: object | None = None,
+) -> ComputeBackendImpl:
+    """The Trainium backend, discovering its devices through ``probe``."""
+    del events  # Trainium watches no contention; accepted so the registry call stays uniform
+    trainium = import_module("vs_sandbox.trainium_backend")
+    return trainium.TrainiumBackend(
+        log_dir,
+        log=log,
+        image=image,
+        docker=docker,
+        threads=threads,
+        launcher=launcher,
+        clock=clock,
+        accelerator_discovery=SystemAcceleratorDiscovery(probe=probe),
     )
 
 
 def _register_defaults() -> None:
     cuda = import_module("vs_sandbox.cuda_backend")
     local = import_module("vs_sandbox.local_compute_backend")
-    rocm = import_module("vs_sandbox.rocm_backend")
-    trainium = import_module("vs_sandbox.trainium_backend")
 
     register_compute_backend(ComputeBackend.CUDA, cuda.CudaBackend)
     register_compute_backend(
@@ -256,8 +323,8 @@ def _register_defaults() -> None:
         local.metal_backend,
         host_only=ComputeBackend.METAL in local.HOST_ONLY_BACKENDS,
     )
-    register_compute_backend(ComputeBackend.TRAINIUM, trainium.TrainiumBackend)
-    register_compute_backend(ComputeBackend.ROCM, rocm.RocmBackend)
+    register_compute_backend(ComputeBackend.TRAINIUM, _trainium_backend)
+    register_compute_backend(ComputeBackend.ROCM, _rocm_backend)
     register_compute_backend(ComputeBackend.CPU, local.cpu_backend)
 
 

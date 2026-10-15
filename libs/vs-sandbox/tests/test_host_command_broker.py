@@ -319,6 +319,39 @@ class TestGpuOperation:
         assert base64.b64decode(first["output"]) == b"started\n"
         assert cancelled
 
+    def test_a_client_that_stops_reading_has_its_job_cancelled(
+        self, sim: Sim, tmp_path: Path, workspace: Path
+    ) -> None:
+        """Regression: an unbounded send to a client that stopped reading blocked the job's
+        output writer, so the job, and its allocation, never ended."""
+
+        class _Flooding(_RecordingLauncher):
+            def run(
+                self,
+                request: GpuJobRequest,
+                command: GpuCommand,
+                *,
+                write: Callable[[bytes], None],
+                cancel: Event,
+            ) -> int:
+                del request, command
+                for _ in range(1024):
+                    if cancel.is_set():
+                        self.cancelled.set()
+                        break
+                    write(b"x" * 4096)
+                return 0
+
+        def program(net: _Network) -> bool:
+            launcher = _Flooding(net.threads)
+            with _serving(net, tmp_path, workspace, gpu=_gpu(launcher)) as broker:
+                client = _send_request(net, broker, _gpu_call(broker, str(workspace)))
+                cancelled = launcher.cancelled.wait(HANG_GUARD_S)
+                client.close()
+            return cancelled
+
+        assert _simulate(sim, program)
+
     def test_closing_the_broker_cancels_running_jobs_and_waits_for_them(
         self, sim: Sim, tmp_path: Path, workspace: Path
     ) -> None:

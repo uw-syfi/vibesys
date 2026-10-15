@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import ValidationError
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from vibesys.events import (
     AgentExecutionStartedData,
@@ -19,8 +19,8 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStarted,
     AgentExecutionStatus,
 )
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_runtime.api.testing import idle_environment_system
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,8 +36,8 @@ def test_a_semantic_event_uses_the_unified_durable_stream(tmp_path: Path) -> Non
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     try:
         integration.attach(tmp_path, run_id="run-winner")
@@ -57,8 +57,8 @@ def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> 
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     try:
         integration.attach(tmp_path, run_id="run-1")
@@ -105,15 +105,15 @@ def test_local_integrations_own_isolated_agent_event_streams(tmp_path: Path) -> 
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     second = LocalRunIntegration(
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     try:
         first.attach(tmp_path / "first", run_id="run-1")

@@ -50,8 +50,11 @@ _SCENARIOS = tuple(
         )
     )
 )
-# vs_decode (the bounded JSON decode lib vs_project reads state through) adds 3 modules.
-_MODULE_CEILING = 333
+# vs_decode (the bounded JSON decode lib vs_project reads state through) adds 3 modules;
+# vs_project._workspace_tree (GitTracker restores preserved memory by descriptor) adds 1;
+# vs_project._nested_repositories (host Git refuses a work tree holding a nested repository)
+# adds 1.
+_MODULE_CEILING = 335
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
 from typing import TYPE_CHECKING
 
 from pydantic import TypeAdapter
@@ -28,6 +27,7 @@ from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
 from vibesys.api import CoreEventType
+from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -216,9 +216,9 @@ class RunIntegrationAdapter:
         self._threads = threads
         self._chat_agent_builder = chat_agent_builder
         self._chat_factory: ExperimentChatFactory | None = None
-        self._auxiliary_scopes = ExitStack()
+        self._owned = ReleaseStack()
         self._detach_run: Callable[[], None] | None = None
-        self._closed = False
+        self._close = CloseOnce()
         self._failure_diagnostics: dict[str, Diagnostic] = {}
 
     @property
@@ -270,7 +270,7 @@ class RunIntegrationAdapter:
             agent_providers=ready.agent_providers,
         )
         auxiliary_agents = session.open_auxiliary_agents()
-        self._auxiliary_scopes.callback(auxiliary_agents.close)
+        self._owned.callback(auxiliary_agents.close)
         self._detach_run = self._attach_run(attachment, auxiliary_agents)
 
     def _attach_run(
@@ -309,17 +309,16 @@ class RunIntegrationAdapter:
         return detach
 
     def close(self) -> None:
-        """Release adapter subscriptions and optional server resources."""
-        if self._closed:
-            return
-        self._closed = True
-        detach_run, self._detach_run = self._detach_run, None
-        with self._auxiliary_scopes:
-            try:
-                if detach_run is not None:
-                    detach_run()
-            finally:
-                self.chat.close_terminal_resource()
+        """Release adapter subscriptions and optional server resources.
+
+        A step whose close raised runs again on the next call.
+        """
+        if not self._close.started:
+            self._owned.callback(self.chat.close_terminal_resource)
+            detach_run, self._detach_run = self._detach_run, None
+            if detach_run is not None:
+                self._owned.callback(detach_run)
+        self._close.run(self._owned.close)
 
     def record(
         self,
@@ -443,7 +442,7 @@ class RunIntegrationAdapter:
 
     def _route_output_event(self, event: CoreEvent) -> None:
         """Publish one explicitly delivered presentation event."""
-        if self._closed:
+        if self._close.started:
             return
         event_type = EventType(event.type.value)
         if event_type not in _PRESENTATION_EVENTS or event.data is None:

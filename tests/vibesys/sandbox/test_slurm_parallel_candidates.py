@@ -20,10 +20,17 @@ import pytest
 from tests.support.workspace_world import open_workspace_env
 
 from vibesys.run.environment import open_run_environment
-from vs_runtime.api.infrastructure import SlurmEnvironment
+from vs_runtime.api.infrastructure import EnvironmentSystem, SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api.slurm import BrokeredProcesses, load_slurm_operator_settings
-from vs_sim.api import OsThreads, ProcessOutcome, ProcessSpec, UnixNetwork
+from vs_sim.api import (
+    OsThreads,
+    ProcessOutcome,
+    ProcessSpec,
+    SubprocessPipedProcessLauncher,
+    UnixNetwork,
+)
+from vs_sim.api.testing import NO_PROCESSES, FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
@@ -32,6 +39,7 @@ if TYPE_CHECKING:
         RuntimeWorkspaces,
     )
     from vs_sandbox.api import CommandResult
+    from vs_sim.api import Processes
 
 _CONFIG = """[slurm]
 name = "test-cluster"
@@ -97,12 +105,15 @@ def _run(
     *,
     environment: SlurmEnvironment | None = None,
     opened: list[RunEnvironmentSession] | None = None,
+    slurm_processes: Processes = NO_PROCESSES,
 ) -> None:
     """Open a run whose candidates are Slurm sessions, and await *exercise* with its workspaces.
 
     Every session the run opens (the root's first, then each candidate's) is appended to *opened*.
     """
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    threads = OsThreads()
+    launcher = SubprocessPipedProcessLauncher()
+    backend = DaemonBackend(daemon_engine(tmp_path, launcher=launcher), threads=threads)
     environment = environment or _environment(tmp_path, backend)
 
     def open_session(request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -118,6 +129,13 @@ def _run(
         backend=backend,
         open_session=open_session,
         owns_candidate_worktrees=True,
+        system=EnvironmentSystem(
+            threads=threads,
+            network=UnixNetwork(),
+            processes=NO_PROCESSES,
+            launcher=launcher,
+            slurm_processes=slurm_processes,
+        ),
     ) as env:
         try:
             asyncio.run(exercise(env.hosts[0]))  # ty: ignore[call-non-callable]
@@ -194,7 +212,9 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
     """The SSH transport's broker of a candidate session is scoped like its GPU broker."""
     config = tmp_path / "ssh.toml"
     config.write_text(_SSH_CONFIG, encoding="utf-8")
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(
+        daemon_engine(tmp_path, launcher=SubprocessPipedProcessLauncher()), threads=OsThreads()
+    )
     environment = SlurmEnvironment(
         load_slurm_operator_settings(config), docker=daemon_docker_config(backend.engine)
     )
@@ -230,4 +250,12 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             upload(first_session, second.path)
         assert upload(second_session, second.path) == 0
 
-    _run(tmp_path, exercise, environment=environment, opened=sessions)
+    _run(
+        tmp_path,
+        exercise,
+        environment=environment,
+        opened=sessions,
+        slurm_processes=FakeProcesses(
+            lambda _spec: ProcessScript(), pass_time=ManualClock().advance
+        ),
+    )

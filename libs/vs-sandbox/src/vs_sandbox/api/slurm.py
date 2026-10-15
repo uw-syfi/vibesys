@@ -14,6 +14,7 @@ from vs_sandbox.agent_gpu import (
     AgentGpuRequestError,
     GpuCommand,
     GpuJobRequest,
+    GpuLauncher,
     choose_partition,
 )
 from vs_sandbox.host_command_broker import (
@@ -96,6 +97,7 @@ __all__ = [
     "GpuCommand",
     "GpuCommands",
     "GpuJobRequest",
+    "GpuLauncher",
     "HipApiTime",
     "HostCommandBroker",
     "HostCommandBrokerError",

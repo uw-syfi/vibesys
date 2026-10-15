@@ -12,10 +12,11 @@ from vs_sim.gate import arrival
 from vs_sim.loopback_http import HttpReply
 from vs_sim.processes import (
     ForegroundChild,
-    MergedOutputProcess,
+    OutputStream,
     PipedProcess,
     ProcessGroupUnreaped,
     ProcessOutcome,
+    ProcessOutputTooLarge,
     ProcessSpec,
     ProcessTimedOut,
     RunningProcess,
@@ -248,6 +249,14 @@ class FakeProcessLauncher:
         return _ScriptedProcess(spec, self.script(spec), self.clock)
 
 
+def _too_large(limit: int, stdout: bytes, stderr: bytes) -> ProcessOutputTooLarge | None:
+    """The outcome of a scripted run that writes past *limit*, stopped as the real one is."""
+    for stream, written in ((OutputStream.STDOUT, stdout), (OutputStream.STDERR, stderr)):
+        if len(written) > limit:
+            return ProcessOutputTooLarge(limit, stream, stdout[:limit], stderr[:limit])
+    return None
+
+
 @dataclass
 class FakeProcesses:
     """Runs scripted commands to completion; records every spec it was asked to run.
@@ -274,6 +283,9 @@ class FakeProcesses:
         pid = self.first_pid + len(self.ran)
         self.ran.append(spec)
         script = self.script(spec)
+        stdout = script.stdout + (spec.input if script.echo_input else b"")
+        if too_large := _too_large(spec.max_output_bytes, stdout, script.stderr):
+            return too_large
         endless = script.runs_until_signalled
         if timeout is not None and (endless or script.duration_s > timeout):
             self._elapse(timeout)
@@ -284,7 +296,6 @@ class FakeProcesses:
             message = f"{spec.argv[0]} never ends and the caller set no timeout"
             raise AssertionError(message)
         self._elapse(script.duration_s)
-        stdout = script.stdout + (spec.input if script.echo_input else b"")
         return ProcessOutcome(script.returncode, stdout, script.stderr)
 
     def _elapse(self, seconds: float) -> None:
@@ -292,40 +303,87 @@ class FakeProcesses:
             self.pass_time(seconds)
 
 
+class ProcessStartRefusedError(AssertionError):
+    """A test that runs no process started one."""
+
+
+_REFUSED: list[str] = []
+"""Every refused start since the last :func:`refused_starts` call, as a description."""
+
+
+def refused_starts() -> tuple[str, ...]:
+    """The process starts that refusing Fakes turned away since the last call.
+
+    A refusal raises, but product code that catches ``Exception`` swallows the raise, so
+    the raise alone cannot fail a test. The test harness calls this after each test and
+    fails the test if anything was refused. A test that checks a refusal itself calls this
+    to take what it provoked.
+    """
+    refused = tuple(_REFUSED)
+    _REFUSED.clear()
+    return refused
+
+
+class RefusingProcesses:
+    """Starts nothing: any run fails the test, naming the command it tried to run.
+
+    For a test whose code takes a :class:`~vs_sim.processes.Processes` it must never use.
+    A test that does need a command to run scripts it with :class:`FakeProcesses` instead.
+    """
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        """Fail: this test runs no process."""
+        del timeout
+        message = f"this test runs no process, but ran {' '.join(spec.argv)}"
+        _REFUSED.append(message)
+        raise ProcessStartRefusedError(message)
+
+
+NO_PROCESSES = RefusingProcesses()
+"""Shared :class:`RefusingProcesses`; it holds no state."""
+
+
+@dataclass(frozen=True)
+class PipedStart:
+    """One request a :class:`FakePipedProcessLauncher` received."""
+
+    argv: tuple[str, ...]
+    cwd: Path | None = None
+    env: Mapping[str, str] | None = None
+    merge_stderr: bool = False
+
+
+def _refuse_piped_start(request: PipedStart) -> PipedProcess:
+    message = f"this test starts no piped process, but {request.argv[0]!r} was started"
+    _REFUSED.append(message)
+    raise ProcessStartRefusedError(message)
+
+
 @dataclass
 class FakePipedProcessLauncher:
-    """Record synchronous piped process starts and create each process through a Fake factory."""
+    """Record synchronous piped process starts and create each process through a Fake factory.
 
-    factory: Callable[[tuple[str, ...], Path | None], PipedProcess]
-    started: list[tuple[tuple[str, ...], Path | None]] = field(default_factory=list)
+    Without a factory, any start fails the test: the launcher stands in for one that the
+    code under test is handed but must not use.
+    """
 
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
-        """Record the normalized start request and return its scripted process."""
-        request = (tuple(argv), cwd)
-        self.started.append(request)
-        return self.factory(*request)
-
-
-@dataclass
-class FakeMergedOutputProcessLauncher:
-    """Record merged-output starts and create each process through a Fake factory."""
-
-    factory: Callable[[tuple[str, ...], Path | str | None, Mapping[str, str]], MergedOutputProcess]
-    started: list[tuple[tuple[str, ...], Path | str | None, Mapping[str, str]]] = field(
-        default_factory=list
-    )
+    factory: Callable[[PipedStart], PipedProcess] = _refuse_piped_start
+    started: list[PipedStart] = field(default_factory=list)
 
     def start(
         self,
-        argv: Sequence[str],
+        argv: tuple[str, ...],
         *,
-        cwd: Path | str | None,
-        env: Mapping[str, str],
-    ) -> MergedOutputProcess:
-        """Record a normalized start request and return its scripted process."""
-        request = (tuple(argv), cwd, dict(env))
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        merge_stderr: bool = False,
+    ) -> PipedProcess:
+        """Record the normalized start request and return its scripted process."""
+        request = PipedStart(
+            tuple(argv), cwd, None if env is None else dict(env), merge_stderr=merge_stderr
+        )
         self.started.append(request)
-        return self.factory(*request)
+        return self.factory(request)
 
 
 @dataclass(frozen=True)

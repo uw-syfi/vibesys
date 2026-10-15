@@ -19,13 +19,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from vs_sim.api import Clock, OsThreads, SubprocessProbe, Threads
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from vs_sim.api import CommandProbe, Worker
+    from vs_sim.api import Clock, CommandProbe, Threads, Worker
+
 GPU_QUERY_COLUMN_COUNT = 6
 GPU_PROCESS_QUERY_COLUMN_COUNT = 4
 
@@ -142,10 +141,10 @@ class NvidiaSmiTelemetry:
         executable: str = "nvidia-smi",
         timeout: float = 10.0,
         *,
-        probe: CommandProbe | None = None,
+        probe: CommandProbe,
     ) -> None:
         """Run *executable* (looked up on ``PATH`` when bare), giving up after *timeout* seconds."""
-        self._probe: CommandProbe = probe or SubprocessProbe()
+        self._probe = probe
         self._executable = executable
         self._timeout = timeout
 
@@ -242,8 +241,8 @@ class GpuContentionMonitor:
         gpu_uuid: str,
         interval: float = 30.0,
         *,
-        telemetry: GpuTelemetry | None = None,
-        threads: Threads | None = None,
+        telemetry: GpuTelemetry,
+        threads: Threads,
         clock: Clock,
         events: GpuContentionEvents | None = None,
     ) -> None:
@@ -251,8 +250,8 @@ class GpuContentionMonitor:
         self._log_dir = log_dir
         self._gpu_uuid = gpu_uuid
         self._interval = interval
-        self._telemetry: GpuTelemetry = telemetry or NvidiaSmiTelemetry()
-        self._threads: Threads = threads or OsThreads()
+        self._telemetry = telemetry
+        self._threads = threads
         self._clock: Clock = clock
         self._events = events
 

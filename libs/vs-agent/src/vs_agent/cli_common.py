@@ -10,21 +10,22 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, TextIO
 
 from vs_agent.provider_policy import cli_skill_dirs
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
+from vs_project.api.workspace_tree import WorkspacePathError, open_workspace_tree
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
 
     from pydantic import BaseModel
 
     from vs_agent.sink import AgentEventSink
     from vs_agent.skills import SkillSelection
+    from vs_project.api.workspace_tree import CopyIgnore, WorkspaceTree
 
 # Per-provider CLI skill-discovery paths, matching upstream
 # vibesys-skills install.sh conventions. Each CLI tool auto-loads skills from
@@ -80,9 +81,12 @@ def materialize_skills(
     resolved targets escape the skill or were omitted by the copy policy.
 
     Existing destinations are replaced on every invocation so skill edits are
-    picked up across iterations and after candidate checkpoint rollback. Errors
-    are logged but never raised — the loop should still make progress even if a
-    skill fails to materialize.
+    picked up across iterations and after candidate checkpoint rollback. The
+    agent may have planted symlinks below its workspace in an earlier turn, so
+    every write and removal is walked by descriptor from the workspace root: a
+    planted symlink is removed in place of a destination and refused on the way
+    to one, never followed. Errors are logged but never raised — the loop should
+    still make progress even if a skill fails to materialize.
     """
     if not skill_dirs:
         return
@@ -103,46 +107,76 @@ def materialize_skills(
         ignored |= selection.skip_dir(src_dir, names)
         return ignored
 
-    for target_rel in (".", *CLI_SKILL_DIRS):
-        target_root = workspace / target_rel
-        target_root.mkdir(parents=True, exist_ok=True)
-        for name, src_skill in discovered.items():
-            _materialize_skill_copy(
-                src_skill,
-                target_root / name,
-                ignore=skip_ignore,
-                log_file=log_file,
-                event_sink=event_sink,
-            )
-
-
-def _materialize_skill_copy(
-    src_skill: Path,
-    dest: Path,
-    *,
-    ignore: Callable[[str, list[str]], set[str]],
-    log_file: TextIO | None,
-    event_sink: AgentEventSink,
-) -> None:
-    """Replace one copied skill tree, reporting filesystem failures in-place."""
-    try:
-        if src_skill.resolve() == dest.resolve():
-            return
-        if dest.exists() or dest.is_symlink():
-            if dest.is_dir() and not dest.is_symlink():
-                shutil.rmtree(dest)
-            else:
-                dest.unlink()
-        shutil.copytree(src_skill, dest, symlinks=True, ignore=ignore)
-        _confine_materialized_links(src_skill.resolve(), dest)
-    except OSError as exc:
-        message = (
-            f"[skills] failed to materialize {src_skill} -> {dest}: {type(exc).__name__}: {exc}"
-        )
+    def report(message: str) -> None:
         event_sink.agent_output(message + "\n", channel="diagnostic")
         if log_file is not None:
             log_file.write(message + "\n")
             log_file.flush()
+
+    workspace.mkdir(parents=True, exist_ok=True)
+    with open_workspace_tree(workspace) as tree:
+        for target_rel in (".", *CLI_SKILL_DIRS):
+            for failure in _materialize_target(
+                tree, workspace, target_rel, discovered, ignore=skip_ignore
+            ):
+                report(f"[skills] failed to materialize {failure}")
+
+
+def _materialize_target(
+    tree: WorkspaceTree,
+    workspace: Path,
+    target_rel: str,
+    discovered: dict[str, Path],
+    *,
+    ignore: CopyIgnore,
+) -> list[str]:
+    """Install every discovered skill below ``target_rel``; return what failed and why."""
+    try:
+        tree.make_directories(target_rel)
+    except (OSError, WorkspacePathError) as exc:
+        return [f"into {workspace / target_rel}: {type(exc).__name__}: {exc}"]
+    failures: list[str] = []
+    for name, src_skill in discovered.items():
+        destination = PurePosixPath(target_rel, name).as_posix()
+        if src_skill.resolve() == workspace.resolve() / destination:
+            continue
+        try:
+            _materialize_skill_copy(tree, src_skill, destination, ignore=ignore)
+        except (OSError, WorkspacePathError) as exc:
+            failures.append(
+                f"{src_skill} -> {workspace / destination}: {type(exc).__name__}: {exc}"
+            )
+    return failures
+
+
+def _materialize_skill_copy(
+    tree: WorkspaceTree,
+    src_skill: Path,
+    destination: str,
+    *,
+    ignore: CopyIgnore,
+) -> None:
+    """Replace the copied skill tree at ``destination`` with a fresh copy of ``src_skill``.
+
+    Links are recreated relative to the copy, and only when they resolve, inside the
+    source skill, to something the copy kept; foreign, pruned, dangling and cyclic links
+    are dropped. Resolving against the source turns absolute links and relative chains
+    into canonical targets that contain no source symlinks.
+    """
+    tree.remove(destination)
+    copy = tree.copy_in(src_skill, destination, ignore=ignore)
+    source = src_skill.resolve()
+    for link in copy.links:
+        try:
+            target = (source / link).resolve(strict=True)
+        except (OSError, RuntimeError):
+            continue
+        if not target.is_relative_to(source):
+            continue
+        kept = PurePosixPath(target.relative_to(source).as_posix())
+        if kept in copy.copied:
+            relative_target = os.path.relpath(kept, link.parent)
+            tree.symlink(PurePosixPath(destination, link).as_posix(), relative_target)
 
 
 def build_schema_hint(response_cls: type[BaseModel]) -> str:
@@ -155,30 +189,3 @@ def build_schema_hint(response_cls: type[BaseModel]) -> str:
         "before or after the JSON object.\n\n"
         f"Schema for {response_cls.__name__}:\n{schema}\n"
     )
-
-
-def _confine_materialized_links(source: Path, destination: Path) -> None:
-    """Keep only links to resources that survived copying, within this skill.
-
-    Resolve against the source before replacing links: absolute source links
-    and relative chains both become destination-relative canonical links.
-    Foreign, pruned, dangling and cyclic links are removed.
-    """
-    for link in destination.rglob("*"):
-        if not link.is_symlink():
-            continue
-        source_link = source / link.relative_to(destination)
-        try:
-            target = source_link.resolve(strict=True)
-        except (OSError, RuntimeError):
-            link.unlink()
-            continue
-        if not target.is_relative_to(source):
-            link.unlink()
-            continue
-        copied_target = destination / target.relative_to(source)
-        # Canonical targets contain no source symlinks, so this checks what
-        # copytree actually kept rather than trusting the lexical link name.
-        link.unlink()
-        if copied_target.exists():
-            link.symlink_to(os.path.relpath(copied_target, link.parent))

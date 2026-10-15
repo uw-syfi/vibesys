@@ -3,7 +3,7 @@
 import shutil
 import sys
 from collections.abc import Iterator
-from contextlib import AbstractContextManager, ExitStack, contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Literal, TypedDict, Unpack
 from unittest.mock import patch
@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict
 from tests.support import run_test_command
 from tests.support.docker_environment import fake_docker_environment
 from tests.support.host_environment import unconfined_host_spec
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.task_project import task_path, write_task
 
 from launch import built_in_orchestrations, open_run_store
@@ -51,10 +51,11 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,
     resolve_evaluator_package,
 )
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import OsThreads
+from vs_sim.api import ReleaseStack
 from vs_sim.api.testing import ManualClock, SimThreads
 
 
@@ -72,7 +73,7 @@ class _RecordingBackendFactory:
 
     def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
         self.calls += 1
-        return FakeComputeBackend()
+        return FakeComputeBackend(threads=SimThreads())
 
 
 class _CreateContextOptions(TypedDict, total=False):
@@ -215,7 +216,7 @@ def _create_context(
     registration = built_in_orchestrations().resolve(descriptor.id)
     plugin = registration.plugin
     agent_roles = options.get("agent_roles", plugin.agents)
-    ownership = ExitStack()
+    ownership = ReleaseStack()
     try:
         prepared = open_run_resources(
             request,
@@ -224,8 +225,8 @@ def _create_context(
                 clock=ManualClock(),
                 git=REAL_GIT,
                 github=NO_GITHUB,
-                threads=OsThreads(),
-                slurm_processes=REAL_PROCESSES,
+                threads=SimThreads(),
+                system=idle_environment_system(),
             ),
             ownership=ownership,
             agent_specs=resolve_agent_specs(
@@ -250,11 +251,13 @@ def _create_context(
 @contextmanager
 def _owned_prepared_run(
     prepared: _PreparedRun,
-    ownership: ExitStack,
+    ownership: ReleaseStack,
 ) -> Iterator[_PreparedRun]:
     """Close resources opened by the direct composition helper."""
-    with ownership:
+    try:
         yield prepared
+    finally:
+        ownership.close()
 
 
 def _git(project: Path, *args: str) -> str:
@@ -492,8 +495,8 @@ def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> Non
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     try:
         with _create_context(project, evaluator=evaluator, integration=integration) as ctx:
@@ -867,8 +870,8 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
 
     def reject_resources(_resources: object) -> None:

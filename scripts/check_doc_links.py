@@ -62,6 +62,8 @@ PUBLISHED_ROOTS = ("docs",)
 # there too (they point at pages of the original site that were not mirrored),
 # so enforcing them here would only pin us to upstream's bugs.
 EXCLUDED_PREFIXES = (
+    "examples/data-structures/kvstore-default/.vibesys/tasks/default/accuracy_checker/"
+    "porcupine_checker/vendor/",
     "third_party/",
     "node_modules/",
     "resources/skills/neuron-agentic-development/",

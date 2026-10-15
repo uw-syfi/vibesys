@@ -26,6 +26,7 @@ from vs_sim.api import (
     OsThreads,
     PidfdProcessSignaller,
     ProbeResult,
+    ProcessesProbe,
     SubprocessLauncher,
     SubprocessProbe,
     SystemClock,
@@ -345,6 +346,9 @@ class _StartedPipedGroup:
         self.group_kills = 0
         self.wait_timeouts: list[float | None] = []
 
+    def terminate_group(self) -> None:
+        raise AssertionError
+
     def kill_group(self) -> None:
         self.group_kills += 1
 
@@ -453,6 +457,17 @@ class TestSubprocessProbe(CommandProbeContract):
         )
 
 
+class TestProcessesProbe(TestSubprocessProbe):
+    def probe_under_test(self) -> ProbeUnderTest:
+        subject = super().probe_under_test()
+        return ProbeUnderTest(
+            ProcessesProbe(OsProcesses()),
+            subject.exit_with_stdout,
+            subject.blocks_forever,
+            subject.missing_program,
+        )
+
+
 class TestOsProcesses(ProcessesContract):
     def processes_under_test(self, *, cleanup_timeout: float) -> ProcessesUnderTest:
         held = Path(tempfile.mkdtemp()) / "held"
@@ -526,6 +541,16 @@ class TestFakeProcesses(ProcessesContract):
             survives_kill=("escape",),
             missing_program=("no-such-program",),
             now=clock.now,
+        )
+
+
+class TestProcessesProbeOverFakeProcesses(CommandProbeContract):
+    def probe_under_test(self) -> ProbeUnderTest:
+        return ProbeUnderTest(
+            ProcessesProbe(FakeProcesses(_processes_script, pass_time=ManualClock().advance)),
+            exit_with_stdout=lambda status, text: ("exit", str(status), text.encode().hex(), ""),
+            blocks_forever=("block", ""),
+            missing_program=("no-such-program",),
         )
 
 

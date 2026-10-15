@@ -10,7 +10,7 @@ import pytest
 from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.core_plugins import core_policy
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
-from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GITHUB, REAL_GIT
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.task_project import write_task
 from tests.vibesys.orchestration.plugin import EmptyOptions
@@ -48,10 +48,10 @@ from vs_runtime.api import (
     RunStatus,
 )
 from vs_runtime.api.core import RunTiming
-from vs_runtime.api.testing import FakeStopTimer
+from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -154,7 +154,7 @@ def _open(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
     clock = VirtualClock(at=0.0)
 
@@ -194,7 +194,7 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
     clock = VirtualClock(at=0.0)
 
@@ -407,7 +407,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        system=idle_environment_system(),
     )
     clock = VirtualClock(at=0.0)
     request = _request(project_root).model_copy(update={"run_id": "core-run"})
@@ -426,7 +426,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
             plugin,
             EmptyOptions(),
             agent_client_factory=_resumable_client,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
             stop_timer=clock.sleep,
             timing=RunTiming(clock, 60.0, OsThreads()),
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),
