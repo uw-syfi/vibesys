@@ -4,10 +4,14 @@ A close-once latch (``if self._closed: return; self._closed = True; <effect>``)
 reports a failed close as success on every retry: the latch is set before the
 effect is known to have worked. :class:`CloseOnce` and :class:`AsyncCloseOnce`
 replace it. They remember a *failed* close, so the next call runs the effect
-again, and only the :class:`Released` value the effect returns ends them. The
-owner's translator mints that value from its evidence (``docker rm`` read as
-gone, a session close that returned), so "released" is never set on the
-caller's word alone.
+again, and only the :class:`Released` value the effect returns ends them.
+
+Nobody constructs :class:`Released` directly. A :class:`ReleaseStack` mints it
+once every teardown step it holds has run, keeping the steps that failed for the
+next ``close``, as ``contextlib.ExitStack`` does not; :meth:`Released.shown_by`
+mints it from an owner's typed :class:`ReleaseEvidence` (``docker rm`` read as
+gone, a registry left empty), and refuses evidence that shows nothing released.
+So "released" is never set on the caller's word alone.
 
 ``started`` says a close was asked for, so the owner can refuse new work while
 a failed close waits for its retry.
@@ -16,18 +20,130 @@ a failed close waits for its retry.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Protocol, Self
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Collection
+    from contextlib import AbstractContextManager
+
+_MINT = object()
+
+
+class ReleaseEvidence(Protocol):
+    """An owner's typed observation of whether its resource is gone."""
+
+    @property
+    def released(self) -> bool:
+        """Whether this observation shows the resource gone or going."""
+        ...
+
+    def describe(self) -> str:
+        """What was observed, for the proof's ``evidence``."""
+        ...
+
+
+class NotReleasedError(RuntimeError):
+    """Evidence offered as proof of release shows the resource still held."""
 
 
 @dataclass(frozen=True)
 class Released:
-    """Proof that a resource is gone or going; ``evidence`` says what showed it."""
+    """Proof that a resource is gone or going; ``evidence`` says what showed it.
+
+    Minted only by :meth:`shown_by` and :meth:`ReleaseStack.close`.
+    """
 
     evidence: str
+    _mint: object = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        """Refuse a proof built from a bare string."""
+        if self._mint is not _MINT:
+            message = "mint Released with Released.shown_by(evidence) or ReleaseStack.close()"
+            raise TypeError(message)
+
+    @classmethod
+    def shown_by(cls, evidence: ReleaseEvidence) -> Released:
+        """The proof ``evidence`` gives; ``NotReleasedError`` when it shows the resource held."""
+        if not evidence.released:
+            message = f"not released: {evidence.describe()}"
+            raise NotReleasedError(message)
+        return cls(evidence.describe(), _MINT)
+
+
+@dataclass(frozen=True)
+class NothingLeft:
+    """Evidence that every resource an owner tracked was closed and dropped from its registry."""
+
+    remaining: Collection[object]
+    what: str
+
+    @property
+    def released(self) -> bool:
+        """Whether the registry is empty."""
+        return not self.remaining
+
+    def describe(self) -> str:
+        """The registry, and how much is left in it."""
+        return f"{self.what}: {len(self.remaining)} left"
+
+
+class ReleaseStack:
+    """Teardown steps run last-in first-out, where a step that failed stays for the next close.
+
+    ``contextlib.ExitStack.close`` drops each step before running it, so a close retried
+    after a failure runs nothing and looks like a success. Here :meth:`close` runs every
+    remaining step, keeps the ones that raised, and returns :class:`Released` only when
+    none is left. Not thread-safe: an owner whose close can race holds its own lock.
+    """
+
+    def __init__(self) -> None:
+        """Start with no steps."""
+        self._steps: list[Callable[[], object]] = []
+
+    def callback[**P](
+        self, step: Callable[P, object], /, *args: P.args, **kwargs: P.kwargs
+    ) -> None:
+        """Run ``step(*args, **kwargs)`` at close."""
+        self._steps.append(lambda: step(*args, **kwargs))
+
+    def enter_context[T](self, manager: AbstractContextManager[T]) -> T:
+        """Enter ``manager`` now and exit it at close."""
+        value = manager.__enter__()
+        self._steps.append(lambda: manager.__exit__(None, None, None))
+        return value
+
+    def pop_all(self) -> Self:
+        """Move every step to a new stack, so this one closes nothing."""
+        moved = type(self)()
+        for step in self._steps:
+            moved.callback(step)
+        self._steps = []
+        return moved
+
+    def close(self) -> Released:
+        """Run the remaining steps, newest first; raise the first failure after trying all.
+
+        A step that raised stays on the stack, so the next call runs it again.
+        """
+        failed: list[Callable[[], object]] = []
+        first: BaseException | None = None
+        for step in reversed(self._steps):
+            try:
+                step()
+            except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-750114 [BLE001]; every teardown step runs even after one failed, and the first failure is raised after.
+                # > A narrower type would let an unexpected failure skip the later steps, which is
+                # > the leak this stack exists to prevent.
+                failed.append(step)
+                if first is None:
+                    first = error
+                else:
+                    first.add_note(f"another teardown step also failed: {error!r}")
+        self._steps = failed[::-1]
+        if first is not None:
+            raise first
+        return Released("every teardown step ran", _MINT)
 
 
 def _proof(value: object) -> Released:
