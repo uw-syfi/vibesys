@@ -166,8 +166,8 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
-    "AsyncCloseOnce",
     "DEFAULT_MAX_OUTPUT_BYTES",
+    "AsyncCloseOnce",
     "BlockingRunner",
     "Clock",
     "CloseOnce",
