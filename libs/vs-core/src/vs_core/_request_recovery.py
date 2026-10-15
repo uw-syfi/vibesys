@@ -51,6 +51,8 @@ from .types.common import (
 )
 from .types.evaluation import (
     CancelOwnedJob,
+    InspectOwnedJob,
+    ObserveOwnedJob,
     OwnedJob,
     RegisteredOwnedJob,
     SubmitMeasurement,
@@ -1703,7 +1705,14 @@ def _end_open_record(
     if not is_open(record):
         return state, ()
     failed = None if lost else record.failure or _failure(record, reason)
-    heard = (failed,) if failed is not None and first and not _decision_ended(state, record) else ()
+    heard = (
+        (failed,)
+        if failed is not None
+        and first
+        and not _job_step(record)
+        and not _decision_ended(state, record)
+        else ()
+    )
     blocked = record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
     return _replace_record(state, blocked), heard
 
@@ -1730,11 +1739,24 @@ def _lost_turn(
     )
 
 
+def _job_step(record: RequestRecord) -> bool:
+    """Whether the record is a step core takes on a job it owns: a poll, inspection or cancel.
+
+    A step carries the decision of the submission that started the job, but it is not the
+    decision's work: evaluation owns it and takes it again when it ends at its own short bound
+    (``_measurements``: a poll backs off and polls again). The decision hears only of its own
+    request, the submission, whose limit counts from the job's start (``_wait_clock``). A
+    status query that outlasts its bound on a busy scheduler therefore never ends a
+    measurement, nor leaves its job running with nothing waiting on it.
+    """
+    return isinstance(record.request, ObserveOwnedJob | InspectOwnedJob | CancelOwnedJob)
+
+
 def _decision_ended(state: RecordsState, record: RequestRecord) -> bool:
     """Whether another request of the record's decision already ended with a failure.
 
-    A decision hears of its ending once. Its later requests (the submission a measurement
-    still holds open after its observation timed out) end quietly: the owner has moved on.
+    A decision hears of its ending once; its later requests end quietly, as the owner has
+    moved on.
     """
     decision = record.request.decision_id
     return decision is not None and any(

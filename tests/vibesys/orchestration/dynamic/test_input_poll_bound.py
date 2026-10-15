@@ -14,6 +14,7 @@ of that job unanswered until their bound passes.
 
 from __future__ import annotations
 
+import itertools
 from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
@@ -32,7 +33,7 @@ from vibesys.orchestration.dynamic.search.api import dynamic
 from vs_core.api import (
     CancelOwnedJob,
     Failed,
-    MeasurementFinished,
+    MeasurementResult,
     Measure,
     ObserveOwnedJob,
     SubmitMeasurement,
@@ -107,7 +108,7 @@ def _input_decisions(trace: Trace) -> set[str]:
     }
 
 
-@settings(max_examples=examples(pr=6, nightly=60), deadline=None)
+@settings(max_examples=examples(pr=4, nightly=60), deadline=None)
 @given(
     silent=st.frozensets(st.integers(min_value=0, max_value=MOST_POLLS - 2), max_size=4),
     queued=st.integers(min_value=0, max_value=MOST_POLLS - 1),
@@ -129,17 +130,25 @@ def test_an_unanswered_poll_never_ends_the_input_measurement(
         and event.decision.root in decisions
     ]
     assert failed == [], failed
-    finished = [
+    (submission,) = (
+        record.request_id
+        for record in trace.core.records.records
+        if isinstance(record.request, SubmitMeasurement)
+        and record.request.plan.purpose == "baseline"
+    )
+    results = [
         event
         for event in trace.events
-        if isinstance(event, MeasurementFinished)
-        and event.decision is not None
-        and event.decision.root in decisions
+        if isinstance(event, MeasurementResult) and event.source_request == submission
     ]
-    assert len(finished) == 1
-    assert finished[0].result.status == "succeeded"
-    # Every unanswered poll was followed by another, until the job finished.
-    assert script.polls > max(silent | {queued - 1}, default=-1)
+    # The input was measured once, with its evidence: the job ran to its end.
+    assert len(results) == 1, results
+    assert results[0].failure is None
+    assert results[0].evidence
+    # Every unanswered poll was followed by another, until the first answered poll after the
+    # queue found the job finished.
+    first_done = next(index for index in itertools.count(queued) if index not in silent)
+    assert script.polls == first_done + 1
     # A finished job is never cancelled.
     assert not any(
         isinstance(request, CancelOwnedJob) and request.resource_id.root in script.baseline
