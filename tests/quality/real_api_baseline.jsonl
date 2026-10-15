@@ -199,7 +199,7 @@
 {"path": "tests/server/test_runtime_on_sim.py", "rule": "real_impl", "count": 5}
 {"path": "tests/server/test_startup_progress.py", "rule": "real_impl", "count": 4}
 {"path": "tests/server/test_transport_subscription.py", "rule": "real_impl", "count": 7}
-{"path": "tests/server/test_websocket_transport.py", "rule": "real_impl", "count": 70}
+{"path": "tests/server/test_websocket_transport.py", "rule": "real_impl", "count": 69}
 {"path": "tests/support/agent_tool_world.py", "rule": "real_impl", "count": 1}
 {"path": "tests/support/core_host_world.py", "rule": "real_impl", "count": 6}
 {"path": "tests/support/docker_environment.py", "rule": "real_impl", "count": 2}

@@ -1744,7 +1744,13 @@ async def _assert_failure_acknowledgement_snapshot_isolated(
             assert subscribed["type"] == "subscribed"
             assert subscribed["run_id"] == api.snapshots[0].run_id
             assert subscribed["latest_sequence"] == api.snapshots[0].sequence
-            assert json.loads(await stream.recv())["type"] == "protocol_error"
+            failure = json.loads(await stream.recv())
+            assert failure["type"] == "protocol_error"
+            assert failure["request_id"] == subscribed["request_id"]
+            assert failure["client_id"] == "failed-bootstrap"
+            assert failure["code"] == "stream_failed"
+            with pytest.raises(ConnectionClosedOK):
+                await stream.recv()
         finally:
             runner.release_snapshot.open()
 
@@ -1792,26 +1798,6 @@ def test_gateway_converts_control_api_timeout_into_response() -> None:
 
 
 def test_gateway_acknowledges_subscription_before_bootstrap_failure(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path / "logs")
-    api = _SubscriptionFailureApi(parts.api, "bootstrap")
-
-    with WebSocketGateway(
-        cast("RunApi", api),
-        clock=ManualClock(),
-        threads=OsThreads(),
-        request_runner=ThreadBlockingRunner(),
-    ) as gateway:
-        asyncio.run(
-            _assert_subscription_failure_lifecycle(
-                gateway,
-                ("subscribed", "protocol_error"),
-            )
-        )
-
-
-def test_bootstrap_failure_acknowledgement_does_not_block_another_websocket(
-    tmp_path: Path,
-) -> None:
     parts = build_server_parts(tmp_path / "logs")
     api = _SubscriptionFailureApi(parts.api, "bootstrap")
     runner = _HeldFailureAcknowledgementRunner(api.snapshot)
