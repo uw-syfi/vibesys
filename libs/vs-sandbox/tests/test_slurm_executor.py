@@ -34,8 +34,8 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
     SlurmTargetLifecycle,
 )
-from vs_sim.api import ThreadBlockingRunner, yield_now
-from vs_sim.api.testing import Gate, ManualClock, examples, wait_until_started
+from vs_sim.api import yield_now
+from vs_sim.api.testing import Gate, InlineBlockingRunner, ManualClock, examples, wait_until_started
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -804,7 +804,7 @@ async def test_executor_preserves_both_stages_through_durable_coordinator_failur
     )
     coordinator = EvaluationCoordinator(
         executor,
-        FilesystemEvaluationStore(tmp_path / "coordinator", blocking=ThreadBlockingRunner()),
+        FilesystemEvaluationStore(tmp_path / "coordinator", blocking=InlineBlockingRunner()),
         ManualClock(),
         deadline_factory=loop_evaluation_deadline,
     )
@@ -1317,7 +1317,7 @@ async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure
     )
     coordinator = EvaluationCoordinator(
         executor,
-        FilesystemEvaluationStore(tmp_path / "coordinator", blocking=ThreadBlockingRunner()),
+        FilesystemEvaluationStore(tmp_path / "coordinator", blocking=InlineBlockingRunner()),
         ManualClock(),
         deadline_factory=loop_evaluation_deadline,
     )
@@ -1483,7 +1483,7 @@ async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
     )
     coordinator = EvaluationCoordinator(
         executor,
-        FilesystemEvaluationStore(tmp_path / "coordinator", blocking=ThreadBlockingRunner()),
+        FilesystemEvaluationStore(tmp_path / "coordinator", blocking=InlineBlockingRunner()),
         ManualClock(),
         deadline_factory=loop_evaluation_deadline,
     )
@@ -1983,7 +1983,7 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
     )
     coordinator = EvaluationCoordinator(
         executor,
-        FilesystemEvaluationStore(tmp_path / "records", blocking=ThreadBlockingRunner()),
+        FilesystemEvaluationStore(tmp_path / "records", blocking=InlineBlockingRunner()),
         ManualClock(),
         deadline_factory=loop_evaluation_deadline,
     )

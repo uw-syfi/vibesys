@@ -195,8 +195,6 @@
 {"path": "tests/vibesys/loops/test_profiler_mcp.py", "rule": "interpreter", "count": 1}
 {"path": "tests/vibesys/run/test_slurm_evaluation.py", "rule": "interpreter", "count": 1}
 {"path": "tests/vibesys/sandbox/test_slurm_environment.py", "rule": "interpreter", "count": 1}
-{"path": "libs/vs-evaluation/tests/test_fault_conformance.py", "rule": "real_impl", "count": 6}
-{"path": "libs/vs-evaluation/tests/test_lifecycle.py", "rule": "real_impl", "count": 5}
 {"path": "libs/vs-project/tests/git_contract/conftest.py", "rule": "real_impl", "count": 2}
 {"path": "libs/vs-project/tests/git_contract/test_interop.py", "rule": "real_impl", "count": 8}
 {"path": "libs/vs-project/tests/test_collection_root.py", "rule": "real_impl", "count": 2}
@@ -216,16 +214,11 @@
 {"path": "libs/vs-runtime/tests/test_workspace_requests.py", "rule": "real_impl", "count": 2}
 {"path": "libs/vs-sandbox/tests/skypilot_world.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_agent_path_contract.py", "rule": "real_impl", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_container_runtime.py", "rule": "real_impl", "count": 7}
 {"path": "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "rule": "real_impl", "count": 8}
-{"path": "libs/vs-sandbox/tests/test_docker_device_groups.py", "rule": "real_impl", "count": 3}
-{"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "real_impl", "count": 54}
-{"path": "libs/vs-sandbox/tests/test_docker_sandbox_exit_paths.py", "rule": "real_impl", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_docker_states.py", "rule": "real_impl", "count": 1}
+{"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "real_impl", "count": 5}
 {"path": "libs/vs-sandbox/tests/test_local_shell.py", "rule": "real_impl", "count": 20}
 {"path": "libs/vs-sandbox/tests/test_slurm_broker.py", "rule": "real_impl", "count": 4}
 {"path": "libs/vs-sandbox/tests/test_slurm_close_drain.py", "rule": "real_impl", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_slurm_executor.py", "rule": "real_impl", "count": 4}
 {"path": "libs/vs-slurm/tests/test_connector_process_contract.py", "rule": "real_impl", "count": 2}
 {"path": "libs/vs-slurm/tests/test_fake_connector.py", "rule": "real_impl", "count": 2}
 {"path": "tests/architecture/test_prompt_resource_contract.py", "rule": "real_impl", "count": 2}

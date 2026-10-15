@@ -21,8 +21,7 @@ from vs_sandbox.api import (
     released,
 )
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import FakePipedProcessLauncher
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
 
 _MESSAGES = [
     "",
@@ -110,7 +109,7 @@ def test_the_fake_engine_speaks_the_dialect_the_translator_reads() -> None:
         workspace.mkdir()
         engine = FakeDockerEngine(state, launcher=FakePipedProcessLauncher())
         sandbox = DockerSandbox(
-            host_workspace=str(workspace), image="agent-image", docker=engine, threads=OsThreads()
+            host_workspace=str(workspace), image="agent-image", docker=engine, threads=SimThreads()
         )
         sandbox.start()
         container = sandbox.container_id
