@@ -42,17 +42,7 @@ def cleanup_pending(state: CoreState) -> bool:
                 not _job_release_confirmed(job, state.records.records)
                 for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs)
             ),
-            any(
-                not blocked_unnamed(record)
-                and (
-                    record.phase != RequestPhase.COMPLETED
-                    or (
-                        record.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
-                        and (not _record_release_confirmed(record, state.records.records))
-                    )
-                )
-                for record in state.records.records
-            ),
+            bool(unreleased_records(state)),
             bool(state.settlement.pending),
             any(claim.phase != "completed" for claim in state.sessions.interrupts),
             _unreleased_children(state),
@@ -64,6 +54,26 @@ def cleanup_pending(state: CoreState) -> bool:
             any(
                 _invocation_pending(state, invocation) for invocation in state.sessions.invocations
             ),
+        )
+    )
+
+
+def unreleased_records(state: CoreState) -> tuple[RequestRecord, ...]:
+    """The request records that hold the run's closure: not ended, or ended owning a release.
+
+    A record holds closure until it completes; a completed owned job or session turn holds
+    it until its release is proven. A blocked record that named nothing owns nothing.
+    """
+    return tuple(
+        record
+        for record in state.records.records
+        if not blocked_unnamed(record)
+        and (
+            record.phase != RequestPhase.COMPLETED
+            or (
+                record.lifecycle in (LifecycleClass.OWNED_JOB, LifecycleClass.SESSION_TURN)
+                and not _record_release_confirmed(record, state.records.records)
+            )
         )
     )
 

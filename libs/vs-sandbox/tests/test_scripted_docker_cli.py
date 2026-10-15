@@ -13,6 +13,7 @@ from vs_sandbox.api.testing import (
     docker_result,
     docker_timed_out,
 )
+from vs_sim.api import DISCARD
 
 _ARGV = st.lists(st.text(min_size=1, max_size=8), min_size=1, max_size=5)
 _RESULTS = st.builds(
@@ -31,7 +32,7 @@ def test_every_call_is_recorded_in_order_with_its_timeout(
     docker.always(docker_result())
 
     for argv in argvs:
-        docker.run(argv, timeout_seconds=timeout)
+        docker.run(argv, timeout_seconds=timeout, output=DISCARD)
 
     assert docker.calls == [DockerCliCall(tuple(argv), timeout) for argv in argvs]
     assert docker.argvs == [tuple(argv) for argv in argvs]
@@ -42,11 +43,11 @@ def test_sequenced_outcomes_replay_in_order_then_run_dry(results: list[object]) 
     docker = ScriptedDockerCli()
     docker.then(*results)  # ty: ignore[invalid-argument-type]
 
-    replayed = [docker.run(["docker", "ps"], timeout_seconds=1) for _ in results]
+    replayed = [docker.run(["docker", "ps"], timeout_seconds=1, output=DISCARD) for _ in results]
 
     assert replayed == results
     with pytest.raises(AssertionError, match="no scripted Docker CLI outcome"):
-        docker.run(["docker", "ps"], timeout_seconds=1)
+        docker.run(["docker", "ps"], timeout_seconds=1, output=DISCARD)
     assert len(docker.calls) == len(results) + 1
 
 
@@ -54,7 +55,7 @@ def test_an_unscripted_call_is_still_recorded() -> None:
     docker = ScriptedDockerCli()
 
     with pytest.raises(AssertionError):
-        docker.run(["docker", "info"], timeout_seconds=5)
+        docker.run(["docker", "info"], timeout_seconds=5, output=DISCARD)
 
     assert docker.argvs == [("docker", "info")]
 
@@ -68,11 +69,13 @@ def test_the_longest_matching_prefix_wins_and_its_last_outcome_repeats(
     docker.on(("docker",), docker_result(stdout="any docker"))
     docker.on(("docker", "rm"), first, second)  # ty: ignore[invalid-argument-type]
 
-    answers = [docker.run(["docker", "rm", "-f", "c"], timeout_seconds=1) for _ in range(3)]
+    answers = [
+        docker.run(["docker", "rm", "-f", "c"], timeout_seconds=1, output=DISCARD) for _ in range(3)
+    ]
 
     assert answers == [first, second, second]
-    assert docker.run(["docker", "ps"], timeout_seconds=1).stdout == "any docker"
-    assert docker.run(["podman", "ps"], timeout_seconds=1).stdout == "fallback"
+    assert docker.run(["docker", "ps"], timeout_seconds=1, output=DISCARD).stdout == "any docker"
+    assert docker.run(["podman", "ps"], timeout_seconds=1, output=DISCARD).stdout == "fallback"
 
 
 def test_scripted_failures_are_raised() -> None:
@@ -82,23 +85,23 @@ def test_scripted_failures_are_raised() -> None:
     docker.on(("docker", "rm"), KeyboardInterrupt())
 
     with pytest.raises(Exception, match="timed out") as timed_out:
-        docker.run(["docker", "run", "img"], timeout_seconds=120)
+        docker.run(["docker", "run", "img"], timeout_seconds=120, output=DISCARD)
     assert timed_out.value.timeout == 120  # ty: ignore[unresolved-attribute]
     with pytest.raises(FileNotFoundError):
-        docker.run(["docker", "stop", "c"], timeout_seconds=30)
+        docker.run(["docker", "stop", "c"], timeout_seconds=30, output=DISCARD)
     with pytest.raises(KeyboardInterrupt):
-        docker.run(["docker", "rm", "c"], timeout_seconds=10)
+        docker.run(["docker", "rm", "c"], timeout_seconds=10, output=DISCARD)
 
 
 def test_clear_script_drops_answers_but_keeps_history() -> None:
     docker = ScriptedDockerCli()
     docker.always(docker_result())
-    docker.run(["docker", "ps"], timeout_seconds=1)
+    docker.run(["docker", "ps"], timeout_seconds=1, output=DISCARD)
 
     docker.clear_script()
 
     with pytest.raises(AssertionError):
-        docker.run(["docker", "ps"], timeout_seconds=1)
+        docker.run(["docker", "ps"], timeout_seconds=1, output=DISCARD)
     assert len(docker.calls) == 2
 
 

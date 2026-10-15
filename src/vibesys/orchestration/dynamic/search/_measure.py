@@ -31,9 +31,9 @@ PROFILE_STAGE = "profile"
 """The task's stage that captures a profile."""
 
 
-def input_pending(ctx: Flow, w: WorkstreamStart) -> bool:
-    """Whether the input's measurement has not landed yet, as an agent's prompt says."""
-    return w.baseline is None and ctx.latch(INPUT_MEASURED).value is None
+def input_so_far(ctx: Flow, w: WorkstreamStart) -> Baseline | None:
+    """The input's measurement as known now, without waiting; None while it has not landed."""
+    return w.baseline if w.baseline is not None else ctx.latch(INPUT_MEASURED).value
 
 
 async def the_input(ctx: Flow, w: WorkstreamStart, work: Work) -> Baseline:
@@ -42,8 +42,9 @@ async def the_input(ctx: Flow, w: WorkstreamStart, work: Work) -> Baseline:
     A workstream may start while the input is still being measured: its agents plan, write code
     and run their own jobs meanwhile. Only what compares the candidate with the input waits for
     it: the trusted measurement (so the input's own measurement is never queued behind a
-    candidate's, and no candidate is measured against a benchmark the input shows broken), the
-    judge's review, and the settlement.
+    candidate's), the judge's review, and the settlement. An input that comes back unmeasurable
+    does not stop the candidate's measurement: a candidate can fix what broke the input, and with
+    no input value to beat it is eligible once it passes the task's gates.
     """
     if work.baseline is None:
         work.baseline = w.baseline if w.baseline is not None else await ctx.latch(INPUT_MEASURED)

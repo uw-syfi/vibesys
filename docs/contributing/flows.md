@@ -177,9 +177,14 @@ it through their arguments (a registered flow takes only its snapshot). Declare 
 typed by the value (`INPUT_MEASURED = LatchKey[Baseline]("input-measured")`); the flow that
 learns the fact calls `ctx.latch(INPUT_MEASURED).set(value)`, once (a second `set` is a
 `ContractError`), and a waiter calls `await ctx.latch(INPUT_MEASURED)`, which returns at once
-when it is already set. It is not journaled: flow code sets it, so replay sets it again, and a
-restart after a code change starts with it unset until the restarted flow sets it again. A
-latch that is never set is not a `Deadlock`; the waiter waits for its stop.
+when it is already set. A key is its declaration: a second key with a name already in use is a
+`ContractError`, since the two could hold different types under one name.
+
+Latches belong to one journal and are not journaled. Replay runs the flow code again, so it sets
+them again at the same point. A restart after a code change starts a fresh journal from the flows'
+snapshots, and every latch starts empty: the flow that sets one must set it again, from its
+snapshot if it learned the value before the restart (`test_flows_restart.py` plays both orders).
+A latch that is never set is not a `Deadlock`; the waiter waits for its stop.
 
 ### Groups
 
@@ -263,7 +268,13 @@ The root's snapshot type is the config (`ctx.checkpoint(config)`). The restart r
 through `group.start(key, fn, ...)`, which resumes the flow that had that key from its snapshot if
 the new code starts a flow of the same name there (otherwise `FlowCodeChanged`). Work since the
 last checkpoint is redone, and the results of requests in flight at the change are dropped when
-they arrive.
+they arrive. A task that is not a registered flow is part of its parent's work: it has no
+snapshot, so the restart drops it, and when the parent, restarted from its own checkpoint, starts
+that key again, the task starts afresh.
+
+Replay notices a code change when the new code issues different decisions, makes a different
+number of reads, or reads a recorded value as a type it no longer decodes as (the old code read
+the clock where the new code reads `ctx.task`). Each of these restarts the flows as above.
 
 **Resources do not leak across a restart.** A workspace a flow opened after its checkpoint is
 settled as part of the restart: the restart's first decisions withdraw each such attempt plainly

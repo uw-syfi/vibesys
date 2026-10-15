@@ -82,6 +82,7 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentView,
     RuntimeWorkspaces,
     TrustedEvaluationPlan,
+    WorkspaceHolds,
     WorkspaceResource,
     WorkspaceResourceFactory,
     create_workspace_runtime,
@@ -89,11 +90,10 @@ from vs_runtime.api.infrastructure import (
     open_run_environment_resources,
 )
 from vs_runtime.api.observation_contracts import assert_core_accepts
-from vs_runtime.api.testing import MemoryValidationPasses
+from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 from vs_sim.api.testing import (
-    NO_PROCESSES,
     InlineBlockingRunner,
     ManualClock,
     Sim,
@@ -234,7 +234,7 @@ def _env(
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=FakeComputeBackend(),
+                backend=FakeComputeBackend(threads=SimThreads()),
                 agent_backend="stub",
                 cli_provider="codex",
                 run_id="workspace-requests",
@@ -242,7 +242,7 @@ def _env(
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
                 clock=ManualClock(),
-                slurm_processes=NO_PROCESSES,
+                system=idle_environment_system(),
             ),
             lambda _request: _Session(),
             clock=ManualClock(),
@@ -451,6 +451,39 @@ def test_snapshot_replay_makes_one_commit_and_binds_the_receipt(tmp_path: Path) 
         restarted, _ = _executor(workspaces)
         assert await _run(restarted, request, epoch=2) == first
         assert await _run(executor, request, epoch=2) == first
+        assert _commits(workspaces) == commits
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
+@pytest.mark.parametrize("kind", ["directory", "file"])
+def test_a_snapshot_of_a_workspace_holding_a_nested_repository_fails_and_names_it(
+    tmp_path: Path, kind: str
+) -> None:
+    """Host Git never reads a nested repository the agent made; the snapshot says why."""
+
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        attempt = _attempt()
+        await _run(executor, _ensure(workspaces, attempt, "ensure-1"))
+        candidate_path = _candidate_path(workspaces)
+        commits = _commits(workspaces)
+        nested = candidate_path / "vendor" / "lib" / ".git"
+        nested.parent.mkdir(parents=True)
+        if kind == "directory":
+            nested.mkdir()
+        else:
+            nested.write_text("gitdir: /elsewhere\n", encoding="utf-8")
+        request = SnapshotAndRetain(**_common(attempt, "snap-1"), attempt=attempt, retention="wip")
+
+        refused = await _run(executor, request)
+
+        observation = refused.observation.observation
+        assert observation.status is ObservationStatus.FAILED
+        assert observation.terminal
+        assert "vendor/lib/.git" in observation.diagnostic
+        assert refused.observation.revision is None
         assert _commits(workspaces) == commits
 
     with _workspaces(tmp_path) as workspaces:
@@ -1275,6 +1308,155 @@ def test_f3_restart_after_a_recorded_result_still_serves_the_attempt(tmp_path: P
         asyncio.run(exercise())
 
 
+@settings(
+    max_examples=examples(pr=3, nightly=10),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    edits=st.lists(st.booleans(), min_size=1, max_size=3),
+    scratch=st.booleans(),
+    root_moved=st.booleans(),
+)
+def test_a_clean_host_stop_keeps_every_attempt_workspace_for_the_next_host(
+    tmp_path_factory: pytest.TempPathFactory, edits: list[bool], *, scratch: bool, root_moved: bool
+) -> None:
+    """A stop while attempts implement must not discard their worktrees.
+
+    Core still holds each attempt across a stop (its cancel and access settlement run on the
+    next host), so the next host must reopen every attempt workspace with its work in it.
+    Only scratch candidates, which no attempt holds, go with the host. Regression: a clean
+    stop removed every attempt worktree, so each resumed cancel's settlement found no
+    workspace, never became terminal, and left recovery blocked.
+    """
+    with _env(tmp_path_factory.mktemp("stop")) as env:
+
+        async def exercise() -> None:
+            first_host = env.hosts[0]
+            executor, _ = _executor(first_host)
+            attempts = [_attempt(f"a{index}") for index in range(len(edits))]
+            paths = [
+                await _ensure_at(executor, first_host, attempt, f"e-{attempt.attempt_id.root}")
+                for attempt in attempts
+            ]
+            for path, edited in zip(paths, edits, strict=True):
+                if edited:
+                    (path / "work.txt").write_text(f"in progress {path.name}\n", encoding="utf-8")
+            expected = [_visible_files(path) for path in paths]
+            if scratch:
+                await first_host.create_candidate()
+            root = first_host.root.path
+            await first_host.close()
+            if root_moved:
+                # A resume over changed code: the root has moved on since the attempts began.
+                (root / "candidate.py").write_text("VALUE = 3\n", encoding="utf-8")
+                _git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "change")
+
+            second_host = env.start_host()
+            assert _worktree_paths(second_host) == set(paths)
+            restarted, _ = _executor(second_host)
+            for attempt, path, files in zip(attempts, paths, expected, strict=True):
+                name = attempt.attempt_id.root
+                revision = await _snapshot_of(restarted, attempt, f"s-{name}", "wip", epoch=2)
+                assert _visible_files(path) == files
+                restored = await _run(
+                    restarted,
+                    RestoreRevision(
+                        **_common(attempt, f"r-{name}"), attempt=attempt, revision=revision
+                    ),
+                    epoch=2,
+                )
+                assert _status(restored) is ObservationStatus.SUCCEEDED
+                assert _visible_files(path) == files
+            assert _worktree_paths(second_host) == set(paths)
+
+        asyncio.run(exercise())
+
+
+def _candidates_on_disk(env: _Env) -> set[Path]:
+    """The candidate worktree directories of the run, registered or not."""
+    worktrees = env.project.state.candidate_worktrees_directory(env.run_id)
+    if not worktrees.is_dir():
+        return set()
+    return {entry / "workspace" for entry in worktrees.iterdir() if (entry / "workspace").exists()}
+
+
+def _registered(root: Path) -> set[Path]:
+    """The linked worktrees the run's repository registers, its root aside."""
+    paths = {Path(line.split()[0]) for line in _git(root, "worktree", "list").splitlines()}
+    return paths - {root.resolve()}
+
+
+@settings(
+    max_examples=examples(pr=4, nightly=16),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    held=st.lists(st.booleans(), min_size=1, max_size=3),
+    final=st.booleans(),
+    scratch=st.booleans(),
+    restart=st.booleans(),
+)
+def test_a_host_stop_keeps_exactly_the_attempt_workspaces_core_still_holds(
+    tmp_path_factory: pytest.TempPathFactory,
+    held: list[bool],
+    *,
+    final: bool,
+    scratch: bool,
+    restart: bool,
+) -> None:
+    """After a final result no attempt worktree or registration is left; else core's stay.
+
+    After a resumable stop every workspace core references stays on disk with its work, and
+    every other one is gone. With ``restart`` the stopping host never learned core's state,
+    so it kept every attempt workspace, and the next host's start sweeps the ones core no
+    longer references. Regression: a close kept every attempt workspace whatever core's
+    state, so a run with a final result (a deadline stop with attempts open), and members no
+    later host reattached, leaked their worktrees and Git registrations.
+    """
+    with _env(tmp_path_factory.mktemp("holds")) as env:
+
+        async def exercise() -> None:
+            first_host = env.hosts[0]
+            root = first_host.root.path
+            executor, _ = _executor(first_host)
+            attempts = [_attempt(f"a{index}") for index in range(len(held))]
+            paths = [
+                await _ensure_at(executor, first_host, attempt, f"e-{attempt.attempt_id.root}")
+                for attempt in attempts
+            ]
+            for path in paths:
+                (path / "work.txt").write_text(f"in progress {path.name}\n", encoding="utf-8")
+            work = {path: _visible_files(path) for path in paths}
+            if scratch:
+                await first_host.create_candidate()
+            holds = WorkspaceHolds(
+                final=final,
+                attempts=frozenset(
+                    attempt for attempt, kept in zip(attempts, held, strict=True) if kept
+                ),
+            )
+            if restart:
+                await first_host.close()
+                next_host = env.start_host()
+                next_host.follow(lambda: holds)
+                await next_host.release_unheld()
+                await next_host.close()
+            else:
+                first_host.follow(lambda: holds)
+                await first_host.close()
+            expected = (
+                set() if final else {path for path, kept in zip(paths, held, strict=True) if kept}
+            )
+            assert _registered(root) == expected
+            assert _candidates_on_disk(env) == expected
+            for path in expected:
+                assert _visible_files(path) == work[path]
+
+        asyncio.run(exercise())
+
+
 def test_f4_exclusive_root_is_held_by_one_attempt_generation(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
@@ -1439,6 +1621,12 @@ class _FaultyResources:
         return (
             None if resource is None else cast("WorkspaceResource", _FaultyResource(self, resource))
         )
+
+    def leftover_candidates(self) -> tuple[str, ...]:
+        return self._inner.leftover_candidates()
+
+    def remove_leftover(self, workspace_id: str, /) -> None:
+        self._inner.remove_leftover(workspace_id)
 
 
 class _FaultyResource:

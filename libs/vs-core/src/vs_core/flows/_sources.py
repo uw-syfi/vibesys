@@ -161,9 +161,14 @@ class Signal(Source[Event]):
         return self.label
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class LatchKey[T]:
-    """The name of a run-wide latch, typed by the value it holds. Declare one per fact."""
+    """The name of a run-wide latch, typed by the value it holds. Declare one per fact.
+
+    A key is its declaration: two keys are the same latch only if they are the same object. A
+    run refuses a second key with a name already in use, since the two could hold different
+    types under one name (the type parameter is not kept at run time, so it cannot be compared).
+    """
 
     name: str
 
@@ -171,7 +176,8 @@ class LatchKey[T]:
 class LatchCell:
     """The run's one copy of a latch's value; every handle on the key reads it."""
 
-    def __init__(self) -> None:
+    def __init__(self, key: LatchKey[Any]) -> None:
+        self.key = key
         self.held = False
         self.value: object = None
 

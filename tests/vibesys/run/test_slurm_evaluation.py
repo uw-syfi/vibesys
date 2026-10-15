@@ -1078,7 +1078,7 @@ async def test_aggregate_ambiguity_cannot_promote_completed_stage_evidence(
         for name, present in zip(("accuracy", "benchmark"), presence, strict=True)
         if present
     )
-    cluster = FakeCluster()
+    cluster = FakeCluster(clock=ManualClock())
     cluster.script(
         "aggregate",
         states=(status,),

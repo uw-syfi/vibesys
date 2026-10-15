@@ -1,6 +1,11 @@
 import {describe, expect, test} from 'bun:test';
 import type {ScheduleTimeout} from '@vibesys/transport';
-import {bootstrapGateway, type Fetch, fetchReplayFixture} from './backend.js';
+import {
+  bootstrapGateway,
+  EventSourceCampaignStream,
+  type Fetch,
+  fetchCampaignFixture,
+} from './backend.js';
 
 const CAPABILITY = 'http://127.0.0.1:8765/?token=secret';
 
@@ -107,100 +112,141 @@ describe('bootstrapGateway', () => {
   });
 });
 
-/** Load a replay fixture over `fetcher`: its events, or the message it failed with. */
-async function load(fetcher: () => Promise<Response>) {
-  try {
-    return {events: await fetchReplayFixture('replay.jsonl', fetcher), failure: null};
-  } catch (error) {
-    return {events: [], failure: error instanceof Error ? error.message : String(error)};
-  }
-}
-
-describe('fetchReplayFixture', () => {
-  test('loads JSONL events', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response('{"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n'),
-    );
-    expect(failure).toBeNull();
-
-    expect(events).toHaveLength(1);
+describe('campaign browser boundary', () => {
+  test('validates fixture data and forwards owner cancellation', async () => {
+    const controller = new AbortController();
+    const calls: RequestInit[] = [];
+    const fetcher: Fetch = async (_url, init) => {
+      if (init !== undefined) calls.push(init);
+      return Response.json({schemaVersion: 99});
+    };
+    await expect(fetchCampaignFixture(controller.signal, fetcher)).rejects.toThrow();
+    expect(calls[0]?.signal).toBe(controller.signal);
+    expect(calls[0]?.cache).toBe('no-store');
+    await expect(
+      fetchCampaignFixture(controller.signal, async () => new Response('', {status: 503})),
+    ).rejects.toThrow('503');
   });
 
-  test('reports the HTTP status', async () => {
-    const {events, failure} = await load(async () => new Response('unavailable', {status: 503}));
-    expect(failure).toBe('Replay fixture request failed with 503');
-    expect(events).toHaveLength(0);
+  test('fails closed for malformed JSON and strictly invalid campaign frames', () => {
+    const cases = [
+      {label: 'malformed JSON', data: '{bad json'},
+      {
+        label: 'invalid campaign frame',
+        data: JSON.stringify({kind: 'status', seq: 1, status: 'unknown'}),
+      },
+    ] as const;
+
+    for (const {label, data} of cases) {
+      const source = new ManualCampaignSource();
+      const frames: unknown[] = [];
+      const errors: string[] = [];
+      const stream = new EventSourceCampaignStream('/campaign', () => source);
+      const close = stream.subscribe(
+        frame => frames.push(frame),
+        error => errors.push(error.message),
+      );
+      const staleMessage = source.onmessage;
+      const staleError = source.onerror;
+
+      staleMessage?.({data});
+
+      expect({label, closeCalls: source.closeCalls, errors: errors.length}).toEqual({
+        label,
+        closeCalls: 1,
+        errors: 1,
+      });
+      expect(source.onmessage).toBeNull();
+      expect(source.onerror).toBeNull();
+
+      staleMessage?.({
+        data: JSON.stringify({kind: 'status', seq: 1, status: 'completed'}),
+      });
+      source.readyState = 2;
+      staleError?.({});
+      close();
+      close();
+
+      expect({label, frames, errors: errors.length, closeCalls: source.closeCalls}).toEqual({
+        label,
+        frames: [],
+        errors: 1,
+        closeCalls: 1,
+      });
+    }
   });
 
-  test('reports the line containing malformed replay JSON', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          '{"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n{\n',
-        ),
+  test('keeps native reconnects live and releases a terminal source once', () => {
+    const source = new ManualCampaignSource();
+    const frames: unknown[] = [];
+    const errors: string[] = [];
+    const stream = new EventSourceCampaignStream('/campaign', () => source);
+    const close = stream.subscribe(
+      frame => frames.push(frame),
+      error => errors.push(error.message),
     );
-    expect(failure).toBe('Replay fixture contains invalid JSON on line 2');
-    expect(events).toHaveLength(0);
+    const staleMessage = source.onmessage;
+    const staleError = source.onerror;
+
+    source.readyState = 0;
+    staleError?.({});
+    staleMessage?.({
+      data: JSON.stringify({kind: 'status', seq: 1, status: 'completed'}),
+    });
+    expect(frames).toEqual([{kind: 'status', seq: 1, status: 'completed'}]);
+    expect(errors).toEqual([]);
+    expect(source.closeCalls).toBe(0);
+
+    source.readyState = 2;
+    staleError?.({});
+    staleError?.({});
+    staleMessage?.({
+      data: JSON.stringify({kind: 'status', seq: 2, status: 'completed'}),
+    });
+    close();
+    close();
+
+    expect(frames).toEqual([{kind: 'status', seq: 1, status: 'completed'}]);
+    expect(errors).toEqual(['Campaign stream connection error']);
+    expect(source.closeCalls).toBe(1);
+    expect(source.onmessage).toBeNull();
+    expect(source.onerror).toBeNull();
   });
 
-  test('rejects one malformed event atomically and names its line and field', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          '{"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n' +
-            '{"type":"server_ready","sequence":2}\n',
-        ),
+  test('owner disposal is idempotent and fences queued source callbacks', () => {
+    const source = new ManualCampaignSource();
+    const frames: unknown[] = [];
+    const errors: string[] = [];
+    const stream = new EventSourceCampaignStream('/campaign', () => source);
+    const close = stream.subscribe(
+      frame => frames.push(frame),
+      error => errors.push(error.message),
     );
-    expect(failure).toBe(
-      'Replay fixture contains invalid event on line 2: Invalid server run event: timestamp must be a string',
-    );
-    expect(events).toHaveLength(0);
-  });
+    const staleMessage = source.onmessage;
+    const staleError = source.onerror;
 
-  test('rejects malformed fields inside known event data before folding any line', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          '{"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n' +
-            '{"type":"agent_execution_started","sequence":2,"timestamp":"2026-09-27T00:00:01Z","data":{"kind":"agent_execution_started","stage":"implement"}}\n',
-        ),
-    );
-    expect(failure).toBe(
-      'Replay fixture contains invalid event on line 2: Invalid server run event.data: activity must be present',
-    );
-    expect(events).toHaveLength(0);
-  });
+    close();
+    close();
+    staleMessage?.({
+      data: JSON.stringify({kind: 'status', seq: 1, status: 'completed'}),
+    });
+    source.readyState = 2;
+    staleError?.({});
 
-  test('accepts unknown closed-set members with valid wire kinds', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          JSON.stringify({
-            protocol_version: 1,
-            sequence: 1,
-            timestamp: '2026-09-27T00:00:00Z',
-            type: 'future-event-type',
-            status: 'future-status',
-            data: {kind: 'future-data-kind', future_field: true},
-          }),
-        ),
-    );
-    expect(failure).toBeNull();
-
-    expect(events).toHaveLength(1);
-  });
-
-  test('rejects an incompatible event protocol version', async () => {
-    const {events, failure} = await load(
-      async () =>
-        new Response(
-          '{"protocol_version":2,"type":"server_ready","sequence":1,"timestamp":"2026-09-27T00:00:00Z"}\n',
-        ),
-    );
-    expect(failure).toBe(
-      'Replay fixture contains invalid event on line 1: Invalid server run event: protocol_version must be 1',
-    );
-    expect(events).toHaveLength(0);
+    expect(frames).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(source.closeCalls).toBe(1);
+    expect(source.onmessage).toBeNull();
+    expect(source.onerror).toBeNull();
   });
 });
+
+class ManualCampaignSource {
+  onmessage: ((event: {readonly data: string}) => void) | null = null;
+  onerror: ((event: unknown) => void) | null = null;
+  readyState = 1;
+  closeCalls = 0;
+  close(): void {
+    this.closeCalls += 1;
+  }
+}

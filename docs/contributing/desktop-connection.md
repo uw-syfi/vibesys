@@ -163,6 +163,15 @@ The connection manager opens two kinds of channel to a host. Both start with the
 | --- | --- | --- |
 | control | one per host, long lived | Request and reply messages from `HelperRequest`; push messages for watches. |
 | run | one per run-protocol connection the page opens (control, subscribe, chat, per `WP-ROLES`) | One `run.connect`; on `connected` the channel becomes a byte relay to the run's socket and carries the run protocol unchanged until either side ends. |
+| logs | one per host, opened when the first log view comes on screen | `logs.list` and `logs.read` only; see [Logs](#logs). |
+
+A control channel normally exits `0`. If a successful `run.start` reply cannot reach the client,
+the helper owns stopping that undisclosed instance. Only `stopped` and `not_running` release that
+ownership as success. A thrown stop, a refused cleanup worker, or any nonterminal result
+(`stopping`, `still_running`, or `unsupported`) ends the channel with status `12` and writes one
+typed `RunStartCompensationFailure` line per affected instance on stderr. Each line preserves the
+request id, instance id, failure kind, detail, and the complete `InstanceStopResult` when one
+exists, so the app or an operator can recover an instance the failed stdout reply never disclosed.
 
 Framing is the run protocol's: one JSON message per line, UTF-8 (`WP-GRANULARITY`, `WP-FRAME-TYPE`,
 `WP-NEWLINE`), read with the existing `NewlineFramer`. After `connected`, the run channel's bytes
@@ -215,10 +224,13 @@ either the method's result, whose `type` is the request's, or `HelperError` (`ty
 | `instances.unwatch` | `watch_id` | `watch_id` | Ends a watch; no push for it follows. `unknown_watch` when none is open. |
 | `tasks.list` | `project` | `TaskList` | Replaces `vibesys tasks --json`. Errors are typed: `project_missing`, `project_uninitialized`, `task_invalid`, each with the path. |
 | `runs.list` | `project` | the project's runs (`run_id`, `task`, `display_name`, `created_at`) with the `phase` of the server on this host that drives or last drove each, and its `instance_id` while live | Gives Recent rows status and lets resume name a concrete run. A run whose server left no record here has no phase; reading the run's own journal for it needs a light journal reader and is not built. |
-| `run.start` | `project`, `task`, `args: [str]`, `resume: {run_id} \| {latest: true} \| null` | `{instance_id, run_id, socket_path, phase}` or `DetachedLaunchFailure` | Allocates or resolves `run_id` before detaching (see [Run identity](#run-identity)); returns once the record is published, not when the run is ready. |
+| `run.start` | `project`, `task`, `args: [str]`, `resume: {run_id} \| {latest: true} \| null`, `harness: {provider, model} \| null` | `{instance_id, run_id, socket_path, phase}` or `DetachedLaunchFailure` | Allocates or resolves `run_id` before detaching (see [Run identity](#run-identity)); returns once the record is published, not when the run is ready. `args` holding `--allow-unvetted-model`, or any abbreviation argparse accepts, is `invalid_request`: a run started here never opts out of the vetted harnesses. `harness` (gated by feature `harnesses`; absent or null keeps the project's configuration) must be a pair `harnesses.list` offers, else `unvetted_harness` naming the provider's vetted models; it becomes `--cli-provider` and `--model`, so `args` may then hold neither. |
+| `harnesses.list` | none | `harnesses: [{provider, model, default}]`, each provider's default first | The vetted provider and model pairs (`vs_agent`'s `HARNESSES`), for the start sheet's model picker. Gated by feature `harnesses`. The helper loads the agent library only when this or a `run.start` with `harness` arrives, so `hello` stays light. |
 | `run.stop` | `instance_id`, `force` | `InstanceStopResult` | Same outcomes as `vibesys instances stop`. |
 | `run.connect` | `instance_id`, `role: control \| subscribe \| chat` | `{run_id, protocol_version}` then relay | Run channels only; `channel_busy` while another request or watch is open. The run's `run_id` comes back here, so the page never derives it. Bytes the client sends before the reply are relayed after it. A failed connect (`run_gone`, `connect_denied`, `connect_failed`) leaves the channel a request channel. |
 | `ping` | none | an empty reply | Control channel liveness for the supervisor. |
+| `logs.list` | `instance_id` | `streams: [{id, owner, command, retained_start, size, outcome}]`, oldest first | The run's recorded log streams, live or ended. `owner` is the JSON object the writer validated against vibesys's `LogOwner` union (the client narrows it with that generated type); `outcome` is `ended`, `failed`, `abandoned`, or `null` while open. `unknown_instance` when the host knows nothing of the instance. Gated by feature `logs`. |
+| `logs.read` | `instance_id`, `stream_id`, `start: {offset} \| {tail_bytes}`, `max_bytes` (4 to 64 KiB), `wait_ms` (0 to 30 s) | `chunk: {offset, data, next_offset, eof, closed, truncated_before, pipes: [{offset, length, pipe}]}` | One bounded chunk; at the end of an open stream it waits up to `wait_ms` for bytes. `unknown_log_stream`, `unknown_instance`. Gated by feature `logs`. See [Logs](#logs). |
 | `paths.complete` | `prefix` | `directory`, `entries: [{name, path, vibesys_checkout, vibesys_project, git_repository}]`, `truncated` | For the host's project and checkout pickers. `~` expands on the host and a relative prefix is under the home directory; a trailing `/` lists the directory. Directories only (a link counts when this account can follow it to one), filtered by the typed name prefix exactly, sorted, at most 200. A directory is read for at most 10,000 entries; past either bound `truncated` is set. `path_missing`, `path_not_directory`, `permission_denied` name the path. Gated by feature `paths_complete`. |
 
 There is no `projects.recent` method: Recent is the app's own record of what this user opened,
@@ -229,6 +241,88 @@ and their status, is `runs.list`. See [Decisions and alternatives](#decisions-an
 import the engine. The run protocol's control envelope (the requests and responses `run.stop`
 needs) is therefore split from the engine-importing modules first, as step one of phase 4 (see
 [Phases](#phases)), so the helper imports only the envelope and the import guard has no exceptions.
+
+### Logs
+
+The `logs` feature lets the app show, live, the output of long-running work on a host (image
+builds, container start, evaluator stages, the run's own narration). The run records each stream
+under a typed owner in its `vs_logs` store ([logs.md](logs.md)); the helper reads that store and
+serves it in bounded chunks. Nothing about logs rides the run's event stream.
+
+- **Where the helper reads.** `server.host_helper_logs` answers the two methods over one role,
+  `LogReader` (list an instance's streams, read raw bytes). `server.host_helper_os.StoreLogReader`
+  implements it over `vs_logs.read`: it finds the instance's run from its live record or, once the
+  run ended, its retained inspection metadata (`inspection.json`), and opens the store at
+  `Project.log_streams_directory_for(project_root, run_id)`. So a run's logs stay readable after it
+  ends, and the helper keeps no state between requests. A helper with no log store does not offer
+  `logs` in `hello`.
+- **Tail first, then follow.** A view opens with `{tail_bytes}` (64 KiB), then reads forward from
+  `next_offset` with `wait_ms`. At the end of an open stream the helper re-reads every 250 ms on its
+  injected clock and answers as soon as bytes arrive, the stream closes, or the wait ends; the wait
+  always ends 1 s before the request's deadline, so a long poll is answered, never
+  `deadline_exceeded`. Nothing is fetched for a stream that is not on screen, and nothing is
+  replayed from offset 0 unless asked.
+- **Chunk boundaries.** `data` is text: the bytes `[offset, next_offset)` decoded as UTF-8, with
+  bytes that are not UTF-8 replaced by U+FFFD. When more bytes follow the window, the chunk ends after
+  the window's last line end, so a view rarely has to join a line across chunks; with no line end in
+  the window, it ends before the character the window splits. At the end of what the stream holds,
+  the chunk keeps an unfinished last line (a progress bar, a prompt) so it shows at once, and holds
+  back only an unfinished last character of an open stream until its last byte is written; at the
+  end of a closed stream nothing is held back. A cut therefore never splits a character, so decoding
+  chunk by chunk gives the same text as decoding the whole stream, and offsets stay byte offsets.
+  `max_bytes` is at least 4, one whole character, so every read of available bytes makes progress.
+  A tail that does not start the stream starts at its first line start. Encoding the bytes as base64
+  instead was rejected: it costs a third more on the wire and pushes decoding, with the same
+  boundary problem, into every client.
+- **Evictions.** The store caps each stream and evicts its oldest bytes. A read that asks for
+  evicted bytes starts at the oldest byte still held and sets `truncated_before`. `pipes` labels each
+  byte with the pipe (stdout or stderr) that wrote it, as spans in stream offsets covering the chunk
+  exactly.
+- **Which channel.** Logs ride their own request channel, one per host, which the connection
+  manager opens when the first log view comes on screen; the helper treats it like any request
+  channel (no new helper channel kind). The reasons are the ones in [Stream
+  topology](#stream-topology-why-one-channel-per-run-connection): a 64 KiB reply or a waiting read on
+  the control channel would delay `ping` and the instance watch behind it, and long polls would hold
+  control's request workers (16 per channel); on a channel of its own, ssh's per-channel window keeps
+  log bulk from blocking control or the run's event stream. One logs channel per host, not one per
+  stream: replies are bounded and served concurrently, and each follower keeps exactly one read in
+  flight, so a chatty stream delays another by at most one chunk, while a channel per stream would
+  cost a helper process each and count against `MaxSessions`. The 16 workers bound the streams one
+  host follows at once, more than a screen shows.
+- **The client.** `@vibesys/logs` holds the data fold (`foldChunk`: chunks into a bounded line view
+  with the unfinished last line, the evicted range, and the closed flag) and the control state
+  (`logFollowMachine`: idle, tailing, following with one read in flight, closed, and error with
+  retry on the injected clock), over a `LogTransport` the composition provides on the logs channel.
+  A view starts a follower when its stream comes on screen and stops it when it leaves, which aborts
+  the read in flight.
+- **The channel's lifetime.** `HostConnection.openLogs()` hands out leases on the host's one logs
+  channel. The first request of any lease opens it once the host is ready (a host whose control
+  `hello` did not negotiate `logs` answers `feature_not_negotiated` and opens nothing), every lease
+  shares it, the next request reopens it if it ended, and releasing the last lease closes it.
+- **From the run page.** The run page reaches logs the way it reaches its run: through the main
+  process, never naming a host or a channel. The run preload's `logs()` sends one request on the
+  `vibesys:logs` IPC channel (`@vibesys/ipc`'s `RunLogsRequest`, parsed strictly by
+  `parseRunLogsRequest`); the main process admits it only from a window's current run page and
+  answers from that window's run binding. The binding takes a logs lease on its first request and
+  releases it with the binding, and supplies the instance id from the record the app attached to: a
+  listing names it, and a read that names another instance is refused. An IPC request cannot be
+  withdrawn, so the page drops an aborted request's late answer; the main process's request ends by
+  its wait bound, or when the binding releases the lease. The page's `RunLogSource` (`@vibesys/logs`)
+  wraps that bridge; a browser page has none and shows no log view.
+- **From the Inspect sheet.** The welcome view's Inspect sheet shows any run's logs, live or ended
+  (ended rows have Inspect too: the store outlives the run). It names its host and instance, as the
+  welcome view does, on the welcome channel `vibesys:welcome:logs` (a listing, or a read that must
+  name that instance), answered by the hosts feature's main-process `Hosts.logs`. `Hosts` keeps one
+  connection lease and one logs lease per renderer document, on one host at a time: the first
+  request takes them, asking about another host swaps them, and closing the sheet
+  (`vibesys:welcome:release-logs`), leaving the welcome view, or the document going away releases
+  them. The sheet lists the streams grouped by owner kind and follows only the one on screen;
+  narration streams render as records by level with their traceback, raw streams as monospace with
+  stderr marked (`foldChunk` keeps each line's pipe runs).
+- **Not `server.log`.** `server.log` is the detached server's raw stdout and stderr, for a person at
+  a terminal; no UI feature depends on it. `instances.inspect`'s `include_log` (a tail of it) is
+  deprecated: the app no longer sends it, and refuses a reply that carries a tail. The helper keeps
+  answering it for older clients and removes it at helper protocol version 2.
 
 ### Handshake and versioning
 
@@ -246,7 +340,11 @@ The rules:
    negotiated version's schema. An unknown field is a bug and fails loudly, naming the field.
 2. **Additive evolution through features.** A new optional field or method ships behind a new
    feature. A sender includes the field or calls the method only if `hello` returned the feature,
-   so a strict peer never sees what it does not know. This replaces probe-by-rejection
+   so a strict peer never sees what it does not know. `HELPER_REQUEST_FEATURES` (methods) and
+   `HELPER_FIELD_FEATURES` (optional fields, gated when set) in `server.host_api` are the gates;
+   the generated schema exports both, and the helper, the client channel, and the `FakeHelper`
+   each refuse an ungated use as `feature_not_negotiated`. An error code only a gated request can
+   produce (`unvetted_harness`) needs no version bump either. This replaces probe-by-rejection
    (`WP-CAPABILITY-PROBE`) for the helper protocol; the run protocol keeps its probe until it gains
    a `hello` of its own.
 3. **Breaking changes bump the version.** Removing or retyping a field, or changing a method's
@@ -316,6 +414,13 @@ Facts enter once:
   keeps reporting `starting` with its stage and progress, a resume drops the held request, and
   `READY` lands the run in `pausing` or `stopping` if one is still held. Core may land a held stop
   before `READY`, abandoning the startup; the run then goes from `starting` straight to `stopped`. A failure while starting past `resolving` names the startup stage it failed in.
+- **Starting label**: the run view's status chip shows the stage, its progress, how long the
+  stage has run, and, once nothing has been heard for 60 s, `quiet for <duration>`, so a slow
+  image build or container start never looks frozen. The fold keeps the envelope timestamps of the
+  stage's first event (`stageSince`, reset when the stage changes) and of the latest one
+  (`lastActivityAt`); the label is a pure function of that state and a `now` the page owner
+  ticks once a second only while the run is `starting`. It uses no event beyond
+  `run_startup_progress`.
 - **Record**: the server rewrites its record atomically (temp file, rename) on each phase change;
   a change of progress alone is written at most once per second, the latest one when the second
   ends.
@@ -416,6 +521,30 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
   background, Esc, and return of focus to the opener come from the platform.
 - **Data from watches.** Host panels and Recent statuses fold `instances.watch` pushes; there is no
   manual refresh path to forget.
+
+## Multiple run windows
+
+Each `AppWindow` holds one `#run` view and binds to at most one run at a time (`openRunPage`
+always replaces whatever the window showed before). `RunControl` and `RunIpcRegistry` key every
+binding, navigation claim, and IPC admission by `run_id` rather than by one shared slot
+(`clients/features/run-control/src/main/run-control.ts`, `clients/apps/desktop-main/src/main/
+run-ipc.ts`), so two independent `AppWindow`s attached to two different runs cannot cross-detach or
+cross-admit each other's connection: a window's close detaches only the binding for the run it
+showed, and a window's IPC connect is admitted only for the run its own current page named. A
+Playwright spec (`clients/apps/desktop-main/e2e/two-windows.spec.ts`) constructs two `AppWindow`s
+directly against a fixture host connection and asserts no cross-run bleed on attach, content, or
+close.
+
+This keying is the safety prerequisite for concurrent windows, not the feature itself: the app does
+not yet construct more than one `AppWindow`. `index.ts`'s `openWindow()` creates exactly one at
+startup, and every run attach, start, or resume targets that same window, replacing its current run
+page. Wiring an actual multi-window user path needs a UX decision first (whether attaching always
+opens a fresh window, or only when the current one already shows a different run, and how the
+welcome view's window relates to run windows) and is tracked by #2615.
+
+The campaign workspace UI these run pages can render, and the live telemetry stream it folds, are
+designed in [campaign-workspace-ui.md](../design/campaign-workspace-ui.md) and
+[live-campaign-streaming.md](../design/live-campaign-streaming.md).
 
 ## App lifecycle
 
@@ -544,6 +673,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Host helper and its contract (phase 4) | built: every method, `host-helper.schema.json` and its TypeScript types, the `helper-*` conformance scenarios and runner (in process and over stdio), the import-closure and start-up guards; `entrypoints.stdio_bridge` deleted in phase 5 |
 | Connection manager (phase 5) | built: `ConnectionManager` and `HostConnection` (an XState machine, shell with disposal scopes), the bootstrap, typed channels with one strict validator, run channels, watch-pushed listings, path completion, the HostConnection contract suite over the `FakeHelper` and the real helper; not built: the Playwright journey job, a second master past `MaxSessions`, and checkout completion on a host with no checkout yet (it needs a helper) |
 | Screen stores and app lifecycle (phase 6) | built (#1839) |
+| Logs feature | built: `logs.list` and `logs.read` over the run's `vs_logs` store, the `helper-logs-*` scenarios (in process), and `@vibesys/logs` (fold and follow machine); the connection manager's logs channel, the run view's startup log panel, and the Inspect sheet's log viewer; not built: gate logs in the run view's round cards, and the logs scenarios over stdio against the real helper |
 
 ## Decisions and alternatives
 

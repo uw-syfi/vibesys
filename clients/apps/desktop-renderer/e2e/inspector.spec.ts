@@ -7,8 +7,9 @@ const SSH_INSTANCE = 'ba9876543210';
 interface InspectionCall {
   readonly host: string;
   readonly instance: string;
-  readonly includeLog: boolean;
   readonly inspectionToken: number;
+  /** How many arguments the view passed: three, so no server log was asked for. */
+  readonly arguments: number;
 }
 
 interface RendererTestControl {
@@ -42,7 +43,7 @@ function field(dialog: Locator, label: string): Locator {
     .locator('xpath=following-sibling::dd[1]');
 }
 
-test('local inspection loads diagnostics explicitly, copies values, and restores focus after redraw', async ({
+test('local inspection shows the run logs, copies values, and restores focus after redraw', async ({
   page,
 }) => {
   const row = page.locator('#recent-section tr').filter({hasText: 'This Mac'});
@@ -53,16 +54,16 @@ test('local inspection loads diagnostics explicitly, copies values, and restores
   await expect(dialog.getByRole('button', {name: 'Close'})).toBeFocused();
   await expect(field(dialog, 'Host').locator('code')).toHaveText('This Mac');
   await expect(field(dialog, 'Hostname').locator('code')).toHaveText('workstation.local');
-  await expect(dialog).toContainText('Diagnostics are not loaded until you request them.');
   await expect
     .poll(() => page.evaluate(() => window.desktopInspectorTest.inspectionCalls))
-    .toEqual([{host: 'local', instance: LOCAL_INSTANCE, includeLog: false, inspectionToken: 1}]);
+    .toEqual([{host: 'local', instance: LOCAL_INSTANCE, inspectionToken: 1, arguments: 3}]);
 
-  await dialog.getByRole('button', {name: 'Load diagnostics'}).click();
-  await expect(dialog.locator('pre')).toHaveText('workstation.local: retained diagnostics');
-  await expect
-    .poll(() => page.evaluate(() => window.desktopInspectorTest.inspectionCalls.at(-1)))
-    .toEqual({host: 'local', instance: LOCAL_INSTANCE, includeLog: true, inspectionToken: 2});
+  const logs = dialog.getByRole('region', {name: 'Logs'});
+  await expect(logs.getByRole('combobox', {name: 'Log stream'})).toHaveValue('000002');
+  await expect(logs.locator('[data-level="ERROR"]')).toContainText('gate crashed');
+  await logs.getByText('Traceback', {exact: true}).click();
+  await expect(logs).toContainText('ValueError: boom');
+  await expect(dialog).not.toContainText('server.log tail');
 
   await field(dialog, 'Project').getByRole('button', {name: 'Copy'}).click();
   await expect(dialog.getByRole('status')).toHaveText('Project copied.');
@@ -73,12 +74,12 @@ test('local inspection loads diagnostics explicitly, copies values, and restores
   await dialog.getByRole('button', {name: 'Refresh'}).click();
   await expect
     .poll(() => page.evaluate(() => window.desktopInspectorTest.inspectionCalls.length))
-    .toBe(3);
+    .toBe(2);
   expect(await page.evaluate(() => window.desktopInspectorTest.inspectionCalls.at(-1))).toEqual({
     host: 'local',
     instance: LOCAL_INSTANCE,
-    includeLog: true,
-    inspectionToken: 4,
+    inspectionToken: 3,
+    arguments: 3,
   });
 
   await page.evaluate(
@@ -122,7 +123,7 @@ test('SSH inspection stays usable at narrow widths and follows the active theme'
   await expect(field(dialog, 'Hostname').locator('code')).toHaveText('gpu.internal');
   await expect
     .poll(() => page.evaluate(() => window.desktopInspectorTest.inspectionCalls.at(-1)))
-    .toEqual({host: 'ssh:gpu', instance: SSH_INSTANCE, includeLog: false, inspectionToken: 1});
+    .toEqual({host: 'ssh:gpu', instance: SSH_INSTANCE, inspectionToken: 1, arguments: 3});
 
   const columns = await dialog
     .locator('.inspection')

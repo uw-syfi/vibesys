@@ -1,15 +1,23 @@
-/** Accessible modal view of one detached server's retained identity and optional log tail. */
+/**
+ * Accessible modal view of one detached run, live or ended: its retained identity, and its logs
+ * from the run's log store, followed live. It never shows `server.log`, the detached server's raw
+ * output, which is for a person at a terminal.
+ */
 
 import type {WelcomeInspection} from '@vibesys/ipc';
+import {decodeNarrationLine, type LogLine, pipeSegments} from '@vibesys/logs';
 import {Button, Dialog} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
+import {inspectionFields} from '../../state/inspector.js';
 import {
-  type InspectorAction,
-  type InspectorState,
-  inspectionFields,
-} from '../../state/inspector.js';
+  type InspectorLogsView,
+  type InspectorSheetAction,
+  type InspectorSheetState,
+  type InspectorStream,
+  inspectorLogsNotice,
+} from '../../state/inspector-logs.js';
 
-type InspectorSend = (action: InspectorAction) => void;
+type InspectorSend = (action: InspectorSheetAction) => void;
 
 function inspectionStatus(inspection: WelcomeInspection): {text: string; className: string} {
   if (inspection.state === 'live') {
@@ -17,7 +25,7 @@ function inspectionStatus(inspection: WelcomeInspection): {text: string; classNa
   }
   if (inspection.state === 'ended') {
     return {
-      text: 'The detached server has ended. Retained metadata and diagnostics are shown when available.',
+      text: 'The detached server has ended. Its retained metadata and logs are shown when available.',
       className: 'status',
     };
   }
@@ -44,8 +52,113 @@ function CopyButton(props: {
   );
 }
 
+/** One narration record: time, level, logger and message, and its traceback behind a disclosure. */
+function NarrationRecord(props: {readonly text: string}): JSX.Element {
+  const record = decodeNarrationLine(props.text);
+  if (record.kind === 'raw') {
+    return (
+      <li className="narration raw">
+        <code>{record.text}</code>
+      </li>
+    );
+  }
+  const {line} = record;
+  return (
+    <li className={`narration level-${line.level.toLowerCase()}`} data-level={line.level}>
+      <span className="narration-at">{line.at}</span>{' '}
+      <span className="narration-level">{line.level}</span>{' '}
+      <span className="narration-logger">{line.logger}</span>{' '}
+      <span className="narration-message">{line.message}</span>
+      {line.traceback == null ? null : (
+        <details className="narration-traceback">
+          <summary>Traceback</summary>
+          <pre>{line.traceback}</pre>
+        </details>
+      )}
+    </li>
+  );
+}
+
+/** One raw line; what stderr wrote is marked. */
+function RawLine(props: {readonly line: LogLine}): JSX.Element {
+  return (
+    <span className="log-line">
+      {pipeSegments(props.line).map(segment =>
+        segment.pipe === 'stderr' ? (
+          <mark className="stderr" data-pipe="stderr" title="stderr" key={segment.at}>
+            {segment.text}
+          </mark>
+        ) : (
+          <span key={segment.at}>{segment.text}</span>
+        ),
+      )}
+      {'\n'}
+    </span>
+  );
+}
+
+function streamOption(stream: InspectorStream): string {
+  return `${stream.label} (${stream.status})`;
+}
+
+function LogLines(props: {readonly logs: InspectorLogsView}): JSX.Element | null {
+  const {logs} = props;
+  if (logs.shown === null || logs.lines.length === 0) return null;
+  if (logs.shown.narration) {
+    return (
+      <ol className="log-narration" data-testid="log-narration">
+        {logs.lines.map(shown => (
+          <NarrationRecord key={shown.number} text={shown.line.text} />
+        ))}
+      </ol>
+    );
+  }
+  return (
+    <pre className="log-raw" data-testid="log-raw">
+      {logs.lines.map(shown => (
+        <RawLine key={shown.number} line={shown.line} />
+      ))}
+    </pre>
+  );
+}
+
+/** The run's log streams, grouped by what they are for, and the one on screen, followed live. */
+function InspectionLogs(props: {
+  readonly logs: InspectorLogsView;
+  readonly send: InspectorSend;
+}): JSX.Element | null {
+  const {logs, send} = props;
+  if (!logs.open) return null;
+  const notice = inspectorLogsNotice(logs);
+  return (
+    <section className="inspection-logs" aria-label="Logs" data-testid="inspection-logs">
+      <h3>Logs</h3>
+      {logs.groups.length > 0 ? (
+        <select
+          aria-label="Log stream"
+          value={logs.shown?.id ?? ''}
+          onChange={event => send({type: 'select-log', streamId: event.currentTarget.value})}
+        >
+          {logs.groups.map(group => (
+            <optgroup key={group.group} label={group.label}>
+              {group.streams.map(stream => (
+                <option key={stream.id} value={stream.id}>
+                  {streamOption(stream)}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      ) : null}
+      {notice === null ? null : <p className="muted">{notice}</p>}
+      {logs.earlier ? <p className="muted">Earlier output is not shown.</p> : null}
+      <LogLines logs={logs} />
+    </section>
+  );
+}
+
 function InspectionBody(props: {
-  readonly state: InspectorState;
+  readonly state: InspectorSheetState;
   readonly send: InspectorSend;
 }): JSX.Element | null {
   const {state, send} = props;
@@ -62,27 +175,24 @@ function InspectionBody(props: {
     const summary = inspectionStatus(inspection);
     status = <p className={summary.className}>{summary.text}</p>;
     details = (
-      <>
-        <dl className="inspection">
-          {inspectionFields(target, inspection).map(field => (
-            <div className="inspection-field" key={field.label}>
-              <dt>{field.label}</dt>
-              <dd>
-                <code>{field.value}</code>
-                {field.copy && field.value !== 'Unknown' ? (
-                  <CopyButton
-                    label={field.label}
-                    value={field.value}
-                    disabled={state.copying !== null}
-                    copy={send}
-                  />
-                ) : null}
-              </dd>
-            </div>
-          ))}
-        </dl>
-        <InspectionLog inspection={inspection} copying={state.copying !== null} send={send} />
-      </>
+      <dl className="inspection">
+        {inspectionFields(target, inspection).map(field => (
+          <div className="inspection-field" key={field.label}>
+            <dt>{field.label}</dt>
+            <dd>
+              <code>{field.value}</code>
+              {field.copy && field.value !== 'Unknown' ? (
+                <CopyButton
+                  label={field.label}
+                  value={field.value}
+                  disabled={state.copying !== null}
+                  copy={send}
+                />
+              ) : null}
+            </dd>
+          </div>
+        ))}
+      </dl>
     );
   }
   return (
@@ -96,12 +206,8 @@ function InspectionBody(props: {
         )}
       </div>
       {details}
+      <InspectionLogs logs={state.logs} send={send} />
       <div className="actions">
-        {!state.includeLog ? (
-          <Button disabled={state.load.kind === 'loading'} onClick={() => send({type: 'load-log'})}>
-            Load diagnostics
-          </Button>
-        ) : null}
         <Button disabled={state.load.kind === 'loading'} onClick={() => send({type: 'refresh'})}>
           Refresh
         </Button>
@@ -111,31 +217,8 @@ function InspectionBody(props: {
   );
 }
 
-function InspectionLog(props: {
-  readonly inspection: WelcomeInspection;
-  readonly copying: boolean;
-  readonly send: InspectorSend;
-}): JSX.Element {
-  const log = props.inspection.log;
-  if (log == null) {
-    return <p className="muted">Diagnostics are not loaded until you request them.</p>;
-  }
-  if (log.state === 'missing') {
-    return <p className="muted">No retained server log is available.</p>;
-  }
-  return (
-    <div>
-      <p className="muted">
-        {log.truncated ? 'Server log tail (earlier bytes omitted)' : 'Server log'}
-      </p>
-      <pre className="diagnostics">{log.text}</pre>
-      <CopyButton label="Diagnostics" value={log.text} disabled={props.copying} copy={props.send} />
-    </div>
-  );
-}
-
 export function InspectorSheet(props: {
-  readonly state: InspectorState;
+  readonly state: InspectorSheetState;
   readonly send: InspectorSend;
 }): JSX.Element {
   const target = props.state.target;

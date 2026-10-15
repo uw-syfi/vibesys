@@ -31,12 +31,14 @@ import {
 } from './connection.js';
 import type {
   BrowserLifecycle,
+  ChatResult,
   IterationLoad,
   RunCommand,
   RunCommandOutcome,
   RunConnection,
   RunStreamHandlers,
   TransportHooks,
+  WebChatOptions,
 } from './ports.js';
 import {
   createRunStore,
@@ -175,6 +177,15 @@ export class WebSession {
     return this.#closed;
   }
 
+  /** Fold the answer's events without advancing the subscription cursor. */
+  async ask(text: string, options: WebChatOptions = {}): Promise<ChatResult> {
+    const response = await this.#connection.ask(text, options);
+    if (this.#closed === null && !options.signal?.aborted) {
+      this.store.dispatch({type: 'response-events', events: response.events});
+    }
+    return response.chat;
+  }
+
   /** Send one operator command without letting presentation code own the transport. */
   command = (input: RunCommand): Promise<RunCommandOutcome> => this.#connection.command(input);
 
@@ -308,7 +319,14 @@ export class WebSession {
     const firstGeneration = previousStoreId === null;
     const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
     const previousRun = this.store.getState();
-    this.#dispatchRun({type: 'batch', message, reconciliation});
+    this.#dispatchRun({
+      type: 'batch',
+      message,
+      reconciliation,
+      ...(context.activeExecutionCheckpoint === undefined
+        ? {}
+        : {activeExecutionCheckpoint: context.activeExecutionCheckpoint}),
+    });
     const rejection = runIdentityRejection(previousRun, this.store.getState());
     this.#streamStoreId = storeId;
     if (storeReplaced) {

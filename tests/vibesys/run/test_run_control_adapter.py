@@ -11,7 +11,8 @@ from tests.support.real_git import NO_GITHUB, REAL_GIT
 from vibesys.api import CoreEventType, RunStopped
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
+from vs_runtime.api.testing import idle_environment_system
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -25,7 +26,7 @@ def test_control_transitions_keep_the_existing_persisted_event_format(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     integration.attach(tmp_path, run_id="run-1")
     unsubscribe = integration.events.subscribe(

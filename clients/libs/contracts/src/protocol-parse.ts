@@ -1,7 +1,13 @@
 import {BackendClientError, ServerError} from './errors.js';
 import responsePayloadSchema from './generated/response-payload.schema.js';
 import runEventSchema from './generated/run-event.schema.js';
-import type {Diagnostic, ProtocolResponse, RunEvent, ServerMessage} from './protocol.js';
+import type {
+  ActiveExecutions,
+  Diagnostic,
+  ProtocolResponse,
+  RunEvent,
+  ServerMessage,
+} from './protocol.js';
 import {
   fieldError,
   isRecord,
@@ -12,6 +18,12 @@ import {
 
 const RESPONSE = 'response';
 const STREAM = 'event-stream message';
+const CHECKPOINT = 'active-execution checkpoint';
+// Generated schema source: MAX_ACTIVE_EXECUTIONS_* in server.api.protocol.
+// These runtime guards protect clients before TypeScript's generated type is
+// asserted, so they deliberately repeat the wire maxima at this boundary.
+const MAX_CHECKPOINT_CHUNKS = 256;
+const MAX_CHECKPOINT_PAYLOAD_CHARACTERS = 64 * 1024;
 /** The run protocol is open: a newer server may add fields and members (#869). */
 const OPEN_WALK: SchemaWalk = {documents: [responsePayloadSchema, runEventSchema], strict: false};
 
@@ -67,6 +79,9 @@ export function parseServerMessage(line: string): ServerMessage {
     case 'event_batch':
       validateEventBatch(record);
       break;
+    case 'active_executions_chunk':
+      validateActiveExecutionsChunk(record);
+      break;
     case 'protocol_error':
       validateProtocolError(record);
       break;
@@ -74,6 +89,13 @@ export function parseServerMessage(line: string): ServerMessage {
       throw unknownStreamLineError(record);
   }
   return value as ServerMessage;
+}
+
+/** Parse the complete JSON payload assembled from validated checkpoint chunks. */
+export function parseActiveExecutionsCheckpoint(payload: string): ActiveExecutions {
+  const value = parseJson(payload, CHECKPOINT);
+  validateActiveExecutionList(value, CHECKPOINT);
+  return value as ActiveExecutions;
 }
 
 /** Convert an invalid frame or callback exception into the public error taxonomy. */
@@ -158,6 +180,58 @@ function validateEventBatch(record: Record<string, unknown>): void {
   optionalNumber(record, 'history_after_sequence', STREAM);
   optionalBoolean(record, 'rebootstrap', STREAM);
   validateActiveExecutions(record, STREAM);
+  const activeExecutions = record['active_executions'];
+  const checkpointId = record['active_executions_checkpoint_id'];
+  if (checkpointId !== undefined && checkpointId !== null) {
+    if (typeof checkpointId !== 'string' || !/^[0-9a-f]{64}$/.test(checkpointId)) {
+      throw fieldError(
+        STREAM,
+        'active_executions_checkpoint_id',
+        '64 lowercase hexadecimal characters or null when present',
+      );
+    }
+  }
+  if (activeExecutions === null && typeof checkpointId !== 'string') {
+    throw fieldError(
+      STREAM,
+      'active_executions_checkpoint_id',
+      'the checkpoint identity when active_executions is null',
+    );
+  }
+  if (activeExecutions !== null && checkpointId != null) {
+    throw fieldError(
+      STREAM,
+      'active_executions_checkpoint_id',
+      'null or absent when active_executions is authoritative',
+    );
+  }
+}
+
+function validateActiveExecutionsChunk(record: Record<string, unknown>): void {
+  const checkpointId = requireString(record, 'checkpoint_id', STREAM);
+  if (!/^[0-9a-f]{64}$/.test(checkpointId)) {
+    throw fieldError(STREAM, 'checkpoint_id', '64 lowercase hexadecimal characters');
+  }
+  const chunkIndex = requireSafeInteger(record, 'chunk_index', STREAM);
+  const chunkCount = requireSafeInteger(record, 'chunk_count', STREAM);
+  if (chunkIndex < 0) throw fieldError(STREAM, 'chunk_index', 'a non-negative safe integer');
+  if (chunkCount < 1 || chunkCount > MAX_CHECKPOINT_CHUNKS) {
+    throw fieldError(STREAM, 'chunk_count', `an integer from 1 to ${MAX_CHECKPOINT_CHUNKS}`);
+  }
+  if (chunkIndex >= chunkCount) {
+    throw fieldError(STREAM, 'chunk_index', 'smaller than chunk_count');
+  }
+  const payload = requireString(record, 'payload', STREAM);
+  if ([...payload].length > MAX_CHECKPOINT_PAYLOAD_CHARACTERS) {
+    throw fieldError(
+      STREAM,
+      'payload',
+      `at most ${MAX_CHECKPOINT_PAYLOAD_CHARACTERS} Unicode characters`,
+    );
+  }
+  requireNonNegativeSafeInteger(record, 'through_sequence', STREAM);
+  requireString(record, 'store_id', STREAM);
+  requireNonNegativeSafeInteger(record, 'history_after_sequence', STREAM);
 }
 
 function validateProtocolError(record: Record<string, unknown>): void {
@@ -198,10 +272,15 @@ function validateRunEventAt(value: unknown, path: string): RunEvent {
 
 function validateActiveExecutions(record: Record<string, unknown>, path: string): void {
   const items = record['active_executions'];
-  if (items === undefined) return;
-  if (!Array.isArray(items)) throw fieldError(path, 'active_executions', 'an array when present');
+  if (items === undefined || items === null) return;
+  validateActiveExecutionList(items, `${path} active_executions`);
+}
+
+function validateActiveExecutionList(value: unknown, path: string): void {
+  if (!Array.isArray(value)) throw new BackendClientError('parse', `${path} must be an array`);
+  const items = value;
   for (let index = 0; index < items.length; index += 1) {
-    validateActiveExecution(items[index], `${path} active_executions[${index}]`);
+    validateActiveExecution(items[index], `${path}[${index}]`);
   }
 }
 
@@ -314,8 +393,9 @@ function parseJson(line: string, path: string): unknown {
  * the "read it as a particular member" answer this policy rules out. Nothing
  * about that behavior changes here.
  */
-function requireString(record: Record<string, unknown>, key: string, path: string): void {
+function requireString(record: Record<string, unknown>, key: string, path: string): string {
   if (typeof record[key] !== 'string') throw fieldError(path, key, 'a string');
+  return record[key];
 }
 
 function optionalString(record: Record<string, unknown>, key: string, path: string): void {
@@ -334,6 +414,24 @@ function nullableString(record: Record<string, unknown>, key: string, path: stri
 
 function requireNumber(record: Record<string, unknown>, key: string, path: string): void {
   if (typeof record[key] !== 'number') throw fieldError(path, key, 'a number');
+}
+
+function requireSafeInteger(record: Record<string, unknown>, key: string, path: string): number {
+  const value = record[key];
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) {
+    throw fieldError(path, key, 'a safe integer');
+  }
+  return value;
+}
+
+function requireNonNegativeSafeInteger(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+): number {
+  const value = requireSafeInteger(record, key, path);
+  if (value < 0) throw fieldError(path, key, 'a non-negative safe integer');
+  return value;
 }
 
 function optionalNumber(record: Record<string, unknown>, key: string, path: string): void {

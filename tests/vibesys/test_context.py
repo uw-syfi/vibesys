@@ -2,8 +2,8 @@
 
 import shutil
 import sys
-from collections.abc import Iterator
-from contextlib import AbstractContextManager, ExitStack, contextmanager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 from typing import Literal, TypedDict, Unpack
 from unittest.mock import patch
@@ -51,10 +51,12 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,
     resolve_evaluator_package,
 )
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
+from vs_sim.api import ReleaseStack
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 class _PortableStateProbe(BaseModel):
@@ -71,7 +73,7 @@ class _RecordingBackendFactory:
 
     def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
         self.calls += 1
-        return FakeComputeBackend()
+        return FakeComputeBackend(threads=SimThreads())
 
 
 class _CreateContextOptions(TypedDict, total=False):
@@ -198,7 +200,7 @@ def _create_context(
     request = RunRequest(
         project_root=project,
         orchestration=descriptor,
-        config=options.get("config") or Config.model_validate({"model": {"name": "gpt-test"}}),
+        config=options.get("config") or Config.model_validate({"model": {"name": "gpt-5.5"}}),
         input_bundle=bundle,
         objective=options.get("objective", "Make the queue faster.\n"),
         exp_name=exp_name,
@@ -214,7 +216,7 @@ def _create_context(
     registration = built_in_orchestrations().resolve(descriptor.id)
     plugin = registration.plugin
     agent_roles = options.get("agent_roles", plugin.agents)
-    ownership = ExitStack()
+    ownership = ReleaseStack()
     try:
         prepared = open_run_resources(
             request,
@@ -224,7 +226,7 @@ def _create_context(
                 git=REAL_GIT,
                 github=NO_GITHUB,
                 threads=SimThreads(),
-                slurm_processes=NO_PROCESSES,
+                system=idle_environment_system(),
             ),
             ownership=ownership,
             agent_specs=resolve_agent_specs(
@@ -249,11 +251,13 @@ def _create_context(
 @contextmanager
 def _owned_prepared_run(
     prepared: _PreparedRun,
-    ownership: ExitStack,
+    ownership: ReleaseStack,
 ) -> Iterator[_PreparedRun]:
     """Close resources opened by the direct composition helper."""
-    with ownership:
+    try:
         yield prepared
+    finally:
+        ownership.close()
 
 
 def _git(project: Path, *args: str) -> str:
@@ -492,7 +496,7 @@ def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> Non
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     try:
         with _create_context(project, evaluator=evaluator, integration=integration) as ctx:
@@ -658,9 +662,10 @@ def test_copied_repository_task_materializes_model_outside_authored_inputs(
             task_name="latency",
             task_root=task,
         ) as ctx:
-            run_id = ctx.project_resources.state.run_id
             workspace = ctx.environment_resources.request.workspace
-            runtime_model = runs_dir / ".cache" / "llm-serving" / run_id / "model"
+            runtime_model = (
+                ctx.project_resources.project.state.model_cache_directory("llm-serving") / "model"
+            )
             copied_reference = workspace / ".vibesys" / "tasks" / "latency" / "reference"
 
             assert not (reference / "model").exists()
@@ -695,6 +700,67 @@ def test_direct_repository_task_materializes_model_in_local_state(tmp_path: Path
             assert ctx.project_resources.git.trusted_input_changes() == []
 
         assert _git(project, "status", "--porcelain") == ""
+
+
+def _model_mounts(ctx: _PreparedRun) -> dict[str, Path]:
+    """The resolved host directory behind each container model mount."""
+    return {
+        mount.container_path: mount.host_path.resolve()
+        for mount in ctx.environment_resources.request.environment_bind_mounts
+        if mount.container_path in {"/model", "/draft_model"}
+    }
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [fake_docker_environment, unconfined_host_spec],
+    ids=["isolated", "host"],
+)
+@pytest.mark.parametrize("with_draft", [False, True], ids=["primary", "with-draft"])
+def test_collection_resume_mounts_the_external_models_a_fresh_launch_mounted(
+    tmp_path: Path,
+    environment: Callable[[], RunEnvironmentSpec],
+    *,
+    with_draft: bool,
+) -> None:
+    # A task whose reference names external weights (a symlink, no meta.json)
+    # must resume with the same /model and /draft_model the fresh launch had,
+    # although the copied project holds only a marker or nothing in their place.
+    source = tmp_path / "serving"
+    _write_project(source)
+    task = _write_serving_task(source)
+    reference = task / "reference"
+    (reference / "meta.json").unlink()
+    weights = tmp_path / "weights"
+    weights.mkdir()
+    (reference / "model").symlink_to(weights, target_is_directory=True)
+    if with_draft:
+        draft = tmp_path / "draft-weights"
+        draft.mkdir()
+        (reference / "draft_model").symlink_to(draft, target_is_directory=True)
+    runs_dir = tmp_path / "runs"
+
+    with _create_context(
+        source,
+        runs_dir=runs_dir,
+        task_name="latency",
+        run_environment=environment(),
+    ) as first:
+        project = first.environment_resources.request.workspace
+        run_id = first.project_resources.state.run_id
+        fresh_mounts = _model_mounts(first)
+
+    assert fresh_mounts["/model"] == weights.resolve()
+    assert ("/draft_model" in fresh_mounts) is with_draft
+    with _create_context(
+        project,
+        runs_dir=runs_dir,
+        task_name="latency",
+        exp_name=run_id,
+        existing=True,
+        run_environment=environment(),
+    ) as resumed:
+        assert _model_mounts(resumed) == fresh_mounts
 
 
 def test_copied_run_provisions_self_contained_project_in_collection(tmp_path: Path) -> None:
@@ -867,7 +933,7 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
     def reject_resources(_resources: object) -> None:
@@ -1020,7 +1086,7 @@ def test_cli_backend_accepts_active_profiler_configuration(
         configuration=configuration,
         config=Config.model_validate(
             {
-                "model": {"name": "gpt-test"},
+                "model": {"name": "gpt-5.5"},
                 "agent": {"backend": "cli", "cli_provider": "codex"},
             }
         ),

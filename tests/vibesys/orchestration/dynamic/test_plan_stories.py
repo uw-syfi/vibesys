@@ -69,8 +69,9 @@ def start(
     return host
 
 
-def plan(host: Host, *entries: dict[str, object], **extra: str) -> None:
-    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(*entries, **extra))
+def plan(host: Host, *entries: dict[str, object], reasoning: str = "portfolio") -> None:
+    reply = plan_reply(*entries, reasoning=reasoning)
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), reply)
 
 
 def answer_all_but_the_planner(host: Host) -> None:

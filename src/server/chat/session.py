@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 from server.chat.manager import ChatAnswer
 from server.execution import AgentExecutionRequest
+from vs_sim.api import ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -78,7 +78,10 @@ class ExperimentChatSession:
         self._provider = dependencies.provider
         self._model = dependencies.model
         self._fallback = dependencies.fallback
-        self._resources = resources
+        self._owned = ReleaseStack()
+        self._owned.callback(self._transcript.close)
+        if resources is not None:
+            self._owned.callback(resources.close)
         self._lock = dependencies.threads.lock()
 
     def ask(self, question: str) -> ChatAnswer:
@@ -145,12 +148,8 @@ class ExperimentChatSession:
         return ChatAnswer(text=answer, invocation_id=execution.execution_id)
 
     def close(self) -> None:
-        """Release resources owned by this chat session once."""
-        resources, self._resources = self._resources, None
-        with ExitStack() as cleanup:
-            cleanup.callback(self._transcript.close)
-            if resources is not None:
-                cleanup.callback(resources.close)
+        """Release the agent, then the transcript; one whose close raised closes on the next call."""
+        self._owned.close()
 
     def _agent_message(self, question: str) -> str:
         """Carry restored transcript data without granting it system-prompt authority."""

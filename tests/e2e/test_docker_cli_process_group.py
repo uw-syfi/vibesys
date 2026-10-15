@@ -22,10 +22,11 @@ from vs_sim.api import (
     SubprocessPipedProcessLauncher,
     UnixNetwork,
 )
-from vs_slurm.api import SlurmConfig, SlurmSshTransport
+from vs_slurm.api import SlurmConfig, SlurmSshTransport, slurm_transport_broker_policy
 
 if TYPE_CHECKING:
     import pytest
+from vs_sim.api import DISCARD
 
 
 def test_docker_lifecycle_commands_run_outside_the_terminals_process_group() -> None:
@@ -33,7 +34,7 @@ def test_docker_lifecycle_commands_run_outside_the_terminals_process_group() -> 
 
     result = SubprocessDockerCli(
         processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
-    ).run([sys.executable, "-c", probe, str(os.getpgid(0))], timeout_seconds=30)
+    ).run([sys.executable, "-c", probe, str(os.getpgid(0))], timeout_seconds=30, output=DISCARD)
 
     assert result.stdout.strip() == "True"
 
@@ -61,7 +62,9 @@ def test_slurm_broker_preserves_stdin_environment_cwd_and_complete_streams(
         transport_timeout_seconds=30,
     )
     broker = SlurmProcessBroker(
-        config, tmp_path / "broker.sock", local_roots=(tmp_path,), processes=OsProcesses()
+        slurm_transport_broker_policy(config, local_roots=(tmp_path,)),
+        tmp_path / "broker.sock",
+        processes=OsProcesses(),
     )
     broker.start()
     try:
@@ -70,6 +73,7 @@ def test_slurm_broker_preserves_stdin_environment_cwd_and_complete_streams(
                 (*transport.ssh_command, "--", "cluster", "hostname"), input=b"complete stdin"
             ),
             timeout=30,
+            output=DISCARD,
         )
     finally:
         broker.close()

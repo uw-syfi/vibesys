@@ -93,6 +93,8 @@ class RunRequest(BaseModel):
     run_environment: RunEnvironmentSpec | None = None
     agent_backend: str | None = None
     cli_provider: str | None = None
+    allow_unvetted_model: bool = False
+    """Run a model outside the vetted harnesses: the terminal's explicit opt-out, or a resume."""
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND
     remote_repo: str | None = None
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE
@@ -185,6 +187,25 @@ class RunResult(BaseModel):
         return self
 
 
+class RoundFailureSummary(BaseModel):
+    """Why one round's workstream ended without a measured candidate, strategy-neutral.
+
+    ``kind`` is a plain string rather than a policy's own closed failure
+    enum: this module stays below every policy in the dependency graph, so it
+    carries the enum's value, not the enum. ``WORKSTREAM_FINISHED``'s wiring
+    is the one place that turns it back into the wire's
+    ``WorkstreamFailureKind``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: str
+    role: str | None = None
+    turns: int | None = None
+    limit: int | None = None
+    text: str = ""
+
+
 class RoundSummary(BaseModel):
     """One policy round in the strategy-neutral shape used for run events."""
 
@@ -197,6 +218,12 @@ class RoundSummary(BaseModel):
     perf_metric: float | None = None
     perf_unit: str | None = None
     profile_skipped: bool = False
+    last_error: RoundFailureSummary | None = None
+    # True exactly when the round's last turn was refused another turn
+    # because it repeated an earlier one (``FailureKind.REPEATED_TURN``, the
+    # dynamic policy's only policy that currently sets this); every other
+    # policy leaves it at the default.
+    repeated_error: bool = False
 
 
 class IterationKind(StrEnum):

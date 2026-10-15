@@ -7,8 +7,8 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
-from pathlib import Path
-from typing import TypeAlias
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
@@ -34,6 +34,7 @@ from .cluster_types import (
 )
 from .remote_operations import RemoteOperationError, RemoteOperationEvidence
 from .runner import (
+    _BATCH_RESULT_ROOT,
     SchedulerReading,
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -49,6 +50,9 @@ from .runner import (
     _validate_request,
 )
 from .staging import _ContentStageError, tree_content_identity
+
+if TYPE_CHECKING:
+    from vs_sim.api import ByteSource, OutputStream
 
 Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
 
@@ -467,6 +471,13 @@ class SlurmCluster:
                 reason="collection locator unavailable",
             )
         return self._collect_terminal(observed, observed.handle)
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        """The file stage ``index`` writes ``stream`` to (the batch script's layout), read live."""
+        stage = PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT / f"{index:04d}"
+        return self._runner.remote_file(stage / f"{stream.value}.txt")
 
     def _collect_terminal(
         self, observed: ClusterObservation, handle: ClusterHandle

@@ -26,7 +26,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
     build_run_environment,
 )
-from vs_runtime.api.testing import unconfined_host_environment
+from vs_runtime.api.testing import idle_environment_system, unconfined_host_environment
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
     ComputeBackendImpl,
@@ -37,12 +37,18 @@ from vs_sandbox.api import (
     SandboxKind,
 )
 from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry, ScriptedDockerCli
-from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, ManualClock, SimThreads
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ManualClock,
+    ScriptedProbe,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from vs_sandbox.api import CommandRunner, HostResource
+    from vs_sim.api import OutputSink
 
 _IMAGE_ID = "sha256:" + "c" * 64
 
@@ -65,9 +71,9 @@ class _RecordingBuildRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
-        del cwd, timeout, on_stderr_line
+        del cwd, timeout, output
         self.argvs.append(tuple(argv))
         if argv[1] == "build":
             dockerfile = Path(argv[list(argv).index("--file") + 1]).read_text()
@@ -147,7 +153,7 @@ def _request(
         evaluator_requirements=TrustedEvaluatorRequirements(),
         docker_in_docker=docker_in_docker,
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
 
@@ -241,6 +247,7 @@ def test_a_host_without_a_gpu_fails_before_any_image_is_built(tmp_path: Path) ->
         threads=SimThreads(),
         docker=ScriptedDockerCli(),
         launcher=FakePipedProcessLauncher(),
+        probe=ScriptedProbe(lambda _argv: None),
     )
 
     with pytest.raises(CudaAcceleratorUnavailableError, match="NVIDIA GPU"):

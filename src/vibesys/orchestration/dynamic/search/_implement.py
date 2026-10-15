@@ -1,12 +1,12 @@
 """The implementer's turns and the judge's review: until a candidate is ready to measure."""
 
-from vibesys.candidates.api import review_evaluations
+from vibesys.candidates.api import Baseline, review_evaluations
 from vibesys.hypothesis import HypothesisConfig, HypothesisOutcome
 from vibesys.hypothesis.cadence import review_due
 from vibesys.metrics import AcceptedReading, accept_readings
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search._briefs import implement_prompt, review_prompt
-from vibesys.orchestration.dynamic.search._measure import input_pending, the_input
+from vibesys.orchestration.dynamic.search._measure import input_so_far, the_input
 from vibesys.orchestration.dynamic.search._operations import EvidenceReadings
 from vibesys.orchestration.dynamic.search._outcomes import (
     Candidate,
@@ -81,8 +81,8 @@ async def take_turn(  # noqa: PLR0913  # LW-220431 [PLR0913]; each argument is a
 ) -> Result | Again[Blocker]:
     """One round with the implementer and the judge: a candidate, or why to ask again."""
     work.carried = None if work.carried is None else work.carried.unreviewed()
-    pending = input_pending(ctx, w)
-    turn = await implementer_turn(sessions.implementer, w, work, earlier, pending=pending)
+    baseline = input_so_far(ctx, w)
+    turn = await implementer_turn(sessions.implementer, w, work, earlier, baseline=baseline)
     if isinstance(turn, Result) and _review_due(w, turn):
         turn = await review(ctx, w, ws, work, sessions.judge, turn)
     if isinstance(turn, Result):
@@ -99,13 +99,14 @@ async def implementer_turn(
     work: Work,
     blockers: tuple[Blocker, ...],
     *,
-    pending: bool,
+    baseline: Baseline | None,
 ) -> Result | Unmeasured:
     """One implementer turn: the candidate it made, or what kept it from making one.
 
-    ``pending`` says the input's own measurement has not landed yet; the prompt says so.
+    ``baseline`` is the input's measurement as known when the turn is asked (None while it has
+    not landed); the prompt says it is pending, or why it failed.
     """
-    prompt = implement_prompt(w.plan, w.parent, w.prior, blockers, baseline_pending=pending)
+    prompt = implement_prompt(w.plan, w.parent, w.prior, blockers, baseline=baseline)
     match await implementer.turn(prompt):
         case TurnFinished(reply=ImplementerResult() as reply, checkpoint=checkpoint):
             return _candidate_of(w, work, reply, checkpoint)

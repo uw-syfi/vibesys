@@ -240,7 +240,9 @@ describe('diffViewerLines', () => {
     const lines = diffViewerLines(viewerOf(loadedState(PATCH, true)));
     const texts = lines.map(line => line.text);
     expect(texts).toContain("Patch truncated at the server's size bound.");
-    expect(texts).toContain('Full patch: git diff aaa1111 bbb2222 -- src/lib.rs');
+    expect(texts).toContain(
+      "Full patch: git diff --no-ext-diff --find-renames aaa1111 bbb2222 -- ':(literal)src/lib.rs'",
+    );
     expect(lines.at(-1)?.tone).toBe('notice');
   });
 
@@ -253,7 +255,9 @@ describe('diffViewerLines', () => {
     const texts = diffViewerLines(viewerOf(failed)).map(line => line.text);
     expect(texts).toContain('The patch query failed.');
     expect(texts).toContain('The run has not attached yet.');
-    expect(texts).toContain('View it outside the TUI: git diff aaa1111 bbb2222 -- src/lib.rs');
+    expect(texts).toContain(
+      "View it outside the TUI: git diff --no-ext-diff --find-renames aaa1111 bbb2222 -- ':(literal)src/lib.rs'",
+    );
   });
 
   it('explains a null patch as the repository going away, not an empty diff', () => {
@@ -264,7 +268,9 @@ describe('diffViewerLines', () => {
     });
     const texts = diffViewerLines(viewerOf(unavailable)).map(line => line.text);
     expect(texts).toContain('The workspace repository could not produce this patch.');
-    expect(texts).toContain('From the workspace checkout: git diff aaa1111 bbb2222 -- src/lib.rs');
+    expect(texts).toContain(
+      "From the workspace checkout: git diff --no-ext-diff --find-renames aaa1111 bbb2222 -- ':(literal)src/lib.rs'",
+    );
   });
 
   it('shows a loading row until the slot resolves', () => {
@@ -277,7 +283,43 @@ describe('diffViewerLines', () => {
     const file = viewer.files[viewer.index];
     if (file === undefined) throw new Error('fixture has a third file');
     expect(diffExternalCommand(viewer, file)).toBe(
-      'git diff aaa1111 bbb2222 -- src/old.rs src/moved.rs',
+      "git diff --no-ext-diff --find-renames aaa1111 bbb2222 -- ':(literal)src/old.rs' ':(literal)src/moved.rs'",
+    );
+  });
+});
+
+describe('diffExternalCommand', () => {
+  it('quotes every literal pathname as one inert POSIX shell word', () => {
+    const viewer = viewerOf(openedState());
+    const prefix = 'git diff --no-ext-diff --find-renames aaa1111 bbb2222 --';
+    const cases = [
+      ['src/two words.ts', "':(literal)src/two words.ts'"],
+      ['src/[ab]*?.ts', "':(literal)src/[ab]*?.ts'"],
+      ["src/it's.ts", `':(literal)src/it'"'"'s.ts'`],
+      ['src/safe; printf AUDIT_MARKER', "':(literal)src/safe; printf AUDIT_MARKER'"],
+      ['src/$(printf AUDIT_MARKER)', "':(literal)src/$(printf AUDIT_MARKER)'"],
+      ['src/line\nbreak.ts', "':(literal)src/line\nbreak.ts'"],
+      ['-n', "':(literal)-n'"],
+      [':(glob)src/*.ts', "':(literal):(glob)src/*.ts'"],
+    ] as const;
+
+    for (const [path, shellWord] of cases) {
+      expect(diffExternalCommand(viewer, {path, change: 'modified'})).toBe(
+        `${prefix} ${shellWord}`,
+      );
+    }
+  });
+
+  it('quotes both sides of a rename independently', () => {
+    const viewer = viewerOf(openedState());
+    expect(
+      diffExternalCommand(viewer, {
+        path: 'src/new $(printf NEW).ts',
+        change: 'renamed',
+        renamed_from: "src/old's; printf OLD.ts",
+      }),
+    ).toBe(
+      `git diff --no-ext-diff --find-renames aaa1111 bbb2222 -- ':(literal)src/old'"'"'s; printf OLD.ts' ':(literal)src/new $(printf NEW).ts'`,
     );
   });
 });

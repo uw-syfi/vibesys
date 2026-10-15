@@ -66,8 +66,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_runtime.api.testing import ProbedRunClock
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock, clock_from
+from vs_sim.api.testing import ManualClock, clock_from, loop_threads
 from vs_slurm.api import ClusterUnknown, Ended, Queued, SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -400,16 +399,17 @@ class FaultedHost(SessionHost):
     def sessions(self) -> FakeAgentSessions:
         """Journal-backed sessions whose turns go through the fault wrapper."""
         assert self.faulty is not None
-        return FakeAgentSessions(self.faulty, self.journal, threads=OsThreads())
+        return FakeAgentSessions(self.faulty, self.journal, threads=loop_threads())
 
 
 def _faulted_agents(plan: FaultPlan) -> Callable[[Path], SessionHost]:
     def open_agents(root: Path) -> SessionHost:
         writer = CandidateWriter(root)
+        threads = loop_threads()
         client = AgentClient(
-            FakeProvider(answer=writer.answer, on_turn=writer, threads=OsThreads()),
+            FakeProvider(answer=writer.answer, on_turn=writer, threads=threads),
             clock=ManualClock(),
-            threads=OsThreads(),
+            threads=threads,
         )
         resolver = CandidateResolver(
             root,
@@ -424,7 +424,7 @@ def _faulted_agents(plan: FaultPlan) -> Callable[[Path], SessionHost]:
             FakeAgentInvocationStore(),
             [],
             ProviderFaults(),
-            faulty=FaultyAgentClient(client, plan, threads=OsThreads()),
+            faulty=FaultyAgentClient(client, plan, threads=threads),
         )
 
     return open_agents
@@ -543,7 +543,7 @@ async def run_chaos(  # noqa: PLR0913  # LW-150102 [PLR0913]; the options are in
     if stop_at == "seeded":
         stop_at = rng.choice((None, None, rng.randint(1, _MAX_STOP_TICK)))
     assert stop_at is None or isinstance(stop_at, int)
-    channel = RuntimeRunControlChannel(_ignore, threads=OsThreads())
+    channel = RuntimeRunControlChannel(_ignore, threads=loop_threads())
     ticks = Ticks(stop_at, channel)
     cluster = FaultyCluster(plan, ticks)
     strategy = SkeletonStrategy(config=config or shape_for(seed))

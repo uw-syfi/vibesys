@@ -29,7 +29,7 @@ from .types.evaluation import (
 
 if TYPE_CHECKING:
     from .types.evaluation import EvaluationEvent, EvaluationState
-    from .types.kernel import AreaChange, EvaluationContext
+    from .types.kernel import AreaChange, EvaluationContext, RunState
 
 
 type Reducer = Callable[
@@ -63,9 +63,31 @@ EVENT_TO_SUBAREA: Mapping[type[EvaluationEvent], Reducer] = MappingProxyType(
 def advance_evaluation(
     state: EvaluationState, context: EvaluationContext, event: EvaluationEvent
 ) -> AreaChange[EvaluationState]:
-    """Route each closed event variant to its sole owning subarea."""
+    """Route each closed event variant to its sole owning subarea.
+
+    The event's time has already moved the run clock. Waits whose bound it reached freeze
+    first, on the job facts they had then, before the event changes them; a wait whose bound
+    the event's facts moved into the past freezes right after it (``_wait_clock``).
+    """
+    due = _continuations.reach_deadlines(state, context)
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
-    change = reducer(state, context, event)
+    change = reducer(due.state, context, event)
+    after = _continuations.reach_deadlines(change.state, context)
     # A job's release is announced to its closing attempt here, whichever subarea recorded it.
-    announced = _job_releases.job_release_signals(state, change.state, context)
-    return change.model_copy(update={"signals": (*change.signals, *announced)})
+    announced = _job_releases.job_release_signals(state, after.state, context)
+    return after.model_copy(
+        update={
+            "signals": (*due.signals, *change.signals, *after.signals, *announced),
+            "requests": (*due.requests, *change.requests, *after.requests),
+            "events": (*due.events, *change.events, *after.events),
+        }
+    )
+
+
+def credit_downtime(state: EvaluationState, run: RunState, credit: float) -> EvaluationState:
+    """Every open wait with ``credit`` seconds of host downtime added to its limit.
+
+    The kernel calls this when a new host epoch opens, with the downtime the host log proves,
+    as it moves every open request record's limit (``records.open_host_epoch``).
+    """
+    return _continuations.credit_downtime(state, run, credit)

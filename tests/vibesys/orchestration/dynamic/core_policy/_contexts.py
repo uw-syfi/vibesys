@@ -44,6 +44,7 @@ from vs_core.api import (
     RevisionId,
     RevisionRef,
     SessionId,
+    WaitEnd,
 )
 from vs_core.api.search import (
     ReplyCorrection,
@@ -164,6 +165,14 @@ def _buildable(draw: st.DrawFn) -> list[dict[str, object]]:
     ]
 
 
+INPUT_FAILURES = (
+    st.none()
+    | st.just({"kind": "benchmark-failed", "output": "bench-output"})
+    | st.just({"kind": "readings-undecodable"})
+)
+"""Why the input is unmeasurable, or None: one kind with the evaluator's output, one without."""
+
+
 @st.composite
 def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, object]:
     """The fields a planning request and its correction share."""
@@ -181,11 +190,7 @@ def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, obje
         "history": draw(_history()),
         "older_ids": tuple(draw(st.lists(tokens("old"), max_size=2, unique=True))),
         "baseline": draw(METRICS),
-        "input_failure": draw(
-            st.none()
-            | st.just({"kind": "benchmark-failed", "output": "bench-output"})
-            | st.just({"kind": "readings-undecodable"})
-        ),
+        "input_failure": draw(INPUT_FAILURES),
         "profiling": draw(st.booleans()),
         "profile_fields": fields,
         "problem": problem,
@@ -247,6 +252,8 @@ IMPLEMENT_PROMPTS = st.builds(
     prior_failure_tail=st.just("") | tokens("tail"),
     last_blocker=st.none() | BLOCKERS,
     turns_without_candidate=st.integers(0, 3),
+    baseline_pending=st.booleans(),
+    input_failure=INPUT_FAILURES,
 )
 EVALUATIONS = st.lists(
     st.builds(
@@ -286,11 +293,27 @@ CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
     PromptTemplate.IMPLEMENT: IMPLEMENT_PROMPTS,
     PromptTemplate.REVIEW: REVIEW_PROMPTS,
     PromptTemplate.PROFILE_REQUEST: PROFILE_PROMPTS,
-    CoreProtocolTemplate.RESUME: st.builds(
-        ResumeFacts,
-        agent=st.sampled_from(ROLES),
-        retained=st.none() | REVISIONS,
-        timed_out=st.booleans(),
+    CoreProtocolTemplate.RESUME: st.one_of(
+        st.builds(
+            ResumeFacts,
+            agent=st.sampled_from(ROLES),
+            retained=st.none() | REVISIONS,
+            ended_by=st.none(),
+        ),
+        st.builds(
+            ResumeFacts,
+            agent=st.sampled_from(ROLES),
+            retained=st.none() | REVISIONS,
+            ended_by=st.just(WaitEnd.QUEUE_BUDGET),
+            queue_budget_spent=st.sampled_from([True]),
+        ),
+        st.builds(
+            ResumeFacts,
+            agent=st.sampled_from(ROLES),
+            retained=st.none() | REVISIONS,
+            ended_by=st.sampled_from((WaitEnd.LIMIT, WaitEnd.RUN_END)),
+            queue_budget_spent=st.booleans(),
+        ),
     ),
     CoreProtocolTemplate.REPLY_CORRECTION: st.builds(
         ReplyCorrection,

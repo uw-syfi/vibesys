@@ -41,8 +41,9 @@ from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import RunControlChannel
+from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads, Platform
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from websockets.typing import Origin
@@ -269,7 +270,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     control = _SessionControlStub(integration.control)
 

@@ -26,8 +26,7 @@ from vs_evaluation.api.testing import (
     FakeEvaluationExecutor,
     InMemoryEvaluationStore,
 )
-from vs_sim.api import ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -206,13 +205,13 @@ async def test_restart_inspects_shared_remote_state_without_duplicate_submission
     backend = FakeEvaluationBackend()
     first = _coordinator(
         FakeEvaluationExecutor(clock, backend=backend),
-        FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner()),
+        FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner()),
     )
     original = await first.submit(_request("restart-shared-provider"))
 
     resumed = _coordinator(
         FakeEvaluationExecutor(clock, backend=backend),
-        FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner()),
+        FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner()),
     )
     (recovered,) = await resumed.reconcile()
 
@@ -225,7 +224,7 @@ async def test_restart_inspects_shared_remote_state_without_duplicate_submission
 async def test_restart_retries_durable_cancellation_before_submission(tmp_path: Path) -> None:
     clock = ManualClock()
     backend = FakeEvaluationBackend()
-    store = FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner())
+    store = FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner())
     first_executor = FakeEvaluationExecutor(
         clock,
         backend=backend,
@@ -242,7 +241,7 @@ async def test_restart_retries_durable_cancellation_before_submission(tmp_path: 
 
     resumed_executor = FakeEvaluationExecutor(clock, backend=backend)
     resumed = _coordinator(
-        resumed_executor, FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner())
+        resumed_executor, FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner())
     )
     (recovered,) = await resumed.reconcile()
 
@@ -259,7 +258,7 @@ async def test_restart_retries_pending_submission_despite_orphan_queued_observat
     provider_accepted: bool,
 ) -> None:
     clock = ManualClock()
-    store = FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner())
+    store = FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner())
     pending = _request("restart-orphan-queued")
     handle_id = stable_handle_id(pending.key)
     await store.claim(pending, handle_id=handle_id)
@@ -270,7 +269,7 @@ async def test_restart_retries_pending_submission_despite_orphan_queued_observat
     executor = FakeEvaluationExecutor(clock, backend=backend)
     executor.script_observations(ExecutorObservation(state=EvaluationState.QUEUED))
     resumed = _coordinator(
-        executor, FilesystemEvaluationStore(tmp_path, blocking=ThreadBlockingRunner())
+        executor, FilesystemEvaluationStore(tmp_path, blocking=InlineBlockingRunner())
     )
 
     (recovered,) = await resumed.reconcile()

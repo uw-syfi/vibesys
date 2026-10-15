@@ -658,6 +658,11 @@ class Limits(Value):
     # delay before re-polling a job whose last poll was unknown.
     observe_interval: Seconds = Field(gt=0)
     observe_backoff_cap: Seconds = Field(gt=0)
+    # How long one measurement's job may wait in its executor's queue before core ends the
+    # measurement with ``QUEUE_BUDGET_SPENT``, and how often core reports a job still
+    # queued (``JobQueued``). Queue time does not count against a measurement's own limit.
+    queue_wait_budget: Seconds = Field(gt=0)
+    queue_notice_interval: Seconds = Field(gt=0)
 
     @model_validator(mode="after")
     def observe_cap_covers_interval(self) -> Limits:

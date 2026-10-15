@@ -19,13 +19,18 @@ from typing import TYPE_CHECKING, Any
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import TypeAdapter
 from tests.server.support import REQUEST_TIME, build_server_parts
 
 from server.api.protocol import (
+    MAX_SERVER_MESSAGE_BYTES,
+    ActiveExecutions,
+    ActiveExecutionsChunkMessage,
     ChatQuery,
     EventBatchMessage,
     ProtocolRequest,
     Response,
+    ServerMessage,
     SubscribedMessage,
 )
 from server.chat.manager import ChatAnswer
@@ -118,6 +123,64 @@ def _read_line(connection: Connection) -> bytes:
         assert chunk, f"the server hung up mid-line after {line!r}"
         line += chunk
     return line
+
+
+def _read_buffered_line(connection: Connection, pending: bytearray) -> bytes:
+    """Read one large line without making its byte count its scheduling count."""
+    while b"\n" not in pending:
+        chunk = connection.recv(_RECV_CHUNK, HANG_GUARD_S)
+        assert chunk, "the server hung up mid-line"
+        pending.extend(chunk)
+    end = pending.index(b"\n") + 1
+    line = bytes(pending[:end])
+    del pending[:end]
+    return line
+
+
+def test_unix_subscription_uses_the_same_bounded_active_checkpoint_frames(
+    tmp_path: Path,
+) -> None:
+    """The desktop's JSONL path has the WebSocket checkpoint semantics."""
+    threads = SimThreads(schedule_seed=7)
+
+    def main() -> None:
+        parts = build_server_parts(None, threads=threads)
+        assignment = "x" * (MAX_SERVER_MESSAGE_BYTES + 64 * 1024)
+        execution = parts.start_execution("implementer", "round-1", assignment)
+        network = SimNetwork(threads)
+        socket_path = tmp_path / "control.sock"
+        with UnixJsonlServer(
+            socket_path,
+            parts.api,
+            subscriptions=None,
+            threads=threads,
+            network=network,
+        ):
+            client = network.connect(str(socket_path))
+            client.send(_frame("subscribe"))
+            pending = bytearray()
+            SubscribedMessage.model_validate_json(_read_buffered_line(client, pending))
+            batch_line = _read_buffered_line(client, pending)
+            assert len(batch_line.removesuffix(b"\n")) <= MAX_SERVER_MESSAGE_BYTES
+            batch = TypeAdapter(ServerMessage).validate_json(batch_line)
+            assert isinstance(batch, EventBatchMessage)
+            assert batch.active_executions is None
+            chunks: list[ActiveExecutionsChunkMessage] = []
+            while not chunks or chunks[-1].chunk_index + 1 != chunks[-1].chunk_count:
+                line = _read_buffered_line(client, pending)
+                assert len(line.removesuffix(b"\n")) <= MAX_SERVER_MESSAGE_BYTES
+                message = TypeAdapter(ServerMessage).validate_json(line)
+                assert isinstance(message, ActiveExecutionsChunkMessage)
+                chunks.append(message)
+            active = TypeAdapter(ActiveExecutions).validate_json(
+                "".join(chunk.payload for chunk in chunks)
+            )
+            assert [(item.execution_id, item.assignment) for item in active] == [
+                (execution.execution_id, assignment)
+            ]
+            client.close()
+
+    threads.run(main)
 
 
 def _send(connection: Connection, data: bytes, cuts: tuple[int, ...]) -> None:

@@ -140,6 +140,8 @@ class _Planning(RolePromptContext):
     profiling: bool = False
     profile_fields: tuple[str, ...] = ()
     """The measurement fields a profile workstream may require: what the capture supplies."""
+    handoff_paths: tuple[str, ...] = ()
+    """Where the earlier planning calls' handoff files are, newest first: paths, never contents."""
     problem: PlanProblem | None = None
     """Why the earlier reply, or the earlier planning call, was not accepted; None if it was lost."""
 
@@ -183,6 +185,8 @@ class ImplementPrompt(RolePromptContext):
     turns_without_candidate: int = Field(default=0, ge=0)
     baseline_pending: bool = False
     """The input's own measurement had not landed when the turn was asked."""
+    input_failure: InputFailure | None = None
+    """Why the input's own measurement failed, when it had when the turn was asked."""
 
 
 class ReviewPrompt(RolePromptContext):

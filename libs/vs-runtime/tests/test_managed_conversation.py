@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_agent.api import (
     NULL_AGENT_EVENT_SINK,
@@ -144,6 +146,32 @@ def test_closed_conversation_rejects_new_turns() -> None:
         create_managed_conversation(
             FakeAgentClient(threads=SimThreads()), _spec(), resources=(), threads=SimThreads()
         ).turn("  ")
+
+
+@given(failures=st.integers(0, 3), extra_closes=st.integers(0, 2))
+def test_a_resource_whose_close_failed_is_closed_again_on_the_next_close(
+    failures: int, extra_closes: int
+) -> None:
+    """Regression: a close that raised latched the conversation closed, so a retry closed nothing."""
+    close_order: list[str] = []
+    flaky = _Environment(close_error=RuntimeError("docker rm -f was killed"))
+    conversation = create_managed_conversation(
+        FakeAgentClient(threads=SimThreads()),
+        _spec(),
+        resources=(flaky, _CloseRecord("client", close_order)),
+        threads=SimThreads(),
+    )
+    for _ in range(failures):
+        with pytest.raises(RuntimeError, match="killed"):
+            conversation.close()
+        with pytest.raises(RuntimeError, match="closed"):
+            conversation.turn("inspect")
+    flaky.close_error = None
+    for _ in range(1 + extra_closes):
+        conversation.close()
+
+    assert flaky.close_count == failures + 1
+    assert close_order == ["client"]
 
 
 def test_new_conversation_with_same_member_starts_fresh() -> None:

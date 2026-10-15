@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from server.api.protocol import (
+    MAX_SERVER_MESSAGE_BYTES,
     EventBatchMessage,
     ProtocolErrorMessage,
     Response,
@@ -38,11 +39,12 @@ from server.transport.discovery import (
     WebInstanceRecord,
 )
 from server.transport.subscriptions import (
+    DeliveryWatermark,
     StreamDelivery,
     SubscriptionAdmissionClosedError,
     SubscriptionTracker,
 )
-from vs_async_ops.api import finish
+from vs_async_ops.api import drain, finish
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -152,7 +154,7 @@ _KEEPALIVE_SECONDS = 20.0
 # so a dependency bump cannot move either direction;
 # `test_the_frame_caps_default_to_the_websockets_value_they_state` fails if the
 # installed library's default no longer agrees with it.
-_FRAME_BYTES = 1024 * 1024
+_FRAME_BYTES = MAX_SERVER_MESSAGE_BYTES
 
 
 class WebSocketBindError(RuntimeError):
@@ -239,27 +241,31 @@ class _GatewayAttempt:
 class WebSocketLimits:
     """The gateway's liveness and flow-control bounds, stated rather than inherited.
 
-    Every field here was previously either a literal in the ``serve()`` call or
-    an unstated ``websockets`` default. They are declared together because they
-    compose into the two contracts a subscriber depends on, both written down
-    under ``WP-DISCONNECT`` in ``docs/contributing/wire-protocol.md``:
+    Every field here began as either a literal in the ``serve()`` call or an
+    unstated ``websockets`` default. The Ping fields now drive the gateway-owned
+    keepalive while the remaining library bounds still reach ``serve()``. They
+    are declared together because they compose into the two contracts a
+    subscriber depends on, both written down under ``WP-DISCONNECT`` in
+    ``docs/contributing/wire-protocol.md``:
 
-    Liveness. A peer that stops answering is closed after
-    ``ping_interval_seconds + ping_timeout_seconds``, and its socket is aborted
-    a further ``close_timeout_seconds`` later when the peer never echoes the
-    close frame. Only that abort moves the connection to ``CLOSED``, which is
-    what ``_stream`` polls for, so the subscription is released one
-    ``_DISCONNECT_POLL_SECONDS`` after the sum of all three.
+    Liveness. The gateway, rather than the WebSocket dependency, owns one
+    keepalive task per connection. A peer's Ping write may take at most
+    ``write_deadline_seconds`` and its Pong may then take at most
+    ``ping_timeout_seconds``. Either expiry aborts the transport, which moves
+    the connection to ``CLOSED`` for ``_stream`` to observe. The subscription
+    is therefore released one ``_DISCONNECT_POLL_SECONDS`` after the relevant
+    keepalive bound. The dependency's automatic keepalive is disabled, so it
+    cannot start its Pong deadline only after an unbounded Ping write.
 
     Flow control. ``send_buffer_bytes`` is the transport high-water mark that
     makes an unread frame stall the producing coroutine instead of queueing
-    without bound; it is the WebSocket equivalent of the blocking
-    ``send`` in ``unix_jsonl.py``'s ``_write_message``.
+    without bound; it is the WebSocket equivalent of the socket buffer that
+    blocks the ``send`` in ``unix_jsonl.py``'s ``_write_message``, whose
+    ``_SEND_BOUND_SECONDS`` plays the part of ``write_deadline_seconds``.
     It is unrelated to ``receive_queue``, which bounds frames arriving *from*
     the peer. ``write_deadline_seconds`` bounds how long that stall may last
-    before the peer is treated as gone; without it a peer that neither reads
-    nor answers pings also blocks the library's own keepalive writes, and no
-    liveness bound holds at all.
+    before the peer is treated as gone; the same deadline covers the gateway's
+    Ping write, so a peer cannot block the liveness probe in flow control.
 
     Frame size. ``receive_frame_bytes`` and ``send_frame_bytes`` are the hard
     caps, and unlike the flow-control pair they are caps rather than
@@ -270,7 +276,8 @@ class WebSocketLimits:
     and is what this gateway refuses to receive. ``send_frame_bytes`` is a
     statement about *peers*: ``max_size`` applies to received messages on each
     side, so naming it here cannot change what a peer accepts, and the send
-    side is bounded by chunking instead (``EventBatchMessage.split_within``).
+    side is bounded by chunking instead
+    (``EventBatchMessage.stream_messages_within``).
     Its value is therefore chosen against the smallest cap a supported client imposes, not
     against this gateway's own: browsers impose no receive limit, so the
     binding client is the Python ``websockets`` client, whose default is the
@@ -284,9 +291,9 @@ class WebSocketLimits:
     quotes the defaults, and
     ``test_the_stated_transport_bounds_are_the_values_they_replaced`` asserts
     the whole tuple so an edit here cannot silently falsify the table. The
-    default write deadline is one full keepalive reaping window, because a
-    write that cannot make progress for as long as an unresponsive peer would
-    take to fail its keepalive is the same failure and deserves the same bound.
+    default write deadline is the nominal keepalive response window (one Ping
+    interval plus one Pong timeout), because a write that cannot make progress
+    for that long is the same failure and deserves the same bound.
 
     The fields are independent rather than derived from each other so a test
     can exercise one mechanism at a time: raising the ping interval takes the
@@ -621,9 +628,12 @@ class WebSocketGateway:
                 # does ``max_size``: it is the cap on what this gateway will
                 # *receive*, and says nothing about what a peer will accept from
                 # it. The send side is bounded by chunking instead
-                # (``EventBatchMessage.split_within``).
-                ping_interval=self.limits.ping_interval_seconds,
-                ping_timeout=self.limits.ping_timeout_seconds,
+                # (``EventBatchMessage.stream_messages_within``).
+                # The gateway owns keepalive because the library begins its Pong
+                # deadline only after the Ping write has drained. Leaving the
+                # library task enabled would retain an unbounded second writer.
+                ping_interval=None,
+                ping_timeout=None,
                 close_timeout=self.limits.close_timeout_seconds,
                 write_limit=self.limits.send_buffer_bytes,
                 max_queue=self.limits.receive_queue,
@@ -1093,20 +1103,11 @@ class WebSocketGateway:
         while the peer is behind (which is what lets the next
         ``subscription_checkpoint`` coalesce a backlog into one batch), and
         abandon the peer once the stall outlasts ``write_deadline_seconds``.
-        The one write that does not is the library-owned close frame in
-        ``_handle_connection``'s teardown, whose ``drain()`` is unbounded;
-        that path runs only after the stream is already ending.
-
         The deadline is what makes the liveness bound true rather than
-        conditional. ``websockets`` ends every write, including its own
-        keepalive ping and close frames, in ``drain()``, which suspends while
-        the transport sits above ``send_buffer_bytes``. A peer that neither
-        drains its socket nor answers pings therefore blocks the keepalive that
-        was supposed to reap it, and without this deadline the subscription is
-        never released and a non-detached run never exits. The keepalive's own
-        ping write is still not covered by any deadline, so the keepalive bound
-        holds only while the transport dips below its low-water mark, which it
-        does whenever a ``send`` here returns.
+        conditional. ``websockets`` ends every write in ``drain()``, which
+        suspends while the transport sits above ``send_buffer_bytes``. Protocol
+        frames use this path; the gateway-owned keepalive and close paths apply
+        the same deadline around their public library calls.
 
         The transport is aborted rather than closed because a close frame is
         itself a write: it would re-enter the same stalled ``drain()``. This is
@@ -1135,8 +1136,95 @@ class WebSocketGateway:
             websocket.transport.abort()
             raise _WriteDeadlineError from error
 
+    async def _keepalive(self, websocket: ServerConnection) -> None:
+        """Probe one peer until cancellation or a failed bounded exchange.
+
+        ``websockets.Connection.ping`` doesn't return the Pong waiter until its
+        Ping frame has passed through flow control. The dependency's automatic
+        keepalive starts ``ping_timeout`` only after that return, so a Ping that
+        stalls in ``drain()`` has no deadline. Keep both waits here, where the
+        gateway owns the transport's write policy.
+        """
+        while True:
+            try:
+                async with asyncio.timeout(self.limits.ping_interval_seconds):
+                    await websocket.wait_closed()
+            except TimeoutError:
+                pass
+            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101116 [BLE001]; a failed close observation cannot silently disable the connection's sole liveness owner
+                # > `wait_closed` is documented not to fail, so an implementation error is not recoverable here; aborting preserves the same terminal path as every failed probe.
+                _LOG.debug("websocket keepalive close wait ended: %r", error)
+                websocket.transport.abort()
+                return
+            else:
+                return
+            try:
+                async with asyncio.timeout(self.limits.write_deadline_seconds):
+                    pong = await websocket.ping()
+            except TimeoutError:
+                self._abandon_peer(
+                    websocket,
+                    operation="keepalive Ping write",
+                    seconds=self.limits.write_deadline_seconds,
+                )
+                return
+            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101112 [BLE001]; any unexpected keepalive boundary failure must not silently disable the connection's sole liveness owner
+                # > Enumerating dependency exceptions would leave a new Ping failure with no keepalive; aborting an already-closed transport is idempotent and preserves one terminal path.
+                _LOG.debug("websocket keepalive Ping ended: %r", error)
+                websocket.transport.abort()
+                return
+
+            try:
+                async with asyncio.timeout(self.limits.ping_timeout_seconds):
+                    await pong
+            except TimeoutError:
+                self._abandon_peer(
+                    websocket,
+                    operation="keepalive Pong wait",
+                    seconds=self.limits.ping_timeout_seconds,
+                )
+                return
+            except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101113 [BLE001]; any unexpected Pong boundary failure must end rather than silently disable the connection's sole liveness owner
+                # > Matching today's dependency exception set would make a future failure strand the subscriber; the transport abort is the common terminal action for every failed exchange.
+                _LOG.debug("websocket keepalive Pong ended: %r", error)
+                websocket.transport.abort()
+                return
+
+    def _abandon_peer(self, websocket: ServerConnection, *, operation: str, seconds: float) -> None:
+        """Abort a peer whose named transport operation exceeded its bound."""
+        _LOG.warning("abandoning a websocket peer whose %s exceeded %ss", operation, seconds)
+        websocket.transport.abort()
+
+    async def _close_connection(self, websocket: ServerConnection) -> None:
+        """Close one connection without giving its final write an unbounded drain."""
+        if _connection_closed(websocket):
+            return
+        try:
+            async with asyncio.timeout(self.limits.write_deadline_seconds):
+                await websocket.close()
+        except TimeoutError:
+            self._abandon_peer(
+                websocket,
+                operation="close",
+                seconds=self.limits.write_deadline_seconds,
+            )
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-101114 [BLE001]; close is best-effort at the transport boundary after the handler has already ended
+            # > Dependency-specific catches would only duplicate its evolving close errors; teardown must preserve the original handler outcome and the library already owns connection error reporting.
+            _LOG.debug("websocket close ended: %r", error)
+
+    async def _release_connection(
+        self, websocket: ServerConnection, keepalive: asyncio.Task[None]
+    ) -> None:
+        """Cancel and drain connection-owned work, then close its transport once."""
+        keepalive.cancel()
+        await drain(keepalive)
+        await self._close_connection(websocket)
+
     async def _handle_connection(self, connection: ServerConnection) -> None:
         websocket = connection
+        keepalive = asyncio.create_task(
+            self._keepalive(websocket), name="vibesys-websocket-keepalive"
+        )
         try:
             async for raw in websocket:
                 if not isinstance(raw, str):
@@ -1158,8 +1246,16 @@ class WebSocketGateway:
             # indistinguishable; the deadline itself is reported at warning by
             # ``_send``, which is what decided to abandon the peer.
             _LOG.debug("websocket stream ended: %r", error)
-            with suppress(Exception):
-                await websocket.close()
+        finally:
+            # The cleanup task is the single connection ownership path. Finish
+            # shields it from handler cancellation (including repeated server
+            # shutdown cancellation) before propagating that cancellation.
+            await finish(
+                asyncio.create_task(
+                    self._release_connection(websocket, keepalive),
+                    name="vibesys-websocket-release",
+                )
+            )
 
     async def _handle_request(self, websocket: ServerConnection, raw: str) -> bool:
         request = decode_request(raw, clock=self._clock)
@@ -1215,13 +1311,17 @@ class WebSocketGateway:
             # fields and would retry the same broken replay as a capability
             # fallback. Match the Unix transport: acknowledge first, then let
             # the subscription boundary report the failure in band.
+            # Snapshot once through the blocking-work owner: its sequence and
+            # run identity are one journal generation, and folding it cannot
+            # occupy the gateway loop while the subscription is degraded.
+            snapshot = await _run_owned_blocking(self._request_runner, self.api.snapshot)
             await self._send(
                 websocket,
                 SubscribedMessage(
                     request_id=request.request_id,
                     client_id=request.client_id,
-                    run_id=self.api.snapshot().run_id,
-                    latest_sequence=self.api.latest_sequence,
+                    run_id=snapshot.run_id,
+                    latest_sequence=snapshot.sequence,
                 ).model_dump_json(),
             )
             raise
@@ -1237,7 +1337,7 @@ class WebSocketGateway:
         cursor, reported_floor, store_id = await self._write_bootstrap(
             websocket, request, bootstrap
         )
-        delivery.delivered(cursor)
+        delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
         while True:
             changed = await _run_owned_blocking(
                 self._request_runner,
@@ -1260,7 +1360,7 @@ class WebSocketGateway:
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True
                 )
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             checkpoint = await _run_owned_blocking(
                 self._request_runner,
@@ -1279,7 +1379,7 @@ class WebSocketGateway:
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True
                 )
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             await self._send_event_batch(
                 websocket,
@@ -1292,7 +1392,7 @@ class WebSocketGateway:
                 ),
             )
             cursor = checkpoint.through_sequence
-            delivery.delivered(cursor)
+            delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
 
     async def _write_stream_error(
         self,
@@ -1347,8 +1447,8 @@ class WebSocketGateway:
         supplies ``tail`` only if it has one, so the batch is otherwise sized by
         the run's entire history.
         """
-        for chunk in batch.split_within(self.limits.send_frame_bytes):
-            await self._send(websocket, chunk.model_dump_json())
+        for message in batch.stream_messages_within(self.limits.send_frame_bytes):
+            await self._send(websocket, message.model_dump_json())
 
 
 def browser_origin(value: str) -> str:

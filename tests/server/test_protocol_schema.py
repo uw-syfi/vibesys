@@ -3,15 +3,22 @@
 import copy
 import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter, ValidationError
 
-from server.api.protocol import ProtocolRequest, Response, ServerMessage
+from server.api.protocol import (
+    MAX_ACTIVE_EXECUTIONS_CHUNKS,
+    ProtocolRequest,
+    Response,
+    ServerMessage,
+)
 from server.api.schema import (
     fully_populated_response,
     host_helper_json_schema,
@@ -25,8 +32,10 @@ from server.api.schema import (
     run_event_typescript,
 )
 from server.events import EventData
+from server.events import GateKind as ServerGateKind
 from server.host_api import HelperFeature
-from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
+from vibesys.api import GateKind, RunFailedData, RunFailure, ToolResultPayload
+from vs_logs.api import NarrationLevel, NarrationLine
 
 SCHEMA_PATH = Path("clients/libs/contracts/src/generated/protocol.schema.json")
 HOST_HELPER_SCHEMA_PATH = Path("clients/libs/contracts/src/generated/host-helper.schema.json")
@@ -80,6 +89,28 @@ def test_committed_protocol_schema_matches_python_contract() -> None:
     assert _committed_schema() == protocol_json_schema()
 
 
+@given(
+    level=st.sampled_from(list(NarrationLevel)),
+    message=st.text(max_size=20),
+    traceback=st.none() | st.text(max_size=20),
+)
+def test_committed_schema_accepts_every_narration_line_the_run_writes(
+    level: NarrationLevel, message: str, traceback: str | None
+) -> None:
+    """A log view decodes narration with the generated type: every written line must fit it."""
+    document = _committed_schema()
+    line = NarrationLine(
+        at=datetime(2026, 10, 15, tzinfo=UTC),
+        level=level,
+        logger="vibesys.run",
+        thread="MainThread",
+        message=message,
+        traceback=traceback,
+    )
+    schema = {**_definition(document, "#/$defs/NarrationLine"), "$defs": document["$defs"]}
+    Draft202012Validator(schema).validate(json.loads(line.model_dump_json()))
+
+
 def test_committed_host_helper_schema_matches_python_contract() -> None:
     assert json.loads(HOST_HELPER_SCHEMA_PATH.read_text()) == host_helper_json_schema()
 
@@ -122,10 +153,25 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "instances.watch": "instances_watch",
         "instances.unwatch": "instances_watch",
         "paths.complete": "paths_complete",
+        "logs.list": "logs",
+        "logs.read": "logs",
+        "harnesses.list": "harnesses",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()
     assert set(gates.values()) == {feature.value for feature in HelperFeature}
+
+
+def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> None:
+    document = host_helper_json_schema()
+    gates = document["x-vibesys-feature-by-field"]
+
+    assert gates == {"run.start": {"harness": "harnesses"}}
+    request_refs = document["properties"]["request"]["discriminator"]["mapping"]
+    for tag, fields in gates.items():
+        request = document["$defs"][request_refs[tag].rsplit("/", 1)[1]]
+        assert fields.keys() <= request["properties"].keys()
+        assert fields.keys().isdisjoint(request.get("required", ()))
 
 
 @pytest.mark.parametrize(
@@ -355,8 +401,142 @@ def test_committed_schema_reuses_the_active_execution_list_definition() -> None:
         "$ref": "#/$defs/ActiveExecutions"
     }
     assert definitions["EventBatchMessage"]["properties"]["active_executions"] == {
-        "$ref": "#/$defs/ActiveExecutions"
+        "anyOf": [
+            {"$ref": "#/$defs/ActiveExecutions"},
+            {"type": "null"},
+        ]
     }
+    assert definitions["EventBatchMessage"]["properties"]["active_executions_checkpoint_id"] == {
+        "anyOf": [
+            {"pattern": "^[0-9a-f]{64}$", "type": "string"},
+            {"type": "null"},
+        ],
+        "default": None,
+        "title": "Active Executions Checkpoint Id",
+    }
+    ordinary, deferred = definitions["EventBatchMessage"]["oneOf"]
+    assert ordinary["properties"]["active_executions"] == {"$ref": "#/$defs/ActiveExecutions"}
+    assert ordinary["properties"]["active_executions_checkpoint_id"] == {
+        "default": None,
+        "title": "Active Executions Checkpoint Id",
+        "type": "null",
+    }
+    assert deferred["properties"]["active_executions"] == {"type": "null"}
+    assert deferred["properties"]["active_executions_checkpoint_id"] == {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string",
+    }
+    assert set(deferred["required"]) >= {
+        "type",
+        "events",
+        "active_executions",
+        "active_executions_checkpoint_id",
+    }
+
+    chunk = definitions["ActiveExecutionsChunkMessage"]
+    assert chunk["properties"]["payload"]["maxLength"] == 64 * 1024
+    assert chunk["properties"]["chunk_count"]["maximum"] == MAX_ACTIVE_EXECUTIONS_CHUNKS
+    assert set(chunk["required"]) >= {
+        "checkpoint_id",
+        "chunk_index",
+        "chunk_count",
+        "payload",
+        "through_sequence",
+        "store_id",
+        "history_after_sequence",
+    }
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_fields", "outcome"),
+    [
+        ({}, "accepted"),
+        ({"active_executions": []}, "accepted"),
+        ({"active_executions_checkpoint_id": None}, "accepted"),
+        (
+            {
+                "active_executions": None,
+                "active_executions_checkpoint_id": "a" * 64,
+            },
+            "accepted",
+        ),
+        ({"active_executions": None}, "rejected"),
+        (
+            {
+                "active_executions": None,
+                "active_executions_checkpoint_id": None,
+            },
+            "rejected",
+        ),
+        (
+            {
+                "active_executions": [],
+                "active_executions_checkpoint_id": "a" * 64,
+            },
+            "rejected",
+        ),
+        ({"active_executions_checkpoint_id": "a" * 64}, "rejected"),
+    ],
+)
+def test_draft_2020_schema_enforces_deferred_checkpoint_relationship(
+    checkpoint_fields: dict[str, object], outcome: str
+) -> None:
+    document = _committed_schema()
+    Draft202012Validator.check_schema(document)
+    validator = Draft202012Validator(
+        {"$ref": "#/$defs/EventBatchMessage", "$defs": document["$defs"]}
+    )
+    errors = list(validator.iter_errors({"type": "event_batch", "events": [], **checkpoint_fields}))
+    assert ("accepted" if errors == [] else "rejected") == outcome
+
+
+@pytest.mark.parametrize(
+    "checkpoint_fields",
+    [
+        {"active_executions": None},
+        {
+            "active_executions": None,
+            "active_executions_checkpoint_id": None,
+        },
+        {
+            "active_executions": [],
+            "active_executions_checkpoint_id": "a" * 64,
+        },
+        {"active_executions_checkpoint_id": "a" * 64},
+    ],
+)
+def test_server_message_rejects_inconsistent_deferred_checkpoint_fields(
+    checkpoint_fields: dict[str, object],
+) -> None:
+    """The Python source contract owns the relation enforced by every client."""
+    with pytest.raises(
+        ValidationError,
+        match=("active_executions_checkpoint_id is present exactly when active_executions is null"),
+    ):
+        TypeAdapter(ServerMessage).validate_python(
+            {"type": "event_batch", "events": [], **checkpoint_fields}
+        )
+
+
+@pytest.mark.parametrize(
+    "checkpoint_fields",
+    [
+        {},
+        {"active_executions": []},
+        {"active_executions_checkpoint_id": None},
+        {
+            "active_executions": None,
+            "active_executions_checkpoint_id": "a" * 64,
+        },
+    ],
+)
+def test_server_message_accepts_consistent_deferred_checkpoint_fields(
+    checkpoint_fields: dict[str, object],
+) -> None:
+    message = TypeAdapter(ServerMessage).validate_python(
+        {"type": "event_batch", "events": [], **checkpoint_fields}
+    )
+    assert message.type == "event_batch"
 
 
 @pytest.mark.parametrize("alias", TAGGED_UNION_ALIASES)
@@ -466,6 +646,11 @@ def test_wire_run_failure_is_the_core_contract() -> None:
     assert defs["RunFailure"]["required"] == core["required"]
     assert defs["RunFailureKind"]["enum"] == core["$defs"]["RunFailureKind"]["enum"]
     assert RunFailedData.model_fields["failure"].annotation is RunFailure
+
+
+def test_gate_kind_has_one_definition_on_both_wire_contracts() -> None:
+    """Run events and log owners share vibesys' GateKind, so one schema entry serves both."""
+    assert ServerGateKind is GateKind
 
 
 def test_thread_creation_request_no_longer_accepts_a_driver() -> None:

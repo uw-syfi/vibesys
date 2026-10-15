@@ -23,6 +23,7 @@ from vs_sandbox.api.slurm import (
     COMMAND_BROKER_SOCKET_ENV,
     COMMAND_BROKER_TOKEN_ENV,
     AgentGpuConfig,
+    BrokerTransport,
     GpuCommand,
     GpuCommands,
     GpuJobRequest,
@@ -32,6 +33,7 @@ from vs_sandbox.api.slurm import (
 
 # test-isolation: the client is a single-file CLI that is intentionally absent from the library API.
 from vs_sandbox.host_command_client import Stop, execute
+from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S, join_or_fail, wait_or_fail
 
 if TYPE_CHECKING:
@@ -94,6 +96,7 @@ def _serving(directory: Path, launcher: _Launcher) -> Iterator[HostCommandBroker
         directory / "broker.sock",
         roots=RunRoots((workspace,)),
         gpu=GpuCommands(config, _NoConfinement(), {}, launcher=launcher),
+        transport=BrokerTransport(UnixNetwork(), OsThreads()),
     )
     broker.start()
     try:

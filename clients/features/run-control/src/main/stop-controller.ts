@@ -77,7 +77,10 @@ export class StopController {
     await this.#stop(
       target,
       force,
-      () => this.#deps.confirm(confirmText({label: target.label, host: target.hostLabel, force})),
+      requestedForce =>
+        this.#deps.confirm(
+          confirmText({label: target.label, host: target.hostLabel, force: requestedForce}),
+        ),
       () => true,
     );
   }
@@ -96,20 +99,28 @@ export class StopController {
   async #stop(
     target: StopTarget,
     force: boolean,
-    confirm: () => Promise<boolean>,
+    confirm: (force: boolean) => Promise<boolean>,
     current: () => boolean,
   ): Promise<StopResult> {
     if (!current()) return {kind: 'withdrawn'};
     const key = stopKey(target.host, target.instanceId);
-    if (this.#step(key, {type: 'request', force}).state.phase !== 'confirming')
-      return {kind: 'complete'};
-    const yes = await confirm();
+    const confirmation = this.#step(key, {type: 'request', force}).effect;
+    if (confirmation?.kind !== 'confirm') return {kind: 'complete'};
+    let yes: boolean;
+    try {
+      yes = await confirm(confirmation.force);
+    } catch (error) {
+      // Confirmation is this operation's resource. Release its state ownership
+      // when the native dialog cannot answer, then preserve that boundary failure.
+      this.#step(key, {type: 'abandon'});
+      throw error;
+    }
     if (!current()) {
       this.#step(key, {type: 'abandon'});
       return {kind: 'withdrawn'};
     }
     const {effect} = this.#step(key, yes ? {type: 'confirm'} : {type: 'cancel'});
-    if (effect === null) return {kind: 'complete'};
+    if (effect?.kind !== 'stop') return {kind: 'complete'};
     try {
       const command = await this.#deps.stop(target.host, target.instanceId, effect.force, current);
       switch (command.kind) {

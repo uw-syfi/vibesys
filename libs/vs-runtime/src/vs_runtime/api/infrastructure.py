@@ -40,12 +40,18 @@ from vs_runtime._bundled_paths import (
 )
 from vs_runtime._capacity_gate import CapacityHandling, CapacityTimer, install_capacity_gate
 from vs_runtime._container_runtime_policy import DockerInDockerUnsupportedError
-from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
+from vs_runtime._docker_evaluator_tools import (
+    DockerToolBuilder,
+    prepare_docker_evaluator_resources,
+)
 from vs_runtime._environment_startup import (
     EnvironmentStartup,
     EnvironmentStartupSink,
     EnvironmentStartupStage,
+    StartupOutputOpener,
+    ToolBuildOutputOpener,
 )
+from vs_runtime._environment_system import EnvironmentSystem
 from vs_runtime._evaluator_packages import (
     PACKAGE_ROOT_TOKEN,
     TOOL_TOKEN_PREFIX,
@@ -113,6 +119,7 @@ from vs_runtime._model_artifacts import (
     ModelArtifactDownloader,
     ModelArtifactRequest,
     PreparedModelArtifacts,
+    model_artifact_copy_excludes,
     prepare_model_artifacts,
 )
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
@@ -250,6 +257,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     required_evaluator_tools_root,
 )
 from vs_runtime._validation_passes import StateValidationPasses, ValidationPasses
+from vs_runtime._workspace_holds import WorkspaceHolds, core_workspace_holds
 from vs_runtime._workspace_resources import (
     RootBaselineDrifted,
     WorkspaceResourceEvent,
@@ -450,10 +458,12 @@ __all__ = [
     "DockerEnvironmentConfig",
     "DockerEnvironmentFacts",
     "DockerInDockerUnsupportedError",
+    "DockerToolBuilder",
     "DurableEventJournal",
     "EnvironmentStartup",
     "EnvironmentStartupSink",
     "EnvironmentStartupStage",
+    "EnvironmentSystem",
     "EvaluatorPackageError",
     "EvaluatorPackageMetadata",
     "EvaluatorPackageNotFoundError",
@@ -550,11 +560,13 @@ __all__ = [
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
     "StageFailureText",
+    "StartupOutputOpener",
     "StateValidationPasses",
     "StopGraceError",
     "StopTimer",
     "Switch",
     "TerminalSignal",
+    "ToolBuildOutputOpener",
     "ToolLocation",
     "ToolSite",
     "TrustedAccuracyResult",
@@ -570,6 +582,7 @@ __all__ = [
     "ValidationRecipe",
     "WaitFor",
     "WorkspaceEvaluationSpec",
+    "WorkspaceHolds",
     "WorkspaceResource",
     "WorkspaceResourceEvent",
     "WorkspaceResourceEventSink",
@@ -585,6 +598,7 @@ __all__ = [
     "classify",
     "collect_linux_profile",
     "collect_macos_profile",
+    "core_workspace_holds",
     "create_managed_conversation",
     "create_model_request_reconciler",
     "create_run_control_channel",
@@ -609,6 +623,7 @@ __all__ = [
     "materialize_input_project",
     "materialize_objective_document",
     "migrate_recorded_run_environment",
+    "model_artifact_copy_excludes",
     "off_path_tools",
     "offered_skill_facts",
     "open_agent_execution_environment",

@@ -17,7 +17,7 @@ from vs_sandbox.process_execution import PipedStoppableProcess
 
 if TYPE_CHECKING:
     from vs_sandbox.execution import CommandResult
-    from vs_sim.api import Event, PipedProcessLauncher, Threads
+    from vs_sim.api import Event, OutputSink, PipedProcessLauncher, Threads
 
 DEFAULT_EXECUTE_TIMEOUT = 120
 DEFAULT_MAX_OUTPUT_CHARS = 100_000
@@ -75,6 +75,7 @@ class LocalShellRunner:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         """Run *command* under ``/bin/sh -c`` and return its bounded result.
 
@@ -92,6 +93,7 @@ class LocalShellRunner:
             launch=lambda: PipedStoppableProcess(
                 self._launcher.start((_SHELL, "-c", command), cwd=self.root_dir, env=self.env),
                 threads=self._threads,
+                output=output,
             ),
             threads=self._threads,
         )

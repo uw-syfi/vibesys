@@ -1,0 +1,76 @@
+{
+  "id": "helper-logs-truncated",
+  "protocol": "host-helper",
+  "title": "Read evicted bytes of a closed stream",
+  "description": "A read from an offset the store evicted starts at the oldest byte still held and says the bytes before it are gone; a closed stream answers at once.",
+  "role": "logs",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "logs"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.read",
+        "request_id": "r",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab",
+        "stream_id": "000002",
+        "start": {
+          "offset": 0
+        },
+        "max_bytes": 65536,
+        "wait_ms": 2000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.read",
+        "request_id": "r",
+        "chunk": {
+          "offset": 14,
+          "data": "line 2\nline 3\nline 4\nline 5\n",
+          "next_offset": 42,
+          "eof": true,
+          "closed": true,
+          "truncated_before": true,
+          "pipes": [
+            {
+              "offset": 14,
+              "length": 28,
+              "pipe": "stderr"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

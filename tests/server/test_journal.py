@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import itertools
 import json
+import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -13,8 +14,10 @@ from hypothesis import strategies as st
 from tests.server.support import HARNESS_RUN_ID, build_server_parts
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
+
+    from vs_sim.api import Condition
 
 from server.diagnostics import (
     Diagnostic,
@@ -28,6 +31,7 @@ from server.events import (
     AgentExecutionStartedData,
     ConfigurationFailedData,
     EventData,
+    EventHeader,
     EventStatus,
     EventType,
     GateFinishedData,
@@ -39,8 +43,58 @@ from server.events import (
     make_event,
 )
 from server.host_api import FailureReason
+from server.journal import WireJournal
 from server.runtime import failure_reason
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import ManualClock, SimThreads, examples
+
+
+class _RecordingCondition:
+    """A single-threaded condition Fake that records committed notifications."""
+
+    def __init__(self) -> None:
+        self.notifications = 0
+
+    def __enter__(self) -> _RecordingCondition:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def notify_all(self) -> None:
+        self.notifications += 1
+
+
+class _ListenerFailedError(RuntimeError):
+    """A scripted post-commit projection failure."""
+
+
+def _recording_journal(
+    condition: _RecordingCondition,
+    *,
+    listener_errors: (
+        list[tuple[Exception, EventHeader]] | Callable[[Exception, EventHeader], None] | None
+    ) = None,
+) -> WireJournal:
+    threads = SimThreads()
+    if listener_errors is None:
+        return WireJournal(
+            cast("Condition", condition),
+            clock=ManualClock(),
+            threads=threads,
+        )
+    if isinstance(listener_errors, list):
+
+        def error_sink(error: Exception, header: EventHeader) -> None:
+            listener_errors.append((error, header))
+
+    else:
+        error_sink = listener_errors
+    return WireJournal(
+        cast("Condition", condition),
+        clock=ManualClock(),
+        threads=threads,
+        listener_errors=error_sink,
+    )
 
 
 def _events(path: Path) -> list[dict[str, object]]:
@@ -67,6 +121,194 @@ def _stored_event(
         round_label="round 1",
         execution_id="exec-1",
         data=data,
+    )
+
+
+def test_committed_event_survives_a_live_listener_failure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A failed projection cannot turn a durable append into a reported failure."""
+    condition = _RecordingCondition()
+    journal = _recording_journal(condition)
+    journal.attach(tmp_path, run_id="run-a")
+    later_sequences: list[int] = []
+    failure = _ListenerFailedError("registry publish failed")
+
+    def broken(_event: RunEvent) -> None:
+        raise failure
+
+    journal.add_listener(broken, replay_filter=lambda _header: False)
+    journal.add_listener(
+        lambda event: later_sequences.append(event.sequence),
+        replay_filter=lambda _header: False,
+    )
+    notifications_before = condition.notifications
+
+    with caplog.at_level(logging.ERROR, logger="server.journal"):
+        committed = journal.record(EventType.SERVER_READY)
+
+    assert journal.read_history()[-1] == committed
+    assert later_sequences == [committed.sequence]
+    assert condition.notifications == notifications_before + 1
+    assert any(
+        "observer failed while applying committed server_ready event" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_replay_attempts_every_listener_after_one_fails(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One broken replay projection cannot starve independent projections."""
+    stored = _recording_journal(_RecordingCondition())
+    stored.attach(tmp_path, run_id="run-a")
+    stored.record(EventType.SERVER_READY)
+    expected_sequences = [event.sequence for event in stored.read_history()]
+
+    replay = _recording_journal(_RecordingCondition())
+    later_sequences: list[int] = []
+    failure = _ListenerFailedError("replay projection failed")
+
+    def broken(_event: RunEvent) -> None:
+        raise failure
+
+    replay.add_listener(broken, replay_filter=lambda _header: True)
+    replay.add_listener(
+        lambda event: later_sequences.append(event.sequence),
+        replay_filter=lambda _header: True,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="server.journal"):
+        replay.attach(tmp_path, run_id="run-a", read_only=True)
+
+    assert later_sequences == expected_sequences
+    assert sum(
+        "observer failed while applying committed" in record.getMessage()
+        for record in caplog.records
+    ) == len(expected_sequences)
+
+
+def test_listener_failures_reach_the_explicit_error_owner(tmp_path: Path) -> None:
+    """The journal reports observer faults separately from its append result."""
+    failures: list[tuple[Exception, EventHeader]] = []
+    journal = _recording_journal(_RecordingCondition(), listener_errors=failures)
+    journal.attach(tmp_path, run_id="run-a")
+    failure = _ListenerFailedError("registry publish failed")
+
+    def broken(_event: RunEvent) -> None:
+        raise failure
+
+    journal.add_listener(broken, replay_filter=lambda _header: False)
+
+    committed = journal.record(EventType.SERVER_READY)
+
+    assert failures == [(failure, _header_from_event_for_test(committed))]
+
+
+def test_failed_replay_filter_does_not_starve_other_reducers(tmp_path: Path) -> None:
+    """A replay-selection failure is isolated like a listener failure."""
+    stored = _recording_journal(_RecordingCondition())
+    stored.attach(tmp_path, run_id="run-a")
+    stored.record(EventType.SERVER_READY)
+    expected = stored.read_history()
+    failures: list[tuple[Exception, EventHeader]] = []
+    replay = _recording_journal(_RecordingCondition(), listener_errors=failures)
+    selected_sequences: list[int] = []
+    failure = _ListenerFailedError("replay filter failed")
+
+    def broken_filter(_header: EventHeader) -> bool:
+        raise failure
+
+    replay.add_listener(lambda _event: None, replay_filter=broken_filter)
+    replay.add_listener(
+        lambda event: selected_sequences.append(event.sequence),
+        replay_filter=lambda _header: True,
+    )
+
+    replay.attach(tmp_path, run_id="run-a", read_only=True)
+
+    assert selected_sequences == [event.sequence for event in expected]
+    assert failures == [(failure, _header_from_event_for_test(event)) for event in expected]
+
+
+def test_failed_listener_error_sink_cannot_escape_or_starve_delivery(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Even the final diagnostic boundary cannot rewrite the append outcome."""
+    condition = _RecordingCondition()
+    sink_failure = _ListenerFailedError("diagnostic sink failed")
+
+    def broken_sink(_error: Exception, _header: EventHeader) -> None:
+        raise sink_failure
+
+    journal = _recording_journal(condition, listener_errors=broken_sink)
+    journal.attach(tmp_path, run_id="run-a")
+    observed: list[int] = []
+
+    def broken_listener(_event: RunEvent) -> None:
+        raise _ListenerFailedError
+
+    journal.add_listener(broken_listener, replay_filter=lambda _header: False)
+    journal.add_listener(
+        lambda event: observed.append(event.sequence), replay_filter=lambda _header: False
+    )
+    notifications_before = condition.notifications
+
+    with caplog.at_level(logging.ERROR, logger="server.journal"):
+        committed = journal.record(EventType.SERVER_READY)
+
+    assert observed == [committed.sequence]
+    assert condition.notifications == notifications_before + 1
+    assert any("observer error sink failed" in record.getMessage() for record in caplog.records)
+
+
+def test_reentrant_listener_error_sink_cannot_reenter_itself(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A diagnostic append runs after fan-out and cannot recursively invoke its sink."""
+    condition = _RecordingCondition()
+    sink_sequences: list[int] = []
+    observed: list[int] = []
+    journal: WireJournal
+
+    def append_diagnostic(_error: Exception, header: EventHeader) -> None:
+        sink_sequences.append(header.sequence)
+        journal.record(EventType.OUTPUT, text="observer diagnostic")
+
+    journal = _recording_journal(condition, listener_errors=append_diagnostic)
+    journal.attach(tmp_path, run_id="run-a")
+
+    def broken_listener(_event: RunEvent) -> None:
+        raise _ListenerFailedError
+
+    journal.add_listener(broken_listener, replay_filter=lambda _header: False)
+    journal.add_listener(
+        lambda event: observed.append(event.sequence), replay_filter=lambda _header: False
+    )
+    notifications_before = condition.notifications
+
+    with caplog.at_level(logging.ERROR, logger="server.journal"):
+        committed = journal.record(EventType.SERVER_READY)
+
+    appended = journal.read_history()[-2:]
+    assert [event.type for event in appended] == [EventType.SERVER_READY, EventType.OUTPUT]
+    assert sink_sequences == [committed.sequence]
+    assert observed == [event.sequence for event in appended]
+    assert condition.notifications == notifications_before + 2
+    assert any(
+        "observer failed while applying committed output event" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def _header_from_event_for_test(event: RunEvent) -> EventHeader:
+    """Build the public observer-failure context expected for one committed event."""
+    return EventHeader(
+        sequence=event.sequence,
+        type=event.type,
+        execution_id=event.execution_id,
+        chat_thread_id=event.chat_thread_id,
+        run_id=event.run_id,
     )
 
 

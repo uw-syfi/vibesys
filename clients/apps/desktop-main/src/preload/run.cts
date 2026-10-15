@@ -2,8 +2,9 @@
  * Sandboxed preload: the page's only way out of its sandbox.
  *
  * It exposes the platform (data), `connect` (open one protocol connection to the server the main
- * process bound this window to; the page names no host, path, or command), and `onWake` (the
- * machine woke from sleep). A connection is a MessagePort handed to the main process, which relays
+ * process bound this window to; the page names no host, path, or command), `logs` (one request
+ * about the logs of that run, answered by the main process), and `onWake` (the machine woke from
+ * sleep). A connection is a MessagePort handed to the main process, which relays
  * it to the server; the port itself stays here, in the isolated world, and the page holds only the
  * two functions below. Sandboxed preloads cannot be ES modules or import local files, hence `.cts`
  * and the channel names repeated from `@vibesys/ipc`, whose types keep them in step.
@@ -14,10 +15,12 @@ import type {
   DesktopSocketHandlers,
   MainToPage,
   PageToMain,
+  RunLogsRequest,
 } from '@vibesys/ipc';
 
 const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
 const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
+const LOGS_CHANNEL: typeof import('@vibesys/ipc').LOGS_CHANNEL = 'vibesys:logs';
 
 interface PreloadMessagePort {
   onmessage: ((event: MessageEvent<unknown>) => void) | null;
@@ -31,6 +34,8 @@ interface RunPreloadCapabilities<RemotePort> {
   createChannel(): {readonly port: PreloadMessagePort; readonly remote: RemotePort};
   attach(remote: RemotePort): void;
   onWake(listener: () => void): void;
+  /** Ask the main process one logs request; it answers for the run this window is bound to. */
+  logs(request: RunLogsRequest): Promise<unknown>;
 }
 
 /** Build the page capability from its Electron boundary effects. */
@@ -41,6 +46,7 @@ function createRunPreload<RemotePort>(
     platform: capabilities.platform,
     connect: handlers => connect(capabilities, handlers),
     onWake: listener => capabilities.onWake(listener),
+    logs: request => capabilities.logs(request),
   };
 }
 
@@ -230,6 +236,7 @@ if (process.type === 'renderer') {
       },
       attach: remote => electron.ipcRenderer.postMessage(CONNECT_CHANNEL, null, [remote]),
       onWake: listener => electron.ipcRenderer.on(WAKE_CHANNEL, () => listener()),
+      logs: request => electron.ipcRenderer.invoke(LOGS_CHANNEL, request),
     }),
   );
 }

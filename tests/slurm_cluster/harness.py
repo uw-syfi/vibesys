@@ -31,6 +31,7 @@ from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentConfig,
+    EnvironmentSystem,
     RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentSession,
@@ -39,8 +40,14 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend, SubprocessDockerCli
 from vs_sandbox.api.slurm import load_slurm_operator_settings
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
-from vs_sim.api.testing import NO_PROCESSES
+from vs_sim.api import (
+    DISCARD,
+    MonotonicClock,
+    OsProcesses,
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    UnixNetwork,
+)
 
 if TYPE_CHECKING:
     import threading
@@ -48,6 +55,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.api import CommandResult
+    from vs_sim.api import OutputSink
 #: The label ``DockerSandbox`` puts on its containers (``vs_sandbox.docker_sandbox.RUN_ID_LABEL``).
 _RUN_ID_LABEL = "vibesys.run-id"
 BENCHMARK_OUTPUT_ARGUMENT = "--output"
@@ -85,10 +93,10 @@ class PrebuiltImageRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         """Return the scripted outcome for ``docker build`` or ``docker image inspect``."""
-        del cwd, timeout, on_stderr_line
+        del cwd, timeout, output
         stdout = self._image_id if argv[1] == "image" else ""
         return subprocess.CompletedProcess(tuple(argv), 0, stdout, "")
 
@@ -108,7 +116,7 @@ class OpenRun:
         self, command: str, *, cancel: threading.Event | None = None, timeout: int | None = None
     ) -> CommandResult:
         """Run a scripted *command* as the agent, in the container, and return its result."""
-        return self.session.sandbox.execute(command, timeout=timeout, cancel=cancel)
+        return self.session.sandbox.execute(command, timeout=timeout, cancel=cancel, output=DISCARD)
 
     @property
     def has_gpu_commands(self) -> bool:
@@ -322,7 +330,7 @@ def make_request(
         benchmark_output_argument=BENCHMARK_OUTPUT_ARGUMENT,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         clock=MonotonicClock(),
-        slurm_processes=NO_PROCESSES,
+        system=_real_system(),
     )
 
 
@@ -402,3 +410,19 @@ def open_candidates(
             for opened in sessions:
                 remove_run_containers(opened.run_id)
             cluster.cancel_all()
+
+
+def _real_system() -> EnvironmentSystem:
+    """The host's own threads, sockets and processes.
+
+    The agent GPU launcher checks and cancels its jobs with ``squeue`` and ``scancel``
+    through ``slurm_processes``, so they reach the real cluster too.
+    """
+    processes = OsProcesses()
+    return EnvironmentSystem(
+        threads=OsThreads(),
+        network=UnixNetwork(),
+        processes=processes,
+        launcher=SubprocessPipedProcessLauncher(),
+        slurm_processes=processes,
+    )

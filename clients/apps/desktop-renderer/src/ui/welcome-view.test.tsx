@@ -9,8 +9,8 @@ import {
   type CompletionAction,
   completionStep,
   hostInitial,
-  INSPECTOR_CLOSED,
-  type InspectorAction,
+  INSPECTOR_SHEET_CLOSED,
+  type InspectorSheetAction,
   PICKER_CLOSED,
 } from '@vibesys/feature-hosts/state';
 import {LISTS_EMPTY} from '@vibesys/feature-recent-runs/state';
@@ -79,7 +79,7 @@ async function mountWelcome(): Promise<{readonly root: Root; readonly container:
     start: opened,
     picker: PICKER_CLOSED,
     completion: COMPLETION_EMPTY,
-    inspector: INSPECTOR_CLOSED,
+    inspector: INSPECTOR_SHEET_CLOSED,
     send: {
       welcome: () => undefined,
       host: () => undefined,
@@ -183,7 +183,7 @@ test('a retained recent locator stays inspectable while its host listing is unav
     const container = document.createElement('div');
     document.body.append(container);
     const root = createRoot(container);
-    const inspections: InspectorAction[] = [];
+    const inspections: InspectorSheetAction[] = [];
     const props: WelcomeViewProps = {
       welcome: WELCOME_INITIAL,
       lists: {
@@ -194,7 +194,7 @@ test('a retained recent locator stays inspectable while its host listing is unav
       start: START_CLOSED,
       picker: PICKER_CLOSED,
       completion: COMPLETION_EMPTY,
-      inspector: INSPECTOR_CLOSED,
+      inspector: INSPECTOR_SHEET_CLOSED,
       send: {
         welcome: () => undefined,
         host: () => undefined,

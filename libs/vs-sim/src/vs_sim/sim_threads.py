@@ -38,7 +38,13 @@ from typing import TYPE_CHECKING, Self, cast
 
 from vs_sim.concurrency import OsThreadLocal
 from vs_sim.randomness import SeededRandom
-from vs_sim.virtual import SIM_MONOTONIC_ORIGIN, VirtualClock, VirtualTimeLimitError, run_hosted
+from vs_sim.virtual import (
+    SIM_MONOTONIC_ORIGIN,
+    VirtualClock,
+    VirtualTimeLimitError,
+    current_virtual_loop,
+    run_hosted,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -88,6 +94,27 @@ def undriven_threads() -> tuple[str, ...]:
         names.extend(threads.never_ran())
         threads.close()
     return tuple(names)
+
+
+def loop_threads() -> SimThreads:
+    """The simulated threads of the virtual loop the caller runs on, created on first use.
+
+    Code that runs on a loop started by :func:`~vs_sim.virtual.run_virtual` without a
+    ``driver`` can still hand blocking work to simulated threads: the loop adopts the
+    returned simulator as its driver, on the loop's clock, schedule seed and trace, and
+    closes it when the run ends. Every call on one loop returns the same object.
+
+    Raises:
+        RuntimeError: the caller is not on a virtual loop, or the loop's driver is not a
+            :class:`SimThreads`.
+    """
+    loop = current_virtual_loop()
+    if loop.driver is None:
+        loop.adopt(SimThreads(loop.clock, schedule_seed=loop.schedule_seed, trace=loop.trace))
+    if not isinstance(loop.driver, SimThreads):
+        message = f"the virtual loop is driven by {type(loop.driver).__name__}, not SimThreads"
+        raise RuntimeError(message)  # noqa: TRY004  # LW-163851 [TRY004]; a missing precondition of the call, not a bad argument type.
+    return loop.driver
 
 
 class _SimThread:
@@ -352,7 +379,7 @@ class SimThreads:
         self._yield_to_driver = threading.Semaphore(0)
         self._closed = False
         self._driven = False
-        self._outside_ident: int | None = None
+        self._outside_ident = threading.get_ident()
         self._executor = _SimExecutor(self)
         self.errors: list[BaseException] = []
         """Exceptions that ended threads, in the order they happened."""
@@ -543,23 +570,23 @@ class SimThreads:
         """The simulated thread running this code, or the one real thread that drives them.
 
         Every caller that is not a simulated thread is the same stand-in, so only one real
-        thread may use a simulator: the test's, or the event loop's that drives it. Two
-        would share lock ownership and race on its state.
+        thread may use a simulator: the one that built it (the test's, or the event loop's
+        that drives it). Two would share lock ownership and race on its state. The thread
+        is fixed at construction, so a worker that uses the simulator fails on every run,
+        not only on the runs where a pool happens to hand the work to a second worker.
 
         Raises:
-            SimMisuseError: a second real thread used this simulator.
+            SimMisuseError: a real thread other than the one that built this simulator used it.
         """
         ident = threading.get_ident()
         thread = self._by_ident.get(ident)
         if thread is not None:
             return thread
-        if self._outside_ident is None:
-            self._outside_ident = ident
-        elif ident != self._outside_ident:
+        if ident != self._outside_ident:
             message = (
-                f"real thread {threading.current_thread().name!r} used a SimThreads that "
-                "another real thread already uses; run the work as a simulated thread "
-                "(spawn it from SimThreads.run or Sim.run) instead of on a real one"
+                f"real thread {threading.current_thread().name!r} used a SimThreads built on "
+                "another real thread; run the work as a simulated thread (spawn it from "
+                "SimThreads.run or Sim.run) instead of on a real one"
             )
             raise SimMisuseError(message)
         return _OUTSIDE

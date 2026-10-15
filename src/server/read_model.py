@@ -2,41 +2,53 @@
 
 from __future__ import annotations
 
-import json
 import re
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from server.events import ConfigurationFailedData, EventStatus, EventType, RunEvent
-from vibesys.api import read_latest_run_log
+from server.events import (
+    AgentExecutionFinishedData,
+    BenchmarkResultData,
+    ConfigurationFailedData,
+    EventStatus,
+    EventType,
+    GateFinishedData,
+    GateKind,
+    JudgeResultData,
+    RoundFinishedData,
+    RunEvent,
+)
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Callable
 
     from server.events import EventData
-    from vibesys.api import RunRecord
+
+_ROUND_NUMBER = re.compile(r"(?i)(?:round|iter(?:ation)?)\D*(\d+)")
+"""How a round label names a round: ``round-3``, ``round 3``, ``iteration 3``."""
+
+_DETAIL_EVENT_TYPES = frozenset(
+    {
+        EventType.AGENT_EXECUTION_FINISHED,
+        EventType.GATE_FINISHED,
+        EventType.JUDGE_RESULT,
+        EventType.BENCHMARK_RESULT,
+        EventType.ROUND_FINISHED,
+    }
+)
+"""The typed outcomes a round's detail lists, in the order they were recorded."""
 
 
 class RunInspectionSource(Protocol):
     """The slice of the run integration adapter that inspector queries read.
 
     Declared here so this module does not import the adapter that constructs
-    the inspector.
+    the inspector. Every fact comes from typed events; the inspector never
+    reads the human-facing run log.
     """
-
-    @property
-    def attached_run(self) -> RunRecord | None:
-        """Return the attached semantic run record, if available."""
-        ...
 
     @property
     def current_round(self) -> str | None:
         """Return the current controlled round label."""
-        ...
-
-    @property
-    def log_dir(self) -> Path | None:
-        """Return the attached wire-journal directory."""
         ...
 
     def status(self) -> str:
@@ -54,34 +66,120 @@ class RunInspectionSource(Protocol):
         """Record a server-only wire event."""
         ...
 
-    def read_events(
-        self, after_sequence: int = 0, before_sequence: int | None = None
-    ) -> list[RunEvent]:
-        """Read canonical wire events within an optional cursor range."""
-        ...
-
     def read_history_events(self) -> list[RunEvent]:
         """Read canonical wire history for inspector queries."""
         ...
 
 
-@dataclass(frozen=True)
-class _HistoryDocument:
-    """Decoded read-only evidence from persisted state or a run log."""
+def _round_number(label: str | None) -> int | None:
+    match = _ROUND_NUMBER.search(label or "")
+    return int(match.group(1)) if match else None
 
-    name: str
-    text: str
+
+def _clip(text: str, limit: int = 2000) -> str:
+    return text if len(text) <= limit else text[:limit] + "..."
+
+
+def _where(event: RunEvent) -> str:
+    parts = [part for part in (event.round_label, event.agent_kind) if part]
+    return f" ({', '.join(parts)})" if parts else ""
+
+
+def _diagnostic_lines(event: RunEvent) -> list[str]:
+    diagnostic = event.diagnostic
+    if diagnostic is None:
+        return []
+    lines = [f"Diagnostic: {_clip(diagnostic.summary)}"]
+    if diagnostic.detail:
+        lines.append(_clip(diagnostic.detail))
+    return lines
+
+
+def _format_execution(event: RunEvent, data: AgentExecutionFinishedData) -> str:
+    lines = [f"Agent execution {event.status or 'finished'}{_where(event)}"]
+    if data.error:
+        lines.append(f"Error: {_clip(data.error)}")
+    elif event.text:
+        lines.append(_clip(event.text))
+    return "\n".join([*lines, *_diagnostic_lines(event)])
+
+
+def _format_gate(event: RunEvent, data: GateFinishedData) -> str:
+    name = data.gate.value + (f" {data.recipe}" if data.recipe else "")
+    lines = [f"Gate {name} {event.status or 'finished'}{_where(event)}"]
+    if data.metric is not None and data.value is not None:
+        lines.append(f"Metric: {data.metric} = {data.value} {data.unit or ''}".rstrip())
+    if data.output_tail:
+        lines.append("Output tail:\n" + _clip(data.output_tail))
+    return "\n".join([*lines, *_diagnostic_lines(event)])
+
+
+def _format_judge(event: RunEvent, data: JudgeResultData) -> str:
+    lines = [f"Judge verdict: {data.verdict} (attempt {data.attempt}){_where(event)}"]
+    if data.skipped:
+        lines.append(f"Skipped: {data.skip_reason or 'no reason recorded'}")
+    if data.feedback:
+        lines.append("Feedback: " + _clip(data.feedback))
+    return "\n".join(lines)
+
+
+def _format_benchmark(event: RunEvent, data: BenchmarkResultData) -> str:
+    return f"Benchmark {data.metric}: {data.value} {data.unit}{_where(event)}".rstrip()
+
+
+def _format_round(event: RunEvent, data: RoundFinishedData) -> str:
+    line = f"Round finished{_where(event)}: {data.attempts} attempt(s), judge {data.judge_verdict}"
+    if data.perf_metric is not None:
+        line += f", perf {data.perf_metric} {data.perf_unit or ''}".rstrip()
+    return line
+
+
+def _format_typed(event: RunEvent) -> str | None:
+    """Render one typed outcome event, or None when it is not one the inspector reports."""
+    data = event.data
+    if isinstance(data, AgentExecutionFinishedData):
+        return _format_execution(event, data)
+    if isinstance(data, GateFinishedData):
+        return _format_gate(event, data)
+    if isinstance(data, JudgeResultData):
+        return _format_judge(event, data)
+    if isinstance(data, BenchmarkResultData):
+        return _format_benchmark(event, data)
+    if isinstance(data, RoundFinishedData):
+        return _format_round(event, data)
+    return None
+
+
+def _is_failure(event: RunEvent) -> bool:
+    return event.status is EventStatus.FAILED and event.type in {
+        EventType.AGENT_EXECUTION_FINISHED,
+        EventType.GATE_FINISHED,
+    }
+
+
+def _is_judge(event: RunEvent) -> bool:
+    return event.type is EventType.JUDGE_RESULT
+
+
+def _is_benchmark(event: RunEvent) -> bool:
+    if event.type is EventType.BENCHMARK_RESULT:
+        return True
+    return (
+        isinstance(event.data, GateFinishedData)
+        and event.data.gate is GateKind.BENCHMARK
+        and event.data.metric is not None
+    )
 
 
 class RunInspector:
-    """Answer operator questions without mutating agent behavior."""
+    """Answer operator questions from typed run events without mutating agent behavior."""
 
     def __init__(self, integration: RunInspectionSource) -> None:
         """Bind the read model to its run-inspection data source."""
         self.integration = integration
 
     def answer(self, question: str) -> str:
-        """Answer a question using current status and persisted run history."""
+        """Answer a question using current status and the typed event history."""
         configuration_failure = self._latest_configuration_failure()
         if configuration_failure is not None:
             return self._status_answer(question, configuration_failure)
@@ -103,24 +201,22 @@ class RunInspector:
         if any(word in query for word in ("doing", "current", "status", "now")):
             answer = self._status_answer(question, self.integration.status())
         elif any(word in query for word in ("failed", "failure", "why")):
-            failed = self._latest_execution(status=EventStatus.FAILED)
-            detail = (
-                "Latest failed agent execution:\n" + failed
-                if failed
-                else self._search_latest(("judge", "fail", "feedback", "verdict"), "judge result")
+            detail = self._latest(
+                _is_failure,
+                "Latest failure",
+                "No failed agent execution or gate has been recorded yet.",
             )
             answer = self._status_answer(question, detail)
         elif "judge" in query:
-            judge = self._latest_execution(agent_kind="judge")
-            detail = (
-                "Latest judge execution:\n" + judge
-                if judge
-                else self._search_latest(("judge", "feedback", "verdict"), "judge result")
+            detail = self._latest(
+                _is_judge, "Latest judge result", "No judge result has been recorded yet."
             )
             answer = self._status_answer(question, detail)
         elif any(word in query for word in ("benchmark", "performance", "metric", "latest result")):
-            detail = self._search_latest(
-                ("benchmark", "metric", "latency", "throughput"), "benchmark result"
+            detail = self._latest(
+                _is_benchmark,
+                "Latest benchmark result",
+                "No benchmark result has been recorded yet.",
             )
             answer = self._status_answer(question, detail)
         else:
@@ -128,73 +224,35 @@ class RunInspector:
             if match:
                 answer = self._status_answer(question, self.round_detail(int(match.group(1))))
             elif "previous" in query or "last round" in query:
-                current = re.search(
-                    r"(?i)(?:round|iter(?:ation)?)\D*(\d+)", self.integration.current_round or ""
+                number = self._previous_round_number()
+                detail = (
+                    "No previous round has been recorded yet."
+                    if number is None
+                    else self.round_detail(number)
                 )
-                number = int(current.group(1)) if current else self._latest_round_number()
-                if number:
-                    answer = self._status_answer(question, self.round_detail(max(1, number - 1)))
+                answer = self._status_answer(question, detail)
         return answer
 
     def round_detail(self, number: int) -> str:
-        """Return persisted history excerpts matching one round number."""
-        pattern = re.compile(rf"(?i)\b(?:round(?:_number|_idx)?|iter(?:ation)?)\b\D*{number}\b")
-        chunks = []
-        for document in self._history_documents():
-            lines = document.text.splitlines()
-            indexes = [i for i, line in enumerate(lines) if pattern.search(line)]
-            if indexes:
-                start = max(0, indexes[-1] - 2)
-                chunks.append(f"--- {document.name} ---\n" + "\n".join(lines[start : start + 80]))
-        return "\n\n".join(chunks) or f"No persisted detail found for round {number}."
+        """Return the typed outcomes recorded for one round number."""
+        lines = [
+            text
+            for event in self.integration.read_history_events()
+            if event.type in _DETAIL_EVENT_TYPES
+            and _round_number(event.round_label) == number
+            and (text := _format_typed(event)) is not None
+        ]
+        return "\n\n".join(lines) or f"No recorded events found for round {number}."
 
     def _status_answer(self, question: str, answer: str) -> str:
         self.integration.record(EventType.STATUS_QUERY, question)
         return answer
 
-    def _history_documents(self) -> list[_HistoryDocument]:
-        documents: list[_HistoryDocument] = []
-        attached_run = self.integration.attached_run
-        if attached_run is not None:
-            documents.extend(
-                _HistoryDocument(
-                    name=item.relative_path.name,
-                    text=item.contents.decode("utf-8", errors="replace"),
-                )
-                for item in attached_run.history_documents()
-                if item.relative_path.suffix in {".json", ".jsonl", ".log", ".md", ".txt"}
-            )
-        log_dir = self.integration.log_dir
-        latest = read_latest_run_log(log_dir) if log_dir is not None else None
-        if latest is not None:
-            documents.append(_HistoryDocument(name=latest.name, text=latest.text))
-        return documents
-
-    def _search_latest(self, terms: tuple[str, ...], label: str) -> str:
-        for document in reversed(self._history_documents()):
-            lines = document.text.splitlines()
-            hits = [
-                i for i, line in enumerate(lines) if any(term in line.lower() for term in terms)
-            ]
-            if hits:
-                start = max(0, hits[-1] - 8)
-                return f"Latest {label} ({document.name}):\n" + "\n".join(
-                    lines[start : hits[-1] + 12]
-                )
-        return f"No {label} has been persisted yet."
-
-    def _latest_execution(
-        self, *, status: EventStatus | None = None, agent_kind: str | None = None
-    ) -> str | None:
-        for event in reversed(self.integration.read_events()):
-            if event.type is not EventType.AGENT_EXECUTION_FINISHED:
-                continue
-            if status is not None and event.status is not status:
-                continue
-            if agent_kind is not None and event.agent_kind != agent_kind:
-                continue
-            return self._format_event(event)
-        return None
+    def _latest(self, wanted: Callable[[RunEvent], bool], title: str, missing: str) -> str:
+        for event in reversed(self.integration.read_history_events()):
+            if wanted(event) and (text := _format_typed(event)) is not None:
+                return f"{title}:\n{text}"
+        return missing
 
     def _latest_configuration_failure(self) -> str | None:
         for event in reversed(self.integration.read_history_events()):
@@ -209,13 +267,15 @@ class RunInspector:
             return answer
         return None
 
-    def _latest_round_number(self) -> int | None:
-        numbers = []
-        pattern = re.compile(r"(?i)(?:round|iter(?:ation)?)\D*(\d+)")
-        for document in self._history_documents():
-            numbers.extend(int(match.group(1)) for match in pattern.finditer(document.text))
-        return max(numbers) if numbers else None
-
-    @staticmethod
-    def _format_event(event: RunEvent) -> str:
-        return json.dumps(event.model_dump(mode="json"), indent=2, ensure_ascii=False)
+    def _previous_round_number(self) -> int | None:
+        """The round before the current one, else the latest round that finished."""
+        current = _round_number(self.integration.current_round)
+        if current is not None:
+            return current - 1 if current > 1 else None
+        finished = [
+            number
+            for event in self.integration.read_history_events()
+            if event.type is EventType.ROUND_FINISHED
+            and (number := _round_number(event.round_label)) is not None
+        ]
+        return max(finished) if finished else None

@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_sim.api import Processes
+from vs_sim.api import DISCARD
 
 
 class LinuxProfilerTool(StrEnum):
@@ -103,7 +104,7 @@ class _TextRun:
 
 def _run_text(processes: Processes, command: list[str], *, timeout: float | None) -> _TextRun:
     """Run ``command`` to completion; a command that outlives ``timeout`` raises ``TimeoutError``."""
-    match processes.run(ProcessSpec(tuple(command)), timeout=timeout):
+    match processes.run(ProcessSpec(tuple(command)), timeout=timeout, output=DISCARD):
         case ProcessOutcome(returncode=returncode, stdout=stdout, stderr=stderr):
             return _TextRun(
                 returncode,

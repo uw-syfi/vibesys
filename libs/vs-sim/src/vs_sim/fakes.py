@@ -8,11 +8,12 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from vs_sim.concurrency import WorkerStartRefusedError
 from vs_sim.gate import arrival
 from vs_sim.loopback_http import HttpReply
+from vs_sim.output import OutputStream
 from vs_sim.processes import (
     ForegroundChild,
-    OutputStream,
     PipedProcess,
     ProcessGroupUnreaped,
     ProcessOutcome,
@@ -24,12 +25,67 @@ from vs_sim.processes import (
 from vs_sim.states import Changes, wait_for_state
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Coroutine, Mapping, Sequence
     from pathlib import Path
 
     from vs_sim.clock import Sleeper
+    from vs_sim.concurrency import Condition, Event, Lock, ThreadLocal, Threads, Worker
+    from vs_sim.output import OutputSink
     from vs_sim.probes import ProbeResult
     from vs_sim.processes import ProcessRun
+
+
+class RefusingThreads:
+    """A Threads Fake that delegates every operation except scripted worker starts.
+
+    ``refusals`` maps a worker name to how many matching starts should fail. The
+    wrapper leaves the delegate's scheduling and synchronization semantics intact.
+    """
+
+    def __init__(self, delegate: Threads, refusals: Mapping[str, int]) -> None:
+        """Wrap *delegate* and script the positive refusal counts in *refusals*."""
+        self._delegate = delegate
+        self._remaining = {name: count for name, count in refusals.items() if count > 0}
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        """Refuse a scripted start, otherwise spawn it through the delegate."""
+        remaining = self._remaining.get(name, 0)
+        if remaining > 0:
+            self._remaining[name] = remaining - 1
+            raise WorkerStartRefusedError(name)
+        return self._delegate.spawn(target, name=name, daemon=daemon)
+
+    def lock(self) -> Lock:
+        """Return a lock from the delegate."""
+        return self._delegate.lock()
+
+    def rlock(self) -> Lock:
+        """Return a reentrant lock from the delegate."""
+        return self._delegate.rlock()
+
+    def condition(self, lock: Lock | None = None) -> Condition:
+        """Return a condition from the delegate."""
+        return self._delegate.condition(lock)
+
+    def event(self) -> Event:
+        """Return an event from the delegate."""
+        return self._delegate.event()
+
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        """Return thread-local storage from the delegate."""
+        return self._delegate.local(initial)
+
+    def sleep(self, seconds: float) -> None:
+        """Sleep on the delegate's timeline."""
+        self._delegate.sleep(seconds)
+
+    def now(self) -> float:
+        """Read the delegate's monotonic timeline."""
+        return self._delegate.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        """Run an async entrypoint through the delegate."""
+        return self._delegate.run_async(main)
 
 
 class InlineBlockingRunner:
@@ -268,7 +324,8 @@ class FakeProcesses:
     commands took. A command whose ``duration_s`` exceeds the timeout, or one that
     ``runs_until_signalled``, times out as the real group would after being killed, and one
     that ``survives_kill`` is left unreaped. A never-ending command without a timeout would
-    hang the caller, so the Fake refuses it.
+    hang the caller, so the Fake refuses it. Everything a scripted command writes reaches
+    ``output`` before :meth:`run` returns, as the real run's chunks do.
     """
 
     script: Callable[[ProcessSpec], ProcessScript]
@@ -278,12 +335,14 @@ class FakeProcesses:
     first_pid: int = 1000
     """The process ID of the first run; each later run gets the next one."""
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Record ``spec``, let its running time pass, and end it the way its script says."""
         pid = self.first_pid + len(self.ran)
         self.ran.append(spec)
         script = self.script(spec)
         stdout = script.stdout + (spec.input if script.echo_input else b"")
+        output.write(OutputStream.STDOUT, stdout)
+        output.write(OutputStream.STDERR, script.stderr)
         if too_large := _too_large(spec.max_output_bytes, stdout, script.stderr):
             return too_large
         endless = script.runs_until_signalled
@@ -307,6 +366,23 @@ class ProcessStartRefusedError(AssertionError):
     """A test that runs no process started one."""
 
 
+_REFUSED: list[str] = []
+"""Every refused start since the last :func:`refused_starts` call, as a description."""
+
+
+def refused_starts() -> tuple[str, ...]:
+    """The process starts that refusing Fakes turned away since the last call.
+
+    A refusal raises, but product code that catches ``Exception`` swallows the raise, so
+    the raise alone cannot fail a test. The test harness calls this after each test and
+    fails the test if anything was refused. A test that checks a refusal itself calls this
+    to take what it provoked.
+    """
+    refused = tuple(_REFUSED)
+    _REFUSED.clear()
+    return refused
+
+
 class RefusingProcesses:
     """Starts nothing: any run fails the test, naming the command it tried to run.
 
@@ -314,10 +390,11 @@ class RefusingProcesses:
     A test that does need a command to run scripts it with :class:`FakeProcesses` instead.
     """
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Fail: this test runs no process."""
-        del timeout
+        del timeout, output
         message = f"this test runs no process, but ran {' '.join(spec.argv)}"
+        _REFUSED.append(message)
         raise ProcessStartRefusedError(message)
 
 
@@ -337,6 +414,7 @@ class PipedStart:
 
 def _refuse_piped_start(request: PipedStart) -> PipedProcess:
     message = f"this test starts no piped process, but {request.argv[0]!r} was started"
+    _REFUSED.append(message)
     raise ProcessStartRefusedError(message)
 
 
@@ -487,8 +565,8 @@ class ScriptedStreamingCommand:
     """A :class:`~vs_sim.streaming.StreamingCommand` whose commands come from a script.
 
     ``script`` maps an argument vector and working directory to what that command does,
-    or to ``None`` for a program that does not exist. Like the real command, each stderr
-    line reaches the callback on the calling thread before :meth:`run` returns or raises.
+    or to ``None`` for a program that does not exist. Like the real command, everything it
+    writes reaches ``output`` before :meth:`run` returns or raises.
     """
 
     script: Callable[[tuple[str, ...], Path], StreamedRun | None]
@@ -501,7 +579,7 @@ class ScriptedStreamingCommand:
         *,
         cwd: Path,
         timeout_seconds: float,
-        on_stderr_line: Callable[[str], None],
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         """Record the call and play the scripted command."""
         command = tuple(argv)
@@ -509,9 +587,10 @@ class ScriptedStreamingCommand:
         scripted = self.script(command, cwd)
         if scripted is None:
             raise FileNotFoundError(2, "No such file or directory", command[0])
-        for line in scripted.stderr_lines:
-            on_stderr_line(line)
         stderr = "".join(f"{line}\n" for line in scripted.stderr_lines)
+        for line in scripted.stderr_lines:
+            output.write(OutputStream.STDERR, f"{line}\n".encode())
+        output.write(OutputStream.STDOUT, scripted.stdout.encode())
         if scripted.blocks:
             raise subprocess.TimeoutExpired(command, timeout_seconds, scripted.stdout, stderr)
         return subprocess.CompletedProcess(command, scripted.returncode, scripted.stdout, stderr)

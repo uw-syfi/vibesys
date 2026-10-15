@@ -315,6 +315,18 @@ def test_setting_a_latch_twice_is_a_bug(begin: Begin) -> None:
         begin(twice)
 
 
+def test_two_latch_keys_with_one_name_are_refused_whatever_their_types(begin: Begin) -> None:
+    """A second key under a name in use could hold another type: one cell would mix them."""
+    clashing = core.LatchKey[str](LEARNED.name)
+
+    async def mixes(ctx: core.Flow, _config: Config) -> None:
+        ctx.latch(LEARNED).set(1)
+        await ctx.latch(clashing)
+
+    with pytest.raises(core.ContractError, match="another latch key has this name"):
+        begin(mixes)
+
+
 # -- stops, resources ---------------------------------------------------------------------------
 
 

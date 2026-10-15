@@ -143,6 +143,17 @@ const SSH_FAILED = 255;
 const AUTH_FAILURE =
   /Permission denied|Too many authentication failures|Authentication failed|Host key verification failed/;
 
+/**
+ * The host refused a new channel because this app's other channels to it already spent its session
+ * ceiling (sshd's `MaxSessions`, default 10: one control channel plus up to three per attached run,
+ * `docs/contributing/desktop-connection.md`). `mux_client_request_session: ... Session open refused
+ * by peer` is the OpenSSH mux client's own wording for exactly this refusal over the shared
+ * `ControlMaster`; `administratively prohibited` is the server-side channel-open-failure reason the
+ * same refusal can surface as. Neither is a link problem a retry fixes: the link and the host are
+ * both fine, only this app's own channel count against this one host is not.
+ */
+const SESSION_CAPACITY_REFUSED = /session request failed|administratively prohibited/i;
+
 interface EstablishWaiter {
   readonly interactive: boolean;
 }
@@ -603,9 +614,18 @@ export class SshLink implements Link {
     return {code: await process.exit, stderr};
   }
 
-  /** An ssh status 255: the host refused the user or an untrusted host key (`auth`), or `link`. */
+  /**
+   * An ssh status 255: the host refused the user or an untrusted host key (`auth`), this app's own
+   * channel count against the host spent its session ceiling (`capacity`), or `link`.
+   */
   #sshError(stderr: string): ConnectionError {
     const alias = this.#options.alias;
+    if (SESSION_CAPACITY_REFUSED.test(stderr)) {
+      return new ConnectionError(
+        'capacity',
+        `too many runs are already open against ${alias}; close one or wait, then retry (${lastLine(stderr)})`,
+      );
+    }
     if (AUTH_FAILURE.test(stderr))
       return new ConnectionError('auth', `ssh ${alias}: ${lastLine(stderr)}`);
     return new ConnectionError('link', `the connection to ${alias} is down: ${lastLine(stderr)}`);

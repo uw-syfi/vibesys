@@ -6,9 +6,16 @@
 
 import type {HostKey} from '@vibesys/hosts';
 import {settled, type WelcomeInspection, type WelcomeResult} from '@vibesys/ipc';
-import {actorStore} from '@vibesys/machine';
+import {
+  type LogListOutcome,
+  type LogReadInput,
+  type LogReadOutcome,
+  type LogTransport,
+  logFollowMachineFor,
+} from '@vibesys/logs';
+import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {createStore, type Store} from '@vibesys/store';
-import {createActor, fromPromise} from 'xstate';
+import {type AnyActorRef, createActor, fromPromise, type Subscription} from 'xstate';
 import {
   COMPLETION_EMPTY,
   type CompletionAction,
@@ -20,12 +27,17 @@ import {
   type HostsBridge,
   hostInitial,
   hostStep,
-  type InspectorAction,
   type InspectorCopy,
   type InspectorInspect,
-  type InspectorState,
+  type InspectorLogsEvent,
+  type InspectorLogsTarget,
+  type InspectorSheetAction,
+  type InspectorSheetState,
+  inspectorLogsMachine,
+  inspectorLogsView,
   inspectorMachine,
   inspectorView,
+  type LogFollowerView,
   PICKER_CLOSED,
   type PickerAction,
   type PickerState,
@@ -44,7 +56,7 @@ function inspect(
   signal.addEventListener('abort', cancel, {once: true});
   let answer: Promise<WelcomeResult<WelcomeInspection>>;
   try {
-    answer = bridge.inspect(request.host, request.instance, request.includeLog, request.token);
+    answer = bridge.inspect(request.host, request.instance, request.token);
   } catch (error) {
     answer = Promise.reject(error);
   }
@@ -70,11 +82,57 @@ async function copyValue(
   }
 }
 
-/** The detached-run inspector store over the host bridge and an injected clipboard writer. */
+type LogsAnswer = LogListOutcome | LogReadOutcome;
+
+function isOutcome(value: unknown): value is LogsAnswer {
+  return (
+    typeof value === 'object' && value !== null && typeof Reflect.get(value, 'ok') === 'boolean'
+  );
+}
+
+/**
+ * Ask the main process one logs question about `target`, resolving a refusal as a `transport`
+ * failure. An IPC request cannot be withdrawn, so an aborted request rejects at once and its late
+ * answer is dropped; the main process's own read ends by its wait bound or when the logs are
+ * released.
+ */
+function askLogs<T extends LogsAnswer>(
+  ask: () => Promise<WelcomeResult<LogsAnswer>>,
+  signal: AbortSignal,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const aborted = (): void => reject(signal.reason);
+    if (signal.aborted) {
+      aborted();
+      return;
+    }
+    signal.addEventListener('abort', aborted, {once: true});
+    const failed = (message: string): T =>
+      ({ok: false, failure: {code: 'transport', message}}) as T;
+    void settled(new Promise<WelcomeResult<LogsAnswer>>(answer => answer(ask()))).then(result => {
+      signal.removeEventListener('abort', aborted);
+      if (!result.ok) resolve(failed(result.error));
+      else resolve(isOutcome(result.value) ? (result.value as T) : failed('no log answer'));
+    });
+  });
+}
+
+function followerView(ref: AnyActorRef | undefined): LogFollowerView | null {
+  if (ref === undefined) return null;
+  const {context} = ref.getSnapshot() as {context: LogFollowerView};
+  return {view: context.view, failure: context.failure};
+}
+
+/**
+ * The detached-run inspector store over the host bridge, an injected clipboard writer, and the
+ * clock its logs retry and follow on. Opening the sheet also opens its logs, `refresh` re-lists
+ * them, and closing it stops every log read and lets the host's logs channel go.
+ */
 export function createInspectorStore(
   bridge: HostsBridge,
   copy: (value: string) => Promise<void>,
-): Store<InspectorState, InspectorAction> {
+  schedule: ScheduleTimeout,
+): Store<InspectorSheetState, InspectorSheetAction> {
   const machine = inspectorMachine.provide({
     actors: {
       inspect: fromPromise<WelcomeResult<WelcomeInspection>, InspectorInspect>(({input, signal}) =>
@@ -83,8 +141,98 @@ export function createInspectorStore(
       copy: fromPromise<WelcomeResult<null>, InspectorCopy>(({input}) => copyValue(copy, input)),
     },
   });
-  // The actor lives as long as the window that renders it, so it is intentionally never stopped.
-  return actorStore(createActor(machine).start(), inspectorView);
+  // A read goes to the host of the run on screen: opening another run restarts the follower.
+  let target: InspectorLogsTarget | null = null;
+  const transport: LogTransport = {
+    read: (input: LogReadInput, signal) => {
+      const host = target?.host;
+      if (host === undefined) return Promise.reject(new Error('no run is inspected'));
+      return askLogs<LogReadOutcome>(
+        () => bridge.logs(host, input.instance_id, {kind: 'read', read: input}),
+        signal as AbortSignal,
+      );
+    },
+  };
+  const logsMachine = inspectorLogsMachine.provide({
+    actors: {
+      list: fromPromise<LogListOutcome, InspectorLogsTarget>(({input, signal}) =>
+        askLogs<LogListOutcome>(
+          () => bridge.logs(input.host, input.instanceId, {kind: 'list'}),
+          signal,
+        ),
+      ),
+      follow: logFollowMachineFor(transport),
+    },
+  });
+  // Both actors live as long as the window that renders them, so they are never stopped.
+  const inspector = createActor(machine).start();
+  const logs = createActor(logsMachine, {input: {}, clock: clockFrom(schedule)});
+  const listeners = new Set<() => void>();
+  let follower: AnyActorRef | undefined;
+  let followerSubscription: Subscription | null = null;
+  let seen: readonly unknown[] = [];
+  let state: InspectorSheetState = {
+    ...inspectorView(inspector.getSnapshot()),
+    logs: inspectorLogsView(logs.getSnapshot(), null),
+  };
+
+  // Publish only a change: an actor notifies on every event, also one that changed nothing.
+  const publish = (): void => {
+    const now = [inspector.getSnapshot(), logs.getSnapshot(), follower?.getSnapshot()];
+    if (now.every((snapshot, index) => snapshot === seen[index])) return;
+    seen = now;
+    state = {
+      ...inspectorView(inspector.getSnapshot()),
+      logs: inspectorLogsView(logs.getSnapshot(), followerView(follower)),
+    };
+    for (const listener of [...listeners]) listener();
+  };
+  inspector.subscribe(publish);
+  logs.subscribe(snapshot => {
+    const child = snapshot.children['follow'] as AnyActorRef | undefined;
+    if (child !== follower) {
+      followerSubscription?.unsubscribe();
+      follower = child;
+      followerSubscription = child?.subscribe(publish) ?? null;
+    }
+    publish();
+  });
+  logs.start();
+
+  const sendLogs = (event: InspectorLogsEvent): void => logs.send(event);
+  return {
+    getState: () => state,
+    subscribe: listener => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    dispatch: action => {
+      switch (action.type) {
+        case 'select-log':
+          sendLogs({type: 'select', streamId: action.streamId});
+          return;
+        case 'open':
+          inspector.send(action);
+          // Set before the logs open, so the follower's first read already has its host.
+          target = {host: action.target.host, instanceId: action.target.instanceId};
+          sendLogs({type: 'open', target});
+          return;
+        case 'close':
+          inspector.send(action);
+          sendLogs({type: 'close'});
+          target = null;
+          void settled(bridge.releaseLogs());
+          return;
+        case 'refresh':
+          inspector.send(action);
+          sendLogs({type: 'refresh'});
+          return;
+        case 'copy':
+          inspector.send(action);
+          return;
+      }
+    },
+  };
 }
 
 /** The host panel's store, showing `firstHost` until told otherwise. */

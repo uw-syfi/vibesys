@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
+from pydantic import TypeAdapter
 from tests.conformance.frame_matching import assert_frame_matches
 from tests.conformance.replay import ScenarioConnection, load_scenario, run_steps, runner_group
 from tests.server.support import (
@@ -19,6 +20,7 @@ from tests.server.support import (
 )
 from websockets.sync.client import ClientConnection, connect
 
+from server.api.protocol import ActiveExecutions
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import WebSocketGateway, WebSocketLimits
@@ -157,6 +159,45 @@ def test_shared_bootstrap_scenarios_run_against_each_transport(
             assert batch["history_after_sequence"] == parts.api.latest_sequence - 50
         else:
             assert batch["history_after_sequence"] == 0
+    finally:
+        parts.close()
+
+
+@pytest.mark.parametrize("scenario_name", runner_group("server", "active-checkpoint"))
+@pytest.mark.parametrize("transport", ["unix", "websocket"])
+def test_shared_active_checkpoint_scenario_runs_against_each_transport(
+    tmp_path: Path,
+    socket_dir: Path,
+    scenario_name: str,
+    transport: str,
+) -> None:
+    """Both transports reconstruct the same oversized authoritative list."""
+    scenario = load_scenario(scenario_name)
+    assert transport in scenario["transports"]
+    parts = build_server_parts(tmp_path / "logs")
+    assignment = "x" * 1_100_000
+    execution = parts.start_execution("implementer", "round-1", assignment)
+    try:
+        with _running_connection(
+            transport, parts, socket_dir / "active-checkpoint.sock"
+        ) as connection:
+            received = run_steps(connection, scenario)
+            event_batch, first_chunk = received[-2:]
+            chunks = [first_chunk]
+            while len(chunks) < first_chunk["chunk_count"]:
+                chunks.append(connection.receive())
+
+        checkpoint_id = first_chunk["checkpoint_id"]
+        assert event_batch["active_executions_checkpoint_id"] == checkpoint_id
+        assert [chunk["chunk_index"] for chunk in chunks] == list(range(len(chunks)))
+        assert {chunk["chunk_count"] for chunk in chunks} == {len(chunks)}
+        assert {chunk["checkpoint_id"] for chunk in chunks} == {checkpoint_id}
+        active = TypeAdapter(ActiveExecutions).validate_json(
+            "".join(chunk["payload"] for chunk in chunks)
+        )
+        assert [(item.execution_id, item.assignment) for item in active] == [
+            (execution.execution_id, assignment)
+        ]
     finally:
         parts.close()
 

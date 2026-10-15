@@ -49,7 +49,7 @@ async def workstream(ctx: Flow, w: WorkstreamStart) -> WorkstreamDone:
                 return WorkstreamDone.not_opened(w, failure_of(opened.failed, None))
             work.workspace = opened
             closing = await do_work(ctx, w, opened, work)
-            if closing.candidate is not None:
+            if closing.scored:
                 await the_input(ctx, w, work)  # a candidate is scored against it
             keep(ctx, w, opened, closing, work.baseline)
     except Stopped:

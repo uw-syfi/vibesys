@@ -304,14 +304,7 @@ export class ServerClient {
       socket.once('error', error => disconnect(transportFailure(error)));
       onPeerEnd(socket, () => {
         this.#secondarySockets.delete(socket);
-        disconnect(
-          new BackendClientError(
-            'disconnected',
-            subscribed
-              ? 'Server event stream disconnected'
-              : 'Server event stream disconnected before subscription',
-          ),
-        );
+        disconnect(finishFraming(frames) ?? subscriptionEnded(subscribed));
       });
     });
   }
@@ -448,9 +441,14 @@ export class ServerClient {
       }
     });
     socket.on('error', error => handlers.onDrop(transportFailure(error)));
-    onPeerEnd(socket, () =>
-      handlers.onDrop(new BackendClientError('disconnected', 'Server disconnected')),
-    );
+    onPeerEnd(socket, () => {
+      const framing = finishFraming(frames);
+      if (framing === null) {
+        handlers.onDrop(new BackendClientError('disconnected', 'Server disconnected'));
+      } else {
+        handlers.onFault(framing);
+      }
+    });
     return {
       send: frame =>
         socket.write(`${frame}\n`, error => {
@@ -579,7 +577,7 @@ export class ServerClient {
         }
       });
       socket.once('error', fail);
-      onPeerEnd(socket, disconnected);
+      onPeerEnd(socket, () => fail(finishFraming(frames) ?? chatEnded()));
     });
   }
 }
@@ -697,6 +695,29 @@ function frameChunk(
     onFramingError(streamFailure(error));
     return null;
   }
+}
+
+/** Finalize one newline-framed peer stream without throwing from its terminal event. */
+function finishFraming(framer: NewlineFramer): BackendClientError | null {
+  try {
+    framer.finish();
+    return null;
+  } catch (error) {
+    return streamFailure(error);
+  }
+}
+
+function subscriptionEnded(subscribed: boolean): BackendClientError {
+  return new BackendClientError(
+    'disconnected',
+    subscribed
+      ? 'Server event stream disconnected'
+      : 'Server event stream disconnected before subscription',
+  );
+}
+
+function chatEnded(): BackendClientError {
+  return new BackendClientError('disconnected', 'Server disconnected during chat');
 }
 
 function delay(ms: number, scheduleTimeout: ScheduleTimeout): Promise<void> {

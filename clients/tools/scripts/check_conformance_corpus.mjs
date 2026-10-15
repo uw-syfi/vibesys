@@ -16,7 +16,7 @@ import {fileURLToPath} from 'node:url';
 const SCHEMA_RELATIVE = 'libs/contracts/src/generated/protocol.schema.json';
 const HELPER_SCHEMA_RELATIVE = 'libs/contracts/src/generated/host-helper.schema.json';
 const HELPER_PROTOCOL = 'host-helper';
-const HELPER_ROLES = new Set(['control', 'run']);
+const HELPER_ROLES = new Set(['control', 'run', 'logs']);
 const HELPER_TRANSPORTS = new Set(['stdio']);
 const CONTRACT_RELATIVE = 'docs/contributing/wire-protocol.md';
 const CORPUS_RELATIVE = 'tests/conformance';
@@ -254,7 +254,8 @@ function helperStepErrors(step, index, label, helper) {
 
 function helperShapeErrors(data, label) {
   const errors = [];
-  if (!HELPER_ROLES.has(data?.role)) errors.push(`${label}: "role" must be one of control, run`);
+  if (!HELPER_ROLES.has(data?.role))
+    errors.push(`${label}: "role" must be one of control, run, logs`);
   const transports = Array.isArray(data?.transports) ? data.transports : [];
   if (transports.length === 0 || !transports.every(transport => HELPER_TRANSPORTS.has(transport))) {
     errors.push(`${label}: "transports" must be ["stdio"]`);

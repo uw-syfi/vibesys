@@ -99,7 +99,8 @@ class _Run:
             self.control.request_stop(StopMode.DRAIN)
 
     def play(self, client: FakeAgentClient, prompts: tuple[str, ...]) -> list[str]:
-        threads = SimThreads()
+        threads = client.threads
+        assert isinstance(threads, SimThreads)
         control = create_run_control_channel(
             FakeRunControlEventSink(on_transition=self._on_transition), threads=threads
         )

@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_sandbox.api.slurm import AgentGpuConfig, AgentGpuLauncher, GpuCommand, GpuJobRequest
-from vs_sim.api import ProbeResult
+from vs_sim.api import OsThreads, ProbeResult, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import ScriptedProbe
 
 if TYPE_CHECKING:
@@ -51,6 +51,8 @@ signal.pause()
         ),
         (sys.executable, "-c", wrapper),
         probe=probe,
+        processes=SubprocessPipedProcessLauncher(),
+        threads=OsThreads(),
     )
     cancel = threading.Event()
     output = bytearray()

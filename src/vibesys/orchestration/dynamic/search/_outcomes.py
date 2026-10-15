@@ -182,6 +182,15 @@ class Closing(Value):
         return None if self.result is None else self.result.candidate.revision
 
     @property
+    def scored(self) -> bool:
+        """Whether settling it compares a candidate with the input, so needs its measurement.
+
+        A closing with a failure cause is ineligible however its candidate measured, so it
+        settles at once and frees its slot, without waiting for the input's measurement.
+        """
+        return self.candidate is not None and self.cause is None
+
+    @property
     def review_passed(self) -> bool | None:
         """The judge's verdict, or None when no review ran."""
         verdict = None if self.result is None else self.result.verdict
@@ -311,7 +320,7 @@ def assertion(
 
     A profile workstream measures a revision without proposing one, so it settles as ineligible
     and discarded. A candidate is eligible when it passed the task's gates and beats the input,
-    so a closing that proposes a candidate needs the input's measurement (``baseline``).
+    so a closing that is scored (`Closing.scored`) needs the input's measurement (``baseline``).
     """
     if w.plan.kind is WorkKind.PROFILE:
         profile = reading_of(closing.readings, EvidenceKind.PROFILING)
@@ -322,7 +331,7 @@ def assertion(
             outcome="failed" if closing.cause is not None else "succeeded",
             candidate=None,
         )
-    if closing.candidate is not None and baseline is None:
+    if closing.scored and baseline is None:
         message = "a candidate is scored only once the input's measurement is known"
         raise ValueError(message)
     space = space_of(terms)
@@ -372,6 +381,7 @@ def failure_of(event: Failed, role: AgentName | None) -> Failure:  # noqa: PLR09
             return Failure(kind=FailureKind.TURN_FAILED, role=role, turn_failure=event.turn_failure)
         case (
             FailureReason.TIMED_OUT
+            | FailureReason.QUEUE_BUDGET_SPENT
             | FailureReason.WORKSPACE_CLOSED
             | FailureReason.OWNER_GONE
             | FailureReason.LOST

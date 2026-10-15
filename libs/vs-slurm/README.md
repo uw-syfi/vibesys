@@ -102,10 +102,11 @@ SSH, so a job gets the environment Slurm's defaults give it.
 
 The local transport runs whatever `shell_command` names with the host's
 privileges, so it is for the host's own trusted code only. VibeSys therefore
-does not offer it to the sandboxed agent: the host-side transport broker that
-lets an agent container make ad hoc Slurm calls (used by the ROCprof capture
-tool) accepts only the SSH transport, and a run configured with the local
-transport simply has no such broker. Gates still run through the full job path.
+does not expose it through the editor's host-side transport broker: doing so
+would turn a remote-capture capability into arbitrary host shell execution.
+An explicit ROCprof selection is rejected during profiler validation, while
+`--profiler auto` selects no profiler. Gates still run through the full job
+path.
 
 Sites whose gateway is not reachable through OpenSSH can provide the advanced
 versioned JSON connector transport:
@@ -119,6 +120,23 @@ command = ["site-slurm-connector"]
 The connector receives one JSON request on standard input and returns one JSON
 response on standard output. This escape hatch is intended for operator-managed
 gateways; normal SSH-based clusters do not need it.
+
+The ROCprof server reaches either SSH or connector transports through the same
+host-owned broker. For a connector, the broker runs only the exact configured
+command and accepts only the version-1 request schema. Every transfer's local
+path must remain under the run-owned roots and every remote path under
+`remote_workspace_root/name`; unknown keys, operations, versions, and
+non-normalized paths are refused before the connector starts. Local path
+spellings containing `.` or `..` components are invalid. The broker walks a
+local path from its authorized root without following links and gives the
+transport only a private staged snapshot; successful downloads are published
+back through the same descriptor-rooted boundary. Staging retains regular-file
+and directory modes and modification times, including executable bits.
+Replacing a checked path can therefore neither change an upload nor redirect a download. Connector
+credentials remain owned by the host process and are not mounted into the
+editor container. A complete connector response, including its JSON envelope,
+is limited to 1 MiB so the two brokered process streams always fit the broker's
+bounded response frame.
 
 ## Recoverable job lifecycle
 

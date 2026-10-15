@@ -15,7 +15,6 @@ Python's ``os`` module does not expose it.
 from __future__ import annotations
 
 import errno
-import itertools
 import os
 import shutil
 import stat
@@ -37,9 +36,14 @@ if TYPE_CHECKING:
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
+# No ``O_TRUNC``: the file is checked to be regular before it is truncated.
+_OVERWRITE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _TEMPORARY_ATTEMPTS = 64
 _READ_CHUNK_BYTES = 1024 * 1024
-_temporary_names = itertools.count()
+
+
+class TreeLimitError(ValueError):
+    """A walk found more entries than its caller allowed."""
 
 
 class WorkspacePathError(ValueError):
@@ -157,14 +161,17 @@ class WorkspaceTree:
                 effects=_DirectoryAtomicWrite(parent, parts[-1]),
             )
 
-    def files_below(self, relative: str) -> tuple[str, ...]:
+    def files_below(self, relative: str, *, limit: int | None = None) -> tuple[str, ...]:
         """The regular files below the directory ``relative``, sorted by components.
 
         Each is named relative to the tree root. Raises ``WorkspacePathError`` for a
-        symlink found below it; other entries (FIFOs, sockets) are skipped.
+        symlink found below it; other entries (FIFOs, sockets) are skipped. With a
+        ``limit``, raises ``TreeLimitError`` as soon as the walk finds more than
+        ``limit`` files or more than ``limit`` directories, without listing the rest.
         """
         pending = [relative_parts(relative)]
         files: list[tuple[str, ...]] = []
+        directories = 0
         while pending:
             parts = pending.pop()
             with self._directory(parts, create=False) as directory, os.scandir(directory) as it:
@@ -175,8 +182,12 @@ class WorkspaceTree:
                         raise WorkspacePathError(message)
                     if entry.is_dir(follow_symlinks=False):
                         pending.append(child)
+                        directories += 1
                     elif entry.is_file(follow_symlinks=False):
                         files.append(child)
+                    if limit is not None and max(len(files), directories) > limit:
+                        message = f"{relative} holds more than {limit} files or directories"
+                        raise TreeLimitError(message)
         return tuple(PurePosixPath(*parts).as_posix() for parts in sorted(files))
 
     def make_directories(self, relative: str) -> None:
@@ -202,6 +213,23 @@ class WorkspaceTree:
                     os.unlink(parts[-1], dir_fd=parent)
         except (FileNotFoundError, NotADirectoryError):
             return
+
+    def overwrite(self, relative: str, contents: bytes) -> None:
+        """Write ``contents`` into the file at ``relative`` in place, creating it if missing.
+
+        Unlike :meth:`write_bytes` the file keeps its inode, for a reader that holds it
+        open. Missing directories are created. Raises ``WorkspacePathError`` for a symlink
+        and ``NotRegularFileError`` for anything but a regular file.
+        """
+        parts = _file_parts(relative)
+        with self._parent(parts, create=True) as parent:
+            descriptor = _open_component(parts[-1], _OVERWRITE_FLAGS, parent, relative)
+        with os.fdopen(descriptor, "wb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                message = f"{relative} is not a regular file"
+                raise NotRegularFileError(errno.EINVAL, message)
+            stream.truncate(0)
+            stream.write(contents)
 
     def symlink(self, relative: str, target: str) -> None:
         """Create the symlink ``relative`` with the contents ``target``; never followed here."""
@@ -232,6 +260,49 @@ class WorkspaceTree:
                     elif entry.is_dir(follow_symlinks=False):
                         pending.append(child)
         return tuple(PurePosixPath(*parts).as_posix() for parts in sorted(links))
+
+    def entries_named(
+        self,
+        name: str,
+        *,
+        limit: int,
+        below: str = "",
+        skip: Collection[str] = frozenset(),
+    ) -> tuple[str, ...]:
+        """Every entry of any kind called ``name`` below the directory ``below``, sorted.
+
+        Each is named relative to the tree root. No symlink is followed, and neither an
+        entry called ``name`` nor a directory in ``skip`` (root-relative) is entered.
+        Nothing is found when ``below`` is not a directory. A directory removed or
+        replaced while the walk runs is skipped, as if the walk had passed it a moment
+        later, and so is one the host cannot read, which Git cannot read either. Raises
+        ``TreeLimitError`` as soon as the walk has seen more than ``limit`` entries,
+        without looking at the rest.
+        """
+        pending: list[tuple[str, ...]] = [relative_parts(below)]
+        found: list[tuple[str, ...]] = []
+        seen = 0
+        while pending:
+            parts = pending.pop()
+            try:
+                with (
+                    self._directory(parts, create=False) as directory,
+                    os.scandir(directory) as it,
+                ):
+                    entries = [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in it]
+            except (FileNotFoundError, NotADirectoryError, PermissionError, WorkspacePathError):
+                continue
+            seen += len(entries)
+            if seen > limit:
+                message = f"the tree holds more than {limit} entries"
+                raise TreeLimitError(message)
+            for entry_name, is_directory in entries:
+                child = (*parts, entry_name)
+                if entry_name == name:
+                    found.append(child)
+                elif is_directory and PurePosixPath(*child).as_posix() not in skip:
+                    pending.append(child)
+        return tuple(PurePosixPath(*parts).as_posix() for parts in sorted(found))
 
     def read_link(self, relative: str) -> str:
         """The contents of the symlink ``relative``."""
@@ -355,10 +426,13 @@ def _copy_file(source: Path, directory: int, name: str) -> None:
             os.utime(writer.fileno(), ns=(status.st_atime_ns, status.st_mtime_ns))
 
 
-def _open_component(name: str, flags: int, directory: int, shown: str) -> int:
-    """Open one path component in ``directory``; a symlink there is refused."""
+def _open_component(name: str, flags: int, directory: int, shown: str, mode: int = 0o666) -> int:
+    """Open one path component in ``directory``; a symlink there is refused.
+
+    ``mode`` applies, under the umask, to a file ``O_CREAT`` creates.
+    """
     try:
-        return os.open(name, flags, dir_fd=directory)
+        return os.open(name, flags, mode, dir_fd=directory)
     except OSError as error:
         # ``O_NOFOLLOW`` refuses a symlink with ELOOP, or with ENOTDIR on Linux when
         # ``O_DIRECTORY`` is set too; either may also mean something else.
@@ -385,7 +459,8 @@ class _DirectoryAtomicWrite:
     def temporary(self, destination: Path) -> Iterator[tuple[Path, AtomicWriteStream]]:
         del destination
         for _ in range(_TEMPORARY_ATTEMPTS):
-            temporary = f".{self._name}.{next(_temporary_names)}.tmp"
+            # Unpredictable, so the agent cannot plant every name the host tries first.
+            temporary = f".{self._name}.{os.urandom(8).hex()}.tmp"
             try:
                 descriptor = os.open(temporary, _CREATE_FLAGS, 0o600, dir_fd=self._directory)
             except FileExistsError:

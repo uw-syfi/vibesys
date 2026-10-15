@@ -125,8 +125,11 @@ export class WelcomePageLifecycle<Page> {
       // Activation may report a synchronous load failure and exhaust recovery re-entrantly.
       return this.#current === successor ? 'recovered' : 'fatal';
     } catch {
-      this.#current = null;
-      if (replacement !== null) {
+      // Activation may have reported a synchronous loss before it threw. That nested
+      // transition already fenced and retired the successor, so only the frame that
+      // still owns the exact replacement may release it here.
+      if (replacement !== null && this.#current === replacement) {
+        this.#current = null;
         try {
           this.#effects.retire(replacement);
         } catch {

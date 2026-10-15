@@ -16,7 +16,8 @@
  *
  * Electron-free: the main process supplies the paths.
  */
-import {readFile, rename, unlink, writeFile} from 'node:fs/promises';
+import {randomUUID} from 'node:crypto';
+import {open, readFile, rename, unlink} from 'node:fs/promises';
 import {EMPTY_SETTINGS, parseSettings, type SettingsFile} from './host-settings.js';
 import {EMPTY_RECENT, parseRecent, type RecentFile} from './recent.js';
 
@@ -30,7 +31,8 @@ export interface SettingsStoreOptions {
 /** The filesystem operations needed to read and atomically replace settings files. */
 export interface SettingsFilesystem {
   readText(path: string): Promise<string>;
-  writePrivateText(path: string, text: string): Promise<void>;
+  /** Create a complete private regular file exclusively beside `target` and return its path. */
+  stagePrivateText(target: string, text: string): Promise<string>;
   remove(path: string): Promise<void>;
   replace(staging: string, target: string): Promise<void>;
 }
@@ -172,10 +174,42 @@ type TextRead =
 
 const NODE_SETTINGS_FILESYSTEM: SettingsFilesystem = {
   readText: path => readFile(path, 'utf8'),
-  writePrivateText: (path, text) => writeFile(path, text, {mode: 0o600}),
+  stagePrivateText: (target, text) => stagePrivateText(target, text, 0o600),
   remove: unlink,
   replace: rename,
 };
+
+const MAX_STAGING_ATTEMPTS = 8;
+
+/** Create a complete private regular file without ever opening an existing path. */
+async function stagePrivateText(target: string, text: string, mode: number): Promise<string> {
+  let collision: unknown;
+  for (let attempt = 0; attempt < MAX_STAGING_ATTEMPTS; attempt += 1) {
+    const staging = `${target}.${randomUUID()}.tmp`;
+    try {
+      await writeNewPrivateText(staging, text, mode);
+      return staging;
+    } catch (error) {
+      if (!hasCode(error, 'EEXIST')) throw error;
+      collision = error;
+    }
+  }
+  throw new Error(`could not create a private staging file beside ${target}`, {cause: collision});
+}
+
+async function writeNewPrivateText(path: string, text: string, mode: number): Promise<void> {
+  const file = await open(path, 'wx', mode);
+  try {
+    await file.writeFile(text);
+    // Creation mode is umask-sensitive; chmod the owned descriptor to make the contract exact.
+    await file.chmod(mode);
+    await file.close();
+  } catch (error) {
+    await file.close().catch(() => {});
+    await unlink(path).catch(() => {});
+    throw error;
+  }
+}
 
 async function readText(filesystem: SettingsFilesystem, path: string): Promise<TextRead> {
   try {
@@ -186,6 +220,10 @@ async function readText(filesystem: SettingsFilesystem, path: string): Promise<T
     }
     return {kind: 'failed', error};
   }
+}
+
+function hasCode(error: unknown, code: string): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === code;
 }
 
 function readFailure(path: string, cause: unknown): Error {
@@ -205,16 +243,15 @@ async function writeJson(
   value: unknown,
   current: () => boolean = () => true,
 ): Promise<SettingsUpdateOutcome> {
-  const staging = `${path}.${process.pid}.tmp`;
-  await filesystem.writePrivateText(staging, `${JSON.stringify(value, null, 2)}\n`);
-  if (!current()) {
-    await filesystem.remove(staging);
-    return 'cancelled';
-  }
+  const staging = await filesystem.stagePrivateText(path, `${JSON.stringify(value, null, 2)}\n`);
   try {
+    if (!current()) {
+      await filesystem.remove(staging);
+      return 'cancelled';
+    }
     await filesystem.replace(staging, path);
   } catch (error) {
-    // Best effort: a failed cleanup must not hide the reason the replace itself failed.
+    // Best effort: a failed cleanup must not hide the operation or commit-guard failure.
     await filesystem.remove(staging).catch(() => {});
     throw error;
   }

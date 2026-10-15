@@ -60,7 +60,7 @@ from vs_core.api import (
 from vs_core.api.testing import sample_limits
 from vs_core.testing.drive import Answer, Harness, Running, Succeeded, new_run
 from vs_evaluation.api import SocketFailure, SocketSuccess, SubmitCall, WaitCall
-from vs_project.api import FakeStateStore
+from vs_project.api import FakeStateStore, NestedRepositoryError
 from vs_runtime.api.core import (
     AgentEvaluationBridge,
     AgentEvaluationPolicy,
@@ -183,19 +183,27 @@ class Workspace:
     retention commit carries its own metadata); the same content gives the same snapshot.
     """
 
-    def __init__(self, edits: list[str], slow: SlowSnapshot) -> None:
+    def __init__(self, edits: list[str], slow: SlowSnapshot, nested: tuple[str, ...]) -> None:
         self._edits = edits
         self._slow = slow
+        self._nested = nested
 
     async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
         """The current content as a snapshot revision, the same one until the next edit."""
         del label, retention_label
         await self._slow.pass_through()
+        self._refuse_nested()
         return _commit(f"snapshot:{self._edits[-1]}")
 
     async def matches_revision(self, revision: str) -> bool:
         """Whether nothing changed since the snapshot ``revision``."""
+        self._refuse_nested()
         return revision == _commit(f"snapshot:{self._edits[-1]}")
+
+    def _refuse_nested(self) -> None:
+        """Refuse as host Git does while the agent keeps a repository in its workspace."""
+        if self._nested:
+            raise NestedRepositoryError(self._nested)
 
 
 class Workspaces:
@@ -204,6 +212,8 @@ class Workspaces:
     def __init__(self) -> None:
         self.edits = [_commit("edit:0")]
         self.slow = SlowSnapshot()
+        self.nested: tuple[str, ...] = ()
+        """The ``.git`` paths the agent left below its workspace root."""
 
     def edit(self) -> None:
         """The agent changed its candidate."""
@@ -212,7 +222,7 @@ class Workspaces:
     async def workspace_of(self, scope: Scope) -> SnapshotWorkspace | None:
         """The one workspace."""
         del scope
-        return Workspace(self.edits, self.slow)
+        return Workspace(self.edits, self.slow, self.nested)
 
 
 class ShellView:
@@ -802,6 +812,22 @@ def test_an_admission_refused_for_a_busy_queue_is_busy_and_is_journaled() -> Non
     assert played.agent.diagnostics == [
         "agent evaluation call refused as busy: AdmissionBusyError: admission needs an idle input queue"
     ]
+
+
+async def _nest_a_repository_then_submit(agent: Agent) -> None:
+    """The agent clones a repository into its workspace and submits; then it removes it."""
+    agent.workspaces.nested = ("vendor/lib/.git",)
+    scope = Scope(owner=ATTEMPT.attempt_id, generation=0)
+    assert not await agent.call(agent.token(scope), ("submit",), count=False)
+    agent.workspaces.nested = ()
+
+
+def test_a_submit_from_a_workspace_holding_a_nested_repository_is_refused_not_halted() -> None:
+    """Host Git refuses the snapshot; the agent is told how to fix it and the run goes on."""
+    played = play((Turn(at_start=_nest_a_repository_then_submit),), 1)
+    check(played)
+    assert len(played.agent.errors) == 1
+    assert "nested Git repository" in played.agent.errors[0]
 
 
 def _failing_admission(error: Exception | None) -> Callable[[Agent], Awaitable[None]]:

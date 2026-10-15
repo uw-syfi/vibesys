@@ -3,12 +3,14 @@
 On a shared cluster the input's trusted measurement may wait hours for a slot. The search asks the
 planner at once, telling it the measurement is pending, and starts what it schedules: implementers
 write code meanwhile. What compares a candidate with the input waits for it: no candidate is
-reviewed, measured or named the winner before the input's measurement lands. A planning call that
+reviewed, measured or named the winner before the input's measurement lands; a workstream that ends
+with a failure is never compared, so it settles at once and frees its slot. A planning call that
 ends empty meanwhile is not a stuck planner: planning is asked again when the measurement lands.
 An input that fails its measurement drops a plan made without knowing it that has not started, and
-the planner is asked again with the failure in view; a workstream already running goes on. An
-input with nothing configured to measure it is never shown as pending. A stop before it lands
-leaves the input standing. How each measurement outcome ends the run is unchanged
+the planner is asked again with the failure in view; a workstream already running goes on, and its
+implementer is told the failure. An input with nothing configured to measure it is never shown as
+pending. A stop before it lands leaves the input standing. How each measurement outcome ends the run
+is unchanged
 (`test_unmeasurable_input.py` plays it in both orders).
 """
 
@@ -43,6 +45,7 @@ from vs_core.api import (
     RevisionRef,
     StartAttempt,
     Wait,
+    Withdraw,
 )
 
 MODES = across_restarts
@@ -171,8 +174,17 @@ def test_a_workstream_started_before_the_input_fails_its_measurement_goes_on(
 
     host.measure_input()
 
-    # The work already paid for goes on; the next planner turn is told why the input failed.
+    # The work already paid for goes on, and its implementer is told why the input failed.
     assert host.open(StartAttempt) == [start]
+    host.answer(start)
+    told = host.run.expect_turn(role="implementer").context
+    assert isinstance(told, ImplementPrompt)
+    assert not told.baseline_pending
+    assert told.input_failure is not None
+    text = render(PromptTemplate.IMPLEMENT, told)
+    assert "trusted measurement failed: the input's own benchmark failed" in text
+    assert "still queued or running" not in text
+    # The next planner turn is told too.
     host.drain_until_turn(PLANNER_LABEL)
     assert _candidate_measurements(host) == 1
     again = host.run.expect_turn(role=PLANNER_LABEL).context
@@ -211,3 +223,38 @@ def test_an_input_with_nothing_to_measure_is_never_shown_as_pending(*, restartin
     assert isinstance(first, PlannerPrompt)
     assert not first.baseline_pending
     assert "still being measured" not in render(PromptTemplate.PORTFOLIO, first)
+
+
+@MODES
+def test_a_workstream_that_fails_before_the_input_lands_settles_at_once_and_frees_its_slot(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=2), restarting=restarting, input_first=False)
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h1")))
+    (start,) = host.open(StartAttempt)
+    host.answer(start)
+
+    # The implementer makes a candidate it says failed, then its session fails: the workstream
+    # ends with a failure while carrying a candidate, which makes it ineligible however it would
+    # measure.
+    host.run.reply(
+        host.run.expect_turn(role="implementer"),
+        ImplementerResult.model_validate_json(implemented("implementation_failed")),
+        checkpoint=Retained(revision=RevisionRef.of_git_commit("c1")),
+    )
+    host.run.fail(host.run.expect_turn(role="implementer"), FailureReason.OUT_OF_BUDGET)
+
+    # It settles now, while the input is still being measured, and frees its slot.
+    assert host.input_waits()
+    (settle,) = host.open(Withdraw)
+    host.answer(settle)
+    record = host.record
+    assert record is not None
+    assert not record.running
+    assert [done.failure is not None for done in record.finished] == [True]
+    assert _candidate_measurements(host) == 0
+    assert not host.open(RequestTurn, label="judge")
+    host.measure_input()
+    host.drain()
+    assert isinstance(host.run.finished, Finish)
+    assert_flow_closed(host)

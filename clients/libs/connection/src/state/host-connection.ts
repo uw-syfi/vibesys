@@ -42,7 +42,14 @@ export type Cause =
   /** The run is no longer there (`run_gone`). */
   | 'run-gone'
   /** The run is there but this user may not connect to it (`connect_denied`). */
-  | 'denied';
+  | 'denied'
+  /**
+   * The host refused a new channel: its session ceiling (sshd `MaxSessions`, or an equivalent local
+   * limit) is already spent by this app's other channels to the same host. The host itself is fine;
+   * retrying the same dial now would only repeat the refusal, so this is the caller's fact to show,
+   * never a reason to back off and retry the link.
+   */
+  | 'capacity';
 
 const CAUSES: ReadonlySet<string> = new Set<Cause>([
   'link',
@@ -50,6 +57,7 @@ const CAUSES: ReadonlySet<string> = new Set<Cause>([
   'incompatible',
   'run-gone',
   'denied',
+  'capacity',
 ]);
 
 /** What a check proves: the control channel answers, or a run channel to `instanceId` connects. */
@@ -263,8 +271,11 @@ export const connectionMachine = setup({
           }),
         },
         'run-ended': {
-          // The run going away, or refusing this user, is the run's fact, not the link's.
-          guard: ({event}) => event.cause !== 'run-gone' && event.cause !== 'denied',
+          // The run going away, refusing this user, or a spent channel ceiling is the dial's own
+          // fact, not the link's: none of them says the host is unreachable, so none should start a
+          // reconnect that would only repeat the same dial and the same refusal.
+          guard: ({event}) =>
+            event.cause !== 'run-gone' && event.cause !== 'denied' && event.cause !== 'capacity',
           target: 'lost',
           actions: assign({
             target: ({event}) => ({kind: 'run', instanceId: event.instanceId}) as const,

@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import sys
-import threading
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -21,10 +19,16 @@ from vs_sandbox.api.slurm import (
     GpuJobRequest,
     choose_partition,
 )
+from vs_sim.api import ProbeResult
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ScriptedPipedProcess,
+    ScriptedProbe,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
-    from pathlib import Path
 
 # Recorded `slurm-windows --json` output: 1-4 GPUs start now on main for up
 # to 57 minutes; 5-8 GPUs wait on both main and priority.
@@ -69,25 +73,6 @@ WINDOWS: Mapping[str, object] = {
     ],
 }
 
-# Stands in for the Slurm shell (the local transport's `bash -c`): it receives the
-# command line of `srun` or `scancel` as its one argument, records the arguments,
-# then runs what follows `--`.
-FAKE_SLURM = """\
-import os, shlex, sys
-sys.argv = [sys.argv[0], *shlex.split(sys.argv[1])[1:]]
-with open(os.environ["FAKE_SLURM_LOG"], "a") as log:
-    log.write(repr(sys.argv[1:]) + "\\n")
-if "--" in sys.argv:
-    command = sys.argv[sys.argv.index("--") + 1 :]
-    os.execvp(command[0], command)
-"""
-
-
-def _launcher(tmp_path: Path, **updates: object) -> AgentGpuLauncher:
-    fake = tmp_path / "fake_slurm.py"
-    fake.write_text(FAKE_SLURM)
-    return AgentGpuLauncher(_config(**updates), (sys.executable, str(fake)))
-
 
 def _config(**updates: object) -> AgentGpuConfig:
     values: dict[str, object] = {
@@ -99,11 +84,16 @@ def _config(**updates: object) -> AgentGpuConfig:
     return AgentGpuConfig.model_validate(values)
 
 
-@pytest.fixture
-def slurm_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    log = tmp_path / "slurm.log"
-    monkeypatch.setenv("FAKE_SLURM_LOG", str(log))
-    return log
+def _simulated(
+    threads: SimThreads, process: ScriptedPipedProcess
+) -> tuple[AgentGpuLauncher, FakePipedProcessLauncher, ScriptedProbe]:
+    """A launcher whose ``srun`` is *process* and whose ``scancel`` and ``squeue`` succeed."""
+    processes = FakePipedProcessLauncher(lambda _start: process)
+    probe = ScriptedProbe(lambda _argv: ProbeResult(0, ""))
+    launcher = AgentGpuLauncher(
+        _config(), ("slurm-shell",), probe=probe, processes=processes, threads=threads
+    )
+    return launcher, processes, probe
 
 
 class TestConfig:
@@ -152,53 +142,58 @@ class TestPartition:
 
 
 class TestLauncher:
-    def test_streams_output_and_returns_the_command_status(
-        self, tmp_path: Path, slurm_log: Path
-    ) -> None:
+    def test_streams_output_and_returns_the_command_status(self) -> None:
+        threads = SimThreads()
+        process = ScriptedPipedProcess(threads, merge_stderr=True)
+        process.write("from-job\n")
+        process.exit(3)
+        launcher, processes, _probe = _simulated(threads, process)
         output = bytearray()
-        status = _launcher(tmp_path).run(
-            GpuJobRequest(gpus=2, time_minutes=7),
-            GpuCommand(
-                argv=("sh", "-c", "echo from-job; exit 3"), cwd=tmp_path, env=dict(os.environ)
-            ),
-            write=output.extend,
-            cancel=threading.Event(),
+
+        status = threads.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=2, time_minutes=7),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=output.extend,
+                cancel=threads.event(),
+            )
         )
-        srun_args = slurm_log.read_text().splitlines()[0]
 
         assert status == 3
-        assert b"from-job\n" in output
+        assert output.endswith(b"from-job\n")
+        (start,) = processes.started
+        assert start.argv[0] == "slurm-shell"
+        srun_args = start.argv[-1]
         for expected in ("--partition=main", "--gres=gpu:2", "--time=7", "--ntasks=1"):
             assert expected in srun_args
 
-    def test_cancel_scancels_the_job_by_its_unique_name(
-        self, tmp_path: Path, slurm_log: Path
-    ) -> None:
-        cancel = threading.Event()
+    def test_cancel_scancels_the_job_by_its_unique_name(self) -> None:
+        threads = SimThreads()
+        process = ScriptedPipedProcess(threads, merge_stderr=True)
+        launcher, _processes, probe = _simulated(threads, process)
+        cancel = threads.event()
         cancel.set()
         output = bytearray()
-        _launcher(tmp_path).run(
-            GpuJobRequest(gpus=1, time_minutes=5),
-            GpuCommand(argv=("sleep", "60"), cwd=tmp_path, env=dict(os.environ)),
-            write=output.extend,
-            cancel=cancel,
+
+        threads.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=5),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=output.extend,
+                cancel=cancel,
+            )
         )
-        # The launcher announces the job name before it starts srun, and cancel is
-        # synchronous, so both facts are settled when run returns. srun may be
-        # stopped before it logs anything, so the log's line order is not asserted.
+
         match = re.search(r"job-name=(\S+)", output.decode())
         assert match is not None
         job_name = match.group(1)
-
-        # The fake logs the arguments without the program; only the squeue check
-        # after the cancel asks for a headerless listing.
-        named = [
-            line for line in slurm_log.read_text().splitlines() if f"--name={job_name}" in line
+        commands = [argv[-1] for argv, _timeout in probe.calls]
+        scancels = [line for line in commands if line.startswith("scancel")]
+        assert scancels == [f"scancel --name={job_name} --me"]
+        assert [line for line in commands if line.startswith("squeue")] == [
+            f"squeue --name={job_name} --me --noheader --format=%i"
         ]
-        scancel_lines = [line for line in named if "--noheader" not in line]
-        assert len(scancel_lines) == 1
-        assert "--me" in scancel_lines[0]
-        assert len(named) == 2
+        assert process.signals[0] == "terminate"
         assert b"cancel unconfirmed" not in output
 
 
