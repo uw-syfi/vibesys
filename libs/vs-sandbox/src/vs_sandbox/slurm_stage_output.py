@@ -23,7 +23,6 @@ evaluation.
 from __future__ import annotations
 
 import logging
-from contextlib import ExitStack
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -77,7 +76,8 @@ class _File:
 @dataclass
 class _Stage:
     sink: OutputSink
-    scope: ExitStack
+    stream: AbstractContextManager[OutputSink]
+    """The opened stream, exited once when the stage's stream ends."""
     files: dict[OutputStream, _File] = field(default_factory=dict)
     drained: bool = False
 
@@ -139,10 +139,10 @@ class StageOutputFollower:
     def _open(self, index: int) -> None:
         if self._opener is None or index in self._stages:
             return
-        scope = ExitStack()
-        sink = scope.enter_context(self._opener(self._handle_id, self._names[index]))
+        stream = self._opener(self._handle_id, self._names[index])
+        sink = stream.__enter__()
         self._stages[index] = _Stage(
-            sink, scope, {pipe: _File(self._source(index, pipe)) for pipe in _PIPES}
+            sink, stream, {pipe: _File(self._source(index, pipe)) for pipe in _PIPES}
         )
 
     def _write_rest(self, index: int, stage: _Stage, result: CollectedStage) -> bool:
@@ -168,10 +168,10 @@ class StageOutputFollower:
     @staticmethod
     def _close(stage: _Stage, *, ended: bool) -> None:
         if ended:
-            stage.scope.close()
+            stage.stream.__exit__(None, None, None)
             return
         cut = StageOutputCutError()
-        stage.scope.__exit__(type(cut), cut, None)
+        stage.stream.__exit__(type(cut), cut, None)
 
 
 def _copy(sink: OutputSink, pipe: OutputStream, file: _File) -> bool:
