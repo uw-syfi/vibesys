@@ -60,6 +60,7 @@ source_roots = [
     "libs/vs-faults/src",
     "libs/vs-sim/src",
     "libs/vs-dst/src",
+    "libs/vs-logs/src",
 ]
 exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
@@ -78,7 +79,9 @@ forbid_circular_dependencies = true
 # edge, same-layer or cross-layer, must still be listed in `depends_on`;
 # layers add one more check on top: no module may list a dependency on a
 # module in a strictly higher layer.
-layers = ["loops", "roles_search", "orchestration_host", "prompts_and_lower_libs"]
+# `logs` sits above every library, so no library can import `vs_logs`: only the
+# product (which names the owners) writes logs, and only the host helper reads them.
+layers = ["loops", "roles_search", "orchestration_host", "logs", "prompts_and_lower_libs"]
 layers_explicit_depends_on = true
 
 [[modules]]
@@ -184,7 +187,7 @@ depends_on = ["server.host_api", "vs_sim.api"]
 # The host helper's channel: its pure core and shell (docs/contributing/desktop-connection.md).
 # Light: no engine, no run protocol beyond the control envelope's requester.
 path = "server.host_helper"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests", "server.relay", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests", "server.relay", "vs_sim.api", "vs_logs"]
 
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
@@ -651,6 +654,20 @@ path = "vs_sim.api.testing"
 layer = "prompts_and_lower_libs"
 depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts", "vs_sim.crash", "vs_sim.depth", "vs_sim.fake_byte_source", "vs_sim.fake_piped_process", "vs_sim.fake_signal_relay", "vs_sim.fakes", "vs_sim.faults", "vs_sim.file_effects", "vs_sim.gate", "vs_sim.host_clock", "vs_sim.hostile_input", "vs_sim.manual", "vs_sim.output_contracts", "vs_sim.pairwise", "vs_sim.seeds", "vs_sim.signal_relay_contracts", "vs_sim.sim", "vs_sim.sim_network", "vs_sim.sim_threads", "vs_sim.states", "vs_sim.threads", "vs_sim.trace", "vs_sim.virtual", "vs_sim.waits"]
 
+# Durable log streams for humans. Layer `logs`, above every library, so no library can
+# import it. `vs_logs.api` (the writer) is open to the product; `vs_logs.read` only to
+# `server.host_helper` (see the [[interfaces]] entries), so nothing else reads logs back.
+[[modules]]
+path = "vs_logs"
+layer = "logs"
+depends_on = ["vs_decode.api", "vs_sim.api"]
+
+# The run's log store: the owner union's writer side, opened in the run's log directory.
+[[modules]]
+path = "vibesys.run.logs"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vs_logs", "vs_project", "vs_sim.api"]
+
 # Test-support simulation of the run lifecycle (store, commits, executors, effects) above vs_sim.
 # Nothing in production depends on it.
 [[modules]]
@@ -955,6 +972,21 @@ from = ["vs_sim"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_dst"]
+
+# Members of `vs_logs.api` only: `vs_logs.api.testing` (the contract suite, which reads
+# streams back) is for tests, which tach does not check.
+[[interfaces]]
+expose = ["api", "api\\.[A-Za-z_]+"]
+from = ["vs_logs"]
+
+[[interfaces]]
+expose = ["read", "read\\.[A-Za-z_]+"]
+from = ["vs_logs"]
+visibility = ["server.host_helper"]
+
+[[interfaces]]
+expose = ["RUN_LOG_OWNER", "open_run_log_store"]
+from = ["vibesys.run.logs"]
 
 [[interfaces]]
 expose = ["IterationKind", "IterationMetric", "IterationProjection", "IterationStatus", "IterationSummary", "IterationSupport", "IterationTree", "IterationUnavailable", "IterationUnavailableReason", "PluginProjection", "ProfilerKind", "ResumeRef", "RoundFailureSummary", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
