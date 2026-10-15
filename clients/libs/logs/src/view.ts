@@ -94,13 +94,20 @@ export function logViewLines(view: LogView): readonly string[] {
   return logViewRecords(view).map(line => line.text);
 }
 
+/** A piece of a line one pipe wrote, starting `at` UTF-16 units into the line. */
+export interface PipeSegment {
+  readonly at: number;
+  readonly text: string;
+  readonly pipe: LogPipe;
+}
+
 /** The pieces of `line` each pipe wrote, in order. */
-export function pipeSegments(line: LogLine): {readonly text: string; readonly pipe: LogPipe}[] {
+export function pipeSegments(line: LogLine): PipeSegment[] {
   let at = 0;
   return line.runs.map(run => {
-    const text = line.text.slice(at, at + run.length);
+    const segment = {at, text: line.text.slice(at, at + run.length), pipe: run.pipe};
     at += run.length;
-    return {text, pipe: run.pipe};
+    return segment;
   });
 }
 

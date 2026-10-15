@@ -37,5 +37,6 @@ export {
   logViewLines,
   logViewRecords,
   type PipeRun,
+  type PipeSegment,
   pipeSegments,
 } from './view.js';

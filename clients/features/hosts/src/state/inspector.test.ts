@@ -130,7 +130,6 @@ describe('inspector machine', () => {
         return random.pick([
           {type: 'open', target},
           {type: 'close'},
-          {type: 'load-log'},
           {type: 'refresh'},
           {type: 'copy', label: 'Project', value: '/project'},
           ...outcomes,
@@ -163,12 +162,9 @@ describe('inspector machine', () => {
 
     actor.send({type: 'open', target});
     expect(replies).toHaveLength(1);
-    actor.send({type: 'load-log'});
+    actor.send({type: 'refresh'});
     expect(replies).toHaveLength(2);
-    expect(inspectorView(actor.getSnapshot())).toMatchObject({
-      includeLog: true,
-      load: {kind: 'loading'},
-    });
+    expect(inspectorView(actor.getSnapshot())).toMatchObject({load: {kind: 'loading'}});
 
     replies[0]?.resolve({ok: true, value: inspection()});
     await flush();
@@ -189,7 +185,7 @@ describe('inspector machine', () => {
     actor.send({type: 'open', target});
     actor.send({type: 'close'});
     const closed = inspectorView(actor.getSnapshot());
-    expect(closed).toMatchObject({target: null, includeLog: false, load: {kind: 'idle'}});
+    expect(closed).toMatchObject({target: null, load: {kind: 'idle'}});
 
     reply.resolve({ok: true, value: inspection()});
     await flush();

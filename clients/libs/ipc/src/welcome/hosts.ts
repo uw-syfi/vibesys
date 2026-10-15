@@ -1,6 +1,6 @@
 /**
- * The hosts feature's welcome requests: the host picker, a host's checkout and sign-in, and path
- * completion. The channel names, what the view's bridge sends on them, and how the main process
+ * The hosts feature's welcome requests: the host picker, a host's checkout and sign-in, path
+ * completion, and the inspector's run inspection and logs. The channel names, what the view's bridge sends on them, and how the main process
  * parses what arrives.
  */
 import {
@@ -11,7 +11,9 @@ import {
   type InstanceInspection,
   validHostPath,
 } from '@vibesys/hosts';
+import type {LogListOutcome, LogReadOutcome} from '@vibesys/logs';
 import {isInstanceId} from '@vibesys/runs';
+import {parseRunLogsRequest, type RunLogsRequest} from '../run-logs.js';
 import type {PathCompletion, WelcomeResult} from './types.js';
 import {type ChannelOf, operationToken} from './values.js';
 
@@ -24,6 +26,8 @@ export const HOSTS_CHANNELS = {
   signIn: 'vibesys:welcome:sign-in',
   complete: 'vibesys:welcome:complete',
   inspect: 'vibesys:welcome:inspect',
+  logs: 'vibesys:welcome:logs',
+  releaseLogs: 'vibesys:welcome:release-logs',
 } as const;
 
 /** The welcome bridge's requests the hosts feature makes. */
@@ -41,9 +45,20 @@ export interface HostsWelcomeBridge {
   inspect(
     host: HostKey,
     instance: string,
-    includeLog: boolean,
     inspection: number,
   ): Promise<WelcomeResult<InstanceInspection>>;
+  /**
+   * One logs request about `instance` on `host`, over the host's logs channel, which the main
+   * process holds for this view until `releaseLogs` (`docs/contributing/desktop-connection.md`,
+   * "Logs"). A read must name `instance`.
+   */
+  logs(
+    host: HostKey,
+    instance: string,
+    request: RunLogsRequest,
+  ): Promise<WelcomeResult<LogListOutcome | LogReadOutcome>>;
+  /** Let the host's logs channel go: the view shows no logs now. */
+  releaseLogs(): Promise<WelcomeResult<null>>;
 }
 
 export type HostsRequest =
@@ -65,10 +80,16 @@ export type HostsRequest =
       readonly kind: 'inspect';
       readonly host: HostId;
       readonly instance: string;
-      readonly includeLog: boolean;
       /** Renderer-local operation sequence, paired with its document identity by main. */
       readonly inspection: number;
-    };
+    }
+  | {
+      readonly kind: 'logs';
+      readonly host: HostId;
+      readonly instance: string;
+      readonly request: RunLogsRequest;
+    }
+  | {readonly kind: 'release-logs'};
 
 /** A directory to list: a host path, as the listing's prefix (ending in `/`). */
 function directory(value: unknown): string {
@@ -83,9 +104,14 @@ function instance(value: unknown): string {
   return value;
 }
 
-function includeLog(value: unknown): boolean {
-  if (typeof value !== 'boolean') throw new Error('include log must be a boolean');
-  return value;
+/** A logs request about `instanceId`: a listing, or a read that names it. */
+function logsRequest(value: unknown, instanceId: string): RunLogsRequest {
+  const request = parseRunLogsRequest(value);
+  if (request === null) throw new Error('the logs request is not a listing or a read');
+  if (request.kind === 'read' && request.read.instance_id !== instanceId) {
+    throw new Error(`the logs read names ${request.read.instance_id}, not ${instanceId}`);
+  }
+  return request;
 }
 
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
@@ -93,7 +119,7 @@ export function parseHostsRequest(
   channel: ChannelOf<typeof HOSTS_CHANNELS>,
   args: readonly unknown[],
 ): HostsRequest {
-  const [first, second, third, fourth] = args;
+  const [first, second, third] = args;
   switch (channel) {
     case HOSTS_CHANNELS.hosts:
       return {kind: 'hosts'};
@@ -119,9 +145,19 @@ export function parseHostsRequest(
         kind: 'inspect',
         host: hostFromKey(first),
         instance: instance(second),
-        includeLog: includeLog(third),
-        inspection: operationToken(fourth, 'inspection'),
+        inspection: operationToken(third, 'inspection'),
       };
+    case HOSTS_CHANNELS.logs: {
+      const id = instance(second);
+      return {
+        kind: 'logs',
+        host: hostFromKey(first),
+        instance: id,
+        request: logsRequest(third, id),
+      };
+    }
+    case HOSTS_CHANNELS.releaseLogs:
+      return {kind: 'release-logs'};
   }
 }
 
