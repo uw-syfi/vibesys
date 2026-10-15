@@ -14,8 +14,8 @@ import os
 import stat
 from typing import TYPE_CHECKING
 
+import pygit2
 import pytest
-from tests.support.real_git import REAL_GIT
 
 from vs_project.api import NestedRepositoryError
 
@@ -101,30 +101,43 @@ def test_a_pinned_linked_worktree_ignores_a_redirected_git_file(
     assert decoy_repo.head() is None
 
 
-_AGENT_IDENTITY = ("-c", "user.name=agent", "-c", "user.email=agent@example.com")
+_AGENT = pygit2.Signature("agent", "agent@example.com")
 
 
-def _agent_git(root: Path, *args: str) -> None:
-    """Run bare ``git`` the way an agent (or the user, before the run) does."""
-    REAL_GIT.run_text([*_AGENT_IDENTITY, *args], cwd=root).check()
+def _commit_index(repository: pygit2.Repository, message: str) -> str:
+    """Commit ``repository``'s index the way an agent's own ``git commit`` does."""
+    tree = repository.index.write_tree()
+    parents = [] if repository.head_is_unborn else [repository.head.target]
+    return str(repository.create_commit("HEAD", _AGENT, _AGENT, message, tree, parents))
 
 
 def _nested_repository_with_a_filter(root: Path, marker: Path) -> None:
     """``sub``, a repository whose own config defines a clean filter that leaves ``marker``.
 
-    Its tracked file is left stat-dirty with unchanged content, so checking whether ``sub``
+    The agent's tools (here libgit2, which runs no configured filter) build it. Its
+    tracked file is left stat-dirty with unchanged content, so checking whether ``sub``
     is modified makes Git rehash the file through the filter.
     """
     nested = root / "sub"
-    nested.mkdir()
-    _agent_git(nested, "init", "-q")
+    repository = pygit2.init_repository(str(nested))
     (nested / "f.t").write_text("x\n", encoding="utf-8")
-    _agent_git(nested, "add", "f.t")
-    _agent_git(nested, "commit", "-q", "-m", "nested")
+    repository.index.add("f.t")
+    repository.index.write()
+    _commit_index(repository, "nested")
     filter_program = _plant_program(root.parent / "filter", marker)
-    _agent_git(nested, "config", "filter.agent.clean", f"{filter_program}; cat")
+    repository.config["filter.agent.clean"] = f"{filter_program}; cat"
     (nested / ".gitattributes").write_text("*.t filter=agent\n", encoding="utf-8")
     os.utime(nested / "f.t", (0, 0))
+
+
+def _record_as_gitlink(root: Path) -> str:
+    """Commit ``sub`` as a gitlink, as a snapshot taken before this check existed would have."""
+    outer = pygit2.Repository(str(root))
+    nested = pygit2.Repository(str(root / "sub"))
+    outer.index.read()
+    outer.index.add(pygit2.IndexEntry("sub", nested.head.target, pygit2.enums.FileMode.COMMIT))
+    outer.index.write()
+    return _commit_index(outer, "gitlink")
 
 
 _WORK_TREE_READS = {
@@ -145,23 +158,13 @@ def test_a_filter_a_nested_repository_defines_never_runs(
     marker = tmp_path / "ran"
     _nested_repository_with_a_filter(sandbox.root, marker)
     if recorded:
-        # Git records the repository as a gitlink, as a snapshot taken before this
-        # check existed (or the user's own commit) would have.
-        _agent_git(sandbox.root, "add", "-A")
-        _agent_git(sandbox.root, "commit", "-q", "--allow-empty", "-m", "gitlink")
-        base = _commit_of(sandbox.root)
-        os.utime(sandbox.root / "sub" / "f.t", (0, 0))
-        marker.unlink(missing_ok=True)
+        base = _record_as_gitlink(sandbox.root)
 
     with pytest.raises(NestedRepositoryError) as refused:
         _WORK_TREE_READS[operation](sandbox.repo, base)
 
     assert "sub/.git" in refused.value.paths
     assert not marker.exists()
-
-
-def _commit_of(root: Path) -> str:
-    return REAL_GIT.run_text(["rev-parse", "HEAD"], cwd=root).check().stdout.strip()
 
 
 def test_a_patch_runs_no_textconv_that_agent_attributes_select(
