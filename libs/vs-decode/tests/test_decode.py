@@ -11,7 +11,15 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from vs_decode.api import Unreadable, UnreadableKind, ValidationOptions, decode_json, read_json
+from vs_decode.api import (
+    Problem,
+    Unreadable,
+    UnreadableKind,
+    ValidationOptions,
+    decode_json,
+    extract_unique_object_strings,
+    read_json,
+)
 from vs_sim.api.testing import examples, hostile_json_frames
 
 if TYPE_CHECKING:
@@ -76,6 +84,208 @@ def test_an_unknown_key_is_invalid_and_named(key: str) -> None:
     assert isinstance(decoded, Unreadable)
     assert decoded.kind is UnreadableKind.INVALID
     assert decoded.key_path == f"inner.{key}"
+
+
+@pytest.mark.parametrize("input_kind", ["text", "bytes"])
+def test_a_duplicate_root_key_is_invalid_and_does_not_echo_its_values(input_kind: str) -> None:
+    text = '{"name":"do-not-echo-first","name":"do-not-echo-second","inner":{"count":1}}'
+    frame = text.encode() if input_kind == "bytes" else text
+
+    decoded = decode_json(frame, _Doc, source="peer", max_bytes=_CAP)
+
+    assert isinstance(decoded, Unreadable)
+    assert decoded.kind is UnreadableKind.INVALID
+    assert decoded.problems == (
+        Problem(("name",), "Object member appears more than once", "duplicate_key"),
+    )
+    assert "do-not-echo" not in str(decoded)
+
+
+@settings(max_examples=examples(pr=30, nightly=300))
+@given(key=st.text(max_size=40), as_bytes=st.booleans())
+def test_a_duplicate_key_at_any_nested_array_object_path_is_invalid(
+    key: str, *, as_bytes: bool
+) -> None:
+    encoded_key = json.dumps(key)
+    text = f'{{"items":[{{{encoded_key}:1,{encoded_key}:2}}]}}'
+    frame = text.encode() if as_bytes else text
+
+    decoded = decode_json(
+        frame,
+        TypeAdapter(dict[str, list[dict[str, int]]]),
+        source="peer",
+        max_bytes=_CAP,
+    )
+
+    assert isinstance(decoded, Unreadable)
+    assert decoded.kind is UnreadableKind.INVALID
+    assert decoded.problems[0].location == ("items", 0, key)
+    assert decoded.problems[0].error_type == "duplicate_key"
+
+
+def test_escaped_and_literal_spellings_of_the_same_key_are_duplicates() -> None:
+    decoded = decode_json(
+        '{"name":"n","inner":{"co\\u0075nt":1,"count":2}}',
+        _Doc,
+        source="peer",
+        max_bytes=_CAP,
+    )
+
+    assert isinstance(decoded, Unreadable)
+    assert decoded.problems[0].location == ("inner", "count")
+    assert decoded.problems[0].error_type == "duplicate_key"
+
+
+def test_escaped_surrogate_pair_and_literal_key_are_duplicates() -> None:
+    decoded = decode_json(
+        '{"𝄞":1,"\\ud834\\udd1e":2}',
+        TypeAdapter(dict[str, int]),
+        source="peer",
+        max_bytes=_CAP,
+    )
+
+    assert isinstance(decoded, Unreadable)
+    assert decoded.problems[0].location == ("𝄞",)
+    assert decoded.problems[0].error_type == "duplicate_key"
+
+
+def test_unescaped_key_fast_path_finds_a_large_duplicate() -> None:
+    key = "key" * 20_000
+    frame = f"{{{json.dumps(key)}:1,{json.dumps(key)}:2}}"
+
+    decoded = decode_json(frame, TypeAdapter(dict[str, int]), source="peer", max_bytes=_CAP)
+
+    assert isinstance(decoded, Unreadable)
+    assert decoded.problems[0].location == (key,)
+
+
+def test_escaped_key_chunks_decode_to_the_same_member_name() -> None:
+    frame = '{"prefix\\nmid\\u0073uffix":1,"prefix\\nmidsuffix":2}'
+
+    decoded = decode_json(frame, TypeAdapter(dict[str, int]), source="peer", max_bytes=_CAP)
+
+    assert isinstance(decoded, Unreadable)
+    assert decoded.problems[0].location == ("prefix\nmidsuffix",)
+
+
+def test_large_non_key_string_is_skipped_before_a_later_duplicate() -> None:
+    payload = "value" * 200_000
+    frame = f'{{"payload":{json.dumps(payload)},"count":1,"count":2}}'
+
+    decoded = decode_json(frame, TypeAdapter(dict[str, str | int]), source="peer", max_bytes=_CAP)
+
+    assert isinstance(decoded, Unreadable)
+    assert decoded.problems[0].location == ("count",)
+
+
+@pytest.mark.parametrize(
+    "frame",
+    [
+        b'{"key":"\\ud800"}',
+        b'{"key":"\\udfff"}',
+        b'{"\\ud800":"value"}',
+        b'{"\\udfff":"value"}',
+    ],
+)
+def test_lone_surrogate_escapes_are_not_json(frame: bytes) -> None:
+    decoded = decode_json(frame, TypeAdapter(object), source="peer", max_bytes=_CAP)
+
+    assert isinstance(decoded, Unreadable)
+    assert decoded.kind is UnreadableKind.NOT_JSON
+
+
+@pytest.mark.parametrize(("opening", "closing"), [("[", "]"), ('{"k":', "}")])
+@pytest.mark.parametrize(("depth", "valid"), [(200, True), (201, False)])
+def test_duplicate_scan_obeys_the_json_parser_nesting_bound(
+    opening: str, closing: str, depth: int, *, valid: bool
+) -> None:
+    frame = opening * depth + "0" + closing * depth
+
+    decoded = decode_json(frame, TypeAdapter(object), source="peer", max_bytes=_CAP)
+
+    if valid:
+        assert not isinstance(decoded, Unreadable)
+    else:
+        assert isinstance(decoded, Unreadable)
+        assert decoded.kind is UnreadableKind.NOT_JSON
+
+
+@pytest.mark.parametrize("input_kind", ["text", "bytes"])
+def test_unique_root_strings_can_correlate_a_document_rejected_for_another_duplicate(
+    input_kind: str,
+) -> None:
+    text = (
+        '{"type":"query.history","type":"command.stop",'
+        '"request_id":"request-7","client_id":"client-2"}'
+    )
+    frame = text.encode() if input_kind == "bytes" else text
+
+    assert extract_unique_object_strings(
+        frame,
+        frozenset({"request_id", "client_id"}),
+        max_bytes=_CAP,
+        max_value_characters=128,
+    ) == {"request_id": "request-7", "client_id": "client-2"}
+
+
+def test_repeated_requested_root_string_is_not_extracted() -> None:
+    frame = '{"request_id":"first","request_id":"second","client_id":"client-2"}'
+
+    assert extract_unique_object_strings(
+        frame,
+        frozenset({"request_id", "client_id"}),
+        max_bytes=_CAP,
+        max_value_characters=128,
+    ) == {"client_id": "client-2"}
+
+
+@pytest.mark.parametrize(
+    "encoded_value",
+    [json.dumps("x" * 129), '"' + "\\u0078" * 129 + '"'],
+    ids=["unescaped", "escaped"],
+)
+def test_extracted_object_strings_are_bounded_after_decoding(encoded_value: str) -> None:
+    frame = f'{{"request_id":{encoded_value},"client_id":"client-2"}}'
+
+    assert extract_unique_object_strings(
+        frame,
+        frozenset({"request_id", "client_id"}),
+        max_bytes=_CAP,
+        max_value_characters=128,
+    ) == {"client_id": "client-2"}
+
+
+def test_extracted_escaped_object_string_at_the_bound_is_preserved() -> None:
+    frame = '{"request_id":"' + "\\u0078" * 128 + '"}'
+
+    assert extract_unique_object_strings(
+        frame,
+        frozenset({"request_id"}),
+        max_bytes=_CAP,
+        max_value_characters=128,
+    ) == {"request_id": "x" * 128}
+
+
+@pytest.mark.parametrize("code_point", [0xD800, 0xDFFF], ids=["high", "low"])
+@pytest.mark.parametrize("placement", ["requested-value", "object-key"])
+def test_raw_surrogates_make_object_string_extraction_fail_closed(
+    code_point: int, placement: str
+) -> None:
+    surrogate = chr(code_point)
+    if placement == "requested-value":
+        frame = '{"request_id":"' + surrogate + '","client_id":"client-2"}'
+    else:
+        frame = '{"request_id":"request-7","' + surrogate + '":"value"}'
+
+    assert (
+        extract_unique_object_strings(
+            frame,
+            frozenset({"request_id", "client_id"}),
+            max_bytes=_CAP,
+            max_value_characters=128,
+        )
+        == {}
+    )
 
 
 def test_deep_nesting_is_not_json_rather_than_a_recursion_error() -> None:
