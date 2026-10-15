@@ -50,7 +50,12 @@ from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.gpu_events import CoreGpuContentionEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
-from vibesys.run.logs import open_run_logs, startup_output_opener
+from vibesys.run.logs import (
+    open_run_logs,
+    stage_output_opener,
+    startup_output_opener,
+    tool_build_output_opener,
+)
 from vibesys.run.profilers import (
     ProfilerPreflight,
     resolve_run_profiler,
@@ -96,6 +101,7 @@ from vs_runtime.api import (
     WorkspaceSourceFact,
     boot_trace,
 )
+from vs_runtime.api.core import StageOutputOpener
 from vs_runtime.api.infrastructure import (
     EnvironmentStartup,
     ModelArtifactRequest,
@@ -625,6 +631,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 ),
                 log=logger.lprint,
                 startup_output=startup_output_opener(log_scope),
+                tool_build_output=tool_build_output_opener(log_scope),
                 framework_root=PROJECT_ROOT,
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
@@ -672,6 +679,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             project_resources=project_resources,
             agent_host_resources=agent_host_resources,
             profiler_agent_resources=session.view.profiler_mcp_resources,
+            stage_output=stage_output_opener(log_scope),
         )
         integration.publish_resources(
             RunResources(
@@ -783,3 +791,5 @@ class _PreparedRun:
     evaluation_plan: TrustedEvaluationPlan
     agent_host_resources: tuple[HostResource, ...]
     profiler_agent_resources: tuple[HostResource, ...]
+    stage_output: StageOutputOpener
+    """Opens each evaluation stage's output stream in the run's log store."""

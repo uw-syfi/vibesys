@@ -161,7 +161,9 @@ class PollingEvaluationExecutor:
             )
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
-                with self._open_output(StageRun(handle_id, step.name)) as output:
+                with self._open_output(
+                    StageRun(handle_id, step.name, purpose=stage.purpose)
+                ) as output:
                     observed = await self._evaluate(workspace, stage, handle_id, output)
                 evidence = observed.evidence
                 results.append(

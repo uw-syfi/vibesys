@@ -29,6 +29,12 @@ class SemanticEvaluationStage(BaseModel):
     submitted_at_s: FiniteFloat | None = Field(default=None, ge=0)
     deadline_at_s: FiniteFloat | None = Field(default=None, ge=0)
     deadline_unavailable: str | None = Field(default=None, min_length=1)
+    purpose: str | None = Field(default=None, min_length=1)
+    """What the caller measures this stage for, as it names it; not part of the identity.
+
+    An executor passes it on to whoever shows the stage's output, so a host can tell,
+    for example, a local validation's accuracy stage from an official one.
+    """
 
 
 @dataclass(frozen=True, kw_only=True)

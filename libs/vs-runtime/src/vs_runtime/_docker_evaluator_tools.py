@@ -100,12 +100,14 @@ def prepare_docker_evaluator_resources(
         opened = (
             nullcontext(DISCARD) if builder.output is None else builder.output(tuple(sorted(tools)))
         )
+        # The build's stream stays open until the build is verified, so a build that
+        # publishes too little ends its stream as failed.
         with opened as output:
             _build_evaluator_tools(requirements, builder, host_parent, output)
-        try:
-            prepare_evaluator_tools(tools, host_parent, command_runner=_require_builder)
-        except _EvaluatorToolBuildRequiredError as exc:
-            raise EvaluatorToolError.builder_incomplete() from exc
+            try:
+                prepare_evaluator_tools(tools, host_parent, command_runner=_require_builder)
+            except _EvaluatorToolBuildRequiredError as exc:
+                raise EvaluatorToolError.builder_incomplete() from exc
 
     return tuple(
         HostResource(

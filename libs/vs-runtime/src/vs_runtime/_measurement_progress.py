@@ -35,14 +35,19 @@ class StageStarted:
 
 @dataclass(frozen=True, slots=True)
 class StageRun:
-    """One run of one stage of a measurement job, as the executor running it names it.
+    """One run of one stage of a measurement job.
 
-    ``handle_id`` and ``stage_id`` are the ones :class:`StageStarted` reports for the same
-    stage; the job's purpose is on that report, since an executor does not know it.
+    ``handle_id``, ``purpose`` and ``stage_id`` are the ones :class:`StageStarted` reports
+    for the same stage. ``purpose`` is ``None`` when the stage's request does not name one.
+    ``attempt`` counts the tries of the measurement, from 1: a
+    ``RetryingEvaluationExecutor`` measures again under a new inner handle, and its
+    :class:`TryHandles` names that run by the measurement's handle and try number.
     """
 
     handle_id: str
     stage_id: str
+    purpose: str | None = None
+    attempt: int = 1
 
 
 type StageOutputOpener = Callable[[StageRun], AbstractContextManager[OutputSink]]
