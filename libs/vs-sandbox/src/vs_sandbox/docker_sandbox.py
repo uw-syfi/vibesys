@@ -37,6 +37,7 @@ from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
 from vs_sandbox.process_execution import PopenProcess
+from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
     import signal
@@ -157,7 +158,7 @@ def _remove_container(
     for _ in range(_REMOVE_ATTEMPTS):
         try:
             result = docker.run(cmd, timeout_seconds=timeout_seconds)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except (OSError, ProcessTimeoutError) as exc:
             failure = exc
             if log is not None:
                 log(cmd, error=f"container cleanup failed: {exc}")
