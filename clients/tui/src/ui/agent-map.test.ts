@@ -1,4 +1,5 @@
 import {afterEach, describe, expect, test} from 'bun:test';
+import {BoxRenderable, TextRenderable} from '@opentui/core';
 import {createTestRenderer, type TestRendererSetup} from '@opentui/core/testing';
 import type {AgentPhase} from '@vibesys/run-state/rounds';
 import type {SessionController} from '../session-controller.js';
@@ -21,6 +22,7 @@ import {
 } from './agent-map.js';
 import {MIN_SPLIT_WIDTH} from './right-pane.js';
 import {RAIL_COMPACT_WIDTH, roundRailWidth} from './round-rail.js';
+import {displayWidth} from './text-width.js';
 
 /** The active-node marker: `nodeLabel` draws the spinner's frame 0 here first. */
 const activeMarker = SPINNER_FRAMES[0];
@@ -671,5 +673,95 @@ describe('fan-in at a narrowed, overridden width', () => {
     // routing itself; this just confirms the wiring reaches it at this width).
     expect(frame).toContain('▶');
     expect(frame).toContain('judge');
+  });
+});
+
+describe('wide-character display width in agent graph', () => {
+  const cleanup: Array<() => void> = [];
+  afterEach(() => {
+    for (const destroy of cleanup.splice(0).reverse()) destroy();
+  });
+
+  test('agentPaneFloor sizes wide-character agent kinds by display cells rather than code units', () => {
+    const twoWideStages: AgentPhase[] = [
+      {
+        kind: '実装者実装者',
+        status: 'pending',
+        roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
+        roundLabel: null,
+      },
+      {
+        kind: '審査員審査員',
+        status: 'pending',
+        roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
+        roundLabel: null,
+      },
+    ];
+    // Each wide stage has 6 CJK ideographs (12 cells).
+    // selected label: '› ○ 実装者実装者' = 2 ('› ') + 2 ('○ ') + 12 = 16 cells.
+    // + 2 border cells = 18 cells per node column.
+    // 2 stages: 18 + 18 + 5 (gutter) + 4 (chrome) = 45 cells.
+    // By code units, length was 10 + 2 = 12 (clamped to NODE_WIDTH_MIN 14), which gave 37 cells.
+    expect(agentPaneFloor(twoWideStages)).toBe(45);
+  });
+
+  test('truncates wide CJK and emoji labels to fit node interior without breaking graphemes', async () => {
+    const widePhases: AgentPhase[] = [
+      {
+        kind: '👩‍💻👩‍💻👩‍💻👩‍💻',
+        status: 'active',
+        roundNumber: 1,
+        roundKey: {kind: 'number' as const, number: 1},
+        roundLabel: null,
+        executionId: 'e-wide',
+        provider: 'anthropic',
+        model: '模型模型模型模型模型',
+      },
+    ];
+    const base = initialSessionState();
+    const state: SessionState = {
+      ...base,
+      experimentLog: null,
+      selectedRound: 1,
+      core: {
+        ...base.core,
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
+        phases: widePhases,
+      },
+    };
+
+    const testRenderer: TestRendererSetup = await createTestRenderer({width: 120, height: 20});
+    const view = new AgentMapView(
+      testRenderer.renderer,
+      {} as unknown as SessionController,
+      resolveTheme(null),
+    );
+    testRenderer.renderer.root.add(view.output);
+    cleanup.push(() => {
+      view.destroy();
+      view.output.destroyRecursively();
+      testRenderer.renderer.destroy();
+    });
+
+    view.render(state, undefined, 0, 20, 60);
+    await testRenderer.renderOnce();
+
+    const node = testRenderer.renderer.root.findDescendantById('agent-👩‍💻👩‍💻👩‍💻👩‍💻-0');
+    expect(node).toBeDefined();
+    if (node instanceof BoxRenderable) {
+      const innerWidth = node.width - 2;
+      for (const child of node.getChildren()) {
+        if (child instanceof TextRenderable) {
+          const text = child.content.chunks.map(chunk => chunk.text).join('');
+          expect(displayWidth(text)).toBeLessThanOrEqual(innerWidth);
+          // Never contains unmatched surrogate code points
+          expect(
+            /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text),
+          ).toBe(false);
+        }
+      }
+    }
   });
 });

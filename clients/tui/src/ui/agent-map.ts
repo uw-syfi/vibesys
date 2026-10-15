@@ -39,6 +39,7 @@ import {fillLayer} from './box-fill.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
 import {splitFits} from './right-pane.js';
+import {displayWidth, truncateToWidth} from './text-width.js';
 
 const STATUS_MARKER: Record<AgentPhase['status'], string> = {
   pending: '○',
@@ -123,7 +124,7 @@ function edgeFlowColors(theme: Theme): {live: string; brighter: string; brightes
  * the graph.
  */
 function selectedLabelWidth(phase: AgentPhase): number {
-  return nodeLabel(phase, true).length;
+  return displayWidth(nodeLabel(phase, true));
 }
 
 /**
@@ -479,7 +480,7 @@ export class AgentMapView {
     // without counting nodes. It is the first thing to give up room, because a
     // wrapped heading costs a row of graph and says less.
     const summary = phaseSummary(phases);
-    if (headingText.length + summary.length + 2 <= paneWidth - 4) {
+    if (displayWidth(headingText) + displayWidth(summary) + 2 <= paneWidth - 4) {
       headingRow.add(
         new TextRenderable(this.renderer, {
           content: summary,
@@ -948,7 +949,8 @@ function phaseSummary(phases: readonly AgentPhase[]): string {
 
 function truncate(text: string, width: number): string {
   const room = Math.max(1, width);
-  return text.length <= room ? text : `${text.slice(0, room - 1)}…`;
+  if (displayWidth(text) <= room) return text;
+  return `${truncateToWidth(text, room - 1)}…`;
 }
 
 /**
