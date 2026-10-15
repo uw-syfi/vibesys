@@ -87,10 +87,12 @@ class _ShellHarness:
         return f"kill -{signal_number} $$"
 
     def hang(self, *, announce: bool) -> str:
-        # Relative paths: the command runs in the workspace on every kind.
+        # Relative paths: the command runs in the workspace on every kind. The
+        # child clears its environment, as harnesses that pass ``env=`` do, so a
+        # stop cannot rely on finding it by an inherited variable.
         steps = [
             "exec 3> alive",
-            "sleep 1000 &",
+            "env -i sleep 1000 &",
             f"printf %s {PARTIAL_STDOUT}",
             f"printf %s {PARTIAL_STDERR} >&2",
         ]

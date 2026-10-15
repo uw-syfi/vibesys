@@ -33,7 +33,12 @@ from vs_sandbox.docker_sandbox import (
     _live_containers,
 )
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
-from vs_sim.api import OsThreads, ProcessTimeoutError, SubprocessPipedProcessLauncher
+from vs_sim.api import (
+    NotReleasedError,
+    OsThreads,
+    ProcessTimeoutError,
+    SubprocessPipedProcessLauncher,
+)
 from vs_sim.api.testing import SimThreads
 
 
@@ -601,9 +606,10 @@ class TestStop:
         docker.on(("docker", "rm"), _failed_cleanup(cleanup_mode))
         docker.always(docker_result())
         try:
-            expected_error = OSError if cleanup_mode == "raises" else RuntimeError
-            with pytest.raises(expected_error):
+            last_failure = OSError if cleanup_mode == "raises" else RuntimeError
+            with pytest.raises(NotReleasedError, match="abc123") as raised:
                 sandbox.stop()
+            assert isinstance(raised.value.__cause__, last_failure)
 
             assert sandbox.container_id == "abc123"
             assert "abc123" in _live_containers
