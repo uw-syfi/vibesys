@@ -21,11 +21,8 @@ import type {CampaignRecord} from './campaign-record.js';
 
 export type {
   CampaignMetricDefinition as ReplayMetricDefinition,
-  CampaignRecord,
   MeasurementDisposition,
   MetricDirection,
-  TurnMessage,
-  WorkstreamOutcome,
 } from './campaign-record.js';
 
 /** Compatibility name for the original fixture parser API. */

@@ -120,11 +120,11 @@ export function textAt(value: unknown, path: string): string {
   return value;
 }
 
-export function nullableStringAt(value: unknown, path: string): string | null {
+function nullableStringAt(value: unknown, path: string): string | null {
   return value === null ? null : stringAt(value, path);
 }
 
-export function numberAt(value: unknown, path: string): number {
+function numberAt(value: unknown, path: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value))
     return fail(path, 'expected finite number');
   return value;
@@ -192,7 +192,7 @@ export function uniqueIds<T extends {id: string}>(values: T[], path: string): st
   return uniqueBy(values, path, item => item.id);
 }
 
-export function uniqueBy<T>(values: T[], path: string, identify: (item: T) => string): string[] {
+function uniqueBy<T>(values: T[], path: string, identify: (item: T) => string): string[] {
   const seen = new Set<string>();
   for (const [index, value] of values.entries()) {
     const id = identify(value);
