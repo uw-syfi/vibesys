@@ -63,7 +63,7 @@ if TYPE_CHECKING:
         WorkspaceResourceProvider,
     )
     from vs_sandbox.api import CommandRunner, ComputeBackendImpl
-    from vs_sim.api import BlockingRunner
+    from vs_sim.api import BlockingRunner, Processes
 
 RUN_ID = "workspace-requests"
 
@@ -149,6 +149,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     memory_paths: tuple[str, ...] = (),
     wrap_git: Callable[[GitRepository], GitRepository] | None = None,
     events: WorkspaceResourceEventSink | None = None,
+    slurm_processes: Processes = NO_PROCESSES,
 ) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
@@ -160,7 +161,8 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     product run does. ``wrap_git`` wraps every Fake repository (not with real Git), so a
     case can stand between the run and Git, for example to kill the host at a Git step.
     ``events`` observes workspace resource events (for example a reported baseline drift);
-    the default discards them.
+    the default discards them. ``slurm_processes`` runs the Slurm transport's commands; the
+    default refuses to start any.
     """
     disk = FakeGitRepositories() if git is GitKind.FAKE else REAL_GIT
     root = tmp_path / "project"
@@ -210,7 +212,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                     else ()
                 ),
                 clock=ManualClock(),
-                slurm_processes=NO_PROCESSES,
+                slurm_processes=slurm_processes,
             ),
             open_session if open_session is not None else lambda _request: _Session(),
             clock=ManualClock(),

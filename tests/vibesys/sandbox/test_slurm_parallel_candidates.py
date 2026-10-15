@@ -24,6 +24,7 @@ from vs_runtime.api.infrastructure import SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api.slurm import BrokeredProcesses, load_slurm_operator_settings
 from vs_sim.api import OsThreads, ProcessOutcome, ProcessSpec, UnixNetwork
+from vs_sim.api.testing import NO_PROCESSES, FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
         RuntimeWorkspaces,
     )
     from vs_sandbox.api import CommandResult
+    from vs_sim.api import Processes
 
 _CONFIG = """[slurm]
 name = "test-cluster"
@@ -97,6 +99,7 @@ def _run(
     *,
     environment: SlurmEnvironment | None = None,
     opened: list[RunEnvironmentSession] | None = None,
+    slurm_processes: Processes = NO_PROCESSES,
 ) -> None:
     """Open a run whose candidates are Slurm sessions, and await *exercise* with its workspaces.
 
@@ -118,6 +121,7 @@ def _run(
         backend=backend,
         open_session=open_session,
         owns_candidate_worktrees=True,
+        slurm_processes=slurm_processes,
     ) as env:
         try:
             asyncio.run(exercise(env.hosts[0]))  # ty: ignore[call-non-callable]
@@ -230,4 +234,12 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             upload(first_session, second.path)
         assert upload(second_session, second.path) == 0
 
-    _run(tmp_path, exercise, environment=environment, opened=sessions)
+    _run(
+        tmp_path,
+        exercise,
+        environment=environment,
+        opened=sessions,
+        slurm_processes=FakeProcesses(
+            lambda _spec: ProcessScript(), pass_time=ManualClock().advance
+        ),
+    )
