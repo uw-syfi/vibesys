@@ -6,6 +6,13 @@
 
 /* --- shared ------------------------------------------------------------------------------------ */
 
+/* The document a `Page` fills: no default margin, the theme's background. */
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
 .vs-page,
 .vs-page *,
 .vs-flex,

@@ -276,6 +276,17 @@ jobs:
         # provides Xvfb on this Linux runner. The wrapper owns the display for this one check group.
         run: xvfb-run -a ./support/repoctl/repoctl run-checks --group tui_e2e
 
+      # A gallery screenshot that differs from its baseline leaves the actual and the diff here, so
+      # a reviewer can see the change without rerunning it in the Linux image.
+      - name: Upload the gallery's screenshot differences
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-gallery-test-results
+          path: clients/apps/ui-gallery/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
   queue-native:
     needs: changes
     if: needs.changes.outputs.evaluators == 'true'

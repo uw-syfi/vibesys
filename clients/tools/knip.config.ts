@@ -76,6 +76,12 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     entry: ['src/main.tsx', 'src/**/*.test.ts', 'src/**/*.test.tsx', 'e2e/**/*.spec.ts'],
     project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,js}'],
   },
+  'apps/ui-gallery': {
+    // The development-only component gallery (`index.html`, built by `vite.config.ts`), its
+    // Playwright suite, and the static server that suite starts (`playwright.config.ts`).
+    entry: ['src/main.tsx', 'src/**/*.test.ts', 'e2e/**/*.spec.ts', 'e2e/serve-dist.mjs'],
+    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,mjs}'],
+  },
 };
 
 // Repository tooling run by `node tools/scripts/...`; `*.test.mjs` runs under `node --test`. The

@@ -24,12 +24,14 @@ export function Text(props: {
   readonly style?: TextStyle;
   readonly tone?: TextTone;
   readonly as?: TextElement;
+  /** For a region or control to be named by this text (`aria-labelledby`). */
+  readonly id?: string;
   readonly children: ReactNode;
 }): JSX.Element {
   const {style = 'body', as: Element = 'span'} = props;
   const tone = props.tone ?? (style === 'section' ? 'muted' : 'default');
   return (
-    <Element className="vs-text" data-tone={tone} style={typeStyle(style)}>
+    <Element className="vs-text" id={props.id} data-tone={tone} style={typeStyle(style)}>
       {props.children}
     </Element>
   );
