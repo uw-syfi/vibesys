@@ -31,6 +31,7 @@ import asyncio
 import heapq
 import itertools
 import threading
+import weakref
 from collections import deque
 from typing import TYPE_CHECKING, Self, cast
 
@@ -50,6 +51,10 @@ class SimDeadlockError(RuntimeError):
     """No thread can run and no timer is pending, yet some thread still waits."""
 
 
+class SimMisuseError(RuntimeError):
+    """A simulator was used in a way whose outcome would depend on the real scheduler."""
+
+
 class _Killed(BaseException):
     """Raised inside a parked thread to unwind it when the run ends."""
 
@@ -61,6 +66,27 @@ class _OutsideThread:
 
 
 _OUTSIDE = _OutsideThread()
+
+_CREATED: list[weakref.ref[SimThreads]] = []
+"""Every simulator built since the last :func:`undriven_threads` call."""
+
+
+def undriven_threads() -> tuple[str, ...]:
+    """Names of threads spawned on simulators that nothing drove, since the last call.
+
+    A thread spawned on a simulator that no :meth:`SimThreads.run` or virtual loop drives
+    never runs, so a test that relies on it passes whatever the thread would have done.
+    The test harness calls this after each test; each such simulator is closed here.
+    """
+    made = [ref() for ref in _CREATED]
+    _CREATED.clear()
+    names: list[str] = []
+    for threads in made:
+        if threads is None:
+            continue
+        names.extend(threads.never_ran())
+        threads.close()
+    return tuple(names)
 
 
 class _SimThread:
@@ -324,15 +350,19 @@ class SimThreads:
         self._by_ident: dict[int, _SimThread] = {}
         self._yield_to_driver = threading.Semaphore(0)
         self._closed = False
+        self._driven = False
+        self._outside_ident: int | None = None
         self.errors: list[BaseException] = []
         """Exceptions that ended threads, in the order they happened."""
+        _CREATED.append(weakref.ref(self))
 
     # ----- the Threads interface -----
 
     def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> SimWorker:
         """Start ``target`` as a simulated thread; it first runs when the baton reaches it."""
+        me = self.caller()
         thread = self._spawn(target, name, daemon=daemon)
-        self.switch_point(self.caller())
+        self.switch_point(me)
         return SimWorker(self, thread)
 
     def _spawn(self, target: Callable[[], object], name: str, *, daemon: bool) -> _SimThread:
@@ -415,6 +445,7 @@ class SimThreads:
             VirtualTimeLimitError: the next timer is past the clock's ``limit``, so the run is
                 stuck rather than slow.
         """
+        self._driven = True
         outcome: list[T] = []
         first = self._start_main(main, outcome)
         try:
@@ -507,8 +538,39 @@ class SimThreads:
     # ----- inside the scheduler -----
 
     def caller(self) -> _SimThread | _OutsideThread:
-        """The simulated thread running this code, or a stand-in for any other caller."""
-        return self._by_ident.get(threading.get_ident(), _OUTSIDE)
+        """The simulated thread running this code, or the one real thread that drives them.
+
+        Every caller that is not a simulated thread is the same stand-in, so only one real
+        thread may use a simulator: the test's, or the event loop's that drives it. Two
+        would share lock ownership and race on its state.
+
+        Raises:
+            SimMisuseError: a second real thread used this simulator.
+        """
+        ident = threading.get_ident()
+        thread = self._by_ident.get(ident)
+        if thread is not None:
+            return thread
+        if self._outside_ident is None:
+            self._outside_ident = ident
+        elif ident != self._outside_ident:
+            message = (
+                f"real thread {threading.current_thread().name!r} used a SimThreads that "
+                "another real thread already uses; run the work as a simulated thread "
+                "(spawn it from SimThreads.run or Sim.run) instead of on a real one"
+            )
+            raise SimMisuseError(message)
+        return _OUTSIDE
+
+    def attach(self) -> None:
+        """Mark this simulator as driven by a virtual loop from now on."""
+        self._driven = True
+
+    def never_ran(self) -> tuple[str, ...]:
+        """Names of threads spawned on a simulator that nothing ever drove."""
+        if self._driven:
+            return ()
+        return tuple(thread.name for thread in self._threads)
 
     def _entry(self, thread: _SimThread) -> None:
         thread.go.acquire()

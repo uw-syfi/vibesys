@@ -83,7 +83,13 @@ from vs_sim.signal_relay_contracts import (
 )
 from vs_sim.sim import WORLDS, Sim, UnknownWorldError, WorldFactory, WorldRegistry
 from vs_sim.sim_network import SimNetwork
-from vs_sim.sim_threads import SimBlockingRunner, SimDeadlockError, SimThreads
+from vs_sim.sim_threads import (
+    SimBlockingRunner,
+    SimDeadlockError,
+    SimMisuseError,
+    SimThreads,
+    undriven_threads,
+)
 from vs_sim.states import Changes, wait_for_async_state, wait_for_state, yield_until
 from vs_sim.threads import TGKILL_SUPPORTED, non_main_thread_ids, send_to_thread
 from vs_sim.trace import EventTrace, TraceEvent
@@ -177,6 +183,7 @@ __all__ = [
     "Sim",
     "SimBlockingRunner",
     "SimDeadlockError",
+    "SimMisuseError",
     "SimNetwork",
     "SimThreads",
     "SleeperContract",
@@ -223,6 +230,7 @@ __all__ = [
     "start_thread",
     "stop_process",
     "swept",
+    "undriven_threads",
     "using_depth",
     "wait_for_async_state",
     "wait_for_state",

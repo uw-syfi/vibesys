@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 
 import pytest
 from hypothesis import given, settings
@@ -13,12 +14,15 @@ from vs_sim.api.testing import (
     EventTrace,
     SimBlockingRunner,
     SimDeadlockError,
+    SimMisuseError,
     SimNetwork,
     SimThreads,
     VirtualClock,
     VirtualDeadlockError,
     examples,
+    join_or_fail,
     run_virtual,
+    undriven_threads,
 )
 
 type Step = tuple[str, int, float]
@@ -379,3 +383,49 @@ def test_one_seed_gives_the_same_trace_for_any_thread_tree(
     second_counts, second_trace = _run_tree(tree, seed, join=join)
     assert first_counts == second_counts
     assert first_trace.first_difference(second_trace) is None
+
+
+@pytest.mark.parametrize("primitive", ["lock", "rlock", "event", "spawn"])
+def test_a_second_real_thread_cannot_use_a_simulator(primitive: str) -> None:
+    sim = SimThreads()
+    lock, rlock, event = sim.lock(), sim.rlock(), sim.event()
+    uses = {
+        "lock": lambda: lock.acquire(blocking=False),
+        "rlock": lambda: rlock.acquire(blocking=False),
+        "event": event.set,
+        "spawn": lambda: sim.spawn(lambda: None, name="late"),
+    }
+    lock.acquire()
+    lock.release()
+    raised: list[BaseException] = []
+
+    def other_real_thread() -> None:
+        try:
+            uses[primitive]()
+        except SimMisuseError as error:
+            raised.append(error)
+
+    worker = threading.Thread(target=other_real_thread)
+    worker.start()
+    join_or_fail(worker)
+
+    assert [type(error) for error in raised] == [SimMisuseError]
+    assert not lock.held_by_caller()
+
+
+def test_a_thread_spawned_on_an_undriven_simulator_is_reported_as_never_run() -> None:
+    sim = SimThreads()
+    sim.spawn(lambda: None, name="watchdog")
+
+    assert sim.never_ran() == ("watchdog",)
+    assert "watchdog" in undriven_threads()
+
+
+def test_a_driven_simulator_reports_no_stranded_threads() -> None:
+    sim = SimThreads()
+    ran: list[str] = []
+    sim.spawn(lambda: ran.append("early"), name="early", daemon=False)
+    sim.run(lambda: ran.append("main"))
+
+    assert sorted(ran) == ["early", "main"]
+    assert sim.never_ran() == ()

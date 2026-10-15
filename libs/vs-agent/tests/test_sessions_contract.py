@@ -118,34 +118,34 @@ class _Harness:
     message: RenderedPrompt
     namespace: StateNamespace
     new_client: Callable[[], AgentClient]
+    threads: SimThreads
 
     def reconstruct(self) -> ClientAgentSessions:
         factory = FakeAgentSessions if self.implementation == "fake" else ClientAgentSessions
-        sessions = factory(self.client, self.ledger, threads=SimThreads())
+        sessions = factory(self.client, self.ledger, threads=self.threads)
         sessions.bind(KEY, self.spec, self.turn)
         return sessions
 
 
 @pytest.fixture(params=["fake", "client"])
 def harness(
-    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sim: Sim
 ) -> Iterator[_Harness]:
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
     tmp_path = tmp_path / "workspace"
     tmp_path.mkdir()
     namespace = _namespace(tmp_path)
+    threads = sim.threads()
     checkpoints = DurableSessionStore(
         namespace.slot(
             "sessions.json",
             AgentSessionState,
         ),
-        threads=SimThreads(),
+        threads=threads,
     )
     boundary = _Boundary()
     if request.param == "fake":
-        launcher = FakeProvider(
-            answer="done", on_turn=lambda _: boundary.accept(), threads=SimThreads()
-        )
+        launcher = FakeProvider(answer="done", on_turn=lambda _: boundary.accept(), threads=threads)
     else:
 
         def execute(_request: object) -> FakeRun:
@@ -155,7 +155,7 @@ def harness(
             )
 
         launcher = fake_agentshim_launcher(
-            provider="codex", executor=FakeExecutor(execute), threads=SimThreads()
+            provider="codex", executor=FakeExecutor(execute), threads=threads
         )
 
     def new_client() -> AgentClient:
@@ -164,7 +164,7 @@ def harness(
             provider="codex",
             session_store=checkpoints,
             clock=ManualClock(),
-            threads=SimThreads(),
+            threads=threads,
         )
 
     client = new_client()
@@ -184,7 +184,7 @@ def harness(
         else namespace.slot("invocations.json", AgentInvocationState)
     )
     factory = FakeAgentSessions if request.param == "fake" else ClientAgentSessions
-    sessions = factory(client, ledger, threads=SimThreads())
+    sessions = factory(client, ledger, threads=threads)
     sessions.bind(KEY, spec, turn)
     (tmp_path / "message.j2").write_text("{{ content }}", encoding="utf-8")
     message = TemplateRenderer(tmp_path).render_template("message.j2", content="trusted results")
@@ -199,6 +199,7 @@ def harness(
         message,
         namespace,
         new_client,
+        threads,
     )
     client.close()
 
@@ -227,11 +228,9 @@ def test_reused_identity_with_changed_payload_is_conflict(harness: _Harness) -> 
     assert harness.boundary.calls == 2
 
 
-def test_missing_and_recovered_unfinished_invocation_is_unknown(
-    harness: _Harness, sim: Sim
-) -> None:
+def test_missing_and_recovered_unfinished_invocation_is_unknown(harness: _Harness) -> None:
     assert isinstance(harness.sessions.inspect(KEY, "absent"), Unknown)
-    threads = sim.threads()
+    threads = harness.threads
     entered, release = threads.event(), threads.event()
 
     def block() -> None:
@@ -570,10 +569,10 @@ def test_session_cannot_adopt_while_turn_is_in_flight(
         release.wait(HANG_GUARD_S)
 
     launcher = (
-        FakeProvider(answer="done", on_turn=block_fake_turn, threads=SimThreads())
+        FakeProvider(answer="done", on_turn=block_fake_turn, threads=threads)
         if implementation == "fake"
         else fake_agentshim_launcher(
-            provider="codex", executor=FakeExecutor(block_turn), threads=SimThreads()
+            provider="codex", executor=FakeExecutor(block_turn), threads=threads
         )
     )
     spec = AgentSessionSpec(

@@ -53,6 +53,10 @@ class IdleDriver(Protocol):
     jumps to whichever is due first, the loop's next timer or a thread's.
     """
 
+    def attach(self) -> None:
+        """Take note that a virtual loop drives this work from now on."""
+        ...
+
     def run_until_blocked(self) -> None:
         """Run until nothing the driver owns can run."""
         ...
@@ -458,6 +462,8 @@ def run_virtual[T](
     def make_loop() -> _VirtualLoop:
         loop = _VirtualLoop(clock, trace, schedule_seed)
         loop.driver = driver
+        if driver is not None:
+            driver.attach()
         return loop
 
     try:

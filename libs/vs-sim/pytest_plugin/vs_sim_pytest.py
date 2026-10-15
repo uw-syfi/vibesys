@@ -83,6 +83,7 @@ from vs_sim.api.testing import (  # noqa: E402  # LW-163810 [E402]; the assert-r
     replay_hint,
     seed_for_test,
     set_depth,
+    undriven_threads,
 )
 
 if TYPE_CHECKING:
@@ -408,6 +409,21 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> object | None:
     arguments = {name: pyfuncitem.funcargs[name] for name in parameters}
     sim_for_test.run(pyfuncitem.obj(**arguments))
     return True
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Generator[None]:
+    """Fail a test that spawned simulated threads on a simulator nothing drove."""
+    del item
+    undriven_threads()
+    yield
+    stranded = undriven_threads()
+    if stranded:
+        pytest.fail(
+            f"threads {', '.join(stranded)} were spawned on a SimThreads that nothing drove, "
+            "so they never ran; drive it with SimThreads.run or Sim.run(threads=...)",
+            pytrace=False,
+        )
 
 
 @pytest.hookimpl(wrapper=True)
