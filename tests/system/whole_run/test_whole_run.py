@@ -78,7 +78,16 @@ _LEASE_S = 30.0
 _RUN_LIMIT_S = 3600.0
 """Virtual seconds a run may take; past it the run is stuck, so the test fails instead of hanging."""
 _DOCKER_COMMANDS = 16
-"""More than a run issues, so some seeds kill no process."""
+"""More than a run issues, so some deaths hit no command."""
+_MAX_DEATHS = 2
+_LATEST_DROP = 12
+"""The last message after which the client may drop; a run that ends sooner drops it just
+before its terminal event."""
+_RETRY_NOT_NEEDED = frozenset({"stop", "read"})
+"""Commands a run may lose without issuing them again: every ``stop`` is followed by an
+``rm -f``, whose effect the ledger does check, and a lost read of the agent user's ids
+makes the sandbox remap them anyway."""
+_AGENT_IDENTITY_READ = "id -u agent && id -g agent"
 _SIGNALS = (Signals.SIGKILL, Signals.SIGSEGV, Signals.SIGTERM)
 _TERMINAL = frozenset({"run_finished", "run_failed", "run_interrupted", "configuration_failed"})
 _NIGHTLY_SEEDS = range(64)
@@ -100,26 +109,54 @@ async def _one_attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
 
 
 @dataclass(frozen=True)
+class _Death:
+    """One ``docker`` client process that dies by a signal."""
+
+    command: int
+    """The index, among the run's ``docker`` commands, of the one whose process dies."""
+    signal: Signals
+    after_effect: bool
+    """Whether the daemon applied the command before its client died."""
+
+
+@dataclass(frozen=True)
 class _Faults:
     """What one seed breaks."""
 
-    killed_command: int
-    """The index, among the run's ``docker`` commands, of the one whose process dies."""
-    killed_by: Signals
-    created_before_death: bool
-    """Whether a ``docker run`` that dies had already made its container."""
+    deaths: tuple[_Death, ...]
+    """Up to ``_MAX_DEATHS`` client deaths, on distinct commands."""
     drop_after: int
     """Messages the client reads before its connection drops."""
 
     @classmethod
     def draw(cls, sim: Sim) -> _Faults:
         rng = sim.random("whole-run-faults")
-        return cls(
-            killed_command=rng.randint(0, _DOCKER_COMMANDS - 1),
-            killed_by=_SIGNALS[rng.randint(0, len(_SIGNALS) - 1)],
-            created_before_death=rng.random() < 0.5,
-            drop_after=rng.randint(1, 12),
+        count = rng.randint(0, _MAX_DEATHS)
+        commands = sorted({rng.randint(0, _DOCKER_COMMANDS - 1) for _ in range(count)})
+        deaths = tuple(
+            _Death(
+                command=command,
+                signal=_SIGNALS[rng.randint(0, len(_SIGNALS) - 1)],
+                after_effect=rng.random() < 0.5,
+            )
+            for command in commands
         )
+        return cls(deaths=deaths, drop_after=rng.randint(1, _LATEST_DROP))
+
+    def death_of(self, command: int) -> _Death | None:
+        return next((death for death in self.deaths if death.command == command), None)
+
+
+@dataclass(frozen=True)
+class _Command:
+    """One ``docker`` command in the daemon's ledger."""
+
+    argv: tuple[str, ...]
+    effect: tuple[str, ...]
+    """What the command does to the daemon, named so a retry of it has the same name."""
+    died: Signals | None
+    applied: bool
+    """Whether the daemon applied the effect (a dead client's command may or may not have)."""
 
 
 @dataclass
@@ -130,38 +167,58 @@ class _Daemon:
     containers: dict[str, str] = field(default_factory=dict)
     """Live containers, id to name."""
     created: list[str] = field(default_factory=list)
-    commands: int = 0
-    killed: tuple[str, ...] | None = None
+    ledger: list[_Command] = field(default_factory=list)
 
     def answer(self, spec: ProcessSpec) -> ProcessScript:
-        argv = spec.argv
-        index = self.commands
-        self.commands += 1
-        dies = index == self.faults.killed_command
-        if dies:
-            self.killed = argv
+        argv = tuple(spec.argv)
+        death = self.faults.death_of(len(self.ledger))
+        effect = self._effect(argv)
+        applied = death is None or death.after_effect
+        self.ledger.append(_Command(argv, effect, None if death is None else death.signal, applied))
+        reply = self._apply(argv) if applied else ProcessScript()
+        if death is not None:
+            return ProcessScript(returncode=-death.signal)
+        return reply
+
+    def _effect(self, argv: tuple[str, ...]) -> tuple[str, ...]:
+        if argv[1] in {"rm", "stop"}:
+            return (argv[1], self._resolve(argv[-1]))
+        if argv[1] == "exec":
+            return ("read" if argv[-1] == _AGENT_IDENTITY_READ else "exec", argv[-1])
+        return (argv[1],)
+
+    def _resolve(self, reference: str) -> str:
+        """The container id *reference* names (by id or name), or *reference* itself."""
+        for container, name in self.containers.items():
+            if reference in {container, name}:
+                return container
+        return reference
+
+    def _apply(self, argv: tuple[str, ...]) -> ProcessScript:
         if argv[1] == "run":
-            if dies and not self.faults.created_before_death:
-                return ProcessScript(returncode=-self.faults.killed_by)
             name = argv[argv.index("--name") + 1]
             container = f"c{len(self.created):04x}"
             self.containers[container] = name
             self.created.append(container)
-            if dies:
-                return ProcessScript(returncode=-self.faults.killed_by)
             return ProcessScript(stdout=f"{container}\n".encode())
-        if dies:
-            return ProcessScript(returncode=-self.faults.killed_by)
         if argv[1] == "rm":
-            self._remove(argv[-1])
-        if argv[1] == "exec" and "id -u" in " ".join(argv):
+            container = self._resolve(argv[-1])
+            if self.containers.pop(container, None) is None:
+                message = f"Error response from daemon: No such container: {argv[-1]}\n"
+                return ProcessScript(returncode=1, stderr=message.encode())
+        if argv[1] == "exec" and argv[-1] == _AGENT_IDENTITY_READ:
             return ProcessScript(stdout=b"1000\n1000\n")
         return ProcessScript()
 
-    def _remove(self, reference: str) -> None:
-        for container, name in list(self.containers.items()):
-            if reference in {container, name}:
-                del self.containers[container]
+    def unretried(self) -> list[_Command]:
+        """Killed commands that never took effect and were never issued again."""
+        missing = []
+        for index, command in enumerate(self.ledger):
+            if command.died is None or command.applied or command.effect[0] in _RETRY_NOT_NEEDED:
+                continue
+            if not any(later.effect == command.effect for later in self.ledger[index + 1 :]):
+                missing.append(command)
+        return missing
 
 
 class _Backend(FakeComputeBackend):
@@ -244,46 +301,72 @@ def _reaper(run_id: str, *, docker: DockerCli, log: Callable[[str], None]) -> tu
 
 @dataclass
 class _Client:
-    """A frontend that subscribes, loses its connection once, and resumes from its cursor."""
+    """A frontend that subscribes, loses its connection once, and resumes from its cursor.
+
+    The server drains the clients attached when its run ends, then closes. A client that
+    is between connections then cannot resubscribe, so, like a frontend reopening a
+    finished run, it reads the rest from the run's event log (:meth:`read_log`).
+    """
 
     network: Network
     socket_path: Path
     drop_after: int
     events: list[dict[str, Any]] = field(default_factory=list)
     drops: int = 0
+    cursor: int = 0
+    read_from_log: bool = False
 
     def follow(self, runtime: ServerRuntime) -> None:
         assert runtime.transport_listening.wait(HANG_GUARD_S)
-        cursor, store = 0, ""
+        store = ""
         read = 0
         while True:
-            connection = self.network.connect(str(self.socket_path), HANG_GUARD_S)
+            try:
+                connection = self.network.connect(str(self.socket_path), HANG_GUARD_S)
+            except ConnectionRefusedError:
+                return  # the server is gone: read_log takes over
             request = SubscribeRequest(
-                timestamp=REQUEST_TIME, after_sequence=cursor, store_id=store
+                timestamp=REQUEST_TIME, after_sequence=self.cursor, store_id=store
             )
             connection.send(request.model_dump_json().encode() + b"\n")
             for message in _messages(connection):
                 read += 1
+                if self.drops == 0 and (read >= self.drop_after or _is_terminal(message)):
+                    # The connection drops before this message is folded: at the drawn
+                    # point, or at the latest just before the end, so every seed drops once.
+                    break
                 if message["type"] == "event_batch":
                     if message.get("store_id", "") != store:
                         # A new store supersedes what this client folded.
                         self.events.clear()
                     store = message.get("store_id", "")
                     self.events.extend(message["events"])
-                    cursor = max(cursor, message["through_sequence"])
+                    self.cursor = max(self.cursor, message["through_sequence"])
                 if self.ended:
                     connection.close()
                     return
-                if self.drops == 0 and read >= self.drop_after:
-                    break
             connection.close()
-            if self.drops > 0 and not self.ended:
-                return  # the server hung up before the end: the assertions report it
+            if self.drops > 0:
+                return  # the server hung up before the end: read_log takes over
             self.drops += 1
+
+    def read_log(self, runtime: ServerRuntime) -> None:
+        """After the server closed, fold what the run logged past this client's cursor."""
+        if self.ended:
+            return
+        self.read_from_log = True
+        for event in runtime.journal.read(after_sequence=self.cursor):
+            self.events.append(event.model_dump(mode="json"))
 
     @property
     def ended(self) -> bool:
         return any(event["type"] in _TERMINAL for event in self.events)
+
+
+def _is_terminal(message: dict[str, Any]) -> bool:
+    return message["type"] == "event_batch" and any(
+        event["type"] in _TERMINAL for event in message["events"]
+    )
 
 
 def _messages(connection: Connection) -> Iterator[dict[str, Any]]:
@@ -308,8 +391,7 @@ class _Outcome:
     root: Path
 
 
-def _run(tmp_path: Path, sim: Sim) -> _Outcome:
-    faults = _Faults.draw(sim)
+def _run(tmp_path: Path, sim: Sim, faults: _Faults) -> _Outcome:
     schedule = sim.seed if sim.schedule_seed is None else sim.schedule_seed
     threads = SimThreads(sim.clock, schedule_seed=schedule, trace=sim.trace)
     sim.clock.limit = sim.clock.now() + _RUN_LIMIT_S
@@ -370,23 +452,30 @@ def _run(tmp_path: Path, sim: Sim) -> _Outcome:
             error = raised
         follower.join(HANG_GUARD_S)
         assert not follower.is_alive(), "the client never saw the connection end"
+        client.read_log(runtime)
         return _Outcome(result, error, client, daemon, socket_path, root)
 
     return threads.run(main)
 
 
-def _assert_invariants(outcome: _Outcome, sim: Sim) -> None:
-    faults = _Faults.draw(sim)
-    context = f"seed {sim.seed}: {faults}; killed {outcome.daemon.killed}; error {outcome.error!r}"
-    # A defined end: success, or a failure that names how the dead process ended.
+def _assert_invariants(outcome: _Outcome, sim: Sim, faults: _Faults) -> None:
+    killed = [command for command in outcome.daemon.ledger if command.died is not None]
+    context = f"seed {sim.seed}: {faults}; killed {killed}; error {outcome.error!r}"
+    # A defined end: success, or a failure that names how a dead process ended.
     succeeded = outcome.result is not None and outcome.result.succeeded
-    if outcome.daemon.killed is None:
+    if not killed:
         assert outcome.error is None, context
         assert succeeded, context
     elif not succeeded:
         failure = repr(outcome.error) if outcome.result is None else str(outcome.result.failure)
-        assert f"exit {-faults.killed_by}" in failure, context
-    # The client was told that end exactly once, across its dropped connection.
+        assert any(f"exit {-command.died}" in failure for command in killed if command.died), (
+            context
+        )
+    else:
+        # A success is earned: every killed command that never took effect was issued again.
+        assert outcome.daemon.unretried() == [], context
+    # The client lost its connection once and was still told that end exactly once.
+    assert outcome.client.drops == 1, context
     terminal = [event["type"] for event in outcome.client.events if event["type"] in _TERMINAL]
     assert len(terminal) == 1, (context, terminal)
     assert (terminal[0] == "run_finished") == succeeded, (context, terminal)
@@ -398,36 +487,46 @@ def _assert_invariants(outcome: _Outcome, sim: Sim) -> None:
     assert not outcome.socket_path.exists(), context
 
 
+def _check(tmp_path: Path, sim: Sim, faults: _Faults | None = None) -> _Outcome:
+    faults = _Faults.draw(sim) if faults is None else faults
+    outcome = _run(tmp_path, sim, faults)
+    _assert_invariants(outcome, sim, faults)
+    return outcome
+
+
 def test_a_whole_run_ends_and_releases_everything_despite_a_dead_process_and_a_dropped_client(
     sim: Sim, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The agent container receives the provider credential, so the run needs one to open.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    _assert_invariants(_run(tmp_path, sim), sim)
+    _check(tmp_path, sim)
 
 
 @pytest.mark.slow
 @pytest.mark.parametrize("seed", _NIGHTLY_SEEDS)
 def test_the_whole_run_sweep(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed: int) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    sim = Sim(seed=seed)
-    _assert_invariants(_run(tmp_path, sim), sim)
+    _check(tmp_path, Sim(seed=seed))
 
 
-@pytest.mark.parametrize(
-    "seed",
-    [
-        pytest.param(1, id="attempt-container-removal-killed"),
-        pytest.param(8, id="root-container-removal-killed"),
-    ],
-)
+@pytest.mark.parametrize("which", ["first", "last"])
+@pytest.mark.parametrize("timing", ["before-effect", "after-effect"])
 def test_a_killed_container_removal_leaves_no_container(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, which: str, timing: str
 ) -> None:
-    """Regression: a ``docker rm -f`` whose client died was not retried, so the container leaked."""
+    """Regression: a ``docker rm -f`` whose client died was not retried, so the container leaked.
+
+    A run with no fault locates the run's container removals (the attempt's first, the
+    root's last); the run under test kills one of them, before or after the daemon removed
+    the container.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    sim = Sim(seed=seed)
-    outcome = _run(tmp_path, sim)
-    assert outcome.daemon.killed is not None
-    assert outcome.daemon.killed[1] == "rm"
-    _assert_invariants(outcome, sim)
+    (tmp_path / "clean").mkdir()
+    (tmp_path / "killed").mkdir()
+    clean = _check(tmp_path / "clean", Sim(seed=0), _Faults(deaths=(), drop_after=1))
+    removals = [i for i, command in enumerate(clean.daemon.ledger) if command.argv[1] == "rm"]
+    assert len(removals) >= 2, clean.daemon.ledger
+    target = removals[0] if which == "first" else removals[-1]
+    death = _Death(command=target, signal=Signals.SIGKILL, after_effect=timing == "after-effect")
+    outcome = _check(tmp_path / "killed", Sim(seed=0), _Faults(deaths=(death,), drop_after=1))
+    assert outcome.daemon.ledger[target].argv[1] == "rm"

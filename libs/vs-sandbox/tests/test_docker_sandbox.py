@@ -34,6 +34,7 @@ from vs_sandbox.docker_sandbox import (
 )
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 from vs_sim.api import OsThreads, ProcessTimeoutError
+from vs_sim.api.testing import SimThreads
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
@@ -1636,12 +1637,11 @@ def _released_after_removals(
     docker = ScriptedDockerCli()
     docker.on(("docker", "rm"), *failures, settled)
     docker.always(docker_result(stdout="abc123\n"))
-    with tempfile.TemporaryDirectory() as raw:
+    threads = SimThreads()
+
+    def scenario(workspace: Path) -> tuple[bool, int]:
         sandbox = DockerSandbox(
-            docker=docker,
-            host_workspace=str(Path(raw) / "workspace"),
-            image="test-image",
-            threads=OsThreads(),
+            docker=docker, host_workspace=str(workspace), image="test-image", threads=threads
         )
         sandbox.start()
         try:
@@ -1654,6 +1654,9 @@ def _released_after_removals(
             return "abc123" not in _live_containers, removals
         finally:
             _live_containers.pop("abc123", None)
+
+    with tempfile.TemporaryDirectory() as raw:
+        return threads.run(lambda: scenario(Path(raw) / "workspace"))
 
 
 @pytest.mark.parametrize("act", ["stop", "cleanup"])
