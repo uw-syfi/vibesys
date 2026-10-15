@@ -106,6 +106,7 @@ if TYPE_CHECKING:
         RunView,
         SearchDef,
         Seconds,
+        SpanKind,
         Within,
     )
     from vs_core.flows._define import Root
@@ -146,10 +147,10 @@ FAKE_REGISTRY = FAKE_OPERATIONS.registry()
 
 
 def fake_search[C](
-    name: str, config: type[C], roles: tuple[Role, ...] = ()
+    name: str, config: type[C], roles: tuple[Role, ...] = (), spans: tuple[SpanKind, ...] = ()
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """``@search`` over the fake namespace: renders are answered by ``FlowRun``."""
-    return search(name, config=config, operations=FAKE_OPERATIONS, roles=roles)
+    return search(name, config=config, operations=FAKE_OPERATIONS, roles=roles, spans=spans)
 
 
 @dataclass

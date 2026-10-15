@@ -24,7 +24,7 @@ starts over from there.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 from vs_core._ids import IdScheme
 from vs_core._registry import ContractError, OperationRegistration, OperationRegistry
@@ -33,6 +33,7 @@ from vs_core.types.strategy import SearchDeclaration
 
 from ._defs import FlowDef
 from ._errors import FlowCodeChanged
+from ._labels import SpanKind, declared
 from ._resource import kit_of
 from ._roles import Role, with_models
 from ._run import Wiring, _Run
@@ -70,6 +71,8 @@ class SearchDef[C]:
     """The agents the search asks: the only ones ``ctx.agents.session`` accepts."""
     owned: tuple[OperationRegistration, ...] = ()
     """Operations other libraries' owners perform for the search (``ctx.owners.perform``)."""
+    spans: tuple[SpanKind, ...] = ()
+    """The kinds of span the search labels (``ctx.label``, ``label=`` on an aspect call)."""
 
     @property
     def ids(self) -> IdScheme:
@@ -122,13 +125,17 @@ class SearchDef[C]:
         return FlowDriver(self, config, registry)
 
 
+class Declarations(TypedDict, total=False):
+    """What a search declares beside its name and config (see ``search``)."""
+
+    operations: StrategyOperations | None
+    roles: tuple[Role, ...]
+    owned: tuple[OperationRegistration, ...]
+    spans: tuple[SpanKind, ...]
+
+
 def search[C](
-    name: str,
-    *,
-    config: type[C],
-    operations: StrategyOperations | None = None,
-    roles: tuple[Role, ...] = (),
-    owned: tuple[OperationRegistration, ...] = (),
+    name: str, *, config: type[C], **declared_: Unpack[Declarations]
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """Register ``root`` as the search ``name``, run on a ``config`` model.
 
@@ -137,15 +144,22 @@ def search[C](
     the verification, evidence and retention of workspaces and measurements, and the context
     types of the prompts. ``owned`` are the operations another library's owner performs
     for the search (an issue board, say): their codec is registered, the host must provide an
-    owner for each, and a flow asks one with ``ctx.owners.perform``.
+    owner for each, and a flow asks one with ``ctx.owners.perform``. ``spans`` are the kinds of
+    span the search labels: each with its attribute schema, verdicts and link relations.
     """
+    operations = declared_.get("operations")
+    roles = declared_.get("roles", ())
+    owned = declared_.get("owned", ())
+    spans = declared_.get("spans", ())
     names = [role.name for role in roles]
     if len(set(names)) != len(names):
         message = f"roles of search {name!r} must have distinct names: {sorted(names)}"
         raise ContractError(("roles",), message)
 
+    declared(spans)  # two kinds with one name are refused at registration
+
     def register(root: Root[C]) -> SearchDef[C]:
-        return SearchDef(name, config, root, operations, roles, owned)
+        return SearchDef(name, config, root, operations, roles, owned, spans)
 
     return register
 
@@ -172,6 +186,7 @@ class FlowDriver[C]:
             definition.ids,
             definition.owned,
             {role.name: role for role in definition.roles},
+            declared(definition.spans),
         )
         root = definition.root
 

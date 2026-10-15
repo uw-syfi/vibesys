@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING, Any, Self, overload
+from typing import TYPE_CHECKING, Any, Self, Unpack, overload
 
 from vs_core._registry import ContractError
 from vs_core.types.common import Capabilities, Limits, RevisionRef, Seconds, TaskTerms, Value
@@ -26,7 +26,9 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from ._labels import LabelFields, SpanKind
     from ._run import _Run
+    from ._spans import SpanId
 
 
 class Clock:
@@ -144,6 +146,20 @@ class Flow:
             if policy.backoff is not None and number < policy.max_tries:
                 await self.timer(self._kit.now() + policy.backoff.delay(number - 1))
         return GaveUp(reasons=tuple(reasons))
+
+    @property
+    def span(self) -> SpanId:
+        """This flow's span in the run trace: what another span's link names it by."""
+        return self._kit.task.span_id
+
+    def label(self, kind: SpanKind, **fields: Unpack[LabelFields]) -> None:
+        """Label this flow's span as ``kind`` (declared at ``@search``).
+
+        ``fields`` (``title``, ``links``, ``attrs``, ``verdict``, ``reason``) replace those
+        they name; the rest keep their values. An undeclared kind, attribute, relation or
+        verdict, or a link to a span the run has not recorded, is a ``ContractError``.
+        """
+        self._run.label(self.span, kind, fields)
 
     def checkpoint(self, snapshot: object) -> None:
         """Record ``snapshot``: where a code change may resume this flow (see ``flow``)."""

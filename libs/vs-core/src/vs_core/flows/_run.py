@@ -41,10 +41,11 @@ from vs_core.types.until import Within
 from ._defs import FlowDef, _adapter, _Task, definition_of
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
 from ._flow import Flow
+from ._labels import labeled
 from ._sources import First, Latch, LatchCell, LatchKey, Pending, Signal, Task, Timer
 from ._spans import RunTrace
 from ._state import Dropped, Issued, LiveFlow, LiveFlows, Recorded, RecordedOperation
-from ._trace import Trace
+from ._trace import Trace, operation_span
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -57,7 +58,9 @@ if TYPE_CHECKING:
     from vs_core.types.settlement import Selection
 
     from ._flow import Group
+    from ._labels import Label, LabelFields, SpanKind
     from ._roles import Role
+    from ._spans import SpanId
 
 
 @dataclass(frozen=True)
@@ -71,6 +74,8 @@ class Wiring:
     """The operations the search registered for other libraries' owners to perform."""
     roles: Mapping[str, Role] = field(default_factory=dict)
     """The roles the search declared, by name (with the models the operator chose)."""
+    spans: Mapping[str, SpanKind] = field(default_factory=dict)
+    """The span kinds the search declared, by name: the only ones a label may name."""
 
 
 class _Run:
@@ -286,8 +291,13 @@ class _Run:
             update={"decision_id": DecisionId(root=f"{task.path}{root}.{number}")}
         )
 
-    def issue(self, task: _Task, pending: Pending, decision: Decision) -> Pending:
-        """Send a decision out and register the ``Pending`` that its outcome will fill."""
+    def issue(
+        self, task: _Task, pending: Pending, decision: Decision, label: Label | None = None
+    ) -> Pending:
+        """Send a decision out and register the ``Pending`` that its outcome will fill.
+
+        ``label`` labels the operation's span as it starts.
+        """
         if pending.decision in self._pendings:
             raise ContractError(
                 ("decision_id",), f"decision id {pending.decision.root} is not unique"
@@ -302,7 +312,15 @@ class _Run:
                 self.trace.operation_started(task.span_id, pending.decision, request.kind)
             case work:
                 self.trace.operation_started(task.span_id, pending.decision, _label(work))
+        if label is not None:
+            self.label(operation_span(pending.decision), label.kind, label.fields())
         return pending
+
+    def label(self, span_id: SpanId, kind: SpanKind, fields: LabelFields) -> None:
+        """Label the span ``span_id`` as ``kind``: ``fields`` replace those they name."""
+        current = self.trace.label_of(span_id)
+        found = labeled(self.wiring.spans, current, kind, fields, self.trace.exists)
+        self.trace.labeled(span_id, found)
 
     def forget(self, pending: Pending) -> None:
         """Abandon a request's outcome: if it arrives later it is dropped and recorded."""

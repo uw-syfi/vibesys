@@ -20,6 +20,7 @@ its continuation, which core authorizes once.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
@@ -80,6 +81,7 @@ if TYPE_CHECKING:
     from vs_core.types.search import Event
 
     from ._kit import Kit
+    from ._labels import Label
     from ._roles import Role
     from ._sources import Signal
     from ._workspaces import Workspace
@@ -159,13 +161,15 @@ class Session:
         *,
         within: Seconds | Within | None = None,
         revision: RevisionRef | None = None,
+        label: Label | None = None,
     ) -> TurnFinished | Failed:
         """Ask the agent once: its validated reply, or the typed failure that ended the turn.
 
         ``prompt`` is the context the role's template renders; a ``Correction`` names the
         earlier turn it corrects. Each provider turn of the ask may take the role's
         ``turn_time``; ``within`` narrows that for this ask (the smaller limit applies) and
-        adds the watches that may end it earlier.
+        adds the watches that may end it earlier. ``label`` labels the span of each provider
+        turn the ask makes.
         """
         asked = (
             None
@@ -175,20 +179,28 @@ class Session:
         role = self.role
         limit = role.turn_time if asked is None else min(asked.limit, role.turn_time)
         until = Within(limit=limit, watches=() if asked is None else asked.watches)
-        ask = _Ask(self._kit, self, prompt, until, revision or self.revision)
+        ask = _Ask(self._kit, self, prompt, _Terms(until, revision or self.revision, label))
         while True:
             step = await ask.attempt()
             if not isinstance(step, _Again):
                 return step
 
 
+@dataclass(frozen=True)
+class _Terms:
+    """What one ask was asked under: its bound, the revision it works on, its spans' label."""
+
+    until: Within
+    revision: RevisionRef | None
+    label: Label | None
+
+
 class _Ask:
     """One ask: what stays the same across its corrections, re-asks and resumes, and what changes."""
 
-    def __init__(
-        self, kit: Kit, session: Session, prompt: Value, until: Within, revision: RevisionRef | None
-    ) -> None:
+    def __init__(self, kit: Kit, session: Session, prompt: Value, terms: _Terms) -> None:
         self.kit = kit
+        until, revision, self.label = terms.until, terms.revision, terms.label
         self.session = session
         self.role = session.role
         self.until = until
@@ -226,7 +238,8 @@ class _Ask:
             ),
         )
         try:
-            pending = kit.start(request, Within(limit=self.until.limit, watches=self.until.watches))
+            bound = Within(limit=self.until.limit, watches=self.until.watches)
+            pending = kit.start(request, bound, self.label)
             self.decision = pending.decision
             event = await kit.settle(pending)
             if isinstance(event, Failed):

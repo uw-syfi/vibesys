@@ -105,6 +105,28 @@ class SpanStop(Value):
     landed: bool = False
 
 
+class SpanLink(Value):
+    """A labelled span's relation ``rel`` (one its kind declares) to the span ``to``."""
+
+    rel: str
+    to: SpanId
+
+
+class SpanLabel(Value):
+    """What the search says a span is: one of its declared kinds, with that kind's fields.
+
+    ``attrs_json`` holds the kind's attribute model as JSON (the search's own model, which a
+    state schema cannot name); ``verdict`` is one of the kind's verdicts, apart from ``status``.
+    """
+
+    kind: str
+    title: str | None = None
+    links: tuple[SpanLink, ...] = ()
+    attrs_json: str | None = None
+    verdict: str | None = None
+    reason: str | None = None
+
+
 class Span(Value):
     """One flow task or awaited operation of the run, on the run clock."""
 
@@ -120,8 +142,8 @@ class Span(Value):
     ended_at: Seconds | None = None
     failure: SpanFailure | None = None
     stop: SpanStop | None = None
-    label: None = None
-    """The search's label of the span: empty until searches can label spans."""
+    label: SpanLabel | None = None
+    """The search's label of the span (``ctx.label``, or ``label=`` on an aspect call)."""
 
     @property
     def ended(self) -> bool:

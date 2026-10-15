@@ -24,6 +24,7 @@ from ._spans import (
     SpanAttempt,
     SpanFailure,
     SpanId,
+    SpanLabel,
     SpanStatus,
     SpanStop,
     SpanType,
@@ -141,6 +142,20 @@ class Trace:
                 self._pending[_path_of(span.id)] = span.id
             else:
                 self._end(span.id, SpanStatus.STOPPED, _interrupted(_RESTARTED))
+
+    # -- labels ------------------------------------------------------------------------------
+
+    def exists(self, span_id: SpanId) -> bool:
+        """Whether the run has recorded the span ``span_id``."""
+        return span_id in self._spans
+
+    def label_of(self, span_id: SpanId) -> SpanLabel | None:
+        """The span's label so far."""
+        return self._spans[span_id].label
+
+    def labeled(self, span_id: SpanId, label: SpanLabel) -> None:
+        """The search labelled the span (``ctx.label``, or ``label=`` on an aspect call)."""
+        self._update(span_id, label=label)
 
     # -- retries -----------------------------------------------------------------------------
 
