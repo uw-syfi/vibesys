@@ -1014,7 +1014,7 @@ class DockerSandbox(WorkspaceSandbox):
         user is not root, so a step that needs root (installing system
         packages) uses this instead.
         """
-        return self._execute(command, timeout=timeout, cancel=cancel, user="root")
+        return self._execute(command, timeout=timeout, cancel=cancel, user="root", output=DISCARD)
 
     def execute(
         self,
@@ -1022,6 +1022,7 @@ class DockerSandbox(WorkspaceSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
         """Execute a command inside the Docker container.
 
@@ -1032,7 +1033,7 @@ class DockerSandbox(WorkspaceSandbox):
         documented in :mod:`vs_sandbox.command_execution`; every sandbox kind
         shares it.
         """
-        return self._execute(command, timeout=timeout, cancel=cancel, user=None)
+        return self._execute(command, timeout=timeout, cancel=cancel, user=None, output=output)
 
     def _execute(
         self,
@@ -1041,6 +1042,7 @@ class DockerSandbox(WorkspaceSandbox):
         timeout: int | None,
         cancel: Event | None,
         user: str | None,
+        output: OutputSink,
     ) -> CommandResult:
         if self._container_id is None:
             raise DockerSandboxNotStartedError.operation_before_start()
@@ -1067,7 +1069,7 @@ class DockerSandbox(WorkspaceSandbox):
             cancel=cancel,
             max_output_chars=self._max_output_bytes,
             launch=lambda: PipedStoppableProcess(
-                self._docker.spawn(exec_cmd), threads=self._threads
+                self._docker.spawn(exec_cmd), threads=self._threads, output=output
             ),
             signal_remote=_ExecStop(self._docker, container_id, exec_id, user).send,
             threads=self._threads,

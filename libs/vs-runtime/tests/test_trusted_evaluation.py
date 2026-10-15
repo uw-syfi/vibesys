@@ -28,7 +28,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
 from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
-from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher
+from vs_sim.api import DISCARD, OsThreads, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import (
     InlineBlockingRunner,
     Sim,
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
     from vs_project.api import GitTracker
     from vs_sandbox.api import CommandRunner
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 
 _MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -174,9 +174,10 @@ class _TruncatingRunner(FakeCommandRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
         del cancel  # every command here finishes at once
-        super().execute(command, timeout=timeout)
+        super().execute(command, timeout=timeout, output=output)
         if command.startswith("rm -f -- ") and "--output-json" in command:
             head = "evaluator log line\n" * 10
             return CommandResult(
@@ -438,8 +439,9 @@ class _FailingSandbox:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
-        del cancel  # every command here finishes at once
+        del cancel, output  # every command here finishes at once and prints nothing
         del timeout
         self.calls.append(command)
         message = "sandbox unavailable"
@@ -528,8 +530,9 @@ class _BlockingSandbox:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
-        del cancel  # every command here finishes at once
+        del cancel, output  # every command here finishes at once and prints nothing
         del timeout
         self.calls.append(command)
         self.started.set()
@@ -568,8 +571,9 @@ class _CancellableSandbox(_BlockingSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
-        del timeout
+        del timeout, output
         assert cancel is not None
         self.calls.append(command)
         self.started.set()
