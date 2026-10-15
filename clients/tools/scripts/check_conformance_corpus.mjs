@@ -254,7 +254,8 @@ function helperStepErrors(step, index, label, helper) {
 
 function helperShapeErrors(data, label) {
   const errors = [];
-  if (!HELPER_ROLES.has(data?.role)) errors.push(`${label}: "role" must be one of control, run, logs`);
+  if (!HELPER_ROLES.has(data?.role))
+    errors.push(`${label}: "role" must be one of control, run, logs`);
   const transports = Array.isArray(data?.transports) ? data.transports : [];
   if (transports.length === 0 || !transports.every(transport => HELPER_TRANSPORTS.has(transport))) {
     errors.push(`${label}: "transports" must be ["stdio"]`);

@@ -674,6 +674,31 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  libs/logs:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../machine
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../transport
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../store
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   libs/machine:
     dependencies:
       '@vibesys/store':

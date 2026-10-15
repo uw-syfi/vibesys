@@ -35,6 +35,14 @@ export type {
   InstanceStopResult,
   InstancesChanged,
   LiveInstanceRecord,
+  LogChunk,
+  LogOffset,
+  LogStream,
+  LogsListReply,
+  LogsListRequest,
+  LogsReadReply,
+  LogsReadRequest,
+  LogTail,
   Message as HelperMessage,
   PathEntry,
   PathsCompleteReply,
@@ -76,6 +84,15 @@ export function helperFeatureForRequest(type: string): HelperFeature | null {
 
 /** Maximum UTF-8 bytes in an available instance log tail, generated from Python's contract. */
 export const INSTANCE_LOG_TAIL_BYTES = logText['x-vibesys-max-utf8-bytes'] as number;
+
+const logsRead = definitions['LogsReadRequest'] as Schema;
+const logsReadProperties = logsRead['properties'] as Record<string, Schema>;
+
+/** The most bytes one `logs.read` returns (its `max_bytes` bound), from Python's contract. */
+export const LOGS_READ_MAX_BYTES = (logsReadProperties['max_bytes'] as Schema)['maximum'] as number;
+
+/** The longest one `logs.read` waits at the end of an open stream (its `wait_ms` bound). */
+export const LOGS_WAIT_MAX_MS = (logsReadProperties['wait_ms'] as Schema)['maximum'] as number;
 
 /** The helper protocol versions this client speaks (`hello`'s `client_versions`). */
 export const HELPER_CLIENT_VERSIONS: readonly [number, number] = [1, 1];
