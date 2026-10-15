@@ -65,6 +65,17 @@ describe('agentPaneWidth', () => {
     expect(agentPaneWidth(104, THREE)).toBeNull();
     expect(agentPaneWidth(105, THREE)).toBe(63);
   });
+
+  test('measures wide agent names in terminal cells before choosing the graph', () => {
+    const wide = round('実装者実装者実装者', 'implementer', 'judge');
+
+    // The first label occupies 22 cells when selected: four marker cells plus
+    // nine double-width CJK characters. At 110 columns its 69-column graph
+    // would leave only 41 for the transcript, so the stacked layout must win.
+    expect(agentPaneFloor(wide)).toBe(69);
+    expect(agentPaneWidth(110, wide)).toBeNull();
+    expect(agentPaneWidth(111, wide)).toBe(69);
+  });
 });
 
 describe('agentPaneWidth transcript floor beside the rail', () => {
@@ -149,7 +160,11 @@ describe('agent map rendering states', () => {
     for (const destroy of cleanup.splice(0).reverse()) destroy();
   });
 
-  async function renderState(state: SessionState, width: number): Promise<string> {
+  async function renderState(
+    state: SessionState,
+    width: number,
+    automaticWidth = false,
+  ): Promise<string> {
     const testRenderer = await createTestRenderer({width, height: 20});
     const view = new AgentMapView(
       testRenderer.renderer,
@@ -162,7 +177,7 @@ describe('agent map rendering states', () => {
       view.output.destroyRecursively();
       testRenderer.renderer.destroy();
     });
-    view.render(state, width, 0, 20);
+    view.render(state, automaticWidth ? undefined : width, 0, 20);
     await testRenderer.renderOnce();
     return testRenderer.captureCharFrame();
   }
@@ -207,6 +222,23 @@ describe('agent map rendering states', () => {
     expect(stacked).toContain('Round 1 flow');
     expect(stacked).not.toContain('1 agent · 0 active · 1 done');
     expect(stacked).toContain('✓ orchestrator');
+  });
+
+  test('uses the stacked renderer when wide agent names do not leave a readable transcript', async () => {
+    const base = initialSessionState();
+    const state: SessionState = {
+      ...base,
+      selectedRound: 1,
+      core: {
+        ...base.core,
+        rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'completed'}],
+        phases: round('実装者実装者実装者', 'implementer', 'judge'),
+      },
+    };
+
+    const frame = await renderState(state, 110, true);
+    expect(frame).not.toContain('▶');
+    expect(frame).toContain('✓ 実装者実装者実装者');
   });
 });
 
@@ -522,7 +554,7 @@ describe('truncation under an explicit override', () => {
     for (const destroy of cleanup.splice(0).reverse()) destroy();
   });
 
-  function roundState(): SessionState {
+  function roundState(phases: AgentPhase[] = THREE): SessionState {
     const base = initialSessionState();
     return {
       ...base,
@@ -531,7 +563,7 @@ describe('truncation under an explicit override', () => {
       core: {
         ...base.core,
         rounds: [{key: {kind: 'number' as const, number: 1}, number: 1, status: 'active'}],
-        phases: THREE,
+        phases,
       },
     };
   }
@@ -539,6 +571,7 @@ describe('truncation under an explicit override', () => {
   async function renderAt(
     width: number,
     graphWidthOverride: number | null,
+    phases: AgentPhase[] = THREE,
   ): Promise<{frame: string; paneWidth: number}> {
     const testRenderer: TestRendererSetup = await createTestRenderer({width, height: 20});
     const view = new AgentMapView(
@@ -552,7 +585,7 @@ describe('truncation under an explicit override', () => {
       view.output.destroyRecursively();
       testRenderer.renderer.destroy();
     });
-    view.render(roundState(), undefined, 0, 20, graphWidthOverride);
+    view.render(roundState(phases), undefined, 0, 20, graphWidthOverride);
     await testRenderer.renderOnce();
     return {frame: testRenderer.captureCharFrame(), paneWidth: view.output.width as number};
   }
@@ -583,6 +616,37 @@ describe('truncation under an explicit override', () => {
     const {paneWidth} = await renderAt(100, 68);
     expect(paneWidth).toBe(clampGraphWidthOverride(68, 100, THREE));
     expect(paneWidth).toBeLessThan(68);
+  });
+
+  test('truncates a wide runtime label by display cells at the node edge', async () => {
+    const phases: AgentPhase[] = THREE.map((phase, index) =>
+      index === 0 ? {...phase, model: '模型模型模型模型模型'} : phase,
+    );
+
+    // At the geometric floor every node has twelve content cells. The model
+    // needs twenty, so five complete CJK graphemes fit before the ellipsis.
+    const {frame} = await renderAt(200, -1000, phases);
+    expect(frame).toContain('模型模型模…');
+    expect(frame).not.toContain('模型模型模型');
+  });
+
+  test('keeps joined emoji whole while truncating a runtime label', async () => {
+    const emoji = '👩‍💻';
+    const phases: AgentPhase[] = THREE.map((phase, index) =>
+      index === 0 ? {...phase, model: emoji.repeat(7)} : phase,
+    );
+
+    // Five two-cell graphemes fit beside the one-cell ellipsis. Slicing the
+    // same input by UTF-16 units stops after two graphemes and a high surrogate.
+    const {frame} = await renderAt(200, -1000, phases);
+    expect(frame).toContain(`${emoji.repeat(5)}…`);
+    expect(frame).not.toContain('�');
+    expect(
+      [...frame].some(character => {
+        const codePoint = character.codePointAt(0);
+        return codePoint !== undefined && codePoint >= 0xd800 && codePoint <= 0xdfff;
+      }),
+    ).toBeFalse();
   });
 });
 
