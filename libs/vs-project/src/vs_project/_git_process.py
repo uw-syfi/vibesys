@@ -7,6 +7,12 @@ repository ("Directory not empty: .git"). Every Git command VibeSys starts
 therefore carries ``maintenance.auto=false`` and ``gc.auto=0``; the user's own
 Git commands still maintain their repositories.
 
+Every command also runs no program the repository names: hooks (``core.hooksPath`` is
+``/dev/null``), the file-system monitor (``core.fsmonitor``) and commit or tag signing
+(``gpg.program``). The repository's config, hooks and worktree are agent-writable in a
+workspace, so any of them would run agent-chosen code on the host, unconfined, at the
+next snapshot.
+
 ``tests/architecture/test_git_invocation_boundary.py`` fails when code under
 ``src/`` or ``libs/`` starts Git without going through this module.
 """
@@ -45,12 +51,24 @@ _NO_BACKGROUND_MAINTENANCE: tuple[tuple[str, str], ...] = (
     ("gc.auto", "0"),
 )
 
+# Programs a repository can make Git run; none runs on the host (see the module docstring).
+_NO_REPOSITORY_PROGRAMS: tuple[tuple[str, str], ...] = (
+    ("core.hooksPath", "/dev/null"),
+    ("core.fsmonitor", "false"),
+    ("commit.gpgSign", "false"),
+    ("tag.gpgSign", "false"),
+)
+
 
 def git_config_env(
     extra_config: Sequence[tuple[str, str]] = (),
 ) -> dict[str, str]:
-    """Return ``GIT_CONFIG_*`` variables for ``extra_config`` plus the no-maintenance pair."""
-    config = (*extra_config, *_NO_BACKGROUND_MAINTENANCE)
+    """Return ``GIT_CONFIG_*`` variables for ``extra_config`` plus the host Git policy.
+
+    The policy (no background maintenance, no repository programs) comes last, so
+    ``extra_config`` cannot override it.
+    """
+    config = (*extra_config, *_NO_BACKGROUND_MAINTENANCE, *_NO_REPOSITORY_PROGRAMS)
     result = {"GIT_CONFIG_COUNT": str(len(config))}
     for index, (key, value) in enumerate(config):
         result[f"GIT_CONFIG_KEY_{index}"] = key
@@ -79,6 +97,23 @@ def git_environment(
     safe = (("safe.directory", str(safe_directory)),) if safe_directory is not None else ()
     env.update(git_config_env(safe))
     return env
+
+
+def _require_policy(env: Mapping[str, str]) -> None:
+    """Refuse ``env`` unless its last ``GIT_CONFIG_*`` entries are the host Git policy."""
+    policy = (*_NO_BACKGROUND_MAINTENANCE, *_NO_REPOSITORY_PROGRAMS)
+    try:
+        count = int(env.get("GIT_CONFIG_COUNT", "0"))
+    except ValueError:
+        count = 0
+    first = count - len(policy)
+    given = tuple(
+        (env.get(f"GIT_CONFIG_KEY_{index}"), env.get(f"GIT_CONFIG_VALUE_{index}"))
+        for index in range(max(first, 0), count)
+    )
+    if first < 0 or given != policy:
+        message = "a Git environment must come from git_environment(), which owns its config"
+        raise ValueError(message)
 
 
 @dataclass(frozen=True)
@@ -121,10 +156,13 @@ class Git:
     ) -> ProcessOutcome:
         """Run ``git <args>`` in ``cwd``; ``args`` excludes the ``git`` executable.
 
-        ``env`` comes from ``git_environment`` and defaults to ``git_environment()``.
+        ``env`` comes from ``git_environment`` and defaults to ``git_environment()``; an
+        ``env`` without the host Git policy raises ``ValueError`` before Git starts.
         """
         argv = (shutil.which("git") or "git", *args)
-        spec = ProcessSpec(argv, cwd=cwd, env=git_environment() if env is None else env)
+        environment = git_environment() if env is None else env
+        _require_policy(environment)
+        spec = ProcessSpec(argv, cwd=cwd, env=environment)
         match self._processes.run(spec, timeout=timeout):
             case ProcessOutcome() as outcome:
                 return outcome

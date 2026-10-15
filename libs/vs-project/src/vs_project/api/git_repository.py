@@ -204,6 +204,15 @@ class GitRepository(Protocol):
         """
         ...
 
+    def pin(self, location: RepositoryLocation) -> None:
+        """Pin every later call to ``location`` without asking Git where the repository is.
+
+        For a linked worktree whose ``.git`` file the host must not trust: the agent
+        working in it can rewrite it. Take ``location`` from the parent repository's
+        :meth:`linked_worktree_location` (portable).
+        """
+        ...
+
     # -- names ---------------------------------------------------------------
 
     def is_valid_branch_name(self, name: str) -> bool:
@@ -471,6 +480,15 @@ class GitRepository(Protocol):
         """The commit a linked worktree's ``HEAD`` resolves to.
 
         Raises ``GitCommandError`` when it does not resolve (portable).
+        """
+        ...
+
+    def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        """Where this repository registered its linked worktree ``worktree``.
+
+        Read from this repository's own records, never from ``worktree/.git``.
+        Raises ``GitCommandError`` when ``worktree`` is not a linked worktree of this
+        repository (portable).
         """
         ...
 

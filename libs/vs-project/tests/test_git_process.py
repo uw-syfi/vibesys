@@ -8,6 +8,7 @@ caller removes or moves the repository ("Directory not empty: .git").
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ from hypothesis import strategies as st
 from tests.support.real_git import REAL_GIT
 
 from vs_project.api import Git, GitCommandError
-from vs_sim.api import ProcessTimeoutError
+from vs_sim.api import ProcessSpec, ProcessTimeoutError
 from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
 _IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@local")
@@ -111,3 +112,31 @@ def test_a_command_past_its_timeout_raises_and_says_what_is_left(
     assert clock.now() == timeout
     notes = getattr(raised.value, "__notes__", [])
     assert bool(notes) == survives_kill
+
+
+_AGENT_CONFIG = st.tuples(
+    st.sampled_from(["core.hooksPath", "core.fsmonitor", "gc.auto", "maintenance.auto"]),
+    st.sampled_from(["/agent/programs", "true", "1"]),
+)
+
+
+@given(config=st.lists(_AGENT_CONFIG, max_size=6))
+@settings(max_examples=20)
+def test_git_starts_nothing_in_an_environment_that_lacks_the_host_policy(
+    config: list[tuple[str, str]],
+) -> None:
+    started: list[ProcessSpec] = []
+
+    def start(spec: ProcessSpec) -> ProcessScript:
+        started.append(spec)
+        return ProcessScript()
+
+    git = Git(FakeProcesses(start, pass_time=ManualClock().advance))
+    forged = {"PATH": os.environ.get("PATH", ""), "GIT_CONFIG_COUNT": str(len(config))}
+    for index, (key, value) in enumerate(config):
+        forged[f"GIT_CONFIG_KEY_{index}"] = key
+        forged[f"GIT_CONFIG_VALUE_{index}"] = value
+
+    with pytest.raises(ValueError, match="git_environment"):
+        git.run(["status"], cwd=Path("/repo"), env=forged)
+    assert not started

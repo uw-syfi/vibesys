@@ -208,11 +208,15 @@ class ProjectRunResources:
                 log_dir, clock=self._effects.clock, tee_stderr=False, emit=self._effects.log_emit
             )
             teardown_stack.callback(logger.close)
+            # The agent can rewrite the workspace's ``.git``; host Git follows the
+            # parent repository's registration instead.
+            repository = self._effects.git_repository(workspace, self._effects.git_events)
+            repository.pin(self.git.linked_worktree_location(workspace))
             git = GitTracker(
                 workspace,
                 run_id=self._request.run_id,
                 events=self._effects.git_events,
-                repository=self._effects.git_repository(workspace, self._effects.git_events),
+                repository=repository,
                 excluded_dirs=self._request.excluded_dirs,
                 excluded_files=self._request.excluded_files,
                 trusted_input_paths=self._request.trusted_input_paths,

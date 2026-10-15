@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
     from vs_project._git_events import GitTrackerEvents
     from vs_project._state import GitSnapshotPlan, ProjectGitIntegration, StateSnapshot
-    from vs_project.api.git_repository import GitRepository
+    from vs_project.api.git_repository import GitRepository, RepositoryLocation
 
 
 def _normalize_project_paths(paths: Iterable[str | Path]) -> tuple[Path, ...]:
@@ -148,6 +148,15 @@ class GitTracker:
         destination = self._validate_local_worktree_path(worktree_dir)
         destination.parent.mkdir(parents=True, exist_ok=True)
         self._git.add_worktree(destination, commit)
+
+    def linked_worktree_location(self, worktree_dir: Path) -> RepositoryLocation:
+        """Where this repository registered the linked worktree ``worktree_dir``.
+
+        Read from this repository's records, never from ``worktree_dir/.git``, which
+        the agent working there can rewrite. Pin the worktree's own repository to it
+        (``GitRepository.pin``) so host Git never follows a redirected ``.git``.
+        """
+        return self._git.linked_worktree_location(self._validate_local_worktree_path(worktree_dir))
 
     def remove_worktree(self, worktree_dir: Path) -> None:
         """Unregister a linked worktree and delete its directory (best-effort).

@@ -206,6 +206,11 @@ class Pygit2GitRepository:
         self._cli.pin(location)
         return location
 
+    def pin(self, location: RepositoryLocation) -> None:
+        self._location = location
+        self._exclude_file = (_common_dir(location.git_dir) / "info" / "exclude").resolve()
+        self._cli.pin(location)
+
     # -- names ---------------------------------------------------------------
 
     def is_valid_branch_name(self, name: str) -> bool:
@@ -527,13 +532,17 @@ class Pygit2GitRepository:
         self._cli.prune_worktrees()
 
     def worktree_head(self, worktree: Path) -> str:
+        location = self.linked_worktree_location(worktree)
         try:
-            repository = self._open_at(worktree)
+            repository = pygit2.Repository(str(location.git_dir))
             if repository.head_is_unborn:
                 _refuse("ambiguous argument 'HEAD': unknown revision")
             return str(repository.head.peel(pygit2.Commit).id)
         except _LIBGIT2_ERRORS as error:
             self._fail("rev-parse HEAD", error)
+
+    def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        return self._cli.linked_worktree_location(worktree)
 
     # -- repository-local ignore rules ---------------------------------------
 

@@ -234,10 +234,20 @@ class FakeGitRepository:
         with self._operation("bind"):
             scope = self._scope(["rev-parse", "--absolute-git-dir", "--show-toplevel"])
             self._pinned = scope.co
-            git_dir = scope.repo.git_dir
-            if scope.co.name is not None:
-                git_dir = git_dir / "worktrees" / scope.co.name
-            return RepositoryLocation(git_dir=git_dir, work_tree=scope.root)
+            return RepositoryLocation(git_dir=self._git_dir_of(scope.co), work_tree=scope.root)
+
+    def pin(self, location: RepositoryLocation) -> None:
+        with self._operation("pin"):
+            checkout = self._disk.exact(location.work_tree)
+            if checkout is None or self._git_dir_of(checkout) != location.git_dir:
+                self._refuse(["rev-parse", "--git-dir"], _NOT_A_REPOSITORY)
+            self._pinned = checkout
+
+    @staticmethod
+    def _git_dir_of(checkout: Checkout) -> Path:
+        if checkout.name is None:
+            return checkout.repo.git_dir
+        return checkout.repo.git_dir / "worktrees" / checkout.name
 
     # -- names ---------------------------------------------------------------
 
@@ -972,6 +982,15 @@ class FakeGitRepository:
                     command, "fatal: ambiguous argument 'HEAD': unknown revision", warn=False
                 )
             return head
+
+    def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        with self._operation("linked_worktree_location"):
+            scope = self._scope(["rev-parse", "--git-common-dir"], warn=False)
+            checkout = self._disk.exact(worktree)
+            if checkout is None or checkout.name is None or checkout.repo is not scope.repo:
+                message = f"fatal: '{worktree}' is not a linked worktree of {scope.repo.git_dir}"
+                self._refuse(["worktree", "list"], message, warn=False)
+            return RepositoryLocation(git_dir=self._git_dir_of(checkout), work_tree=checkout.path)
 
     # -- repository-local ignore rules ---------------------------------------
 

@@ -68,12 +68,15 @@ class CliGitRepository:
         self._exclude_file = root / ".git" / "info" / "exclude"
 
     def pin(self, location: RepositoryLocation) -> None:
-        """Adopt an already-resolved ``location`` instead of asking Git for it (see ``bind``).
-
-        For an implementation that wraps this one and located the repository itself.
-        """
+        """Adopt an already-resolved ``location`` instead of asking Git for it (see ``bind``)."""
         self._git_dir = location.git_dir
         self._work_tree = location.work_tree
+        exclude = _text(
+            self._run_checked(
+                ["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"]
+            ).stdout
+        )
+        self._exclude_file = (self._root / exclude.strip()).resolve()
 
     # -- process plumbing ----------------------------------------------------
 
@@ -441,14 +444,36 @@ class CliGitRepository:
 
     def worktree_head(self, worktree: Path) -> str:
         args = ["rev-parse", "HEAD"]
+        location = self.linked_worktree_location(worktree)
+        overrides = {
+            **self._ENVIRONMENT,
+            "GIT_DIR": str(location.git_dir),
+            "GIT_WORK_TREE": str(location.work_tree),
+        }
         result = self._git.run(
             args,
-            cwd=worktree,
-            env=git_environment(safe_directory=worktree, overrides=self._ENVIRONMENT),
+            cwd=location.work_tree,
+            env=git_environment(safe_directory=location.work_tree, overrides=overrides),
         )
         if result.returncode != 0:
             raise self._failure(args, result)
         return _text(result.stdout).strip()
+
+    def linked_worktree_location(self, worktree: Path) -> RepositoryLocation:
+        args = ["rev-parse", "--path-format=absolute", "--git-common-dir"]
+        common = Path(_text(self._run_checked(args).stdout).strip())
+        # The pointer path itself, never what an agent-planted ``.git`` symlink names.
+        pointer = worktree.resolve() / ".git"
+        registrations = common / "worktrees"
+        for gitdir in sorted(registrations.iterdir()) if registrations.is_dir() else ():
+            back_pointer = gitdir / "gitdir"
+            if back_pointer.is_symlink() or not back_pointer.is_file():
+                continue
+            recorded = Path(back_pointer.read_text(encoding="utf-8").strip())
+            if recorded.parent.resolve() / recorded.name == pointer:
+                return RepositoryLocation(git_dir=gitdir.resolve(), work_tree=worktree.resolve())
+        message = f"fatal: '{worktree}' is not a linked worktree of {common}"
+        raise GitCommandError(["git", "worktree", "list"], 128, message)
 
     # -- repository-local ignore rules ---------------------------------------
 
