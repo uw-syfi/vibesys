@@ -15,8 +15,8 @@ Python's ``os`` module does not expose it.
 from __future__ import annotations
 
 import errno
-import itertools
 import os
+import secrets
 import shutil
 import stat
 from collections.abc import Callable
@@ -39,7 +39,6 @@ _READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _CREATE_FLAGS = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC
 _TEMPORARY_ATTEMPTS = 64
 _READ_CHUNK_BYTES = 1024 * 1024
-_temporary_names = itertools.count()
 
 
 class WorkspacePathError(ValueError):
@@ -349,7 +348,8 @@ class _DirectoryAtomicWrite:
     def temporary(self, destination: Path) -> Iterator[tuple[Path, AtomicWriteStream]]:
         del destination
         for _ in range(_TEMPORARY_ATTEMPTS):
-            temporary = f".{self._name}.{next(_temporary_names)}.tmp"
+            # Unpredictable, so the agent cannot plant every name the host tries first.
+            temporary = f".{self._name}.{secrets.token_hex(8)}.tmp"
             try:
                 descriptor = os.open(temporary, _CREATE_FLAGS, 0o600, dir_fd=self._directory)
             except FileExistsError:

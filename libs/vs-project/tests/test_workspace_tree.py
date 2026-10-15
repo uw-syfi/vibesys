@@ -262,3 +262,19 @@ def test_a_copy_lands_only_at_the_new_directory_the_path_names(
         assert os.access(expected / "run.sh", os.X_OK)
         assert copied.links == (PurePosixPath("alias.md"),)
         assert PurePosixPath("skipped") not in copied.copied
+
+
+def test_planted_temporary_names_never_block_a_write(tmp_path: Path) -> None:
+    """Regression: temporaries were numbered, so planting the next 64 names blocked a write."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_text("host\n")
+    for number in range(4096):
+        (workspace / f".notes.txt.{number}.tmp").symlink_to(outside)
+
+    with open_workspace_tree(workspace) as tree:
+        tree.write_bytes("notes.txt", b"agent\n")
+
+    assert (workspace / "notes.txt").read_bytes() == b"agent\n"
+    assert outside.read_text() == "host\n"
