@@ -401,6 +401,46 @@ class ThreadsContract:
 
         assert abs(subject.run(lambda: threads.run_async(main())) - 5.0) < 1e-9
 
+    def test_run_async_runs_to_thread_calls_and_carries_their_failures(self) -> None:
+        """``asyncio.to_thread`` on the loop runs the call on a thread and returns its outcome."""
+        subject = self.threads_under_test(0)
+        threads = subject.threads
+        tick = subject.tick
+
+        def blocking(value: str) -> str:
+            threads.sleep(tick)
+            if value == "fail":
+                raise LookupError(value)
+            return value
+
+        async def main() -> list[str]:
+            answered = await asyncio.to_thread(blocking, "answer")
+            try:
+                await asyncio.to_thread(blocking, "fail")
+            except LookupError as error:
+                return [answered, str(error)]
+            return [answered]
+
+        assert subject.run(lambda: threads.run_async(main())) == ["answer", "fail"]
+
+    def test_run_async_loop_time_is_the_threads_monotonic_clock_on_an_exact_clock(self) -> None:
+        """``loop.time()`` reads the same clock as ``Threads.now()``."""
+        subject = self.threads_under_test(0)
+        if not subject.exact:
+            return
+        threads = subject.threads
+
+        async def main() -> list[float]:
+            loop = asyncio.get_running_loop()
+            gaps = [loop.time() - threads.now()]
+            # test-isolation: the loop runs on the simulated timeline, so this costs no wall time
+            await asyncio.sleep(3.0)
+            gaps.append(loop.time() - threads.now())
+            return gaps
+
+        gaps = subject.run(lambda: threads.run_async(main()))
+        assert all(abs(gap) < 1e-9 for gap in gaps), gaps
+
 
 @dataclass(frozen=True)
 class NetworkUnderTest:

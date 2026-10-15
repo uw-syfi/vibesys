@@ -28,6 +28,7 @@ simulated thread.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import heapq
 import itertools
 import threading
@@ -660,16 +661,55 @@ class _LoopWake:
     def __init__(self, sim: SimThreads) -> None:
         self._sim = sim
         self._woken = sim.event()
+        self._executor = _SimExecutor(sim)
 
     def park(self, timeout: float | None) -> None:
         self._woken.wait(timeout)
         self._woken.clear()
 
     def wake(self) -> None:
-        # Only a simulated thread can hand over the baton; a real worker thread's callback
-        # reaches the loop through its wakeup pipe, which the loop reads in a real select.
-        if not isinstance(self._sim.caller(), _OutsideThread):
-            self._woken.set()
+        # Only a simulated thread can hand over the baton. A thread outside the simulation
+        # that schedules a callback would otherwise leave the loop asleep until its next
+        # timer, so it is refused loudly.
+        if isinstance(self._sim.caller(), _OutsideThread):
+            message = "a thread outside the simulation cannot wake a loop started by run_async"
+            raise RuntimeError(message)  # noqa: TRY004  # LW-988825 [TRY004]; the caller is outside the simulation, not an argument of the wrong type.
+            # > TypeError would say an argument has the wrong type; no argument is wrong here.
+        self._woken.set()
+
+    def now(self) -> float:
+        return self._sim.now()
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        return self._executor
+
+
+class _SimExecutor(concurrent.futures.Executor):
+    """Runs each submitted call as a new simulated thread."""
+
+    def __init__(self, sim: SimThreads) -> None:
+        self._sim = sim
+        self._count = itertools.count()
+
+    def submit[T](
+        self, fn: Callable[..., T], /, *args: object, **kwargs: object
+    ) -> concurrent.futures.Future[T]:
+        future: concurrent.futures.Future[T] = concurrent.futures.Future()
+
+        def call() -> None:
+            if not future.set_running_or_notify_cancel():
+                return
+            try:
+                result = fn(*args, **kwargs)
+            except BaseException as error:  # noqa: BLE001  # LW-096717 [BLE001]; the future carries any failure back to its awaiter, as a thread pool's does.
+                # > Catching less would kill the simulated thread and leave the awaiter hanging.
+                future.set_exception(error)
+            else:
+                future.set_result(result)
+
+        self._sim.spawn(call, name=f"executor-{next(self._count)}")
+        return future
 
 
 class SimBlockingRunner:

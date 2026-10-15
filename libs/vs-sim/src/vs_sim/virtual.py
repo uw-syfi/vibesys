@@ -91,7 +91,16 @@ class LoopHost(Protocol):
         ...
 
     def wake(self) -> None:
-        """End a current or the next ``park``."""
+        """End a current or the next ``park``; raises when the caller cannot hand over the baton."""
+        ...
+
+    def now(self) -> float:
+        """The reading the loop's ``time()`` returns: the host's own monotonic clock."""
+        ...
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        """The loop's default executor, which runs ``run_in_executor`` calls as host threads."""
         ...
 
 
@@ -272,7 +281,7 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
             self._trace = trace
 
     def time(self) -> float:
-        return self._clock.at
+        return self._clock.at if self.host is None else self.host.now()
 
     def _write_to_self(self) -> None:
         # A callback scheduled from another thread writes to the loop's wakeup pipe; a hosted
@@ -324,6 +333,11 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         func: Callable[[*Ts], T],
         *args: *Ts,
     ) -> asyncio.Future[T]:
+        if self.host is not None and executor is None:
+            # The host's executor runs the call as a simulated thread, whose completion
+            # wakes this loop like any other callback: nothing to wait for outside. (asyncio
+            # accepts only a real thread pool as the default executor, so it is chosen here.)
+            return super().run_in_executor(self.host.executor, func, *args)
         # Count the call until its future is done, so the selector can tell "idle" from
         # "waiting for a thread". A call whose waiter was cancelled stops counting at once.
         self.workers_in_flight += 1
@@ -486,7 +500,9 @@ def run_hosted[T](
 
     Unlike :func:`run_virtual`, the loop does not drive the simulated threads: it runs on
     one of them, and while idle it parks that thread until another wakes it or its next
-    timer is due. ``SimThreads.run_async`` is the caller.
+    timer is due. Its ``time()`` is ``host.now()``, and ``run_in_executor`` (so also
+    ``asyncio.to_thread``) runs calls on ``host.executor``. ``SimThreads.run_async`` is the
+    caller.
     """
 
     def make_loop() -> _VirtualLoop:
