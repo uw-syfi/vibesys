@@ -10,13 +10,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
-from vs_project.api.git_repository import GitError, PatchStyle, StagingError
-from vs_project.api.workspace_tree import (
+from vs_project._workspace_tree import (
     EntryKind,
     NotRegularFileError,
     WorkspacePathError,
     open_workspace_tree,
 )
+from vs_project.api.git_repository import GitError, PatchStyle, StagingError
 from vs_project.project import Project
 
 if TYPE_CHECKING:
@@ -24,8 +24,8 @@ if TYPE_CHECKING:
 
     from vs_project._git_events import GitTrackerEvents
     from vs_project._state import GitSnapshotPlan, ProjectGitIntegration, StateSnapshot
+    from vs_project._workspace_tree import WorkspaceTree
     from vs_project.api.git_repository import GitRepository, RepositoryLocation
-    from vs_project.api.workspace_tree import WorkspaceTree
 
 
 def _normalize_project_paths(paths: Iterable[str | Path]) -> tuple[Path, ...]:
