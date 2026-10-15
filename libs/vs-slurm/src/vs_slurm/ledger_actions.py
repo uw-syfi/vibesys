@@ -143,13 +143,44 @@ def _cancel_live(cluster: Cluster, record: LedgerRecord) -> str | None | Withdra
     return cancelled.job_id or known
 
 
+_ORPHANING_STATES = frozenset({LedgerState.FAILED, LedgerState.WITHDRAWN})
+
+
+def _cancel_orphans(cluster: Cluster, entry: LedgerEntry) -> tuple[WithdrawOutcome, ...]:
+    """Cancel every live job named for an attempt that failed or was withdrawn with no job.
+
+    Such a job is an orphan: its submitter sbatched it after the attempt was
+    taken over or withdrawn (past the tombstone) and died before it could
+    cancel it itself. No record names it, so only its name finds it. Each such
+    attempt costs one cluster call per sweep; one that named its job does not,
+    since that job was seen ended (failed) or cancelled first (withdrawn).
+    """
+    outcomes: list[WithdrawOutcome] = []
+    for record in (*entry.earlier, entry.record):
+        if record.state not in _ORPHANING_STATES or record.job is not None:
+            continue
+        observed = cluster.inspect(record.operation_id)
+        if not isinstance(observed, ClusterObservation) or observed.status.terminal:
+            continue
+        cancelled = cluster.cancel(record.operation_id)
+        if isinstance(cancelled, ClusterUnknown):
+            outcomes.append(WithdrawUnknown(record.key, cancelled.reason))
+        else:
+            job = cancelled.job_id or observed.job_id
+            outcomes.append(Withdrawn(record.key, record.operation_id, job, already=True))
+    return tuple(outcomes)
+
+
 def sweep_unleased(
     ledger: EvaluationLedger, cluster: Cluster, *, now: float, grace_seconds: float
 ) -> tuple[WithdrawOutcome, ...]:
     """Withdraw every live request no run has leased for longer than ``grace_seconds``.
 
-    A settled request (completed, failed or withdrawn) costs one ledger read and
-    no cluster call. A submitted job found ended is not withdrawn, since it holds
+    It also cancels orphans: live jobs named for an attempt that failed or was
+    withdrawn before naming a job (``_cancel_orphans``), whatever the leases say.
+
+    A settled request (completed, failed or withdrawn) costs one ledger read,
+    plus one cluster call per attempt it failed or withdrew before naming a job. A submitted job found ended is not withdrawn, since it holds
     no resources: one that ended unsuccessfully settles ``failed``, and one that
     COMPLETED is left for the next ask, which collects it (only a collected
     result settles ``completed``; it costs one cluster call per sweep until then).
@@ -161,7 +192,10 @@ def sweep_unleased(
         except LedgerError as error:
             outcomes.append(WithdrawUnknown(key, str(error)))
             continue
-        if entry is None or entry.record.state.settled:
+        if entry is None:
+            continue
+        outcomes.extend(_cancel_orphans(cluster, entry))
+        if entry.record.state.settled:
             continue
         if isinstance(lease_verdict(entry, now=now, grace_seconds=grace_seconds), Leased):
             continue

@@ -436,12 +436,15 @@ class LedgerEntry:
     whose lease this build cannot decode (a newer ``format_version``, or a
     damaged file): each counts as a live holder of unknown kind, so the request
     is never swept as unleased while one stands, and reading never fails on one.
+    ``earlier`` holds the current record of every earlier attempt, oldest first;
+    each is final, since a new attempt is claimed only after the last one ended.
     """
 
     record: LedgerRecord
     leases: tuple[LedgerLease, ...] = ()
     revision: int = 0
     unreadable_leases: tuple[str, ...] = ()
+    earlier: tuple[LedgerRecord, ...] = ()
 
 
 def check_transition(before: LedgerRecord, after: LedgerRecord) -> None:

@@ -77,7 +77,11 @@ class FakeEvaluationLedger:
             if record.key != key or record.attempt != attempt:
                 raise LedgerError.unreadable(path, "the record names another key or attempt")
             decoded.append(((attempt, revision), record))
-        (_, revision), current = max(decoded, key=lambda item: item[0])
+        latest: dict[int, tuple[int, LedgerRecord]] = {}
+        for (attempt, revision), record in decoded:
+            if attempt not in latest or revision > latest[attempt][0]:
+                latest[attempt] = (revision, record)
+        *earlier, (revision, current) = (latest[attempt] for attempt in sorted(latest))
         readable: list[LedgerLease] = []
         unreadable: list[str] = []
         for holder, text in sorted(leases.items()):
@@ -85,7 +89,13 @@ class FakeEvaluationLedger:
                 readable.append(decode_lease(text, path=f"{key}/leases/{holder}.json"))
             except LedgerError:
                 unreadable.append(holder)  # a live holder of unknown kind
-        return LedgerEntry(current, tuple(readable), revision, tuple(unreadable))
+        return LedgerEntry(
+            current,
+            tuple(readable),
+            revision,
+            tuple(unreadable),
+            tuple(record for _, record in earlier),
+        )
 
     def claim(self, record: LedgerRecord) -> LedgerRecord:
         """Create the record's attempt unless one exists; return the stored attempt."""

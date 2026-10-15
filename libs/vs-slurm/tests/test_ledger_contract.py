@@ -174,7 +174,7 @@ def test_of_many_claims_of_one_attempt_exactly_the_first_is_stored(owners: list[
             assert entry.record.owner == owners[0]
 
 
-def test_the_highest_attempt_is_the_current_one(case: _Case) -> None:
+def test_the_highest_attempt_is_the_current_one_and_earlier_ones_are_listed(case: _Case) -> None:
     case.ledger.claim(_record(state=LedgerState.SUBMITTING))
     claimed = case.ledger.read(KEY)
     assert claimed is not None
@@ -185,6 +185,7 @@ def test_the_highest_attempt_is_the_current_one(case: _Case) -> None:
     assert (entry.record.attempt, entry.record.owner) == (1, "run-b")
     assert entry.record.state is LedgerState.SUBMITTING
     assert entry.revision == 0
+    assert entry.earlier == (_record(state=LedgerState.WITHDRAWN),)
 
 
 _STATES = st.sampled_from(LedgerState)

@@ -112,12 +112,17 @@ class RemoteEvaluationLedger:
             revisions.append((attempt, revision, record))
         if not revisions:
             return None
-        _, revision, current = max(revisions, key=lambda item: item[:2])
+        latest: dict[int, tuple[int, LedgerRecord]] = {}
+        for attempt, revision, record in revisions:
+            if attempt not in latest or revision > latest[attempt][0]:
+                latest[attempt] = (revision, record)
+        *earlier, (revision, current) = (latest[attempt] for attempt in sorted(latest))
         return LedgerEntry(
             current,
             tuple(sorted(leases, key=lambda lease: lease.holder)),
             revision,
             tuple(sorted(unreadable)),
+            tuple(record for _, record in earlier),
         )
 
     def claim(self, record: LedgerRecord) -> LedgerRecord:

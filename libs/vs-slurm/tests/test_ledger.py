@@ -515,3 +515,76 @@ def test_the_sweep_never_touches_a_job_outside_the_ledger(tmp_path: Path) -> Non
     observed = world.cluster.inspect("foreign")
     assert isinstance(observed, ClusterObservation)
     assert observed.status is SlurmJobStatus.RUNNING
+
+
+_ORPHAN_STATUSES = st.sampled_from(
+    (None, SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.FAILED)
+)
+_JOBLESS_ENDS = st.sampled_from((LedgerState.FAILED, LedgerState.WITHDRAWN))
+
+
+@given(
+    attempts=st.lists(st.tuples(_JOBLESS_ENDS, _ORPHAN_STATUSES), min_size=1, max_size=4),
+    current_settled=st.booleans(),
+)
+@settings(max_examples=examples(pr=30, nightly=300), deadline=None)
+def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attempt(
+    attempts: list[tuple[LedgerState, SlurmJobStatus | None]], *, current_settled: bool
+) -> None:
+    """A submitter that sbatched past a takeover or withdrawal, then died, left an orphan.
+
+    Each attempt here ended with no job recorded, and a job may still run under
+    its name. The sweep cancels exactly the live ones, whether the attempt is an
+    earlier one or the current one, and never the current attempt's own leased job.
+    """
+    with TemporaryDirectory() as directory:
+        workspace = Path(directory)
+        cluster = FakeCluster(clock=ManualClock())
+        ledger = FakeEvaluationLedger(project=PROJECT)
+        request = _request(workspace)
+        key = evaluation_key(PROJECT, request, CONFIG, setup_script_sha256=None)
+        live: set[str] = set()
+        ends = list(attempts) if current_settled else [*attempts, (LedgerState.SUBMITTED, None)]
+        for attempt, (end, orphan) in enumerate(ends):
+            operation = ledger_operation_id(key, attempt)
+            claimed = LedgerRecord(
+                key=key,
+                project=PROJECT,
+                attempt=attempt,
+                operation_id=operation,
+                owner="run-a",
+                created_at=0.0,
+                claim_expires_at=900.0,
+                state=LedgerState.SUBMITTING,
+            )
+            ledger.claim(claimed)
+            entry = ledger.read(key)
+            assert entry is not None
+            if end is LedgerState.SUBMITTED:
+                cluster.script(operation, states=(SlurmJobStatus.RUNNING,))
+                submitted = cluster.submit(request, operation_id=operation)
+                assert isinstance(submitted, ClusterSubmitted)
+                assert isinstance(submitted.handle, SlurmBatchHandle)
+                job = job_of_handle(submitted.handle)
+                assert ledger.replace(entry, claimed.model_copy(update={"state": end, "job": job}))
+                continue
+            assert ledger.replace(entry, claimed.model_copy(update={"state": end, "reason": "x"}))
+            if orphan is not None:
+                cluster.script(operation, states=(orphan,))
+                assert isinstance(cluster.submit(request, operation_id=operation), ClusterSubmitted)
+                if not orphan.terminal:
+                    live.add(operation)
+        ledger.renew(key, LedgerLease(holder="run-a", renewed_at=0.0, expires_at=1e12))
+
+        outcomes = sweep_unleased(ledger, cluster, now=1.0, grace_seconds=0.0)
+
+        assert {o.operation_id for o in outcomes if isinstance(o, Withdrawn)} == live
+        assert len(outcomes) == len(live)
+        for attempt, (end, _) in enumerate(ends):
+            observed = cluster.inspect(ledger_operation_id(key, attempt))
+            if end is LedgerState.SUBMITTED:
+                assert isinstance(observed, ClusterObservation)
+                assert observed.status is SlurmJobStatus.RUNNING
+            elif isinstance(observed, ClusterObservation):
+                assert observed.status.terminal
+        assert sweep_unleased(ledger, cluster, now=2.0, grace_seconds=0.0) == ()
