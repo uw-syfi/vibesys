@@ -44,7 +44,7 @@ export async function installAskpass(path: string): Promise<string> {
 }
 
 /** What the filesystem proved about the control path entry itself, without following it. */
-export interface ControlDirectoryEntry {
+interface ControlDirectoryEntry {
   readonly kind: 'directory' | 'symbolic-link' | 'other';
   readonly uid: number;
   readonly mode: number;
