@@ -73,7 +73,15 @@ export function RunPage({
         </div>
       </header>
       <Banners banners={banners} replayFailure={replayFailure} {...events} />
-      <QuotaBanner banner={quotaBanner(run)} command={events.onCommand} />
+      {/* Keyed on the quota fact's own sequence: a fresh episode (a new pause, a settling
+          switch, or a resume that clears one) remounts rather than inheriting the previous
+          episode's resume-click `pending`/`result` state, which the component itself only
+          tracks for its own, current fact. */}
+      <QuotaBanner
+        key={run.quota.sequence}
+        banner={quotaBanner(run)}
+        command={events.onCommand}
+      />
       <RunSummary run={run} iterations={iterations} />
       <div className="run-layout">
         <RoundRail
