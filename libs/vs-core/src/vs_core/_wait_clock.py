@@ -105,7 +105,9 @@ def job_bound(job: Job, stated: float, run: RunState) -> Bound:
     """
     limits = run.limits
     bound = Bound(at=stated + job.queue_credit, by=WaitEnd.LIMIT)
-    if pending(job) and job.observation is not None:
+    if pending(job) and job.observation is not None and bound.at > job.observation.observed_at:
+        # The pending fact came before the limit passed, so the time since it is queue time,
+        # up to the cap; one that came after it cannot revive the limit.
         queued_since = job.observation.observed_at
         bound = _earliest(
             (

@@ -5,9 +5,9 @@ input measurement) gives the work a limit counted from the submission's dispatch
 submission's record stays open until the job ends, and a record whose limit passes is
 ended: the strategy gets ``Failed(TIMED_OUT)`` and the job is cancelled. On a contended
 cluster an 8-GPU job waits hours in the scheduler's queue, so a limit that counted that
-time expired before the job ever ran. The rule is the one agent waits follow: a limit
-starts when the job starts running, and only the run's own deadline or a stop ends a
-queued job.
+time expired before the job ever ran. The rule is the one agent waits follow: the queue
+time a job's pending facts earn (at most ``observe_backoff_cap`` per interval) is not
+charged, so the limit counts from the job's start.
 """
 
 from dataclasses import dataclass
@@ -175,41 +175,42 @@ def test_a_measurement_times_out_exactly_when_its_job_has_run_its_limit(
 ) -> None:
     """Any interleaving of queued and running facts, clock ticks, requeues and an end.
 
-    Time is charged from the dispatch, except from a fact saying the job is queued to the
-    job's next fact. The record's limit is checked at each clock tick: the measurement
-    times out at the first tick at which the charged time reaches the limit while the job
-    runs and has not ended, once, and is cancelled at most once; never while queued.
+    Time is charged from the dispatch, except the queue time a pending fact earns: the time
+    from it to the job's next fact (or to now), at most ``observe_backoff_cap``. The record's
+    limit is checked at each clock tick: the measurement times out at the first tick at which
+    the charged time reaches the limit (or the run's deadline passes) while the job has not
+    ended, once, and is cancelled at most once; never before.
     """
     measured = measuring(queued=first_queued)
     state, submit = measured.state, measured.submit
+    cap = state.run.limits.observe_backoff_cap
     sequence = 1
     at = state.run.now_at
     charged = at  # Dispatched at 0; the job's first fact at ``at``.
+    last_fact_at = at
     job_queued = first_queued
     ended = False
     timeouts = 0
     cancels = 0
     for fact in [*facts, *(() if end is None else (end, Tick(after=LIMIT)))]:
         at += fact.after
-        if not job_queued:
-            charged += fact.after
+        since = at - last_fact_at
+        now_charged = charged + (max(since - cap, 0.0) if job_queued else since)
         if not isinstance(fact, Tick):
             sequence += 1
             job_queued = isinstance(fact, Poll)
+            charged, last_fact_at = now_charged, at
         result = core.step(state, _event(fact, submit, sequence, at))
         state = result.state
         timed = _timed_out(result.events)
         cancels += _cancels(result.requests)
-        if job_queued and timeouts == 0:
-            assert _submission(state, submit).phase != core.RequestPhase.BLOCKED, (fact, at)
-        if job_queued:
-            assert timed == 0, (fact, at, charged)
-            assert cancels == 0 or timeouts == 1, (fact, at)
-        if isinstance(fact, Tick) and not ended and not job_queued and charged >= LIMIT:
+        due = now_charged >= LIMIT or at >= state.run.deadline_at
+        if isinstance(fact, Tick) and not ended and due:
             # The first tick past the run limit ends it; later ones find it already ended.
-            assert timeouts + timed == 1, (fact, at, charged)
+            assert timeouts + timed == 1, (fact, at, now_charged)
         elif timeouts == 0:
-            assert timed == 0, (fact, at, charged)
+            assert timed == 0, (fact, at, now_charged)
+            assert _submission(state, submit).phase != core.RequestPhase.BLOCKED, (fact, at)
         timeouts += timed
         assert timeouts <= 1
         assert cancels <= 1
