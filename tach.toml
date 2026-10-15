@@ -394,7 +394,7 @@ depends_on = ["vs_evaluation.api", "vibesys", "vibesys.inputs", "vibesys.run.con
 [[modules]]
 path = "vibesys.run.profilers"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.run.contracts", "vs_agent", "vs_project", "vs_runtime"]
+depends_on = ["vibesys", "vibesys.errors", "vibesys.orchestration.profilers", "vibesys.run.contracts", "vs_agent", "vs_project", "vs_runtime", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.skill_sources"
