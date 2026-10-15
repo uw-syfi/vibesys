@@ -55,7 +55,7 @@ class _GatedCluster(FakeCluster):
     """Every batch stays PENDING; once armed, ``inspect`` parks until released."""
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(clock=ManualClock())
         self.armed = False
         self.entered = _threads.event()
         self.release = _threads.event()

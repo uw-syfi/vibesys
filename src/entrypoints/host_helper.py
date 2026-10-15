@@ -16,15 +16,20 @@ from __future__ import annotations
 
 import os
 import sys
+from functools import cache
 from typing import TYPE_CHECKING
 
 from entrypoints.launcher import headless_command, source_checkout_root
+from server.host_api import HarnessOption
 from server.host_helper import serve_channel
+from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
     OsDirectories,
+    StoreLogReader,
     SubprocessRunLauncher,
+    run_streams_directory,
 )
 from server.host_helper_requests import HelperHost
 from server.instances import ControlSocketStopRequester
@@ -58,6 +63,26 @@ _STDOUT_FD = 1
 _STDERR_FD = 2
 
 
+@cache
+def vetted_harnesses() -> tuple[HarnessOption, ...]:
+    """The agent library's vetted harnesses, each provider's default marked; loaded on first use."""
+    # lint-waiver: LW-271503 [PLC0415]; the helper answers hello without loading the agent library.
+    # > `vs_agent.api` owns the vetted list and takes about half a second to import; at module
+    # > level every channel would pay for it before `hello` (the light-entrypoint guards forbid
+    # > it). A copy of the list in a light module would be a second source of truth, and a
+    # > generated copy would need a drift check for what one deferred import already gives.
+    from vs_agent.api import HARNESSES, default_model  # noqa: PLC0415
+
+    return tuple(
+        HarnessOption(
+            provider=harness.provider,
+            model=harness.model,
+            default=default_model(harness.provider) == harness.model,
+        )
+        for harness in HARNESSES
+    )
+
+
 def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperHost:
     """This host as the helper sees it; ``PermissionError`` when the registry root is unsafe."""
     network = UnixNetwork()
@@ -65,16 +90,20 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
     store = FileInstanceStore(root)
     # Records carry epoch times, so they age on the epoch clock, not ``threads``' monotonic one.
     epoch = SystemClock()
+    inspector = InstanceInspector(
+        store,
+        FileInstanceLogs(root),
+        FileInstanceMetadataStore(root),
+        epoch,
+    )
+    logs = StoreLogReader(
+        lambda instance_id: run_location(inspector.inspect(instance_id)), run_streams_directory
+    )
     return HelperHost(
         registry=LiveRegistry(store, epoch),
-        inspector=InstanceInspector(
-            store,
-            FileInstanceLogs(root),
-            FileInstanceMetadataStore(root),
-            epoch,
-        ),
+        inspector=inspector,
         stop_effects=StopEffects(
-            requester=ControlSocketStopRequester(network, clock=epoch),
+            requester=ControlSocketStopRequester(network, clock=epoch, deadline_clock=threads),
             signaller=PidfdProcessSignaller(),
             clock=threads,
             pause=threads.sleep,
@@ -85,6 +114,8 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
         checkout=GitCheckoutProbe(source_checkout_root(), SubprocessProbe()),
         dialer=network,
         vibesys_version=host_facts()[1],
+        logs=HelperLogs(logs, threads, threads.sleep),
+        harnesses=vetted_harnesses,
     )
 
 

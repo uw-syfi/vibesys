@@ -60,6 +60,16 @@ class Bounds(Protocol):
         ...
 
     @property
+    def queue_wait_budget_seconds(self) -> float:
+        """Longest wait of one measurement's job in its executor's queue."""
+        ...
+
+    @property
+    def queue_notice_interval_seconds(self) -> float:
+        """How often a job still queued is reported, in seconds of queue time."""
+        ...
+
+    @property
     def cancellation_bound_seconds(self) -> float:
         """Longest wait for a cancelled job to be confirmed gone."""
         ...
@@ -90,4 +100,6 @@ def limits_for(budget: RunBudget, bounds: Bounds) -> Limits:
         reconciliation_bound=float(bounds.reconciliation_bound_seconds),
         observe_interval=float(bounds.observe_interval_seconds),
         observe_backoff_cap=float(bounds.observe_backoff_cap_seconds),
+        queue_wait_budget=float(bounds.queue_wait_budget_seconds),
+        queue_notice_interval=float(bounds.queue_notice_interval_seconds),
     )

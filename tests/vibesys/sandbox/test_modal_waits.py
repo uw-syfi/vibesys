@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_sandbox.modal_evaluator import (
@@ -30,6 +30,12 @@ URL = "https://workspace--candidate.modal.run"
 APP = "candidate-app"
 _RUNNING = ContainerListing(({"app_name": APP, "container_id": "ta-1"},))
 _STARTING = ContainerListing(({"app_name": "another-app", "container_id": "ta-2"},))
+_ROUNDING = 1e-9
+"""How far a virtual time may pass a deadline from float rounding alone.
+
+The loops pause for ``deadline - now``, and ``now + (deadline - now)`` can land one ulp
+past ``deadline`` (2.7284237543152616 + 4.857555907057096 is 7.585979661372358).
+"""
 
 
 class AdvancingClock:
@@ -99,8 +105,8 @@ def test_wait_for_health_keeps_to_its_deadline(
     else:
         assert answers[len(timeouts) - 1] == 200, "it returns at the first ready answer"
         assert 200 not in answers[: len(timeouts) - 1]
-        assert clock.now() <= timeout
-    assert clock.now() <= max(timeout, 0.0) + 1e-9, "nothing ran past the deadline"
+        assert clock.now() <= timeout + _ROUNDING
+    assert clock.now() <= max(timeout, 0.0) + _ROUNDING, "nothing ran past the deadline"
     assert all(0 < limit <= 10.0 for limit in timeouts)
     assert all(0 < pause <= 2.0 for pause in clock.sleeps)
 
@@ -127,6 +133,7 @@ _LISTINGS = st.sampled_from([_STARTING, ListingFailed("modal exited 1"), Contain
 
 
 @settings(max_examples=examples(pr=40, nightly=1000), deadline=None)
+@example(timeout=7.585979661372357, listings=[], running_after=None, took=[2.7284237543152616])
 @given(
     timeout=st.floats(0.0, 300.0),
     listings=st.lists(_LISTINGS, max_size=80),
@@ -171,6 +178,6 @@ def test_find_app_container_keeps_to_its_deadline(
     else:
         assert found == "ta-1"
         assert running_after == len(listed_at) - 1, "it returns at the first running listing"
-    assert all(at <= timeout for at in listed_at), "no listing starts past the deadline"
+    assert all(at <= timeout + _ROUNDING for at in listed_at), "no listing starts past the deadline"
     assert all(0 < pause <= 5.0 for pause in clock.sleeps)
     assert warmed == [URL] * len(clock.sleeps)

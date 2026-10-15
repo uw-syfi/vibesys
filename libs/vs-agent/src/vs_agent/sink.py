@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from vs_agent.contracts import (
         AgentQuotaError,
         AgentRateLimit,
+        AgentUsage,
         Attribution,
         ProviderSwitch,
         QuotaPlan,
@@ -95,6 +96,17 @@ class AgentEventSink(Protocol):
         invocation_id: str | None = None,
     ) -> None:
         """Publish token usage from the current model response."""
+        ...
+
+    def turn_usage_recorded(
+        self,
+        usage: AgentUsage,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Publish settled token and cost accounting for one finished turn."""
         ...
 
     def rate_limit_update(
@@ -199,6 +211,17 @@ class NullAgentEventSink:
     ) -> None:
         """Ignore usage updates when no event sink was injected."""
         del input_tokens, context_window, model, agent_kind, round_label, invocation_id
+
+    def turn_usage_recorded(
+        self,
+        usage: AgentUsage,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Ignore settled usage when no event sink was injected."""
+        del usage, agent_kind, round_label, invocation_id
 
     def rate_limit_update(
         self,

@@ -87,6 +87,66 @@
       },
       "type": "array"
     },
+    "ActiveExecutionsChunkMessage": {
+      "additionalProperties": false,
+      "description": "One bounded piece of an atomically replaced execution checkpoint.\n\nThe payload pieces concatenate to the JSON encoding of ``ActiveExecutions``.\nA client stages one transfer and publishes the decoded list only after all\npieces arrive in order. The metadata is copied from the batch whose\ncheckpoint this replaces, so the final publication remains in the same\nsequence space even when the batch itself was split into event frames.",
+      "properties": {
+        "type": {
+          "const": "active_executions_chunk",
+          "default": "active_executions_chunk",
+          "title": "Type",
+          "type": "string"
+        },
+        "checkpoint_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Checkpoint Id",
+          "type": "string"
+        },
+        "chunk_index": {
+          "exclusiveMaximum": 256,
+          "minimum": 0,
+          "title": "Chunk Index",
+          "type": "integer"
+        },
+        "chunk_count": {
+          "maximum": 256,
+          "minimum": 1,
+          "title": "Chunk Count",
+          "type": "integer"
+        },
+        "payload": {
+          "maxLength": 65536,
+          "title": "Payload",
+          "type": "string"
+        },
+        "through_sequence": {
+          "minimum": 0,
+          "title": "Through Sequence",
+          "type": "integer"
+        },
+        "store_id": {
+          "title": "Store Id",
+          "type": "string"
+        },
+        "history_after_sequence": {
+          "minimum": 0,
+          "title": "History After Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "checkpoint_id",
+        "chunk_index",
+        "chunk_count",
+        "payload",
+        "through_sequence",
+        "store_id",
+        "history_after_sequence"
+      ],
+      "title": "ActiveExecutionsChunkMessage",
+      "type": "object"
+    },
     "AgentExecutionActivityData": {
       "additionalProperties": false,
       "description": "Complete current activity for an active agent execution.",
@@ -235,6 +295,29 @@
         "activity"
       ],
       "title": "AgentExecutionStartedData",
+      "type": "object"
+    },
+    "AgentInvocation": {
+      "additionalProperties": false,
+      "description": "One agent invocation, as the invocation events identify it.",
+      "properties": {
+        "kind": {
+          "const": "agent_invocation",
+          "default": "agent_invocation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "invocation_id": {
+          "minLength": 1,
+          "title": "Invocation Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "invocation_id"
+      ],
+      "title": "AgentInvocation",
       "type": "object"
     },
     "AgentOutputChunkData": {
@@ -1295,9 +1378,131 @@
       "title": "DiagnosticSeverity",
       "type": "string"
     },
+    "EnvironmentStartupStage": {
+      "description": "Where an opening environment is, in the order it gets there.",
+      "enum": [
+        "building_image",
+        "starting_container"
+      ],
+      "title": "EnvironmentStartupStage",
+      "type": "string"
+    },
     "EventBatchMessage": {
       "additionalProperties": false,
       "description": "Event batch and cursor metadata sent to subscribers.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Event batch and cursor metadata sent to subscribers.",
+          "properties": {
+            "type": {
+              "const": "event_batch",
+              "default": "event_batch",
+              "title": "Type",
+              "type": "string"
+            },
+            "events": {
+              "items": {
+                "$ref": "#/$defs/RunEvent"
+              },
+              "title": "Events",
+              "type": "array"
+            },
+            "through_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Through Sequence",
+              "type": "integer"
+            },
+            "active_executions": {
+              "$ref": "#/$defs/ActiveExecutions"
+            },
+            "active_executions_checkpoint_id": {
+              "default": null,
+              "title": "Active Executions Checkpoint Id",
+              "type": "null"
+            },
+            "store_id": {
+              "default": "",
+              "title": "Store Id",
+              "type": "string"
+            },
+            "history_after_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "History After Sequence",
+              "type": "integer"
+            },
+            "rebootstrap": {
+              "default": false,
+              "title": "Rebootstrap",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "events",
+            "type"
+          ],
+          "title": "EventBatchMessage",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Event batch and cursor metadata sent to subscribers.",
+          "properties": {
+            "type": {
+              "const": "event_batch",
+              "default": "event_batch",
+              "title": "Type",
+              "type": "string"
+            },
+            "events": {
+              "items": {
+                "$ref": "#/$defs/RunEvent"
+              },
+              "title": "Events",
+              "type": "array"
+            },
+            "through_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Through Sequence",
+              "type": "integer"
+            },
+            "active_executions": {
+              "type": "null"
+            },
+            "active_executions_checkpoint_id": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "store_id": {
+              "default": "",
+              "title": "Store Id",
+              "type": "string"
+            },
+            "history_after_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "History After Sequence",
+              "type": "integer"
+            },
+            "rebootstrap": {
+              "default": false,
+              "title": "Rebootstrap",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "events",
+            "type",
+            "active_executions",
+            "active_executions_checkpoint_id"
+          ],
+          "title": "EventBatchMessage",
+          "type": "object"
+        }
+      ],
       "properties": {
         "type": {
           "const": "event_batch",
@@ -1319,7 +1524,27 @@
           "type": "integer"
         },
         "active_executions": {
-          "$ref": "#/$defs/ActiveExecutions"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActiveExecutions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "active_executions_checkpoint_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Executions Checkpoint Id"
         },
         "store_id": {
           "default": "",
@@ -1427,7 +1652,9 @@
         "workspace_snapshot",
         "run_configured",
         "framework_warning",
-        "winner_selected"
+        "winner_selected",
+        "workstream_finished",
+        "turn_usage_recorded"
       ],
       "title": "EventType",
       "type": "string"
@@ -1739,7 +1966,7 @@
     },
     "GateFinishedData": {
       "additionalProperties": false,
-      "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries the trailing command\noutput on failure.",
+      "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries the trailing command\noutput on failure. ``round_label`` groups the per-recipe local-validation\ngates of one attempt back together, so a client folds them into a\npass-fraction itself rather than the backend aggregating one.",
       "properties": {
         "kind": {
           "const": "gate_finished",
@@ -1815,6 +2042,18 @@
           "default": null,
           "title": "Output Tail"
         },
+        "round_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Round Label"
+        },
         "source": {
           "$ref": "#/$defs/FrameworkSource",
           "default": "gates"
@@ -1848,6 +2087,39 @@
       ],
       "title": "GateKind",
       "type": "string"
+    },
+    "GateStage": {
+      "additionalProperties": false,
+      "description": "One attempt of one gate of a candidate's evaluation.",
+      "properties": {
+        "kind": {
+          "const": "gate_stage",
+          "default": "gate_stage",
+          "title": "Kind",
+          "type": "string"
+        },
+        "execution_id": {
+          "minLength": 1,
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "gate": {
+          "$ref": "#/$defs/GateKind"
+        },
+        "attempt": {
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "execution_id",
+        "gate",
+        "attempt"
+      ],
+      "title": "GateStage",
+      "type": "object"
     },
     "GateStartedData": {
       "additionalProperties": false,
@@ -2861,7 +3133,7 @@
     },
     "JudgeResultData": {
       "additionalProperties": false,
-      "description": "Verdict and feedback returned by the judge.",
+      "description": "Verdict and feedback returned by the judge.\n\nSee ``vibesys.events.JudgeResultData`` for ``skipped``/``skip_reason``/\n``implementer_outcome``.",
       "properties": {
         "kind": {
           "const": "judge_result",
@@ -2884,6 +3156,42 @@
         "attempt": {
           "title": "Attempt",
           "type": "integer"
+        },
+        "skipped": {
+          "default": false,
+          "title": "Skipped",
+          "type": "boolean"
+        },
+        "skip_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skip Reason"
+        },
+        "implementer_outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "continue",
+                "supported",
+                "nominated",
+                "disproven",
+                "implementation_failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Implementer Outcome"
         }
       },
       "required": [
@@ -2893,6 +3201,98 @@
         "attempt"
       ],
       "title": "JudgeResultData",
+      "type": "object"
+    },
+    "LogOwner": {
+      "discriminator": {
+        "mapping": {
+          "agent_invocation": "#/$defs/AgentInvocation",
+          "gate_stage": "#/$defs/GateStage",
+          "run_narration": "#/$defs/RunNarration",
+          "slurm_job": "#/$defs/SlurmJob",
+          "startup_step": "#/$defs/StartupStep",
+          "tool_build": "#/$defs/ToolBuild"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/StartupStep"
+        },
+        {
+          "$ref": "#/$defs/GateStage"
+        },
+        {
+          "$ref": "#/$defs/AgentInvocation"
+        },
+        {
+          "$ref": "#/$defs/ToolBuild"
+        },
+        {
+          "$ref": "#/$defs/SlurmJob"
+        },
+        {
+          "$ref": "#/$defs/RunNarration"
+        }
+      ]
+    },
+    "NarrationLevel": {
+      "description": "A line's severity: the standard ``logging`` level at or below the record's.",
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL"
+      ],
+      "title": "NarrationLevel",
+      "type": "string"
+    },
+    "NarrationLine": {
+      "additionalProperties": false,
+      "description": "One narration record, as one JSON line of a narration stream.",
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "level": {
+          "$ref": "#/$defs/NarrationLevel"
+        },
+        "logger": {
+          "title": "Logger",
+          "type": "string"
+        },
+        "thread": {
+          "title": "Thread",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "traceback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Traceback"
+        }
+      },
+      "required": [
+        "at",
+        "level",
+        "logger",
+        "thread",
+        "message"
+      ],
+      "title": "NarrationLine",
       "type": "object"
     },
     "OutputData": {
@@ -3904,7 +4304,7 @@
     },
     "RunConfiguredData": {
       "additionalProperties": false,
-      "description": "One per run: the resolved configuration a loop starts with.",
+      "description": "One per run: the resolved configuration a loop starts with.\n\nSee ``vibesys.events.RunConfiguredData`` for ``max_continuation_rounds``/\n``max_unmeasured_turns``.",
       "properties": {
         "kind": {
           "const": "run_configured",
@@ -3972,6 +4372,30 @@
           ],
           "default": null,
           "title": "Pareto Objectives"
+        },
+        "max_continuation_rounds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Continuation Rounds"
+        },
+        "max_unmeasured_turns": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Unmeasured Turns"
         },
         "source": {
           "$ref": "#/$defs/FrameworkSource",
@@ -4141,9 +4565,11 @@
                   "todo_update": "#/$defs/TodoUpdateData",
                   "tool_call": "#/$defs/ToolCallData",
                   "tool_result": "#/$defs/ToolResultData",
+                  "turn_usage_recorded": "#/$defs/TurnUsageData",
                   "usage_update": "#/$defs/UsageUpdateData",
                   "winner_selected": "#/$defs/WinnerSelectedData",
-                  "workspace_snapshot": "#/$defs/WorkspaceSnapshotData"
+                  "workspace_snapshot": "#/$defs/WorkspaceSnapshotData",
+                  "workstream_finished": "#/$defs/WorkstreamFinishedData"
                 },
                 "propertyName": "kind"
               },
@@ -4261,6 +4687,12 @@
                 },
                 {
                   "$ref": "#/$defs/WinnerSelectedData"
+                },
+                {
+                  "$ref": "#/$defs/WorkstreamFinishedData"
+                },
+                {
+                  "$ref": "#/$defs/TurnUsageData"
                 }
               ]
             },
@@ -4287,7 +4719,7 @@
     },
     "RunFailedData": {
       "additionalProperties": false,
-      "description": "Why a run ended without a result to keep, with the counts behind it.",
+      "description": "Why a run failed, what partial result it preserved, and the counts behind it.",
       "properties": {
         "kind": {
           "const": "run_failed",
@@ -4308,7 +4740,7 @@
     },
     "RunFailure": {
       "additionalProperties": false,
-      "description": "What a failed run did and why it stopped, as data; frontends choose the wording.\n\n``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts\nattempts core admitted, against the ``workstream_budget`` the run was allowed.\n``candidates_kept`` counts settled candidates eligible for adoption.",
+      "description": "What a failed run did and why it stopped, as data; frontends choose the wording.\n\n``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts\nattempts core admitted, against the ``workstream_budget`` the run was allowed.\n``candidates_kept`` counts settled candidates eligible for adoption.\n``adopted_candidate`` names the verified candidate revision core adopted even though the\nstrategy still reported a failed outcome. Its None default preserves replay of failure events\nrecorded before the adoption fact was added to the event contract.",
       "properties": {
         "kind": {
           "$ref": "#/$defs/RunFailureKind"
@@ -4331,6 +4763,20 @@
           "minimum": 0,
           "title": "Candidates Kept",
           "type": "integer"
+        },
+        "adopted_candidate": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^\\S+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adopted Candidate"
         }
       },
       "required": [
@@ -4344,7 +4790,7 @@
       "type": "object"
     },
     "RunFailureKind": {
-      "description": "Why a run ended without a result the operator can keep.",
+      "description": "Why a run failed to meet its goal, whether or not it preserved a partial result.",
       "enum": [
         "budget_exhausted",
         "deadline",
@@ -4386,6 +4832,23 @@
       ],
       "title": "RunInterruptedData",
       "type": "object"
+    },
+    "RunNarration": {
+      "additionalProperties": false,
+      "description": "The run's own narration for humans: what it is doing, warnings, tracebacks.",
+      "properties": {
+        "kind": {
+          "const": "run_narration",
+          "default": "run_narration",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "RunNarration",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     },
     "RunSnapshot": {
       "additionalProperties": false,
@@ -4606,6 +5069,35 @@
         "kind"
       ]
     },
+    "SlurmJob": {
+      "additionalProperties": false,
+      "description": "A Slurm job an execution submitted; its log is the job's own output file.",
+      "properties": {
+        "kind": {
+          "const": "slurm_job",
+          "default": "slurm_job",
+          "title": "Kind",
+          "type": "string"
+        },
+        "execution_id": {
+          "minLength": 1,
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "job_id": {
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "execution_id",
+        "job_id"
+      ],
+      "title": "SlurmJob",
+      "type": "object"
+    },
     "SnapshotQuery": {
       "additionalProperties": false,
       "description": "Request the current run snapshot.\n\n``expected_store_id`` fences the read to the event store whose batch established a\nclient's sequence space. None preserves the unfenced request used by\nclients that do not combine a snapshot with a live subscription. An empty\nstring is a real fence for the pre-attachment store, not an alias for None.",
@@ -4699,6 +5191,27 @@
       ],
       "title": "StartupStage",
       "type": "string"
+    },
+    "StartupStep": {
+      "additionalProperties": false,
+      "description": "A step of opening the run's environment, such as building its image.",
+      "properties": {
+        "kind": {
+          "const": "startup_step",
+          "default": "startup_step",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/$defs/EnvironmentStartupStage"
+        }
+      },
+      "required": [
+        "kind",
+        "stage"
+      ],
+      "title": "StartupStep",
+      "type": "object"
     },
     "SteerCommand": {
       "additionalProperties": false,
@@ -4972,6 +5485,29 @@
         "kind"
       ]
     },
+    "ToolBuild": {
+      "additionalProperties": false,
+      "description": "Building or pulling a tool the run needs, such as a profiler.",
+      "properties": {
+        "kind": {
+          "const": "tool_build",
+          "default": "tool_build",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "ToolBuild",
+      "type": "object"
+    },
     "ToolCallData": {
       "additionalProperties": false,
       "description": "Tool name, call identity, and arguments emitted by an agent.",
@@ -5145,6 +5681,95 @@
       "title": "TuiTheme",
       "type": "string"
     },
+    "TurnUsageData": {
+      "additionalProperties": false,
+      "description": "Settled token and cost accounting for one finished agent turn.\n\nSee ``vibesys.events.TurnUsageData``.",
+      "properties": {
+        "kind": {
+          "const": "turn_usage_recorded",
+          "default": "turn_usage_recorded",
+          "title": "Kind",
+          "type": "string"
+        },
+        "input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "cache_creation_input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Creation Input Tokens"
+        },
+        "cache_read_input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Read Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "total_cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Cost Usd"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        }
+      },
+      "title": "TurnUsageData",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
     "UsageUpdateData": {
       "additionalProperties": false,
       "description": "Token usage reported by the active model.",
@@ -5291,6 +5916,130 @@
       "required": [
         "kind"
       ]
+    },
+    "WorkstreamFailureData": {
+      "additionalProperties": false,
+      "description": "One workstream's typed account of why it ended without a measured candidate.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/WorkstreamFailureKind"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "turns": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Turns"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "WorkstreamFailureData",
+      "type": "object"
+    },
+    "WorkstreamFailureKind": {
+      "description": "Why a workstream ended without a measured candidate. Closed.\n\nSee ``vibesys.events.WorkstreamFailureKind``, which this mirrors\nmember-for-member.",
+      "enum": [
+        "stopped",
+        "parent-unverified",
+        "refused",
+        "ended",
+        "out-of-budget",
+        "turn-failed",
+        "invalid-reply",
+        "render-failed",
+        "wait-refused",
+        "checkpoint-declined",
+        "no-changed-candidate",
+        "implementation-failed",
+        "review-rejected",
+        "no-trusted-evidence",
+        "evidence-refused",
+        "evidence-undecodable",
+        "profile-capture-unavailable",
+        "turn-limit",
+        "repeated-turn"
+      ],
+      "title": "WorkstreamFailureKind",
+      "type": "string"
+    },
+    "WorkstreamFinishedData": {
+      "additionalProperties": false,
+      "description": "One workstream (one dynamic-run round) ended; its typed failure, if any.\n\nSee ``vibesys.events.WorkstreamFinishedData`` for why ``setup_failure``\nand ``refunded`` are always ``False`` from this event's only current\nproducer.",
+      "properties": {
+        "kind": {
+          "const": "workstream_finished",
+          "default": "workstream_finished",
+          "title": "Kind",
+          "type": "string"
+        },
+        "setup_failure": {
+          "title": "Setup Failure",
+          "type": "boolean"
+        },
+        "refunded": {
+          "title": "Refunded",
+          "type": "boolean"
+        },
+        "repeated_error": {
+          "title": "Repeated Error",
+          "type": "boolean"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamFailureData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "setup_failure",
+        "refunded",
+        "repeated_error"
+      ],
+      "title": "WorkstreamFinishedData",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -5386,6 +6135,7 @@
     "server_message": {
       "discriminator": {
         "mapping": {
+          "active_executions_chunk": "#/$defs/ActiveExecutionsChunkMessage",
           "event": "#/$defs/EventMessage",
           "event_batch": "#/$defs/EventBatchMessage",
           "protocol_error": "#/$defs/ProtocolErrorMessage",
@@ -5404,10 +6154,19 @@
           "$ref": "#/$defs/EventBatchMessage"
         },
         {
+          "$ref": "#/$defs/ActiveExecutionsChunkMessage"
+        },
+        {
           "$ref": "#/$defs/ProtocolErrorMessage"
         }
       ],
       "title": "Server Message"
+    },
+    "log_owner": {
+      "$ref": "#/$defs/LogOwner"
+    },
+    "narration_line": {
+      "$ref": "#/$defs/NarrationLine"
     }
   },
   "required": [
@@ -5415,7 +6174,9 @@
     "response",
     "event",
     "snapshot",
-    "server_message"
+    "server_message",
+    "log_owner",
+    "narration_line"
   ],
   "title": "ProtocolDocument",
   "type": "object"

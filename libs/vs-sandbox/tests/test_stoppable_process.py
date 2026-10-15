@@ -21,10 +21,14 @@ from vs_sandbox.api.testing import (
     StoppableScript,
 )
 
+# test-isolation: the result contract for a lost client is internal to the command runners.
+from vs_sandbox.command_execution import execute_command
+
 # test-isolation: the stop policy is internal to the command runners; this is the one place that drives it directly.
 from vs_sandbox.process_execution import (
     KILL,
     TERMINATE,
+    ProcessOutcome,
     ProcessStop,
     RemoteProcesses,
     StopSignal,
@@ -91,7 +95,7 @@ class _Scenario:
 @dataclass(frozen=True)
 class _Observed:
     outcome_stop: ProcessStop | None
-    returncode: int
+    returncode: int | None
     stdout: str
     group_signals: list[tuple[StopSignal, float]]
     """Each signal the process received, with the seconds since the scenario began."""
@@ -278,3 +282,83 @@ def test_a_remote_side_shown_empty_after_the_client_died_is_not_waited_for() -> 
     assert signals == [TERMINATE, TERMINATE]
     assert ended_at == pytest.approx(1)
     assert unconfirmed is None
+
+
+def _client_dies(
+    signal_number: StopSignal, remote: _Remote | None, *, grace: float = 5.0
+) -> tuple[ProcessOutcome, list[StopSignal], float]:
+    """Run a client that a signal nobody here sent ends after 2 s; return its outcome."""
+    threads = SimThreads()
+    origin = threads.now()
+    process = FakeStoppableProcess(
+        threads, StoppableScript(stdout="partial", returncode=-signal_number, runs_for=2.0)
+    )
+
+    def main() -> tuple[ProcessOutcome, list[StopSignal], float]:
+        outcome = wait_stoppable(
+            process,
+            timeout=60,
+            cancel=None,
+            grace_seconds=grace,
+            signal_remote=remote,
+            threads=threads,
+        )
+        assert outcome.stdout == "partial"
+        assert process.signals == []
+        return outcome, [] if remote is None else remote.signals, threads.now() - origin
+
+    return threads.run(main)
+
+
+@given(signal_number=st.sampled_from([TERMINATE, KILL]), survivors=st.integers(0, 3))
+def test_a_relaying_client_killed_from_outside_reports_no_status_and_stops_the_command(
+    signal_number: StopSignal, survivors: int
+) -> None:
+    """Regression: a ``docker exec`` client's own death read as the command's ``128 + N``.
+
+    The client relays the command's status as an exit code, so its death by a
+    signal says nothing about the command, which is stopped where it runs.
+    """
+    outcome, signals, ended_at = _client_dies(signal_number, _Remote(survivors, survivors))
+
+    assert outcome.stopped is ProcessStop.CLIENT_LOST
+    assert outcome.returncode is None
+    if survivors:
+        assert signals == [TERMINATE, KILL]
+        assert ended_at == pytest.approx(2 + 5.0)
+    else:
+        assert signals == [TERMINATE]
+        assert ended_at == pytest.approx(2)
+    assert outcome.unconfirmed == (RemoteProcesses(survivors) if survivors else None)
+
+
+@given(signal_number=st.sampled_from([TERMINATE, KILL]))
+def test_a_local_command_killed_from_outside_reports_the_shell_status(
+    signal_number: StopSignal,
+) -> None:
+    outcome, _, _ = _client_dies(signal_number, None)
+
+    assert outcome.stopped is None
+    assert outcome.returncode == 128 + signal_number
+
+
+def test_a_lost_client_gives_a_result_with_no_exit_code_and_a_notice() -> None:
+    threads = SimThreads()
+    process = FakeStoppableProcess(threads, StoppableScript(returncode=-KILL, runs_for=1.0))
+
+    result = threads.run(
+        lambda: execute_command(
+            "work",
+            timeout=60,
+            default_timeout=60,
+            cancel=None,
+            max_output_chars=1000,
+            launch=lambda: process,
+            signal_remote=_Remote(),
+            threads=threads,
+        )
+    )
+
+    assert result.exit_code is None
+    assert not result.cancelled
+    assert "exit status is unknown" in result.stderr

@@ -28,8 +28,14 @@ from vs_sandbox.api import (
     TrainiumBackend,
 )
 from vs_sandbox.api.testing import FakeComputeBackend, ScriptedDockerCli
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, PipedStart
+from vs_sim.api import DISCARD, OsThreads
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ManualClock,
+    PipedStart,
+    ScriptedProbe,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -81,8 +87,9 @@ _FACTORIES = {
         # The scripted shell exits at once, so its output drains never wait on time.
         threads=OsThreads(),
         launcher=FakePipedProcessLauncher(_printf_shell),
+        probe=ScriptedProbe(lambda _argv: None),
     ),
-    "fake": FakeComputeBackend,
+    "fake": partial(FakeComputeBackend, threads=SimThreads()),
 }
 
 
@@ -108,7 +115,7 @@ class TestComputeBackendContract:
         )
 
         assert sandbox.id
-        result = sandbox.execute("printf hello")
+        result = sandbox.execute("printf hello", output=DISCARD)
         assert result.exit_code in (0, None)
 
     def test_make_monitor_and_reselect_device_are_no_ops_without_a_device(

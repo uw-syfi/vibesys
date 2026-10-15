@@ -263,3 +263,23 @@ class Pathspecs:
             not item.wild and (item.text == path or item.text.startswith(f"{path}/"))
             for item in self._includes
         )
+
+    def fixed_prefixes(self) -> tuple[str, ...]:
+        """The leading wildcard-free directories that hold every path an include selects.
+
+        ``""`` (the whole tree) when there is no include or one starts with a wildcard.
+        """
+        if not self._includes:
+            return ("",)
+        prefixes: set[str] = set()
+        for item in self._includes:
+            parts = item.text.split("/") if item.text else []
+            if item.wild:
+                fixed = len(parts)
+                for index, part in enumerate(parts):
+                    if _WILDCARDS & set(part):
+                        fixed = index
+                        break
+                parts = parts[:fixed]
+            prefixes.add("/".join(parts))
+        return tuple(sorted(prefixes))

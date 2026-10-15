@@ -36,6 +36,8 @@ if TYPE_CHECKING:
     from vs_runtime.api import AgentRole
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration
     from vs_sandbox.api import CommandRunner
+    from vs_sim.api import OutputSink
+from vs_sim.api import DISCARD
 
 
 class _Resource:
@@ -45,6 +47,7 @@ class _Resource:
         self.revision: str | None = revision
         self.trusted_input_baseline: str | None = revision
         self.closed = False
+        self.detached = False
         self.executions: list[tuple[str, int | None]] = []
         self.scripted: deque[CommandResult] = deque()
         self.unavailable_revisions: set[str] = set()
@@ -134,7 +137,10 @@ class _Resource:
             deployment_release_env_var=None,
         )
 
-    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+    async def trusted_accuracy(
+        self, command_override: str | None, output: OutputSink
+    ) -> TrustedAccuracyResult:
+        del output
         self.accuracy_calls.append(command_override)
         return TrustedAccuracyResult(
             command=command_override,
@@ -146,7 +152,9 @@ class _Resource:
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
+        output: OutputSink,
     ) -> TrustedBenchmarkResult:
+        del output
         self.benchmark_calls.append((command_override, required_metrics))
         return TrustedBenchmarkResult(
             command=command_override,
@@ -156,6 +164,9 @@ class _Resource:
 
     def close(self) -> None:
         self.closed = True
+
+    def detach(self) -> None:
+        self.detached = True
 
 
 class _Provider:
@@ -173,6 +184,13 @@ class _Provider:
         resource = _Resource(workspace_id, self.root.path / workspace_id, revision)
         self.created.append(resource)
         return resource
+
+    def leftover_candidates(self) -> tuple[str, ...]:
+        """No candidate outlives this provider: each lives only in ``created``."""
+        return ()
+
+    def remove_leftover(self, workspace_id: str, /) -> None:
+        del workspace_id
 
 
 class _LiveOnlyProvider(_Provider):
@@ -203,14 +221,16 @@ class _ContentResource(_Resource):
         self.history[self.revision] = dict(self.files)
         return self.revision
 
-    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+    async def trusted_accuracy(
+        self, command_override: str | None, output: OutputSink
+    ) -> TrustedAccuracyResult:
         before = dict(self.files)
         self.edit_while_staging()
         if dict(self.files) != before:
             message = "local input changed during remote staging"
             raise RuntimeError(message)
         self.staged.append(before)
-        return await super().trusted_accuracy(command_override)
+        return await super().trusted_accuracy(command_override, output)
 
 
 class _ContentProvider(_Provider):
@@ -288,6 +308,22 @@ async def test_close_attempts_every_candidate_and_aggregates_failures(tmp_path: 
         await workspaces.close()
     assert len(captured.value.exceptions) == 2
     assert all(resource.closed for resource in provider.created)
+
+
+async def test_close_keeps_member_candidates_and_discards_scratch_ones(tmp_path: Path) -> None:
+    """A run close detaches what core holds (attempt members) and discards the rest."""
+    provider = _Provider(tmp_path)
+    runtime = _runtime(provider)
+    workspaces = runtime.workspaces
+    await workspaces.create_candidate(member_id="attempt-1")
+    await workspaces.create_candidate()
+    await workspaces.create_candidate(member_id="attempt-2")
+    await workspaces.close()
+    member, scratch, second = provider.created
+    assert (member.detached, member.closed) == (True, False)
+    assert (second.detached, second.closed) == (True, False)
+    assert (scratch.detached, scratch.closed) == (False, True)
+    assert provider.root.closed
 
 
 class _CloseFailedError(OSError):
@@ -450,7 +486,7 @@ async def test_gate_stages_the_submitted_revision_while_the_live_workspace_chang
 
     provider.content_root.edit_while_staging = implementer_edits
     runtime = _runtime(provider)
-    accuracy = await runtime.evaluation.accuracy("run-a", runtime.workspaces.root)
+    accuracy = await runtime.evaluation.accuracy("run-a", runtime.workspaces.root, output=DISCARD)
 
     assert accuracy.result is not None
     assert accuracy.result.passed
@@ -474,10 +510,12 @@ async def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(
         "run-a",
         workspace,
         release=True,
+        output=DISCARD,
     )
     benchmark = await runtime.evaluation.benchmark(
         workspace,
         required_metrics=frozenset({"throughput"}),
+        output=DISCARD,
     )
 
     assert accuracy.result is not None
@@ -499,6 +537,7 @@ async def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(
             "run-b",
             workspace,
             reuse=accuracy.receipt,
+            output=DISCARD,
         )
     # An agent-reported artifact path that is not a workspace file is
     # repairable feedback, including recipe JSON inlined in its place.

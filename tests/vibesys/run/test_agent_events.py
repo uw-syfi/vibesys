@@ -19,6 +19,7 @@ from vibesys.events import (
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
+    TurnUsageData,
     UsageUpdateData,
 )
 from vibesys.run import CoreAgentEventSink, EventJournal
@@ -26,6 +27,7 @@ from vs_agent.api import (
     AgentEventSink,
     AgentQuotaError,
     AgentRateLimit,
+    AgentUsage,
     Attribution,
     ProviderSwitch,
     QuotaCondition,
@@ -167,6 +169,41 @@ def test_adapters_are_isolated_by_their_injected_run_journals(tmp_path: Path) ->
     assert [event.run_id for event in first_journal.read()] == ["run-1", "run-1"]
     assert [event.type for event in second_journal.read()] == [CoreEventType.AGENT_OUTPUT_CHUNK]
     assert [event.run_id for event in second_journal.read()] == ["run-2"]
+
+
+def test_a_finished_turn_s_settled_usage_is_recorded_with_routing_metadata(
+    tmp_path: Path,
+) -> None:
+    journal, sink = _attached_sink(tmp_path, "run-1")
+    usage = AgentUsage(
+        input_tokens=1234,
+        cache_creation_input_tokens=56,
+        cache_read_input_tokens=78,
+        output_tokens=90,
+        total_cost_usd=0.42,
+        duration_ms=1500,
+    )
+
+    sink.turn_usage_recorded(
+        usage,
+        agent_kind="implementer",
+        round_label="round-2",
+        invocation_id="invocation-7",
+    )
+
+    (event,) = journal.read()
+    assert event.type is CoreEventType.TURN_USAGE_RECORDED
+    assert event.agent_kind == "implementer"
+    assert event.round_label == "round-2"
+    assert event.execution_id == "invocation-7"
+    assert event.data == TurnUsageData(
+        input_tokens=1234,
+        cache_creation_input_tokens=56,
+        cache_read_input_tokens=78,
+        output_tokens=90,
+        total_cost_usd=0.42,
+        duration_ms=1500,
+    )
 
 
 def test_a_rate_limit_report_is_recorded_with_its_resolved_exhaustion(tmp_path: Path) -> None:

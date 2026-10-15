@@ -19,6 +19,7 @@ from vs_sim.api.testing import SimThreads, file_size_limit
 
 if TYPE_CHECKING:
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 
 def test_capture_plan_interrupted_at_every_byte_remains_readable(tmp_path: Path) -> None:
@@ -52,9 +53,15 @@ def test_docker_metadata_interrupted_at_every_byte_preserves_last_document(
         docker_result(stdout=f"{os.getuid()}\n{os.getgid()}\n"),
     )
     docker.always(docker_result())
-    sandbox = DockerSandbox(str(tmp_path), image="test-image", docker=docker, threads=SimThreads())
-    path = tmp_path / ".docker_metadata.json"
-    sandbox.start()
+    sandbox = DockerSandbox(
+        str(tmp_path / "workspace"),
+        image="test-image",
+        docker=docker,
+        threads=SimThreads(),
+        log_path=tmp_path / "logs" / "docker.log",
+    )
+    path = tmp_path / "logs" / "docker.metadata.json"
+    sandbox.start(output=DISCARD)
     try:
         sandbox.save_symlink_commands(["old"])
         old = path.read_bytes()

@@ -159,7 +159,7 @@ def _render(
 def _cases() -> dict[str, Callable[..., str]]:
     def core(root: Path, ref: EvidenceRef, evidence: TrustedEvidence) -> str:
         context = ResumeFacts(
-            agent="implementer", retained=REVISION, timed_out=False, evidence=(ref,)
+            agent="implementer", retained=REVISION, ended_by=None, evidence=(ref,)
         )
         return _render(root, (CORE_PROTOCOL_DIR,), context, (ref, evidence))
 

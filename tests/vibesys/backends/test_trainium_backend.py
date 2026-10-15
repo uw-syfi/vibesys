@@ -21,7 +21,7 @@ from vs_sandbox.api import (
     create_compute_backend,
 )
 from vs_sandbox.api.testing import FakeAcceleratorDiscovery, ScriptedDockerCli
-from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, ScriptedProbe, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -55,6 +55,7 @@ class TestTrainiumRegistry:
             docker=ScriptedDockerCli(),
             threads=SimThreads(),
             launcher=FakePipedProcessLauncher(),
+            probe=ScriptedProbe(lambda _argv: None),
         )
         assert isinstance(impl, TrainiumBackend)
         assert impl.name is ComputeBackend.TRAINIUM

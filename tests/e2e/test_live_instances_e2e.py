@@ -92,7 +92,7 @@ def test_stop_terminates_a_live_server_and_removes_its_record(
     result = registry.stop(
         INSTANCE,
         StopEffects(
-            ControlSocketStopRequester(UnixNetwork(), clock=SystemClock()),
+            ControlSocketStopRequester(UnixNetwork(), clock=SystemClock(), deadline_clock=threads),
             PidfdProcessSignaller(),
             threads,
             threads.sleep,

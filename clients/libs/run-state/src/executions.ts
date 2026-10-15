@@ -27,8 +27,10 @@ export function reconcileActiveExecutions(
   throughSequence?: number,
 ): CoreState {
   if (throughSequence !== undefined && throughSequence < state.sequence) return state;
+  const activeExecutions = activeExecutionsFromCheckpoint(executions);
   const next = cloneCoreStateWith(state, {
-    activeExecutions: activeExecutionsFromCheckpoint(executions),
+    activeExecutions,
+    executionStatuses: reconcileExecutionStatuses(state.executionStatuses, activeExecutions),
   });
   return publishCoreState(next);
 }

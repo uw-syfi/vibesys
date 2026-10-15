@@ -42,7 +42,7 @@ from vs_agent.api import (
     SteerOutcome,
 )
 from vs_sandbox.api.testing import FakeDockerConfinement
-from vs_sim.api.testing import HANG_GUARD_S, SimThreads, start_thread
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -121,7 +121,10 @@ class _Observer:
 
 
 def _launcher(
-    provider: str, executor: FakeExecutor, sandbox: FakeDockerConfinement
+    provider: str,
+    executor: FakeExecutor,
+    sandbox: FakeDockerConfinement,
+    threads: SimThreads | None = None,
 ) -> subject.ConfinedSessionLauncher:
     return subject.ConfinedSessionLauncher(
         provider=provider,
@@ -131,7 +134,7 @@ def _launcher(
         transient_retry_delays=(),
         clock=FakeClock(),
         ids=SequentialIds(),
-        threads=SimThreads(),
+        threads=SimThreads() if threads is None else threads,
     )
 
 
@@ -274,12 +277,12 @@ def test_a_hung_turn_with_no_bound_anywhere_still_ends_at_the_default(
     """Neither the turn nor the launcher names a timeout: the turn ends at the hang guard."""
     sandbox = FakeDockerConfinement(workspace=tmp_path)
     executor = FakeExecutor([], peers=_hanging(provider))
-    session = _launcher(provider, executor, sandbox).launch(_container_spec(tmp_path, provider))
-
-    def turn() -> object:
-        return session.run_turn(AgentTurnRequest(message="work"))
+    threads = SimThreads()
+    session = _launcher(provider, executor, sandbox, threads).launch(
+        _container_spec(tmp_path, provider)
+    )
 
     with pytest.raises(AgentTurnTimeoutError) as raised:
-        start_thread(turn).result(timeout=HANG_GUARD_S)
+        threads.run(lambda: session.run_turn(AgentTurnRequest(message="work")))
 
     assert raised.value.timeout_seconds == DEFAULT_TURN_TIMEOUT_S

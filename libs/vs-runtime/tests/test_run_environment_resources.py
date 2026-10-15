@@ -13,9 +13,10 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentView,
     open_run_environment_resources,
 )
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,7 +40,7 @@ class _Monitor:
 
 class _Backend(FakeComputeBackend):
     def __init__(self, monitor: _Monitor) -> None:
-        super().__init__()
+        super().__init__(threads=SimThreads())
         self.monitor = monitor
         self._monitor = monitor
         self.reselection_count = 0
@@ -85,7 +86,7 @@ def _request(tmp_path: Path, backend: _Backend) -> RunEnvironmentRequest:
         framework_root=tmp_path,
         project_path_policy=ProjectPathPolicy(),
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
 

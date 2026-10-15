@@ -29,6 +29,7 @@ from server.relay import (
     EndReason,
     Flow,
     Peer,
+    ReadProgress,
     RelayEvent,
     RelayState,
     Tick,
@@ -56,6 +57,13 @@ _events: st.SearchStrategy[RelayEvent] = st.one_of(
     st.builds(WriteFinished, _peers),
     st.builds(Ended, _peers, st.sampled_from(Flow), st.sampled_from(EndReason)),
     st.builds(Tick, st.floats(0, 200)),
+)
+# ``ReadProgress`` is excluded from ``_events``: with the default read deadline enabled,
+# a bare write-stall fold (``test_a_write_in_flight_stalls_exactly_at_its_deadline``)
+# would otherwise sometimes land on ``SERVER_UNRESPONSIVE`` instead of a write stall. The
+# read-deadline fold has its own property test below, over its own event strategy.
+_read_events: st.SearchStrategy[RelayEvent] = st.one_of(
+    _events, st.builds(ReadProgress, _peers, st.floats(0, 200))
 )
 
 
@@ -88,6 +96,31 @@ def test_a_write_in_flight_stalls_exactly_at_its_deadline(
     assert early.outcome is None
     stalled = advance(state, Tick(deadline), _LIMITS)
     assert stalled.outcome in {ChannelEndOutcome.CLIENT_STALLED, ChannelEndOutcome.SERVER_STALLED}
+
+
+@given(st.lists(_read_events, max_size=30), st.floats(1e-3, 100))
+@example(events=[ReadProgress(Peer.SERVER, 12.5)], early_by=1.0)
+def test_a_silent_server_read_is_unresponsive_exactly_at_its_deadline(
+    events: list[RelayEvent], early_by: float
+) -> None:
+    """The earliest tracked deadline, write or read, decides on time and no sooner."""
+    state = _fold(events)[-1]
+    deadline = next_deadline(state, _LIMITS)
+    if deadline is None:
+        assert state.outcome is not None or (
+            state.client_write_since is None
+            and state.server_write_since is None
+            and state.server_read_at is None
+        )
+        return
+    early = advance(state, Tick(deadline - early_by), _LIMITS)
+    assert early.outcome is None
+    fired = advance(state, Tick(deadline), _LIMITS)
+    assert fired.outcome in {
+        ChannelEndOutcome.CLIENT_STALLED,
+        ChannelEndOutcome.SERVER_STALLED,
+        ChannelEndOutcome.SERVER_UNRESPONSIVE,
+    }
 
 
 @pytest.mark.parametrize("peer", list(Peer))
@@ -389,6 +422,44 @@ def test_a_server_that_stops_reading_ends_the_relay_at_the_write_deadline() -> N
     assert ended_at == pytest.approx(_DEADLINE)
     assert "40s" in result.detail
     assert result.exit_status == EXIT_STATUS[ChannelEndOutcome.SERVER_STALLED]
+
+
+def test_a_server_that_goes_silent_on_read_is_unresponsive_within_the_read_deadline() -> None:
+    """A server that never sends, but never closes or stalls a write either, is unresponsive.
+
+    The client's one chunk still reaches the socket because the simulated network's
+    buffer is unbounded, so the write side makes real progress while the server-to-client
+    read stays silent: this reaches ``SERVER_UNRESPONSIVE`` through the read deadline
+    alone, not through a write stall.
+    """
+    threads = SimThreads()
+    network = SimNetwork(threads)
+    limits = BridgeLimits(read_deadline_seconds=5.0)
+    stdin = _Stdin(threads, [b'{"type":"command.pause"}\n'])
+    stdout = _Stdout(threads)
+
+    def main() -> tuple[BridgeResult, float]:
+        started_at = threads.now()
+        listener = network.listen(_ADDRESS)
+        result = run_bridge(
+            network=network,
+            address=_ADDRESS,
+            client=ClientStreams(stdin, stdout),
+            threads=threads,
+            limits=limits,
+        )
+        listener.close()
+        return result, threads.now() - started_at
+
+    result, ended_at = threads.run(main)
+    assert result.outcome is ChannelEndOutcome.SERVER_UNRESPONSIVE
+    assert ended_at == pytest.approx(limits.read_deadline_seconds)
+    assert result.exit_status == EXIT_STATUS[ChannelEndOutcome.SERVER_UNRESPONSIVE]
+    # Regression for the formatting bug: the detail names the deadline that actually
+    # fired (the read one) rather than always citing ``write_deadline_seconds``.
+    assert "5s" in result.detail
+    assert "40s" not in result.detail
+    assert stdout.data == b""
 
 
 def test_a_stdin_failure_is_a_client_failure() -> None:

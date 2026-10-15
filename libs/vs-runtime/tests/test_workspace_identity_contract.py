@@ -58,9 +58,10 @@ from vs_runtime.api.testing import (
     FakeWorkspace,
     FakeWorkspaces,
     MemoryValidationPasses,
+    idle_environment_system,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, SimThreads, examples
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -135,13 +136,13 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     log_dir=project.logger.log_dir,
                     workspace=root,
                     ref_dir=None,
-                    backend=FakeComputeBackend(),
+                    backend=FakeComputeBackend(threads=SimThreads()),
                     agent_backend="stub",
                     cli_provider="codex",
                     run_id="workspace-contract",
                     framework_root=Path(scratch),
                     clock=ManualClock(),
-                    slurm_processes=NO_PROCESSES,
+                    system=idle_environment_system(),
                 ),
                 lambda _request: _EnvironmentSession(
                     FakeCommandRunner(),

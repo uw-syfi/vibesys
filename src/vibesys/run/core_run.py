@@ -120,7 +120,8 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
 
     Raises ``RunStopped`` when the operator's stop ended the run, so the session reports
     a stopped run, and ``CoreRunRefusedError`` when composition left an executor role
-    unserved.
+    unserved. Every exit after core starts closes a configured evaluation bridge and
+    releases the run lease, including interruption while the bridge itself starts.
     """
     services = host.services
     shell = CoreRuntime(
@@ -135,19 +136,31 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         integration.control,
         _SteerTexts(services.artifacts),
     )
-    loop = CoreRunHost(shell, delivery, services.clock, controls)
+    loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing.lease_seconds)
     await start_core_awaiting_lease(loop, config)
     bridge = services.agent_evaluation
-    if bridge is not None:
-        bridge.attach(shell, services.clock)
-        await bridge.serve()
+    run_error: BaseException | None = None
     try:
+        if bridge is not None:
+            bridge.attach(shell, services.clock)
+            await bridge.serve()
         outcome = await drive_core(loop, config, stall_notes=_unacknowledged_notes(bridge))
+    except BaseException as error:
+        run_error = error
+        raise
     finally:
         try:
-            if bridge is not None:
-                await bridge.close()
+            try:
+                if bridge is not None:
+                    await bridge.close()
+            except BaseException as cleanup_error:
+                if run_error is None:
+                    raise
+                run_error.add_note(
+                    "Additional error while closing the agent evaluation bridge: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
         finally:
             # A crashed process cannot reach this line, so its restart waits out the lease
             # (see ``start_core_awaiting_lease``); any return or raise here frees it.
@@ -189,18 +202,19 @@ def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatu
         return RunStatus.FAILED
     if _ended_by(result, EndReason.STOPPED):
         raise RunStopped
-    kept = _ended_by(result, EndReason.DEADLINE) and _adopted_retained_candidate(shell)
+    kept = _ended_by(result, EndReason.DEADLINE) and _adopted_candidate(shell) is not None
     return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
 
 
 def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFailure:
     """Why a failed run stopped, read from the result and the counts core kept.
 
-    A run ends in failure with nothing to keep when its time ran out, when every
-    workstream it was allowed had run, or when its strategy gave up earlier. A run that
-    recorded no result at all (an unfinished record) is reported as ``NO_RESULT`` with a
-    fixed reason. ``BUDGET_EXHAUSTED`` is inferred from the counts (``started >= budget``),
-    so a strategy that gives up on its last permitted workstream is labelled the same.
+    A failed strategy may still ask core to adopt its best partial candidate. Otherwise it
+    ends with nothing to keep when its time ran out, when every allowed workstream ran, or
+    when its strategy gave up earlier. A run that recorded no result at all (an unfinished
+    record) is reported as ``NO_RESULT`` with a fixed reason. ``BUDGET_EXHAUSTED`` is inferred
+    from the counts (``started >= budget``), so a strategy that gives up on its last permitted
+    workstream is labelled the same.
     """
     core = shell.record.envelope.core
     started = len(core.attempts.attempts)
@@ -223,17 +237,20 @@ def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFail
         workstreams_started=started,
         workstream_budget=budget,
         candidates_kept=sum(1 for item in core.settlement.settlements if item.eligible),
+        adopted_candidate=_adopted_candidate(shell),
     )
 
 
-def _adopted_retained_candidate(shell: CoreRuntime) -> bool:
-    """Whether core verified the adoption of a retained candidate."""
+def _adopted_candidate(shell: CoreRuntime) -> str | None:
+    """The verified retained candidate's stable revision identity, if core adopted one."""
     adoption = shell.record.envelope.core.settlement.adoption
-    return (
-        adoption is not None
-        and adoption.verified
-        and isinstance(adoption.selection, RetainedCandidate)
-    )
+    if (
+        adoption is None
+        or not adoption.verified
+        or not isinstance(adoption.selection, RetainedCandidate)
+    ):
+        return None
+    return adoption.selection.revision.revision_id.root
 
 
 __all__ = [

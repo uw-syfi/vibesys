@@ -392,6 +392,7 @@ class Pygit2GitRepository:
         matcher = compile_pathspecs(pathspecs)
         if matcher is None:
             return self._cli.tracked_changes_since_head(pathspecs)
+        self._cli.require_plain_work_tree(pathspecs)
         try:
             repository = self._open()
             tree = self._head_tree(repository)

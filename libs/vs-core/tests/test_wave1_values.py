@@ -70,6 +70,7 @@ from vs_core.api import (
     SteerReceived,
     SubmissionBudget,
     TimedOut,
+    WaitEnd,
     WorkspaceMode,
     WorkspacePlan,
     initial_state,
@@ -125,7 +126,10 @@ def _identity(stages: tuple[MeasurementStageIdentity, ...] = ()) -> MeasurementI
 def test_wait_all_timeout_preserves_missing_progress(
     deadline: float, delay: float, count: int
 ) -> None:
-    jobs = tuple(JobTimeout(resource_id=ResourceId(root=f"job-{i}")) for i in range(count))
+    jobs = tuple(
+        JobTimeout(resource_id=ResourceId(root=f"job-{i}"), by=WaitEnd.LIMIT, at=deadline)
+        for i in range(count)
+    )
     timeout = TimedOut(deadline_at=deadline, reached_at=deadline + delay, unfinished=jobs)
     restored = TimedOut.model_validate_json(timeout.model_dump_json())
     assert restored == timeout
@@ -136,7 +140,7 @@ def test_wait_all_timeout_preserves_missing_progress(
 
 
 def test_timeout_rejects_premature_or_duplicate_dependencies() -> None:
-    job = JobTimeout(resource_id=ResourceId(root="job"))
+    job = JobTimeout(resource_id=ResourceId(root="job"), by=WaitEnd.LIMIT, at=1.0)
     with pytest.raises(ValidationError, match="reached_at"):
         TimedOut(deadline_at=2.0, reached_at=1.0, unfinished=(job,))
     with pytest.raises(ValidationError, match="unfinished"):

@@ -45,6 +45,8 @@ duplicate strategy update for hypothesis {{ quoted(item.subject) }}
 strategy update names unknown hypothesis {{ quoted(item.subject) }}
 {%- elif item.code.value == 'update-incomplete' -%}
 cannot update incomplete hypothesis {{ quoted(item.subject) }}
+{%- elif item.code.value == 'expectation-unknown' -%}
+{{ quoted(item.subject) }} is not a workstream of this reply; name only workstreams this reply schedules
 {%- else -%}
 {{ item.code.value }}
 {%- endif %}

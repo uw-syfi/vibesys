@@ -44,7 +44,16 @@ from server.registry import (
 from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_sim.api import OsThreads, PidfdProcessSignaller, Platform, SystemClock, UnixNetwork
+from vs_runtime.api.infrastructure import EnvironmentSystem
+from vs_sim.api import (
+    OsProcesses,
+    OsThreads,
+    PidfdProcessSignaller,
+    Platform,
+    SubprocessPipedProcessLauncher,
+    SystemClock,
+    UnixNetwork,
+)
 from vs_sim.api.testing import HANG_GUARD_S, NO_PROCESSES
 
 if TYPE_CHECKING:
@@ -165,7 +174,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=_real_system(),
     )
     integration.events.subscribe(runtime.integration.project_event)
     threads = OsThreads()
@@ -210,7 +219,9 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         result = registry.stop(
             instance_id,
             StopEffects(
-                ControlSocketStopRequester(UnixNetwork(), clock=SystemClock()),
+                ControlSocketStopRequester(
+                    UnixNetwork(), clock=SystemClock(), deadline_clock=threads
+                ),
                 _NoSignal(),
                 threads,
                 threads.sleep,
@@ -238,3 +249,14 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
     # The run never became ready: it held the stop while starting, and core
     # landed it there, so it ends stopped without ever reporting running.
     assert statuses == ["stopped"], subscriber.seen
+
+
+def _real_system() -> EnvironmentSystem:
+    """The host's own threads, sockets and processes; this test runs no Slurm program."""
+    return EnvironmentSystem(
+        threads=OsThreads(),
+        network=UnixNetwork(),
+        processes=OsProcesses(),
+        launcher=SubprocessPipedProcessLauncher(),
+        slurm_processes=NO_PROCESSES,
+    )

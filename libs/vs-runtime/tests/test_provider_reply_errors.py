@@ -7,7 +7,6 @@ never unknown, so core corrects the conversation instead of asking the provider 
 
 from __future__ import annotations
 
-import asyncio
 import json
 import tempfile
 from pathlib import Path
@@ -29,7 +28,7 @@ from vs_core.api import ObservationStatus, ReplyErrorCode
 from vs_project.api import Project
 from vs_runtime.api import AgentId
 from vs_runtime.api.core import ExecutionResult, ReceiptStore
-from vs_sim.api.testing import ManualClock, SimThreads, examples
+from vs_sim.api.testing import ManualClock, SimThreads, examples, run_virtual
 
 
 class Named(BaseModel):
@@ -43,20 +42,22 @@ class Named(BaseModel):
 _ERRORS = st.text(st.characters(codec="ascii", categories=("L", "N", "P", "Zs")), min_size=1)
 
 
-async def _turn(host: SessionHost, base: Path) -> ExecutionResult:
+async def _turn(host: SessionHost, base: Path, threads: SimThreads) -> ExecutionResult:
     """Bind the session of ``host`` and dispatch one turn of it, on a store of its own."""
     (base / "project").mkdir()
     store = ReceiptStore(
-        Project.open(base / "project").state.state_store_namespace("run"), threads=SimThreads()
+        Project.open(base / "project").state.state_store_namespace("run"), threads=threads
     )
     await host.run(ensure_request(), store)
     return await host.run(dispatch_request(), store)
 
 
-def _dispatch(host: SessionHost) -> ExecutionResult:
+def _dispatch(host: SessionHost, threads: SimThreads | None = None) -> ExecutionResult:
+    """Dispatch one turn; its blocking work runs as simulated threads of ``threads``."""
     host.resolver.schemas[SCHEMA] = Named
+    sim = SimThreads() if threads is None else threads
     with tempfile.TemporaryDirectory() as raw:
-        return asyncio.run(_turn(host, Path(raw)))
+        return run_virtual(sim.clock, _turn(host, Path(raw), sim), driver=sim)
 
 
 def _failed_with_errors(result: ExecutionResult) -> tuple[object, ...]:
@@ -95,12 +96,11 @@ def test_a_provider_that_gave_up_on_the_schema_hands_core_its_last_errors_whole(
     with tempfile.TemporaryDirectory() as raw:
         host = open_host(Path(raw))
         script = FakeTurnScript((AgentOutputSchemaError(reason),))
+        sim = SimThreads()
         host.client = AgentClient(
-            FakeProvider(script=script, threads=SimThreads()),
-            clock=ManualClock(),
-            threads=SimThreads(),
+            FakeProvider(script=script, threads=sim), clock=ManualClock(), threads=sim
         )
-        errors = _failed_with_errors(_dispatch(host))
+        errors = _failed_with_errors(_dispatch(host, sim))
 
     (error,) = errors
     assert error.path == ()  # ty: ignore[unresolved-attribute]

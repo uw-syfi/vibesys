@@ -16,6 +16,10 @@ implementation to:
   truncation marker (see :func:`~vs_sandbox.execution.bounded_execution_result`).
 * A normal exit reports the command's status. A signalled command reports
   ``128 + N`` (shell convention), never a negative number.
+* When the launched process is the client of a remote command (a
+  ``docker exec``) and a signal the runner did not send ends that client, the
+  command is stopped where it runs, a notice is appended to ``stderr``, and
+  the exit code is ``None``: the client's death is not the command's status.
 * A timeout stops the command's whole process tree, keeps the output written
   before the stop, appends the timeout notice to ``stderr``, and reports exit
   code 124 (GNU ``timeout``'s status, which the benchmark failure
@@ -132,6 +136,12 @@ def result_of(outcome: ProcessOutcome, timeout: int, max_output_chars: int) -> C
         exit_code = TIMEOUT_EXIT_CODE
     elif outcome.stopped is ProcessStop.CANCELLED:
         stderr = _with_notice(stderr, "Error: Command was cancelled.")
+    elif outcome.stopped is ProcessStop.CLIENT_LOST:
+        stderr = _with_notice(
+            stderr,
+            "Error: the client relaying this command was killed by a signal;"
+            " the command was stopped and its own exit status is unknown.",
+        )
     result = bounded_execution_result(
         stdout=outcome.stdout,
         stderr=stderr,

@@ -64,19 +64,14 @@ export class RunPageLifecycle<Page> {
   /** Deliberately close the current page, optionally proving which page requested it. */
   close(page: Page | null = this.#current): boolean {
     if (page === null || this.#current !== page) return false;
-    this.#current = null;
-    this.#effects.retire(page);
-    this.#effects.showWelcome();
+    this.#leave(page, false);
     return true;
   }
 
   /** Retire a current page that failed independently of its run-control binding. */
   lost(page: Page): boolean {
     if (this.#current !== page) return false;
-    this.#current = null;
-    this.#effects.retire(page);
-    this.#effects.showWelcome();
-    this.#effects.currentPageLost();
+    this.#leave(page, true);
     return true;
   }
 
@@ -85,5 +80,23 @@ export class RunPageLifecycle<Page> {
     const page = this.#current;
     this.#current = null;
     if (page !== null) this.#effects.retire(page);
+  }
+
+  /** Fence `page`, attempt every ordered terminal effect, then preserve the first failure. */
+  #leave(page: Page, unexpected: boolean): void {
+    this.#current = null;
+    const failures: Array<{readonly error: unknown}> = [];
+    const attempt = (effect: () => void): void => {
+      try {
+        effect();
+      } catch (error) {
+        failures.push({error});
+      }
+    };
+    attempt(() => this.#effects.retire(page));
+    attempt(() => this.#effects.showWelcome());
+    if (unexpected) attempt(() => this.#effects.currentPageLost());
+    const firstFailure = failures[0];
+    if (firstFailure !== undefined) throw firstFailure.error;
   }
 }

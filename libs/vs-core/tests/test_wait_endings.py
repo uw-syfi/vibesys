@@ -230,7 +230,7 @@ BUDGETS = st.floats(min_value=1.0, max_value=300.0, allow_nan=False)
 
 
 @given(budget=BUDGETS, left=st.floats(min_value=1.0, max_value=900.0, allow_nan=False))
-def test_cleanup_before_the_run_deadline_keeps_the_time_the_run_has_left(
+def test_cleanup_before_the_run_deadline_gets_the_time_left_and_never_less_than_its_budget(
     budget: float, left: float
 ) -> None:
     state, ref = _past_the_run_deadline(budget)
@@ -240,8 +240,38 @@ def test_cleanup_before_the_run_deadline_keeps_the_time_the_run_has_left(
 
     issued = [r for r in closing.state.records.records if r.phase is core.RequestPhase.PREPARED]
     assert issued
-    # The budget is a floor for a run that is over; a run with time left caps it at its end.
-    assert {r.until.at for r in issued} == {run.deadline_at}
+    # The run deadline does not cut a cleanup issued just before it short of its budget.
+    assert {r.until.at for r in issued} == {max(run.deadline_at, run.now_at + budget)}
+    assert all(r.until.watches == () for r in issued)
+
+
+@given(budget=BUDGETS, left=st.floats(min_value=1.0, max_value=100_000.0, allow_nan=False))
+def test_cleanup_after_a_stop_is_bounded_by_its_budget_not_the_run_left(
+    budget: float, left: float
+) -> None:
+    state, ref = _past_the_run_deadline(budget)
+    run = state.run.model_copy(update={"deadline_at": state.run.now_at + left})
+    stop = core.RunControlEvent(
+        control=core.ControlInput(
+            control_id=core.ControlId(root="stop"), action="stop", mode=core.StopMode.CANCEL
+        ),
+        result=core.RunResultProposal(outcome="cancelled", reason="operator stop"),
+        now_at=run.now_at,
+    )
+    state = core.step(state.model_copy(update={"run": run}), stop).state
+    assert state.run.status is core.RunStatus.CLOSING
+    state = dispatch_all(core.step(state, retirement(ref)).state)
+    issued = [r for r in state.records.records if r.phase is core.RequestPhase.DISPATCHED]
+    assert issued
+    assert {r.until.at for r in issued} == {state.run.now_at + budget}
+
+    # The answer is lost: once the bound passes, nothing core sent is still awaited.
+    lapsed = core.step(state, core.ClockAdvanced(now_at=state.run.now_at + budget + 1.0)).state
+    assert all(
+        r.phase is not core.RequestPhase.DISPATCHED
+        for r in lapsed.records.records
+        if r.request_id in {i.request_id for i in issued}
+    )
 
 
 @given(budget=BUDGETS)

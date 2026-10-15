@@ -40,11 +40,17 @@ class AgentSpawnError(RuntimeError):
 
 
 class AgentTurnTimeoutError(TimeoutError):
-    """An agent turn exceeded its configured wall-clock budget."""
+    """An agent turn exceeded its configured wall-clock budget.
 
-    def __init__(self, timeout_seconds: float) -> None:
-        """Record the configured budget, independent of execution mechanism."""
+    ``usage`` is the accounting from a partial turn parsed before the timeout,
+    when one reached the boundary. It stays ``None`` when there was no parsed
+    partial turn; individual fields retain the provider's known/unknown semantics.
+    """
+
+    def __init__(self, timeout_seconds: float, *, usage: AgentUsage | None = None) -> None:
+        """Record the configured budget and any provider-reported partial usage."""
         self.timeout_seconds = timeout_seconds
+        self.usage = usage
         super().__init__(f"agent turn timed out after {timeout_seconds:g} seconds")
 
 
@@ -69,10 +75,17 @@ class AgentOutputSchemaError(RuntimeError):
     correction sent as the next turn continues the same work.
     """
 
-    def __init__(self, detail: str, violations: tuple[SchemaViolation, ...] = ()) -> None:
-        """Record the validation errors the provider reported last."""
+    def __init__(
+        self,
+        detail: str,
+        violations: tuple[SchemaViolation, ...] = (),
+        *,
+        usage: AgentUsage | None = None,
+    ) -> None:
+        """Record the validation errors and any usage measured before rejection."""
         self.detail = detail
         self.violations = violations or (SchemaViolation(path=(), message=detail),)
+        self.usage = usage
         super().__init__(f"agent output did not match the response schema: {detail}")
 
 

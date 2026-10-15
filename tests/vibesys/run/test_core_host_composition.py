@@ -48,10 +48,10 @@ from vs_runtime.api import (
     RunStatus,
 )
 from vs_runtime.api.core import RunTiming
-from vs_runtime.api.testing import FakeStopTimer
+from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -127,7 +127,7 @@ def _request(
         run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="core-test", config_version=1, options={}),
-        config=config or Config.model_validate({"model": {"name": "core-test"}}),
+        config=config or Config.model_validate({"model": {"name": "claude-sonnet-5"}}),
         input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="core-test",
@@ -154,7 +154,7 @@ def _open(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     clock = VirtualClock(at=0.0)
 
@@ -194,7 +194,7 @@ def _run_diagnostics(tmp_path: Path, *, profile_capture_withheld: bool) -> str:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     clock = VirtualClock(at=0.0)
 
@@ -273,8 +273,8 @@ def test_a_fallback_that_is_the_providers_own_fails_at_startup_naming_the_key(
 ) -> None:
     config = Config.model_validate(
         {
-            "model": {"name": "core-test"},
-            "agent": {"quota": {"fallback_provider": "claude", "fallback_model": "opus"}},
+            "model": {"name": "claude-sonnet-5"},
+            "agent": {"quota": {"fallback_provider": "claude", "fallback_model": "claude-opus-5"}},
         }
     )
 
@@ -294,7 +294,9 @@ def _built_clients(tmp_path: Path, config: Config) -> list[_GateRecordingClient]
 
 
 def test_every_client_the_core_path_builds_gets_the_runs_quota_gate(tmp_path: Path) -> None:
-    clients = _built_clients(tmp_path, Config.model_validate({"model": {"name": "core-test"}}))
+    clients = _built_clients(
+        tmp_path, Config.model_validate({"model": {"name": "claude-sonnet-5"}})
+    )
 
     assert clients
     assert all(len(client.gates) == 1 for client in clients)
@@ -303,7 +305,7 @@ def test_every_client_the_core_path_builds_gets_the_runs_quota_gate(tmp_path: Pa
 def test_the_quota_policy_of_the_config_reaches_the_gate(tmp_path: Path) -> None:
     """Under ``fail`` a quota stop ends the turn at once, where ``pause`` would hold it."""
     config = Config.model_validate(
-        {"model": {"name": "core-test"}, "agent": {"quota": {"policy": "fail"}}}
+        {"model": {"name": "claude-sonnet-5"}, "agent": {"quota": {"policy": "fail"}}}
     )
     [client] = _built_clients(tmp_path, config)
     [gate] = client.gates
@@ -323,11 +325,11 @@ def test_the_quota_policy_of_the_config_reaches_the_gate(tmp_path: Path) -> None
 # consumed by the gate tests above, the rest show up in the specs the run resolves.
 _AGENT_KEY_SAMPLES: dict[str, object] = {
     "backend": "stub",
-    "cli_provider": "gemini",
+    "cli_provider": "claude",
     "cli_timeout": 17,
     "env_passthrough": ("SOME_TOKEN",),
     "quota": {"policy": "fail"},
-    "roles": {"implementer": {"model": "role-model"}},
+    "roles": {"implementer": {"model": "gpt-5.6-luna"}},
 }
 
 
@@ -342,10 +344,9 @@ def test_a_changed_agent_config_key_changes_the_specs_the_run_resolves(key: str)
     def specs(config: Config) -> object:
         return resolve_agent_specs(config, (role,), backend=None, provider=None)
 
-    base = Config.model_validate({"model": {"name": "core-test"}})
-    changed = Config.model_validate(
-        {"model": {"name": "core-test"}, "agent": {key: _AGENT_KEY_SAMPLES[key]}}
-    )
+    # Without [model].name each provider runs its own default model.
+    base = Config()
+    changed = Config.model_validate({"agent": {key: _AGENT_KEY_SAMPLES[key]}})
 
     assert specs(changed) != specs(base)
 
@@ -355,8 +356,8 @@ def test_a_fallback_a_core_run_cannot_switch_to_fails_at_startup_naming_the_key(
 ) -> None:
     config = Config.model_validate(
         {
-            "model": {"name": "core-test"},
-            "agent": {"quota": {"fallback_provider": "codex", "fallback_model": "gpt-5"}},
+            "model": {"name": "claude-sonnet-5"},
+            "agent": {"quota": {"fallback_provider": "codex", "fallback_model": "gpt-5.5"}},
         }
     )
 
@@ -407,7 +408,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     clock = VirtualClock(at=0.0)
     request = _request(project_root).model_copy(update={"run_id": "core-run"})
@@ -426,7 +427,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
             plugin,
             EmptyOptions(),
             agent_client_factory=_resumable_client,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
             stop_timer=clock.sleep,
             timing=RunTiming(clock, 60.0, OsThreads()),
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),

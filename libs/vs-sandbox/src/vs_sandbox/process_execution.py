@@ -16,13 +16,13 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sim.api import ProcessTimeoutError
+from vs_sim.api import OutputStream, ProcessTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from io import TextIOBase
 
-    from vs_sim.api import PipedProcess, Threads
+    from vs_sim.api import OutputSink, PipedProcess, Threads
 
 #: The signals a stop sends, named here so only this adapter module refers to ``signal``.
 type StopSignal = signal.Signals
@@ -63,6 +63,10 @@ class ProcessStop(StrEnum):
 
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
+    CLIENT_LOST = "client_lost"
+    """The launched process was the client of a remote command, and a signal this
+    module did not send ended it. The client's death says nothing about the
+    command, which may still be running where it lives, so it is stopped there."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,13 +74,14 @@ class ProcessOutcome:
     """Captured streams and exit status of one finished or stopped command.
 
     ``returncode`` is the shell-convention status: ``128 + N`` for a process
-    killed by signal ``N``, never a negative number. The streams hold
-    everything the command wrote before it exited or was stopped.
+    killed by signal ``N``, never a negative number. It is ``None`` when the
+    command's own status is unknown (:attr:`ProcessStop.CLIENT_LOST`). The
+    streams hold everything the command wrote before it exited or was stopped.
     """
 
     stdout: str
     stderr: str
-    returncode: int
+    returncode: int | None
     stopped: ProcessStop | None = None
     unconfirmed: RemoteProcesses | None = None
     """Set when a stop could not show that the command's remote processes ended."""
@@ -132,11 +137,16 @@ class PipedStoppableProcess:
     Two drain workers read stdout and stderr as the command writes them, so
     neither pipe fills and blocks the command; a wait returns the output once
     the leader exited and both pipes reached EOF. Like ``subprocess`` text
-    mode, CRLF and a lone CR become LF.
+    mode, CRLF and a lone CR become LF in what a wait returns.
+
+    Each chunk a drain reads is also written to *output* as it arrives, UTF-8
+    encoded and with its line endings as the command wrote them, so a caller
+    sees a long command's output while it runs. *output* receives the same text
+    whatever the wait later returns, before and after a stop alike.
     """
 
-    def __init__(self, process: PipedProcess, *, threads: Threads) -> None:
-        """Take ownership of *process* and start draining its pipes on *threads*."""
+    def __init__(self, process: PipedProcess, *, threads: Threads, output: OutputSink) -> None:
+        """Take ownership of *process* and start draining its pipes on *threads* into *output*."""
         self._process = process
         self._threads = threads
         self._stdout: list[str] = []
@@ -144,10 +154,12 @@ class PipedStoppableProcess:
         self._returncode: int | None = None
         self._drains = (
             threads.spawn(
-                partial(_drain, process.stdout, self._stdout), name="vibesys-command-stdout"
+                partial(_drain, process.stdout, self._stdout, output, OutputStream.STDOUT),
+                name="vibesys-command-stdout",
             ),
             threads.spawn(
-                partial(_drain, process.stderr, self._stderr), name="vibesys-command-stderr"
+                partial(_drain, process.stderr, self._stderr, output, OutputStream.STDERR),
+                name="vibesys-command-stderr",
             ),
         )
 
@@ -196,9 +208,10 @@ class PipedStoppableProcess:
 _DRAIN_CHARACTERS = 65_536
 
 
-def _drain(stream: TextIOBase, sink: list[str]) -> None:
+def _drain(stream: TextIOBase, kept: list[str], output: OutputSink, name: OutputStream) -> None:
     while chunk := stream.read(_DRAIN_CHARACTERS):
-        sink.append(chunk)
+        kept.append(chunk)
+        output.write(name, chunk.encode())
 
 
 def _universal_newlines(chunks: list[str]) -> str:
@@ -233,6 +246,8 @@ def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the st
             wait = remaining if cancel is None else _min_wait(remaining)
             finished = process.wait(wait)
             if finished is not None:
+                if signal_remote is not None and process.returncode < 0:
+                    return _client_lost(finished, grace_seconds, signal_remote, threads)
                 return ProcessOutcome(*finished, shell_exit_status(process.returncode))
             if cancel is not None and cancel.is_set():
                 stop = ProcessStop.CANCELLED
@@ -270,6 +285,24 @@ def _stop(
         remote = _end_remote(signal_remote, grace_end, threads, killed=killed)
         unconfirmed = None if remote.gone else remote
     return ProcessOutcome(*finished, shell_exit_status(process.returncode), stop, unconfirmed)
+
+
+def _client_lost(
+    finished: tuple[str, str],
+    grace_seconds: float,
+    signal_remote: SignalSender,
+    threads: Threads,
+) -> ProcessOutcome:
+    """Stop a remote command whose client a signal ended, and report no status for it.
+
+    A client relays its remote command's status as an ordinary exit code, so a
+    client ended by a signal is the client's own death (an OOM kill on the host,
+    an operator's ``kill``), not the command's. The command may still run, so it
+    gets ``SIGTERM`` and, after the grace period, ``SIGKILL`` where it lives.
+    """
+    remote = _end_remote(signal_remote, threads.now() + grace_seconds, threads, killed=False)
+    unconfirmed = None if remote.gone else remote
+    return ProcessOutcome(*finished, None, ProcessStop.CLIENT_LOST, unconfirmed)
 
 
 def _end_remote(

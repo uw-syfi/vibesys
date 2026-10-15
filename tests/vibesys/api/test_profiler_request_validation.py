@@ -32,7 +32,7 @@ from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -68,7 +68,7 @@ class _RecordingBackendFactory:
 
     def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
         self.calls += 1
-        return FakeComputeBackend()
+        return FakeComputeBackend(threads=SimThreads())
 
 
 def _profiler_registry() -> OrchestrationRegistry:
@@ -94,7 +94,7 @@ def _native_profiler_request(root: Path, requested: ProfilerKind) -> RunRequest:
         orchestration=OrchestrationDescriptor(
             id="profiler-preflight-test", config_version=1, options={}
         ),
-        config=Config.model_validate({"model": {"name": "gpt-test"}}),
+        config=Config.model_validate({"model": {"name": "gpt-5.5"}}),
         input_bundle=load_task(project),
         exp_name="profiler-preflight",
         run_environment=fake_docker_environment(),
@@ -148,7 +148,7 @@ def _request(root: Path, *, service: bool, profile: bool, requested: ProfilerKin
                 "official_eval_every": 1,
             },
         ),
-        config=Config.model_validate({"model": {"name": "gpt-test"}}),
+        config=Config.model_validate({"model": {"name": "gpt-5.5"}}),
         exp_name="profile-preflight",
         runs_dir=root / "runs",
         profiler_kind=requested,

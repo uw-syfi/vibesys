@@ -35,9 +35,10 @@ from vs_agent.api import reap_orphaned_agents
 from vs_agent.api.testing import FakeConfinement, FakeDockerBuildRunner
 from vs_core.api import AssessmentKind
 from vs_project.api import OrchestrationDescriptor
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, ManualClock
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -108,7 +109,7 @@ def _facts(tmp_path: Path, plugin: OrchestrationPlugin) -> RunFacts:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> RunFacts:

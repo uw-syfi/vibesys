@@ -8,11 +8,18 @@ relying on prior uncommitted or untracked files.
 Your original task and pass criteria remain in force; this continuation does not start
 another attempt.
 
-{% if timed_out %}
+{% if ended_by is none %}
+Every evaluation you awaited is terminal.
+{% elif ended_by.value == 'queue_budget' %}
+Every other evaluation you awaited is terminal.
+{% else %}
 The suspension deadline expired. Evaluations may still be running; the timeout ends
 this suspension, not the evaluation job, and supplies no passing or failing result.
-{% else %}
-Every evaluation you awaited is terminal.
+{% endif %}
+{% if queue_budget_spent %}
+An evaluation was cancelled because it waited in the cluster queue past its queue
+budget; it never ran, so this says nothing about your candidate. Resubmit it if you
+still need the measurement.
 {% endif %}
 {% if evidence %}
 Accepted evidence for the original submitted candidate, not a measurement of later

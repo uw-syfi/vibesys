@@ -13,7 +13,7 @@ from hypothesis import strategies as st
 
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import ScriptedDockerCli
-from vs_sim.api import OsThreads
+from vs_sim.api.testing import SimThreads
 
 _names = st.lists(st.text(alphabet="abcdefgz", min_size=1, max_size=8), min_size=1, max_size=3)
 _devices = st.lists(st.sampled_from(["/dev/kfd", "/dev/dri/renderD128"]), min_size=1, max_size=2)
@@ -28,7 +28,7 @@ def test_groups_without_devices_are_refused(groups: list[str], devices: list[str
             group_add=groups,
             devices=devices,
             docker=ScriptedDockerCli(),
-            threads=OsThreads(),
+            threads=SimThreads(),
         )
 
 
@@ -40,7 +40,7 @@ def test_groups_with_devices_are_accepted(groups: list[str], devices: list[str])
         group_add=groups,
         devices=devices,
         docker=ScriptedDockerCli(),
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
 
 
@@ -51,5 +51,5 @@ def test_no_groups_is_always_accepted(devices: list[str] | None) -> None:
         image="img",
         devices=devices,
         docker=ScriptedDockerCli(),
-        threads=OsThreads(),
+        threads=SimThreads(),
     )

@@ -1,8 +1,8 @@
 """Drive a flow search by hand, as a script: no asyncio, no clock, no core.
 
 ``FlowRun`` plays the host. It starts the search, keeps the list of waits the search has
-opened, answers the prompt renders by itself (they are core's own business) and delivers the
-events a story names::
+opened, answers the prompt renders by itself (they are core's own business), answers at once
+the owned operations a story hands to ``own``, and delivers the events a story names::
 
     run = FlowRun.start(search, config, facts)
     asked = run.expect_turn("worker")          # the next turn request that matches
@@ -97,7 +97,16 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import Decision, Role, RunFacts, RunView, SearchDef, Seconds, Within
+    from vs_core.api import (
+        Decision,
+        OperationRequest,
+        Role,
+        RunFacts,
+        RunView,
+        SearchDef,
+        Seconds,
+        Within,
+    )
     from vs_core.flows._define import Root
     from vs_core.types.agents import Checkpoint
 
@@ -242,6 +251,7 @@ class FlowRun[C]:
         self._open: list[Asked] = []
         self._sleeps: list[Seconds] = []
         self._prompts: dict[ArtifactId, tuple[str, Value]] = {}
+        self._owners: dict[str, Callable[[OperationRequest], BaseModel]] = {}
         self._queue: list[Event] = []
         self.finished: Finish | None = None
         """The ``Finish`` the search issued, once it did."""
@@ -478,6 +488,16 @@ class FlowRun[C]:
         result = self._operation_result(request.request, outcome)
         self.answer(asked, OperationFinished(decision=asked.decision, result=result))
 
+    def own(self, kind: str, perform: Callable[[OperationRequest], BaseModel]) -> None:
+        """Answer every operation of ``kind`` at once with ``perform``'s outcome, from now on.
+
+        For an owned operation a story is not about: its waits never show among the open ones.
+        Any such wait already open is answered now.
+        """
+        self._owners[kind] = perform
+        for asked in [item for item in self._open if self._owned(item.request)]:
+            self.finish_operation(asked, self._perform(asked.request))
+
     def published[M: BaseModel](self, model: type[M]) -> M | None:
         """What the flow last published with ``ctx.publish``, as ``model``."""
         return self.driver.published(self.state, model)
@@ -534,6 +554,12 @@ class FlowRun[C]:
             match decision:
                 case Wait(request=Operation(request=render) as operation) if self._renders(render):
                     self._render(operation, render)  # ty: ignore[invalid-argument-type]
+                case Wait(request=Operation() as operation) if self._owned(operation):
+                    self._sequence += 1
+                    result = self._operation_result(operation.request, self._perform(operation))
+                    self._queue.append(
+                        OperationFinished(decision=operation.decision_id, result=result)
+                    )
                 case Wait(request=ProposeWinner() as proposal) if self.adopting:
                     self._open.append(Asked(proposal.decision_id, proposal, None))
                     self._queue.append(self._adopted(proposal))
@@ -553,6 +579,15 @@ class FlowRun[C]:
             if found is not None:
                 return found
         return None, None
+
+    def _owned(self, request: object) -> bool:
+        return isinstance(request, Operation) and request.request.kind in self._owners
+
+    def _perform(self, request: object) -> BaseModel:
+        if not isinstance(request, Operation):
+            message = f"{type(request).__name__} is not an operation"
+            raise TypeError(message)
+        return self._owners[request.request.kind](request.request)
 
     def _renders(self, request: object) -> bool:
         """Whether ``request`` asks to render a prompt: the namespace's render operation."""

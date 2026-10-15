@@ -23,7 +23,7 @@ from server.chat.transcript import FileChatTranscriptStore
 from server.events import ChatThreadCreatedData, ChatThreadId
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.api import AuxiliaryAgentLaunch
-from vs_sim.api import utc_datetime
+from vs_sim.api import CloseOnce, ReleaseStack, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from server.controller import RunController
     from server.execution import ExecutionTracker
     from vibesys.api import ManagedAgent
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, Released, Threads
 
 
 #: Session-key identifier for the run's default chat, which has no thread ID of
@@ -120,7 +120,9 @@ class ExperimentChatFactory:
         self._build_agent = build_agent
         self._fallback = fallback
         self._lock = self._threads.lock()
-        self._closed = False
+        self._closing = self._threads.lock()
+        self._close = CloseOnce()
+        self._owned = ReleaseStack()
         self._sessions: list[ExperimentChatSession] = []
         self._default_retained = False
         self._transcripts: FileChatTranscriptStore | None = None
@@ -128,7 +130,7 @@ class ExperimentChatFactory:
     def start(self) -> None:
         """Install the default session and per-thread factory on the manager."""
         with self._lock:
-            if self._closed:
+            if self._close.started:
                 raise _factory_closed_error()
             if self._transcripts is not None:
                 raise _factory_started_error()
@@ -144,7 +146,7 @@ class ExperimentChatFactory:
             ),
         )
         with self._lock:
-            if self._closed:
+            if self._close.started:
                 raise _factory_closed_error()
             self._default_retained = self._manager.retain_terminal_resource(
                 TerminalChatResource(handler=default.ask, close=default.close)
@@ -155,28 +157,25 @@ class ExperimentChatFactory:
                 self._manager.install_default_handler(default.ask)
 
     def close(self) -> None:
-        """Drain chat calls and close every factory-owned session."""
-        with self._lock:
-            if self._closed:
-                return
-            self._closed = True
+        """Drain chat calls and close every factory-owned session.
+
+        A session or transcript store whose close raised is closed again on the next call.
+        """
+        with self._closing:
+            self._close.run(self._release)
+
+    def _release(self) -> Released:
         self._manager.clear_threads_and_drain()
         if not self._default_retained:
             self._manager.clear_default_handler_and_drain()
         with self._lock:
             sessions, self._sessions = self._sessions, []
             transcripts, self._transcripts = self._transcripts, None
-        first_error: BaseException | None = None
-        owned_resources: list[ExperimentChatSession | FileChatTranscriptStore] = [*sessions]
         if transcripts is not None:
-            owned_resources.append(transcripts)
-        for resource in owned_resources:
-            try:
-                resource.close()
-            except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010246 [BLE001]; factory teardown attempts every owned session and namespace capability even when one close is cancelled; ExitStack would replace this first-error policy with exception chaining.
-                first_error = first_error or exc
-        if first_error is not None:
-            raise first_error
+            self._owned.callback(transcripts.close)
+        for session in reversed(sessions):
+            self._owned.callback(session.close)
+        return self._owned.close()
 
     def _create_thread(
         self,
@@ -225,7 +224,7 @@ class ExperimentChatFactory:
         self, thread_id: ChatThreadId | None, selection: AgentSelection
     ) -> ExperimentChatSession:
         with self._lock:
-            if self._closed:
+            if self._close.started:
                 raise _factory_closed_error()
             transcripts = self._transcripts
             if transcripts is None:
@@ -275,7 +274,7 @@ class ExperimentChatFactory:
             raise
 
         with self._lock:
-            if not self._closed:
+            if not self._close.started:
                 self._sessions.append(session)
                 return session
         session.close()

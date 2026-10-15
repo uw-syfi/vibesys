@@ -8,7 +8,8 @@ reach a terminal state, render a failed stage's text, and cancel the same way.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -40,13 +41,15 @@ from vs_runtime.api import (
     PollingEvaluationExecutor,
     render_stage_failure,
 )
-from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
+from vs_runtime.api.core import StageOutputOpener, StageRun
+from vs_runtime.api.slurm_evaluation_stack import BENCHMARK_OUTPUT, ScenarioCluster, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
+from vs_sim.api import Capture, OutputStream
 from vs_sim.api.testing import ManualClock, yield_until
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Iterator
 
 pytestmark = pytest.mark.asyncio
 
@@ -68,6 +71,8 @@ class _World:
     snapshot: str
     stage_running: Callable[[], Awaitable[None]]
     submission_visible: Callable[[str], Awaitable[None]]
+    printed: dict[str, bytes] = field(default_factory=dict)
+    """What each stage's command printed to stdout, as the executor's Fake scripts it."""
 
 
 class _Script(StrEnum):
@@ -76,12 +81,15 @@ class _Script(StrEnum):
     HOLD_FIRST_STAGE = "hold-first-stage"
 
 
-type _Build = Callable[[Path, _Script], Awaitable[_World]]
+type _Build = Callable[[Path, _Script, StageOutputOpener | None], Awaitable[_World]]
+_LOCAL_PRINTED = {"accuracy": b"checking 1/3\nchecking 2/3\n", "benchmark": b"warmup\nrps=41\n"}
 
 
-async def _local(root: Path, script: _Script) -> _World:
+async def _local(root: Path, script: _Script, stage_output: StageOutputOpener | None) -> _World:
     del root
     evaluation = FakeEvaluation()
+    evaluation.printed.update({"accuracy": (_LOCAL_PRINTED["accuracy"], b"")})
+    evaluation.printed.update({"benchmark": (_LOCAL_PRINTED["benchmark"], b"")})
     if script is _Script.FAIL_ACCURACY:
         evaluation.accuracy_results.append(
             AccuracyEvaluation(
@@ -106,19 +114,22 @@ async def _local(root: Path, script: _Script) -> _World:
         return None
 
     return _World(
-        PollingEvaluationExecutor(evaluation, workspaces, clock=ManualClock()),
+        PollingEvaluationExecutor(
+            evaluation, workspaces, clock=ManualClock(), stage_output=stage_output
+        ),
         snapshot,
         running,
         visible,
+        dict(_LOCAL_PRINTED),
     )
 
 
-async def _slurm(root: Path, script: _Script) -> _World:
+async def _slurm(root: Path, script: _Script, stage_output: StageOutputOpener | None) -> _World:
     cluster = ScenarioCluster()
     cluster.accuracy_exit = 1 if script is _Script.FAIL_ACCURACY else 0
     if script is _Script.HOLD_FIRST_STAGE:
         cluster.states = (SlurmJobStatus.PENDING,)
-    stack = await build_stack(root, cluster)
+    stack = await build_stack(root, cluster, stage_output=stage_output)
 
     async def running() -> None:
         return None
@@ -128,7 +139,8 @@ async def _slurm(root: Path, script: _Script) -> _World:
         # in a background task, and until it lands a poll honestly reports Unknown.
         await wait_until_executor_started(cluster.accepted, stack.executor, handle_id)
 
-    return _World(stack.executor, stack.snapshot, running, visible)
+    printed = {"accuracy": b"ok", "benchmark": BENCHMARK_OUTPUT.encode()}
+    return _World(stack.executor, stack.snapshot, running, visible, printed)
 
 
 BUILDERS = [pytest.param(_local, id="polling"), pytest.param(_slurm, id="semantic-slurm")]
@@ -167,7 +179,7 @@ async def _terminal(executor: _Executor) -> ExecutorObservation:
 async def test_a_submitted_request_is_observable_and_succeeds_with_evidence_per_stage(
     build: _Build, tmp_path: Path
 ) -> None:
-    world = await build(tmp_path, _Script.SUCCEED)
+    world = await build(tmp_path, _Script.SUCCEED, None)
     assert await world.executor.inspect(_HANDLE) is None
 
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
@@ -186,7 +198,7 @@ async def test_a_submitted_request_is_observable_and_succeeds_with_evidence_per_
 
 @pytest.mark.parametrize("build", BUILDERS)
 async def test_resubmitting_the_same_handle_is_idempotent(build: _Build, tmp_path: Path) -> None:
-    world = await build(tmp_path, _Script.SUCCEED)
+    world = await build(tmp_path, _Script.SUCCEED, None)
     request = _request(world.snapshot)
 
     await world.executor.submit(request, handle_id=_HANDLE)
@@ -201,7 +213,7 @@ async def test_resubmitting_the_same_handle_is_idempotent(build: _Build, tmp_pat
 async def test_a_failed_accuracy_stage_fails_the_evaluation_with_its_rendered_text(
     build: _Build, tmp_path: Path
 ) -> None:
-    world = await build(tmp_path, _Script.FAIL_ACCURACY)
+    world = await build(tmp_path, _Script.FAIL_ACCURACY, None)
 
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
     observed = await _terminal(world.executor)
@@ -222,7 +234,7 @@ async def test_a_failed_accuracy_stage_fails_the_evaluation_with_its_rendered_te
 async def test_cancel_stops_an_in_flight_evaluation_and_reports_canceled(
     build: _Build, tmp_path: Path
 ) -> None:
-    world = await build(tmp_path, _Script.HOLD_FIRST_STAGE)
+    world = await build(tmp_path, _Script.HOLD_FIRST_STAGE, None)
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
     await world.stage_running()
 
@@ -237,7 +249,7 @@ async def test_cancel_stops_an_in_flight_evaluation_and_reports_canceled(
 async def test_poll_reports_each_phase_without_submitting_or_cancelling(
     build: _Build, tmp_path: Path
 ) -> None:
-    world = await build(tmp_path, _Script.SUCCEED)
+    world = await build(tmp_path, _Script.SUCCEED, None)
     assert (await world.executor.poll(_HANDLE)).phase is PollPhase.UNSUBMITTED
     assert await world.executor.inspect(_HANDLE) is None  # polling submitted nothing
 
@@ -265,7 +277,7 @@ async def test_cancelling_a_finished_evaluation_keeps_its_terminal_result(
     then polls each to prove release. A cancel that rewrites a SUCCEEDED
     evaluation as CANCELED discards evidence the run already paid for.
     """
-    world = await build(tmp_path, _Script.SUCCEED)
+    world = await build(tmp_path, _Script.SUCCEED, None)
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
     finished = await _terminal(world.executor)
     assert finished.state is EvaluationState.SUCCEEDED
@@ -288,7 +300,7 @@ async def test_close_ends_every_submitted_evaluation_in_a_terminal_state(
     build: _Build, tmp_path: Path
 ) -> None:
     """Closing the executor right after a submit leaves no evaluation non-terminal."""
-    world = await build(tmp_path, _Script.HOLD_FIRST_STAGE)
+    world = await build(tmp_path, _Script.HOLD_FIRST_STAGE, None)
     await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
 
     await world.executor.close()
@@ -296,3 +308,42 @@ async def test_close_ends_every_submitted_evaluation_in_a_terminal_state(
     observed = await world.executor.inspect_only(_HANDLE)
     assert observed is not None
     assert observed.state in _TERMINAL, observed
+
+
+@dataclass
+class _Streams:
+    """An opener that keeps each stage's stdout and records open and close, in order."""
+
+    opened: list[StageRun] = field(default_factory=list)
+    closed: list[StageRun] = field(default_factory=list)
+    output: dict[StageRun, Capture] = field(default_factory=dict)
+
+    @contextmanager
+    def open(self, run: StageRun) -> Iterator[Capture]:
+        self.opened.append(run)
+        sink = self.output[run] = Capture(1 << 16)
+        try:
+            yield sink
+        finally:
+            self.closed.append(run)
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_each_stage_output_reaches_one_stream_named_by_its_run(
+    build: _Build, tmp_path: Path
+) -> None:
+    """Local or on the cluster, a stage's whole stdout lands in one stream, closed at its end."""
+    streams = _Streams()
+    world = await build(tmp_path, _Script.SUCCEED, streams.open)
+
+    await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+    observed = await _terminal(world.executor)
+    await world.executor.close()
+
+    runs = [StageRun(_HANDLE, "accuracy"), StageRun(_HANDLE, "benchmark")]
+    assert observed.state is EvaluationState.SUCCEEDED
+    assert streams.opened == runs
+    assert sorted(streams.closed, key=runs.index) == runs
+    assert {
+        run.stage_id: streams.output[run].kept(OutputStream.STDOUT) for run in runs
+    } == world.printed

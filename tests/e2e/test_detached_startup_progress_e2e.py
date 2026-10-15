@@ -47,8 +47,15 @@ from vibesys.events import (
 )
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.images import TaskImageBuildError
-from vs_runtime.api.infrastructure import EnvironmentStartupStage
-from vs_sim.api import OsThreads, Platform, SystemClock
+from vs_runtime.api.infrastructure import EnvironmentStartupStage, EnvironmentSystem
+from vs_sim.api import (
+    OsProcesses,
+    OsThreads,
+    Platform,
+    SubprocessPipedProcessLauncher,
+    SystemClock,
+    UnixNetwork,
+)
 from vs_sim.api.testing import HANG_GUARD_S, NO_PROCESSES
 
 if TYPE_CHECKING:
@@ -94,7 +101,7 @@ def _serve(
             git=REAL_GIT,
             github=NO_GITHUB,
             threads=OsThreads(),
-            slurm_processes=NO_PROCESSES,
+            system=_real_system(),
         )
         try:
             with registry.register(instance_id) as hold:
@@ -223,3 +230,14 @@ def test_a_failed_image_build_leaves_a_tombstone_naming_the_stage_and_reason(roo
     assert ended.phase.reason is not None
     assert ended.phase.reason.stage == "building_image"
     assert _BUILD_FAILURE in ended.phase.reason.message
+
+
+def _real_system() -> EnvironmentSystem:
+    """The host's own threads, sockets and processes; this test runs no Slurm program."""
+    return EnvironmentSystem(
+        threads=OsThreads(),
+        network=UnixNetwork(),
+        processes=OsProcesses(),
+        launcher=SubprocessPipedProcessLauncher(),
+        slurm_processes=NO_PROCESSES,
+    )

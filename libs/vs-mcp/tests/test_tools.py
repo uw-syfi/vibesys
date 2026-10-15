@@ -15,7 +15,7 @@ import re
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import BaseModel
@@ -51,8 +51,11 @@ async def _list_tool_names(server: FastMCP) -> set[str]:
     return {t.name for t in tools}
 
 
-async def _call_tool(server: FastMCP, name: str, **kwargs: object) -> str:
+async def _call_tool(server: FastMCP, name: str, /, **kwargs: object) -> str:
     """Invoke an MCP tool and return its string result.
+
+    ``server`` and ``name`` are positional-only, so a tool argument of either name
+    reaches the tool instead of colliding with them.
 
     ``FastMCP.call_tool`` is declared as returning
     ``Sequence[ContentBlock] | dict[str, Any]``, but for a tool with an
@@ -240,6 +243,8 @@ class TestToolServer:
 _FIELDS = frozenset(_EchoArgs.model_fields)
 
 
+@example(key="name", value=None)
+@example(key="server", value=None)
 @given(
     key=st.text(min_size=1, max_size=12).filter(lambda key: key not in _FIELDS),
     value=st.none() | st.booleans() | st.integers() | st.text(max_size=8),

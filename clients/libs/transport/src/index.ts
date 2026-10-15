@@ -1,3 +1,4 @@
+export type {ActiveExecutionCheckpointDisposition} from './active-execution-checkpoint.js';
 export {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 export {
   ControlChannel,
@@ -14,6 +15,7 @@ export {
   PersistentEventStream,
   type PersistentEventStreamCallbacks,
   type PersistentEventStreamOptions,
+  type PersistentStreamMessage,
   type StreamConnectionState,
   type StreamMessageContext,
   type StreamRebootstrapDisposition,

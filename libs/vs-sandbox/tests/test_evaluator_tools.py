@@ -29,6 +29,7 @@ from vs_sandbox.api.testing import FakeCommandRunner
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from typing import Never
+from vs_sim.api import DISCARD
 
 
 def _spec() -> CargoGitToolSpec:
@@ -139,7 +140,7 @@ def test_lifecycle_hooks_reject_target_install_failure(
         EvaluatorToolError,
         match=rf"sandbox installation failed \(exit {exit_code}\): permission denied",
     ) as error:
-        lifecycle.hooks[0].before_ready(BeforeReadyContext(sandbox=sandbox))
+        lifecycle.hooks[0].before_ready(BeforeReadyContext(sandbox=sandbox, output=DISCARD))
 
     assert "root sandbox failure" in str(error.value)
     assert len(str(error.value)) < 2100

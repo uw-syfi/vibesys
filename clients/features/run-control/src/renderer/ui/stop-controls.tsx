@@ -14,13 +14,16 @@ export function StopControls(props: {
   const view = props.view;
   if (view?.phase === 'stopping') return <span className="muted">{view.text}</span>;
   const failed = view?.phase === 'error' ? view : null;
+  const confirming = view?.phase === 'confirming';
   return (
     <>
       {failed === null ? null : <span className="error">{failed.text}</span>}
       {failed?.canForce === true ? (
         <Button onClick={() => props.stop(true)}>Force stop</Button>
       ) : null}
-      <Button onClick={() => props.stop(false)}>Stop run</Button>
+      <Button disabled={confirming} onClick={() => props.stop(false)}>
+        Stop run
+      </Button>
     </>
   );
 }

@@ -11,15 +11,21 @@ from vs_core.api import (
     BlockRequest,
     CancelOwnedResource,
     ClockAdvanced,
+    DispatchAuthorized,
     EnsureSession,
+    EventId,
     FailureReason,
     InspectRequest,
     LifecycleClass,
+    Observation,
+    ObservationStatus,
     RecordsState,
     RecoveryBarrier,
     RecoveryPhase,
     RecoveryStarted,
+    ReissueProof,
     RequestId,
+    RequestObserved,
     RequestPhase,
     RequestRecord,
     ResourceId,
@@ -28,6 +34,7 @@ from vs_core.api import (
     Scope,
     SessionId,
     SessionSpec,
+    TargetObservation,
     Transition,
     Until,
     Value,
@@ -232,3 +239,86 @@ def test_a_recovery_check_whose_inspection_is_never_answered_blocks_and_is_no_or
     assert state.records.recovery.phase == RecoveryPhase.BLOCKED
     assert [check.resolution for check in state.records.recovery.checks] == ["blocked"]
     assert not [wait for wait in orphan_waits(state) if wait.waiter == WaitKind.RECOVERY_CHECK]
+
+
+def _answered_never_began(
+    inspection: InspectRequest, lost: RequestRecord, at: float
+) -> RequestObserved:
+    """The executor's answer to ``inspection``: the dead host's ``lost`` command never began."""
+    refusal = Observation.model_validate(
+        {
+            "event_id": EventId(root=f"refusal-{lost.request_id.root}"),
+            "request_id": lost.request_id,
+            "scope": lost.request.scope,
+            "sequence": 1,
+            "observed_at": at,
+            "status": ObservationStatus.REJECTED,
+            "accepted": False,
+            "terminal": True,
+            "released": True,
+        }
+    )
+    answer = Observation.model_validate(
+        {
+            "event_id": EventId(root="inspection-answer"),
+            "request_id": inspection.request_id,
+            "scope": inspection.scope,
+            "sequence": 1,
+            "observed_at": at,
+            "status": ObservationStatus.SUCCEEDED,
+            "accepted": True,
+            "terminal": True,
+            "released": True,
+            "children_complete": True,
+        }
+    )
+    return RequestObserved(
+        observation=answer,
+        target=TargetObservation(observation=refusal, reissue=ReissueProof.NEVER_BEGAN),
+    )
+
+
+@given(
+    kind=st.sampled_from(["cancel", "block"]),
+    phase=st.sampled_from([RequestPhase.DISPATCHED, RequestPhase.RECONCILING]),
+    down_past_bound=st.floats(min_value=0.0, max_value=10_000.0, allow_nan=False),
+)
+def test_a_dead_hosts_command_restarted_after_its_limit_is_sent_again_on_a_never_began_proof(
+    kind: str, phase: RequestPhase, down_past_bound: float
+) -> None:
+    """However long the host was down, the command lives until its inspection answers.
+
+    Before, a dispatched cancel or block kept the limit the dead host gave it (REVIEW-10
+    P2-3). Restarted after that limit, it lapsed BLOCKED on the first tick, the inspection's
+    "never began" proof was dropped, and the cancel was never sent; a re-send would have kept
+    the stale limit and lapsed on the next tick.
+    """
+    restart_at = 100.0 + down_past_bound
+    started, lost = _restarted(kind, phase, restart_at)
+    (inspection,) = (
+        request
+        for request in started.requests
+        if isinstance(request, InspectRequest) and request.target == lost.request_id
+    )
+    assert inspection.request_id is not None
+    bound = started.state.run.limits.reconciliation_bound
+
+    ticked = step(started.state, ClockAdvanced(now_at=restart_at + 1.0))
+    rows = {row.request_id: row for row in ticked.state.records.records}
+    assert rows[lost.request_id].phase == phase
+
+    asked = step(ticked.state, DispatchAuthorized(request_id=inspection.request_id))
+    answered_at = restart_at + 2.0
+    result = step(
+        asked.state.model_copy(
+            update={"run": asked.state.run.model_copy(update={"now_at": answered_at})}
+        ),
+        _answered_never_began(inspection, lost, answered_at),
+    )
+    rows = {row.request_id: row for row in result.state.records.records}
+    assert rows[lost.request_id].phase == RequestPhase.PREPARED
+    assert rows[lost.request_id].until.at >= answered_at + bound
+
+    later = step(result.state, ClockAdvanced(now_at=answered_at + 1.0))
+    rows = {row.request_id: row for row in later.state.records.records}
+    assert rows[lost.request_id].phase == RequestPhase.PREPARED

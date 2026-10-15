@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from contextlib import ExitStack, asynccontextmanager
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_runtime.contracts import RunCleanupError
+from vs_sim.api import AsyncCloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
 
     from vs_runtime._workspaces import OwnedWorkspaces
-    from vs_sim.api import BlockingRunner
+    from vs_sim.api import BlockingRunner, Released
 
 
 def _runtime_closed_error() -> RuntimeError:
@@ -86,20 +87,18 @@ class RunHostComponents:
 class RuntimeRunHost:
     """Concrete run host owning workspace and resource teardown."""
 
-    def __init__(self, components: RunHostComponents, ownership: ExitStack) -> None:
+    def __init__(self, components: RunHostComponents, ownership: ReleaseStack) -> None:
         """Bind the fixed public value to its private lifecycle owner."""
         self.workspaces = components.workspaces
         self._blocking = components.blocking
         self._ownership = ownership
-        self._close_task: asyncio.Task[None] | None = None
+        self._close = AsyncCloseOnce()
 
     async def close(self) -> None:
-        """Release all run-owned resources exactly once."""
-        if self._close_task is None:
-            self._close_task = asyncio.create_task(self._close_once())
-        await asyncio.shield(self._close_task)
+        """Release all run-owned resources; a step that failed runs again on the next call."""
+        await self._close.run(self._release)
 
-    async def _close_once(self) -> None:
+    async def _release(self) -> Released:
         self._blocking.begin_close()
         self.workspaces.begin_close()
         errors = await self._blocking.drain()
@@ -107,12 +106,14 @@ class RuntimeRunHost:
             await self.workspaces.close()
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948002 [BLE001]; cleanup must continue through independently owned resources.
             errors.append(error)
+        released: Released | None = None
         try:
-            await self._blocking.runner.run(self._ownership.close)
+            released = await self._blocking.runner.run(self._ownership.close)
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-948003 [BLE001]; all cleanup outcomes are reported together after every owner runs.
             errors.append(error)
-        if errors:
+        if errors or released is None:
             raise _cleanup_failure(errors)
+        return released
 
 
 async def _wait_until_done[Result](task: asyncio.Task[Result]) -> None:
@@ -153,7 +154,7 @@ async def _close_runtime(host: RuntimeRunHost, error: BaseException | None) -> N
 
 
 async def _close_preparation_resources(
-    ownership: ExitStack,
+    ownership: ReleaseStack,
     error: BaseException | None,
     runner: BlockingRunner,
 ) -> None:
@@ -184,7 +185,7 @@ async def _close_preparation_resources(
 
 @asynccontextmanager
 async def open_run_host(
-    prepare: Callable[[ExitStack], RunHostComponents],
+    prepare: Callable[[ReleaseStack], RunHostComponents],
     *,
     runner: BlockingRunner,
 ) -> AsyncIterator[RuntimeRunHost]:
@@ -192,7 +193,7 @@ async def open_run_host(
 
     Preparation and failed-preparation cleanup run on ``runner``.
     """
-    ownership = ExitStack()
+    ownership = ReleaseStack()
     host: RuntimeRunHost | None = None
     try:
         preparation = asyncio.create_task(runner.run(prepare, ownership))

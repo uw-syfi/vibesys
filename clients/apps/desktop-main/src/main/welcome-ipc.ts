@@ -59,7 +59,9 @@ function failure(error: unknown): WelcomeResult<never> {
  * `url`) only; any other sender is refused. Each request carries the invoking Electron frame's
  * process/routing identity. `revoke` synchronously removes each replaced document's authority;
  * a replacement document cannot issue work until `retire` has settled every asynchronous cleanup
- * belonging to the prior identities.
+ * belonging to the prior identities. A `retire` implementation owns reporting its cleanup
+ * failures; rejection still counts as settlement and cannot skip a sibling generation or poison a
+ * later document's barrier.
  */
 export function bindWelcomeIpc(
   ipc: WelcomeIpc,
@@ -85,7 +87,7 @@ export function bindWelcomeIpc(
       revoke(generation);
     }
     retirement = retirement.then(async () => {
-      await Promise.all(retiring.map(generation => retire(generation)));
+      await Promise.allSettled(retiring.map(async generation => retire(generation)));
     });
   };
   welcome.onNewDocument(retireCurrent);

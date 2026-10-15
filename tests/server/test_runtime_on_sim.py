@@ -26,10 +26,10 @@ from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
+from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import (
     HANG_GUARD_S,
-    NO_PROCESSES,
     ManualClock,
     SimNetwork,
     SimThreads,
@@ -376,7 +376,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
             git=REAL_GIT,
             github=NO_GITHUB,
             threads=OsThreads(),
-            slurm_processes=NO_PROCESSES,
+            system=idle_environment_system(),
         )
         integration.events.subscribe(runtime.integration.project_event)
 

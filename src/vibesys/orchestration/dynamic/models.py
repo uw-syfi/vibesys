@@ -273,6 +273,42 @@ class PlannerHypothesisUpdate(HypothesisStrategyUpdate):
     )
 
 
+class WorkstreamExpectation(BaseModel):
+    """What the planner expects of one workstream it scheduled, and what it would do next."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    work_id: AgentId = Field(
+        description="The hypothesis or profile ID of a workstream of this reply."
+    )
+    expected: str = Field(min_length=1, description="What you expect this workstream to show.")
+    if_it_succeeds: str = Field(
+        min_length=1, description="What you would plan next if it shows what you expect."
+    )
+    if_it_fails: str = Field(
+        min_length=1, description="What you would plan next if it fails or shows the opposite."
+    )
+
+
+class PlannerHandoff(BaseModel):
+    """The planner's note to the planner of a later turn, which starts with no memory of this one.
+
+    Core writes it, with the plan's reasoning and workstreams, to a handoff file in the run's
+    state; later planning prompts list that file's path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    expectations: tuple[WorkstreamExpectation, ...] = Field(
+        max_length=32,
+        description="One entry per workstream of this reply: what you expect and what follows.",
+    )
+    doubts: tuple[str, ...] = Field(
+        max_length=16,
+        description="What you are unsure of and would check next; empty when there is nothing.",
+    )
+
+
 class PortfolioPlan(BaseModel):
     """A bounded batch of distinct hypothesis workstreams."""
 
@@ -291,6 +327,12 @@ class PortfolioPlan(BaseModel):
         default=(),
         max_length=32,
         description="Parks and abandonments of completed hypotheses; empty when there are none.",
+    )
+    handoff: PlannerHandoff = Field(
+        description=(
+            "Your note to the next planner, who starts without your memory: what you expect "
+            "of each workstream, what you would do next on each outcome, and your open doubts."
+        )
     )
 
     @field_validator("reasoning")
@@ -504,6 +546,7 @@ __all__ = [
     "ImplementPortfolioPlan",
     "ImplementerResult",
     "PlannedWorkstream",
+    "PlannerHandoff",
     "PlannerHypothesisUpdate",
     "PlannerWorkstream",
     "PortfolioPlan",
@@ -515,6 +558,7 @@ __all__ = [
     "ReviewResult",
     "StrategyReason",
     "WorkResult",
+    "WorkstreamExpectation",
     "WorkstreamKind",
     "WorkstreamPlan",
     "planned_id",

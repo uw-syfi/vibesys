@@ -16,7 +16,8 @@ Guarantees under test (``vs_sandbox.api.skypilot.SkyPilotBridge``):
 * An unresolved prior attempt is never resubmitted; infrastructure retries are
   bounded by the persisted attempt count.
 * Closing cancels every in-flight job (including one discovered mid-close),
-  releases every touched cluster exactly once, logs failures and continues, and
+  releases every touched cluster, logs failures and continues; a cluster whose
+  release failed makes close raise and is released again by the next close; and
   the bridge cannot be restarted.
 * The one real-socket test pins the filesystem contract: the socket file is
   owner-only and removed on close.
@@ -68,7 +69,7 @@ from vs_sandbox.api.skypilot import (
     decode_response,
     encode_message,
 )
-from vs_sim.api import ProcessTimeoutError, Threads
+from vs_sim.api import NotReleasedError, ProcessTimeoutError, Threads
 from vs_sim.api.testing import HANG_GUARD_S, FakePipedProcessLauncher, SimNetwork, SimThreads
 
 from .skypilot_world import MemoryTransport
@@ -1371,10 +1372,39 @@ def test_bridge_close_logs_failed_cancel_and_release_and_continues(
     bridge.start()
     _private(bridge, "_active_jobs").add(("lease", 3))
 
-    bridge.close()
+    with pytest.raises(NotReleasedError, match="lease"):
+        bridge.close()
 
     assert "[warn] SkyPilot job cancellation failed: RuntimeError" in logs
     assert "[warn] SkyPilot allocation release failed: OSError" in logs
+
+
+@pytest.mark.parametrize("failures", [1, 2])
+def test_a_cluster_whose_release_failed_is_released_again_on_the_next_close(
+    tmp_path: Path, transport: MemoryTransport, failures: int
+) -> None:
+    """Regression: a failed release was logged and the bridge latched closed, leaking the cluster."""
+
+    class FlakyRelease(FakeRunner):
+        def release(self, cluster_name: str, *, timeout: float = 60) -> None:
+            super().release(cluster_name, timeout=timeout)
+            if cluster_name == "old-lease" and self.release_names.count(cluster_name) <= failures:
+                message = "sky down was killed"
+                raise OSError(message)
+
+    runner = FlakyRelease()
+    bridge = _bridge(tmp_path, transport, runner)
+    bridge.start()
+    _private(bridge, "_touched_clusters").add("old-lease")
+
+    for _ in range(failures):
+        with pytest.raises(NotReleasedError, match="old-lease"):
+            bridge.close()
+    bridge.close()
+    bridge.close()
+
+    assert runner.release_names.count("old-lease") == failures + 1
+    assert runner.release_names.count("lease") == 1
 
 
 def test_handler_reports_value_error_frame_once_shutdown_has_started(

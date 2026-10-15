@@ -28,7 +28,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
 from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
-from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher
+from vs_sim.api import DISCARD, Capture, OsThreads, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import (
     InlineBlockingRunner,
     Sim,
@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 
     from vs_project.api import GitTracker
     from vs_sandbox.api import CommandRunner
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 
 _MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -97,7 +97,7 @@ def test_accuracy_applies_setup_timeout_and_preserves_streams(tmp_path: Path) ->
         sandbox,
     )
 
-    result = asyncio.run(executor.accuracy())
+    result = asyncio.run(executor.accuracy(output=DISCARD))
 
     assert result.passed
     assert result.executed
@@ -105,6 +105,39 @@ def test_accuracy_applies_setup_timeout_and_preserves_streams(tmp_path: Path) ->
     assert result.stderr == "warning\n"
     assert sandbox.calls[0].command == "check"
     assert sandbox.calls[0].timeout == 10
+
+
+def test_only_the_stage_command_writes_to_the_stage_output(tmp_path: Path) -> None:
+    """Each stage's command, and no framework command around it, writes to its sink."""
+    printed = f'step 1\n{_MARKER}\n{{"score": 4.5}}\n{_END_MARKER}\n'
+    sandbox = FakeCommandRunner(
+        default_result=CommandResult(
+            output=printed + "warn\n", exit_code=0, stdout=printed, stderr="warn\n"
+        )
+    )
+    executor = _executor(
+        tmp_path,
+        TrustedEvaluationPlan(
+            accuracy_command="check",
+            benchmark_command="bench",
+            benchmark_contract=ScalarBenchmarkContract(
+                output_argument="--output-json", metric="score"
+            ),
+        ),
+        sandbox,
+    )
+    accuracy_output, benchmark_output = Capture(1 << 16), Capture(1 << 16)
+
+    accuracy = asyncio.run(executor.accuracy(output=accuracy_output))
+    benchmark = asyncio.run(executor.benchmark(output=benchmark_output))
+
+    assert accuracy.passed
+    assert benchmark.passed
+    assert benchmark.row == {"score": 4.5}
+    # The benchmark's cleanup ran too, and wrote to no stage's stream.
+    assert sandbox.calls[-1].command.startswith("rm -f -- ")
+    for output in (accuracy_output, benchmark_output):
+        assert (output.stdout, output.stderr) == (printed.encode(), b"warn\n")
 
 
 def test_accuracy_rejects_trusted_input_changes_without_execution(tmp_path: Path) -> None:
@@ -116,7 +149,7 @@ def test_accuracy_rejects_trusted_input_changes_without_execution(tmp_path: Path
         git=_Git(["vibesys.input.toml"]),
     )
 
-    result = asyncio.run(executor.accuracy())
+    result = asyncio.run(executor.accuracy(output=DISCARD))
 
     assert not result.passed
     assert not result.executed
@@ -133,7 +166,7 @@ def test_accuracy_rejects_mutation_during_execution(tmp_path: Path) -> None:
         git=_Git([], ["OBJECTIVE.md"]),
     )
 
-    result = asyncio.run(executor.accuracy())
+    result = asyncio.run(executor.accuracy(output=DISCARD))
 
     assert not result.passed
     assert result.executed
@@ -157,7 +190,7 @@ def test_scalar_benchmark_decodes_finite_result_and_always_cleans(tmp_path: Path
         sandbox,
     )
 
-    result = asyncio.run(executor.benchmark())
+    result = asyncio.run(executor.benchmark(output=DISCARD))
 
     assert result.passed
     assert result.row == {"score": 4.5}
@@ -174,9 +207,10 @@ class _TruncatingRunner(FakeCommandRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         del cancel  # every command here finishes at once
-        super().execute(command, timeout=timeout)
+        super().execute(command, timeout=timeout, output=output)
         if command.startswith("rm -f -- ") and "--output-json" in command:
             head = "evaluator log line\n" * 10
             return CommandResult(
@@ -206,7 +240,7 @@ def test_truncated_benchmark_output_reads_the_result_file_alone(tmp_path: Path) 
         sandbox,
     )
 
-    result = asyncio.run(executor.benchmark())
+    result = asyncio.run(executor.benchmark(output=DISCARD))
 
     assert result.passed, result.output
     assert result.row == {"score": 7.25}
@@ -256,7 +290,7 @@ def _bulky_executor(
 
 @pytest.mark.parametrize("size", [120_000, 250_000])
 def test_result_file_larger_than_the_output_cap_is_read_whole(tmp_path: Path, size: int) -> None:
-    result = asyncio.run(_bulky_executor(tmp_path, size).benchmark())
+    result = asyncio.run(_bulky_executor(tmp_path, size).benchmark(output=DISCARD))
 
     assert result.passed, result.output
     assert result.row == {"score": 7.25}
@@ -264,7 +298,9 @@ def test_result_file_larger_than_the_output_cap_is_read_whole(tmp_path: Path, si
 
 def test_result_file_that_cannot_be_read_in_chunks_names_its_size(tmp_path: Path) -> None:
     # A cap smaller than one encoded chunk cannot carry the result file.
-    result = asyncio.run(_bulky_executor(tmp_path, 120_000, max_output_chars=2_000).benchmark())
+    result = asyncio.run(
+        _bulky_executor(tmp_path, 120_000, max_output_chars=2_000).benchmark(output=DISCARD)
+    )
 
     assert not result.passed
     assert "could not be read back in 48000-byte chunks" in result.output
@@ -287,7 +323,7 @@ def test_scalar_benchmark_preserves_legacy_nested_result_shape(tmp_path: Path) -
         sandbox,
     )
 
-    result = asyncio.run(executor.benchmark())
+    result = asyncio.run(executor.benchmark(output=DISCARD))
 
     assert result.passed
     assert result.row == {"score": 4.5}
@@ -313,7 +349,9 @@ def test_protocol_benchmark_returns_full_row_and_declarations(tmp_path: Path) ->
         sandbox,
     )
 
-    result = asyncio.run(executor.benchmark(required_metrics=frozenset({"throughput", "latency"})))
+    result = asyncio.run(
+        executor.benchmark(required_metrics=frozenset({"throughput", "latency"}), output=DISCARD)
+    )
 
     assert result.passed
     assert result.row == {"throughput": 8.0, "latency": 3.0}
@@ -340,7 +378,9 @@ def test_protocol_rejection_names_reason_and_declared_metrics(tmp_path: Path) ->
         sandbox,
     )
 
-    result = asyncio.run(executor.benchmark(required_metrics=frozenset({"latency"})))
+    result = asyncio.run(
+        executor.benchmark(required_metrics=frozenset({"latency"}), output=DISCARD)
+    )
 
     assert not result.passed
     assert result.failure is not None
@@ -364,7 +404,7 @@ def test_benchmark_timeout_result_is_a_failure_and_cleanup_still_runs(tmp_path: 
         sandbox,
     )
 
-    result = asyncio.run(executor.benchmark())
+    result = asyncio.run(executor.benchmark(output=DISCARD))
 
     assert not result.passed
     assert result.executed
@@ -390,7 +430,7 @@ def test_failure_kind_requires_a_completed_trusted_benchmark_frame(
         FakeCommandRunner(default_result=CommandResult(output=output, exit_code=exit_code)),
     )
 
-    result = asyncio.run(executor.benchmark())
+    result = asyncio.run(executor.benchmark(output=DISCARD))
 
     assert not result.passed
     assert reason in (result.failure or "")
@@ -417,7 +457,7 @@ def test_evaluator_disappearing_without_a_record_is_retried_once(tmp_path: Path)
         ),
     )
 
-    result = asyncio.run(executor.benchmark())
+    result = asyncio.run(executor.benchmark(output=DISCARD))
 
     assert not result.passed
     assert result.failure_kind is BenchmarkFailureKind.AMBIGUOUS
@@ -438,8 +478,9 @@ class _FailingSandbox:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
-        del cancel  # every command here finishes at once
+        del cancel, output  # every command here finishes at once and prints nothing
         del timeout
         self.calls.append(command)
         message = "sandbox unavailable"
@@ -459,7 +500,7 @@ def test_benchmark_execution_error_is_typed_and_cleanup_failure_is_suppressed(
         sandbox,
     )
 
-    result = asyncio.run(executor.benchmark())
+    result = asyncio.run(executor.benchmark(output=DISCARD))
 
     assert not result.passed
     assert result.executed
@@ -488,7 +529,7 @@ def test_model_request_failure_prevents_trusted_command(tmp_path: Path) -> None:
         model_requests=reconciler,
     )
 
-    result = asyncio.run(executor.accuracy())
+    result = asyncio.run(executor.accuracy(output=DISCARD))
 
     assert not result.executed
     assert not result.passed
@@ -528,8 +569,9 @@ class _BlockingSandbox:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
-        del cancel  # every command here finishes at once
+        del cancel, output  # every command here finishes at once and prints nothing
         del timeout
         self.calls.append(command)
         self.started.set()
@@ -544,7 +586,7 @@ def test_cancellation_drains_owned_accuracy_execution(tmp_path: Path, sim: Sim) 
     executor = _accuracy_on_threads(tmp_path, sandbox, threads)
 
     async def scenario() -> None:
-        operation = asyncio.create_task(executor.accuracy())
+        operation = asyncio.create_task(executor.accuracy(output=DISCARD))
         await SimBlockingRunner(threads).run(sandbox.started.wait)
         operation.cancel()
         sandbox.release.set()
@@ -568,8 +610,9 @@ class _CancellableSandbox(_BlockingSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
-        del timeout
+        del timeout, output
         assert cancel is not None
         self.calls.append(command)
         self.started.set()
@@ -585,7 +628,7 @@ def test_cancelling_an_evaluation_stops_its_running_command(tmp_path: Path, sim:
     executor = _accuracy_on_threads(tmp_path, sandbox, threads)
 
     async def scenario() -> None:
-        operation = asyncio.create_task(executor.accuracy())
+        operation = asyncio.create_task(executor.accuracy(output=DISCARD))
         await SimBlockingRunner(threads).run(sandbox.started.wait)
         operation.cancel()
         with pytest.raises(asyncio.CancelledError):

@@ -15,6 +15,7 @@ retry.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -29,16 +30,21 @@ from vs_evaluation.api import (
     PollingEvaluationExecutor,
     PollPhase,
     TrustedEvidence,
+    same_work,
 )
 from vs_runtime._failure_classification import job_failure
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
     from vs_evaluation.api import (
         AvailabilitySnapshot,
         EvaluationStateNamespace,
         ExecutorObservation,
         ResourceRequirements,
     )
+    from vs_runtime._measurement_progress import StageOutputOpener, StageRun
+    from vs_sim.api import OutputSink
 
 
 class EvaluationRetries(BaseModel):
@@ -91,6 +97,40 @@ def attempt_handle(handle_id: str, attempt: int) -> str:
     return handle_id if attempt == 1 else f"{handle_id}-try-{attempt}"
 
 
+class TryHandles:
+    """Which try of which measurement each inner handle runs, as the wrapper submitted it.
+
+    A ``RetryingEvaluationExecutor`` records every inner handle it submits here, so an
+    inner executor's stage output can be named by the measurement's own handle (the one
+    its progress reports name) and its try number. Share one with the wrapper and the
+    inner executor's stage output opener; it is used on the executors' event loop only.
+    """
+
+    def __init__(self) -> None:
+        """Know no tries yet."""
+        self._tries: dict[str, tuple[str, int]] = {}
+
+    def record(self, handle_id: str, attempt: int) -> None:
+        """Remember that ``attempt_handle(handle_id, attempt)`` runs try ``attempt``."""
+        self._tries[attempt_handle(handle_id, attempt)] = (handle_id, attempt)
+
+    def stage_output(self, opener: StageOutputOpener) -> StageOutputOpener:
+        """``opener``, called with the measurement's handle and try in place of the inner one.
+
+        A stage of an inner handle this wrapper never submitted keeps its own handle and
+        try 1: that executor runs it without retries.
+        """
+
+        def open_stage_output(run: StageRun) -> AbstractContextManager[OutputSink]:
+            tried = self._tries.get(run.handle_id)
+            if tried is None:
+                return opener(run)
+            handle_id, attempt = tried
+            return opener(replace(run, handle_id=handle_id, attempt=attempt))
+
+        return open_stage_output
+
+
 class ClosableEvaluationExecutor(PollingEvaluationExecutor, Protocol):
     """A pollable executor the host releases at shutdown."""
 
@@ -114,9 +154,15 @@ class RetryingEvaluationExecutor:
         inner: ClosableEvaluationExecutor,
         retries: EvaluationRetries,
         namespace: EvaluationStateNamespace,
+        *,
+        tries: TryHandles | None = None,
     ) -> None:
-        """Retry ``inner``'s infrastructure failures within ``retries``, recorded in ``namespace``."""
+        """Retry ``inner``'s infrastructure failures within ``retries``, recorded in ``namespace``.
+
+        Each inner handle submitted is recorded in ``tries`` when one is given.
+        """
         self._inner = inner
+        self._tries = TryHandles() if tries is None else tries
         self._retries = retries
         self._namespace = namespace
 
@@ -130,10 +176,15 @@ class RetryingEvaluationExecutor:
         if tries is None:
             tries = _Tries(request=request)
             self._namespace.save(self._path(handle_id), tries)
-        elif tries.request != request:
+        elif not same_work(tries.request, request):
             message = f"retrying handle {handle_id!r} has different work"
             raise ExecutorRejectedError(message)
-        await self._inner.submit(tries.request, handle_id=attempt_handle(handle_id, tries.attempt))
+        elif tries.request != request:
+            # The same work, recorded before its stages named their purpose: keep the
+            # request as it is now asked for, so the tries to come carry the purpose.
+            tries = tries.model_copy(update={"request": request})
+            self._namespace.save(self._path(handle_id), tries)
+        await self._submit_try(handle_id, tries)
 
     async def poll(self, handle_id: str) -> ExecutorPoll:
         """Inspect the current try; start the next one instead of reporting a retryable failure."""
@@ -144,7 +195,7 @@ class RetryingEvaluationExecutor:
         polled = await self._inner.poll(current)
         if polled.phase is PollPhase.UNSUBMITTED and tries.attempt > 1:
             # The next try was recorded and the host stopped before starting it.
-            await self._inner.submit(tries.request, handle_id=current)
+            await self._submit_try(handle_id, tries)
             return ExecutorPoll(phase=PollPhase.QUEUED, attempt=polled.attempt)
         if polled.terminal is None:
             return polled
@@ -153,9 +204,7 @@ class RetryingEvaluationExecutor:
             return polled
         following = tries.model_copy(update={"attempt": tries.attempt + 1})
         self._namespace.save(self._path(handle_id), following)
-        await self._inner.submit(
-            following.request, handle_id=attempt_handle(handle_id, following.attempt)
-        )
+        await self._submit_try(handle_id, following)
         return ExecutorPoll(phase=PollPhase.QUEUED, attempt=polled.attempt)
 
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
@@ -178,6 +227,10 @@ class RetryingEvaluationExecutor:
         """Close the inner executor."""
         await self._inner.close()
 
+    async def _submit_try(self, handle_id: str, tries: _Tries) -> None:
+        self._tries.record(handle_id, tries.attempt)
+        await self._inner.submit(tries.request, handle_id=attempt_handle(handle_id, tries.attempt))
+
     def _current(self, handle_id: str) -> str:
         tries = self._load(handle_id)
         return handle_id if tries is None else attempt_handle(handle_id, tries.attempt)
@@ -194,6 +247,7 @@ __all__ = [
     "ClosableEvaluationExecutor",
     "EvaluationRetries",
     "RetryingEvaluationExecutor",
+    "TryHandles",
     "attempt_handle",
     "terminal_failure",
 ]

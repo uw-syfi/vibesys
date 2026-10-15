@@ -6,6 +6,7 @@ import type {ChannelEndOutcome} from '@vibesys/contracts/host-helper';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {Cause, ConnectionConfig} from '../state/host-connection.js';
 import {ECHO_SERVER, FakeHelper, FakeLink, record} from '../testing/fake-helper.js';
+import {FakeLogStore, type LogStoreFixture} from '../testing/fake-log-store.js';
 import {deferredKillProcess, fakeProcess} from '../testing/fake-process.js';
 import {hostConnectionContract, phaseReached} from '../testing/host-connection-contract.js';
 import {ConnectionManager} from './connection-manager.js';
@@ -870,6 +871,7 @@ describe('HostConnection over the FakeHelper', () => {
     client_stalled: 'link',
     server_failed: 'link',
     client_failed: 'link',
+    server_unresponsive: 'link',
   };
   for (const [outcome, cause] of Object.entries(outcomes) as [ChannelEndOutcome, Cause | null][]) {
     test(`a relay that ends ${outcome} ends its stream ${cause ?? 'normally'}`, async () => {
@@ -1643,6 +1645,9 @@ describe('ConnectionManager', () => {
 /** The `helper-*` conformance scenarios, replayed against the FakeHelper over its wire. */
 describe('FakeHelper conformance', () => {
   const directory = join(REPOSITORY, 'tests/conformance/scenarios');
+  const logStoreFixture = JSON.parse(
+    readFileSync(join(REPOSITORY, 'tests/conformance/fixtures/helper-log-store.json'), 'utf8'),
+  ) as LogStoreFixture;
   const scenarios = readdirSync(directory).filter(name => name.startsWith('helper-'));
 
   for (const name of scenarios) {
@@ -1650,7 +1655,9 @@ describe('FakeHelper conformance', () => {
       const scenario = JSON.parse(readFileSync(join(directory, name), 'utf8')) as {
         steps: {dir: 'c2s' | 's2c'; frame?: unknown; expect?: unknown}[];
       };
-      const process = new FakeHelper().spawn();
+      const helper = new FakeHelper();
+      if (name.startsWith('helper-logs-')) helper.logStore = FakeLogStore.from(logStoreFixture);
+      const process = helper.spawn();
       const lines: unknown[] = [];
       let buffer = '';
       let wake: () => void = () => {};

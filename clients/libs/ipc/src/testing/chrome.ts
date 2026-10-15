@@ -17,6 +17,7 @@ const CONNECTIONS: readonly ConnectionStatus[] = [
   {kind: 'run-ended'},
   {kind: 'incompatible', detail: 'protocol 3 vs 4'},
   {kind: 'closed'},
+  {kind: 'capacity', detail: 'too many runs are already open against h'},
 ];
 
 export function randomChrome(random: Seeded): ChromeState {

@@ -16,7 +16,7 @@ from tests.support.skeleton_world import LEASE, open_skeleton_world
 
 from vs_core.api import RunStatus
 from vs_runtime.api.core import CoreRunHost, RunLoopConfig, drive_core, start_core
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import VirtualClock, current_virtual_clock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,14 +52,16 @@ class RenewsThenWrites:
         return await self._inner.publish(publication, context)
 
 
-def test_a_publication_written_after_a_renewal_is_judged_at_the_renewal(tmp_path: Path) -> None:
-    clock = VirtualClock(1.0)
+async def test_a_publication_written_after_a_renewal_is_judged_at_the_renewal(
+    tmp_path: Path,
+) -> None:
+    clock = current_virtual_clock()
     with open_skeleton_world(tmp_path) as world:
         process = world.runtime()
         delivery = RenewsThenWrites(process.delivery, clock)
         host = CoreRunHost(process.shell, delivery, clock)
         config = RunLoopConfig(host_id="renewing", lease_duration=LEASE, max_dispatches=60)
         start_core(host, config)
-        outcome = run_virtual(clock, drive_core(host, config))
+        outcome = await drive_core(host, config)
     assert delivery.renewed == 1
     assert outcome.status == RunStatus.TERMINAL

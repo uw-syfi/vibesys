@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -240,6 +241,44 @@ def test_checkout_tree_reports_failed_restore_of_preserved_memory(tmp_path: Path
         "failed to restore preserved workspace memory after tree restore error",
         f"git tree restore {sha[:8]} failed",
     ]
+
+
+class _RepositoryWhoseRestoreRacesALinkIn(_RepositoryWhoseRestoreReplacesMemory):
+    """A repository during whose restore the agent swaps ``memory`` for a link to ``target``."""
+
+    def __init__(self, root: Path, *, faults: GitFaultSink, target: Path) -> None:
+        super().__init__(root, faults=faults)
+        self._target = target
+
+    def restore_worktree(self, revision: str, exclude: Sequence[str] = ()) -> None:
+        CliGitRepository.restore_worktree(self, revision, exclude)
+        shutil.rmtree(self._memory)
+        self._memory.symlink_to(self._target, target_is_directory=True)
+
+
+def test_reapplying_preserved_memory_never_writes_through_a_planted_link(tmp_path: Path) -> None:
+    """Regression: the reapply wrote preserved files through a link swapped in for ``memory``."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    events = _RecordingEvents()
+    tracker = GitTracker(
+        workspace,
+        run_id="guard-run",
+        events=events,
+        repository=_RepositoryWhoseRestoreRacesALinkIn(workspace, faults=events, target=outside),
+    )
+    tracker.init(existing=False)
+    sha = tracker.current_sha()
+    assert sha is not None
+    (workspace / "memory").mkdir()
+    (workspace / "memory" / "notes.txt").write_text("keep\n", encoding="utf-8")
+
+    tracker.checkout_tree(sha, preserve_paths=["memory"])
+
+    assert list(outside.iterdir()) == []
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can write a read-only file")
@@ -558,3 +597,45 @@ def test_is_retained_separates_reachable_commits_from_dangling_and_unknown_ones(
     assert not tracker.is_retained("0" * 40)
     with pytest.raises(ValueError, match="not a commit object name"):
         tracker.is_retained("--all")
+
+
+class _RepositoryThatRacesALinkIn(_RepositoryWhoseRestoreReplacesMemory):
+    """A repository during whose ``ls-files`` the agent swaps ``victim`` for a link to ``target``."""
+
+    def __init__(self, root: Path, *, faults: GitFaultSink) -> None:
+        super().__init__(root, faults=faults)
+        self.swap: tuple[Path, Path] | None = None
+
+    def has_tracked_files(self, pathspec: str) -> bool:
+        tracked = CliGitRepository.has_tracked_files(self, pathspec)
+        if self.swap is not None:
+            victim, target = self.swap
+            shutil.rmtree(victim)
+            victim.symlink_to(target, target_is_directory=True)
+        return tracked
+
+
+def test_replacing_framework_state_never_follows_a_link_planted_after_the_check(
+    tmp_path: Path,
+) -> None:
+    """Regression: the namespace was reconciled by path after its symlink check."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("host\n", encoding="utf-8")
+    events = _RecordingEvents()
+    repository = _RepositoryThatRacesALinkIn(workspace, faults=events)
+    tracker = GitTracker(workspace, run_id="guard-run", events=events, repository=repository)
+    tracker.init(existing=False)
+    project = _project(workspace, tracker)
+    namespace = project.state.portable_namespace(tracker.run_id, _NAMESPACE)
+    namespace.write_bytes("a.json", b"fw-0")
+    snapshot = namespace.snapshot()
+    repository.swap = (namespace.external_directory(), outside)
+
+    with pytest.raises((ValueError, OSError)):
+        tracker.snapshot_framework_state("replace", snapshot)
+
+    assert sorted(path.name for path in outside.iterdir()) == ["keep.txt"]

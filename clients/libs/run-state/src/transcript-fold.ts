@@ -69,15 +69,19 @@ export function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null 
 
 interface TranscriptFields {
   id: string;
+  turnId: string;
   agentFields: {agentKind?: string};
   roundFields: {roundLabel?: string; roundNumber?: number; roundKey?: RoundKey};
 }
+
+const UNSEQUENCED_TRANSCRIPT_ID_PREFIX = 'unsequenced:';
 
 function transcriptFields(event: RunEvent): TranscriptFields {
   const roundKey = roundKeyFor(event);
   const roundNumber = roundNumberFor(roundKey);
   return {
-    id: String(event.sequence ?? `${event.timestamp}-${event.type}`),
+    id: transcriptEventId(event),
+    turnId: transcriptTurnId(event),
     agentFields: event.agent_kind ? {agentKind: event.agent_kind} : {},
     roundFields: {
       ...(event.round_label ? {roundLabel: event.round_label} : {}),
@@ -85,6 +89,120 @@ function transcriptFields(event: RunEvent): TranscriptFields {
       ...(roundKey === null ? {} : {roundKey}),
     },
   };
+}
+
+/** A stable presentation identity for a sequenced event or one legacy event value. */
+function transcriptEventId(event: RunEvent): string {
+  const sequence = event.sequence ?? 0;
+  if (sequence > 0) return String(sequence);
+  return `${UNSEQUENCED_TRANSCRIPT_ID_PREFIX}${semanticFingerprint([
+    event.timestamp,
+    event.type,
+    event.run_id,
+    event.text,
+    event.diagnostic,
+    event.status,
+    event.round_label,
+    event.agent_kind,
+    event.invocation_id,
+    event.execution_id,
+    event.chat_thread_id,
+    event.data,
+    event.truncated,
+  ])}`;
+}
+
+/** Legacy chunks have no sequence identity, so their durable scope identifies their turn. */
+function transcriptTurnId(event: RunEvent): string {
+  const sequence = event.sequence ?? 0;
+  if (sequence > 0) return String(sequence);
+  const data = event.data;
+  const channel = data?.kind === 'agent_output_chunk' ? data.channel : null;
+  return `${UNSEQUENCED_TRANSCRIPT_ID_PREFIX}turn:${JSON.stringify([
+    event.type,
+    event.execution_id ?? null,
+    event.invocation_id ?? null,
+    event.chat_thread_id ?? null,
+    event.agent_kind ?? null,
+    event.round_label ?? null,
+    data?.kind ?? null,
+    channel,
+  ])}`;
+}
+
+const FINGERPRINT_SEEDS = [
+  0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344, 0xa4093822, 0x299f31d0, 0x082efa98, 0xec4e6c89,
+] as const;
+const FINGERPRINT_PRIMES = [
+  0x01000193, 0x85ebca6b, 0xc2b2ae35, 0x27d4eb2f, 0x165667b1, 0x9e3779b1, 0x7feb352d, 0x846ca68b,
+] as const;
+
+/** Fixed-size deterministic digest that consumes canonical semantics without retaining payloads. */
+class SemanticFingerprint {
+  readonly #lanes: number[] = [...FINGERPRINT_SEEDS];
+
+  write(value: string): void {
+    for (let at = 0; at < value.length; at += 1) {
+      const code = value.charCodeAt(at);
+      for (let lane = 0; lane < this.#lanes.length; lane += 1) {
+        this.#lanes[lane] = Math.imul(
+          (this.#lanes[lane] as number) ^ code,
+          FINGERPRINT_PRIMES[lane] as number,
+        );
+      }
+    }
+  }
+
+  finish(): string {
+    return this.#lanes.map(value => (value >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+}
+
+/** Canonically fingerprints JSON-like protocol data, including cyclic caller-owned arguments. */
+function semanticFingerprint(value: unknown): string {
+  const digest = new SemanticFingerprint();
+  appendSemanticValue(digest, value, new Map<object, number>());
+  return digest.finish();
+}
+
+function appendSemanticValue(
+  digest: SemanticFingerprint,
+  value: unknown,
+  seen: Map<object, number>,
+): void {
+  if (value === null || value === undefined) {
+    digest.write(`${String(value)};`);
+    return;
+  }
+  if (typeof value !== 'object') {
+    const scalar = typeof value === 'symbol' ? String(value.description) : String(value);
+    appendScalar(digest, typeof value, scalar);
+    return;
+  }
+  const previous = seen.get(value);
+  if (previous !== undefined) {
+    appendScalar(digest, 'reference', String(previous));
+    return;
+  }
+  seen.set(value, seen.size);
+  if (Array.isArray(value)) {
+    appendScalar(digest, 'array-length', String(value.length));
+    for (const item of value) appendSemanticValue(digest, item, seen);
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  appendScalar(digest, 'object-length', String(keys.length));
+  for (const key of keys) {
+    appendScalar(digest, 'key', key);
+    appendSemanticValue(digest, record[key], seen);
+  }
+}
+
+function appendScalar(digest: SemanticFingerprint, tag: string, value: string): void {
+  digest.write(`${tag}:${value.length}:`);
+  digest.write(value);
+  digest.write(';');
 }
 
 /** Projects typed payloads in wire order, preserving mixed-envelope precedence. */
@@ -209,7 +327,7 @@ function outputTranscriptEntry(
     label: labelFor(event, data.channel),
     ...fields.agentFields,
     ...fields.roundFields,
-    turnId: invocationId ?? fields.id,
+    turnId: invocationId ?? fields.turnId,
     ...(invocationId === undefined ? {} : {invocationId}),
     ...(kind === 'tool' && data.content.trimStart().startsWith('→ ')
       ? {startsTurn: true, toolCall: data.content}
@@ -232,7 +350,7 @@ function toolTranscriptEntry(
       label: labelFor(event, 'tool'),
       ...fields.agentFields,
       ...fields.roundFields,
-      turnId: invocationId ?? fields.id,
+      turnId: invocationId ?? fields.turnId,
       ...(invocationId === undefined ? {} : {invocationId}),
       startsTurn: true,
       toolName: data.tool,
@@ -248,7 +366,7 @@ function toolTranscriptEntry(
     ...(data.is_error ? {tone: 'failure' as const} : {}),
     ...fields.agentFields,
     ...fields.roundFields,
-    turnId: invocationId ?? fields.id,
+    turnId: invocationId ?? fields.turnId,
     toolName: data.tool,
     toolResult: ownProjectionInput(data),
     ...(data.call_id == null ? {} : {toolCallId: data.call_id}),
@@ -504,6 +622,10 @@ function runConfiguredContent(data: RunConfiguredData): string {
   if (data.objective) lines.push(`objective: ${data.objective}`);
   if (data.model) lines.push(`model: ${data.model}`);
   if (data.search_policy) lines.push(`search policy: ${data.search_policy}`);
+  if (data.pareto_objectives) lines.push(`pareto objectives: ${data.pareto_objectives}`);
+  if (data.benchmark_contract) {
+    lines.push('benchmark result contract declared; it owns candidate fitness');
+  }
   return lines.length > 0 ? lines.join('\n') : 'run configured';
 }
 
@@ -533,7 +655,7 @@ export function appendTranscript(
 export function foldTranscriptEntry(
   entries: TranscriptEntry[],
   incoming: TranscriptEntry,
-  index: OpenToolCallIndex | null,
+  index: TranscriptIndex | null,
 ): void {
   if (incoming.kind === 'tool' && !incoming.startsTurn && incoming.toolName !== undefined) {
     const target =
@@ -580,9 +702,27 @@ export function foldTranscriptEntry(
     };
     return;
   }
-  entries.push(incoming);
-  index?.record(incoming, entries.length - 1);
+  const appended = uniqueTranscriptEntry(entries, incoming, index);
+  entries.push(appended);
+  index?.record(appended, entries.length - 1);
   capTranscript(entries, index);
+}
+
+/** Give a distinct retained card a unique renderer identity without changing its turn identity. */
+function uniqueTranscriptEntry(
+  entries: readonly TranscriptEntry[],
+  incoming: TranscriptEntry,
+  index: TranscriptIndex | null,
+): TranscriptEntry {
+  // A positive sequence already is a unique durable identity, and the run reducer rejects a
+  // repeated or stale sequence before it reaches this fold. Keep the ordinary streaming path O(1).
+  if (!incoming.id.startsWith(UNSEQUENCED_TRANSCRIPT_ID_PREFIX)) return incoming;
+  const contains = (id: string): boolean =>
+    index === null ? entries.some(entry => entry.id === id) : index.hasId(id);
+  if (!contains(incoming.id)) return incoming;
+  let occurrence = 2;
+  while (contains(`${incoming.id}#${occurrence}`)) occurrence += 1;
+  return {...incoming, id: `${incoming.id}#${occurrence}`};
 }
 
 /**
@@ -605,7 +745,7 @@ function glue(last: TranscriptEntry, incoming: TranscriptEntry): string {
 const MAX_TRANSCRIPT_ENTRIES = 20_000;
 
 /** Evicts the oldest round in place once the transcript passes its cap. */
-function capTranscript(entries: TranscriptEntry[], index: OpenToolCallIndex | null): void {
+function capTranscript(entries: TranscriptEntry[], index: TranscriptIndex | null): void {
   if (entries.length <= MAX_TRANSCRIPT_ENTRIES) return;
   const oldestRound = entries.find(entry => entry.roundNumber !== undefined)?.roundNumber;
   const kept =
@@ -674,7 +814,7 @@ function toolKey(invocationId: string | undefined, discriminator: string): strin
 }
 
 /**
- * Locates the tool call a result merges into without scanning the transcript.
+ * Indexes retained entry identities and locates tool calls without scanning the transcript.
  *
  * `findToolCall` scans by call id from the end (latest open call wins) and by
  * tool name from the start (earliest open call wins), so this keeps one bucket
@@ -682,12 +822,18 @@ function toolKey(invocationId: string | undefined, discriminator: string): strin
  * end. Positions of calls that have since been answered are dropped lazily: a
  * call never reopens, so a stale position can only ever be discarded.
  */
-export class OpenToolCallIndex {
+class TranscriptIndex {
+  readonly #ids = new Set<string>();
   readonly #byCallId = new Map<string, number[]>();
   readonly #byName = new Map<string, number[]>();
 
-  /** Records `entry` at position `at` if it is a call awaiting a result. */
+  hasId(id: string): boolean {
+    return this.#ids.has(id);
+  }
+
+  /** Records `entry` at position `at`, including its open-call keys when it has them. */
   record(entry: TranscriptEntry, at: number): void {
+    this.#ids.add(entry.id);
     if (!isOpenToolCall(entry)) return;
     if (entry.toolCallId !== undefined) {
       bucket(this.#byCallId, toolKey(entry.invocationId, entry.toolCallId)).push(at);
@@ -699,6 +845,7 @@ export class OpenToolCallIndex {
 
   /** Rebuilds every bucket after positions shift, i.e. after cap eviction. */
   reindex(entries: readonly TranscriptEntry[]): void {
+    this.#ids.clear();
     this.#byCallId.clear();
     this.#byName.clear();
     for (let at = 0; at < entries.length; at += 1) {
@@ -758,7 +905,7 @@ function bucket(buckets: Map<string, number[]>, key: string): number[] {
  */
 export class TranscriptBuffer {
   readonly entries: TranscriptEntry[];
-  readonly #index = new OpenToolCallIndex();
+  readonly #index = new TranscriptIndex();
 
   constructor(initial: readonly TranscriptEntry[]) {
     this.entries = [...initial];

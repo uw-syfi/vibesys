@@ -32,6 +32,7 @@ from vs_runtime.api import (
     validate_workspace_writable_paths,
 )
 from vs_runtime.api.testing import FakeCommands, FakeEvaluation, FakeWorkspace, FakeWorkspaces
+from vs_sim.api import DISCARD
 
 
 class _Options(BaseModel):
@@ -388,10 +389,13 @@ def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
         run.evaluation.script_benchmark(benchmark)
         run.evaluation.script_local_validation(local_validation)
 
-        accuracy_result = await run.evaluation.accuracy(workspace)
+        accuracy_result = await run.evaluation.accuracy(workspace, output=DISCARD)
         assert accuracy_result.executed
         assert accuracy_result.receipt is not None
-        assert await run.evaluation.benchmark(workspace, objectives=(objective,)) == benchmark
+        assert (
+            await run.evaluation.benchmark(workspace, objectives=(objective,), output=DISCARD)
+            == benchmark
+        )
         assert (
             await run.evaluation.validate_local(
                 workspace,
@@ -410,7 +414,9 @@ def test_fake_evaluation_preserves_semantic_results_and_requests() -> None:
         restored = AccuracyReceipt.model_validate_json(serialized)
         resumed_host = _Run(run_id=run.run_id, project_root=workspace.path)
         reused = await resumed_host.evaluation.accuracy(
-            resumed_host.workspaces.root, reuse=restored
+            resumed_host.workspaces.root,
+            reuse=restored,
+            output=DISCARD,
         )
         assert reused == AccuracyEvaluation(executed=False, receipt=restored)
         assert resumed_host.evaluation.accuracy_calls[-1].reuse == restored
@@ -481,6 +487,7 @@ def test_fake_evaluation_rejects_duplicate_objective_names() -> None:
             await run.evaluation.benchmark(
                 run.workspaces.root,
                 objectives=(objective, objective),
+                output=DISCARD,
             )
         assert run.evaluation.benchmark_calls == []
 
