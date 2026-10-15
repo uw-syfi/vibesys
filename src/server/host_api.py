@@ -614,6 +614,8 @@ class HelperFeature(StrEnum):
     """``instances.inspect``: retained metadata and an optional bounded log tail."""
     LOGS = "logs"
     """``logs.list`` and ``logs.read``: a run's recorded log streams, read in bounded chunks."""
+    LOGS_CANCEL = "logs_cancel"
+    """``logs.cancel``: withdraw a waiting ``logs.read`` so its worker returns at once."""
     HARNESSES = "harnesses"
     """``harnesses.list`` and ``run.start``'s ``harness``: start a run on a vetted provider and model."""
 
@@ -880,6 +882,19 @@ class LogsReadRequest(_HelperRequest):
     wait_ms: Annotated[int, Field(ge=0, le=LOGS_WAIT_MAX_MS)] = 0
 
 
+class LogsCancelRequest(_HelperRequest):
+    """Withdraw the ``logs.read`` whose request id is ``read_id``: a wait it is in ends now.
+
+    The read still answers, with what it holds (an empty chunk at the end of the
+    stream), and its worker returns, so the channel can admit another request.
+    Naming a read that already answered, or no read, is not an error: withdrawal
+    races the reply by nature. Admitted even when the channel's workers are full.
+    """
+
+    type: Literal["logs.cancel"] = "logs.cancel"
+    read_id: RequestId
+
+
 HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
@@ -887,6 +902,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     PathsCompleteRequest: HelperFeature.PATHS_COMPLETE,
     LogsListRequest: HelperFeature.LOGS,
     LogsReadRequest: HelperFeature.LOGS,
+    LogsCancelRequest: HelperFeature.LOGS_CANCEL,
     HarnessesListRequest: HelperFeature.HARNESSES,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
@@ -922,6 +938,7 @@ HelperRequest = Annotated[
     | PathsCompleteRequest
     | LogsListRequest
     | LogsReadRequest
+    | LogsCancelRequest
     | HarnessesListRequest,
     Field(discriminator="type"),
 ]
@@ -1199,6 +1216,13 @@ class LogsReadReply(_HelperReply):
     chunk: LogChunk
 
 
+class LogsCancelReply(_HelperReply):
+    """The withdrawal was taken: a read ``read_id`` named that was still waiting stops waiting."""
+
+    type: Literal["logs.cancel"] = "logs.cancel"
+    read_id: RequestId
+
+
 class HarnessesListReply(_HelperReply):
     """The vetted pairs, grouped by provider with each provider's default first."""
 
@@ -1285,6 +1309,7 @@ HelperReply = (
     | PathsCompleteReply
     | LogsListReply
     | LogsReadReply
+    | LogsCancelReply
     | HarnessesListReply
 )
 """A request's result; its ``type`` is the request's."""

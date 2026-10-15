@@ -201,6 +201,7 @@ export class FakeHelper {
     'instances_inspect',
     'harnesses',
     'logs',
+    'logs_cancel',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -522,6 +523,11 @@ class HelperSession {
       case 'logs.list':
       case 'logs.read':
         this.#logs(request);
+        return;
+      case 'logs.cancel':
+        // This helper answers every read at once, so the named read has always answered already
+        // (or never existed): the cancel's reply follows it, as the real helper's does.
+        this.#send({type: 'logs.cancel', request_id: id, read_id: request.read_id});
         return;
     }
   }

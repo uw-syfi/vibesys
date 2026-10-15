@@ -50,13 +50,13 @@ export interface HostsWelcomeBridge {
   /**
    * One logs request about `instance` on `host`, over the host's logs channel, which the main
    * process holds for this view until `releaseLogs` (`docs/contributing/desktop-connection.md`,
-   * "Logs"). A read must name `instance`.
+   * "Logs"). A read must name `instance`; a withdrawal aborts the view's read named by its token.
    */
   logs(
     host: HostKey,
     instance: string,
     request: RunLogsRequest,
-  ): Promise<WelcomeResult<LogListOutcome | LogReadOutcome>>;
+  ): Promise<WelcomeResult<LogListOutcome | LogReadOutcome | null>>;
   /** Let the host's logs channel go: the view shows no logs now. */
   releaseLogs(): Promise<WelcomeResult<null>>;
 }
@@ -104,10 +104,12 @@ function instance(value: unknown): string {
   return value;
 }
 
-/** A logs request about `instanceId`: a listing, or a read that names it. */
+/** A logs request about `instanceId`: a listing, a read that names it, or a read's withdrawal. */
 function logsRequest(value: unknown, instanceId: string): RunLogsRequest {
   const request = parseRunLogsRequest(value);
-  if (request === null) throw new Error('the logs request is not a listing or a read');
+  if (request === null) {
+    throw new Error('the logs request is not a listing, a read, or a withdrawal');
+  }
   if (request.kind === 'read' && request.read.instance_id !== instanceId) {
     throw new Error(`the logs read names ${request.read.instance_id}, not ${instanceId}`);
   }

@@ -585,6 +585,7 @@ def test_inspection_executes_through_the_host_helper_registry_interface() -> Non
             instance_id="0123456789ab",
         ),
         host,
+        threads.event(),
     )
 
     assert isinstance(reply, InstancesInspectReply)
@@ -627,8 +628,11 @@ def test_a_prefix_splits_into_the_directory_listed_and_the_name_matched(prefix: 
 
 
 def _complete(directories: FakeDirectories, prefix: str) -> PathsCompleteReply | HelperError:
-    host = fake_host(SimThreads(), SimNetwork(SimThreads()), directories=directories)
-    reply = answer(PathsCompleteRequest(request_id="c", deadline_ms=1, prefix=prefix), host)
+    threads = SimThreads()
+    host = fake_host(threads, SimNetwork(threads), directories=directories)
+    reply = answer(
+        PathsCompleteRequest(request_id="c", deadline_ms=1, prefix=prefix), host, threads.event()
+    )
     assert isinstance(reply, PathsCompleteReply | HelperError)
     return reply
 
@@ -744,7 +748,7 @@ def test_a_start_launches_in_the_resolved_project_and_returns_the_launch(tmp_pat
     threads = SimThreads()
     host = fake_host(threads, SimNetwork(threads), launcher=launcher)
     request = RunStartRequest(request_id="s", deadline_ms=1, project=str(project), task="spsc")
-    reply = answer(request, host)
+    reply = answer(request, host, threads.event())
     assert reply == RunStartReply(request_id="s", launch=started)
     assert launcher.calls == [(project.resolve(), ("--detach", "--task", "spsc"))]
 
@@ -766,7 +770,7 @@ def test_project_errors_are_typed_and_name_the_path(
     launcher = host.launcher
     project = make(tmp_path)
     request = parse_helper_request_dict(_request(method, "r", project=str(project)))
-    reply = answer(request, host)
+    reply = answer(request, host, threads.event())
     assert isinstance(reply, HelperError)
     assert reply.code is code
     assert reply.path is not None
@@ -786,9 +790,15 @@ def test_tasks_and_runs_of_a_project(tmp_path: Path) -> None:
     threads = SimThreads()
     host = fake_host(threads, SimNetwork(threads))
     tasks = answer(
-        parse_helper_request_dict(_request("tasks.list", "t", project=str(project))), host
+        parse_helper_request_dict(_request("tasks.list", "t", project=str(project))),
+        host,
+        threads.event(),
     )
-    runs = answer(parse_helper_request_dict(_request("runs.list", "r", project=str(project))), host)
+    runs = answer(
+        parse_helper_request_dict(_request("runs.list", "r", project=str(project))),
+        host,
+        threads.event(),
+    )
     assert tasks.model_dump(mode="json")["tasks"]["tasks"] == [{"name": "spsc"}]
     assert runs.model_dump(mode="json")["runs"] == {
         "project_root": str(project.resolve()),

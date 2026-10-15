@@ -79,7 +79,9 @@ type GuardedRequestResult<T> =
 /**
  * One holder's use of the host's logs channel (`HostConnection.openLogs`). Its requests resolve a
  * helper error, or the channel failing, as `{ok: false}`; an aborted request rejects with the
- * abort reason and its reply is dropped. Releasing the last lease closes the channel.
+ * abort reason and its reply is dropped, and an aborted read is withdrawn on the helper's side
+ * (`logs.cancel`) when the helper offers `logs_cancel`, so its long poll stops holding a worker.
+ * Releasing the last lease closes the channel.
  */
 export interface LogsLease extends AsyncDisposable {
   /** Without `signal`, the request lives until it settles or the lease's channel closes. */
@@ -443,7 +445,7 @@ export class HostConnection implements AsyncDisposable {
     ): Promise<ReplyOf<T>> => {
       if (released) throw new ConnectionError('link', 'the logs lease was released');
       const channel = await untilAborted(this.#logsChannel(), signal);
-      return untilAborted(channel.request(body), signal);
+      return channel.request(body, signal);
     };
     const settle = async <T>(
       signal: AbortSignalLike | undefined,

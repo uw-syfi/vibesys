@@ -308,6 +308,7 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 # The contract suites are test code shipped in the library so every implementation runs them:
 # their assertions are the output, as in a test module.
 "libs/vs-sandbox/src/vs_sandbox/*_contracts.py" = ["S101", "PLR2004"]
+"libs/vs-evaluation/src/vs_evaluation/*_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/concurrency_contracts.py" = ["S101", "PLR2004"]
 "libs/vs-sim/src/vs_sim/signal_relay_contracts.py" = ["S101", "PLR2004"]

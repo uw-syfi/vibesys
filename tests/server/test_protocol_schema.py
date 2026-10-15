@@ -155,6 +155,7 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "paths.complete": "paths_complete",
         "logs.list": "logs",
         "logs.read": "logs",
+        "logs.cancel": "logs_cancel",
         "harnesses.list": "harnesses",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]

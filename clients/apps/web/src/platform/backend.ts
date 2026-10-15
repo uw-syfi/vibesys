@@ -231,10 +231,18 @@ function isOutcome(value: unknown): value is {readonly ok: boolean} {
   );
 }
 
+/** The last read token this page named; each read takes the next, so none repeats on the page. */
+let lastLogRead = 0;
+
+function nextLogReadToken(): string {
+  lastLogRead += 1;
+  return `r${lastLogRead}`;
+}
+
 /**
  * Ask `request`, resolving a refusal or a malformed answer as a `transport` failure. An IPC
- * request cannot be withdrawn, so an aborted request rejects at once and its late answer is
- * dropped; the main process's own request ends by its wait bound or when the run's page goes away.
+ * request cannot be withdrawn itself, so an aborted request rejects at once and its late answer is
+ * dropped; an aborted read also sends its `withdraw`, so the main process aborts its read too.
  */
 function askLogs<T extends LogListOutcome | LogReadOutcome>(
   logs: AskLogs,
@@ -242,7 +250,10 @@ function askLogs<T extends LogListOutcome | LogReadOutcome>(
   signal: AbortSignalLike,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const registration = registerAbort(signal, () => reject(reasonOf(signal)));
+    const registration = registerAbort(signal, () => {
+      reject(reasonOf(signal));
+      if (request.kind === 'read') withdraw(logs, request.token);
+    });
     if (registration.aborted) {
       reject(reasonOf(signal));
       return;
@@ -262,10 +273,19 @@ function askLogs<T extends LogListOutcome | LogReadOutcome>(
   });
 }
 
+/** Tell the main process to abort the read named `token`; its answer, or failure, is ignored. */
+function withdraw(logs: AskLogs, token: string): void {
+  new Promise<unknown>(resolve => resolve(logs({kind: 'withdraw', token}))).catch(() => {
+    // The page already stopped waiting for the read; a withdrawal that fails leaves the main
+    // process's read to end by its own wait bound.
+  });
+}
+
 /** The run page's `RunLogSource` over the desktop app's logs requests. */
 export function bridgeLogSource(logs: AskLogs): RunLogSource {
   return {
     list: signal => askLogs<LogListOutcome>(logs, {kind: 'list'}, signal),
-    read: (input, signal) => askLogs<LogReadOutcome>(logs, {kind: 'read', read: input}, signal),
+    read: (input, signal) =>
+      askLogs<LogReadOutcome>(logs, {kind: 'read', token: nextLogReadToken(), read: input}, signal),
   };
 }

@@ -25,6 +25,7 @@
       "helper-logs-list",
       "helper-logs-read-tail",
       "helper-logs-follow",
+      "helper-logs-cancel",
       "helper-logs-truncated",
       "helper-logs-unknown"
     ]

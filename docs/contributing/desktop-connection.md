@@ -163,7 +163,7 @@ The connection manager opens two kinds of channel to a host. Both start with the
 | --- | --- | --- |
 | control | one per host, long lived | Request and reply messages from `HelperRequest`; push messages for watches. |
 | run | one per run-protocol connection the page opens (control, subscribe, chat, per `WP-ROLES`) | One `run.connect`; on `connected` the channel becomes a byte relay to the run's socket and carries the run protocol unchanged until either side ends. |
-| logs | one per host, opened when the first log view comes on screen | `logs.list` and `logs.read` only; see [Logs](#logs). |
+| logs | one per host, opened when the first log view comes on screen | `logs.list`, `logs.read`, and `logs.cancel` only; see [Logs](#logs). |
 
 A control channel normally exits `0`. If a successful `run.start` reply cannot reach the client,
 the helper owns stopping that undisclosed instance. Only `stopped` and `not_running` release that
@@ -231,6 +231,7 @@ either the method's result, whose `type` is the request's, or `HelperError` (`ty
 | `ping` | none | an empty reply | Control channel liveness for the supervisor. |
 | `logs.list` | `instance_id` | `streams: [{id, owner, command, retained_start, size, outcome}]`, oldest first | The run's recorded log streams, live or ended. `owner` is the JSON object the writer validated against vibesys's `LogOwner` union (the client narrows it with that generated type); `outcome` is `ended`, `failed`, `abandoned`, or `null` while open. `unknown_instance` when the host knows nothing of the instance. Gated by feature `logs`. |
 | `logs.read` | `instance_id`, `stream_id`, `start: {offset} \| {tail_bytes}`, `max_bytes` (4 to 64 KiB), `wait_ms` (0 to 30 s) | `chunk: {offset, data, next_offset, eof, closed, truncated_before, pipes: [{offset, length, pipe}]}` | One bounded chunk; at the end of an open stream it waits up to `wait_ms` for bytes. `unknown_log_stream`, `unknown_instance`. Gated by feature `logs`. See [Logs](#logs). |
+| `logs.cancel` | `read_id` | `read_id` | Withdraw the `logs.read` whose request id is `read_id`: its wait ends at once, it answers what it holds, and this reply follows that answer, so the read's worker is free. Admitted even when the channel's workers are full. Naming no waiting read is not an error and answers at once. Gated by feature `logs_cancel`. See [Logs](#logs). |
 | `paths.complete` | `prefix` | `directory`, `entries: [{name, path, vibesys_checkout, vibesys_project, git_repository}]`, `truncated` | For the host's project and checkout pickers. `~` expands on the host and a relative prefix is under the home directory; a trailing `/` lists the directory. Directories only (a link counts when this account can follow it to one), filtered by the typed name prefix exactly, sorted, at most 200. A directory is read for at most 10,000 entries; past either bound `truncated` is set. `path_missing`, `path_not_directory`, `permission_denied` name the path. Gated by feature `paths_complete`. |
 
 There is no `projects.recent` method: Recent is the app's own record of what this user opened,
@@ -249,8 +250,10 @@ builds, container start, evaluator stages, the run's own narration). The run rec
 under a typed owner in its `vs_logs` store ([logs.md](logs.md)); the helper reads that store and
 serves it in bounded chunks. Nothing about logs rides the run's event stream.
 
-- **Where the helper reads.** `server.host_helper_logs` answers the two methods over one role,
-  `LogReader` (list an instance's streams, read raw bytes). `server.host_helper_os.StoreLogReader`
+- **Where the helper reads.** `server.host_helper_logs` answers the methods over one role,
+  `LogReader`, which opens an instance's logs (`InstanceLogs`: list its streams, read raw bytes).
+  A request opens them once, so a waiting read re-reads only its stream, not the instance's
+  inspection. `server.host_helper_os.StoreLogReader`
   implements it over `vs_logs.read`: it finds the instance's run from its live record or, once the
   run ended, its retained inspection metadata (`inspection.json`), and opens the store at
   `Project.log_streams_directory_for(project_root, run_id)`. So a run's logs stay readable after it
@@ -262,6 +265,18 @@ serves it in bounded chunks. Nothing about logs rides the run's event stream.
   always ends 1 s before the request's deadline, so a long poll is answered, never
   `deadline_exceeded`. Nothing is fetched for a stream that is not on screen, and nothing is
   replayed from offset 0 unless asked.
+- **Withdrawing a read.** A waiting read holds one of the channel's 16 request workers for up to
+  its `wait_ms` (25 s from the app's follower). A follower that stops (its view left the screen, or
+  the Inspect sheet switched streams) sends `logs.cancel {read_id}`: the helper sets the read's
+  withdrawal, its wait ends at once, the read answers what it holds (the client already dropped
+  it), and the cancel's reply follows, so a worker never outlives the follower that asked for it.
+  Without it, switching streams more than 16 times within a wait filled the channel and new reads
+  got `channel_busy`. The method is behind its own feature, `logs_cancel`, not `logs`: a helper
+  that offers only `logs` would refuse it as `invalid_request`, so a client sends it only when
+  `hello` returned the feature and otherwise just drops the read, as before. Two alternatives were
+  rejected: a new `logs.read` replacing a pending one on the same stream does not help a switch to
+  another stream and breaks two views of one stream; a short `wait_ms` with immediate re-issue
+  still holds a worker per switch for that wait and multiplies the polling.
 - **Chunk boundaries.** `data` is text: the bytes `[offset, next_offset)` decoded as UTF-8, with
   bytes that are not UTF-8 replaced by U+FFFD. When more bytes follow the window, the chunk ends after
   the window's last line end, so a view rarely has to join a line across chunks; with no line end in
@@ -293,8 +308,9 @@ serves it in bounded chunks. Nothing about logs rides the run's event stream.
   with the unfinished last line, the evicted range, and the closed flag) and the control state
   (`logFollowMachine`: idle, tailing, following with one read in flight, closed, and error with
   retry on the injected clock), over a `LogTransport` the composition provides on the logs channel.
-  A view starts a follower when its stream comes on screen and stops it when it leaves, which aborts
-  the read in flight.
+  A view starts a follower when its stream comes on screen and stops it when it leaves. Stopping
+  aborts the read in flight, and the abort withdraws it on the helper: `HelperChannel` sends
+  `logs.cancel` for an aborted `logs.read` when `hello` negotiated `logs_cancel`.
 - **The channel's lifetime.** `HostConnection.openLogs()` hands out leases on the host's one logs
   channel. The first request of any lease opens it once the host is ready (a host whose control
   `hello` did not negotiate `logs` answers `feature_not_negotiated` and opens nothing), every lease
@@ -306,13 +322,16 @@ serves it in bounded chunks. Nothing about logs rides the run's event stream.
   answers from that window's run binding. The binding takes a logs lease on its first request and
   releases it with the binding, and supplies the instance id from the record the app attached to: a
   listing names it, and a read that names another instance is refused. An IPC request cannot be
-  withdrawn, so the page drops an aborted request's late answer; the main process's request ends by
-  its wait bound, or when the binding releases the lease. The page's `RunLogSource` (`@vibesys/logs`)
+  withdrawn by itself, so each read carries a token the page chose, and an aborted read sends a
+  `withdraw` request naming it: the main process aborts that read on the lease, which withdraws it
+  on the helper. The page drops the aborted read's late answer; releasing the binding aborts any
+  read still in flight. The page's `RunLogSource` (`@vibesys/logs`)
   wraps that bridge; a browser page has none and shows no log view.
 - **From the Inspect sheet.** The welcome view's Inspect sheet shows any run's logs, live or ended
   (ended rows have Inspect too: the store outlives the run). It names its host and instance, as the
   welcome view does, on the welcome channel `vibesys:welcome:logs` (a listing, or a read that must
-  name that instance), answered by the hosts feature's main-process `Hosts.logs`. `Hosts` keeps one
+  name that instance, or a `withdraw` of an aborted read's token as on the run page), answered by
+  the hosts feature's main-process `Hosts.logs`. `Hosts` keeps one
   connection lease and one logs lease per renderer document, on one host at a time: the first
   request takes them, asking about another host swaps them, and closing the sheet
   (`vibesys:welcome:release-logs`), leaving the welcome view, or the document going away releases
@@ -673,7 +692,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Host helper and its contract (phase 4) | built: every method, `host-helper.schema.json` and its TypeScript types, the `helper-*` conformance scenarios and runner (in process and over stdio), the import-closure and start-up guards; `entrypoints.stdio_bridge` deleted in phase 5 |
 | Connection manager (phase 5) | built: `ConnectionManager` and `HostConnection` (an XState machine, shell with disposal scopes), the bootstrap, typed channels with one strict validator, run channels, watch-pushed listings, path completion, the HostConnection contract suite over the `FakeHelper` and the real helper; not built: the Playwright journey job, a second master past `MaxSessions`, and checkout completion on a host with no checkout yet (it needs a helper) |
 | Screen stores and app lifecycle (phase 6) | built (#1839) |
-| Logs feature | built: `logs.list` and `logs.read` over the run's `vs_logs` store, the `helper-logs-*` scenarios (in process), and `@vibesys/logs` (fold and follow machine); the connection manager's logs channel, the run view's startup log panel, and the Inspect sheet's log viewer; not built: gate logs in the run view's round cards, and the logs scenarios over stdio against the real helper |
+| Logs feature | built: `logs.list`, `logs.read`, and `logs.cancel` (feature `logs_cancel`) over the run's `vs_logs` store, the `helper-logs-*` scenarios (in process), and `@vibesys/logs` (fold and follow machine); the connection manager's logs channel, the run view's startup log panel, and the Inspect sheet's log viewer; not built: gate logs in the run view's round cards, and the logs scenarios over stdio against the real helper |
 
 ## Decisions and alternatives
 

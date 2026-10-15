@@ -5,18 +5,20 @@ stream, from a byte offset or from its tail, and at the end of an open stream wa
 up to ``wait_ms`` for more (the long poll a follower keeps one of in flight).
 ``docs/contributing/desktop-connection.md`` ("Logs") owns the design.
 
-The helper needs one role from the log store, :class:`LogReader`: list an instance's
-streams and read raw bytes. Everything the client sees on top of that is decided
+The helper needs one role from the log store, :class:`LogReader`: open an instance's
+logs (:class:`InstanceLogs`), then list its streams and read raw bytes. A request opens
+them once, so a long poll re-reads only the stream, never the instance's whereabouts. Everything the client sees on top of that is decided
 here, purely, in :func:`cut_chunk`: where a chunk ends (after its last line end
 when more bytes follow, else before a character the window splits), where a tail
 starts (the first line start in it), and how bytes become text (UTF-8, invalid
 bytes replaced). :func:`list_logs` and :func:`read_log` answer the two requests;
-the long poll re-reads on the injected clock and ends before the request's deadline.
+the long poll re-reads every ``POLL_INTERVAL_SECONDS``, waiting on a :class:`ReadWithdrawal`
+that ``logs.cancel`` sets, and ends before the request's deadline or once withdrawn.
 
 Light like the rest of the helper: the standard library, Pydantic, and
 ``server.host_api``.
 
-Public surface: ``LogReader``, ``StoredBytes``, ``UnknownInstanceError``,
+Public surface: ``LogReader``, ``InstanceLogs``, ``ReadWithdrawal``, ``StoredBytes``, ``UnknownInstanceError``,
 ``UnknownLogStreamError``, ``RunLocation``, ``run_location``, ``HelperLogs``, ``cut_chunk``, ``clip_pipes``, ``list_logs``,
 ``read_log``, and the limits ``POLL_INTERVAL_SECONDS`` and ``REPLY_MARGIN_MS``.
 """
@@ -42,8 +44,6 @@ from server.host_api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from vs_sim.api import Clock
 
 POLL_INTERVAL_SECONDS: Final = 0.25
@@ -83,28 +83,50 @@ class StoredBytes:
     """The stream was closed before the read began: with ``eof``, no byte will follow."""
 
 
-class LogReader(Protocol):
-    """The log store, as the helper reads it.
+class InstanceLogs(Protocol):
+    """One instance's recorded logs, opened once and read as often as a request needs.
 
-    Contract: ``streams`` lists every stream recorded for an instance, live or
-    ended, oldest first. ``read`` returns at most ``max_bytes`` bytes and never
+    Contract: ``streams`` lists every stream recorded for the instance, live or
+    ended, oldest first. ``read`` sees bytes written after the logs were opened, and returns at most ``max_bytes`` bytes and never
     blocks: from ``LogOffset`` it starts at that offset, or at the oldest byte
     still held when that offset was evicted (``truncated_before``), or returns no
     bytes at that offset when it is at or past the end; from ``LogTail`` it starts
     ``min(tail_bytes, max_bytes)`` before the end, or at the oldest byte held
-    (``truncated_before`` again). ``pipes`` covers the bytes returned. Both raise
-    ``UnknownInstanceError`` for an instance with no logs, and ``read`` raises
+    (``truncated_before`` again). ``pipes`` covers the bytes returned. ``read`` raises
     ``UnknownLogStreamError`` for a stream the instance does not have.
     """
 
-    def streams(self, instance_id: str) -> tuple[LogStream, ...]:
+    def streams(self) -> tuple[LogStream, ...]:
         """The instance's streams, oldest first."""
         ...
 
-    def read(
-        self, instance_id: str, stream_id: str, start: LogOffset | LogTail, max_bytes: int
-    ) -> StoredBytes:
+    def read(self, stream_id: str, start: LogOffset | LogTail, max_bytes: int) -> StoredBytes:
         """At most ``max_bytes`` bytes of the stream from ``start``."""
+        ...
+
+
+class LogReader(Protocol):
+    """The log store, as the helper reads it.
+
+    Contract: ``instance`` finds where an instance's logs are and opens them, raising
+    ``UnknownInstanceError`` for an instance with no logs; the result follows the
+    ``InstanceLogs`` contract.
+    """
+
+    def instance(self, instance_id: str) -> InstanceLogs:
+        """The instance's logs, opened."""
+        ...
+
+
+class ReadWithdrawal(Protocol):
+    """How a waiting read learns it was withdrawn (``logs.cancel``): a flag it waits on.
+
+    ``wait`` blocks up to ``timeout`` seconds on the helper's clock and returns early,
+    ``True``, once the read is withdrawn; ``vs_sim``'s ``Event`` is one.
+    """
+
+    def wait(self, timeout: float) -> bool:
+        """Wait up to ``timeout`` seconds; whether the read was withdrawn."""
         ...
 
 
@@ -130,12 +152,10 @@ def run_location(inspection: InstanceInspection) -> RunLocation | None:
 
 @dataclass(frozen=True)
 class HelperLogs:
-    """What the ``logs`` feature needs from the host: the store and a clock to wait on."""
+    """What the ``logs`` feature needs from the host: the store and the clock a read waits on."""
 
     reader: LogReader
     clock: Clock
-    pause: Callable[[float], None]
-    """Wait this many seconds on ``clock``'s timeline."""
 
 
 def _complete_prefix(data: bytes) -> int:
@@ -210,28 +230,33 @@ def clip_pipes(pipes: tuple[LogPipeSpan, ...], start: int, end: int) -> tuple[Lo
 def list_logs(request: LogsListRequest, logs: HelperLogs) -> LogsListReply | HelperError:
     """Answer ``logs.list``."""
     try:
-        streams = logs.reader.streams(request.instance_id)
+        streams = logs.reader.instance(request.instance_id).streams()
     except UnknownInstanceError:
         return _unknown_instance(request.request_id, request.instance_id)
     return LogsListReply(request_id=request.request_id, streams=streams)
 
 
-def read_log(request: LogsReadRequest, logs: HelperLogs) -> LogsReadReply | HelperError:
+def read_log(
+    request: LogsReadRequest, logs: HelperLogs, withdrawal: ReadWithdrawal
+) -> LogsReadReply | HelperError:
     """Answer ``logs.read``; at the end of an open stream, wait for bytes until the wait ends.
 
     The wait is ``wait_ms``, cut to end ``REPLY_MARGIN_MS`` before the request's
-    deadline; it re-reads every ``POLL_INTERVAL_SECONDS`` on ``logs.clock``.
+    deadline; it re-reads every ``POLL_INTERVAL_SECONDS`` on ``logs.clock``, and ends
+    at once, answering what it holds, when ``withdrawal`` is set. The instance's logs
+    are opened once for the whole wait.
     """
     wait_ms = min(request.wait_ms, max(request.deadline_ms - REPLY_MARGIN_MS, 0))
     until = logs.clock.now() + wait_ms / 1000
     tail = isinstance(request.start, LogTail)
+    try:
+        opened = logs.reader.instance(request.instance_id)
+    except UnknownInstanceError:
+        return _unknown_instance(request.request_id, request.instance_id)
+    withdrawn = False
     while True:
         try:
-            stored = logs.reader.read(
-                request.instance_id, request.stream_id, request.start, request.max_bytes
-            )
-        except UnknownInstanceError:
-            return _unknown_instance(request.request_id, request.instance_id)
+            stored = opened.read(request.stream_id, request.start, request.max_bytes)
         except UnknownLogStreamError:
             message = f"instance {request.instance_id} has no log stream {request.stream_id!r}"
             return HelperError(
@@ -242,9 +267,9 @@ def read_log(request: LogsReadRequest, logs: HelperLogs) -> LogsReadReply | Help
         chunk = cut_chunk(stored, tail=tail)
         remaining = until - logs.clock.now()
         waiting = chunk.eof and not chunk.closed and chunk.next_offset == chunk.offset
-        if not waiting or remaining <= 0:
+        if not waiting or remaining <= 0 or withdrawn:
             return LogsReadReply(request_id=request.request_id, chunk=chunk)
-        logs.pause(min(POLL_INTERVAL_SECONDS, remaining))
+        withdrawn = withdrawal.wait(min(POLL_INTERVAL_SECONDS, remaining))
 
 
 def _unknown_instance(request_id: str, instance_id: str) -> HelperError:

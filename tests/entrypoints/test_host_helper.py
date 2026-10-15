@@ -41,12 +41,17 @@ def test_the_real_host_reads_this_users_registry_and_filesystem(tmp_path: Path) 
     runtime = tmp_path / "runtime"
     runtime.mkdir(mode=0o700)
     (tmp_path / "projects" / "alpha").mkdir(parents=True)
-    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), SimThreads())
+    threads = SimThreads()
+    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), threads)
 
-    listing = answer(InstancesListRequest(request_id="l", deadline_ms=1), host)
+    listing = answer(InstancesListRequest(request_id="l", deadline_ms=1), host, threads.event())
     prefix = f"{tmp_path}/projects/a"
-    completed = answer(PathsCompleteRequest(request_id="c", deadline_ms=1, prefix=prefix), host)
-    stopped = answer(RunStopRequest(request_id="s", deadline_ms=1, instance_id="0" * 12), host)
+    completed = answer(
+        PathsCompleteRequest(request_id="c", deadline_ms=1, prefix=prefix), host, threads.event()
+    )
+    stopped = answer(
+        RunStopRequest(request_id="s", deadline_ms=1, instance_id="0" * 12), host, threads.event()
+    )
 
     assert listing == InstancesListReply(request_id="l", listing=InstanceList(instances=()))
     assert isinstance(completed, PathsCompleteReply)
@@ -60,9 +65,10 @@ def test_the_real_host_offers_the_vetted_harnesses_with_one_default_per_provider
 ) -> None:
     runtime = tmp_path / "runtime"
     runtime.mkdir(mode=0o700)
-    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), SimThreads())
+    threads = SimThreads()
+    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), threads)
 
-    reply = answer(HarnessesListRequest(request_id="h", deadline_ms=1), host)
+    reply = answer(HarnessesListRequest(request_id="h", deadline_ms=1), host, threads.event())
 
     assert isinstance(reply, HarnessesListReply)
     offered = reply.harnesses

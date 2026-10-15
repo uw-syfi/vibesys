@@ -179,23 +179,34 @@ describe('parseWelcomeRequest', () => {
       wait_ms: 0,
     };
     expect(
-      parseWelcomeRequest(WELCOME_CHANNELS.logs, ['ssh:gpu', '0123456789ab', {kind: 'read', read}]),
+      parseWelcomeRequest(WELCOME_CHANNELS.logs, [
+        'ssh:gpu',
+        '0123456789ab',
+        {kind: 'read', token: 'l1', read},
+      ]),
     ).toEqual({
       kind: 'logs',
       host: {kind: 'ssh', alias: 'gpu'},
       instance: '0123456789ab',
-      request: {kind: 'read', read},
+      request: {kind: 'read', token: 'l1', read},
     });
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.logs, [
+        'local',
+        '0123456789ab',
+        {kind: 'withdraw', token: 'l1'},
+      ]),
+    ).toMatchObject({kind: 'logs', request: {kind: 'withdraw', token: 'l1'}});
     expect(() =>
       parseWelcomeRequest(WELCOME_CHANNELS.logs, [
         'local',
         '0123456789ab',
-        {kind: 'read', read: {...read, instance_id: 'ba9876543210'}},
+        {kind: 'read', token: 'l2', read: {...read, instance_id: 'ba9876543210'}},
       ]),
     ).toThrow('the logs read names ba9876543210, not 0123456789ab');
     expect(() =>
       parseWelcomeRequest(WELCOME_CHANNELS.logs, ['local', '0123456789ab', {kind: 'tail'}]),
-    ).toThrow('the logs request is not a listing or a read');
+    ).toThrow('the logs request is not a listing, a read, or a withdrawal');
     expect(parseWelcomeRequest(WELCOME_CHANNELS.releaseLogs, [])).toEqual({kind: 'release-logs'});
   });
 

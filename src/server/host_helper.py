@@ -58,6 +58,9 @@ from server.host_api import (
     InstancesWatchReply,
     InstancesWatchRequest,
     LiveInstanceRecord,
+    LogsCancelReply,
+    LogsCancelRequest,
+    LogsReadRequest,
     RunConnectReply,
     RunConnectRequest,
     RunStartCompensationFailure,
@@ -129,6 +132,10 @@ class ChannelState:
     """Undeliverable started runs still owned, from request id to instance id."""
     compensation_failures: tuple[RunStartCompensationFailure, ...] = ()
     """Terminal diagnostics for compensating stops that could not be proved complete."""
+    reads: frozenset[str] = frozenset()
+    """``logs.read`` workers that have not returned: the ones ``logs.cancel`` can withdraw."""
+    withdrawing: Mapping[str, str] = field(default_factory=dict)
+    """Each withdrawn read's id, with the ``logs.cancel`` answered once the read returns."""
     connecting: str | None = None
     """The ``run.connect`` in flight; input waits until it is answered."""
     relaying: bool = False
@@ -256,6 +263,13 @@ class Unwatch:
 
 
 @dataclass(frozen=True)
+class WithdrawRead:
+    """End the wait of the ``logs.read`` ``request_id`` executes, so it answers at once."""
+
+    request_id: str
+
+
+@dataclass(frozen=True)
 class Relay:
     """Hand the channel to the relay over the connection ``request_id`` opened."""
 
@@ -274,7 +288,9 @@ class Close:
     """The channel is done: input ended and nothing is in flight."""
 
 
-type ChannelOutput = Send | Execute | Watch | Unwatch | Relay | Release | StopStartedRun | Close
+type ChannelOutput = (
+    Send | Execute | Watch | Unwatch | WithdrawRead | Relay | Release | StopStartedRun | Close
+)
 
 
 def accepts_input(state: ChannelState) -> bool:
@@ -529,7 +545,7 @@ def _admission(
         ):
             message = f"this channel already owns {MAX_ACTIVE_WATCHES} watch worker"
             refusal = _error(request_id, HelperErrorCode.CHANNEL_BUSY, message)
-        elif not isinstance(request, InstancesUnwatchRequest) and (
+        elif not isinstance(request, InstancesUnwatchRequest | LogsCancelRequest) and (
             len(state.executing) + len(state.compensating) >= MAX_EXECUTING_REQUESTS
         ):
             message = f"this channel already owns {MAX_EXECUTING_REQUESTS} request workers"
@@ -562,6 +578,10 @@ def _admit(
                 Unwatch(watch_id),
                 Send(InstancesUnwatchReply(request_id=request_id, watch_id=watch_id)),
             )
+        case LogsCancelRequest():
+            return _withdraw(state, request, at)
+        case LogsReadRequest():
+            state = replace(state, reads=state.reads | {request_id})
         case RunConnectRequest():
             if state.executing or state.watches or state.stopping_watches:
                 message = "run.connect needs a channel with no other request or watch open"
@@ -576,16 +596,32 @@ def _admit(
     return replace(state, pending=pending, executing=executing), (Execute(request),)
 
 
+def _withdraw(
+    state: ChannelState, request: LogsCancelRequest, at: float
+) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
+    """End the wait of the read ``request`` names; its reply follows the read's (``_withdrawn``)."""
+    request_id, read_id = request.request_id, request.read_id
+    if read_id not in state.reads or read_id in state.withdrawing:
+        return state, (Send(LogsCancelReply(request_id=request_id, read_id=read_id)),)
+    pending = {**state.pending, request_id: at + request.deadline_ms / 1000}
+    withdrawing = {**state.withdrawing, read_id: request_id}
+    return replace(state, pending=pending, withdrawing=withdrawing), (WithdrawRead(read_id),)
+
+
 def _answered(
     state: ChannelState, request_id: str, reply: HelperReply | HelperError
 ) -> tuple[ChannelState, tuple[ChannelOutput, ...]]:
     if request_id not in state.executing:
         return state, ()
     was_starting = request_id in state.starting
-    state = replace(
-        state,
-        executing=state.executing - {request_id},
-        starting=state.starting - {request_id},
+    state, withdrawn = _withdrawn(
+        replace(
+            state,
+            executing=state.executing - {request_id},
+            starting=state.starting - {request_id},
+            reads=state.reads - {request_id},
+        ),
+        request_id,
     )
     compensation = _start_compensation(request_id, reply) if was_starting else None
     if request_id not in state.pending:
@@ -602,15 +638,33 @@ def _answered(
                 },
             )
             outputs.append(compensation)
-        return _maybe_close(state, outputs)
+        return _maybe_close(state, [*outputs, *withdrawn])
     pending = {rid: d for rid, d in state.pending.items() if rid != request_id}
     state = replace(state, pending=pending)
-    outputs = [Send(reply, if_undelivered=compensation)]
+    outputs = [Send(reply, if_undelivered=compensation), *withdrawn]
     if request_id == state.connecting:
         if isinstance(reply, RunConnectReply):
             return replace(state, connecting=None, relaying=True), (*outputs, Relay(request_id))
         state = replace(state, connecting=None)
     return _maybe_close(state, outputs)
+
+
+def _withdrawn(state: ChannelState, read_id: str) -> tuple[ChannelState, list[ChannelOutput]]:
+    """Answer the ``logs.cancel`` that withdrew ``read_id``, now that the read returned.
+
+    After the read's own reply, so a client that sees the cancel's reply knows the
+    read's worker is free; nothing when its deadline already answered for it.
+    """
+    cancel_id = state.withdrawing.get(read_id)
+    if cancel_id is None:
+        return state, []
+    withdrawing = {rid: cid for rid, cid in state.withdrawing.items() if rid != read_id}
+    state = replace(state, withdrawing=withdrawing)
+    if cancel_id not in state.pending:
+        return state, []
+    pending = {rid: d for rid, d in state.pending.items() if rid != cancel_id}
+    reply = LogsCancelReply(request_id=cancel_id, read_id=read_id)
+    return replace(state, pending=pending), [Send(reply)]
 
 
 def _start_compensation(request_id: str, reply: HelperReply | HelperError) -> StopStartedRun | None:
@@ -695,6 +749,7 @@ class _Channel:
         self._events: list[ChannelEvent] = []
         self._held: dict[str, Connection] = {}
         self._watches: dict[str, tuple[Event, Event]] = {}
+        self._withdrawals: dict[str, Event] = {}
         self._handed_over: str | None = None
         self._closed = False
 
@@ -769,13 +824,17 @@ class _Channel:
                     watch[1].set()
             elif isinstance(event, WatchStopped):
                 self._watches.pop(event.watch_id, None)
+            elif isinstance(event, Answered):
+                self._withdrawals.pop(event.request_id, None)
 
     def _perform(self, output: ChannelOutput) -> None:
         match output:
             case Send():
                 self._send(output)
             case Execute(request=request):
-                self._threads.spawn(lambda: self._execute(request), name=f"helper-{request.type}")
+                self._begin_execute(request)
+            case WithdrawRead(request_id=request_id):
+                self._withdrawals[request_id].set()
             case Watch(watch_id=watch_id):
                 stop = self._threads.event()
                 observed = self._threads.event()
@@ -808,6 +867,15 @@ class _Channel:
                 self._apply(InputEnded())
             self._closed = True
 
+    def _begin_execute(self, request: HelperRequest) -> None:
+        """Spawn ``request``'s worker; a ``logs.read`` keeps its withdrawal for ``WithdrawRead``."""
+        withdrawal = self._threads.event()
+        if isinstance(request, LogsReadRequest):
+            self._withdrawals[request.request_id] = withdrawal
+        self._threads.spawn(
+            lambda: self._execute(request, withdrawal), name=f"helper-{request.type}"
+        )
+
     def _begin_stop_started(self, request_id: str, instance_id: str) -> None:
         try:
             self._threads.spawn(
@@ -826,7 +894,7 @@ class _Channel:
             )
             self.post(failure)
 
-    def _execute(self, request: HelperRequest) -> None:
+    def _execute(self, request: HelperRequest, withdrawal: Event) -> None:
         try:
             if isinstance(request, RunConnectRequest):
                 opened = connect(request, self._host)
@@ -837,7 +905,7 @@ class _Channel:
                     with self._inbox.cond:
                         self._held[request.request_id] = connection
             else:
-                reply = answer(request, self._host)
+                reply = answer(request, self._host, withdrawal)
         # lint-waiver: LW-188705 [BLE001]; one request's failure is its own typed reply.
         # > Letting it escape kills the worker silently, and the client waits out its whole
         # > deadline for a `deadline_exceeded` that hides the cause; catching named types
