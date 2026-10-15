@@ -33,6 +33,7 @@ from vs_slurm.api import (
     LedgerLease,
     LedgerRecord,
     LedgerState,
+    OrphanChecks,
     ResolveSubmission,
     SlurmBatchHandle,
     SlurmSubmissionRejectedError,
@@ -126,11 +127,13 @@ class SlurmLedgerAttachment:
     clock: Clock
     _renewed: dict[str, float] = field(default_factory=dict)
     _swept_at: float | None = None
+    _orphans: OrphanChecks = field(init=False)
 
     def __post_init__(self) -> None:
         """Reject a project or holder that cannot name a ledger path."""
         validate_project(self.project)
         validate_holder(self.holder)
+        self._orphans = OrphanChecks(window_seconds=self.policy.claim_seconds)
 
     def key(self, request: SlurmBatchRequest) -> str:
         """The request's idempotency key, over the setup script's content on the cluster too."""
@@ -251,7 +254,11 @@ class SlurmLedgerAttachment:
             return ()
         self._swept_at = now
         return sweep_unleased(
-            self.ledger, cluster, now=now, grace_seconds=self.policy.grace_seconds
+            self.ledger,
+            cluster,
+            now=now,
+            grace_seconds=self.policy.grace_seconds,
+            orphans=self._orphans,
         )
 
     def _attached(self, record: LedgerRecord, request: SlurmBatchRequest) -> Attached:

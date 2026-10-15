@@ -32,6 +32,7 @@ from vs_slurm.api import (
     LedgerStage,
     LedgerState,
     NotInLedger,
+    OrphanChecks,
     ResolveSubmission,
     Settlement,
     SlurmBatchHandle,
@@ -465,7 +466,9 @@ def test_an_unleased_job_is_cancelled_only_after_its_grace_period(
     with TemporaryDirectory() as directory:
         world = _World(Path(directory), status=SlurmJobStatus.RUNNING)
         now = 300.0 + grace + offset
-        outcomes = sweep_unleased(world.ledger, world.cluster, now=now, grace_seconds=grace)
+        outcomes = sweep_unleased(
+            world.ledger, world.cluster, now=now, grace_seconds=grace, orphans=OrphanChecks(900.0)
+        )
         if offset <= 0:
             assert outcomes == ()
             assert world.state() is LedgerState.SUBMITTED
@@ -481,13 +484,23 @@ def test_the_sweep_settles_an_unsuccessful_job_and_never_asks_the_cluster_about_
     tmp_path: Path, status: SlurmJobStatus
 ) -> None:
     world = _World(tmp_path, status=status)
-    assert sweep_unleased(world.ledger, world.cluster, now=1e9, grace_seconds=0.0) == ()
+    assert (
+        sweep_unleased(
+            world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+        )
+        == ()
+    )
     settled = LedgerState.FAILED
     assert world.state() is settled
     # A cluster that has forgotten the job (accounting purged it) changes nothing:
     # a settled request is not asked about again.
     forgetful = FakeCluster(clock=ManualClock())
-    assert sweep_unleased(world.ledger, forgetful, now=2e9, grace_seconds=0.0) == ()
+    assert (
+        sweep_unleased(
+            world.ledger, forgetful, now=2e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+        )
+        == ()
+    )
     assert world.state() is settled
 
 
@@ -498,7 +511,12 @@ def test_a_lease_this_build_cannot_read_holds_the_request_and_blocks_no_removal(
     world = _World(tmp_path, status=SlurmJobStatus.RUNNING)
     world.ledger.store_raw_lease(world.key, "run-new", '{"format_version": 2}\n')
 
-    assert sweep_unleased(world.ledger, world.cluster, now=1e9, grace_seconds=0.0) == ()
+    assert (
+        sweep_unleased(
+            world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+        )
+        == ()
+    )
     assert world.state() is LedgerState.SUBMITTED
     (row,) = list_entries(world.ledger, world.cluster, project=PROJECT, now=1e9).rows
     assert row.unreadable_leases == ("run-new",)
@@ -512,7 +530,12 @@ def test_a_lease_this_build_cannot_read_holds_the_request_and_blocks_no_removal(
 def test_the_sweep_leaves_a_completed_job_for_a_run_to_collect(tmp_path: Path) -> None:
     """Only collected results settle completed; the sweep collects nothing, so it waits."""
     world = _World(tmp_path, status=SlurmJobStatus.COMPLETED)
-    assert sweep_unleased(world.ledger, world.cluster, now=1e9, grace_seconds=0.0) == ()
+    assert (
+        sweep_unleased(
+            world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+        )
+        == ()
+    )
     assert world.state() is LedgerState.SUBMITTED
 
 
@@ -523,7 +546,9 @@ def test_the_sweep_never_touches_a_job_outside_the_ledger(tmp_path: Path) -> Non
     world.cluster.script("foreign", states=(SlurmJobStatus.RUNNING,))
     foreign = world.cluster.submit(_request(workspace, "foreign"), operation_id="foreign")
     assert isinstance(foreign, ClusterSubmitted)
-    sweep_unleased(world.ledger, world.cluster, now=1e9, grace_seconds=0.0)
+    sweep_unleased(
+        world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+    )
     observed = world.cluster.inspect("foreign")
     assert isinstance(observed, ClusterObservation)
     assert observed.status is SlurmJobStatus.RUNNING
@@ -588,7 +613,9 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
                     live.add(operation)
         ledger.renew(key, LedgerLease(holder="run-a", renewed_at=0.0, expires_at=1e12))
 
-        outcomes = sweep_unleased(ledger, cluster, now=1.0, grace_seconds=0.0)
+        outcomes = sweep_unleased(
+            ledger, cluster, now=1.0, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+        )
 
         assert {o.operation_id for o in outcomes if isinstance(o, Withdrawn)} == live
         assert len(outcomes) == len(live)
@@ -599,4 +626,7 @@ def test_the_sweep_cancels_every_live_job_named_for_a_failed_or_withdrawn_attemp
                 assert observed.status is SlurmJobStatus.RUNNING
             elif isinstance(observed, ClusterObservation):
                 assert observed.status.terminal
-        assert sweep_unleased(ledger, cluster, now=2.0, grace_seconds=0.0) == ()
+        assert (
+            sweep_unleased(ledger, cluster, now=2.0, grace_seconds=0.0, orphans=OrphanChecks(900.0))
+            == ()
+        )

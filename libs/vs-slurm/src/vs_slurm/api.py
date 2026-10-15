@@ -98,6 +98,7 @@ from .ledger import encode as encode_ledger_document
 from .ledger_actions import (
     Kept,
     NotInLedger,
+    OrphanChecks,
     Withdrawn,
     WithdrawOutcome,
     WithdrawUnknown,
@@ -254,6 +255,7 @@ __all__ = [
     "NotInLedger",
     "NotInQueue",
     "Notice",
+    "OrphanChecks",
     "QueueRow",
     "Queued",
     "RemoteEvaluationLedger",

@@ -1,4 +1,4 @@
-"""The sweep against other processes' writes that land between its reads and its writes."""
+"""The sweep: against other processes' writes between its reads and writes, and its cost."""
 
 from __future__ import annotations
 
@@ -7,8 +7,10 @@ from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitted,
@@ -18,6 +20,7 @@ from vs_slurm.api import (
     LedgerLease,
     LedgerRecord,
     LedgerState,
+    OrphanChecks,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchStage,
@@ -33,6 +36,8 @@ from vs_slurm.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from vs_slurm.api import ClusterInspectOutcome, ClusterTarget
 
 PROJECT = "demo-0123456789ab"
 CONFIG = SlurmConfig(
@@ -168,7 +173,9 @@ def test_the_sweep_never_withdraws_a_request_wanted_again_after_it_decided(
                 world.complete()
 
         racing = _Interleaved(world.ledger, after_read=after_read, race=interfere)
-        outcomes = sweep_unleased(racing, world.cluster, now=NOW, grace_seconds=0.0)
+        outcomes = sweep_unleased(
+            racing, world.cluster, now=NOW, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+        )
 
         assert outcomes == ()
         if kind == "attach":
@@ -178,3 +185,103 @@ def test_the_sweep_never_withdraws_a_request_wanted_again_after_it_decided(
             assert world.state() is LedgerState.COMPLETED
         if after_read == 1:
             assert world.job_status() is SlurmJobStatus.RUNNING
+
+
+class _CountingCluster(FakeCluster):
+    """The Fake cluster, counting the scheduler queries (one SSH round trip each) made of it."""
+
+    def __init__(self) -> None:
+        super().__init__(clock=ManualClock())
+        self.inspections = 0
+
+    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
+        self.inspections += 1
+        return super().inspect(target, by_job_id=by_job_id)
+
+
+WINDOW = 900.0
+
+
+def _jobless_failures(root: Path, attempts: int) -> tuple[FakeEvaluationLedger, SlurmBatchRequest]:
+    """A request whose ``attempts`` attempts all failed before naming a job."""
+    ledger = FakeEvaluationLedger(project=PROJECT)
+    workspace = root / "workspace"
+    workspace.mkdir(exist_ok=True)
+    request = SlurmBatchRequest(
+        workspace=workspace, stages=(SlurmBatchStage(name="bench", command=("true",)),)
+    )
+    key = evaluation_key(PROJECT, request, CONFIG, setup_script_sha256=None)
+    for attempt in range(attempts):
+        claimed = LedgerRecord(
+            key=key,
+            project=PROJECT,
+            attempt=attempt,
+            operation_id=ledger_operation_id(key, attempt),
+            owner="run-a",
+            created_at=0.0,
+            claim_expires_at=WINDOW,
+            state=LedgerState.SUBMITTING,
+        )
+        ledger.claim(claimed)
+        entry = ledger.read(key)
+        assert entry is not None
+        assert ledger.replace(entry, transitioned(claimed, LedgerState.FAILED, reason="rejected"))
+    return ledger, request
+
+
+@given(
+    attempts=st.integers(min_value=1, max_value=4),
+    gaps=st.lists(st.floats(min_value=0.0, max_value=WINDOW), min_size=1, max_size=8),
+)
+@example(attempts=2, gaps=[0.0, WINDOW, 1.0, 1.0])
+@settings(max_examples=examples(pr=30, nightly=300), deadline=None)
+def test_a_process_inspects_a_jobless_attempt_for_one_claim_window_then_never(
+    attempts: int, gaps: list[float]
+) -> None:
+    """Each sweep runs in one evaluation's heartbeat, so its cost must not grow with history.
+
+    An attempt that failed before naming a job is inspected for an orphan only
+    while this process has known it ended for at most the claim window; after
+    that the sweep makes no cluster call for it at all.
+    """
+    with TemporaryDirectory() as directory:
+        ledger, _ = _jobless_failures(Path(directory), attempts)
+        cluster = _CountingCluster()
+        orphans = OrphanChecks(window_seconds=WINDOW)
+        first = NOW + gaps[0]
+        now = NOW
+        for gap in gaps:
+            now += gap
+            before = cluster.inspections
+            assert (
+                sweep_unleased(ledger, cluster, now=now, grace_seconds=0.0, orphans=orphans) == ()
+            )
+            expected = attempts if now - first <= WINDOW else 0
+            assert cluster.inspections - before == expected
+
+
+@pytest.mark.parametrize("appears_after", [0.0, WINDOW / 2, WINDOW])
+def test_an_orphan_that_starts_within_the_window_is_still_cancelled(appears_after: float) -> None:
+    """A submitter past the tombstone sbatches after the sweep first looked, then dies."""
+    with TemporaryDirectory() as directory:
+        ledger, request = _jobless_failures(Path(directory), 1)
+        (key,) = ledger.list_keys()
+        operation = ledger_operation_id(key, 0)
+        cluster = _CountingCluster()
+        orphans = OrphanChecks(window_seconds=WINDOW)
+        assert sweep_unleased(ledger, cluster, now=NOW, grace_seconds=0.0, orphans=orphans) == ()
+        cluster.script(operation, states=(SlurmJobStatus.RUNNING,))
+        assert isinstance(cluster.submit(request, operation_id=operation), ClusterSubmitted)
+
+        later = NOW + appears_after
+        outcomes = sweep_unleased(ledger, cluster, now=later, grace_seconds=0.0, orphans=orphans)
+
+        assert [outcome.operation_id for outcome in outcomes] == [operation]
+        observed = cluster.inspect(operation)
+        assert isinstance(observed, ClusterObservation)
+        assert observed.status.terminal
+        # Once a sweep saw its job ended (or the window closed), it is never inspected again.
+        sweep_unleased(ledger, cluster, now=later + 1.0, grace_seconds=0.0, orphans=orphans)
+        before = cluster.inspections
+        sweep_unleased(ledger, cluster, now=later + 2.0, grace_seconds=0.0, orphans=orphans)
+        assert cluster.inspections == before
