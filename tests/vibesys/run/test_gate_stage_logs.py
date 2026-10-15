@@ -8,6 +8,8 @@ the stage, while it runs; and each evaluator tool build's output to one ``ToolBu
 from __future__ import annotations
 
 import asyncio
+import math
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -50,18 +52,19 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
     prepare_docker_evaluator_resources,
 )
-from vs_runtime.api.slurm_evaluation_stack import BENCHMARK_OUTPUT, build_stack
+from vs_runtime.api.slurm_evaluation_stack import BENCHMARK_OUTPUT, ScenarioCluster, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.evaluator_tools import CargoGitToolSpec, EvaluatorToolError
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
-from vs_sim.api.testing import ManualClock, SimThreads, arrival, yield_until
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimThreads, arrival, yield_until
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_logs.read import LogReader, StreamInfo
     from vs_runtime.api.core import StageOutputOpener
+    from vs_slurm.api import ClusterCollectOutcome, ClusterObservation, ClusterTarget
 
 _HANDLE = "vs-measurement"
 _PRINTED: dict[Literal["accuracy", "benchmark"], tuple[bytes, bytes]] = {
@@ -69,6 +72,7 @@ _PRINTED: dict[Literal["accuracy", "benchmark"], tuple[bytes, bytes]] = {
     "benchmark": (b"warmup\nrps=41\n", b""),
 }
 _STAGES = (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+_TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.CANCELED})
 _RETRIES = EvaluationRetries(infrastructure_attempts=2, ambiguous_attempts=1)
 
 
@@ -205,25 +209,70 @@ async def test_each_gate_stage_writes_to_its_gate_stream_before_it_settles() -> 
     assert _read(reader, streams[1]) == b"".join(_PRINTED["benchmark"])
 
 
+class _HeldCollection(ScenarioCluster):
+    """A cluster that holds the execution's own collection until the test releases it.
+
+    A poll collects an ended job by itself (it passes the state it just read), apart
+    from the execution task that settles the stage streams. Holding the task's
+    collection makes the poll report the end first, as it may under load.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = threading.Event()
+
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
+        if observed is None:
+            assert self.release.wait(HANG_GUARD_S), "the test never released the collection"
+        return super().collect(target, by_job_id=by_job_id, observed=observed)
+
+
+async def _execution_ended(executor: RetryingEvaluationExecutor) -> None:
+    """Wait until the execution task has settled the measurement, stage streams included."""
+    while True:
+        observed = await executor.inspect(_HANDLE)
+        if observed is not None and observed.state in _TERMINAL:
+            return
+        await executor.wait_for_change(_HANDLE, timeout_s=math.inf)
+
+
 @pytest.mark.asyncio
 async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires_it(
     tmp_path: Path,
 ) -> None:
-    """A stage run on the cluster lands under the same gate owners, through the same tries."""
+    """A stage run on the cluster lands under the same gate owners, through the same tries.
+
+    The host learns the end from a poll, which may come before the execution task has
+    collected the job; the streams are whole once that task has settled.
+    """
     store = _store()
     tries = TryHandles()
-    stack = await build_stack(tmp_path, stage_output=tries.stage_output(stage_output_opener(store)))
+    cluster = _HeldCollection()
+    stack = await build_stack(
+        tmp_path, cluster, stage_output=tries.stage_output(stage_output_opener(store))
+    )
     executor = RetryingEvaluationExecutor(
         stack.executor, _RETRIES, InMemoryEvaluationNamespace(), tries=tries
     )
 
-    await executor.submit(_request(stack.snapshot, "official", _STAGES), handle_id=_HANDLE)
-    await yield_until(
-        lambda: executor.poll(_HANDLE),
-        lambda polled: polled.phase is PollPhase.ENDED,
-        "the measurement to end",
-    )
-    await executor.close()
+    try:
+        await executor.submit(_request(stack.snapshot, "official", _STAGES), handle_id=_HANDLE)
+        await yield_until(
+            lambda: executor.poll(_HANDLE),
+            lambda polled: polled.phase is PollPhase.ENDED,
+            "the measurement to end",
+        )
+        cluster.release.set()
+        await _execution_ended(executor)
+    finally:
+        cluster.release.set()
+        await executor.close()
 
     reader = reader_of(store, LOG_OWNER)
     streams = reader.list_streams()
