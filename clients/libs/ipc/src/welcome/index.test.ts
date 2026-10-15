@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {isInstanceId, isRunId, isTaskName} from '@vibesys/runs';
 import {Seeded} from '@vibesys/store/testing';
-import {parseWelcomeRequest, WELCOME_CHANNELS, type WelcomeRequest} from './index.js';
+import {parseWelcomeRequest, WELCOME_CHANNELS, type WelcomeRequest} from '../index.js';
 
 const VALUES: readonly unknown[] = [
   undefined,
@@ -28,6 +28,30 @@ const VALUES: readonly unknown[] = [
   {},
   [],
 ];
+
+/** One valid argument vector for every privileged welcome request. */
+const VALID_ARGUMENTS: Readonly<
+  Record<(typeof WELCOME_CHANNELS)[keyof typeof WELCOME_CHANNELS], readonly unknown[]>
+> = {
+  [WELCOME_CHANNELS.overview]: [],
+  [WELCOME_CHANNELS.hosts]: [],
+  [WELCOME_CHANNELS.host]: ['local'],
+  [WELCOME_CHANNELS.setCheckout]: ['local', '/checkout', 1],
+  [WELCOME_CHANNELS.cancelCheckout]: [1],
+  [WELCOME_CHANNELS.cancelInspection]: [1],
+  [WELCOME_CHANNELS.signIn]: ['local'],
+  [WELCOME_CHANNELS.complete]: ['local', '/project/'],
+  [WELCOME_CHANNELS.inspect]: ['local', '0123456789ab', false, 1],
+  [WELCOME_CHANNELS.tasks]: ['local', '/project'],
+  [WELCOME_CHANNELS.start]: ['local', '/project', 'spsc', '', 1],
+  [WELCOME_CHANNELS.cancelStart]: [1],
+  [WELCOME_CHANNELS.attach]: ['local', '0123456789ab'],
+  [WELCOME_CHANNELS.resume]: ['local', '/project', 'run-1'],
+  [WELCOME_CHANNELS.showRun]: [],
+  [WELCOME_CHANNELS.showWelcome]: [],
+  [WELCOME_CHANNELS.retry]: [],
+  [WELCOME_CHANNELS.stop]: ['local', '0123456789ab', false],
+};
 
 /** What every accepted request guarantees, whatever the view sent. */
 function checkAccepted(request: WelcomeRequest): void {
@@ -112,15 +136,15 @@ describe('parseWelcomeRequest', () => {
       includeLog: true,
       inspection: 7,
     });
-    expect(
+    expect(() =>
       parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', 'true', 8]),
-    ).toMatchObject({includeLog: false});
+    ).toThrow('include log must be a boolean');
     expect(() =>
       parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', false, 0]),
     ).toThrow('an inspection is named by a positive integer');
-    expect(() => parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '../etc'])).toThrow(
-      '12-digit instance id',
-    );
+    expect(() =>
+      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '../etc', false, 9]),
+    ).toThrow('12-digit instance id');
     expect(parseWelcomeRequest(WELCOME_CHANNELS.cancelInspection, [9])).toEqual({
       kind: 'cancel-inspection',
       inspection: 9,
@@ -134,5 +158,41 @@ describe('parseWelcomeRequest', () => {
     expect(() => parseWelcomeRequest('vibesys:welcome:format-disk', [])).toThrow(
       '"vibesys:welcome:format-disk" is not a welcome request',
     );
+  });
+
+  test('regression: every welcome request rejects missing or surplus arguments', () => {
+    for (const channel of Object.values(WELCOME_CHANNELS)) {
+      const args = VALID_ARGUMENTS[channel];
+      expect(() => parseWelcomeRequest(channel, [...args, 'surplus'])).toThrow(
+        `${channel} expects ${args.length} argument`,
+      );
+      if (args.length > 0) {
+        expect(() => parseWelcomeRequest(channel, args.slice(0, -1))).toThrow(
+          `${channel} expects ${args.length} argument`,
+        );
+      }
+    }
+  });
+
+  test('required boolean fields preserve both true and false', () => {
+    for (const value of [false, true]) {
+      expect(
+        parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', value, 1]),
+      ).toMatchObject({kind: 'inspect', includeLog: value});
+      expect(
+        parseWelcomeRequest(WELCOME_CHANNELS.stop, ['local', '0123456789ab', value]),
+      ).toMatchObject({kind: 'stop', force: value});
+    }
+  });
+
+  test('regression: malformed boolean fields are rejected instead of authorizing false', () => {
+    for (const value of [undefined, null, 0, 1, 'false', 'true', {}, []]) {
+      expect(() =>
+        parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', value, 1]),
+      ).toThrow('include log must be a boolean');
+      expect(() =>
+        parseWelcomeRequest(WELCOME_CHANNELS.stop, ['local', '0123456789ab', value]),
+      ).toThrow('force stop must be a boolean');
+    }
   });
 });

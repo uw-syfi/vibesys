@@ -83,6 +83,11 @@ function instance(value: unknown): string {
   return value;
 }
 
+function includeLog(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new Error('include log must be a boolean');
+  return value;
+}
+
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
 export function parseHostsRequest(
   channel: ChannelOf<typeof HOSTS_CHANNELS>,
@@ -114,7 +119,7 @@ export function parseHostsRequest(
         kind: 'inspect',
         host: hostFromKey(first),
         instance: instance(second),
-        includeLog: third === true,
+        includeLog: includeLog(third),
         inspection: operationToken(fourth, 'inspection'),
       };
   }
