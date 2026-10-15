@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from vs_sim.concurrency import WorkerStartRefusedError
 from vs_sim.gate import arrival
 from vs_sim.loopback_http import HttpReply
 from vs_sim.processes import (
@@ -24,12 +25,66 @@ from vs_sim.processes import (
 from vs_sim.states import Changes, wait_for_state
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Coroutine, Mapping, Sequence
     from pathlib import Path
 
     from vs_sim.clock import Sleeper
+    from vs_sim.concurrency import Condition, Event, Lock, ThreadLocal, Threads, Worker
     from vs_sim.probes import ProbeResult
     from vs_sim.processes import ProcessRun
+
+
+class RefusingThreads:
+    """A Threads Fake that delegates every operation except scripted worker starts.
+
+    ``refusals`` maps a worker name to how many matching starts should fail. The
+    wrapper leaves the delegate's scheduling and synchronization semantics intact.
+    """
+
+    def __init__(self, delegate: Threads, refusals: Mapping[str, int]) -> None:
+        """Wrap *delegate* and script the positive refusal counts in *refusals*."""
+        self._delegate = delegate
+        self._remaining = {name: count for name, count in refusals.items() if count > 0}
+
+    def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
+        """Refuse a scripted start, otherwise spawn it through the delegate."""
+        remaining = self._remaining.get(name, 0)
+        if remaining > 0:
+            self._remaining[name] = remaining - 1
+            raise WorkerStartRefusedError(name)
+        return self._delegate.spawn(target, name=name, daemon=daemon)
+
+    def lock(self) -> Lock:
+        """Return a lock from the delegate."""
+        return self._delegate.lock()
+
+    def rlock(self) -> Lock:
+        """Return a reentrant lock from the delegate."""
+        return self._delegate.rlock()
+
+    def condition(self, lock: Lock | None = None) -> Condition:
+        """Return a condition from the delegate."""
+        return self._delegate.condition(lock)
+
+    def event(self) -> Event:
+        """Return an event from the delegate."""
+        return self._delegate.event()
+
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        """Return thread-local storage from the delegate."""
+        return self._delegate.local(initial)
+
+    def sleep(self, seconds: float) -> None:
+        """Sleep on the delegate's timeline."""
+        self._delegate.sleep(seconds)
+
+    def now(self) -> float:
+        """Read the delegate's monotonic timeline."""
+        return self._delegate.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        """Run an async entrypoint through the delegate."""
+        return self._delegate.run_async(main)
 
 
 class InlineBlockingRunner:

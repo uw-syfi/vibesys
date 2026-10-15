@@ -127,6 +127,7 @@ from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._owed_submissions import OwedKey, OwedSubmission, OwedSubmissions
 from vs_runtime._workspace_lookup import find_scope_workspace
 from vs_runtime._workspace_requests import revision_ref
+from vs_sim.api import WorkerStartRefusedError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -146,6 +147,7 @@ EVALUATION_TOOL_ID = "evaluation"
 
 _FRAME_LIMIT = 65_536
 _SNAPSHOT_LABEL = "agent-evaluation"
+_ACCEPT_RETRY_SECONDS = 0.1
 _CALLS = TypeAdapter(AgentEvaluationCall)
 _REFUSALS = {
     AgentRejection.RUN_STOPPING: ToolRefusal.RUN_STOPPING,
@@ -513,9 +515,18 @@ class AgentEvaluationBridge:
             if closing:
                 connection.close()
                 return
-            self._threads.spawn(
-                partial(self._client, connection, loop), name="agent-evaluation-call"
-            )
+            try:
+                self._threads.spawn(
+                    partial(self._client, connection, loop), name="agent-evaluation-call"
+                )
+            except WorkerStartRefusedError as error:
+                with self._guard:
+                    self._open.discard(connection)
+                connection.close()
+                self._diagnostics(
+                    f"agent evaluation call worker did not start: {type(error).__name__}; retrying"
+                )
+                self._threads.sleep(_ACCEPT_RETRY_SECONDS)
 
     def _client(self, connection: Connection, loop: asyncio.AbstractEventLoop) -> None:
         try:

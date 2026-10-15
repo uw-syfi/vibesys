@@ -23,7 +23,16 @@ if TYPE_CHECKING:
         SystemClock,
         utc_datetime,
     )
-    from vs_sim.concurrency import Condition, Event, Lock, OsThreads, ThreadLocal, Threads, Worker
+    from vs_sim.concurrency import (
+        Condition,
+        Event,
+        Lock,
+        OsThreads,
+        ThreadLocal,
+        Threads,
+        Worker,
+        WorkerStartRefusedError,
+    )
     from vs_sim.loopback_http import HttpReply, LoopbackHttp, UrllibLoopbackHttp
     from vs_sim.network import Connection, Listener, Network, UnixNetwork
     from vs_sim.os_platform import Platform
@@ -94,6 +103,7 @@ _MODULES: dict[str, str] = {
     "ThreadLocal": "vs_sim.concurrency",
     "Threads": "vs_sim.concurrency",
     "Worker": "vs_sim.concurrency",
+    "WorkerStartRefusedError": "vs_sim.concurrency",
     "Connection": "vs_sim.network",
     "Listener": "vs_sim.network",
     "Network": "vs_sim.network",
@@ -238,6 +248,7 @@ __all__ = [
     "UrllibLoopbackHttp",
     "WakeupFdSignalRelay",
     "Worker",
+    "WorkerStartRefusedError",
     "derive_seed",
     "run_foreground",
     "sync_descriptor",

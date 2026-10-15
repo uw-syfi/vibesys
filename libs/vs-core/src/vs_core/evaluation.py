@@ -67,6 +67,7 @@ def advance_evaluation(
 
     The event's time has already moved the run clock. Waits whose deadline it reached
     freeze first, on the job facts they had at the deadline, before the event changes them.
+    The kernel then charges the queue time the change ended (``_wait_clock``).
     """
     due = _continuations.reach_deadlines(state, context)
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]

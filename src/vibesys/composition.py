@@ -19,6 +19,7 @@ from vs_agent.api import (
 from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
     PreparedModelArtifacts,
+    model_artifact_copy_excludes,
     prepare_model_artifacts,
 )
 from vs_sandbox.api import HostResource, HostResourceAccess
@@ -56,6 +57,13 @@ def prepare_domain_model_artifacts(
         isolated=isolated,
         materialize_local_weights=materialize_local_weights,
     )
+
+
+def domain_model_copy_excludes(domain: DomainName, *, isolated: bool) -> frozenset[str]:
+    """Reference entries a project copy leaves out for ``domain`` because they are mounted."""
+    if domain is not DomainName.LLM_SERVING:
+        return frozenset()
+    return model_artifact_copy_excludes(isolated=isolated)
 
 
 def _vibesys_runtime_host_resources() -> tuple[HostResource, ...]:

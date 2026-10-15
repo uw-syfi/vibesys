@@ -1,5 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {mkdtempSync, readdirSync} from 'node:fs';
+import {lstat, mkdtemp, readFile, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {Seeded} from '@vibesys/store/testing';
@@ -74,7 +75,7 @@ describe('SettingsStore', () => {
       expect(filesystem.operations.map(operation => operation.kind)).toEqual(['read', 'read']);
       expect(logged).toHaveLength(2);
 
-      await filesystem.writePrivateText(
+      filesystem.setText(
         path,
         `${JSON.stringify({
           version: 2,
@@ -122,10 +123,7 @@ describe('SettingsStore', () => {
       expect(filesystem.operations.map(operation => operation.kind)).toEqual(['read', 'read']);
       expect(logged).toHaveLength(2);
 
-      await filesystem.writePrivateText(
-        path,
-        `${JSON.stringify({version: 2, runs: [version2Run(1)]})}\n`,
-      );
+      filesystem.setText(path, `${JSON.stringify({version: 2, runs: [version2Run(1)]})}\n`);
       await settings.updateRecent(current => remember(current, run(2)));
       const expected = {version: 3 as const, runs: [run(2), migratedVersion2Run(1)]};
       expect(JSON.parse(filesystem.text(path))).toEqual(expected);
@@ -152,6 +150,77 @@ describe('SettingsStore', () => {
       hosts: {'ssh:one': {checkout: '/one'}, 'ssh:two': {checkout: '/two'}},
     });
     expect(await settings.recent()).toEqual({version: 3, runs: [run(2), run(1)]});
+  });
+
+  test('staging chooses a fresh sibling without overwriting an existing entry', async () => {
+    const directory = '/settings';
+    const path = join(directory, 'hosts.json');
+    const occupied = `${path}.0.tmp`;
+    const filesystem = new FakeSettingsFilesystem({[occupied]: 'owned elsewhere'});
+    const {settings} = store(filesystem, directory);
+
+    await settings.updateHosts(current =>
+      withHostSettings(current, {kind: 'local'}, {checkout: '/project'}),
+    );
+
+    expect(filesystem.text(occupied)).toBe('owned elsewhere');
+    expect(filesystem.operations).toContainEqual({kind: 'write', path: `${path}.1.tmp`});
+    expect((await settings.hosts()).settings.hosts['local']).toEqual({checkout: '/project'});
+  });
+
+  test('both settings writers leave planted staging symlinks and their targets untouched', async () => {
+    for (const targetName of ['hosts.json', 'recent.json'] as const) {
+      const directory = await mkdtemp(join(tmpdir(), 'vsd-settings-link-'));
+      const path = join(directory, targetName);
+      const unrelated = join(directory, 'unrelated');
+      const planted = `${path}.${process.pid}.tmp`;
+      try {
+        await writeFile(unrelated, 'keep me\n', {mode: 0o644});
+        const unrelatedMode = (await lstat(unrelated)).mode & 0o777;
+        await symlink(unrelated, planted);
+        const {settings} = store(undefined, directory);
+
+        if (targetName === 'hosts.json') {
+          await settings.updateHosts(current =>
+            withHostSettings(current, {kind: 'local'}, {checkout: '/project'}),
+          );
+        } else {
+          await settings.updateRecent(current => remember(current, run(1)));
+        }
+
+        const installed = await lstat(path);
+        expect(installed.isFile()).toBeTrue();
+        expect(installed.isSymbolicLink()).toBeFalse();
+        expect(installed.mode & 0o777).toBe(0o600);
+        const written = JSON.parse(await readFile(path, 'utf8')) as {version?: unknown};
+        expect(written.version).toBe(targetName === 'hosts.json' ? 2 : 3);
+        expect((await lstat(planted)).isSymbolicLink()).toBeTrue();
+        expect(await readFile(unrelated, 'utf8')).toBe('keep me\n');
+        expect((await lstat(unrelated)).mode & 0o777).toBe(unrelatedMode);
+      } finally {
+        await rm(directory, {recursive: true, force: true});
+      }
+    }
+  });
+
+  test('a regular settings file is atomically replaced with exact private permissions', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'vsd-settings-file-'));
+    const path = join(directory, 'hosts.json');
+    try {
+      await writeFile(path, `${JSON.stringify(EMPTY_SETTINGS)}\n`, {mode: 0o644});
+      const {settings} = store(undefined, directory);
+
+      await settings.updateHosts(current =>
+        withHostSettings(current, {kind: 'local'}, {checkout: '/project'}),
+      );
+
+      const installed = await lstat(path);
+      expect(installed.isFile()).toBeTrue();
+      expect(installed.mode & 0o777).toBe(0o600);
+      expect((await settings.hosts()).settings.hosts['local']).toEqual({checkout: '/project'});
+    } finally {
+      await rm(directory, {recursive: true, force: true});
+    }
   });
 
   test('regression: a host-settings read failure cannot replace the existing file', async () => {
@@ -258,7 +327,6 @@ describe('SettingsStore', () => {
   test('regression: a failed host-settings replace removes its staged file', async () => {
     const directory = '/settings';
     const path = join(directory, 'hosts.json');
-    const staging = `${path}.${process.pid}.tmp`;
     const existing = {version: 2, hosts: {'ssh:existing': {checkout: '/existing'}}};
     const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
     const {settings} = store(filesystem, directory);
@@ -270,6 +338,9 @@ describe('SettingsStore', () => {
     await expect(changing).rejects.toThrow('ENOSPC');
 
     expect(JSON.parse(filesystem.text(path))).toEqual(existing);
+    const staging = filesystem.operations.find(operation => operation.kind === 'write')?.path;
+    expect(staging).toBeDefined();
+    if (staging === undefined) throw new Error('expected a staged write');
     expect(() => filesystem.text(staging)).toThrow();
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
       'read',
@@ -282,7 +353,6 @@ describe('SettingsStore', () => {
   test('regression: a failed recent-runs replace removes its staged file', async () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
-    const staging = `${path}.${process.pid}.tmp`;
     const existing = {version: 3 as const, runs: [run(1)]};
     const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
     const {settings} = store(filesystem, directory);
@@ -295,6 +365,9 @@ describe('SettingsStore', () => {
 
     expect(heard).toEqual([]);
     expect(JSON.parse(filesystem.text(path))).toEqual(existing);
+    const staging = filesystem.operations.find(operation => operation.kind === 'write')?.path;
+    expect(staging).toBeDefined();
+    if (staging === undefined) throw new Error('expected a staged write');
     expect(() => filesystem.text(staging)).toThrow();
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
       'read',
@@ -348,6 +421,31 @@ describe('SettingsStore', () => {
     expect(outcome).toBe('cancelled');
     expect((await settings.hosts()).settings).toEqual(EMPTY_SETTINGS);
     expect(readdirSync(directory).filter(name => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  test('a commit guard failure removes the staging file it owns', async () => {
+    const directory = '/settings';
+    const filesystem = new FakeSettingsFilesystem();
+    const {settings} = store(filesystem, directory);
+    const guardFailure = new Error('guard failed');
+
+    const changing = settings.updateHosts(
+      current => withHostSettings(current, {kind: 'local'}, {checkout: '/project'}),
+      () => {
+        throw guardFailure;
+      },
+    );
+
+    await expect(changing).rejects.toBe(guardFailure);
+    const staging = filesystem.operations.find(operation => operation.kind === 'write')?.path;
+    expect(staging).toBeDefined();
+    if (staging === undefined) throw new Error('expected a staged write');
+    expect(() => filesystem.text(staging)).toThrow();
+    expect(filesystem.operations.map(operation => operation.kind)).toEqual([
+      'read',
+      'write',
+      'remove',
+    ]);
   });
 
   test('interleaved updates of both files keep every change and leave no partial file', async () => {
