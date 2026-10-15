@@ -1,13 +1,21 @@
 /**
- * The run the window is attached to, and what the user does to runs: attach, start, resume, stop,
- * and retry. Every action is a typed request on the host's connection (`run.start`, `run.stop`,
- * `instances.list`); the run view's connections are run channels the same connection opens.
+ * The runs the windows are attached to, and what the user does to runs: attach, start, resume,
+ * stop, and retry. Every action is a typed request on the host's connection (`run.start`,
+ * `run.stop`, `instances.list`); each run page's connections are run channels the same connection
+ * opens.
  *
- * The run's identity comes from its record (`run_id`), when the app starts or attaches to it; it is
- * never inferred later. Whether the run ended comes from the host's pushed registry, a run channel
- * that ended with `run_gone`, or a check that found the run gone. The page keeps its own resume
- * logic but no retry timer: while its page still owns it, a dial waits for the host connection to
- * be ready, and the page is woken when the connection recovers.
+ * A run's identity comes from its record (`run_id`), when the app starts or attaches to it; it is
+ * never inferred later. Each attached run keeps its own binding, keyed by that `run_id`: attaching,
+ * starting, or resuming a run never disturbs a binding under a different key, so one window's run
+ * cannot be silently detached by another window's navigation. Whether a run ended comes from the
+ * host's pushed registry, a run channel that ended with `run_gone`, or a check that found the run
+ * gone. The page keeps its own resume logic but no retry timer: while its page still owns it, a dial
+ * waits for the host connection to be ready, and the page is woken when the connection recovers.
+ *
+ * Navigation toward a target (a host and instance id) is tracked separately from bindings, by the
+ * same key: a newer attach, start, or resume toward the *same* target supersedes an older one
+ * in flight toward it (mirroring the single-window product's "latest click wins" expectation for
+ * one target), but navigation toward a *different* target never touches it.
  */
 
 import {
@@ -35,7 +43,7 @@ import type {StoredRecentRun} from '@vibesys/settings';
 import {type RelayPort, relay} from './relay.js';
 import {StopController} from './stop-controller.js';
 
-/** The page that shows an attached run. */
+/** The page that shows one attached run, in its own window. */
 interface RunPage {
   /** Tell the page its host is reachable again, so its session redials now. */
   wake(): void;
@@ -45,8 +53,11 @@ interface RunPage {
 export interface RunControlDeps {
   /** Lease the one connection to `id`; the caller releases or transfers every lease. */
   connection(id: HostId): Promise<ConnectionLease>;
-  /** Open a new run page for a run on `hostLabel`, replacing the previous one. */
-  openPage(hostLabel: string): RunPage;
+  /** Open (or focus an already-open) window for `runId`, titled from `title`. */
+  openPage(
+    runId: string,
+    title: {readonly hostLabel: string; readonly task: string | null},
+  ): RunPage;
   /** Ask the user; resolves true on "yes". */
   confirm(text: string): Promise<boolean>;
   /** Record a run only while `current` says this selection still owns navigation. */
@@ -75,9 +86,29 @@ interface Binding {
   readonly release: () => PromiseLike<void>;
 }
 
-interface StartIntent {
-  readonly generation: number;
+/** One target (host, instance) a call is navigating toward, from claim to bind or abandonment. */
+interface Target {
+  readonly key: string;
+  readonly id: HostId;
+  readonly instanceId: string;
+}
+
+/**
+ * One call's claim on a target. `cancelled` is set true the moment a newer call claims the same
+ * target (superseding this one), or this call is explicitly withdrawn (`cancelStart`, a failure).
+ * `target` is null until the call's eventual (host, instance) is known: immediate for `attach`,
+ * learned only once `run.start`/`resume` answers for `start`/`resume`.
+ *
+ * `sequence` orders claims by when the user asked (`attach`/`start`/`resume` was called), not by
+ * when each learns its target: a `start` only learns its target once `run.start` answers, which may
+ * land after a later `attach` already claimed the same target. Comparing `sequence` at the moment a
+ * target is claimed, rather than trusting whichever call reaches `#claimTarget` first, keeps
+ * "the newer request wins" true regardless of that race.
+ */
+interface Claim {
   cancelled: boolean;
+  target: Target | null;
+  readonly sequence: number;
 }
 
 /** One welcome document's start request, unique across renderer-document lifetimes. */
@@ -86,14 +117,7 @@ export interface StartIdentity {
   readonly sequence: number;
 }
 
-/** The concrete server the latest navigation intent is trying to select. */
-interface IntendedTarget {
-  readonly generation: number;
-  readonly host: string;
-  readonly instanceId: string;
-}
-
-/** One stale launch waiting to learn whether the newer intent successfully adopts its server. */
+/** One stale launch waiting to learn whether the newer claim successfully adopts its server. */
 interface PendingAdoption {
   readonly result: Promise<boolean>;
   settle(adopted: boolean): void;
@@ -105,15 +129,23 @@ type Resume = {readonly run_id: ResumeRunId} | null;
 export class RunControl {
   readonly #deps: RunControlDeps;
   readonly #stops: StopController;
+  /** Every run bound to a window, by `run_id`. */
+  readonly #bindings = new Map<string, Binding>();
+  /** The claim currently navigating toward (or already bound to) each target, by `targetKey`. */
+  readonly #claims = new Map<string, Claim>();
   /** Starts the welcome view asked for, by document owner and renderer-local sequence. */
-  readonly #starts = new Map<string, Map<number, StartIntent>>();
-  /** The latest attachment-changing intent. Public detach claims a generation too. */
-  #generation = 0;
-  /** Its intended server, once known, including while host lookup or recent persistence waits. */
-  #intended: IntendedTarget | null = null;
-  /** Stale launches held until the matching intended target binds or is abandoned. */
+  readonly #starts = new Map<string, Map<number, Claim>>();
+  /** Stale launches held until the matching claim binds or is abandoned. */
   readonly #pendingAdoptions = new Map<string, PendingAdoption>();
-  #run: Binding | null = null;
+  /**
+   * The most recently bound run, for the single legacy "attached run" the welcome window's title
+   * strip still shows (`ChromeState.attached`). A real multi-run summary is the unified run-registry
+   * dashboard's job (#814/#816), out of scope here; until then this is a deliberate, documented
+   * simplification, not a correctness property of the registry itself.
+   */
+  #lastBoundRunId: string | null = null;
+  /** Orders claims by request time; see `Claim.sequence`. */
+  #nextSequence = 0;
 
   constructor(deps: RunControlDeps) {
     this.#deps = deps;
@@ -143,10 +175,11 @@ export class RunControl {
     });
   }
 
-  /** The attached run, for the title strip. */
+  /** The most recently bound run, for the title strip. */
   attached(): ChromeState['attached'] {
-    const run = this.#run;
-    if (run === null) return null;
+    const runId = this.#lastBoundRunId;
+    const run = runId === null ? undefined : this.#bindings.get(runId);
+    if (run === undefined) return null;
     return {
       host: hostKey(run.id),
       hostLabel: hostLabel(run.id),
@@ -163,20 +196,21 @@ export class RunControl {
 
   /** Attach to registry run `instanceId` on `id`. */
   async attach(id: HostId, instanceId: string, task: string | null = null): Promise<void> {
-    const generation = this.#claim({id, instanceId});
+    const claim: Claim = this.#newClaim();
+    this.#claimTarget(id, instanceId, claim);
     let lease: ConnectionLease | null = null;
     try {
       lease = await this.#deps.connection(id);
       const connection = lease.connection;
-      if (!this.#owns(generation)) return;
+      if (claim.cancelled) return;
       const {listing} = await connection.request({type: 'instances.list'});
-      if (!this.#owns(generation)) return;
+      if (claim.cancelled) return;
       const observation = instanceObservation(listing, instanceId);
       switch (observation.kind) {
         case 'live': {
           const bindingLease = lease;
           lease = null;
-          await this.#bind(generation, id, bindingLease, observation.record, task);
+          await this.#bind(claim, id, bindingLease, observation.record, task);
           break;
         }
         case 'unverified':
@@ -192,7 +226,7 @@ export class RunControl {
           throw new Error(`no live run ${instanceId} on ${hostLabel(id)}`);
       }
     } catch (error) {
-      this.#forgetIntended(generation);
+      this.#forgetClaim(claim);
       throw error;
     } finally {
       await lease?.[Symbol.asyncDispose]();
@@ -210,75 +244,64 @@ export class RunControl {
     args: readonly string[],
     identity: StartIdentity | null = null,
   ): Promise<StartOutcome> {
-    if (identity !== null && this.#startIntent(identity) !== undefined)
+    if (identity !== null && this.#startClaim(identity) !== undefined)
       throw new Error('that start was already asked for');
-    const cancel: StartIntent = {generation: this.#claim(), cancelled: false};
-    if (identity !== null) this.#setStartIntent(identity, cancel);
+    const claim: Claim = this.#newClaim();
+    if (identity !== null) this.#setStartClaim(identity, claim);
     try {
-      return await this.#launch(id, project, task, args, null, cancel);
+      return await this.#launch(id, project, task, args, null, claim);
     } finally {
-      if (identity !== null) this.#deleteStartIntent(identity, cancel);
+      if (identity !== null) this.#deleteStartClaim(identity, claim);
     }
   }
 
   /** Cancel the start named by `identity`; a start that already ended has nothing to cancel. */
   cancelStart(identity: StartIdentity): void {
-    const cancel = this.#startIntent(identity);
-    if (cancel === undefined) return;
-    cancel.cancelled = true;
-    if (this.#owns(cancel.generation)) this.#claim();
+    const claim = this.#startClaim(identity);
+    if (claim === undefined) return;
+    claim.cancelled = true;
+    this.#forgetClaim(claim);
   }
 
   /** Revoke every pending start owned by a renderer document that went away. */
   retireStartOwner(owner: string): void {
     const starts = this.#starts.get(owner);
     if (starts === undefined) return;
-    let ownsNavigation = false;
-    for (const start of starts.values()) {
-      start.cancelled = true;
-      if (this.#owns(start.generation)) ownsNavigation = true;
+    for (const claim of starts.values()) {
+      claim.cancelled = true;
+      this.#forgetClaim(claim);
     }
-    if (ownsNavigation) this.#claim();
   }
 
   /** Resume run `run` of `project` on `id` and attach. */
   async resume(id: HostId, project: string, run: ResumeRunId): Promise<void> {
-    await this.#launch(
-      id,
-      project,
-      null,
-      [],
-      {run_id: run},
-      {
-        generation: this.#claim(),
-        cancelled: false,
-      },
-    );
+    await this.#launch(id, project, null, [], {run_id: run}, this.#newClaim());
   }
 
   /** Stop `instanceId` on `id` after asking. */
   async stop(id: HostId, instanceId: string, force: boolean): Promise<void> {
-    const run = this.#run;
-    const attached = run !== null && run.instanceId === instanceId ? run : null;
-    const label = attached?.task ?? attached?.runId ?? instanceId;
+    const run = this.#bindingFor(id, instanceId);
+    const label = run?.task ?? run?.runId ?? instanceId;
     await this.#stops.request(
       {host: hostKey(id), hostLabel: hostLabel(id), instanceId, label},
       force,
     );
   }
 
-  /** The user asked to retry the attached run's connection (or to sign in again). */
+  /** The user asked to retry the most recently bound run's connection (or to sign in again). */
   retry(): void {
-    this.#run?.connection.dispatch({type: 'user-retry'});
+    const runId = this.#lastBoundRunId;
+    if (runId === null) return;
+    this.#bindings.get(runId)?.connection.dispatch({type: 'user-retry'});
   }
 
   /**
-   * Relay one connection the run page opened to the attached run, over a run channel. Message and
-   * close listener ownership is installed synchronously before this returns.
+   * Relay one connection `runId`'s run page opened, over a run channel. Message and close listener
+   * ownership is installed synchronously before this returns.
    */
-  connect(port: RelayPort): void {
-    const run = this.#run;
-    if (run === null) {
+  connect(port: RelayPort, runId: string): void {
+    const run = this.#bindings.get(runId);
+    if (run === undefined) {
       port.close();
       return;
     }
@@ -286,25 +309,29 @@ export class RunControl {
       try {
         return (await run.connection.openRun(run.instanceId, signal)).stream;
       } catch (error) {
-        if (error instanceof Error && 'reason' in error && error.reason === 'run-gone') {
-          this.#ended(run);
+        if (error instanceof Error && 'reason' in error) {
+          if (error.reason === 'run-gone') this.#ended(run);
+          else if (error.reason === 'capacity') this.#capacityRefused(run, error.message);
         }
         throw error;
       }
     });
   }
 
-  /** End the attached run's page; the run itself keeps going on its host. */
-  detach(): void {
-    this.#claim();
-    this.#releaseBinding();
+  /** End `runId`'s page; the run itself keeps going on its host. Safe when `runId` is not bound. */
+  detach(runId: string): void {
+    this.#releaseBinding(runId);
   }
 
-  /** Drop the current page without changing which in-flight navigation intent owns the window. */
-  #releaseBinding(): void {
-    const run = this.#run;
-    if (run === null) return;
-    this.#run = null;
+  /** Drop `runId`'s binding, without disturbing any other binding or in-flight navigation. */
+  #releaseBinding(runId: string): void {
+    const run = this.#bindings.get(runId);
+    if (run === undefined) return;
+    this.#bindings.delete(runId);
+    if (this.#lastBoundRunId === runId) this.#lastBoundRunId = null;
+    const key = targetKey(run.id, run.instanceId);
+    if (this.#claims.get(key) !== undefined) this.#claims.delete(key);
+    this.#settleAdoption(run.id, run.instanceId, false);
     let retirement: PromiseLike<void>;
     try {
       retirement = run.release();
@@ -336,12 +363,12 @@ export class RunControl {
     task: string | null,
     args: readonly string[],
     resume: Resume,
-    intent: StartIntent,
+    claim: Claim,
   ): Promise<StartOutcome> {
     let lease: ConnectionLease | null = await this.#deps.connection(id);
     try {
       const connection = lease.connection;
-      if (!this.#active(intent)) return 'cancelled';
+      if (claim.cancelled) return 'cancelled';
       const {launch} = await connection.request({
         type: 'run.start',
         project,
@@ -359,12 +386,12 @@ export class RunControl {
       } else {
         record = launch;
       }
-      if (!this.#active(intent)) {
+      if (claim.cancelled) {
         // Stop only the run this launch created, never one that was already live.
-        if (!alreadyLive) await this.#stopSuperseded(id, record, intent.cancelled);
+        if (!alreadyLive) await this.#stopSuperseded(id, record, true);
         return 'cancelled';
       }
-      this.#intend(intent.generation, id, record.id);
+      this.#claimTarget(id, record.id, claim);
       this.#deps.log(
         alreadyLive
           ? `the run is already live as ${record.id}; attaching to it`
@@ -372,14 +399,14 @@ export class RunControl {
       );
       const bindingLease = lease;
       lease = null;
-      const bound = await this.#bind(intent.generation, id, bindingLease, record, task);
+      const bound = await this.#bind(claim, id, bindingLease, record, task);
       if (!bound) {
-        if (!alreadyLive) await this.#stopSuperseded(id, record, intent.cancelled);
+        if (!alreadyLive) await this.#stopSuperseded(id, record, claim.cancelled);
         return 'cancelled';
       }
       return 'started';
     } catch (error) {
-      this.#forgetIntended(intent.generation);
+      this.#forgetClaim(claim);
       throw error;
     } finally {
       await lease?.[Symbol.asyncDispose]();
@@ -422,28 +449,28 @@ export class RunControl {
     }
   }
 
-  /** True when the latest intent targets this server, whether it is in flight or already bound. */
+  /** True when a target is bound, or a live claim is still navigating toward it. */
   #isTargeted(id: HostId, instanceId: string): boolean {
     return this.#isAttached(id, instanceId) || this.#isIntended(id, instanceId);
   }
 
   #isAttached(id: HostId, instanceId: string): boolean {
-    const run = this.#run;
-    return run !== null && hostKey(run.id) === hostKey(id) && run.instanceId === instanceId;
+    return this.#bindingFor(id, instanceId) !== undefined;
+  }
+
+  #bindingFor(id: HostId, instanceId: string): Binding | undefined {
+    for (const binding of this.#bindings.values()) {
+      if (binding.instanceId === instanceId && hostKey(binding.id) === hostKey(id)) return binding;
+    }
+    return undefined;
   }
 
   #isIntended(id: HostId, instanceId: string): boolean {
-    const host = hostKey(id);
-    const intended = this.#intended;
-    return (
-      intended !== null &&
-      intended.generation === this.#generation &&
-      intended.host === host &&
-      intended.instanceId === instanceId
-    );
+    const claim = this.#claims.get(targetKey(id, instanceId));
+    return claim !== undefined && !claim.cancelled;
   }
 
-  /** Wait for the current matching intent to bind or abandon this target. */
+  /** Wait for the current matching claim to bind or abandon this target. */
   #adoption(id: HostId, instanceId: string): Promise<boolean> {
     if (this.#isAttached(id, instanceId)) return Promise.resolve(true);
     if (!this.#isIntended(id, instanceId)) return Promise.resolve(false);
@@ -470,12 +497,13 @@ export class RunControl {
   }
 
   async #bind(
-    generation: number,
+    claim: Claim,
     id: HostId,
     lease: ConnectionLease,
     record: LiveInstanceRecord,
     task: string | null,
   ): Promise<boolean> {
+    const runId = record.run_id;
     const connection = lease.connection;
     const subscriptions: (() => void)[] = [];
     const pendingObservations: (() => void)[] = [];
@@ -507,8 +535,8 @@ export class RunControl {
       return leaseRelease;
     };
     try {
-      if (!this.#owns(generation)) return false;
-      await this.#remember(generation, {
+      if (claim.cancelled) return false;
+      await this.#remember(claim, {
         host: hostKey(id),
         project: record.project_root,
         task,
@@ -516,13 +544,13 @@ export class RunControl {
         instanceId: record.id,
         attachedAt: this.#deps.now(),
       });
-      if (!this.#owns(generation)) return false;
-      this.#releaseBinding();
-      page = this.#deps.openPage(hostLabel(id));
+      if (claim.cancelled) return false;
+      this.#releaseBinding(runId);
+      page = this.#deps.openPage(runId, {hostLabel: hostLabel(id), task});
       const provisional: Binding = {
         id,
         instanceId: record.id,
-        runId: record.run_id,
+        runId,
         project: record.project_root,
         task,
         connection,
@@ -546,100 +574,101 @@ export class RunControl {
           });
         }),
       );
-      this.#run = provisional;
+      this.#bindings.set(runId, provisional);
+      this.#lastBoundRunId = runId;
       observationPhase = 'live';
       for (const observation of pendingObservations.splice(0)) observation();
       this.#deps.changed();
-      if (!this.#owns(generation) || this.#run !== provisional) return false;
+      if (claim.cancelled || this.#bindings.get(runId) !== provisional) return false;
       installed = true;
       this.#settleAdoption(id, record.id, true);
       return true;
     } finally {
       if (!installed) {
         observationPhase = 'closed';
-        if (binding !== null && this.#run === binding) this.#run = null;
+        if (binding !== null && this.#bindings.get(runId) === binding) this.#bindings.delete(runId);
         try {
           leaseRelease = release();
         } finally {
           closePage();
-          this.#forgetIntended(generation);
+          this.#forgetClaim(claim);
         }
         await leaseRelease;
       }
     }
   }
 
-  async #remember(generation: number, run: StoredRecentRun): Promise<void> {
+  async #remember(claim: Claim, run: StoredRecentRun): Promise<void> {
     try {
-      await this.#deps.remember(run, () => this.#owns(generation));
+      await this.#deps.remember(run, () => !claim.cancelled);
     } catch (error) {
       this.#deps.log(`could not remember the run: ${(error as Error).message}`);
     }
   }
 
-  #claim(target: {readonly id: HostId; readonly instanceId: string} | null = null): number {
-    const previous = this.#intended;
-    this.#generation += 1;
-    this.#intended =
-      target === null
-        ? null
-        : {
-            generation: this.#generation,
-            host: hostKey(target.id),
-            instanceId: target.instanceId,
-          };
-    if (
-      previous !== null &&
-      (this.#intended === null ||
-        previous.host !== this.#intended.host ||
-        previous.instanceId !== this.#intended.instanceId)
-    ) {
-      this.#settleAdoption(hostFromKey(previous.host), previous.instanceId, false);
+  /** A fresh claim, sequenced by request time so a later race can tell who asked more recently. */
+  #newClaim(): Claim {
+    return {cancelled: false, target: null, sequence: this.#nextSequence++};
+  }
+
+  /**
+   * Register `claim` as the live navigation toward (`id`, `instanceId`), superseding whatever claim
+   * held that exact target before (an older in-flight call, or an already-bound run at that same
+   * target) — never a claim toward any other target.
+   *
+   * The claim already holding the target may have reached `#claimTarget` after `claim` did (a
+   * `start`/`resume` only learns its target once `run.start` answers, which can land after a later
+   * `attach` already claimed it): comparing `sequence`, not arrival order, is what keeps the claim
+   * from the more recent request the winner either way.
+   */
+  #claimTarget(id: HostId, instanceId: string, claim: Claim): void {
+    if (claim.cancelled) return;
+    const key = targetKey(id, instanceId);
+    const previous = this.#claims.get(key);
+    if (previous !== undefined && previous !== claim && previous.sequence > claim.sequence) {
+      // The claim already there asked more recently than this one: this call lost the race before
+      // it ever held the target, so it is the one superseded, not the other way around.
+      claim.cancelled = true;
+      return;
     }
-    return this.#generation;
+    claim.target = {key, id, instanceId};
+    this.#claims.set(key, claim);
+    if (previous !== undefined && previous !== claim) {
+      previous.cancelled = true;
+      this.#settleAdoption(id, instanceId, false);
+    }
   }
 
-  /** Record the concrete server discovered by the still-current launch intent. */
-  #intend(generation: number, id: HostId, instanceId: string): void {
-    if (!this.#owns(generation)) return;
-    this.#intended = {generation, host: hostKey(id), instanceId};
+  /** A claim that failed, was cancelled, or lost its race no longer protects its target. */
+  #forgetClaim(claim: Claim): void {
+    const target = claim.target;
+    if (target === null) return;
+    if (this.#claims.get(target.key) !== claim) return;
+    this.#claims.delete(target.key);
+    this.#settleAdoption(target.id, target.instanceId, false);
   }
 
-  /** A failed current attach no longer protects a target it could not select. */
-  #forgetIntended(generation: number): void {
-    const intended = this.#intended;
-    if (intended?.generation !== generation) return;
-    this.#intended = null;
-    this.#settleAdoption(hostFromKey(intended.host), intended.instanceId, false);
-  }
-
-  #owns(generation: number): boolean {
-    return this.#generation === generation;
-  }
-
-  #active(intent: StartIntent): boolean {
-    return !intent.cancelled && this.#owns(intent.generation);
-  }
-
-  #startIntent(identity: StartIdentity): StartIntent | undefined {
+  #startClaim(identity: StartIdentity): Claim | undefined {
     return this.#starts.get(identity.owner)?.get(identity.sequence);
   }
 
-  #setStartIntent(identity: StartIdentity, intent: StartIntent): void {
-    const starts = this.#starts.get(identity.owner) ?? new Map<number, StartIntent>();
-    starts.set(identity.sequence, intent);
+  #setStartClaim(identity: StartIdentity, claim: Claim): void {
+    const starts = this.#starts.get(identity.owner) ?? new Map<number, Claim>();
+    starts.set(identity.sequence, claim);
     this.#starts.set(identity.owner, starts);
   }
 
-  #deleteStartIntent(identity: StartIdentity, intent: StartIntent): void {
+  #deleteStartClaim(identity: StartIdentity, claim: Claim): void {
     const starts = this.#starts.get(identity.owner);
-    if (starts?.get(identity.sequence) !== intent) return;
+    if (starts?.get(identity.sequence) !== claim) return;
     starts.delete(identity.sequence);
     if (starts.size === 0) this.#starts.delete(identity.owner);
   }
 
   #phase(binding: Binding, phase: Phase): void {
-    if (this.#run !== binding || binding.status.kind === 'run-ended') return;
+    if (this.#bindings.get(binding.runId) !== binding || binding.status.kind === 'run-ended') {
+      return;
+    }
     const recovered = phase.kind === 'ready' && binding.status.kind !== 'connected';
     binding.status = connectionStatus(phase);
     // The connection recovered: the page's own session redials now.
@@ -650,7 +679,7 @@ export class RunControl {
   #listing(binding: Binding, listing: InstanceList): void {
     const host = hostKey(binding.id);
     this.#stops.observeListing(host, listing);
-    if (this.#run !== binding) return;
+    if (this.#bindings.get(binding.runId) !== binding) return;
     const observation = instanceObservation(listing, binding.instanceId);
     switch (observation.kind) {
       case 'live':
@@ -669,9 +698,20 @@ export class RunControl {
   }
 
   #ended(binding: Binding): void {
-    if (this.#run !== binding || binding.status.kind === 'run-ended') return;
+    if (this.#bindings.get(binding.runId) !== binding || binding.status.kind === 'run-ended') {
+      return;
+    }
     binding.status = {kind: 'run-ended'};
     this.#stops.runEnded(hostKey(binding.id), binding.instanceId);
+    this.#deps.changed();
+  }
+
+  /** This window's own dial to its run was refused: the host's channel ceiling is spent. */
+  #capacityRefused(binding: Binding, detail: string): void {
+    if (this.#bindings.get(binding.runId) !== binding || binding.status.kind === 'run-ended') {
+      return;
+    }
+    binding.status = {kind: 'capacity', detail};
     this.#deps.changed();
   }
 }

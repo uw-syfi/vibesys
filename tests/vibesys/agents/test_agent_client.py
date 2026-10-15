@@ -27,6 +27,7 @@ from vs_agent.api import (
     AgentEventKind,
     AgentOutputSchemaError,
     AgentSessionKey,
+    AgentTurnTimeoutError,
     AgentUsage,
     SessionResumeError,
     SessionScope,
@@ -852,6 +853,39 @@ def test_invoke_builds_session_and_turn_contracts_and_records_usage(tmp_path: Pa
         "duration_ms": 30,
     }
     assert {key: record[key] for key in expected} == expected
+
+
+def test_a_timed_out_turn_records_usage_received_before_the_deadline(tmp_path: Path) -> None:
+    usage = AgentUsage(input_tokens=12, output_tokens=4, total_cost_usd=0.02)
+    timeout = AgentTurnTimeoutError(45)
+    # The session boundary has already attached provider evidence to this typed failure.
+    timeout.usage = usage
+    session = _FakeSession(
+        results=[],
+        error=timeout,
+    )
+    client = AgentClient(
+        _FakeLauncher([session]),
+        provider="codex",
+        log_dir=tmp_path,
+        event_sink=NULL_AGENT_EVENT_SINK,
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+
+    with pytest.raises(AgentTurnTimeoutError):
+        client.invoke_text(
+            kind="implementer",
+            workspace=tmp_path,
+            system_prompt="system",
+            user_prompt="work",
+            round_label="round-1",
+        )
+
+    record = json.loads((tmp_path / "usage.jsonl").read_text())
+    assert record["input_tokens"] == 12
+    assert record["output_tokens"] == 4
+    assert record["total_cost_usd"] == 0.02
 
 
 def test_a_skill_load_is_rendered_on_the_diagnostic_channel(tmp_path: Path) -> None:

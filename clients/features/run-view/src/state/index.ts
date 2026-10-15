@@ -8,3 +8,4 @@ export {
   PAGE_CONNECTION_BANNER_COPY,
   STREAM_BANNER_COPY,
 } from './banners.js';
+export {type QuotaBanner, quotaBanner} from './quota-banner.js';

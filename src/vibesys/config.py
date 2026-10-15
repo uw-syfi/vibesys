@@ -276,6 +276,25 @@ class EvaluationCfg(_Strict):
         gt=0,
         description="How often the core polls a running evaluation job, in seconds.",
     )
+    queue_wait_budget_seconds: int = Field(
+        default=43_200,
+        strict=True,
+        gt=0,
+        description=(
+            "How long one measurement's job may wait in the executor's queue (Slurm "
+            "PENDING) before the run gives the measurement up as queue-budget-spent. "
+            "Queue time does not count against the measurement's own time limit."
+        ),
+    )
+    queue_notice_interval_seconds: int = Field(
+        default=600,
+        strict=True,
+        gt=0,
+        description=(
+            "How often the run reports a measurement job that is still queued, with the "
+            "executor's pending reason, in seconds of queue time."
+        ),
+    )
     observe_backoff_cap_seconds: int = Field(
         default=120,
         strict=True,

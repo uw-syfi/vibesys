@@ -65,7 +65,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "server_stalled",
         "client_stalled",
         "server_failed",
-        "client_failed"
+        "client_failed",
+        "server_unresponsive"
       ],
       "title": "ChannelEndOutcome",
       "type": "string"

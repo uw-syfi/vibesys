@@ -528,6 +528,7 @@ const OUTCOME_CAUSES: Readonly<Record<ChannelEndOutcome, Cause | null>> = {
   client_stalled: 'link',
   server_failed: 'link',
   client_failed: 'link',
+  server_unresponsive: 'link',
 };
 
 /** Why a relayed channel ended, from its `ChannelEnd` line; null for an ordinary end. */

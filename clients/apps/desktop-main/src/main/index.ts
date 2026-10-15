@@ -104,7 +104,7 @@ async function openWindow(
   });
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),
-    openPage: label => window.openRunPage(label),
+    openPage: (runId, title) => window.openRunPage(runId, title),
     confirm: text => window.confirmStop(text),
     remember: (run, current) => settings.updateRecent(recent => remember(recent, run), current),
     changed,
@@ -113,9 +113,9 @@ async function openWindow(
   });
   const window = new AppWindow({
     log,
-    connect: port => runs.connect(port),
-    closed: () => {
-      runs.detach();
+    connect: (port, runId) => runs.connect(port, runId),
+    closed: runId => {
+      runs.detach(runId);
       changed();
     },
     fatal,

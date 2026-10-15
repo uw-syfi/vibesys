@@ -342,6 +342,7 @@ scenarios through a real helper's run channel to hold it to that.
 | 8 | `client_stalled` | A write toward stdout made no progress within the write deadline. |
 | 9 | `server_failed` | A socket read or write failed with an error other than a close. |
 | 10 | `client_failed` | A stdin read or stdout write failed with an error other than a close. |
+| 11 | `server_unresponsive` | The socket sent nothing within the read deadline: the server is wedged. |
 
 Status 1 stays an uncaught error and 2 a usage error. So a client can tell "the run is gone" (4)
 from "the transport is broken" (5, 6, and the stalls) from "the server ended this connection" (3)
@@ -361,14 +362,28 @@ socket read reaches end of stream, after relaying that frame.
 | --- | --- | --- |
 | `write_deadline_seconds` | 40s | How long one write toward either the server or stdout may make no progress |
 | `connect_timeout_seconds` | 5s | How long connecting to the socket may take |
+| `read_deadline_seconds` | 7d | How long the socket may send nothing before the relay ends |
 
 The write deadline is the hop's answer to the Unix path having none. A half-open ssh hop (a slept
 laptop, a partition) stops draining the channel; once ssh's window and the pipe fill, the relay's
 stdout write stops progressing, and after 40s the relay closes the socket and exits with
 `client_stalled`. The server then sees an ordinary client FIN, so a dead remote client pins server
 resources for no longer than the WebSocket gateway's `write_deadline_seconds`, which has the same
-value. A hop that is idle (no frame to write) is reaped by ssh's own liveness instead: when sshd
-closes the channel the relay reads end of stream on stdin.
+value. The client-facing hop is idle-reaped by ssh's own liveness instead: when sshd closes the
+channel the relay reads end of stream on stdin.
+
+The server-facing hop (the Unix socket) has no such liveness: `AF_UNIX` has no keepalive, so a
+wedged server that neither sends nor closes would hang the relay forever without its own bound. The
+read deadline is that bound, checked only against the socket's read (not stdin's, which ssh already
+reaps): after `read_deadline_seconds` of nothing read from the socket, the relay exits with
+`server_unresponsive`. A provider capacity pause can leave the socket legitimately silent for
+*unbounded* time: `[agent.quota]`'s shipped default policy (`pause`) waits for the operator with no
+bound at all, and the self-resuming policies wait without a bound too unless `wait_seconds` is set
+(`vibesys.config.QuotaCfg`). No finite deadline is "longer than every legitimate wait" the way the
+write deadline is, so this one instead draws the line at a week: long enough that an operator who
+left a run paused past it is unlikely to still be waiting on this particular connection, short
+enough to eventually recover a genuinely wedged server. Tearing down a relay that outlives it only
+ends one viewer's connection, not the run itself.
 
 ## The conformance corpus
 

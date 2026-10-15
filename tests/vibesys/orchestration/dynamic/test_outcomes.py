@@ -85,6 +85,9 @@ def _failed_facts() -> dict[FailureReason, st.SearchStrategy[Failed]]:
 
     return {
         FailureReason.TIMED_OUT: of(FailureReason.TIMED_OUT, limit_at=st.floats(0, 1e6)),
+        FailureReason.QUEUE_BUDGET_SPENT: of(
+            FailureReason.QUEUE_BUDGET_SPENT, limit_at=st.floats(0, 1e6)
+        ),
         FailureReason.WORKSPACE_CLOSED: of(
             FailureReason.WORKSPACE_CLOSED, watch=st.just(WhileOpen(workspace=ref))
         ),

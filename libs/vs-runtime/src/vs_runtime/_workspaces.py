@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
     from vs_runtime._agent_execution import AgentExecutionScope
     from vs_runtime._trusted_evaluation import TrustedAccuracyResult, TrustedBenchmarkResult
+    from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_runtime._workspace_receipts import BaselineEntry, RootBaselineDrift
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
     from vs_runtime.contracts import CandidateWorkspace, Workspace
@@ -105,7 +106,13 @@ class WorkspaceResource(Protocol):
         required_metrics: frozenset[str],
     ) -> TrustedBenchmarkResult: ...
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        """Discard: release what this workspace owns, a candidate's content included."""
+        ...
+
+    def detach(self) -> None:
+        """Release this host's live handles and keep the content for ``reattach_candidate``."""
+        ...
 
 
 class WorkspaceResourceProvider(Protocol):
@@ -123,6 +130,14 @@ class WorkspaceResourceProvider(Protocol):
         """Reopen a candidate worktree a stopped host left on disk, keeping its content."""
         ...
 
+    def leftover_candidates(self) -> tuple[str, ...]:
+        """The workspace IDs of the candidate worktrees on disk, live or left by a stopped host."""
+        ...
+
+    def remove_leftover(self, workspace_id: str, /) -> None:
+        """Remove a candidate worktree no live handle owns, with its Git registration."""
+        ...
+
 
 class OwnedWorkspaces(Workspaces, Protocol):
     """Composition lifetime for a runtime-owned workspace collection."""
@@ -132,6 +147,14 @@ class OwnedWorkspaces(Workspaces, Protocol):
 
     async def close(self) -> None:
         """Release workspaces in dependency order."""
+        ...
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        """Decide what outlives this host from what core references, as *holds* reads it."""
+        ...
+
+    async def release_unheld(self) -> None:
+        """Discard every candidate worktree on disk that core no longer references."""
         ...
 
 
@@ -356,6 +379,10 @@ class RuntimeWorkspaces:
         self._lifecycle_lock = asyncio.Lock()
         self._candidate_locks: dict[str, asyncio.Lock] = {}
         self._candidates: dict[str, RuntimeCandidateWorkspace] = {}
+        self._members: set[str] = set()
+        """Member-keyed candidates: core may hold them, so a host stop may keep them on disk."""
+        self._holds: Callable[[], WorkspaceHolds] | None = None
+        """What core references now; ``None`` until a run follows core, so members are kept."""
         self._closed = False
         self._close = AsyncCloseOnce()
         self._root_release = AsyncCloseOnce()
@@ -417,6 +444,8 @@ class RuntimeWorkspaces:
                     else:
                         await run_sync(self._runner, task.result().close)
                     raise
+                if member_id is not None:
+                    self._members.add(workspace_id)
                 return self._register(workspace_id, resource)
 
     def _open_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource:
@@ -461,6 +490,7 @@ class RuntimeWorkspaces:
                 )
                 if resource is None:
                     return None
+                self._members.add(workspace_id)
                 return self._register(workspace_id, resource)
 
     def live_candidate(self, member_id: str) -> RuntimeCandidateWorkspace | None:
@@ -570,10 +600,67 @@ class RuntimeWorkspaces:
                     # or the run's close tries again. Callers read the failure as a group.
                     message = "candidate workspace cleanup failed"
                     raise ExceptionGroup(message, [error]) from error
-                self._candidates.pop(resource.id or "", None)
-                self._candidate_locks.pop(resource.id or "", None)
-                candidate._closed = True  # noqa: SLF001  # lint-waiver: LW-228417 [SLF001]; the owning collection terminates its handle after cleanup.
+                self._forget(resource, candidate)
         return proof
+
+    async def _detach(self, candidate: RuntimeCandidateWorkspace) -> None:
+        """Release a member's live handles at a host stop and keep its worktree on disk.
+
+        Core still holds a member's workspace (its attempt is open, its access may be unjudged),
+        so the stop of this host is not its release: the next host reattaches it with its work.
+        Only a discard, which core asks for when it releases the attempt, removes it.
+        """
+        async with self._lifecycle_lock:
+            resource = self.resource_for(candidate)
+            lock = self._candidate_locks[resource.id or ""]
+            async with lock, self._root_lock:
+                await run_sync(self._runner, resource.detach)
+                self._forget(resource, candidate)
+
+    def _forget(self, resource: WorkspaceResource, candidate: RuntimeCandidateWorkspace) -> None:
+        """Drop a released or detached candidate and end its handle."""
+        self._candidates.pop(resource.id or "", None)
+        self._candidate_locks.pop(resource.id or "", None)
+        self._members.discard(resource.id or "")
+        candidate._closed = True  # noqa: SLF001  # lint-waiver: LW-228417 [SLF001]; the owning collection terminates its handle after cleanup.
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        """Decide what outlives this host from what core references, as *holds* reads it.
+
+        From now on :meth:`close` keeps on disk only the member candidates core still holds
+        (none once the run's result is final) and discards the rest with their worktrees.
+        """
+        self._holds = holds
+
+    def _kept(self) -> frozenset[str] | None:
+        """The candidate workspace IDs a host stop keeps; ``None`` while core is not followed."""
+        if self._holds is None:
+            return None
+        return self._holds().workspace_ids()
+
+    async def release_unheld(self) -> None:
+        """Discard every candidate worktree on disk that core no longer references.
+
+        A stopped host left these behind: members of attempts that have since ended, a
+        member no later host reattached, scratch candidates of a host that died. Live
+        candidates are this host's and stay. Does nothing until :meth:`follow` is called.
+        """
+        async with self._lifecycle_lock, self._root_lock:
+            steps = ReleaseStack()
+            await self._sweep(steps)
+            await run_sync(self._runner, steps.close)
+
+    async def _sweep(self, steps: ReleaseStack) -> None:
+        """Add to *steps* a removal of each worktree on disk neither core nor this host holds.
+
+        The caller holds the root lock: a removal changes the root's worktree registrations.
+        """
+        kept = self._kept()
+        if kept is None:
+            return
+        for workspace_id in await run_sync(self._runner, self._resources.leftover_candidates):
+            if workspace_id not in kept and workspace_id not in self._candidates:
+                steps.callback(self._resources.remove_leftover, workspace_id)
 
     def begin_close(self) -> None:
         """Reject new work and cancel in-flight trusted evaluations before teardown."""
@@ -584,7 +671,13 @@ class RuntimeWorkspaces:
             evaluation.cancel()
 
     async def close(self) -> None:
-        """Close candidate pairs, then the root resource."""
+        """Close candidates by what core holds, then the root resource.
+
+        A member candidate core still holds is detached: its worktree stays for the next
+        host. Every other candidate is discarded, and so is every worktree on disk core no
+        longer references, so a run whose result is final leaves no candidate behind.
+        Before :meth:`follow`, core's state is unknown and every member candidate is kept.
+        """
         self.begin_close()
         await self._close.run(self._close_once)
 
@@ -592,9 +685,13 @@ class RuntimeWorkspaces:
         errors: list[BaseException] = []
         async with self._lifecycle_lock:
             candidates = tuple(self._candidates.values())
+        kept = self._kept()
         for candidate in reversed(candidates):
             try:
-                await candidate.discard()
+                if candidate.id in self._members and (kept is None or candidate.id in kept):
+                    await self._detach(candidate)
+                else:
+                    await candidate.discard()
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228410 [BLE001]; run cleanup attempts every candidate in reverse creation order.
                 errors.append(error)
         self.root._closed = True  # noqa: SLF001  # lint-waiver: LW-228418 [SLF001]; collection close terminates its root handle with the run.
@@ -612,4 +709,6 @@ class RuntimeWorkspaces:
         steps = ReleaseStack()
         steps.callback(self.root._resource.close)  # noqa: SLF001  # lint-waiver: LW-228420 [SLF001]; collection close releases the root resource after all candidates.
         async with self._root_lock:
+            # Worktrees core no longer references go before the root that registers them.
+            await self._sweep(steps)
             return await run_sync(self._runner, steps.close)

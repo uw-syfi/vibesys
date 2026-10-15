@@ -870,6 +870,7 @@ describe('HostConnection over the FakeHelper', () => {
     client_stalled: 'link',
     server_failed: 'link',
     client_failed: 'link',
+    server_unresponsive: 'link',
   };
   for (const [outcome, cause] of Object.entries(outcomes) as [ChannelEndOutcome, Cause | null][]) {
     test(`a relay that ends ${outcome} ends its stream ${cause ?? 'normally'}`, async () => {

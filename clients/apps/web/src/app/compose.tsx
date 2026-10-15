@@ -1,10 +1,15 @@
-/**
- * The run page's composition: it builds the feature stores, subscribes React to them, and renders
- * the features' presentational views with their state and dispatchers. Cross-feature flows are
- * wired here (replayed events fold into the run view; a connected gateway goes to the page owner).
- * Wiring only; the entries (`main.tsx`, `desktop-main.tsx`) decide which page to compose.
- */
-
+/** The browser and desktop run pages compose features through their public views and stores. */
+import {
+  CampaignDashboard,
+  createCampaignReplayStore,
+  createLiveCampaignStore,
+} from '@vibesys/feature-campaign/renderer';
+import {
+  type CampaignRecord,
+  type CampaignStream,
+  webSessionCampaignStream,
+} from '@vibesys/feature-campaign/state';
+import {ConversationPanel} from '@vibesys/feature-conversation/renderer';
 import {
   createGatewayConnectStore,
   type GatewayBootstrapTarget,
@@ -13,33 +18,42 @@ import {
   type GatewayConnectState,
   GatewayForm,
 } from '@vibesys/feature-gateway-connect/renderer';
-import {createReplayStore} from '@vibesys/feature-replay/renderer';
-import {type ReplayAction, type ReplayState, replayFailure} from '@vibesys/feature-replay/state';
 import {RunPage} from '@vibesys/feature-run-view/renderer';
-import {createRunStore, type RunStore, type WebSession} from '@vibesys/run-session';
+import type {RunStore, WebSession} from '@vibesys/run-session';
+import {hasRunEnded} from '@vibesys/run-state';
 import type {Store} from '@vibesys/store';
-import type {JSX, ReactNode} from 'react';
-import {useSyncExternalStore} from 'react';
-import {bootstrapGateway, fetchReplayFixture} from '../platform/backend.js';
+import {Button, Dialog} from '@vibesys/ui';
+import {type JSX, type ReactNode, useEffect, useState, useSyncExternalStore} from 'react';
+import {bootstrapGateway, fetchCampaignFixture} from '../platform/backend.js';
 import type {WebThemeController} from './theme.js';
 import {WebThemePicker} from './theme-picker.js';
+import {useNow} from './use-now.js';
+import '@vibesys/ui/tokens.css';
 // Each feature styles its own views; the page frame is the entry's `styles.css`.
 import '@vibesys/feature-gateway-connect/styles.css';
 import '@vibesys/feature-run-view/styles.css';
+import '@vibesys/feature-campaign/styles.css';
+import '@vibesys/feature-conversation/styles.css';
 
 function useStore<S>(store: Pick<Store<S, unknown>, 'getState' | 'subscribe'>): S {
   return useSyncExternalStore(store.subscribe, store.getState, store.getState);
 }
 
 const NOTHING = (): void => undefined;
+const SYSTEM_CLOCK = (): number => Date.now();
+type CampaignStore = ReturnType<typeof createCampaignReplayStore>;
+type GatewayStore = Store<GatewayConnectState, GatewayConnectAction>;
+
+/** The page owner closes its stores before replacing the view or leaving the document. */
+export interface PreviewPage {
+  readonly view: JSX.Element;
+  close(): void;
+}
 
 export interface DemoAppOptions {
-  /** The capability-free page URL a pasted capability is resolved against. */
   readonly page: string;
-  /** Report an authenticated target while its credential still exists in this document. */
   readonly onGatewayConnected: (connection: GatewayConnection) => void;
   readonly initialGatewayError?: string | null;
-  /** Begin this already-validated launch without delaying the first render. */
   readonly initialGatewayTarget?: GatewayBootstrapTarget | null;
   /** The page-owned preference survives replacement of replay and live run surfaces. */
   readonly theme: WebThemeController;
@@ -47,15 +61,15 @@ export interface DemoAppOptions {
 
 export interface DemoAppServices {
   readonly bootstrap: (capabilityUrl: string, signal: AbortSignal) => Promise<string>;
-  readonly loadReplay: typeof fetchReplayFixture;
+  readonly loadCampaign: (signal: AbortSignal) => Promise<CampaignRecord>;
 }
 
 const DEFAULT_DEMO_SERVICES: DemoAppServices = {
   bootstrap: (capabilityUrl, signal) => bootstrapGateway(capabilityUrl, {signal}),
-  loadReplay: fetchReplayFixture,
+  loadCampaign: fetchCampaignFixture,
 };
 
-/** The replay demo, with the form that switches the page to a live gateway. */
+/** The campaign preview, retaining the current gateway bootstrap and retry behavior. */
 export function createDemoApp(
   {
     page,
@@ -65,55 +79,183 @@ export function createDemoApp(
     theme,
   }: DemoAppOptions,
   services: DemoAppServices = DEFAULT_DEMO_SERVICES,
-): JSX.Element {
-  const run = createRunStore();
-  const replay = createReplayStore(
-    events => run.dispatch({type: 'events', events}),
-    services.loadReplay,
-  );
+): PreviewPage {
+  const campaign = createCampaignReplayStore(signal => services.loadCampaign(signal));
   const gateway = createGatewayConnectStore({
     page,
     initialError: initialGatewayError,
     initialTarget: initialGatewayTarget,
-    onConnected: onGatewayConnected,
+    onConnected: connection => {
+      campaign.close();
+      onGatewayConnected(connection);
+    },
     bootstrap: services.bootstrap,
   });
-  replay.dispatch({type: 'load'});
-  return (
-    <WebAppShell theme={theme}>
-      <Demo run={run} replay={replay} gateway={gateway} />
-    </WebAppShell>
-  );
+  campaign.dispatch({type: 'load'});
+  return {
+    view: (
+      <WebAppShell theme={theme}>
+        <Demo
+          campaign={campaign}
+          gateway={gateway}
+          initialOpen={initialGatewayError !== null || initialGatewayTarget !== null}
+        />
+      </WebAppShell>
+    ),
+    close: () => {
+      gateway.dispatch({type: 'cancel'});
+      campaign.close();
+    },
+  };
 }
 
 function Demo({
-  run,
-  replay,
+  campaign,
   gateway,
+  initialOpen,
 }: {
-  readonly run: RunStore;
-  readonly replay: Store<ReplayState, ReplayAction>;
-  readonly gateway: Store<GatewayConnectState, GatewayConnectAction>;
+  readonly campaign: CampaignStore;
+  readonly gateway: GatewayStore;
+  readonly initialOpen: boolean;
 }): JSX.Element {
-  const iterations = useSyncExternalStore(run.subscribe, run.getIterations, run.getIterations);
+  const [open, setOpen] = useState(initialOpen);
+  const state = useStore(gateway);
+  const dismiss = (): void => {
+    if (state.kind === 'connecting') gateway.dispatch({type: 'cancel'});
+    setOpen(false);
+  };
   return (
     <>
-      <GatewayForm state={useStore(gateway)} send={gateway.dispatch} />
-      <RunPage
-        run={useStore(run)}
-        iterations={iterations}
-        session={null}
-        replayFailure={replayFailure(useStore(replay))}
-        onReattach={NOTHING}
-        onReconnectControls={NOTHING}
-        onRetryReplay={() => replay.dispatch({type: 'load'})}
-        onCommand={null}
+      <Campaign
+        store={campaign}
+        previewLabel="Preview"
+        headerAction={
+          <Button id="gateway-connect-trigger" onClick={() => setOpen(true)}>
+            Connect
+          </Button>
+        }
       />
+      <Dialog
+        open={open}
+        label="Connect to a run"
+        dismiss={dismiss}
+        focusFallbackId="gateway-connect-trigger"
+      >
+        <div className="gateway-dialog">
+          <header>
+            <h2>Connect to a run</h2>
+            <Button onClick={dismiss} aria-label="Close gateway connection">
+              ×
+            </Button>
+          </header>
+          <p>Paste a gateway capability URL to open its run in this viewer.</p>
+          <GatewayForm state={state} send={gateway.dispatch} />
+        </div>
+      </Dialog>
     </>
   );
 }
 
-/** The live page over `session`, which this starts. */
+/** Loading/error chrome around `CampaignDashboard`, by which of its three sources is live: a
+ * fixture replay ('Preview'), the dev-only fixture-replayed-as-a-stream path ('Stream preview'),
+ * or (`undefined`) a real desktop run's own live campaign stream. */
+interface CampaignChrome {
+  readonly testid: 'replay-banner' | 'campaign-stream-banner' | 'live-campaign-banner';
+  readonly ariaLabel: string;
+  readonly errorPrefix: string;
+  readonly loadFailedCopy: string;
+  readonly waitingCopy: string;
+  readonly showRetry: boolean;
+}
+
+function campaignChrome(previewLabel: 'Preview' | 'Stream preview' | undefined): CampaignChrome {
+  if (previewLabel === 'Preview') {
+    return {
+      testid: 'replay-banner',
+      ariaLabel: 'Replay status',
+      errorPrefix: 'Replay failed to load',
+      loadFailedCopy: 'The replay fixture could not be loaded.',
+      waitingCopy: 'Loading fixture replay…',
+      showRetry: true,
+    };
+  }
+  if (previewLabel === 'Stream preview') {
+    return {
+      testid: 'campaign-stream-banner',
+      ariaLabel: 'Live stream status',
+      errorPrefix: 'Live campaign stream error',
+      loadFailedCopy: 'The replay fixture could not be loaded.',
+      waitingCopy: 'Waiting for the live campaign stream…',
+      showRetry: false,
+    };
+  }
+  return {
+    testid: 'live-campaign-banner',
+    ariaLabel: 'Live campaign status',
+    errorPrefix: 'Live campaign error',
+    loadFailedCopy: 'The live campaign could not be loaded.',
+    waitingCopy: 'Waiting for the live campaign…',
+    showRetry: false,
+  };
+}
+
+function Campaign({
+  store,
+  previewLabel,
+  headerAction,
+}: {
+  readonly store: CampaignStore;
+  readonly previewLabel?: 'Preview' | 'Stream preview';
+  readonly headerAction: ReactNode;
+}): JSX.Element {
+  const {scenario, campaign, error} = useStore(store);
+  const chrome = campaignChrome(previewLabel);
+  return (
+    <>
+      {error !== null && (
+        <div
+          className="stale-banner campaign-alert"
+          role="alert"
+          aria-label={chrome.ariaLabel}
+          data-testid={chrome.testid}
+        >
+          <span>
+            {chrome.errorPrefix}: {error}
+          </span>
+          {chrome.showRetry && (
+            <button type="button" onClick={() => store.dispatch({type: 'load'})}>
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+      {scenario === null || campaign === null ? (
+        <main className="campaign-loading">
+          {headerAction}
+          <p>{error !== null ? chrome.loadFailedCopy : chrome.waitingCopy}</p>
+        </main>
+      ) : (
+        <CampaignDashboard
+          scenario={scenario}
+          campaign={campaign}
+          {...(previewLabel === undefined ? {} : {previewLabel})}
+          headerAction={headerAction}
+        />
+      )}
+    </>
+  );
+}
+
+/** Dev-only frame streaming uses the same campaign view as the fixture preview. */
+export function createLiveCampaignApp(stream: CampaignStream): PreviewPage {
+  const store = createLiveCampaignStore(stream);
+  return {
+    view: <Campaign store={store} previewLabel="Stream preview" headerAction={null} />,
+    close: store.close,
+  };
+}
+
+/** The live page over `session`, which this starts, shared with the desktop entry. */
 export function createLiveApp(session: WebSession, theme: WebThemeController): JSX.Element {
   void session.start();
   return (
@@ -138,18 +280,58 @@ function WebAppShell({
   );
 }
 
+type RunView = 'run' | 'campaign';
+
 function Live({session, run}: {readonly session: WebSession; readonly run: RunStore}): JSX.Element {
   const iterations = useSyncExternalStore(run.subscribe, run.getIterations, run.getIterations);
+  const state = useStore(run);
+  const sessionState = useStore(session);
+  const [view, setView] = useState<RunView>('run');
+  const now = useNow(SYSTEM_CLOCK, state.status === 'starting');
+  // Created once for this page's lifetime, over the same session the run page reads: it
+  // subscribes to `session.store`, which (unlike the session's own transport) supports multiple
+  // independent subscribers, so this coexists with the run page's own subscription below.
+  const [campaignStore] = useState(() =>
+    createLiveCampaignStore(webSessionCampaignStream(session)),
+  );
+  useEffect(() => campaignStore.close, [campaignStore]);
+
+  const toggle = (
+    <Button
+      id="run-campaign-toggle"
+      onClick={() => setView(current => (current === 'run' ? 'campaign' : 'run'))}
+    >
+      {view === 'run' ? 'View campaign' : 'View run'}
+    </Button>
+  );
+
+  if (view === 'campaign') {
+    return <Campaign store={campaignStore} headerAction={toggle} />;
+  }
+
   return (
     <RunPage
-      run={useStore(run)}
+      run={state}
       iterations={iterations}
-      session={useStore(session)}
+      session={sessionState}
       replayFailure={null}
       onReattach={() => session.reattach()}
       onReconnectControls={() => session.reconnectControls()}
       onRetryReplay={NOTHING}
       onCommand={session.command}
+      now={now}
+      headerAction={
+        <>
+          {toggle}
+          <ConversationPanel
+            session={session}
+            runId={state.runId}
+            transcript={state.chatTranscript}
+            connected={sessionState.controls.status === 'connected'}
+            steerAvailable={!hasRunEnded(state)}
+          />
+        </>
+      }
     />
   );
 }

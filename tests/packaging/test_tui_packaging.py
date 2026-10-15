@@ -45,6 +45,8 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/libs/transport-node/package.json",
         "clients/tui/package.json",
         "clients/libs/ui/package.json",
+        "clients/features/campaign/package.json",
+        "clients/features/conversation/package.json",
         "clients/features/gateway-connect/package.json",
         "clients/features/hosts/package.json",
         "clients/features/recent-runs/package.json",

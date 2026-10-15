@@ -114,6 +114,7 @@ from vs_runtime._model_artifacts import (
     ModelArtifactDownloader,
     ModelArtifactRequest,
     PreparedModelArtifacts,
+    model_artifact_copy_excludes,
     prepare_model_artifacts,
 )
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
@@ -251,6 +252,7 @@ from vs_runtime._trusted_evaluation_preparation import (
     required_evaluator_tools_root,
 )
 from vs_runtime._validation_passes import StateValidationPasses, ValidationPasses
+from vs_runtime._workspace_holds import WorkspaceHolds, core_workspace_holds
 from vs_runtime._workspace_resources import (
     RootBaselineDrifted,
     WorkspaceResourceEvent,
@@ -572,6 +574,7 @@ __all__ = [
     "ValidationRecipe",
     "WaitFor",
     "WorkspaceEvaluationSpec",
+    "WorkspaceHolds",
     "WorkspaceResource",
     "WorkspaceResourceEvent",
     "WorkspaceResourceEventSink",
@@ -587,6 +590,7 @@ __all__ = [
     "classify",
     "collect_linux_profile",
     "collect_macos_profile",
+    "core_workspace_holds",
     "create_managed_conversation",
     "create_model_request_reconciler",
     "create_run_control_channel",
@@ -611,6 +615,7 @@ __all__ = [
     "materialize_input_project",
     "materialize_objective_document",
     "migrate_recorded_run_environment",
+    "model_artifact_copy_excludes",
     "off_path_tools",
     "offered_skill_facts",
     "open_agent_execution_environment",

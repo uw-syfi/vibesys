@@ -51,6 +51,7 @@ from vs_core.types.common import (
     WorkspaceMode,
     WorkspaceRef,
 )
+from vs_core.types.job_observations import WaitEnd
 from vs_core.types.search import (
     CheckpointKnown,
     OperationFinished,
@@ -527,10 +528,13 @@ class _Ask:
         """Core authorized the resume of a suspended turn: ask it to continue."""
         authorization = ready.authorization
         known = self.kit.run.checkpoints.get(turn)
+        timeout = authorization.timeout
         facts = ResumeFacts(
             agent=self.role.name,
             retained=known.revision if isinstance(known, Retained) else None,
-            timed_out=authorization.timeout is not None,
+            ended_by=timeout.by if timeout is not None else None,
+            queue_budget_spent=timeout is not None
+            and any(job.by is WaitEnd.QUEUE_BUDGET for job in timeout.unfinished),
             evidence=authorization.evidence,
             repeated_failure=authorization.repeated_failure,
         )

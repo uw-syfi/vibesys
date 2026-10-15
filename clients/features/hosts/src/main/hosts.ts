@@ -4,7 +4,6 @@
  * the helper pushes them (`instances.watch`) to the view. Every host action goes through the
  * host's one connection; nothing here retries or polls.
  */
-import {readFile} from 'node:fs/promises';
 import {
   type ConnectionLease,
   type ConnectionManager,
@@ -30,9 +29,9 @@ import {
   rememberInstance,
   type SettingsStore,
   settingsFor,
-  sshConfigHosts,
   withHostSettings,
 } from '@vibesys/settings';
+import {discoverSshConfigAliases, type SshConfigFilesystem} from './ssh-config.js';
 
 export interface HostsDeps {
   readonly manager: ConnectionManager;
@@ -42,21 +41,13 @@ export interface HostsDeps {
   readonly localCheckout: string;
   readonly sshConfigPath: string;
   readonly sshConfigFilesystem?: SshConfigFilesystem;
+  readonly sshHomePath?: string;
   readonly log: (message: string) => void;
   /** Send a host's listing to the welcome view. */
   readonly push: (listing: HostListing) => void;
   /** Forget a host's retained listing when it leaves the desired set. */
   readonly retire: (host: HostKey) => void;
 }
-
-/** The filesystem operation needed to read the user's SSH config. */
-export interface SshConfigFilesystem {
-  readText(path: string): Promise<string>;
-}
-
-const NODE_SSH_CONFIG_FILESYSTEM: SshConfigFilesystem = {
-  readText: path => readFile(path, 'utf8'),
-};
 
 /** One checkout change, unique across renderer-document lifetimes. */
 interface CheckoutChangeId {
@@ -78,7 +69,6 @@ interface InspectionLease {
 
 export class Hosts {
   readonly #deps: HostsDeps;
-  readonly #sshConfigFilesystem: SshConfigFilesystem;
   /** Hosts whose registry the view hears, each with the lease that keeps its resources alive. */
   readonly #watched = new Map<HostKey, WatchedHost>();
   /** Checkout validations that still own permission to persist, by renderer-document operation. */
@@ -96,7 +86,6 @@ export class Hosts {
 
   constructor(deps: HostsDeps) {
     this.#deps = deps;
-    this.#sshConfigFilesystem = deps.sshConfigFilesystem ?? NODE_SSH_CONFIG_FILESYSTEM;
   }
 
   /** Why the settings file is ignored, reading it afresh; null when it is fine or absent. */
@@ -106,14 +95,10 @@ export class Hosts {
 
   /** The concrete aliases in `~/.ssh/config`. */
   async aliases(): Promise<string[]> {
-    let text: string;
-    try {
-      text = await this.#sshConfigFilesystem.readText(this.#deps.sshConfigPath);
-    } catch (error) {
-      if (isMissingFile(error)) return [];
-      throw error;
-    }
-    return sshConfigHosts(text);
+    return discoverSshConfigAliases(this.#deps.sshConfigPath, {
+      filesystem: this.#deps.sshConfigFilesystem,
+      homePath: this.#deps.sshHomePath,
+    });
   }
 
   /** The checkout `id` runs VibeSys from, or null when the user has not set one. */
@@ -483,10 +468,6 @@ export class Hosts {
 interface WatchedHost {
   readonly lease: ConnectionLease;
   readonly stop: () => void;
-}
-
-function isMissingFile(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
 /** One checkout validation and the permission it must still own at the settings commit boundary. */

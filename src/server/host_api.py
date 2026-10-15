@@ -1055,6 +1055,8 @@ class ChannelEndOutcome(StrEnum):
     """Reading from or writing to the socket failed with an error other than a close."""
     CLIENT_FAILED = "client_failed"
     """Reading stdin or writing stdout failed with an error other than a close."""
+    SERVER_UNRESPONSIVE = "server_unresponsive"
+    """Reading from the control socket made no progress within the read deadline: the server is wedged."""
 
 
 class ChannelEnd(BaseModel):

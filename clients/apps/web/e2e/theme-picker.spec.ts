@@ -49,6 +49,9 @@ test('a light theme reaches the complete gateway connection surface through root
 }) => {
   await page.goto('/');
   await page.getByRole('combobox', {name: 'Theme'}).selectOption('light');
+  // The gateway form now lives in the Connect sheet behind its trigger, not inline on the page.
+  await page.locator('#gateway-connect-trigger').click();
+  await expect(page.locator('#gateway-url')).toBeVisible();
 
   const themedStyles = await page.evaluate(() => {
     const root = getComputedStyle(document.documentElement);

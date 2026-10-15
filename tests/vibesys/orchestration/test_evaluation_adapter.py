@@ -330,7 +330,7 @@ async def _scalar_benchmark(ctx: CoreHost, root: Workspace, gates: _Gates) -> No
 
 
 async def _local_validation(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
-    # Local validation maps the runtime result and reports one gate.
+    # Local validation maps the runtime result and reports one gate, grouped by attempt.
     validated = await ctx.evaluation.validate_local(
         root,
         recipe_artifact="validation/recipes.json",
@@ -343,6 +343,19 @@ async def _local_validation(ctx: CoreHost, root: Workspace, gates: _Gates) -> No
     assert isinstance(finished.data, GateFinishedData)
     assert started.data.recipe == finished.data.recipe == "queue-contract"
     assert finished.status is EventStatus.COMPLETED
+    assert finished.data.round_label is not None
+
+    # A second attempt is its own group, not the first attempt's label reused.
+    revalidated = await ctx.evaluation.validate_local(
+        root,
+        recipe_artifact="validation/recipes.json",
+        report_location="validation/report.json",
+    )
+    assert revalidated.passed
+    _, second_finished = gates.new()
+    assert isinstance(second_finished.data, GateFinishedData)
+    assert second_finished.data.round_label is not None
+    assert second_finished.data.round_label != finished.data.round_label
 
 
 async def _unusable_recipes(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:

@@ -53,6 +53,7 @@ from vs_core.api import (
 )
 from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
+from vs_runtime._workspace_holds import core_workspace_holds
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -61,6 +62,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
     from vs_runtime._core_requests import ExecutorRefusal
     from vs_runtime._run_control import RunControlChannel
+    from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sim.api import SleepingClock, Threads
 
 
@@ -265,14 +267,32 @@ class RunControlBridge:
         return RunControlEvent(control=control, now_at=now_at)
 
 
+class CoreHeldWorkspaces(Protocol):
+    """The run's candidate workspaces, kept on disk across a host stop only while core holds them."""
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        """Decide what outlives this host from what core references, as *holds* reads it."""
+        ...
+
+    async def release_unheld(self) -> None:
+        """Discard every candidate worktree on disk that core no longer references."""
+        ...
+
+
 @dataclass(frozen=True)
 class CoreRunHost:
-    """The process-local pieces one run loop drives."""
+    """The process-local pieces one run loop drives.
+
+    ``workspaces``, when given, follow the run's core state: a start discards the worktrees a
+    stopped host left that core no longer references, and the host's close keeps only those
+    core still holds (none once the run's result is final).
+    """
 
     shell: CoreRuntime
     delivery: PublicationDelivery
     clock: SleepingClock
     controls: RunControlBridge | None = None
+    workspaces: CoreHeldWorkspaces | None = None
 
 
 def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
@@ -288,6 +308,9 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     (a live holder renews, so it would still hold the lease after that). The wait is
     in clock time: a simulated clock makes it instant. Raises ``LeaseUnavailableError``
     naming the bound when the lease is still held after it.
+
+    Once started, the host's ``workspaces`` follow core's recovered state: worktrees a
+    stopped host left that core no longer references are discarded now.
     """
     give_up_at = host.clock.now() + config.lease_duration
     while True:
@@ -304,7 +327,18 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
                 raise LeaseUnavailableError(message) from error
             await host.clock.sleep(min(config.recovery_poll_interval, remaining))
         else:
-            return
+            break
+    await _follow_core(host)
+
+
+async def _follow_core(host: CoreRunHost) -> None:
+    """Bind the run's workspaces to core's state and discard what core no longer references."""
+    workspaces = host.workspaces
+    if workspaces is None:
+        return
+    shell = host.shell
+    workspaces.follow(lambda: core_workspace_holds(shell.record.envelope.core))
+    await workspaces.release_unheld()
 
 
 async def drive_core(
@@ -521,15 +555,43 @@ class _Loop:
         A blocked check reopens only on an observation, and with nothing in flight and no
         timer due none will come: the run would sit running until its deadline. So the loop
         stops it with a ``blocked`` result that says why, as it stops a run at its deadline.
+        A blocked check whose last inspection has already answered can never resolve either,
+        so recovery can never open, whatever unrelated timers (another turn's deadline) are
+        still due: waiting for them would hold admission closed in silence.
         """
         return (
             core.records.recovery.phase == RecoveryPhase.BLOCKED
             and core.run.result is None
-            and not self._shell.in_flight
-            and self._next_wake(core) is None
-            and self._shell.next_wake_at is None
             and not any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+            and (
+                (
+                    not self._shell.in_flight
+                    and self._next_wake(core) is None
+                    and self._shell.next_wake_at is None
+                )
+                or self._blocked_for_good(core)
+            )
         )
+
+    def _blocked_for_good(self, core: CoreState) -> bool:
+        """Whether some blocked check has had its last answer and nothing about it still runs.
+
+        The reconciliation deadline blocks a check and sends one last inspection of its target;
+        once that inspection has settled without resolving the check, no observation about
+        the target is left to come (a restart keeps it blocked too).
+        """
+        running = {request.request_id for request in self._shell.in_flight}
+        for check in core.records.recovery.checks:
+            if check.resolution != "blocked" or check.inspection is None:
+                continue
+            inspection = core.records.record(check.inspection)
+            if (
+                inspection is not None
+                and inspection.phase in (RequestPhase.COMPLETED, RequestPhase.BLOCKED)
+                and not {check.target, check.inspection} & running
+            ):
+                return True
+        return False
 
     def _signature(self) -> object:
         """Everything that changes when work happened; time, liveness and the revision do not."""

@@ -76,6 +76,7 @@ if TYPE_CHECKING:
         AgentConfigurationResolver,
         AgentExecutionEnvironment,
         AgentExecutionLifecycleSink,
+        LocalValidationEvents,
         RunEnvironmentView,
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
@@ -110,6 +111,8 @@ class CoreEnvironment:
     queue_allowance_seconds: int
     observe_interval_seconds: int
     observe_backoff_cap_seconds: int
+    queue_wait_budget_seconds: int
+    queue_notice_interval_seconds: int
     request_retries: RequestRetries
     max_run_seconds: int | None
     cancellation_bound_seconds: int
@@ -170,6 +173,8 @@ class CoreResources:
     """The server of each stateless tool a role may declare, keyed by tool id."""
     commands: Commands | None = None
     """Sandboxed process execution in a run workspace, which a command-capturing operation uses."""
+    local_validation_events: LocalValidationEvents | None = None
+    """Hears each recipe's start and settled result, for the host's event stream."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -288,6 +293,8 @@ def _context(resources: CoreResources, artifacts: ArtifactStore) -> CoreRunConte
         queue_allowance_seconds=environment.queue_allowance_seconds,
         observe_interval_seconds=environment.observe_interval_seconds,
         observe_backoff_cap_seconds=environment.observe_backoff_cap_seconds,
+        queue_wait_budget_seconds=environment.queue_wait_budget_seconds,
+        queue_notice_interval_seconds=environment.queue_notice_interval_seconds,
         request_retries=environment.request_retries,
         max_run_seconds=environment.max_run_seconds,
         cancellation_bound_seconds=environment.cancellation_bound_seconds,
@@ -417,6 +424,7 @@ def _catalog(
         validation_passes=StateValidationPasses(
             resources.project.state.local_namespace(resources.run_id, "validation")
         ),
+        local_validation_events=resources.local_validation_events,
     )
     owned = (
         ()

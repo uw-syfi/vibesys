@@ -39,6 +39,7 @@ from server.transport.discovery import (
     WebInstanceRecord,
 )
 from server.transport.subscriptions import (
+    DeliveryWatermark,
     StreamDelivery,
     SubscriptionAdmissionClosedError,
     SubscriptionTracker,
@@ -1218,13 +1219,17 @@ class WebSocketGateway:
             # fields and would retry the same broken replay as a capability
             # fallback. Match the Unix transport: acknowledge first, then let
             # the subscription boundary report the failure in band.
+            # Snapshot once through the blocking-work owner: its sequence and
+            # run identity are one journal generation, and folding it cannot
+            # occupy the gateway loop while the subscription is degraded.
+            snapshot = await _run_owned_blocking(self._request_runner, self.api.snapshot)
             await self._send(
                 websocket,
                 SubscribedMessage(
                     request_id=request.request_id,
                     client_id=request.client_id,
-                    run_id=self.api.snapshot().run_id,
-                    latest_sequence=self.api.latest_sequence,
+                    run_id=snapshot.run_id,
+                    latest_sequence=snapshot.sequence,
                 ).model_dump_json(),
             )
             raise
@@ -1240,7 +1245,7 @@ class WebSocketGateway:
         cursor, reported_floor, store_id = await self._write_bootstrap(
             websocket, request, bootstrap
         )
-        delivery.delivered(cursor)
+        delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
         while True:
             changed = await _run_owned_blocking(
                 self._request_runner,
@@ -1263,7 +1268,7 @@ class WebSocketGateway:
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True
                 )
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             checkpoint = await _run_owned_blocking(
                 self._request_runner,
@@ -1282,7 +1287,7 @@ class WebSocketGateway:
                 cursor, reported_floor, store_id = await self._write_bootstrap(
                     websocket, request, bootstrap, rebootstrap=True
                 )
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             await self._send_event_batch(
                 websocket,
@@ -1295,7 +1300,7 @@ class WebSocketGateway:
                 ),
             )
             cursor = checkpoint.through_sequence
-            delivery.delivered(cursor)
+            delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
 
     async def _write_stream_error(
         self,

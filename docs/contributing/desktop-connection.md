@@ -316,6 +316,13 @@ Facts enter once:
   keeps reporting `starting` with its stage and progress, a resume drops the held request, and
   `READY` lands the run in `pausing` or `stopping` if one is still held. Core may land a held stop
   before `READY`, abandoning the startup; the run then goes from `starting` straight to `stopped`. A failure while starting past `resolving` names the startup stage it failed in.
+- **Starting label**: the run view's status chip shows the stage, its progress, how long the
+  stage has run, and, once nothing has been heard for 60 s, `quiet for <duration>`, so a slow
+  image build or container start never looks frozen. The fold keeps the envelope timestamps of the
+  stage's first event (`stageSince`, reset when the stage changes) and of the latest one
+  (`lastActivityAt`); the label is a pure function of that state and a `now` the page owner
+  ticks once a second only while the run is `starting`. It uses no event beyond
+  `run_startup_progress`.
 - **Record**: the server rewrites its record atomically (temp file, rename) on each phase change;
   a change of progress alone is written at most once per second, the latest one when the second
   ends.
@@ -416,6 +423,30 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
   background, Esc, and return of focus to the opener come from the platform.
 - **Data from watches.** Host panels and Recent statuses fold `instances.watch` pushes; there is no
   manual refresh path to forget.
+
+## Multiple run windows
+
+Each `AppWindow` holds one `#run` view and binds to at most one run at a time (`openRunPage`
+always replaces whatever the window showed before). `RunControl` and `RunIpcRegistry` key every
+binding, navigation claim, and IPC admission by `run_id` rather than by one shared slot
+(`clients/features/run-control/src/main/run-control.ts`, `clients/apps/desktop-main/src/main/
+run-ipc.ts`), so two independent `AppWindow`s attached to two different runs cannot cross-detach or
+cross-admit each other's connection: a window's close detaches only the binding for the run it
+showed, and a window's IPC connect is admitted only for the run its own current page named. A
+Playwright spec (`clients/apps/desktop-main/e2e/two-windows.spec.ts`) constructs two `AppWindow`s
+directly against a fixture host connection and asserts no cross-run bleed on attach, content, or
+close.
+
+This keying is the safety prerequisite for concurrent windows, not the feature itself: the app does
+not yet construct more than one `AppWindow`. `index.ts`'s `openWindow()` creates exactly one at
+startup, and every run attach, start, or resume targets that same window, replacing its current run
+page. Wiring an actual multi-window user path needs a UX decision first (whether attaching always
+opens a fresh window, or only when the current one already shows a different run, and how the
+welcome view's window relates to run windows) and is tracked by #2615.
+
+The campaign workspace UI these run pages can render, and the live telemetry stream it folds, are
+designed in [campaign-workspace-ui.md](../design/campaign-workspace-ui.md) and
+[live-campaign-streaming.md](../design/live-campaign-streaming.md).
 
 ## App lifecycle
 

@@ -1,12 +1,15 @@
 """Confirmed core commits derive semantic projection events strategy-agnostically.
 
 After each confirmed commit the run diffs the previous projected `RunView` against the new
-one. It emits `ROUND_FINISHED` for newly observed rounds, `EXPERIMENTS_CHANGED` when the
-displayed experiment projection changes, and `ITERATIONS_CHANGED` when the policy-owned
-navigation changes. These tests use a synthetic projector and no concrete strategy ID.
+one. It emits `ROUND_FINISHED` and `WORKSTREAM_FINISHED` for newly observed rounds,
+`EXPERIMENTS_CHANGED` when the displayed experiment projection changes, and
+`ITERATIONS_CHANGED` when the policy-owned navigation changes. These tests use a synthetic
+projector and no concrete strategy ID.
 """
 
 from __future__ import annotations
+
+from typing import Literal
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
@@ -14,8 +17,13 @@ from pydantic import BaseModel
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from vibesys.api import IterationKind, IterationStatus, IterationSummary, IterationTree
-from vibesys.events import CoreEvent, CoreEventType, IterationsChangedData
-from vibesys.run.contracts import RoundSummary, RunStatus, RunView
+from vibesys.events import (
+    CoreEvent,
+    CoreEventType,
+    IterationsChangedData,
+    WorkstreamFailureKind,
+)
+from vibesys.run.contracts import RoundFailureSummary, RoundSummary, RunStatus, RunView
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api.testing import ManualClock, SimThreads, examples
@@ -28,6 +36,9 @@ class _FakeAgentState(BaseModel):
     active: int = 0
     revision: int = 0
     profile_skipped: bool = False
+    round_status: Literal["completed", "failed"] = "completed"
+    last_error: RoundFailureSummary | None = None
+    repeated_error: bool = False
 
 
 class _FakeProjector:
@@ -64,10 +75,12 @@ def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
         rounds=tuple(
             RoundSummary(
                 number=number,
-                status="completed",
+                status=state.round_status,
                 attempts=1,
                 judge_verdict="pass",
                 profile_skipped=state.profile_skipped,
+                last_error=state.last_error,
+                repeated_error=state.repeated_error,
             )
             for number in state.round_numbers
         ),
@@ -104,17 +117,73 @@ def test_commit_projection_preserves_semantics_and_publication_order() -> None:
     assert round_finished.data is not None
     assert round_finished.data.kind == "round_finished"
     assert round_finished.data.profile_skipped is True
+    workstream_finished = next(
+        event for event in captured if event.type is CoreEventType.WORKSTREAM_FINISHED
+    )
+    assert workstream_finished.data is not None
+    assert workstream_finished.data.kind == "workstream_finished"
+    assert workstream_finished.data.setup_failure is False
+    assert workstream_finished.data.refunded is False
+    assert workstream_finished.data.repeated_error is False
+    assert workstream_finished.data.last_error is None
+    assert workstream_finished.round_label == round_finished.round_label
     iterations_changed = next(
         event for event in captured if event.type is CoreEventType.ITERATIONS_CHANGED
     )
     assert iterations_changed.data == IterationsChangedData(
         revision=_iterations(state.round_numbers).revision
     )
-    assert order[:3] == [
+    assert order[:4] == [
         "state_published",
         CoreEventType.ROUND_FINISHED.value,
+        CoreEventType.WORKSTREAM_FINISHED.value,
         CoreEventType.ITERATIONS_CHANGED.value,
     ]
+
+
+def test_workstream_finished_carries_the_round_s_typed_failure() -> None:
+    """A round's typed failure survives onto `WORKSTREAM_FINISHED`, unresolved by `ROUND_FINISHED`."""
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=SimThreads(),
+        system=idle_environment_system(),
+    )
+    captured: list[CoreEvent] = []
+    integration.events.subscribe(captured.append)
+    observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
+
+    failure = RoundFailureSummary(
+        kind=WorkstreamFailureKind.REPEATED_TURN.value,
+        role="implementer",
+        turns=3,
+        limit=3,
+        text="the implementer repeated an earlier turn",
+    )
+    state = _FakeAgentState(
+        round_numbers=(1,),
+        revision=1,
+        round_status="failed",
+        last_error=failure,
+        repeated_error=True,
+    )
+    observer.committed(None, state)
+
+    workstream_finished = next(
+        event for event in captured if event.type is CoreEventType.WORKSTREAM_FINISHED
+    )
+    assert workstream_finished.status is not None
+    assert workstream_finished.status.value == "failed"
+    assert workstream_finished.data is not None
+    assert workstream_finished.data.kind == "workstream_finished"
+    assert workstream_finished.data.repeated_error is True
+    assert workstream_finished.data.last_error is not None
+    assert workstream_finished.data.last_error.kind is WorkstreamFailureKind.REPEATED_TURN
+    assert workstream_finished.data.last_error.role == "implementer"
+    assert workstream_finished.data.last_error.turns == 3
+    assert workstream_finished.data.last_error.limit == 3
+    assert workstream_finished.data.last_error.text == "the implementer repeated an earlier turn"
 
 
 @given(

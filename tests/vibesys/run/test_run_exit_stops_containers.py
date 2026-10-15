@@ -204,8 +204,9 @@ def _execute(
         log: Callable[[str], None] | None = None,
         image: str | None = None,
         clock: object,
+        events: object | None = None,
     ) -> _DaemonBackend:
-        del clock  # the fake backend records no timestamps
+        del clock, events  # the fake backend records no timestamps and has no device to watch
         backend = _DaemonBackend(
             log_dir,
             log=log,

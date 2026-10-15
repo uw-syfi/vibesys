@@ -35,6 +35,7 @@ from server.events import (
     RunStartedData,
 )
 from server.journal import _BOOTSTRAP_SPINE_TYPES
+from server.transport.subscriptions import DeliveryWatermark
 from server.transport.unix_jsonl import UnixJsonlServer
 from vs_sim.api import Connection, OsThreads, UnixNetwork
 from vs_sim.api.testing import (
@@ -1041,7 +1042,12 @@ def test_terminal_drain_refuses_a_late_unix_subscription(
             threads=threads,
             network=network,
         ) as server:
-            assert server.wait_until_delivered(parts.api.latest_sequence, 0.0)
+            with parts.condition:
+                watermark = DeliveryWatermark(
+                    store_id=parts.journal.store_id_locked(),
+                    sequence=parts.journal.latest_sequence_locked(),
+                )
+            assert server.wait_until_delivered(watermark, 0.0)
             client = network.connect(str(root / "control.sock"))
             client.send(request.model_dump_json().encode() + b"\n")
             refusal = json.loads(_sim_lines(client)())

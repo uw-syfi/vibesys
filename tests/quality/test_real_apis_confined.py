@@ -1264,10 +1264,6 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.STORE,
         "GitRepository implementation over pygit2 (git state is files)",
     ),
-    "libs/vs-project/src/vs_project/_run_logs.py": (
-        EdgeKind.LOG,
-        "the one reader of the run log files RunLogger writes",
-    ),
     "libs/vs-project/src/vs_project/_state.py": (
         EdgeKind.STORE,
         "project and run state namespaces",

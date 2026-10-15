@@ -363,6 +363,7 @@ def failure_of(event: Failed, role: AgentName | None) -> Failure:  # noqa: PLR09
             return Failure(kind=FailureKind.TURN_FAILED, role=role, turn_failure=event.turn_failure)
         case (
             FailureReason.TIMED_OUT
+            | FailureReason.QUEUE_BUDGET_SPENT
             | FailureReason.WORKSPACE_CLOSED
             | FailureReason.OWNER_GONE
             | FailureReason.LOST

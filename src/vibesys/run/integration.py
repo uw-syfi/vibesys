@@ -21,6 +21,9 @@ from vibesys.events import (
     PhaseData,
     RoundFinishedData,
     WinnerSelectedData,
+    WorkstreamFailureData,
+    WorkstreamFailureKind,
+    WorkstreamFinishedData,
     json_value,
 )
 from vibesys.run.agent_events import CoreAgentEventSink
@@ -117,6 +120,31 @@ class _CoreRunControlEvents:
         )
 
 
+class _RoundFailureProjection(Protocol):
+    """Product shape of one round's typed failure, independent of its policy's own failure type.
+
+    Structural, not imported from a policy module: ``vibesys.run`` sits below
+    every policy in the dependency graph (see architecture.md), so it names
+    the shape it needs rather than importing ``vibesys.run.contracts``'s
+    concrete ``RoundFailureSummary`` (a module one layer above it).
+    """
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def role(self) -> str | None: ...
+
+    @property
+    def turns(self) -> int | None: ...
+
+    @property
+    def limit(self) -> int | None: ...
+
+    @property
+    def text(self) -> str: ...
+
+
 class _RoundProjection(Protocol):
     """Product facts needed to translate one projected round into events."""
 
@@ -140,6 +168,12 @@ class _RoundProjection(Protocol):
 
     @property
     def profile_skipped(self) -> bool: ...
+
+    @property
+    def last_error(self) -> _RoundFailureProjection | None: ...
+
+    @property
+    def repeated_error(self) -> bool: ...
 
 
 class _RunProjection(Protocol):
@@ -202,6 +236,7 @@ def _emit_core_commit_events(
     new_round_numbers = sorted(number for number in after_rounds if number not in before_rounds)
     for number in new_round_numbers:
         _emit_round_finished(events, after_rounds[number])
+        _emit_workstream_finished(events, after_rounds[number])
     _emit_iterations_changed(events, before, after)
     if before is None or _experiments_view(before) == _experiments_view(after):
         return
@@ -241,6 +276,43 @@ def _emit_round_finished(events: EventJournal, round_summary: _RoundProjection) 
             perf_metric=round_summary.perf_metric,
             perf_unit=round_summary.perf_unit,
             profile_skipped=round_summary.profile_skipped,
+        ),
+    )
+
+
+def _workstream_failure_data(
+    failure: _RoundFailureProjection | None,
+) -> WorkstreamFailureData | None:
+    """The round's typed failure, as the wire's frozen ``WorkstreamFailureKind`` vocabulary."""
+    if failure is None:
+        return None
+    return WorkstreamFailureData(
+        kind=WorkstreamFailureKind(failure.kind),
+        role=failure.role,
+        turns=failure.turns,
+        limit=failure.limit,
+        text=failure.text,
+    )
+
+
+def _emit_workstream_finished(events: EventJournal, round_summary: _RoundProjection) -> None:
+    """Publish ``WORKSTREAM_FINISHED`` alongside ``ROUND_FINISHED`` for the same round.
+
+    ``setup_failure`` and ``refunded`` are always False here: a
+    ``_RoundProjection`` exists only once a workstream's workspace opened and
+    settled (see ``WorkstreamFinishedData``'s docstring), so a setup failure
+    never reaches this projection at all.
+    """
+    status = EventStatus.FAILED if round_summary.status == "failed" else EventStatus.COMPLETED
+    events.emit(
+        CoreEventType.WORKSTREAM_FINISHED,
+        status=status,
+        round_label=f"round-{round_summary.number}",
+        data=WorkstreamFinishedData(
+            setup_failure=False,
+            refunded=False,
+            repeated_error=round_summary.repeated_error,
+            last_error=_workstream_failure_data(round_summary.last_error),
         ),
     )
 

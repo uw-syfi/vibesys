@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.server.support import wait_for_worker
 
 from server.transport.subscriptions import (
+    DeliveryWatermark,
     SubscriptionAdmissionClosedError,
     SubscriptionTracker,
     ThreadingSettleWindow,
@@ -128,7 +129,7 @@ def test_a_drain_waits_exactly_until_every_open_stream_has_the_last_event(
     seed: int | None, endings: list[tuple[str, float]]
 ) -> None:
     """An exiting server's drain ends when no open stream is behind, or at its bound."""
-    target = 7
+    target = DeliveryWatermark(store_id="live-store", sequence=7)
     threads = SimThreads(schedule_seed=seed)
     tracker = SubscriptionTracker(threads=threads)
 
@@ -138,7 +139,9 @@ def test_a_drain_waits_exactly_until_every_open_stream_has_the_last_event(
 
         def stream(index: int, ending: str, delay: float) -> None:
             with tracker.track() as delivery:
-                delivery.delivered(target - 1)
+                delivery.delivered(
+                    DeliveryWatermark(store_id=target.store_id, sequence=target.sequence - 1)
+                )
                 opened[index].set()
                 threads.sleep(delay)
                 if ending == "delivers":
@@ -172,3 +175,42 @@ def test_a_drain_waits_exactly_until_every_open_stream_has_the_last_event(
     expected = DRAIN_BOUND_SECONDS if stalled else max((d for _, d in endings), default=0.0)
     assert waited == expected
     assert late_admission == "refused"
+
+
+@settings(deadline=None, max_examples=examples(pr=10, nightly=60))
+@given(
+    seed=SEEDS,
+    retired_sequence=st.integers(min_value=0, max_value=1_000),
+    target_sequence=st.integers(min_value=1, max_value=1_000),
+)
+@example(seed=None, retired_sequence=100, target_sequence=30)
+def test_a_retired_store_watermark_cannot_satisfy_the_live_store_drain(
+    seed: int | None, retired_sequence: int, target_sequence: int
+) -> None:
+    """A high cursor from store A is not delivery evidence for store B."""
+    threads = SimThreads(schedule_seed=seed)
+    tracker = SubscriptionTracker(threads=threads)
+    target = DeliveryWatermark(store_id="store-B", sequence=target_sequence)
+
+    def main() -> None:
+        drained = threads.event()
+        with tracker.track() as delivery:
+
+            def drain() -> None:
+                if tracker.wait_until_delivered(target, DRAIN_BOUND_SECONDS):
+                    drained.set()
+
+            worker = threads.spawn(drain, name="terminal-drain")
+            delivery.delivered(DeliveryWatermark(store_id="store-A", sequence=retired_sequence))
+            threads.sleep(0.1)
+            assert not drained.is_set()
+            delivery.delivered(
+                DeliveryWatermark(store_id=target.store_id, sequence=target_sequence - 1)
+            )
+            threads.sleep(0.1)
+            assert not drained.is_set()
+            delivery.delivered(target)
+            wait_or_fail(drained, "the live-store watermark to be delivered")
+            wait_for_worker(worker)
+
+    threads.run(main)

@@ -11,20 +11,23 @@ import {
   iterationRootsForCore,
 } from '@vibesys/run-state';
 import {type RoundKey, roundsWithPlan, sameRoundKey} from '@vibesys/run-state/rounds';
-import {type JSX, useState} from 'react';
+import {type JSX, type ReactNode, useState} from 'react';
 import {
   connectionBanners,
   emptyTranscriptCopy,
   pageHeader,
   REPLAY_SESSION,
 } from '../../state/banners.js';
+import {quotaBanner} from '../../state/quota-banner.js';
 import {Banners} from './banners.js';
+import {QuotaBanner} from './quota-banner.js';
 import {RoundRail} from './round-rail.js';
 import {RunControls} from './run-controls.js';
 import {RunSummary} from './run-summary.js';
 import {Transcript} from './transcript.js';
 
 export interface RunPageProps {
+  readonly headerAction?: ReactNode;
   readonly run: CoreState;
   readonly iterations: IterationNavigationState;
   /** The live session's state; null on the replay page. */
@@ -35,6 +38,11 @@ export interface RunPageProps {
   readonly onRetryReplay: () => void;
   /** Null for replay, which has no command channel by contract. */
   readonly onCommand: ((input: RunCommand) => Promise<RunCommandOutcome>) | null;
+  /**
+   * The current time in epoch milliseconds, for the starting label's elapsed time. The page owner
+   * ticks it (see `apps/web`), since presentational code schedules no timers.
+   */
+  readonly now: number;
 }
 
 export function RunPage({
@@ -42,11 +50,13 @@ export function RunPage({
   iterations,
   session,
   replayFailure,
+  headerAction,
+  now,
   ...events
 }: RunPageProps): JSX.Element {
   const [requestedIterationId, setRequestedIterationId] = useState<string | null>(null);
   const banners = connectionBanners(run, session ?? REPLAY_SESSION);
-  const header = pageHeader(run, session);
+  const header = pageHeader(run, session, now);
   const roots = iterationRoots(iterations, run);
   const selectedIterationId = roots.some(root => root.id === requestedIterationId)
     ? requestedIterationId
@@ -63,9 +73,17 @@ export function RunPage({
           <p className="eyebrow">VIBESYS / RUN VIEWER</p>
           <h1>{header.heading}</h1>
         </div>
-        <span className={`status ${header.status.className}`}>{header.status.label}</span>
+        <div className="run-header-actions">
+          <span className={`status ${header.status.className}`}>{header.status.label}</span>
+          {headerAction}
+        </div>
       </header>
       <Banners banners={banners} replayFailure={replayFailure} {...events} />
+      {/* Keyed on the quota fact's own sequence: a fresh episode (a new pause, a settling
+          switch, or a resume that clears one) remounts rather than inheriting the previous
+          episode's resume-click `pending`/`result` state, which the component itself only
+          tracks for its own, current fact. */}
+      <QuotaBanner key={run.quota.sequence} banner={quotaBanner(run)} command={events.onCommand} />
       <RunSummary run={run} iterations={iterations} />
       <div className="run-layout">
         <RoundRail

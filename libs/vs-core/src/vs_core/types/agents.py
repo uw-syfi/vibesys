@@ -10,11 +10,19 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
-from .common import CheckpointDecline, InvocationRef, RevisionRef, Seconds, Value
+from .common import (
+    CheckpointDecline,
+    ContractValidationError,
+    InvocationRef,
+    RevisionRef,
+    Seconds,
+    Value,
+)
 from .evaluation import EvidenceRef
 from .evaluation_history import RepeatedFailureGuidance
+from .job_observations import WaitEnd
 from .until import ReplyError
 
 
@@ -85,9 +93,26 @@ class ResumeFacts(Value):
     kind: Literal["resume"] = "resume"
     agent: str
     retained: RevisionRef | None
-    timed_out: bool
+    ended_by: WaitEnd | None
+    """The bound that ended the wait before every evaluation was terminal; None when every
+    one was. ``QUEUE_BUDGET`` means every evaluation was terminal or cancelled for its queue
+    budget."""
+    queue_budget_spent: bool = False
+    """Whether core cancelled an awaited evaluation that waited in its queue past its queue
+    budget: it never ran."""
     evidence: tuple[EvidenceRef, ...] = ()
     repeated_failure: RepeatedFailureGuidance | None = None
+
+    @model_validator(mode="after")
+    def budget_end_names_a_spent_budget(self) -> ResumeFacts:
+        """A wait ended by a queue budget spent one; a wait that ended terminal spent none."""
+        if (self.ended_by is WaitEnd.QUEUE_BUDGET and not self.queue_budget_spent) or (
+            self.ended_by is None and self.queue_budget_spent
+        ):
+            raise ContractValidationError(
+                "queue_budget_spent", "must agree with what ended the wait"
+            )
+        return self
 
 
 class ReplyCorrection(Value):

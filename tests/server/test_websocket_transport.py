@@ -27,7 +27,7 @@ from urllib.request import urlopen
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, build_server_parts
+from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, ServerParts, build_server_parts
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
@@ -51,7 +51,7 @@ from server.transport.discovery import (
     WebInstanceClaim,
     WebInstanceRecord,
 )
-from server.transport.subscriptions import SubscriptionTracker
+from server.transport.subscriptions import DeliveryWatermark, SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
     WebSocketBindError,
@@ -83,6 +83,16 @@ if TYPE_CHECKING:
     from server.api.protocol import ProtocolRequest, RunSnapshot
     from server.api.service import RunApi, SubscriptionBootstrap, SubscriptionCheckpoint
     from vs_sim.api import BlockingRunner, Event
+
+
+def _delivery_watermark(parts: ServerParts) -> DeliveryWatermark:
+    """Capture the journal generation and cursor under their shared lock."""
+    with parts.condition:
+        return DeliveryWatermark(
+            store_id=parts.journal.store_id_locked(),
+            sequence=parts.journal.latest_sequence_locked(),
+        )
+
 
 # The burst has to be larger than the send path can absorb, or the producing
 # coroutine never stalls and the write deadline under test never fires. The
@@ -1632,13 +1642,21 @@ class _SubscriptionFailureApi:
         self._delegate = delegate
         self._failure = failure
         self._error_type = error_type
+        self.latest_sequence_reads = 0
+        self.snapshots: list[RunSnapshot] = []
 
     def snapshot(self) -> RunSnapshot:
-        return self._delegate.snapshot()
+        snapshot = self._delegate.snapshot()
+        self.snapshots.append(snapshot)
+        return snapshot
 
     @property
     def latest_sequence(self) -> int:
+        self.latest_sequence_reads += 1
         return self._delegate.latest_sequence
+
+    def execute(self, request: ProtocolRequest) -> Response:
+        return self._delegate.execute(request)
 
     def subscription_bootstrap(
         self,
@@ -1665,6 +1683,78 @@ class _SubscriptionFailureApi:
     ) -> SubscriptionCheckpoint:
         del after_sequence, store_id, bootstrap_spine
         raise self._error_type
+
+
+class _HeldFailureAcknowledgementRunner:
+    """Hold the failure acknowledgement snapshot but no independent request."""
+
+    def __init__(self, acknowledgement_snapshot: Callable[..., object]) -> None:
+        self._acknowledgement_snapshot = acknowledgement_snapshot
+        self.snapshot_entered = Gate()
+        self.snapshot_completed = Gate()
+        self.release_snapshot = Gate()
+        self._completed: dict[str, Gate] = {}
+
+    def completed(self, request: ProtocolRequest) -> Gate:
+        """Return the signal for this request finishing its owned API call."""
+        return self._completed.setdefault(request.request_id, Gate())
+
+    async def run[**P, T](self, function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+        if function == self._acknowledgement_snapshot:
+            self.snapshot_entered.open()
+            await self.release_snapshot.wait()
+        result = function(*args, **kwargs)
+        if function == self._acknowledgement_snapshot:
+            self.snapshot_completed.open()
+        elif args and isinstance(args[0], SnapshotQuery):
+            self.completed(args[0]).open()
+        return result
+
+
+async def _assert_failure_acknowledgement_snapshot_isolated(
+    gateway: WebSocketGateway,
+    runner: _HeldFailureAcknowledgementRunner,
+    api: _SubscriptionFailureApi,
+) -> None:
+    control_request = SnapshotQuery(timestamp=REQUEST_TIME)
+    async with (
+        asyncio.timeout(DEADLOCK_GUARD_S),
+        _gateway_connection(gateway) as stream,
+        _gateway_connection(gateway) as control,
+    ):
+        try:
+            await stream.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME,
+                    client_id="failed-bootstrap",
+                ).model_dump_json()
+            )
+            acknowledgement = asyncio.create_task(stream.recv())
+            await runner.snapshot_entered.wait(acknowledgement)
+
+            await control.send(control_request.model_dump_json())
+            control_response = asyncio.create_task(control.recv())
+            await runner.completed(control_request).wait(control_response)
+
+            assert runner.snapshot_completed.is_open is False
+            assert json.loads(await control_response)["request_id"] == control_request.request_id
+
+            runner.release_snapshot.open()
+            subscribed = json.loads(await acknowledgement)
+            assert subscribed["type"] == "subscribed"
+            assert subscribed["run_id"] == api.snapshots[0].run_id
+            assert subscribed["latest_sequence"] == api.snapshots[0].sequence
+            failure = json.loads(await stream.recv())
+            assert failure["type"] == "protocol_error"
+            assert failure["request_id"] == subscribed["request_id"]
+            assert failure["client_id"] == "failed-bootstrap"
+            assert failure["code"] == "stream_failed"
+            with pytest.raises(ConnectionClosedOK):
+                await stream.recv()
+        finally:
+            runner.release_snapshot.open()
+
+    assert api.latest_sequence_reads == 0
 
 
 async def _assert_subscription_failure_lifecycle(
@@ -1710,19 +1800,18 @@ def test_gateway_converts_control_api_timeout_into_response() -> None:
 def test_gateway_acknowledges_subscription_before_bootstrap_failure(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path / "logs")
     api = _SubscriptionFailureApi(parts.api, "bootstrap")
+    runner = _HeldFailureAcknowledgementRunner(api.snapshot)
 
-    with WebSocketGateway(
-        cast("RunApi", api),
-        clock=ManualClock(),
-        threads=OsThreads(),
-        request_runner=ThreadBlockingRunner(),
-    ) as gateway:
-        asyncio.run(
-            _assert_subscription_failure_lifecycle(
-                gateway,
-                ("subscribed", "protocol_error"),
-            )
-        )
+    try:
+        with WebSocketGateway(
+            cast("RunApi", api),
+            clock=ManualClock(),
+            threads=OsThreads(),
+            request_runner=cast("BlockingRunner", runner),
+        ) as gateway:
+            asyncio.run(_assert_failure_acknowledgement_snapshot_isolated(gateway, runner, api))
+    finally:
+        parts.close()
 
 
 def test_gateway_reports_post_handshake_stream_failure_in_band(tmp_path: Path) -> None:
@@ -2536,12 +2625,12 @@ def test_a_browser_stream_reports_what_it_delivered_so_a_closing_server_can_wait
             assert json.loads(await websocket.recv())["type"] == "subscribed"
             assert json.loads(await websocket.recv())["type"] == "event_batch"
             caught_up.append(
-                tracker.wait_until_delivered(parts.api.latest_sequence, DEADLOCK_GUARD_S)
+                tracker.wait_until_delivered(_delivery_watermark(parts), DEADLOCK_GUARD_S)
             )
             parts.journal.publish_output("stdout", "the run's last line")
             assert json.loads(await websocket.recv())["type"] == "event_batch"
             caught_up.append(
-                tracker.wait_until_delivered(parts.api.latest_sequence, DEADLOCK_GUARD_S)
+                tracker.wait_until_delivered(_delivery_watermark(parts), DEADLOCK_GUARD_S)
             )
 
     with gateway:
@@ -2569,7 +2658,7 @@ def test_terminal_drain_refuses_a_late_browser_subscription(tmp_path: Path) -> N
         threads=OsThreads(),
         request_runner=ThreadBlockingRunner(),
     ) as gateway:
-        assert tracker.wait_until_delivered(parts.api.latest_sequence, 0.0)
+        assert tracker.wait_until_delivered(_delivery_watermark(parts), 0.0)
         refusal = asyncio.run(subscribe(gateway))
     parts.close()
 

@@ -19,6 +19,7 @@
  * EOF behind an exhausted credit window reach the relay.
  */
 import type {Duplex} from 'node:stream';
+import type {ServerMessage} from '@vibesys/contracts';
 import {BRIDGE_CREDIT_WINDOW_BYTES, type MainToPage, parsePageMessage} from '@vibesys/ipc';
 import {defaultScheduleTimeout, NewlineFramer, type ScheduleTimeout} from '@vibesys/transport';
 
@@ -73,6 +74,8 @@ class StreamRelay {
   readonly #scheduleTimeout: ScheduleTimeout;
   readonly #framer = new NewlineFramer();
   readonly #pending: PendingFrame[] = [];
+  /** A transport framing fault staged behind every complete host frame already accepted. */
+  #framingFault: PendingFrame | null = null;
   #pendingBytes = 0;
   #pageSendCredit = BRIDGE_CREDIT_WINDOW_BYTES;
   #pageReceiveCredit = 0;
@@ -244,7 +247,7 @@ class StreamRelay {
 
   #flushPageOutput(): void {
     while (!this.#closed) {
-      const frame = this.#pending[0];
+      const frame = this.#nextPendingFrame();
       if (frame === undefined || frame.bytes > this.#pageReceiveCredit) break;
       this.#pending.shift();
       this.#pendingBytes -= frame.bytes;
@@ -270,6 +273,17 @@ class StreamRelay {
     // Node need not emit `end` for the relay to own deterministic cleanup.
     if (stream !== null && !this.#streamEnded) stream.pause();
     this.#armCreditDeadline();
+  }
+
+  /** Append a terminal framing fault only after every complete peer frame. */
+  #nextPendingFrame(): PendingFrame | undefined {
+    const pending = this.#pending[0];
+    if (pending !== undefined || !this.#streamEnded || this.#framingFault === null) return pending;
+    const fault = this.#framingFault;
+    this.#framingFault = null;
+    this.#pending.push(fault);
+    this.#pendingBytes += fault.bytes;
+    return fault;
   }
 
   /** (Re)start the pending-page-output deadline after a stall or some insufficient progress. */
@@ -308,6 +322,16 @@ class StreamRelay {
 
   #endStream(): void {
     if (this.#closed || this.#streamEnded) return;
+    try {
+      this.#framer.finish();
+    } catch (error) {
+      const data = JSON.stringify({
+        type: 'protocol_error',
+        code: 'invalid_frame',
+        message: error instanceof Error ? error.message : String(error),
+      } satisfies Extract<ServerMessage, {type: 'protocol_error'}>);
+      this.#framingFault = {data, bytes: frameBytes(data)};
+    }
     this.#streamEnded = true;
     this.#flushPageOutput();
   }
@@ -335,6 +359,7 @@ class StreamRelay {
     this.#cancelHostWriteDeadline();
     this.#cancelCreditDeadline();
     this.#pending.length = 0;
+    this.#framingFault = null;
     this.#pendingBytes = 0;
     this.#stream?.destroy();
     try {

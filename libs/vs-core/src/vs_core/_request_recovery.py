@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from . import _host_epochs
+from . import _host_epochs, _wait_clock
+from ._failure_routing import FailureHearer, failure_hearer
+from ._measurements import cancel_settled
 from ._proofs import (
     Mismatch,
     Missing,
@@ -51,10 +53,12 @@ from .types.common import (
 )
 from .types.evaluation import (
     CancelOwnedJob,
+    JobTerminationRequested,
     OwnedJob,
     RegisteredOwnedJob,
     SubmitMeasurement,
 )
+from .types.job_observations import WaitEnd
 from .types.kernel import AreaChange
 from .types.records import (
     BlockRequest,
@@ -90,8 +94,16 @@ from .types.waits import WaitKind, WaitOn, WaitSubject
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
+    from .types.evaluation import EvaluationState
     from .types.kernel import RecordsContext, RunState, Signal
-    from .types.records import RecordsEvent, RecordsState, Request, RequestRecord, TargetObservation
+    from .types.records import (
+        HostEpoch,
+        RecordsEvent,
+        RecordsState,
+        Request,
+        RequestRecord,
+        TargetObservation,
+    )
     from .types.sessions import Invocation, SessionView
     from .types.strategy import Operation
 
@@ -1563,10 +1575,18 @@ def _deadline(
     # the answer or the inspection's bound, because the limit may have passed while the host
     # was down and the far side may have finished in time.
     timed = event.reason == FailureReason.TIMED_OUT
+    # A limit counts from the job's start, and a job may wait in its queue only for the
+    # queue budget (``_wait_clock``): the bound says when, and which of the two ended it.
+    bound = _wait_clock.record_bound(record, context.evaluation, context.run, state.hosts)
+    reason = (
+        FailureReason.QUEUE_BUDGET_SPENT
+        if timed and bound.by == WaitEnd.QUEUE_BUDGET
+        else event.reason
+    )
     concluded = not is_open(record) and not unresolved_children
     asked_until = _awaiting_report(state, record)
     if (
-        (timed and now_at < record.until.at)
+        (timed and now_at < bound.at)
         or (timed and asked_until is not None and now_at < asked_until)
         or (resolution == "terminal" and not unresolved_children)
         or (timed and concluded and resolution == "reattached")
@@ -1588,15 +1608,20 @@ def _deadline(
         scope=record.request.scope,
         admission_id=record.request.admission_id,
         target=record.request_id,
-        reason=event.reason,
+        reason=reason,
     )
     requests: list[Outbound] = []
     signals = _lost_turn(context, record, first=previous_block is None)
     if previous_block is None:
         requests.append(_probe(block, context))
     state, events = _end_open_record(
-        state, record, event.reason, lost=bool(signals), first=previous_block is None
+        state,
+        record,
+        _failure(record, reason, bound.at),
+        lost=bool(signals),
+        first=previous_block is None,
     )
+    signals = (*signals, *_orphaned_jobs(state, context, record, reason))
     observation = record.observation
     resources = []
     if (
@@ -1688,7 +1713,7 @@ def _cancelled_here(record: RequestRecord) -> bool:
 
 
 def _end_open_record(
-    state: RecordsState, record: RequestRecord, reason: FailureReason, *, lost: bool, first: bool
+    state: RecordsState, record: RequestRecord, failure: Failed, *, lost: bool, first: bool
 ) -> tuple[RecordsState, tuple[Failed, ...]]:
     """Block a record whose result is still owed, and the failure its owner hears of it.
 
@@ -1698,8 +1723,15 @@ def _end_open_record(
     """
     if not is_open(record):
         return state, ()
-    failed = None if lost else record.failure or _failure(record, reason)
-    heard = (failed,) if failed is not None and first and not _decision_ended(state, record) else ()
+    failed = None if lost else record.failure or failure
+    heard = (
+        (failed,)
+        if failed is not None
+        and first
+        and _heard_by_decision(record)
+        and not _decision_ended(state, record)
+        else ()
+    )
     blocked = record.model_copy(update={"phase": RequestPhase.BLOCKED, "failure": failed})
     return _replace_record(state, blocked), heard
 
@@ -1726,23 +1758,94 @@ def _lost_turn(
     )
 
 
+def _orphaned_jobs(
+    state: RecordsState, context: RecordsContext, record: RequestRecord, reason: FailureReason
+) -> tuple[JobTerminationRequested, ...]:
+    """The termination of every unfinished job a submission started, when core ends it.
+
+    A strategy's ``Measure`` waits on its submission's record. Once that record ends at its
+    limit or a watch, nothing waits on the job any longer: evaluation cancels it rather than
+    leave it in the scheduler's queue, holding nodes nobody will read. A cancel of such a job
+    that ends blocked at its bound proved nothing, so core asks again, within the backend's
+    retry limit (``cancel_settled``); each such cancel's own end brings it back here. A job
+    whose id arrives only after its submission ended is cancelled when that late answer ends
+    the submission again. A job an agent submitted is its wait's to end (``_continuations``).
+    """
+    source = _orphan_source(state, context, record)
+    if source is None:
+        return ()
+    cause = (
+        "deadline"
+        if reason in (FailureReason.TIMED_OUT, FailureReason.QUEUE_BUDGET_SPENT)
+        else "retirement"
+    )
+    return tuple(
+        JobTerminationRequested(resource_id=job.resource_id, cause=cause)
+        for job in context.evaluation.jobs
+        if job.submission_id == source
+        and job.resource_id is not None
+        and not job.terminal
+        and not cancel_settled(state, context.run, job.resource_id)
+    )
+
+
+def _heard_by_decision(record: RequestRecord) -> bool:
+    """Whether the record's decision hears its failure (``_failure_routing``)."""
+    return failure_hearer(record.request) == FailureHearer.DECISION
+
+
+def _orphan_source(
+    state: RecordsState, context: RecordsContext, record: RequestRecord
+) -> RequestId | None:
+    """The strategy's submission whose jobs core now ends, as *record* ends; else ``None``.
+
+    That is *record* itself when it is the submission, and the job's submission when
+    *record* is a cancel of a job whose submission core ended before.
+    """
+    request = record.request
+    if isinstance(request, SubmitMeasurement):
+        source: RequestId | None = record.request_id
+    elif isinstance(request, CancelOwnedJob):
+        source = next(
+            (
+                job.submission_id
+                for job in context.evaluation.jobs
+                if job.resource_id == request.resource_id
+            ),
+            None,
+        )
+        ended = state.record(source) if source is not None else None
+        if ended is None or ended.failure is None:
+            return None
+    else:
+        return None
+    if any(call.request_id == source for call in context.evaluation.agent_calls):
+        return None
+    return source
+
+
 def _decision_ended(state: RecordsState, record: RequestRecord) -> bool:
     """Whether another request of the record's decision already ended with a failure.
 
-    A decision hears of its ending once. Its later requests (the submission a measurement
-    still holds open after its observation timed out) end quietly: the owner has moved on.
+    A decision hears of its ending once; its later requests end quietly, as the owner has
+    moved on.
     """
     decision = record.request.decision_id
     return decision is not None and any(
         row.failure is not None
+        and _heard_by_decision(row)
         and row.request.decision_id == decision
         and row.request_id != record.request_id
         for row in state.records
     )
 
 
-def _failure(record: RequestRecord, reason: FailureReason) -> Failed:
-    """The typed result a record ends with: what ended it, and which watch or limit."""
+def _failure(record: RequestRecord, reason: FailureReason, limit_at: float) -> Failed:
+    """The typed result a record ends with: what ended it, and which watch or limit.
+
+    ``limit_at`` is the record's bound (``_wait_clock.record_bound``): its stated limit plus
+    its job's queue credit, or when its job's queue budget ran out.
+    """
     watch = next(
         (
             watch
@@ -1756,7 +1859,9 @@ def _failure(record: RequestRecord, reason: FailureReason) -> Failed:
         reason=reason,
         decision=record.request.decision_id,
         watch=watch,
-        limit_at=record.until.at if reason == FailureReason.TIMED_OUT else None,
+        limit_at=limit_at
+        if reason in (FailureReason.TIMED_OUT, FailureReason.QUEUE_BUDGET_SPENT)
+        else None,
     )
 
 
@@ -1792,15 +1897,25 @@ def command_open(record: RequestRecord) -> bool:
     )
 
 
+def _limit_passed(
+    record: RequestRecord, evaluation: EvaluationState, run: RunState, hosts: tuple[HostEpoch, ...]
+) -> bool:
+    return _wait_clock.record_bound(record, evaluation, run, hosts).at <= run.now_at
+
+
 def overdue_reconciliations(
-    state: RecordsState, now_at: float
+    state: RecordsState, evaluation: EvaluationState, run: RunState
 ) -> tuple[ReconciliationDeadline | ReconciliationCommandLapsed, ...]:
-    """One deadline event per open record, or lapse per open command, whose limit has passed."""
+    """One deadline event per open record, or lapse per open command, whose limit has passed.
+
+    A record's limit is its bound, derived from its jobs' facts (``_wait_clock.record_bound``).
+    """
+    now_at = run.now_at
     return (
         *(
             ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
             for record in state.records
-            if is_open(record) and record.until.at <= now_at
+            if is_open(record) and _limit_passed(record, evaluation, run, state.hosts)
         ),
         *(
             ReconciliationCommandLapsed(request_id=record.request_id, now_at=now_at)
@@ -1810,14 +1925,22 @@ def overdue_reconciliations(
     )
 
 
-def next_reconciliation_at(state: RecordsState) -> float | None:
+def next_reconciliation_at(
+    state: RecordsState, evaluation: EvaluationState, run: RunState
+) -> float | None:
     """The earliest time a ``ClockAdvanced`` would end an open record at its limit."""
-    return min(
+    limits = (
         (
-            max(record.until.at, _awaiting_report(state, record) or record.until.at)
-            for record in state.records
-            if is_open(record) or command_open(record)
-        ),
+            record,
+            _wait_clock.record_bound(record, evaluation, run, state.hosts).at
+            if is_open(record)
+            else record.until.at,
+        )
+        for record in state.records
+        if is_open(record) or command_open(record)
+    )
+    return min(
+        (max(limit_at, _awaiting_report(state, record) or limit_at) for record, limit_at in limits),
         default=None,
     )
 

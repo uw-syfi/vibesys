@@ -277,7 +277,9 @@ export type EventType =
   | "workspace_snapshot"
   | "run_configured"
   | "framework_warning"
-  | "winner_selected";
+  | "winner_selected"
+  | "workstream_finished"
+  | "turn_usage_recorded";
 export type Text2 = string;
 /**
  * Lifecycle and command states reported in events.
@@ -328,6 +330,8 @@ export type Data =
       | RunConfiguredData
       | FrameworkWarningData
       | WinnerSelectedData
+      | WorkstreamFinishedData
+      | TurnUsageData
     )
   | null;
 export type Kind1 = "chat";
@@ -419,6 +423,10 @@ export type Kind20 = "judge_result";
 export type Verdict = "pass" | "fail";
 export type Feedback = string;
 export type Attempt3 = number;
+export type Skipped = boolean;
+export type SkipReason = string | null;
+export type ImplementerOutcome =
+  ("continue" | "supported" | "nominated" | "disproven" | "implementation_failed") | null;
 export type Kind21 = "benchmark_result";
 export type Metric = string;
 export type Value = number;
@@ -507,6 +515,7 @@ export type Metric1 = string | null;
 export type Value2 = number | null;
 export type Unit1 = string | null;
 export type OutputTail = string | null;
+export type RoundLabel3 = string | null;
 /**
  * Closed set of framework subsystems that emit framework events.
  */
@@ -529,6 +538,8 @@ export type Objective = string | null;
 export type SearchPolicy = string | null;
 export type BenchmarkContract = boolean;
 export type ParetoObjectives = string | null;
+export type MaxContinuationRounds = number | null;
+export type MaxUnmeasuredTurns = number | null;
 /**
  * Closed set of framework subsystems that emit framework events.
  */
@@ -545,6 +556,47 @@ export type Kind39 = "winner_selected";
 export type Selection = "candidate" | "baseline";
 export type Revision3 = string;
 export type SettlementId = string | null;
+export type Kind40 = "workstream_finished";
+export type SetupFailure = boolean;
+export type Refunded = boolean;
+export type RepeatedError = boolean;
+/**
+ * Why a workstream ended without a measured candidate. Closed.
+ *
+ * See ``vibesys.events.WorkstreamFailureKind``, which this mirrors
+ * member-for-member.
+ */
+export type WorkstreamFailureKind =
+  | "stopped"
+  | "parent-unverified"
+  | "refused"
+  | "ended"
+  | "out-of-budget"
+  | "turn-failed"
+  | "invalid-reply"
+  | "render-failed"
+  | "wait-refused"
+  | "checkpoint-declined"
+  | "no-changed-candidate"
+  | "implementation-failed"
+  | "review-rejected"
+  | "no-trusted-evidence"
+  | "evidence-refused"
+  | "evidence-undecodable"
+  | "profile-capture-unavailable"
+  | "turn-limit"
+  | "repeated-turn";
+export type Role = string | null;
+export type Turns = number | null;
+export type Limit2 = number | null;
+export type Text3 = string;
+export type Kind41 = "turn_usage_recorded";
+export type InputTokens2 = number | null;
+export type CacheCreationInputTokens = number | null;
+export type CacheReadInputTokens = number | null;
+export type OutputTokens = number | null;
+export type TotalCostUsd = number | null;
+export type DurationMs = number | null;
 /**
  * True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.
  */
@@ -640,7 +692,7 @@ export type Reset = boolean;
 export type RemovedHypothesisIds = string[];
 export type ExperimentsReady = boolean | null;
 export type Iterations = IterationSlice | IterationUnavailable | null;
-export type Kind40 = "page";
+export type Kind42 = "page";
 export type SchemaVersion = 1;
 export type RunId4 = string;
 export type ProjectionRevision = string;
@@ -666,7 +718,7 @@ export type Direction = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
-export type Kind41 = "unavailable";
+export type Kind43 = "unavailable";
 export type SchemaVersion1 = 1;
 /**
  * Closed reasons why a policy cannot expose iteration navigation.
@@ -1372,12 +1424,18 @@ export interface SubprocessOutputData {
 }
 /**
  * Verdict and feedback returned by the judge.
+ *
+ * See ``vibesys.events.JudgeResultData`` for ``skipped``/``skip_reason``/
+ * ``implementer_outcome``.
  */
 export interface JudgeResultData {
   kind: Kind20;
   verdict: Verdict;
   feedback: Feedback;
   attempt: Attempt3;
+  skipped?: Skipped;
+  skip_reason?: SkipReason;
+  implementer_outcome?: ImplementerOutcome;
 }
 /**
  * Metric result emitted by a benchmark stage.
@@ -1552,7 +1610,9 @@ export interface GateStartedData {
  * ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
  * ``unit`` keeps the historical fallback of the metric name when the
  * contract declares no unit. ``output_tail`` carries the trailing command
- * output on failure.
+ * output on failure. ``round_label`` groups the per-recipe local-validation
+ * gates of one attempt back together, so a client folds them into a
+ * pass-fraction itself rather than the backend aggregating one.
  */
 export interface GateFinishedData {
   kind: Kind35;
@@ -1563,6 +1623,7 @@ export interface GateFinishedData {
   value?: Value2;
   unit?: Unit1;
   output_tail?: OutputTail;
+  round_label?: RoundLabel3;
   source?: FrameworkSource1;
   source_label?: SourceLabel1;
 }
@@ -1584,6 +1645,9 @@ export interface WorkspaceSnapshotData {
 }
 /**
  * One per run: the resolved configuration a loop starts with.
+ *
+ * See ``vibesys.events.RunConfiguredData`` for ``max_continuation_rounds``/
+ * ``max_unmeasured_turns``.
  */
 export interface RunConfiguredData {
   kind: Kind37;
@@ -1594,6 +1658,8 @@ export interface RunConfiguredData {
   search_policy?: SearchPolicy;
   benchmark_contract?: BenchmarkContract;
   pareto_objectives?: ParetoObjectives;
+  max_continuation_rounds?: MaxContinuationRounds;
+  max_unmeasured_turns?: MaxUnmeasuredTurns;
   source?: FrameworkSource3;
 }
 /**
@@ -1617,6 +1683,44 @@ export interface WinnerSelectedData {
   selection: Selection;
   revision: Revision3;
   settlement_id?: SettlementId;
+}
+/**
+ * One workstream (one dynamic-run round) ended; its typed failure, if any.
+ *
+ * See ``vibesys.events.WorkstreamFinishedData`` for why ``setup_failure``
+ * and ``refunded`` are always ``False`` from this event's only current
+ * producer.
+ */
+export interface WorkstreamFinishedData {
+  kind: Kind40;
+  setup_failure: SetupFailure;
+  refunded: Refunded;
+  repeated_error: RepeatedError;
+  last_error?: WorkstreamFailureData | null;
+}
+/**
+ * One workstream's typed account of why it ended without a measured candidate.
+ */
+export interface WorkstreamFailureData {
+  kind: WorkstreamFailureKind;
+  role?: Role;
+  turns?: Turns;
+  limit?: Limit2;
+  text?: Text3;
+}
+/**
+ * Settled token and cost accounting for one finished agent turn.
+ *
+ * See ``vibesys.events.TurnUsageData``.
+ */
+export interface TurnUsageData {
+  kind: Kind41;
+  input_tokens?: InputTokens2;
+  cache_creation_input_tokens?: CacheCreationInputTokens;
+  cache_read_input_tokens?: CacheReadInputTokens;
+  output_tokens?: OutputTokens;
+  total_cost_usd?: TotalCostUsd;
+  duration_ms?: DurationMs;
 }
 /**
  * One measured performance result in a run.
@@ -1721,7 +1825,7 @@ export interface ExperimentUpdate {
  * One bounded page, with enough identity to reject stale merges.
  */
 export interface IterationSlice {
-  kind?: Kind40;
+  kind?: Kind42;
   schema_version?: SchemaVersion;
   run_id: RunId4;
   projection_revision: ProjectionRevision;
@@ -1756,7 +1860,7 @@ export interface IterationMetric {
  * Typed absence, kept distinct from a supported empty tree.
  */
 export interface IterationUnavailable {
-  kind?: Kind41;
+  kind?: Kind43;
   schema_version?: SchemaVersion1;
   reason: IterationUnavailableReason;
 }
