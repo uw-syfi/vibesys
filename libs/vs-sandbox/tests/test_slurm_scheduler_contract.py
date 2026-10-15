@@ -47,6 +47,7 @@ from vs_slurm.api import (
     ClusterTarget,
     FakeCluster,
     SchedulerTrace,
+    SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmCluster,
@@ -63,7 +64,7 @@ from vs_slurm.api import SlurmBatchStageResult as _StageResult
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_sim.api import Sleeper
+    from vs_sim.api import ByteSource, OutputStream, Sleeper
 
 _POLL_INTERVAL_S = 10.0
 # The executor waits this long for a cancelled job to end before it leaves the
@@ -117,6 +118,11 @@ class _ObservedCluster:
         observed: ClusterObservation | None = None,
     ) -> ClusterCollectOutcome:
         return self._inner.collect(target, by_job_id=by_job_id, observed=observed)
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        return self._inner.stage_output(handle, index, stream)
 
 
 class _TimelineFake(FakeCluster):

@@ -71,7 +71,7 @@ from vs_sandbox.api.slurm import (
     load_slurm_operator_settings,
     read_slurm_capture_plan,
 )
-from vs_sim.api import ProcessOutcome, ProcessSpec, UnixNetwork
+from vs_sim.api import DISCARD, ProcessOutcome, ProcessSpec, UnixNetwork
 from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
@@ -913,6 +913,7 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
     backend.sandbox.execute.assert_called_once_with(
         evaluator_tools_install_command(package.metadata.tools, tools_root),
         timeout=660,
+        output=DISCARD,
     )
     tool = package.metadata.tools["request-factory"]
     benchmark = shlex.split(session.view.paths.benchmark_command or "")

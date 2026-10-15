@@ -39,6 +39,7 @@ from vs_runtime._run_environment import (
     _NoopWorkspaceRecovery,
     _prepare_evaluation_plan,
     _PreparedRunEnvironment,
+    _starting_container,
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation_preparation import (
@@ -464,23 +465,22 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 extras = bridge_editor_extras(commands, launcher, env=mode.editor_env(launcher))
             sandbox = self._docker.build_editor(request, extras)
             profiler_mcp = _remote_profiler_mcp(plans, transport_env, transport_resources)
-            session = SandboxSession.start(
-                sandbox,
-                RunEnvironmentView(
-                    paths=agent_paths(sandbox, request),
-                    prompt_notes=presentation.prompt_notes,
-                    isolated=True,
-                    cli_sandboxed=True,
-                    host_device_reselect=False,
-                    env_kind="slurm",
-                    profile_execution="remote" if remote_profiling else "local",
-                    editor_has_gpu=False,
-                    framework_setup_timeout_seconds=config.job_timeout_seconds,
-                    profiler_mcp_env=profiler_mcp[0],
-                    profiler_mcp_resources=profiler_mcp[1],
-                    cluster_evaluation=ClusterEvaluationFacts(self._settings, plans.plan),
-                ),
+            view = RunEnvironmentView(
+                paths=agent_paths(sandbox, request),
+                prompt_notes=presentation.prompt_notes,
+                isolated=True,
+                cli_sandboxed=True,
+                host_device_reselect=False,
+                env_kind="slurm",
+                profile_execution="remote" if remote_profiling else "local",
+                editor_has_gpu=False,
+                framework_setup_timeout_seconds=config.job_timeout_seconds,
+                profiler_mcp_env=profiler_mcp[0],
+                profiler_mcp_resources=profiler_mcp[1],
+                cluster_evaluation=ClusterEvaluationFacts(self._settings, plans.plan),
             )
+            with _starting_container(request) as output:
+                session = SandboxSession.start(sandbox, view, output=output)
         except BaseException:
             for broker in reversed(brokers):
                 broker.close()

@@ -6,15 +6,14 @@ import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_agent.images import (
-    DOCKER_PROGRESS_LINE_CHARACTERS,
-    DockerBuildResult,
-    DockerCommandResult,
-)
+from vs_agent.images import DockerBuildResult, DockerCommandResult
+from vs_sim.api import DISCARD, OutputStream
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
     from pathlib import Path
+
+    from vs_sim.api import OutputSink
 
 DEFAULT_IMAGE_ID = "sha256:" + "a" * 64
 
@@ -27,9 +26,9 @@ class FakeDockerBuildRunner:
 
     A build succeeds and inspection reports ``image_id`` unless a result (or an
     exception to raise) is scripted. Every call is recorded in ``calls``. Like
-    the real runner, a command streams each line of its result's ``stderr``
-    to ``on_stderr_line`` before returning; a script's build ``stderr`` is
-    where Docker's progress output goes.
+    the real runner, a command writes its result's ``stdout`` and ``stderr``
+    to ``output`` before returning; a script's build ``stderr`` is where
+    Docker's progress output goes.
     """
 
     def __init__(
@@ -50,7 +49,7 @@ class FakeDockerBuildRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink = DISCARD,
     ) -> DockerBuildResult:
         """Record the command and return the scripted outcome for its kind."""
         normalized = tuple(argv)
@@ -58,9 +57,8 @@ class FakeDockerBuildRunner:
         result = self.build_result if normalized[1] in ("build", "run") else self.inspect_result
         if isinstance(result, BaseException):
             raise result
-        if on_stderr_line is not None:
-            for line in (result.stderr or "").splitlines():
-                on_stderr_line(line[:DOCKER_PROGRESS_LINE_CHARACTERS])
+        output.write(OutputStream.STDOUT, (result.stdout or "").encode())
+        output.write(OutputStream.STDERR, (result.stderr or "").encode())
         return result
 
 

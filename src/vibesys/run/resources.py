@@ -11,6 +11,8 @@ from vibesys.composition import (
     _vibesys_runtime_host_resources,
     domain_model_copy_excludes,
     prepare_domain_model_artifacts,
+    resolve_model,
+    resolve_provider,
 )
 from vibesys.config import BUNDLED_RESOURCES, as_config
 from vibesys.constants import (
@@ -48,6 +50,12 @@ from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.gpu_events import CoreGpuContentionEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
+from vibesys.run.logs import (
+    open_run_logs,
+    stage_output_opener,
+    startup_output_opener,
+    tool_build_output_opener,
+)
 from vibesys.run.profilers import (
     ProfilerPreflight,
     resolve_run_profiler,
@@ -73,11 +81,11 @@ from vibesys.run.workspace_policy import (
     materialized_skill_dirs,
 )
 from vs_agent.api import (
-    DEFAULT_CLI_PROVIDER,
     AgentBackend,
     AgentSpec,
     task_agent_host_resources,
 )
+from vs_logs.api import installed_narration
 from vs_project.api import (
     AgentRoleExecutionRecord,
     OrchestrationDescriptor,
@@ -93,6 +101,7 @@ from vs_runtime.api import (
     WorkspaceSourceFact,
     boot_trace,
 )
+from vs_runtime.api.core import StageOutputOpener
 from vs_runtime.api.infrastructure import (
     EnvironmentStartup,
     ModelArtifactRequest,
@@ -315,7 +324,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 clock=clock,
                 events=CoreGpuContentionEvents(integration.events),
             )
-            model_name = config.model.name
+            model_name = resolve_model(config, resolve_provider(config, request.cli_provider))
         with boot_trace.span("execution_record"):
             skill_source_paths = resolve_skill_source_paths(skills_dirs)
             agent_objective = resolve_agent_resource_paths(
@@ -326,11 +335,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             resolved_backend = str(
                 request.agent_backend or config.agent.backend or AgentBackend.CLI
             )
-            resolved_cli_provider = (
-                request.cli_provider or config.agent.cli_provider or DEFAULT_CLI_PROVIDER
-            )
+            resolved_cli_provider = resolve_provider(config, request.cli_provider)
             execution_record = RunExecutionRecord(
-                model=config.model.name,
+                model=model_name,
                 agent_backend=resolved_backend,
                 cli_provider=resolved_cli_provider,
                 cli_timeout=config.agent.cli_timeout,
@@ -341,7 +348,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 thinking_budget=config.thinking.budget,
                 agent_roles={
                     role_id: AgentRoleExecutionRecord(
-                        model=spec.model if spec.model is not None else config.model.name,
+                        model=spec.model if spec.model is not None else model_name,
                         reasoning_effort=spec.reasoning_effort,
                     )
                     for role_id, spec in agent_specs.items()
@@ -475,6 +482,17 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         log_dir = project_resources.logger.log_dir
         logger = project_resources.logger
         git = project_resources.git
+        # The run's one log store, open until the run's resources close. Its scope is what
+        # the run's producers (startup steps, gate stages) are handed.
+        log_scope = ownership.enter_context(
+            open_run_logs(
+                project_root,
+                run_id,
+                threads=integration.threads,
+                warn=sys.stderr.write,
+                narration=installed_narration(),
+            )
+        )
 
         prepared_evaluator = prepare_trusted_evaluator(
             evaluator_package_root,
@@ -612,6 +630,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     *evaluation_socket_mounts,
                 ),
                 log=logger.lprint,
+                startup_output=startup_output_opener(log_scope),
+                tool_build_output=tool_build_output_opener(log_scope),
                 framework_root=PROJECT_ROOT,
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
@@ -659,6 +679,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             project_resources=project_resources,
             agent_host_resources=agent_host_resources,
             profiler_agent_resources=session.view.profiler_mcp_resources,
+            stage_output=stage_output_opener(log_scope),
         )
         integration.publish_resources(
             RunResources(
@@ -673,6 +694,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     if spec.model is not None and spec.model != model_name
                 ),
                 config=config,
+                allow_unvetted_model=request.allow_unvetted_model,
                 backend=backend,
                 skill_source_dirs=tuple(skill_source_paths),
                 host_resources=agent_host_resources,
@@ -769,3 +791,5 @@ class _PreparedRun:
     evaluation_plan: TrustedEvaluationPlan
     agent_host_resources: tuple[HostResource, ...]
     profiler_agent_resources: tuple[HostResource, ...]
+    stage_output: StageOutputOpener
+    """Opens each evaluation stage's output stream in the run's log store."""

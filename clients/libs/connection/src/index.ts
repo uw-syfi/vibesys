@@ -15,6 +15,6 @@ export {
   DEFAULT_CONNECTION_CONFIG,
 } from './shell/connection-manager.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
-export {HostConnection} from './shell/host-connection.js';
+export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {type Link, LocalLink, SshLink} from './shell/link.js';
 export type {Phase} from './state/host-connection.js';

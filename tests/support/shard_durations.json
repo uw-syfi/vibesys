@@ -366,7 +366,6 @@
  "libs/vs-sandbox/tests/test_docker_cli.py": 0.27,
  "libs/vs-sandbox/tests/test_docker_conformance_e2e.py": 0.0,
  "libs/vs-sandbox/tests/test_docker_device_groups.py": 0.06,
- "libs/vs-sandbox/tests/test_docker_image_resolution.py": 0.02,
  "libs/vs-sandbox/tests/test_docker_sandbox.py": 0.67,
  "libs/vs-sandbox/tests/test_docker_sandbox_exit_paths.py": 0.21,
  "libs/vs-sandbox/tests/test_docker_sandbox_import.py": 0.35,

@@ -22,10 +22,13 @@ from vs_agent.api.images import (
     push_agent_image,
 )
 from vs_agent.api.testing import DockerBuildResult, docker_build_result, docker_timed_out
+from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
     from pathlib import Path
+
+    from vs_sim.api import OutputSink
 
 _IMAGE_ID = "sha256:" + "c" * 64
 _SHORT_ID = "c" * 12
@@ -78,9 +81,9 @@ class _FakeRegistryRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink = DISCARD,
     ) -> DockerBuildResult:
-        del cwd, timeout, on_stderr_line
+        del cwd, timeout, output
         normalized = tuple(argv)
         self.calls.append(normalized)
         for marker, exc in self.raise_on.items():

@@ -110,6 +110,7 @@ def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry
         registration.plugin.agents,
         backend=request.agent_backend,
         provider=request.cli_provider,
+        allow_unvetted_model=request.allow_unvetted_model,
     )
     if request.resume is not None and registration.plugin.core is not None:
         ensure_not_legacy_resume(request.project_root, request.resume.run_id)

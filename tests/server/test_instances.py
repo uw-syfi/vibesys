@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -77,7 +78,7 @@ if TYPE_CHECKING:
 
     from server.host_api import InstanceStopResult
     from server.registry import InstanceStore
-    from vs_sim.api import Listener
+    from vs_sim.api import Connection, Listener, Network
 
 CLOCK = ManualClock()
 IDS = [f"{index:012x}" for index in range(1, 6)]
@@ -966,7 +967,12 @@ def test_an_unreadable_lock_is_reported_but_neither_trusted_nor_removed() -> Non
 
 # A server whose control socket nothing answers: every stop below that uses it
 # exercises the signal fallback.
-_UNANSWERED = ControlSocketStopRequester(SimNetwork(SimThreads()), clock=CLOCK)
+_UNANSWERED_THREADS = SimThreads()
+_UNANSWERED = ControlSocketStopRequester(
+    SimNetwork(_UNANSWERED_THREADS),
+    clock=_UNANSWERED_THREADS,
+    deadline_clock=_UNANSWERED_THREADS,
+)
 
 
 class _ExitingSignaller:
@@ -1072,7 +1078,38 @@ class _Reply(StrEnum):
     GARBAGE = "garbage"
     HANG_UP = "hang_up"
     SILENT = "silent"
+    TRICKLE = "trickle"
     UNBOUND = "unbound"
+
+
+@dataclass(frozen=True)
+class _StopDelays:
+    connect: float = 0.0
+    request_read: float = 0.0
+    trickle: float = 0.0
+
+
+_NO_STOP_DELAYS = _StopDelays()
+
+
+class _DelayedConnectNetwork:
+    """Consume virtual time before delegating, respecting the caller's connect bound."""
+
+    def __init__(self, network: Network, threads: SimThreads, delay: float) -> None:
+        self._network = network
+        self._threads = threads
+        self._delay = delay
+
+    def listen(self, address: str) -> Listener:
+        return self._network.listen(address)
+
+    def connect(self, address: str, timeout: float | None = None) -> Connection:
+        waited = self._delay if timeout is None else min(self._delay, timeout)
+        self._threads.sleep(waited)
+        if timeout is not None and self._delay >= timeout:
+            message = "connection did not open before its deadline"
+            raise TimeoutError(message)
+        return self._network.connect(address, timeout)
 
 
 def _reply_bytes(reply: _Reply, request_id: str) -> bytes:
@@ -1092,9 +1129,36 @@ def _reply_bytes(reply: _Reply, request_id: str) -> bytes:
     return response.model_dump_json().encode() + b"\n"
 
 
+def _answer_stop(
+    connection: Connection,
+    reply: _Reply,
+    request_id: str,
+    threads: SimThreads,
+    trickle_interval: float,
+) -> None:
+    """Produce the simulated server behavior selected by ``reply``."""
+    if reply is _Reply.SILENT:
+        threads.sleep(2 * CONTROL_REPLY_TIMEOUT_SECONDS)
+        return
+    if reply is _Reply.TRICKLE:
+        for _ in range(3):
+            try:
+                connection.send(b"x")
+            except OSError:
+                break
+            threads.sleep(trickle_interval)
+        return
+    if reply is not _Reply.HANG_UP:
+        connection.send(_reply_bytes(reply, request_id))
+
+
 def _stop_against(
-    reply: _Reply, exit_after: float | None, *, force: bool = False
-) -> tuple[InstanceStopResult, FakeInstanceStore, list[str], list[int]]:
+    reply: _Reply,
+    exit_after: float | None,
+    *,
+    force: bool = False,
+    delays: _StopDelays = _NO_STOP_DELAYS,
+) -> tuple[InstanceStopResult, FakeInstanceStore, list[str], list[int], float]:
     """Stop a live server that answers ``reply`` and exits ``exit_after`` seconds later.
 
     The server and the stopping client share one simulated network and clock;
@@ -1102,7 +1166,14 @@ def _stop_against(
     ends the server at once, so whether it was sent shows in the outcome.
     """
     threads = SimThreads()
-    network = SimNetwork(threads)
+    simulated = (
+        SimNetwork(threads, buffer_bytes=8) if reply is _Reply.TRICKLE else SimNetwork(threads)
+    )
+    network: Network = (
+        simulated
+        if delays.connect == 0.0
+        else _DelayedConnectNetwork(simulated, threads, delays.connect)
+    )
     store = FakeInstanceStore()
     hold = store.hold(IDS[0])
     record = _record(IDS[0])
@@ -1112,15 +1183,14 @@ def _stop_against(
 
     def serve(listener: Listener) -> None:
         connection = listener.accept(HANG_GUARD_S)
+        if reply is _Reply.TRICKLE:
+            threads.sleep(delays.request_read)
         line = b""
         while not line.endswith(b"\n"):
             line += connection.recv(1, HANG_GUARD_S)
         request = StopCommand.model_validate_json(line)
         received.append(request.type)
-        if reply is _Reply.SILENT:
-            threads.sleep(2 * CONTROL_REPLY_TIMEOUT_SECONDS)
-        elif reply is not _Reply.HANG_UP:
-            connection.send(_reply_bytes(reply, request.request_id))
+        _answer_stop(connection, reply, request.request_id, threads, delays.trickle)
         connection.close()
         if reply is _Reply.ACK and exit_after is not None:
             threads.sleep(exit_after)
@@ -1133,20 +1203,24 @@ def _stop_against(
         return LiveRegistry(store, CLOCK).stop(
             IDS[0],
             StopEffects(
-                ControlSocketStopRequester(network, clock=CLOCK), signaller, threads, threads.sleep
+                ControlSocketStopRequester(network, clock=threads, deadline_clock=threads),
+                signaller,
+                threads,
+                threads.sleep,
             ),
             force=force,
         )
 
+    started = threads.now()
     result = threads.run(scenario)
-    return result, store, received, signaller.signalled
+    return result, store, received, signaller.signalled, threads.now() - started
 
 
 @given(exit_after=st.floats(min_value=0, max_value=STOP_TIMEOUT_SECONDS * 0.9))
 def test_an_acknowledged_stop_waits_for_the_run_to_end_without_signalling(
     exit_after: float,
 ) -> None:
-    result, store, received, signalled = _stop_against(_Reply.ACK, exit_after)
+    result, store, received, signalled, _elapsed = _stop_against(_Reply.ACK, exit_after)
 
     assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.CONTROL_SOCKET)
     assert received == ["command.stop"]
@@ -1163,7 +1237,7 @@ def test_an_acknowledged_stop_waits_for_the_run_to_end_without_signalling(
 def test_a_run_still_in_its_agent_call_reports_stopping_and_stays_registered(
     exit_after: float | None,
 ) -> None:
-    result, store, _, signalled = _stop_against(_Reply.ACK, exit_after)
+    result, store, _, signalled, _elapsed = _stop_against(_Reply.ACK, exit_after)
 
     assert (result.outcome, result.route) == (StopOutcome.STOPPING, StopRoute.CONTROL_SOCKET)
     assert signalled == []
@@ -1176,15 +1250,79 @@ def test_a_run_still_in_its_agent_call_reports_stopping_and_stays_registered(
     "reply", [_Reply.ERROR, _Reply.GARBAGE, _Reply.HANG_UP, _Reply.SILENT, _Reply.UNBOUND]
 )
 def test_a_server_that_does_not_acknowledge_falls_back_to_the_signal(reply: _Reply) -> None:
-    result, store, _, signalled = _stop_against(reply, exit_after=0.0)
+    result, store, _, signalled, _elapsed = _stop_against(reply, exit_after=0.0)
 
     assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.SIGNAL)
     assert signalled == [4242]
     assert LiveRegistry(store, CLOCK).list().instances == ()
 
 
+def test_an_incomplete_trickle_reaches_signal_fallback_at_the_whole_call_deadline() -> None:
+    result, store, received, signalled, elapsed = _stop_against(
+        _Reply.TRICKLE,
+        exit_after=0.0,
+        delays=_StopDelays(request_read=2.0, trickle=2.0),
+    )
+
+    assert elapsed == CONTROL_REPLY_TIMEOUT_SECONDS
+    assert received == ["command.stop"]
+    assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.SIGNAL)
+    assert signalled == [4242]
+    assert LiveRegistry(store, CLOCK).list().instances == ()
+
+
+def test_connect_delay_reduces_the_send_and_reply_budget() -> None:
+    result, _store, received, signalled, elapsed = _stop_against(
+        _Reply.TRICKLE,
+        exit_after=0.0,
+        delays=_StopDelays(connect=2.0, request_read=1.0, trickle=2.0),
+    )
+
+    assert elapsed == CONTROL_REPLY_TIMEOUT_SECONDS
+    assert received == ["command.stop"]
+    assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.SIGNAL)
+    assert signalled == [4242]
+
+
+def test_connect_that_exhausts_the_call_deadline_falls_back_at_that_deadline() -> None:
+    result, _store, received, signalled, elapsed = _stop_against(
+        _Reply.ACK,
+        exit_after=0.0,
+        delays=_StopDelays(connect=CONTROL_REPLY_TIMEOUT_SECONDS),
+    )
+
+    assert elapsed == CONTROL_REPLY_TIMEOUT_SECONDS
+    assert received == []
+    assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.SIGNAL)
+    assert signalled == [4242]
+
+
+@given(
+    request_read_delay=st.floats(
+        min_value=CONTROL_REPLY_TIMEOUT_SECONDS * 0.1,
+        max_value=CONTROL_REPLY_TIMEOUT_SECONDS * 0.4,
+    ),
+    trickle_interval=st.floats(
+        min_value=CONTROL_REPLY_TIMEOUT_SECONDS * 0.31,
+        max_value=CONTROL_REPLY_TIMEOUT_SECONDS * 0.45,
+    ),
+)
+def test_request_send_and_every_partial_read_share_one_deadline(
+    request_read_delay: float, trickle_interval: float
+) -> None:
+    result, _store, _received, signalled, elapsed = _stop_against(
+        _Reply.TRICKLE,
+        exit_after=0.0,
+        delays=_StopDelays(request_read=request_read_delay, trickle=trickle_interval),
+    )
+
+    assert elapsed == CONTROL_REPLY_TIMEOUT_SECONDS
+    assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.SIGNAL)
+    assert signalled == [4242]
+
+
 def test_a_forced_stop_signals_without_asking() -> None:
-    result, _, received, signalled = _stop_against(_Reply.ACK, exit_after=0.0, force=True)
+    result, _, received, signalled, _elapsed = _stop_against(_Reply.ACK, exit_after=0.0, force=True)
 
     assert (result.outcome, result.route) == (StopOutcome.STOPPED, StopRoute.SIGNAL)
     assert received == []

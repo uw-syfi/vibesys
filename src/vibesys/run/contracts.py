@@ -93,6 +93,8 @@ class RunRequest(BaseModel):
     run_environment: RunEnvironmentSpec | None = None
     agent_backend: str | None = None
     cli_provider: str | None = None
+    allow_unvetted_model: bool = False
+    """Run a model outside the vetted harnesses: the terminal's explicit opt-out, or a resume."""
     backend: ComputeBackend = DEFAULT_COMPUTE_BACKEND
     remote_repo: str | None = None
     repo_visibility: RepositoryVisibility = RepositoryVisibility.PRIVATE

@@ -24,7 +24,7 @@ from vs_slurm.api import MAX_TRANSPORT_STREAM_BYTES
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sim.api import Connection, Network, OutputSink, ProcessRun, ProcessSpec
+    from vs_sim.api import Connection, DeadlineNetwork, OutputSink, ProcessRun, ProcessSpec
 
 _RECV_BYTES = 65_536
 
@@ -52,9 +52,9 @@ class BrokerReplyError(ConnectionError):
 class BrokeredProcesses:
     """Runs each transport program through the host broker's constrained capability.
 
-    A run the broker does not answer within its timeout is :class:`ProcessTimedOut`; each
-    wait on the broker (to connect, to send, for each part of the reply) is bounded by it.
-    The broker runs the program, so it owns the program's process group.
+    A run the broker does not answer within its timeout is :class:`ProcessTimedOut`; the
+    complete connect, send, and reply exchange shares that one monotonic deadline. The
+    broker runs the program, so it owns the program's process group.
 
     Raises from :meth:`run`:
         FileNotFoundError: nothing listens on ``socket_path``.
@@ -64,7 +64,7 @@ class BrokeredProcesses:
 
     socket_path: Path
     token: str = field(repr=False)
-    network: Network
+    network: DeadlineNetwork
 
     def run(
         self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
@@ -112,21 +112,34 @@ class BrokeredProcesses:
         )
 
 
-def _exchange(network: Network, address: str, request: bytes, timeout: float) -> bytes:
-    """Send ``request`` and read the reply line, each wait bounded by ``timeout``."""
-    connection = network.connect(address, timeout)
+def _exchange(network: DeadlineNetwork, address: str, request: bytes, timeout: float) -> bytes:
+    """Send ``request`` and read its reply within one monotonic deadline."""
+    deadline = network.now() + timeout
+    connection = network.connect(address, _remaining(network, deadline))
     try:
-        connection.send(request, timeout)
-        return _reply_line(connection, timeout)
+        connection.send(request, _remaining(network, deadline))
+        return _reply_line(connection, network, deadline)
     finally:
         connection.close()
 
 
-def _reply_line(connection: Connection, timeout: float) -> bytes:
+def _remaining(network: DeadlineNetwork, deadline: float) -> float:
+    """Return positive time left on the broker call deadline."""
+    remaining = deadline - network.now()
+    if remaining <= 0:
+        message = "Slurm broker call exceeded its deadline"
+        raise TimeoutError(message)
+    return remaining
+
+
+def _reply_line(connection: Connection, network: DeadlineNetwork, deadline: float) -> bytes:
     """The broker's one reply line, read without buffering past the frame bound."""
     received = bytearray()
     while not received.endswith(b"\n"):
-        chunk = connection.recv(min(_RECV_BYTES, MAX_FRAME_BYTES + 1 - len(received)), timeout)
+        chunk = connection.recv(
+            min(_RECV_BYTES, MAX_FRAME_BYTES + 1 - len(received)),
+            _remaining(network, deadline),
+        )
         if not chunk:
             raise BrokerReplyError.no_reply()
         received += chunk

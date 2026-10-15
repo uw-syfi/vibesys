@@ -23,10 +23,13 @@ from vs_agent.api.testing import (
     docker_result_without_output,
     docker_timed_out,
 )
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
+
+    from vs_sim.api import OutputSink
 
 _IMAGE_ID = "sha256:" + "a" * 64
 
@@ -59,9 +62,9 @@ class _FakeDockerImageStore:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink = DISCARD,
     ) -> DockerCommandResult:
-        del cwd, timeout, on_stderr_line
+        del cwd, timeout, output
         normalized = tuple(argv)
         if normalized[1] == "build":
             tag = normalized[normalized.index("--tag") + 1]

@@ -41,6 +41,7 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend, SubprocessDockerCli
 from vs_sandbox.api.slurm import load_slurm_operator_settings
 from vs_sim.api import (
+    DISCARD,
     MonotonicClock,
     OsProcesses,
     OsThreads,
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.api import CommandResult
+    from vs_sim.api import OutputSink
 #: The label ``DockerSandbox`` puts on its containers (``vs_sandbox.docker_sandbox.RUN_ID_LABEL``).
 _RUN_ID_LABEL = "vibesys.run-id"
 BENCHMARK_OUTPUT_ARGUMENT = "--output"
@@ -91,10 +93,10 @@ class PrebuiltImageRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink = DISCARD,
     ) -> subprocess.CompletedProcess[str]:
         """Return the scripted outcome for ``docker build`` or ``docker image inspect``."""
-        del cwd, timeout, on_stderr_line
+        del cwd, timeout, output
         stdout = self._image_id if argv[1] == "image" else ""
         return subprocess.CompletedProcess(tuple(argv), 0, stdout, "")
 

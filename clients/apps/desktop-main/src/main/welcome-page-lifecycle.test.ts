@@ -272,4 +272,40 @@ describe('WelcomePageLifecycle', () => {
       'activate:replacement',
     ]);
   });
+
+  test('a synchronously lost replacement is retired once when its activation then throws', () => {
+    const events: string[] = [];
+    const initial = page('initial');
+    const replacement = page('replacement');
+    const pages = new WelcomePageLifecycle<Page>({
+      recreate: () => replacement,
+      activate: (current, lost) => {
+        events.push(`activate:${current.id}`);
+        if (current === replacement) {
+          lost('load-failed');
+          throw new Error('stale replacement activation failure');
+        }
+      },
+      retire: current => events.push(`retire:${current.id}`),
+      documentRetired: () => events.push('document-retired'),
+      recovering: reason => events.push(`recovering:${reason}`),
+      fatal: reason => events.push(`fatal:${reason}`),
+    });
+
+    pages.start(initial);
+
+    expect(pages.lost(initial, 'destroyed')).toBe('fatal');
+    expect(pages.current).toBeNull();
+    expect(events.filter(event => event === 'retire:replacement')).toHaveLength(1);
+    expect(events).toEqual([
+      'activate:initial',
+      'retire:initial',
+      'document-retired',
+      'recovering:destroyed',
+      'activate:replacement',
+      'retire:replacement',
+      'document-retired',
+      'fatal:load-failed',
+    ]);
+  });
 });

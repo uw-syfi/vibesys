@@ -24,6 +24,7 @@ from vs_runtime.contracts import (
     validate_trusted_shell_command,
     validate_workspace_writable_paths,
 )
+from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
         TrustedBenchmarkResult,
     )
     from vs_runtime._validation_passes import ValidationPasses
+    from vs_sim.api import OutputSink
 
 
 class CommandExecutionResult(Protocol):
@@ -211,8 +213,12 @@ class RuntimeWorkspaceEvaluation:
         *,
         reuse: AccuracyReceipt | None = None,
         release: bool = False,
+        output: OutputSink = DISCARD,
     ) -> RuntimeAccuracyRun:
-        """Run accuracy or validate explicit reuse for the current candidate."""
+        """Run accuracy or validate explicit reuse for the current candidate.
+
+        The accuracy command's output is written to *output* as it runs; a reuse runs nothing.
+        """
         managed = self._workspaces.workspace_for(workspace)
         spec = self.spec(managed)
         if reuse is not None:
@@ -235,7 +241,7 @@ class RuntimeWorkspaceEvaluation:
                 spec.deployment_release_env_var if release else None,
             )
             result = await self._workspaces._evaluate(  # noqa: SLF001  # lint-waiver: LW-228425 [SLF001]; trusted execution must not overlap workspace mutation.
-                target, lambda resource: resource.trusted_accuracy(command_override)
+                target, lambda resource: resource.trusted_accuracy(command_override, output)
             )
         if result.executed and target is managed:
             await managed.snapshot("framework-accuracy-evaluation")
@@ -255,8 +261,12 @@ class RuntimeWorkspaceEvaluation:
         workspace: Workspace,
         *,
         required_metrics: frozenset[str],
+        output: OutputSink = DISCARD,
     ) -> RuntimeBenchmarkRun:
-        """Snapshot and benchmark the exact submitted candidate revision."""
+        """Snapshot and benchmark the exact submitted candidate revision.
+
+        The benchmark command's output is written to *output* as it runs.
+        """
         managed = self._workspaces.workspace_for(workspace)
         candidate_revision = await managed.snapshot("framework-benchmark-input")
         async with self._evaluation_target(managed, candidate_revision) as target:
@@ -268,7 +278,9 @@ class RuntimeWorkspaceEvaluation:
             )
             result = await self._workspaces._evaluate(  # noqa: SLF001  # lint-waiver: LW-228426 [SLF001]; trusted execution must not overlap workspace mutation.
                 target,
-                lambda resource: resource.trusted_benchmark(command_override, required_metrics),
+                lambda resource: resource.trusted_benchmark(
+                    command_override, required_metrics, output
+                ),
             )
         if result.executed and target is managed:
             await managed.snapshot("framework-benchmark-evaluation")

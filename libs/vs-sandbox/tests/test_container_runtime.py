@@ -188,7 +188,11 @@ def test_an_ordinary_sandbox_argv_and_metadata_are_exactly_the_historical_ones(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     sandbox = DockerSandbox(
-        host_workspace=str(workspace), image=_IMAGE, docker=engine, threads=SimThreads()
+        host_workspace=str(workspace),
+        image=_IMAGE,
+        docker=engine,
+        threads=SimThreads(),
+        log_path=tmp_path / "docker.log",
     )
 
     sandbox.start()
@@ -200,7 +204,7 @@ def test_an_ordinary_sandbox_argv_and_metadata_are_exactly_the_historical_ones(
     assert run[5:7] == ("-v", f"{workspace}:/workspace")
     assert run[-5:] == ("--workdir", "/workspace", _IMAGE, "sleep", "infinity")
     assert "--init" in run  # PID 1 must handle SIGTERM so `docker stop` is prompt
-    metadata = json.loads((workspace / ".docker_metadata.json").read_text())
+    metadata = json.loads((tmp_path / "docker.metadata.json").read_text())
     assert set(metadata) == {
         "image", "gpus", "devices", "group_add", "entrypoint", "shm_size",
         "bind_mounts", "env", "symlink_commands",

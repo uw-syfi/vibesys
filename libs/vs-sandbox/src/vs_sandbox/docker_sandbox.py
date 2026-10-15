@@ -40,7 +40,7 @@ from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
 from vs_sandbox.process_execution import KILL, PipedStoppableProcess, RemoteProcesses
-from vs_sim.api import NotReleasedError, ProcessTimeoutError
+from vs_sim.api import DISCARD, NotReleasedError, ProcessTimeoutError
 
 if TYPE_CHECKING:
     import signal
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from vs_sandbox.docker_states import ContainerLife
     from vs_sandbox.execution import CommandResult
     from vs_sandbox.host_resources import HostResource
-    from vs_sim.api import Event, Threads
+    from vs_sim.api import Event, OutputSink, Threads
 
 # Global registry of live containers for cleanup on exit / SIGINT: each container's id and
 # the Docker CLI that started it, which is the one that can stop it.
@@ -59,7 +59,7 @@ _live_containers: dict[str, DockerCli] = {}
 # Credentials reach the container as ``-e NAME=VALUE`` arguments on
 # ``docker run``, and every sink that records a command or the env dict is
 # durable and readable: the command log lives beside the run's other logs, the
-# metadata file is written into the bind-mounted workspace the agent edits, and
+# metadata file sits beside the command log, and
 # startup errors are surfaced to the caller.  Endpoint variables such as
 # ``*_BASE_URL`` stay visible because they are diagnostics, not secrets.
 _SECRET_ENV_NAME_PATTERN = re.compile(
@@ -466,6 +466,12 @@ class DockerSandbox(WorkspaceSandbox):
         self._cached_container_path: str | None = None
         self._container_id: str | None = None
         self._logger = self._setup_logger(log_path)
+        # VibeSys-owned bookkeeping lives beside the command log, never in the
+        # workspace: the workspace is the agent's project, and a file there is
+        # swept into every candidate snapshot commit.
+        self._metadata_path = (
+            None if log_path is None else Path(log_path).with_suffix(".metadata.json")
+        )
         self._agent_uid = agent_uid if agent_uid is not None else os.getuid()
         self._agent_gid = agent_gid if agent_gid is not None else os.getgid()
         self._auth_files: list[tuple[str, str]] = list(auth_files or [])
@@ -592,8 +598,14 @@ class DockerSandbox(WorkspaceSandbox):
         """Return the ``docker run`` flags a docker-in-docker sandbox adds."""
         return ["--runtime", SYSBOX_DOCKER_RUNTIME] if self._docker_in_docker else []
 
-    def start(self) -> None:
-        """Start the Docker container."""
+    def start(self, *, output: OutputSink = DISCARD) -> None:
+        """Start the Docker container.
+
+        Every chunk ``docker run`` writes (an image pull's progress, the new
+        container's ID, a daemon error) reaches *output* as it is written.
+        ``docker.log`` still records the command and a bounded result after it
+        exits.
+        """
         if self._docker_in_docker:
             require_sysbox_runtime(self._docker)
         self._container_name = f"vibesys-{uuid.uuid4().hex[:12]}"
@@ -605,7 +617,7 @@ class DockerSandbox(WorkspaceSandbox):
         # sweep must know it if every removal below fails too.
         _live_containers[self._container_name] = self._docker
         try:
-            result = self._docker.run(cmd, timeout_seconds=self._start_timeout)
+            result = self._docker.run(cmd, timeout_seconds=self._start_timeout, output=output)
         except BaseException as exc:
             # The daemon may have created the container before the client
             # died, timed out, or was interrupted; its name is the only handle.
@@ -674,7 +686,7 @@ class DockerSandbox(WorkspaceSandbox):
             "shm_size": self._shm_size,
             "bind_mounts": [[host, container, ro] for host, container, ro in self._bind_mounts],
             # Credentials are omitted rather than masked: the metadata file is
-            # written into the agent-visible workspace, and a masked value
+            # durable and readable, and a masked value
             # would rebuild a broken container that looks authenticated.
             "env": _non_secret_env(self._env),
             "symlink_commands": [],
@@ -855,15 +867,15 @@ class DockerSandbox(WorkspaceSandbox):
         return _remove_container(self._docker, container_id, timeout_seconds=10, log=self._log_cmd)
 
     def _save_metadata(self) -> None:
-        """Write metadata to the host workspace (best-effort)."""
-        try:
-            metadata_path = Path(self._host_workspace) / ".docker_metadata.json"
-            atomic_write_bytes(metadata_path, json.dumps(self._metadata, indent=2).encode())
-        except OSError:
-            pass  # Non-fatal: workspace dir may not exist in tests
+        """Write metadata beside the command log, outside the workspace (best-effort)."""
+        if self._metadata_path is None:
+            return
+        # Non-fatal: the log directory may not exist in tests.
+        with suppress(OSError):
+            atomic_write_bytes(self._metadata_path, json.dumps(self._metadata, indent=2).encode())
 
     def save_symlink_commands(self, symlink_commands: list[str]) -> None:
-        """Update the metadata file with symlink commands for vibesys-shell."""
+        """Update the metadata file with symlink commands for the run."""
         self._metadata["symlink_commands"] = symlink_commands
         self._save_metadata()
 
@@ -1001,6 +1013,7 @@ class DockerSandbox(WorkspaceSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
         """Execute *command* as root inside the started container.
 
@@ -1008,7 +1021,7 @@ class DockerSandbox(WorkspaceSandbox):
         user is not root, so a step that needs root (installing system
         packages) uses this instead.
         """
-        return self._execute(command, timeout=timeout, cancel=cancel, user="root")
+        return self._execute(command, timeout=timeout, cancel=cancel, user="root", output=output)
 
     def execute(
         self,
@@ -1016,6 +1029,7 @@ class DockerSandbox(WorkspaceSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
         """Execute a command inside the Docker container.
 
@@ -1026,7 +1040,7 @@ class DockerSandbox(WorkspaceSandbox):
         documented in :mod:`vs_sandbox.command_execution`; every sandbox kind
         shares it.
         """
-        return self._execute(command, timeout=timeout, cancel=cancel, user=None)
+        return self._execute(command, timeout=timeout, cancel=cancel, user=None, output=output)
 
     def _execute(
         self,
@@ -1035,6 +1049,7 @@ class DockerSandbox(WorkspaceSandbox):
         timeout: int | None,
         cancel: Event | None,
         user: str | None,
+        output: OutputSink,
     ) -> CommandResult:
         if self._container_id is None:
             raise DockerSandboxNotStartedError.operation_before_start()
@@ -1061,7 +1076,7 @@ class DockerSandbox(WorkspaceSandbox):
             cancel=cancel,
             max_output_chars=self._max_output_bytes,
             launch=lambda: PipedStoppableProcess(
-                self._docker.spawn(exec_cmd), threads=self._threads
+                self._docker.spawn(exec_cmd), threads=self._threads, output=output
             ),
             signal_remote=_ExecStop(self._docker, container_id, exec_id, user).send,
             threads=self._threads,

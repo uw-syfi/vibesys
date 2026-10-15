@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import re
+from typing import TYPE_CHECKING
+
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_agent.api.images import ImageBuildProgress, TaskImageBuildError, agent_image
 from vs_agent.api.testing import FakeDockerBuildRunner, docker_result
+from vs_sim.api import DISCARD, Capture, OutputStream
 from vs_sim.api.testing import ManualClock
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from pathlib import Path
+
+    from vs_agent.api.testing import DockerBuildResult
+    from vs_sim.api import OutputSink
 
 _TOTAL = 14
 
@@ -101,3 +112,77 @@ def test_a_build_with_no_sink_streams_nothing() -> None:
     assert agent_image(
         "python:3.12-bookworm", command_runner=runner, clock=ManualClock()
     ).startswith("sha256:")
+
+
+_STEP = re.compile(r"^#\d+ \[(?:\S+ )?\s*(\d+)/(\d+)\] (.+)$")
+
+
+def _expected_steps(lines: Sequence[str]) -> list[ImageBuildProgress]:
+    """The observations a build reports for its stderr lines: the rules this suite pins."""
+    expected: list[ImageBuildProgress] = []
+    for line in lines:
+        match = _STEP.match(line)
+        if match is None:
+            continue
+        step, total = int(match.group(1)), int(match.group(2))
+        done = step - 1
+        if 1 <= step <= total and (not expected or done > expected[-1].done):
+            expected.append(ImageBuildProgress(done=done, total=total, label=match.group(3)[:200]))
+    return expected
+
+
+class _ChunkingRunner:
+    """Write each scripted command's output to the caller's sink in arbitrary chunks.
+
+    A real runner delivers whatever the pipe returns; chunk boundaries carry no
+    meaning, so a line or a UTF-8 character may be split anywhere.
+    """
+
+    def __init__(self, inner: FakeDockerBuildRunner, cuts: Sequence[int]) -> None:
+        self._inner = inner
+        self._cuts = cuts
+        self.written = {stream: bytearray() for stream in OutputStream}
+
+    def run(
+        self, argv: Sequence[str], *, cwd: Path, timeout: float, output: OutputSink = DISCARD
+    ) -> DockerBuildResult:
+        scripted = Capture(limit=1 << 20)
+        result = self._inner.run(argv, cwd=cwd, timeout=timeout, output=scripted)
+        for stream in (OutputStream.STDERR, OutputStream.STDOUT):
+            data = scripted.kept(stream)
+            self.written[stream] += data
+            start = 0
+            for cut in sorted({cut % (len(data) + 1) for cut in self._cuts}):
+                output.write(stream, data[start:cut])
+                start = cut
+            output.write(stream, data[start:])
+        return result
+
+
+@given(
+    lines=st.lists(_LINES, max_size=40),
+    stdout=st.text(max_size=200),
+    cuts=st.lists(st.integers(0, 10_000), max_size=12),
+)
+def test_a_build_writes_every_byte_to_its_output_and_reads_its_steps_from_those_bytes(
+    lines: list[str], stdout: str, cuts: list[int]
+) -> None:
+    stderr = "\n".join(lines)
+    runner = _ChunkingRunner(
+        FakeDockerBuildRunner(build_result=docker_result(stdout=stdout, stderr=stderr)), cuts
+    )
+    observed: list[ImageBuildProgress] = []
+    output = Capture(limit=1 << 20)
+
+    agent_image(
+        "python:3.12-bookworm",
+        command_runner=runner,
+        on_progress=observed.append,
+        output=output,
+        clock=ManualClock(),
+    )
+
+    assert output.stdout == bytes(runner.written[OutputStream.STDOUT])
+    assert output.stderr == bytes(runner.written[OutputStream.STDERR])
+    assert stderr.encode() in output.stderr
+    assert observed == _expected_steps(lines)
