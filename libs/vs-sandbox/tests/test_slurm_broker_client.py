@@ -25,6 +25,7 @@ from vs_sim.api.testing import (
     VirtualClock,
     hostile_json_frames,
 )
+from vs_slurm.api import MAX_TRANSPORT_STREAM_BYTES
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -147,6 +148,7 @@ def test_a_well_formed_result_is_the_completed_process() -> None:
         "argv": ["ssh", "--", "cluster", "hostname"],
         "stdin": None,
         "timeout": TIMEOUT_S,
+        "max_output_bytes": MAX_TRANSPORT_STREAM_BYTES,
     }
 
 
