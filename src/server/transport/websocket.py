@@ -253,8 +253,9 @@ class WebSocketLimits:
 
     Flow control. ``send_buffer_bytes`` is the transport high-water mark that
     makes an unread frame stall the producing coroutine instead of queueing
-    without bound; it is the WebSocket equivalent of the blocking
-    ``send`` in ``unix_jsonl.py``'s ``_write_message``.
+    without bound; it is the WebSocket equivalent of the socket buffer that
+    blocks the ``send`` in ``unix_jsonl.py``'s ``_write_message``, whose
+    ``_SEND_BOUND_SECONDS`` plays the part of ``write_deadline_seconds``.
     It is unrelated to ``receive_queue``, which bounds frames arriving *from*
     the peer. ``write_deadline_seconds`` bounds how long that stall may last
     before the peer is treated as gone; without it a peer that neither reads

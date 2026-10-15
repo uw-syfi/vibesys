@@ -21,6 +21,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import json
+import logging
 import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +47,13 @@ if TYPE_CHECKING:
 _MAX_FRAME_BYTES = 4 * 1024 * 1024
 # How long close() waits for cancelled jobs to be torn down (their scancel round trips).
 _DRAIN_SECONDS = 60.0
+_SEND_BOUND_SECONDS = 30.0
+"""How long one frame may wait for the client to make room before the broker gives up on it.
+
+A client that stops reading would otherwise block the job's output writer, so the job, and
+the Slurm allocation it holds, would never end; giving up cancels the job.
+"""
+_LOG = logging.getLogger(__name__)
 # Variables that would point the job at the agent host's devices or at the
 # broker itself. Slurm sets the device variables for the allocation.
 _DROPPED_ENV_PREFIXES = ("VIBESYS_COMMAND_BROKER_", "SLURM_")
@@ -211,7 +219,10 @@ def _parse_call(frame: bytes) -> GpuCall:
 
 
 def _send(connection: Connection, payload: Mapping[str, object]) -> None:
-    connection.send(json.dumps(payload, separators=(",", ":")).encode() + b"\n")
+    """Send one frame; ``TimeoutError`` when the client read nothing for the send bound."""
+    connection.send(
+        json.dumps(payload, separators=(",", ":")).encode() + b"\n", _SEND_BOUND_SECONDS
+    )
 
 
 def _cancel_on_hangup(connection: Connection, cancel: Event) -> None:
@@ -372,6 +383,12 @@ class HostCommandBroker:
                 return
             try:
                 _send(connection, {"output": base64.b64encode(chunk).decode()})
+            except TimeoutError:
+                _LOG.warning(
+                    "a command broker client read nothing for %g s; cancelling its job",
+                    _SEND_BOUND_SECONDS,
+                )
+                cancel.set()
             except OSError:
                 cancel.set()
 

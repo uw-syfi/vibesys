@@ -285,6 +285,10 @@ class _SimListener:
             self.network.cond.notify_all()
 
 
+DEFAULT_BUFFER_BYTES = 256 << 10
+"""Unread bytes one direction of a connection holds by default, about a Unix stream socket's."""
+
+
 class SimNetwork:
     """Listeners and connections held in memory; addresses are any strings."""
 
@@ -292,16 +296,21 @@ class SimNetwork:
         self,
         threads: Threads,
         *,
-        buffer_bytes: int | None = None,
+        buffer_bytes: int | None = DEFAULT_BUFFER_BYTES,
         faults: Sequence[LinkFault] = (),
     ) -> None:
         """Build on ``threads``, whose condition makes blocking calls simulated waits.
 
         ``buffer_bytes`` bounds the unread bytes each direction of a connection holds,
-        as a socket's buffer does: a ``send`` beyond it waits for the peer to read.
-        ``None`` holds any amount, so a ``send`` never waits. ``faults`` are the
-        :class:`LinkFault` rules this network fires; :attr:`fired` lists those that did.
+        as a socket's buffer does: a ``send`` beyond it waits for the peer to read, so
+        a peer that stops reading blocks its writer, as on a real socket. ``None``
+        holds any amount, so a ``send`` never waits; only a test that is about
+        something else should ask for that. ``faults`` are the :class:`LinkFault`
+        rules this network fires; :attr:`fired` lists those that did.
         """
+        if buffer_bytes is not None and buffer_bytes <= 0:
+            message = f"buffer_bytes must be positive or None, not {buffer_bytes}"
+            raise ValueError(message)
         self.threads = threads
         self.cond = threads.condition()
         self.listeners: dict[str, _SimListener] = {}

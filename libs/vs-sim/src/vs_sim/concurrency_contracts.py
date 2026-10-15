@@ -679,6 +679,56 @@ class NetworkContract:
 
         assert subject.threads.run(program)
 
+    def test_a_peer_that_stops_reading_blocks_an_untimed_writer_until_its_end_closes(
+        self,
+    ) -> None:
+        """A full buffer blocks the writer, as a real socket's does; closing its end frees it.
+
+        The payload exceeds any socket buffer and the peer never reads, so the
+        untimed ``send`` cannot finish. Closing the writer's own end, as a server
+        that hangs up on a client does, ends it with ``OSError``.
+        """
+        subject = self.network_under_test(0)
+        payload = b"x" * (8 << 20)
+
+        def program() -> tuple[bool, bool]:
+            threads = subject.threads.threads
+            address = subject.address("stalled")
+            listener = subject.network.listen(address)
+            accepted = threads.event()
+            done = threads.event()
+            outcome: list[BaseException | None] = []
+
+            def serve() -> None:
+                connection = listener.accept(HANG_GUARD_S)
+                accepted.set()
+                _wait(done, "the writer giving up")
+                connection.close()
+
+            server = threads.spawn(serve, name="server")
+            client = subject.network.connect(address, HANG_GUARD_S)
+            _wait(accepted, "the server accepting")
+
+            def write() -> None:
+                try:
+                    client.send(payload)
+                except OSError as error:
+                    outcome.append(error)
+                else:
+                    outcome.append(None)
+
+            writer = threads.spawn(write, name="writer")
+            threads.sleep(10 * subject.threads.tick)
+            blocked = writer.is_alive()
+            client.close()
+            _join(writer)
+            done.set()
+            _join(server)
+            listener.close()
+            return blocked, isinstance(outcome[0], OSError)
+
+        assert subject.threads.run(program) == (True, True)
+
     def test_sending_to_a_closed_peer_eventually_fails(self) -> None:
         """Writes to a hung-up peer raise ``OSError`` (broken pipe or reset) within a few attempts."""
         subject = self.network_under_test(0)

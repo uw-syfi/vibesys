@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 
 _REAL_TICK_S = 0.001
 #: A socket-sized buffer, so the simulated network blocks a sender as a real one does.
-_SIM_BUFFER_BYTES = 256 << 10
 
 
 class TestOsThreads(ThreadsContract):
@@ -104,7 +103,7 @@ class TestSimNetworkFifo(NetworkContract):
         del seed  # first-in first-out has one interleaving
         sim = SimThreads()
         return NetworkUnderTest(
-            SimNetwork(sim, buffer_bytes=_SIM_BUFFER_BYTES),
+            SimNetwork(sim),
             ThreadsUnderTest(sim, sim.run, tick=1.0, exact=True),
             lambda n: n,
         )
@@ -114,7 +113,7 @@ class TestSimNetworkSeeded(NetworkContract):
     def network_under_test(self, seed: int) -> NetworkUnderTest:
         sim = SimThreads(schedule_seed=seed)
         return NetworkUnderTest(
-            SimNetwork(sim, buffer_bytes=_SIM_BUFFER_BYTES),
+            SimNetwork(sim),
             ThreadsUnderTest(sim, sim.run, tick=1.0, exact=True),
             lambda n: n,
         )
@@ -127,7 +126,7 @@ class TestSimNetworkOverOsThreads(NetworkContract):
         del seed  # real threads have one interleaving
         threads = OsThreads()
         return NetworkUnderTest(
-            SimNetwork(threads, buffer_bytes=_SIM_BUFFER_BYTES),
+            SimNetwork(threads),
             ThreadsUnderTest(threads, lambda program: program(), tick=_REAL_TICK_S, exact=False),
             lambda n: n,
         )
