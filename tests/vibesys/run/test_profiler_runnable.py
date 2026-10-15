@@ -105,7 +105,7 @@ def requests(tmp_path_factory: pytest.TempPathFactory) -> dict[DomainName, RunRe
         built[domain] = RunRequest(
             project_root=project,
             orchestration=OrchestrationDescriptor(id="test", config_version=1, options={}),
-            config=Config.model_validate({"model": {"name": "gpt-test"}}),
+            config=Config.model_validate({"model": {"name": "gpt-5.5"}}),
             input_bundle=load_task(project),
             exp_name="profiler-runnable",
         )

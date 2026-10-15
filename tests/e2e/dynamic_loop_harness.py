@@ -134,10 +134,7 @@ def check(value):
 check(namespace["VALUE"])
 """
 
-_AGENT_CONFIG = (
-    '[model]\nname = "scripted"\n[evaluation]\n'
-    "observe_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n"
-)
+_AGENT_CONFIG = "[evaluation]\nobserve_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n"
 
 
 class _SharedCancelClient(FakeAgentClient):

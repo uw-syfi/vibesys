@@ -94,6 +94,7 @@ class RunResources:
     model: str
     role_models: tuple[str, ...]
     config: Config
+    allow_unvetted_model: bool
     backend: ComputeBackend
     skill_source_dirs: tuple[Path, ...]
     host_resources: tuple[HostResource, ...]
