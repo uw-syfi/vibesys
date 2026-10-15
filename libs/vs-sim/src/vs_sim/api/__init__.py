@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from vs_sim.loopback_http import HttpReply, LoopbackHttp, UrllibLoopbackHttp
     from vs_sim.network import Connection, Listener, Network, UnixNetwork
     from vs_sim.os_platform import Platform
-    from vs_sim.probes import CommandProbe, ProbeResult, SubprocessProbe
+    from vs_sim.probes import CommandProbe, ProbeResult, ProcessesProbe, SubprocessProbe
     from vs_sim.processes import (
         DEFAULT_MAX_OUTPUT_BYTES,
         ForegroundChild,
@@ -100,6 +100,7 @@ _MODULES: dict[str, str] = {
     "UnixNetwork": "vs_sim.network",
     "CommandProbe": "vs_sim.probes",
     "ProbeResult": "vs_sim.probes",
+    "ProcessesProbe": "vs_sim.probes",
     "SubprocessProbe": "vs_sim.probes",
     "ForegroundChild": "vs_sim.processes",
     "ForegroundLauncher": "vs_sim.processes",
@@ -210,6 +211,7 @@ __all__ = [
     "ProcessTimedOut",
     "ProcessTimeoutError",
     "Processes",
+    "ProcessesProbe",
     "RandomSource",
     "ReleaseEvidence",
     "ReleaseStack",

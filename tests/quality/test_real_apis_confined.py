@@ -1640,25 +1640,18 @@ REAL_DEFAULT_PENDING: dict[str, str] = {
     "libs/vs-runtime/src/vs_runtime/_run_environment.py": f"{_LANE_A}: OsProcesses",
     "libs/vs-runtime/src/vs_runtime/_semantic_slurm_evaluation.py": _LANE_A,
     "libs/vs-runtime/src/vs_runtime/api/slurm_evaluation_stack.py": _LANE_B,
-    "libs/vs-sandbox/src/vs_sandbox/accelerator_discovery.py": _SANDBOX_WIRING,
     "libs/vs-sandbox/src/vs_sandbox/agent_gpu.py": _LANE_A,
-    "libs/vs-sandbox/src/vs_sandbox/cuda_backend.py": _SANDBOX_WIRING,
     "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": (
         "the Fake takes its Threads from the test (75 call sites)"
-    ),
-    "libs/vs-sandbox/src/vs_sandbox/fake_compute_backend.py": (
-        "builds a FakeCommandRunner, which defaults to OsThreads (see fake_command_runner.py)"
     ),
     "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py": _SANDBOX_WIRING,
     "libs/vs-sandbox/src/vs_sandbox/host_command_broker.py": (
         f"{_LANE_B}: SlurmEnvironment has no Threads or Network to hand the broker"
     ),
     "libs/vs-sandbox/src/vs_sandbox/host_sandbox.py": _SANDBOX_WIRING,
-    "libs/vs-sandbox/src/vs_sandbox/rocm_backend.py": _SANDBOX_WIRING,
     "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py": _SANDBOX_WIRING,
     "libs/vs-sandbox/src/vs_sandbox/skypilot_runner.py": _SANDBOX_WIRING,
     "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": _LANE_A,
-    "libs/vs-sandbox/src/vs_sandbox/trainium_backend.py": _SANDBOX_WIRING,
     "libs/vs-slurm/src/vs_slurm/fake_cluster.py": "the Fake takes its Clock from the test",
     "src/launch/__init__.py": f"{_LANE_A}: slurm_processes",
     "src/vibesys/run/slurm_evaluation.py": _LANE_A,

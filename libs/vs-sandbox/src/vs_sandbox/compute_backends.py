@@ -20,6 +20,7 @@ from functools import cache
 from importlib import import_module
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from vs_sandbox.accelerator_discovery import SystemAcceleratorDiscovery
 from vs_sandbox.lifecycle import SandboxLifecycle
 from vs_sandbox.local_shell import LocalShellRunner
 
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Clock, PipedProcessLauncher, Threads
+    from vs_sim.api import Clock, CommandProbe, PipedProcessLauncher, Threads
 
 
 class ComputeBackend(StrEnum):
@@ -222,12 +223,13 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
     threads: Threads,
     launcher: PipedProcessLauncher,
     clock: Clock,
+    probe: CommandProbe,
 ) -> ComputeBackendImpl:
     """Construct the registered implementation for one compute stack.
 
     *docker* runs the backend's ``docker`` commands, *threads* is the clock its
-    sandboxes measure command timeouts on, and *launcher* starts its host shell
-    commands.
+    sandboxes measure command timeouts on, *launcher* starts its host shell
+    commands, and *probe* runs the status commands (``nvidia-smi``, ``rocm-smi``) it asks.
     ``clock`` counts seconds since the epoch; a backend stamps what it records with it.
     """
     _ensure_defaults()
@@ -242,14 +244,69 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
         threads=threads,
         launcher=launcher,
         clock=clock,
+        probe=probe,
+    )
+
+
+# lint-waiver: LW-731409 [PLR0913]; the registry's shared construction keywords, one to one.
+# > Grouping them would only rename the keywords create_compute_backend passes every
+# > registered backend.
+def _rocm_backend(  # noqa: PLR0913
+    log_dir: Path,
+    *,
+    log: Callable[[str], None] | None,
+    image: str | None,
+    docker: DockerCli,
+    threads: Threads,
+    launcher: PipedProcessLauncher,
+    clock: Clock,
+    probe: CommandProbe,
+) -> ComputeBackendImpl:
+    """The ROCm backend, discovering its GPUs through ``probe``."""
+    rocm = import_module("vs_sandbox.rocm_backend")
+    return rocm.RocmBackend(
+        log_dir,
+        log=log,
+        image=image,
+        docker=docker,
+        threads=threads,
+        launcher=launcher,
+        clock=clock,
+        accelerator_discovery=SystemAcceleratorDiscovery(probe=probe),
+    )
+
+
+# lint-waiver: LW-731410 [PLR0913]; the registry's shared construction keywords, one to one.
+# > Grouping them would only rename the keywords create_compute_backend passes every
+# > registered backend.
+def _trainium_backend(  # noqa: PLR0913
+    log_dir: Path,
+    *,
+    log: Callable[[str], None] | None,
+    image: str | None,
+    docker: DockerCli,
+    threads: Threads,
+    launcher: PipedProcessLauncher,
+    clock: Clock,
+    probe: CommandProbe,
+) -> ComputeBackendImpl:
+    """The Trainium backend, discovering its devices through ``probe``."""
+    trainium = import_module("vs_sandbox.trainium_backend")
+    return trainium.TrainiumBackend(
+        log_dir,
+        log=log,
+        image=image,
+        docker=docker,
+        threads=threads,
+        launcher=launcher,
+        clock=clock,
+        accelerator_discovery=SystemAcceleratorDiscovery(probe=probe),
     )
 
 
 def _register_defaults() -> None:
     cuda = import_module("vs_sandbox.cuda_backend")
     local = import_module("vs_sandbox.local_compute_backend")
-    rocm = import_module("vs_sandbox.rocm_backend")
-    trainium = import_module("vs_sandbox.trainium_backend")
 
     register_compute_backend(ComputeBackend.CUDA, cuda.CudaBackend)
     register_compute_backend(
@@ -257,8 +314,8 @@ def _register_defaults() -> None:
         local.metal_backend,
         host_only=ComputeBackend.METAL in local.HOST_ONLY_BACKENDS,
     )
-    register_compute_backend(ComputeBackend.TRAINIUM, trainium.TrainiumBackend)
-    register_compute_backend(ComputeBackend.ROCM, rocm.RocmBackend)
+    register_compute_backend(ComputeBackend.TRAINIUM, _trainium_backend)
+    register_compute_backend(ComputeBackend.ROCM, _rocm_backend)
     register_compute_backend(ComputeBackend.CPU, local.cpu_backend)
 
 

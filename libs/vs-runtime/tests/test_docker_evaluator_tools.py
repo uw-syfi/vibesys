@@ -34,6 +34,7 @@ from vs_sandbox.api.testing import (
     FakeComputeBackend,
     FakeLifecycleRunner,
 )
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -87,7 +88,7 @@ def test_verified_cache_returns_read_only_resources_without_a_builder(tmp_path: 
         host_parent,
         command_runner=_install_fake_binary,
     )
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
 
     resources = prepare_docker_evaluator_resources(
         requirements,
@@ -111,7 +112,7 @@ def test_verified_cache_returns_read_only_resources_without_a_builder(tmp_path: 
 
 
 def test_empty_requirements_do_not_require_cache_or_builder_paths(tmp_path: Path) -> None:
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
 
     assert (
         prepare_docker_evaluator_resources(
@@ -138,7 +139,7 @@ def test_declared_tools_require_an_operator_owned_cache_root(tmp_path: Path) -> 
         prepare_docker_evaluator_resources(
             requirements,
             workspace,
-            backend=FakeComputeBackend(),
+            backend=FakeComputeBackend(threads=SimThreads()),
             log_dir=tmp_path / "logs",
             container_image=_IMAGE,
         )
@@ -151,7 +152,7 @@ def test_missing_cache_uses_target_image_ephemeral_builder_then_verifies(
     workspace.mkdir()
     log_dir = tmp_path / "logs"
     requirements = _requirements(tmp_path)
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     sandbox = FakeLifecycleRunner()
     backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
 
@@ -204,7 +205,7 @@ def test_builder_installs_system_packages_as_root_before_building_tools(tmp_path
     workspace.mkdir()
     log_dir = tmp_path / "logs"
     requirements = _system_package_requirements(tmp_path)
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     sandbox = FakeLifecycleRunner()
     backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
 
@@ -236,7 +237,7 @@ def test_builder_setup_failure_names_the_step_and_still_stops(tmp_path: Path) ->
     workspace.mkdir()
     log_dir = tmp_path / "logs"
     requirements = _system_package_requirements(tmp_path)
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     sandbox = FakeLifecycleRunner(default_result=CommandResult(output="E: no network", exit_code=1))
     backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
 
@@ -260,7 +261,7 @@ def test_builder_ownership_failure_is_bounded_and_still_stops(tmp_path: Path) ->
     workspace.mkdir()
     log_dir = tmp_path / "logs"
     requirements = _requirements(tmp_path)
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     sandbox = FakeLifecycleRunner(
         default_result=CommandResult(output="denied\n" + "x" * 800, exit_code=1)
     )
@@ -292,7 +293,7 @@ def test_builder_start_failure_still_attempts_cleanup(tmp_path: Path) -> None:
     workspace.mkdir()
     log_dir = tmp_path / "logs"
     requirements = _requirements(tmp_path)
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     sandbox = FakeLifecycleRunner(start_error=RuntimeError("container failed to start"))
     backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
 

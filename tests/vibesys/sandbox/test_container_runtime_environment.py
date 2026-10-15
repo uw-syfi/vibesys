@@ -37,7 +37,13 @@ from vs_sandbox.api import (
     SandboxKind,
 )
 from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry, ScriptedDockerCli
-from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, ManualClock, SimThreads
+from vs_sim.api.testing import (
+    NO_PROCESSES,
+    FakePipedProcessLauncher,
+    ManualClock,
+    ScriptedProbe,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -241,6 +247,7 @@ def test_a_host_without_a_gpu_fails_before_any_image_is_built(tmp_path: Path) ->
         threads=SimThreads(),
         docker=ScriptedDockerCli(),
         launcher=FakePipedProcessLauncher(),
+        probe=ScriptedProbe(lambda _argv: None),
     )
 
     with pytest.raises(CudaAcceleratorUnavailableError, match="NVIDIA GPU"):

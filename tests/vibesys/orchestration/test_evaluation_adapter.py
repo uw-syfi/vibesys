@@ -44,7 +44,13 @@ from vs_runtime.api.testing import FakeWorkspace
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, wait_or_fail, wait_until_started
+from vs_sim.api.testing import (
+    NO_PROCESSES,
+    ManualClock,
+    SimThreads,
+    wait_or_fail,
+    wait_until_started,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -444,7 +450,7 @@ def test_a_docker_gate_runs_in_a_throwaway_candidate_not_the_live_root(tmp_path:
         threads=OsThreads(),
         slurm_processes=NO_PROCESSES,
     )
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
 
     async def exercise() -> bool:
         async with open_core_host(
@@ -477,7 +483,7 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
         slurm_processes=NO_PROCESSES,
     )
     sandbox = _BlockingEvaluationSandbox()
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     # Docker gates run in a throwaway candidate, so hold every Docker workspace.
     backend.script_sandbox_for_kind(SandboxKind.DOCKER, sandbox)
 

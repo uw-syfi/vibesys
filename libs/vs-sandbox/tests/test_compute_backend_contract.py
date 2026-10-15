@@ -29,7 +29,13 @@ from vs_sandbox.api import (
 )
 from vs_sandbox.api.testing import FakeComputeBackend, ScriptedDockerCli
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, PipedStart
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    ManualClock,
+    PipedStart,
+    ScriptedProbe,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -81,8 +87,9 @@ _FACTORIES = {
         # The scripted shell exits at once, so its output drains never wait on time.
         threads=OsThreads(),
         launcher=FakePipedProcessLauncher(_printf_shell),
+        probe=ScriptedProbe(lambda _argv: None),
     ),
-    "fake": FakeComputeBackend,
+    "fake": partial(FakeComputeBackend, threads=SimThreads()),
 }
 
 

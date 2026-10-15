@@ -41,7 +41,7 @@ from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -199,7 +199,9 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=backend if backend is not None else FakeComputeBackend(),
+                backend=backend
+                if backend is not None
+                else FakeComputeBackend(threads=SimThreads()),
                 agent_backend="stub",
                 cli_provider="codex",
                 run_id=RUN_ID,

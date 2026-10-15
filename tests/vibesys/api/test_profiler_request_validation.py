@@ -32,7 +32,7 @@ from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -68,7 +68,7 @@ class _RecordingBackendFactory:
 
     def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
         self.calls += 1
-        return FakeComputeBackend()
+        return FakeComputeBackend(threads=SimThreads())
 
 
 def _profiler_registry() -> OrchestrationRegistry:

@@ -686,7 +686,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.probes"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_sim.processes"]
 
 [[modules]]
 path = "vs_sim.streaming"

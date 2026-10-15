@@ -113,7 +113,7 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
     project = open_project_run_resources(
         _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
     )
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     opened_sessions: list[_Session] = []
 
     def open_session(_request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -179,7 +179,7 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
     project = open_project_run_resources(
         _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
     )
-    backend = FakeComputeBackend()
+    backend = FakeComputeBackend(threads=SimThreads())
     environment = open_run_environment_resources(
         RunEnvironmentRequest(
             log_dir=project.logger.log_dir,
@@ -244,7 +244,7 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             log_dir=project.logger.log_dir,
             workspace=root,
             ref_dir=None,
-            backend=FakeComputeBackend(),
+            backend=FakeComputeBackend(threads=SimThreads()),
             agent_backend="stub",
             cli_provider=None,
             run_id="workspace-resource-test",
@@ -323,7 +323,7 @@ def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Pa
             log_dir=project.logger.log_dir,
             workspace=root,
             ref_dir=None,
-            backend=FakeComputeBackend(),
+            backend=FakeComputeBackend(threads=SimThreads()),
             agent_backend="stub",
             cli_provider="codex",
             run_id="workspace-resource-test",

@@ -21,6 +21,7 @@ from vibesys.run.workspace_policy import create_project_materializer
 from vs_project.api import InvalidTaskDefinitionError, Project, ProjectLayoutError
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,7 +33,7 @@ def _materializer(destination: Path) -> ProjectMaterializer:
     return create_project_materializer(
         destination,
         environment=unconfined_host_environment(),
-        backend=FakeComputeBackend(),
+        backend=FakeComputeBackend(threads=SimThreads()),
         log=lambda _message: None,
         git=REAL_GIT,
     )

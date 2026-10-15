@@ -26,7 +26,6 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vs_sandbox.accelerator_discovery import AcceleratorDiscovery, SystemAcceleratorDiscovery
 from vs_sandbox.compute_backends import (
     ComputeBackend,
     ContentionMonitor,
@@ -37,6 +36,7 @@ from vs_sandbox.compute_backends import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from vs_sandbox.accelerator_discovery import AcceleratorDiscovery
     from vs_sandbox.docker_cli import DockerCli
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
@@ -81,7 +81,7 @@ class TrainiumBackend:
         *,
         log: Callable[[str], None] | None = None,
         image: str | None = None,
-        accelerator_discovery: AcceleratorDiscovery | None = None,
+        accelerator_discovery: AcceleratorDiscovery,
         docker: DockerCli,
         threads: Threads,
         launcher: PipedProcessLauncher,
@@ -98,7 +98,7 @@ class TrainiumBackend:
         # No per-device selection; kept for protocol parity (read by
         # run resources for logging/pinning).
         self.selected_device = None
-        discovery = accelerator_discovery or SystemAcceleratorDiscovery()
+        discovery = accelerator_discovery
         self._devices = discovery.discover_trainium().device_nodes
         if self._devices:
             self._lprint(

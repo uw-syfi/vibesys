@@ -26,6 +26,7 @@ from vs_sim.api import (
     OsThreads,
     PidfdProcessSignaller,
     ProbeResult,
+    ProcessesProbe,
     SubprocessLauncher,
     SubprocessProbe,
     SystemClock,
@@ -453,6 +454,17 @@ class TestSubprocessProbe(CommandProbeContract):
             ),
             blocks_forever=_python("import signal; signal.pause()"),
             missing_program=("/nonexistent/vs-sim-no-such-program",),
+        )
+
+
+class TestProcessesProbe(TestSubprocessProbe):
+    def probe_under_test(self) -> ProbeUnderTest:
+        subject = super().probe_under_test()
+        return ProbeUnderTest(
+            ProcessesProbe(OsProcesses()),
+            subject.exit_with_stdout,
+            subject.blocks_forever,
+            subject.missing_program,
         )
 
 

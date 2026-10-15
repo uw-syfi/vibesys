@@ -234,7 +234,7 @@ def _env(
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=FakeComputeBackend(),
+                backend=FakeComputeBackend(threads=SimThreads()),
                 agent_backend="stub",
                 cli_provider="codex",
                 run_id="workspace-requests",

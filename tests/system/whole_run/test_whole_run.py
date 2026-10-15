@@ -320,9 +320,8 @@ class _Backend(FakeComputeBackend):
     """A compute backend whose Docker sandboxes are real ``DockerSandbox`` objects."""
 
     def __init__(self, docker: SubprocessDockerCli, threads: SimThreads) -> None:
-        super().__init__()
+        super().__init__(threads=threads)
         self._docker = docker
-        self._threads = threads
 
     def make_sandbox(
         self,

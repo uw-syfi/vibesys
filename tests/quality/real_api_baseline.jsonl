@@ -148,6 +148,7 @@
 {"path": "tests/server/test_websocket_transport.py", "rule": "socket_io", "count": 21}
 {"path": "tests/server/test_websocket_transport.py", "rule": "threading", "count": 8}
 {"path": "tests/support/__init__.py", "rule": "subprocess", "count": 5}
+{"path": "libs/vs-sandbox/tests/test_accelerator_discovery.py", "rule": "real_impl", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_compute_backend_contract.py", "rule": "real_impl", "count": 1}
 {"path": "tests/system/steer/test_steer_reaches_the_next_turn.py", "rule": "real_impl", "count": 2}
 {"path": "tests/vibesys/loops/profiler_process_world.py", "rule": "subprocess", "count": 1}

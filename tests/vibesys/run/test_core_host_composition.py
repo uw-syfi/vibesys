@@ -51,7 +51,7 @@ from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -426,7 +426,7 @@ def test_run_plugin_drives_a_core_policy_through_the_shell(tmp_path: Path) -> No
             plugin,
             EmptyOptions(),
             agent_client_factory=_resumable_client,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
             stop_timer=clock.sleep,
             timing=RunTiming(clock, 60.0, OsThreads()),
             invocation_store_factory=lambda _state, _key: FakeAgentInvocationStore(),

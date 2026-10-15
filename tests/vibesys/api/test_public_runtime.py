@@ -28,7 +28,7 @@ from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +50,7 @@ class _LifecycleMonitor:
 
 class _LifecycleBackend(FakeComputeBackend):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(threads=SimThreads())
         self.monitor = _LifecycleMonitor()
 
     def make_monitor(self, log_dir: Path) -> _LifecycleMonitor:

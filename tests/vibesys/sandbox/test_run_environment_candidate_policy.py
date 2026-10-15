@@ -12,7 +12,7 @@ from vs_project.api import Project
 from vs_runtime.api.infrastructure import RunEnvironmentRequest
 from vs_runtime.api.testing import unconfined_host_environment
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,7 +36,7 @@ def test_run_environment_prepares_hidden_state_before_opening(
         log_dir=tmp_path / "logs",
         workspace=workspace,
         ref_dir=None,
-        backend=FakeComputeBackend(),
+        backend=FakeComputeBackend(threads=SimThreads()),
         agent_backend="stub",
         cli_provider=None,
         run_id="run",

@@ -21,6 +21,7 @@ from vs_project.api import Project
 from vs_runtime.api.testing import FakeGitRunner, unconfined_host_environment
 from vs_sandbox.api.command_translation import PROJECT_ROOT_TOKEN
 from vs_sandbox.api.testing import FakeComputeBackend
+from vs_sim.api.testing import SimThreads
 
 PROJECT_ROOT = Path(__file__).parents[2]
 MICROSERVICE_ROOT = PROJECT_ROOT / "examples" / "microservices"
@@ -186,7 +187,7 @@ def test_hotel_native_task_materializes_shared_checker(tmp_path: Path) -> None:
     materializer = create_project_materializer(
         destination,
         environment=unconfined_host_environment(),
-        backend=FakeComputeBackend(),
+        backend=FakeComputeBackend(threads=SimThreads()),
         log=lambda _message: None,
         git=FakeGitRunner(head=workspace_source.commit).git(),
     )

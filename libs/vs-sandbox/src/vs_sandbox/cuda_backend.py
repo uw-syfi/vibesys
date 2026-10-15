@@ -21,7 +21,7 @@ from vs_sandbox.gpu_monitor import (
     NvidiaSmiTelemetry,
     pick_gpu,
 )
-from vs_sim.api import SubprocessProbe, Threads, utc_datetime
+from vs_sim.api import Threads, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -76,7 +76,7 @@ class CudaBackend:
         threads: Threads,
         launcher: PipedProcessLauncher,
         docker: DockerCli,
-        probe: CommandProbe | None = None,
+        probe: CommandProbe,
         clock: Clock,
     ) -> None:
         """Configure CUDA execution with its log directory, image override and GPU telemetry.
@@ -84,7 +84,7 @@ class CudaBackend:
         ``clock`` counts seconds since the epoch; it stamps each GPU selection in ``gpu.json``.
         """
         self._clock = clock
-        self._probe: CommandProbe = probe or SubprocessProbe()
+        self._probe = probe
         self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry(probe=self._probe)
         self._threads = threads
         self._launcher = launcher

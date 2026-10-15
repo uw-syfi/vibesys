@@ -50,7 +50,7 @@ from vs_sim.api import (
     SubprocessPipedProcessLauncher,
     SystemClock,
 )
-from vs_sim.api.testing import NO_PROCESSES
+from vs_sim.api.testing import NO_PROCESSES, ScriptedProbe
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -192,6 +192,7 @@ def make_backend(base: Base, log_dir: Path) -> ComputeBackendImpl:
         ),
         threads=OsThreads(),
         launcher=SubprocessPipedProcessLauncher(),
+        probe=ScriptedProbe(lambda _argv: None),
     )
 
 

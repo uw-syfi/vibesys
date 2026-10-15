@@ -23,7 +23,7 @@ from vs_sandbox.api import (
     ProjectPathPolicy,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from vs_sandbox.api import CommandRunner
@@ -63,7 +63,7 @@ def _request(tmp_path: Path) -> RunEnvironmentRequest:
         log_dir=tmp_path / "logs",
         workspace=tmp_path / "workspace",
         ref_dir=None,
-        backend=FakeComputeBackend(),
+        backend=FakeComputeBackend(threads=SimThreads()),
         agent_backend="stub",
         cli_provider="claude",
         run_id="run-1",

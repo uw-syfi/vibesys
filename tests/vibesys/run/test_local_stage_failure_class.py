@@ -262,7 +262,7 @@ def _measure_with_lost_command(
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=FakeComputeBackend(),
+                backend=FakeComputeBackend(threads=SimThreads()),
                 agent_backend="claude",
                 cli_provider="claude",
                 run_id=_RUN_ID,

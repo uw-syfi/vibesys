@@ -135,7 +135,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                     log_dir=project.logger.log_dir,
                     workspace=root,
                     ref_dir=None,
-                    backend=FakeComputeBackend(),
+                    backend=FakeComputeBackend(threads=SimThreads()),
                     agent_backend="stub",
                     cli_provider="codex",
                     run_id="workspace-contract",

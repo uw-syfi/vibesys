@@ -15,7 +15,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -39,7 +39,7 @@ class _Monitor:
 
 class _Backend(FakeComputeBackend):
     def __init__(self, monitor: _Monitor) -> None:
-        super().__init__()
+        super().__init__(threads=SimThreads())
         self.monitor = monitor
         self._monitor = monitor
         self.reselection_count = 0

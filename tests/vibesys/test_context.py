@@ -71,7 +71,7 @@ class _RecordingBackendFactory:
 
     def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
         self.calls += 1
-        return FakeComputeBackend()
+        return FakeComputeBackend(threads=SimThreads())
 
 
 class _CreateContextOptions(TypedDict, total=False):

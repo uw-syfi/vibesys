@@ -24,7 +24,7 @@ from vs_github.api import GitHubCLI
 from vs_project.api import Git, generate_run_id
 from vs_runtime.api.wiring import InProcessRuns
 from vs_sandbox.api import SubprocessDockerCli, create_compute_backend
-from vs_sim.api import utc_datetime
+from vs_sim.api import ProcessesProbe, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -105,6 +105,7 @@ def create_session(
             ),
             threads=timing.threads,
             launcher=settings.piped_processes,
+            probe=ProcessesProbe(settings.processes),
         )
         if settings.backend_factory is None
         else settings.backend_factory
