@@ -918,6 +918,7 @@ describe('Hosts inspection changes', () => {
       instance,
       {
         kind: 'read',
+        token: 'l1',
         read: {
           instance_id: instance,
           stream_id: '000001',
@@ -929,10 +930,10 @@ describe('Hosts inspection changes', () => {
       '10:100',
     );
 
-    expect(listed.ok && 'streams' in listed && listed.streams.map(stream => stream.id)).toEqual([
+    expect(listed?.ok && 'streams' in listed && listed.streams.map(stream => stream.id)).toEqual([
       '000001',
     ]);
-    expect(read.ok && 'chunk' in read && read.chunk.data).toBe('hello\n');
+    expect(read?.ok && 'chunk' in read && read.chunk.data).toBe('hello\n');
     // The control channel, then the one logs channel both requests shared.
     expect(link.helper.spawned).toBe(2);
     const logsChannel = link.helper.channels[1];
@@ -941,6 +942,53 @@ describe('Hosts inspection changes', () => {
     hosts.releaseLogs('10:100');
     await logsChannel.process.exit;
     expect(link.helper.exited).toBeGreaterThanOrEqual(1);
+  });
+
+  test("a withdraw aborts the view's read with that token, and withdraws its long poll", async () => {
+    const link = new FakeLink();
+    const instance = '000000000001';
+    link.helper.publish(record(instance, 'run-1'));
+    link.helper.logStore.open(instance, '000001', {kind: 'run_narration'}, 'vibesys run');
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = inspectorHosts(manager);
+    const owner = '10:100';
+    const read = {
+      instance_id: instance,
+      stream_id: '000001',
+      start: {offset: 0},
+      max_bytes: 4096,
+      wait_ms: 25_000,
+    };
+    const heldFirst = link.helper.deferNext('logs.read');
+    const heldSecond = link.helper.deferNext('logs.read');
+    const first = hosts.logs(LOCAL, instance, {kind: 'read', token: 'l1', read}, owner);
+    const second = hosts.logs(LOCAL, instance, {kind: 'read', token: 'l2', read}, owner);
+    await heldFirst.received;
+    await heldSecond.received;
+
+    const withdraw = (token: string, by = owner) =>
+      hosts.logs(LOCAL, instance, {kind: 'withdraw', token}, by);
+    expect(await withdraw('unknown')).toBeNull();
+    expect(await withdraw('l1', '11:100')).toBeNull();
+    expect(await withdraw('l1')).toBeNull();
+    expect(await first).toMatchObject({ok: false, failure: {code: 'transport'}});
+    heldSecond.release();
+    expect(await second).toMatchObject({ok: true});
+    expect(await withdraw('l2')).toBeNull();
+
+    // The logs channel keeps order: a withdrawal written before this listing reached the helper.
+    expect(await hosts.logs(LOCAL, instance, {kind: 'list'}, owner)).toMatchObject({ok: true});
+    const [firstRead] = link.helper.requests.filter(request => request.type === 'logs.read');
+    const cancels = link.helper.requests.filter(request => request.type === 'logs.cancel');
+    expect(cancels).toMatchObject([{read_id: firstRead?.request_id}]);
+    heldFirst.release();
+    hosts.releaseLogs(owner);
   });
 });
 

@@ -1026,6 +1026,7 @@ describe('RunControl logs', () => {
     expect(listed).toMatchObject({ok: true, instanceId: RUN_A, streams: [{id: '000001'}]});
     const read = await w.runs.logs('run-a', {
       kind: 'read',
+      token: 'r1',
       read: {
         instance_id: RUN_A,
         stream_id: '000001',
@@ -1056,7 +1057,7 @@ describe('RunControl logs', () => {
       wait_ms: 0,
     };
 
-    expect(await w.runs.logs('run-a', {kind: 'read', read})).toMatchObject({
+    expect(await w.runs.logs('run-a', {kind: 'read', token: 'r1', read})).toMatchObject({
       ok: false,
       failure: {code: 'unknown_instance'},
     });
@@ -1064,6 +1065,48 @@ describe('RunControl logs', () => {
       ok: false,
       failure: {code: 'unknown_instance'},
     });
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test("a withdraw aborts the page's read with that token, and withdraws its long poll", async () => {
+    const w = world();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+    w.link.helper.logStore.open(
+      RUN_A,
+      '000001',
+      {kind: 'startup_step', stage: 'building_image'},
+      'build',
+    );
+    await w.runs.attach(HOST, RUN_A);
+    const read = {
+      instance_id: RUN_A,
+      stream_id: '000001',
+      start: {offset: 0},
+      max_bytes: 4096,
+      wait_ms: 25_000,
+    };
+    const heldFirst = w.link.helper.deferNext('logs.read');
+    const heldSecond = w.link.helper.deferNext('logs.read');
+    const first = w.runs.logs('run-a', {kind: 'read', token: 'r1', read});
+    const second = w.runs.logs('run-a', {kind: 'read', token: 'r2', read});
+    await heldFirst.received;
+    await heldSecond.received;
+
+    expect(await w.runs.logs('run-a', {kind: 'withdraw', token: 'unknown'})).toBeNull();
+    expect(await w.runs.logs('run-a', {kind: 'withdraw', token: 'r1'})).toBeNull();
+    expect(await first).toMatchObject({ok: false, failure: {code: 'transport'}});
+    heldSecond.release();
+    expect(await second).toMatchObject({ok: true});
+    expect(await w.runs.logs('run-a', {kind: 'withdraw', token: 'r2'})).toBeNull();
+    expect(await w.runs.logs('run-z', {kind: 'withdraw', token: 'r1'})).toBeNull();
+
+    // The logs channel keeps order: a withdrawal written before this listing reached the helper.
+    expect(await w.runs.logs('run-a', {kind: 'list'})).toMatchObject({ok: true});
+    const [firstRead] = w.link.helper.requests.filter(request => request.type === 'logs.read');
+    const cancels = w.link.helper.requests.filter(request => request.type === 'logs.cancel');
+    expect(cancels).toMatchObject([{read_id: firstRead?.request_id}]);
+    heldFirst.release();
+    w.runs.detach('run-a');
     await w.connection[Symbol.asyncDispose]();
   });
 });
