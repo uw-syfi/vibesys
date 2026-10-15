@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from importlib import import_module
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 from pydantic import JsonValue, TypeAdapter
@@ -19,7 +20,6 @@ from vs_sandbox.api import EnvironmentBindMount
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
 
 _MODEL_ARTIFACT_NAMES = frozenset({"model", "draft_model"})
@@ -41,7 +41,13 @@ class ModelArtifactDownloader(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ModelArtifactRequest:
-    """Paths and effects needed to prepare one task's model artifacts."""
+    """Paths and effects needed to prepare one run's model artifacts.
+
+    ``reference_dir`` is the task reference that may author the weights;
+    ``model_cache_dir`` is the download cache; ``runtime_artifact_dir`` is the
+    run's model record, which must be the same directory on every launch and
+    resume of one run.
+    """
 
     reference_dir: Path
     model_cache_dir: Path
@@ -70,6 +76,11 @@ class ModelMetadata:
     revision: str | None
 
 
+def model_artifact_copy_excludes(*, isolated: bool) -> frozenset[str]:
+    """Reference entries a project copy leaves out because they are mounted instead."""
+    return _MODEL_ARTIFACT_NAMES if isolated else frozenset()
+
+
 def prepare_model_artifacts(
     request: ModelArtifactRequest,
     *,
@@ -77,60 +88,92 @@ def prepare_model_artifacts(
     materialize_local_weights: bool,
     downloader: ModelArtifactDownloader | None = None,
 ) -> PreparedModelArtifacts:
-    """Prepare primary model weights and return their copy and mount policy.
+    """Resolve a run's model weights and return their copy and mount policy.
 
-    An authored ``reference/model`` always wins over runtime-managed weights.
-    Environments that materialize weights locally download a missing primary
-    model from ``reference/meta.json``.  Environments that provision weights
-    remotely skip that download when metadata exists, but a task without
-    metadata must still provide its primary model locally.
+    ``request.runtime_artifact_dir`` holds the run's model record: one link
+    per artifact (``model``, ``draft_model``) to the weights the run uses.
+    Every mount comes from that record, so a fresh launch and a resume of the
+    same run mount the same weights.  An authored ``reference/<name>`` always
+    wins and is recorded; a resume, whose project copy holds no external
+    weights, reads the record.  Environments that materialize weights locally
+    download a missing primary model from ``reference/meta.json``.
+    Environments that provision weights remotely skip that download when
+    metadata exists, but a task without metadata must still provide its
+    primary model, authored or recorded.
     """
     reference_dir = request.reference_dir
-    if not reference_dir.is_dir():
+    if not reference_dir.is_dir() and not any(
+        _recorded_artifact(request, name) is not None for name in sorted(_MODEL_ARTIFACT_NAMES)
+    ):
         return PreparedModelArtifacts()
 
-    model_path = reference_dir / "model"
-    metadata_path = reference_dir / "meta.json"
-    if materialize_local_weights or not metadata_path.exists():
-        model_path = _ensure_primary_model(
+    mounts: list[EnvironmentBindMount] = []
+    model_path = _resolve_artifact(request, "model")
+    if model_path is None and (
+        materialize_local_weights or not (reference_dir / "meta.json").exists()
+    ):
+        model_path = _download_primary_model(
             request,
             downloader=(_download_model_snapshot if downloader is None else downloader),
         )
-
-    mounts: list[EnvironmentBindMount] = []
-    if model_path.is_dir() or model_path.is_symlink():
+    if model_path is not None:
         mounts.append(EnvironmentBindMount(model_path, "/model", read_only=True))
 
-    draft_model_path = reference_dir / "draft_model"
-    if draft_model_path.is_dir() or draft_model_path.is_symlink():
+    draft_model_path = _resolve_artifact(request, "draft_model")
+    if draft_model_path is not None:
         mounts.append(EnvironmentBindMount(draft_model_path, "/draft_model", read_only=True))
 
     return PreparedModelArtifacts(
-        copy_excludes=_MODEL_ARTIFACT_NAMES if isolated else frozenset(),
+        copy_excludes=model_artifact_copy_excludes(isolated=isolated),
         bind_mounts=tuple(mounts),
     )
 
 
-def _ensure_primary_model(
+def _resolve_artifact(request: ModelArtifactRequest, name: str) -> Path | None:
+    """Return the run's recorded ``name`` weights, recording an authored reference first."""
+    authored = request.reference_dir / name
+    recorded = request.runtime_artifact_dir / name
+    if authored.exists() and authored.absolute() != recorded.absolute():
+        _record(recorded, authored.resolve())
+    return _recorded_artifact(request, name)
+
+
+def _recorded_artifact(request: ModelArtifactRequest, name: str) -> Path | None:
+    recorded = request.runtime_artifact_dir / name
+    if recorded.is_symlink() and not recorded.exists():
+        recorded.unlink()
+    return recorded if recorded.exists() else None
+
+
+def _record(recorded: Path, target: Path) -> None:
+    """Point the run's record for one artifact at ``target``, replacing it atomically."""
+    if recorded.is_symlink() and recorded.resolve() == target:
+        return
+    if recorded.exists() and not recorded.is_symlink():
+        message = (
+            f"Cannot record the run's model at {recorded}: it holds files, not a link. "
+            "Remove it so the run's model record can point at the task's weights."
+        )
+        raise FileExistsError(message)
+    recorded.parent.mkdir(parents=True, exist_ok=True)
+    staged = recorded.with_name(f".{recorded.name}.recording")
+    staged.unlink(missing_ok=True)
+    staged.symlink_to(target, target_is_directory=True)
+    staged.replace(recorded)
+
+
+def _download_primary_model(
     request: ModelArtifactRequest,
     *,
     downloader: ModelArtifactDownloader,
 ) -> Path:
-    authored_model_path = request.reference_dir / "model"
-    if authored_model_path.exists():
-        return authored_model_path
-
     model_path = request.runtime_artifact_dir / "model"
-    if model_path.is_symlink() and not model_path.exists():
-        model_path.unlink()
-    if model_path.exists():
-        return model_path
-
     metadata_path = request.reference_dir / "meta.json"
     if not metadata_path.exists():
         message = (
-            f"Model weights not found at {model_path} and no meta.json to download from. "
-            "Either create a model/ directory/symlink or add a meta.json with model_id."
+            f"Model weights not found: no {request.reference_dir / 'model'}, no run model "
+            f"record at {model_path}, and no meta.json to download from. Either create a "
+            "model/ directory/symlink or add a meta.json with model_id."
         )
         raise FileNotFoundError(message)
 
@@ -144,8 +187,7 @@ def _ensure_primary_model(
         revision=metadata.revision,
         cache_dir=str(request.model_cache_dir),
     )
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    model_path.symlink_to(downloaded_path)
+    _record(model_path, Path(downloaded_path).resolve())
     request.log(f"[model] Created symlink {model_path} -> {downloaded_path}")
     return model_path
 

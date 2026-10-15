@@ -114,6 +114,7 @@ from vs_runtime._model_artifacts import (
     ModelArtifactDownloader,
     ModelArtifactRequest,
     PreparedModelArtifacts,
+    model_artifact_copy_excludes,
     prepare_model_artifacts,
 )
 from vs_runtime._model_requests import ModelRequestError, _ModelRequestReconciler
@@ -611,6 +612,7 @@ __all__ = [
     "materialize_input_project",
     "materialize_objective_document",
     "migrate_recorded_run_environment",
+    "model_artifact_copy_excludes",
     "off_path_tools",
     "offered_skill_facts",
     "open_agent_execution_environment",

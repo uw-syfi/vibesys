@@ -662,9 +662,10 @@ def test_copied_repository_task_materializes_model_outside_authored_inputs(
             task_name="latency",
             task_root=task,
         ) as ctx:
-            run_id = ctx.project_resources.state.run_id
             workspace = ctx.environment_resources.request.workspace
-            runtime_model = runs_dir / ".cache" / "llm-serving" / run_id / "model"
+            runtime_model = (
+                ctx.project_resources.project.state.model_cache_directory("llm-serving") / "model"
+            )
             copied_reference = workspace / ".vibesys" / "tasks" / "latency" / "reference"
 
             assert not (reference / "model").exists()
