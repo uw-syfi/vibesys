@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
@@ -20,6 +19,7 @@ from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, Roo
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
 from vs_runtime._workspace_tree import EntryKind
 from vs_sandbox.api import HostResource, HostResourceAccess
+from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -129,7 +129,7 @@ class WorkspaceResourceFactory:
 
     def _wrap_candidate(self, project: _ProjectWorkspaceResources) -> RuntimeWorkspaceResource:
         workspace_id = project.workspace_id
-        ownership = ExitStack()
+        ownership = ReleaseStack()
         try:
             ownership.callback(project.close)
             base = self._environment.request
@@ -163,7 +163,7 @@ class WorkspaceResourceFactory:
         environment: RunEnvironmentResources,
         *,
         workspace_id: str | None,
-        ownership: ExitStack | None = None,
+        ownership: ReleaseStack | None = None,
     ) -> RuntimeWorkspaceResource:
         plan = self._evaluation_plan.model_copy(
             update={
@@ -231,7 +231,7 @@ class RuntimeWorkspaceResource:
         skill_selection: SkillSelection,
         host_resources: tuple[HostResource, ...],
         events: WorkspaceResourceEventSink,
-        ownership: ExitStack | None,
+        ownership: ReleaseStack | None,
         root_agent_environment_opener: (
             Callable[[AgentExecutionConfiguration], AgentExecutionEnvironment] | None
         ),
@@ -250,7 +250,7 @@ class RuntimeWorkspaceResource:
         self._events = events
         self._ownership = ownership
         self._root_agent_environment_opener = root_agent_environment_opener
-        self._closed = False
+        self._close = CloseOnce()
 
     @property
     def id(self) -> str | None:
@@ -477,15 +477,13 @@ class RuntimeWorkspaceResource:
         )
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        """Release what this workspace owns; a step that failed runs again on the next call."""
         if self._ownership is not None:
-            self._ownership.close()
+            self._close.run(self._ownership.close)
 
 
 def _close_after_construction_failure(
-    ownership: ExitStack, construction_error: BaseException
+    ownership: ReleaseStack, construction_error: BaseException
 ) -> None:
     try:
         ownership.close()

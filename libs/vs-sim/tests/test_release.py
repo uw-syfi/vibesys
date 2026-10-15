@@ -6,8 +6,9 @@ A Released proof is minted only from evidence, and a ReleaseStack keeps a failed
 from __future__ import annotations
 
 import asyncio
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
@@ -22,6 +23,9 @@ from vs_sim.api import (
     ReleaseStack,
 )
 from vs_sim.api.testing import VirtualClock, run_virtual
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class _CloseFailedError(RuntimeError):
@@ -221,3 +225,21 @@ def test_a_popped_release_stack_closes_nothing_and_the_new_one_closes_everything
     assert ran == []
     moved.close()
     assert ran == ["second", "first"]
+
+
+def test_a_context_whose_exit_failed_keeps_every_later_close_unreleased() -> None:
+    exits: list[str] = []
+
+    @contextmanager
+    def lease() -> Iterator[None]:
+        yield
+        exits.append("exit")
+        raise _CloseFailedError
+
+    stack = ReleaseStack()
+    stack.enter_context(lease())
+    with pytest.raises(_CloseFailedError):
+        stack.close()
+    with pytest.raises(NotReleasedError, match="cannot be retried"):
+        stack.close()
+    assert exits == ["exit"]

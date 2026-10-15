@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -25,7 +24,7 @@ from vs_runtime._project_materialization import copy_support_directories
 from vs_runtime._recorded_environment import migrate_recorded_run_environment
 from vs_runtime._run_state import RunState
 from vs_runtime.contracts import OrchestrationResumeDecision
-from vs_sim.api import utc_datetime
+from vs_sim.api import CloseOnce, ReleaseStack, utc_datetime
 
 if TYPE_CHECKING:
     from vs_project.api import GitRepositoryFactory, StateStoreFactory
@@ -153,11 +152,11 @@ class ProjectRunResources:
     logger: RunLogger
     state: RunState
     objective_document: Path | None
-    _teardown_stack: ExitStack
+    _teardown_stack: ReleaseStack
     _request: ProjectRunRequest
     _effects: ProjectRunEffects
-    _provisional_ownership: ExitStack
-    _closed: bool = field(init=False, default=False)
+    _provisional_ownership: ReleaseStack
+    _close: CloseOnce = field(init=False, default_factory=CloseOnce)
 
     def mark_ready(self) -> None:
         """Preserve a provisioned project after all run resources are ready."""
@@ -195,7 +194,7 @@ class ProjectRunResources:
             # so a directory already here was left by a process that stopped
             # before discarding it.
             self.git.remove_worktree(workspace)
-        teardown_stack = ExitStack()
+        teardown_stack = ReleaseStack()
         try:
             teardown_stack.callback(self.git.remove_worktree, workspace)
             if not reattach:
@@ -233,11 +232,8 @@ class ProjectRunResources:
             raise
 
     def close(self) -> None:
-        """Release owned resources once, in reverse construction order."""
-        if self._closed:
-            return
-        self._closed = True
-        self._teardown_stack.close()
+        """Release owned resources in reverse construction order; a failed step runs again next call."""
+        self._close.run(self._teardown_stack.close)
 
     def __enter__(self) -> ProjectRunResources:
         return self
@@ -256,19 +252,16 @@ class _ProjectWorkspaceResources:
     logger: RunLogger
     parent_git: GitTracker
     state: RunState
-    teardown_stack: ExitStack
-    _closed: bool = field(init=False, default=False)
+    teardown_stack: ReleaseStack
+    _close: CloseOnce = field(init=False, default_factory=CloseOnce)
 
     def retain(self, revision: str, reference: str | None = None) -> None:
         """Keep a candidate revision reachable after its worktree closes."""
         self.parent_git.retain_candidate(reference or self.workspace_id, revision)
 
     def close(self) -> None:
-        """Release the logger and linked worktree exactly once."""
-        if self._closed:
-            return
-        self._closed = True
-        self.teardown_stack.close()
+        """Release the logger and linked worktree; a failed step runs again on the next call."""
+        self._close.run(self.teardown_stack.close)
 
     def __enter__(self) -> _ProjectWorkspaceResources:
         return self
@@ -291,7 +284,7 @@ def open_project_run_resources(
     may replace the recorded descriptor. Runtime applies that decision and
     owns all persistence, Git snapshots, recovery, logging, and cleanup.
     """
-    teardown_stack = ExitStack()
+    teardown_stack = ReleaseStack()
     try:
         return _assemble_project_run_resources(
             request,
@@ -311,9 +304,9 @@ def _assemble_project_run_resources(
     effects: ProjectRunEffects,
     buffered_logs: Iterable[str],
     resolve_resume: ResumeResolver,
-    teardown_stack: ExitStack,
+    teardown_stack: ReleaseStack,
 ) -> ProjectRunResources:
-    provisional_ownership = ExitStack()
+    provisional_ownership = ReleaseStack()
     teardown_stack.callback(provisional_ownership.close)
     if request.provisional_project is not None:
         provisional_ownership.callback(request.provisional_project.discard_project)
@@ -495,7 +488,7 @@ def _apply_resume_decision(
 
 
 def _close_after_construction_failure(
-    teardown_stack: ExitStack,
+    teardown_stack: ReleaseStack,
     construction_error: BaseException,
 ) -> None:
     try:

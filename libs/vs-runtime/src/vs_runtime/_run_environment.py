@@ -32,7 +32,6 @@ import sys
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
-from contextlib import ExitStack
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
@@ -126,7 +125,7 @@ from vs_sandbox.api.symlink_mounts import (
     find_mount_root,
     symlink_lifecycle_hooks,
 )
-from vs_sim.api import OsProcesses, SubprocessPipedProcessLauncher
+from vs_sim.api import CloseOnce, OsProcesses, ReleaseStack, SubprocessPipedProcessLauncher
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
@@ -457,7 +456,7 @@ class RunEnvironmentResources:
         request: RunEnvironmentRequest,
         session: RunEnvironmentSession,
         device: DeviceLease,
-        ownership: ExitStack,
+        ownership: ReleaseStack,
         open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
     ) -> None:
         self.request = request
@@ -465,7 +464,7 @@ class RunEnvironmentResources:
         self.device = device
         self._ownership = ownership
         self._open_session = open_session
-        self._closed = False
+        self._close = CloseOnce()
 
     @property
     def view(self) -> RunEnvironmentView:
@@ -489,15 +488,12 @@ class RunEnvironmentResources:
         return self._open_session(request)
 
     def close(self) -> None:
-        """Release owned resources in reverse construction order exactly once."""
-        if self._closed:
-            return
-        self._closed = True
-        self._ownership.close()
+        """Release owned resources in reverse construction order; a failed step runs again next call."""
+        self._close.run(self._ownership.close)
 
 
 def _close_failed_environment_resources(
-    ownership: ExitStack, construction_error: BaseException
+    ownership: ReleaseStack, construction_error: BaseException
 ) -> None:
     try:
         ownership.close()
@@ -515,7 +511,7 @@ def open_run_environment_resources(
     clock: Clock,
 ) -> RunEnvironmentResources:
     """Open a root session and own its newly started device lease; ``clock`` counts epoch seconds."""
-    ownership = ExitStack()
+    ownership = ReleaseStack()
     try:
         with boot_trace.span("environment_open"):
             session = ownership.enter_context(open_session(request))
@@ -541,7 +537,7 @@ def open_workspace_environment_resources(
     device: DeviceLease,
 ) -> RunEnvironmentResources:
     """Open a workspace session while borrowing the root run's device lease."""
-    ownership = ExitStack()
+    ownership = ReleaseStack()
     try:
         session = ownership.enter_context(open_session(request))
         return RunEnvironmentResources(request, session, device, ownership, open_session)
@@ -1079,7 +1075,12 @@ class _SkyPilotRunEnvironmentSession:
     sandbox: CommandRunner
     view: RunEnvironmentView
     bridge: SkyPilotBridge
-    _closed: bool = False
+    _close: CloseOnce = field(init=False, default_factory=CloseOnce)
+    _steps: ReleaseStack = field(init=False, default_factory=ReleaseStack)
+
+    def __post_init__(self) -> None:
+        self._steps.callback(self.bridge.close)
+        self._steps.callback(stop_sandbox, self.sandbox)
 
     def __enter__(self) -> _SkyPilotRunEnvironmentSession:
         return self
@@ -1088,13 +1089,8 @@ class _SkyPilotRunEnvironmentSession:
         self.close()
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            stop_sandbox(self.sandbox)
-        finally:
-            self.bridge.close()
+        """Stop the sandbox and the bridge; a step that failed runs again on the next call."""
+        self._close.run(self._steps.close)
 
 
 class SkyPilotEnvironment(DockerEnvironment):

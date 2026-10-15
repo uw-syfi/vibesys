@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol, TypeVar, cast
 
 from pydantic import BaseModel
@@ -15,6 +15,7 @@ from vs_runtime._agent_lifecycle import (
     AgentExecutionStatus,
 )
 from vs_sandbox.api import EnvironmentBindMount, HostResourceAccess
+from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     )
     from vs_runtime._run_environment import RunEnvironmentRequest, RunEnvironmentSession
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
+    from vs_sim.api import Released
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
@@ -94,15 +96,17 @@ class ScopedAgentEnvironment:
     backends: dict[str, CommandRunner] | None
     use_docker: bool
     owns_session: bool
-    _closed: bool = False
+    _close: CloseOnce = field(default_factory=CloseOnce)
 
     def close(self) -> None:
-        """Release an owned session exactly once; borrowed sessions remain open."""
-        if self._closed:
-            return
-        self._closed = True
+        """Release an owned session; borrowed sessions remain open. A failed close runs again."""
         if self.owns_session:
-            self.session.close()
+            self._close.run(self._release)
+
+    def _release(self) -> Released:
+        steps = ReleaseStack()
+        steps.callback(self.session.close)
+        return steps.close()
 
     def agent_path(self, host_path: Path | str) -> str:
         """Translate a host path through this environment's active sandbox."""

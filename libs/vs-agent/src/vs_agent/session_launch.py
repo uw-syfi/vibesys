@@ -42,7 +42,7 @@ from vs_agent.session_environment import (
 )
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
 from vs_sandbox.api import build_host_sandbox
-from vs_sim.api import CloseOnce, Released
+from vs_sim.api import CloseOnce, NothingLeft, Released
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -706,4 +706,4 @@ class ConfinedSessionLauncher:
                 self._sessions.discard(session)
         if first_error is not None:
             raise first_error
-        return Released("every launched session closed")
+        return Released.shown_by(NothingLeft(self._sessions, "launched sessions"))

@@ -40,7 +40,7 @@ from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
-from vs_sim.api import CloseOnce, Released, utc_datetime
+from vs_sim.api import CloseOnce, NothingLeft, Released, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -830,7 +830,7 @@ class AgentClient:
                     first_error = error
         if first_error is not None:
             raise first_error
-        return Released("agent sessions and launcher closed")
+        return Released.shown_by(NothingLeft((*self._unclosed, *self._sessions), "agent sessions"))
 
     def _close_or_keep(self, session: LaunchedSession) -> None:
         try:

@@ -109,9 +109,25 @@ class ReleaseStack:
         self._steps.append(lambda: step(*args, **kwargs))
 
     def enter_context[T](self, manager: AbstractContextManager[T]) -> T:
-        """Enter ``manager`` now and exit it at close."""
+        """Enter ``manager`` now and exit it at close.
+
+        An exit cannot be run twice, so one that raised fails every later close too:
+        the stack never reports released over it.
+        """
         value = manager.__enter__()
-        self._steps.append(lambda: manager.__exit__(None, None, None))
+        failure: list[BaseException] = []
+
+        def leave() -> None:
+            if failure:
+                message = f"{manager!r} failed to exit and cannot be retried: {failure[0]!r}"
+                raise NotReleasedError(message)
+            try:
+                manager.__exit__(None, None, None)
+            except BaseException as error:
+                failure.append(error)
+                raise
+
+        self._steps.append(leave)
         return value
 
     def pop_all(self) -> Self:
