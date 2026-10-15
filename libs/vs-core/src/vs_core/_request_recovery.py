@@ -902,12 +902,34 @@ def _finish(
 def _restart_command(
     state: RecordsState, context: RecordsContext, event: RecoveryStarted, record: RequestRecord
 ) -> tuple[RecordsState, tuple[Outbound, ...]]:
-    """What a new epoch does with an earlier epoch's open inspection, cancel or block."""
+    """What a new epoch does with an earlier epoch's open inspection, cancel or block.
+
+    A cancel or block the dead host dispatched is inspected, and lives until the answer with
+    a fresh bound from the restart, like the inspection itself: kept at the dead host's
+    bound, a restart after it would lapse the command on the first tick, before the
+    inspection's "never began" proof could send it again.
+    """
     if isinstance(record.request, InspectRequest) or record.phase == RequestPhase.PREPARED:
         return _requeue_lost_inspection(state, context, event, record), ()
     if record.phase in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING):
-        return state, (_probe(_inspection(record, event.epoch), context),)
+        bound = _fresh_bound(context, event)
+        kept = record.model_copy(
+            update={"until": record.until.model_copy(update={"at": max(record.until.at, bound)})}
+        )
+        state = state.model_copy(
+            update={
+                "records": tuple(
+                    kept if row.request_id == record.request_id else row for row in state.records
+                )
+            }
+        )
+        return state, (_probe(_inspection(kept, event.epoch), context),)
     return state, ()
+
+
+def _fresh_bound(context: RecordsContext, event: RecoveryStarted) -> float:
+    """The reconciliation bound a command of the epoch ``event`` opens gets from its start."""
+    return max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound
 
 
 def _requeue_lost_inspection(
@@ -930,7 +952,7 @@ def _requeue_lost_inspection(
     )
     if not (record.phase in open_phases and record.observation is None):
         return state
-    bound = max(context.run.now_at, event.now_at) + context.run.limits.reconciliation_bound
+    bound = _fresh_bound(context, event)
     requeued = record.model_copy(
         update={
             "phase": RequestPhase.PREPARED,
