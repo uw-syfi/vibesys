@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
+        OwnedWorkspaces,
         RunState,
         StopTimer,
         WorkspaceRuntime,
@@ -531,7 +532,7 @@ class CoreHost:
     ``services.evaluation`` instead.
     """
 
-    workspaces: Workspaces
+    workspaces: OwnedWorkspaces
     evaluation: Evaluation
     facts: RunFacts
     services: CoreServices
