@@ -23,7 +23,9 @@ interface World {
 }
 
 /** A controller over a FakeHelper host whose one server is the run `000000000001`. */
-async function world(options: {stop?: StopDeps['stop']; answer?: boolean} = {}): Promise<World> {
+async function world(
+  options: {stop?: StopDeps['stop']; answer?: boolean; confirm?: StopDeps['confirm']} = {},
+): Promise<World> {
   const link = new FakeLink();
   link.helper.publish(record(TARGET.instanceId, 'run-1'));
   const host = new HostConnection({
@@ -49,7 +51,7 @@ async function world(options: {stop?: StopDeps['stop']; answer?: boolean} = {}):
         }),
       confirm: async text => {
         state.asked.push(text);
-        return options.answer ?? true;
+        return options.confirm?.(text) ?? options.answer ?? true;
       },
       changed: () => {
         state.changes += 1;
@@ -82,6 +84,48 @@ describe('StopController', () => {
     await w.controller.request(TARGET, false);
     expect(w.stops).toEqual([]);
     expect(w.controller.views()).toEqual({});
+  });
+
+  test('an overlapping request cannot open a second confirmation or cancel its owner', async () => {
+    const confirmations: Array<(answer: boolean) => void> = [];
+    const w = await world({
+      confirm: () => new Promise<boolean>(resolve => confirmations.push(resolve)),
+    });
+
+    const owner = w.controller.request(TARGET, false);
+    const duplicate = w.controller.request(TARGET, false);
+    try {
+      expect(w.asked).toHaveLength(1);
+      confirmations[0]?.(true);
+      await Promise.all([owner, duplicate]);
+    } finally {
+      for (const resolve of confirmations) resolve(true);
+      await Promise.all([owner, duplicate]);
+    }
+
+    expect(w.stops).toEqual([{force: false}]);
+    expect(w.controller.views()[KEY]?.phase).toBe('ended');
+    await w.host[Symbol.asyncDispose]();
+  });
+
+  test('a failed confirmation releases ownership so the stop can be retried', async () => {
+    let confirmationFails = true;
+    const w = await world({
+      confirm: async () => {
+        if (confirmationFails) throw new Error('the native dialog closed without an answer');
+        return true;
+      },
+    });
+
+    await expect(w.controller.request(TARGET, false)).rejects.toThrow(
+      'the native dialog closed without an answer',
+    );
+    expect(w.controller.views()).toEqual({});
+
+    confirmationFails = false;
+    await w.controller.request(TARGET, false);
+    expect(w.stops).toEqual([{force: false}]);
+    await w.host[Symbol.asyncDispose]();
   });
 
   test('a confirmed stop uses the same flow without asking again', async () => {

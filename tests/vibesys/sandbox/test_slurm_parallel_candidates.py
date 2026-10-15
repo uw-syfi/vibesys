@@ -20,7 +20,7 @@ import pytest
 from tests.support.workspace_world import open_workspace_env
 
 from vibesys.run.environment import open_run_environment
-from vs_runtime.api.infrastructure import SlurmEnvironment
+from vs_runtime.api.infrastructure import EnvironmentSystem, SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api.slurm import BrokeredProcesses, load_slurm_operator_settings
 from vs_sim.api import (
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     )
     from vs_sandbox.api import CommandResult
     from vs_sim.api import Processes
+from vs_sim.api import DISCARD
 
 _CONFIG = """[slurm]
 name = "test-cluster"
@@ -111,9 +112,9 @@ def _run(
 
     Every session the run opens (the root's first, then each candidate's) is appended to *opened*.
     """
-    backend = DaemonBackend(
-        daemon_engine(tmp_path, launcher=SubprocessPipedProcessLauncher()), threads=OsThreads()
-    )
+    threads = OsThreads()
+    launcher = SubprocessPipedProcessLauncher()
+    backend = DaemonBackend(daemon_engine(tmp_path, launcher=launcher), threads=threads)
     environment = environment or _environment(tmp_path, backend)
 
     def open_session(request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -129,7 +130,13 @@ def _run(
         backend=backend,
         open_session=open_session,
         owns_candidate_worktrees=True,
-        slurm_processes=slurm_processes,
+        system=EnvironmentSystem(
+            threads=threads,
+            network=UnixNetwork(),
+            processes=NO_PROCESSES,
+            launcher=launcher,
+            slurm_processes=slurm_processes,
+        ),
     ) as env:
         try:
             asyncio.run(exercise(env.hosts[0]))  # ty: ignore[call-non-callable]
@@ -142,7 +149,7 @@ def _run(
 def _in(workspaces: RuntimeWorkspaces, path: Path, command: str) -> CommandResult:
     sandbox = workspaces.agent_sandbox_at(path)
     assert sandbox is not None
-    return sandbox.execute(command)
+    return sandbox.execute(command, output=DISCARD)
 
 
 def test_a_candidates_gpu_command_runs_in_its_own_worktree(tmp_path: Path) -> None:
@@ -230,7 +237,7 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             env["VIBESYS_SLURM_BROKER_TOKEN"],
             network=UnixNetwork(),
         )
-        run = processes.run(ProcessSpec(tuple(argv)), timeout=5)
+        run = processes.run(ProcessSpec(tuple(argv)), timeout=5, output=DISCARD)
         assert isinstance(run, ProcessOutcome)
         return run.returncode
 

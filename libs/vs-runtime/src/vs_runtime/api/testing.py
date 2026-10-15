@@ -1,5 +1,6 @@
 """Owned in-memory test implementations for :mod:`vs_runtime.api`."""
 
+from vs_runtime._environment_system import EnvironmentSystem
 from vs_runtime._evidence_ledger import FakeEvidenceLedger
 from vs_runtime._fake_core_execution import (
     ExecutedRequest,
@@ -52,6 +53,8 @@ from vs_runtime.fakes import (
     FakeWorkspace,
     FakeWorkspaces,
 )
+from vs_sim.api import Processes
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, SimNetwork, SimThreads
 
 
 def unconfined_host_environment() -> HostEnvironment:
@@ -61,6 +64,23 @@ def unconfined_host_environment() -> HostEnvironment:
     lack the host sandbox. Production code never builds this.
     """
     return HostEnvironment(build_sandbox=lambda *_args, **_kwargs: None)
+
+
+def idle_environment_system(slurm_processes: Processes = NO_PROCESSES) -> EnvironmentSystem:
+    """Return a host on which nothing starts: every process start is refused.
+
+    Its threads and sockets are simulated and nothing drives them, so a test whose
+    environment starts a broker or a program fails instead of reaching the real host.
+    *slurm_processes* answers the Slurm programs of a test that scripts them.
+    """
+    threads = SimThreads()
+    return EnvironmentSystem(
+        threads=threads,
+        network=SimNetwork(threads),
+        processes=NO_PROCESSES,
+        launcher=FakePipedProcessLauncher(),
+        slurm_processes=slurm_processes,
+    )
 
 
 __all__ = [
@@ -111,6 +131,7 @@ __all__ = [
     "daemon_docker_config",
     "daemon_engine",
     "drive_shell",
+    "idle_environment_system",
     "request_executors",
     "scripted_host",
     "unconfined_host_environment",

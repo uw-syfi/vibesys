@@ -11,7 +11,11 @@ const FIXTURE_EPOCH_MS = Date.UTC(2026, 0, 1);
 type EventOverrides = Omit<Partial<RunEvent>, 'sequence' | 'type'>;
 type EventEnvelopeOverrides = Omit<EventOverrides, 'data'>;
 type RoundFinishedData = Extract<NonNullable<RunEvent['data']>, {kind: 'round_finished'}>;
-type EventBatchOverrides = Omit<Partial<EventBatchMessage>, 'events' | 'type'>;
+type DeferredEventBatch = Extract<EventBatchMessage, {active_executions: null}>;
+type OrdinaryEventBatch = Exclude<EventBatchMessage, DeferredEventBatch>;
+type DeferredEventBatchOverrides = Omit<DeferredEventBatch, 'events' | 'type'>;
+type OrdinaryEventBatchOverrides = Omit<Partial<OrdinaryEventBatch>, 'events' | 'type'>;
+type EventBatchOverrides = DeferredEventBatchOverrides | OrdinaryEventBatchOverrides;
 
 /** A deterministic UTC timestamp, `sequence` seconds after the fixture epoch. */
 export function timestamp(sequence = 0): string {
@@ -127,10 +131,25 @@ export function chatEvent(
 
 /** Build an event batch, copying caller-owned arrays and omitting unspecified cursor metadata. */
 export function eventBatch(
+  events: readonly RunEvent[],
+  overrides: DeferredEventBatchOverrides,
+): DeferredEventBatch;
+export function eventBatch(
+  events?: readonly RunEvent[],
+  overrides?: OrdinaryEventBatchOverrides,
+): OrdinaryEventBatch;
+export function eventBatch(
   events: readonly RunEvent[] = [],
   overrides: EventBatchOverrides = {},
 ): EventBatchMessage {
   const ownedOverrides = structuredClone(overrides);
+  if (ownedOverrides.active_executions === null) {
+    return {
+      type: 'event_batch',
+      ...ownedOverrides,
+      events: structuredClone([...events]),
+    };
+  }
   return {
     type: 'event_batch',
     ...ownedOverrides,

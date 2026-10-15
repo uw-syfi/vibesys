@@ -88,6 +88,7 @@ def _failure(kind: RunFailureKind, kept: int) -> RunFailure:
         workstreams_started=1,
         workstream_budget=1,
         candidates_kept=kept,
+        adopted_candidate=None,
     )
 
 

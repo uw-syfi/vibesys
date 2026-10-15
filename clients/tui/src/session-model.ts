@@ -12,6 +12,7 @@ import type {
 import {
   type ActiveAgentExecution,
   type ActiveExecutionCheckpoint,
+  type ActiveExecutionCheckpointFold,
   type CoreDiagnostic,
   type CoreState,
   type ExecutionTodos,
@@ -1143,13 +1144,21 @@ export function applyResponseEvents(
 export function applyEventBatch(
   state: SessionState,
   events: readonly RunEvent[],
-  activeExecutions?: ActiveExecutionCheckpoint,
+  activeExecutions?: ActiveExecutionCheckpoint | null,
   throughSequence?: number,
   historyAfterSequence?: number,
+  activeExecutionCheckpoint?: ActiveExecutionCheckpointFold,
 ): SessionState {
   return applyReducedCore(
     state,
-    reduceEventBatch(state.core, events, activeExecutions, throughSequence, historyAfterSequence),
+    reduceEventBatch(
+      state.core,
+      events,
+      activeExecutions,
+      throughSequence,
+      historyAfterSequence,
+      activeExecutionCheckpoint,
+    ),
   );
 }
 
@@ -1162,9 +1171,10 @@ export function applyEventBatch(
 export function applyEventRebootstrap(
   state: SessionState,
   events: readonly RunEvent[],
-  activeExecutions: ActiveExecutionCheckpoint | undefined,
+  activeExecutions: ActiveExecutionCheckpoint | null | undefined,
   throughSequence: number | undefined,
   historyAfterSequence: number,
+  activeExecutionCheckpoint?: ActiveExecutionCheckpointFold,
 ): SessionState {
   return applyReducedCore(
     state,
@@ -1174,6 +1184,7 @@ export function applyEventRebootstrap(
       activeExecutions,
       throughSequence,
       historyAfterSequence,
+      activeExecutionCheckpoint,
     ),
   );
 }

@@ -30,6 +30,7 @@ from vs_core._measurement_recipe import (
     MeasurementRecipe,
     StageBudget,
 )
+from vs_core._ownership import unreleased_records
 from vs_core._projection import (
     attempt_view,
     evidence_view,
@@ -347,6 +348,7 @@ from vs_core.types.evaluation import (
     InspectOwnedJob,
     JobFactsBeforeObservation,
     JobObserved,
+    JobQueued,
     JobsDrainRequested,
     JobTerminationRequested,
     JobWaitLapsed,
@@ -393,6 +395,7 @@ from vs_core.types.job_observations import (
     JobTimeout,
     MeasurementFailure,
     TimedOut,
+    WaitEnd,
 )
 from vs_core.types.kernel import (
     AreaChange,
@@ -954,6 +957,7 @@ __all__ = [
     "JobFactsBeforeObservation",
     "JobObserved",
     "JobProgress",
+    "JobQueued",
     "JobTerminationRequested",
     "JobTimeout",
     "JobWaitLapsed",
@@ -1222,6 +1226,7 @@ __all__ = [
     "VerifyAdoption",
     "VerifyParentRevisionBase",
     "Wait",
+    "WaitEnd",
     "WaitKind",
     "WaitOn",
     "WaitRefusal",
@@ -1302,6 +1307,7 @@ __all__ = [
     "trusted_keys",
     "turn_candidate",
     "turn_reply",
+    "unreleased_records",
     "validate_startup",
     "validate_terminal_inputs",
     "verify_encoding",

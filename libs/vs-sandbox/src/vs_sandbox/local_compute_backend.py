@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Clock, PipedProcessLauncher, Threads
+    from vs_sim.api import Clock, CommandProbe, PipedProcessLauncher, Threads
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
@@ -182,9 +182,11 @@ def metal_backend(  # noqa: PLR0913
     threads: Threads,
     launcher: PipedProcessLauncher,
     clock: Clock,
+    probe: CommandProbe,
+    events: object | None = None,
 ) -> LocalBackend:
     """Apple Silicon / Metal backend (local execution only); it records no timestamps."""
-    del clock
+    del clock, probe, events  # no timestamps; no device to watch for contention
     return LocalBackend(
         ComputeBackend.METAL,
         log_dir,
@@ -208,9 +210,11 @@ def cpu_backend(  # noqa: PLR0913
     threads: Threads,
     launcher: PipedProcessLauncher,
     clock: Clock,
+    probe: CommandProbe,
+    events: object | None = None,
 ) -> LocalBackend:
     """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers); no timestamps."""
-    del clock
+    del clock, probe, events  # no timestamps; no device to watch for contention
     return LocalBackend(
         ComputeBackend.CPU,
         log_dir,

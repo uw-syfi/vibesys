@@ -1,4 +1,5 @@
 import {afterEach, beforeEach, describe, expect, it} from 'bun:test';
+import {createHash} from 'node:crypto';
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -11,7 +12,7 @@ import {
   ServerError,
   type ServerMessage,
 } from '@vibesys/contracts';
-import {chatEvent, event} from '@vibesys/contracts/testing';
+import {chatEvent, event, statusEvent} from '@vibesys/contracts/testing';
 import type {
   EventSubscription,
   ScheduleTimeout,
@@ -698,6 +699,171 @@ describe('session controller', () => {
     expect(controller.state.core.sequence).toBe(2);
     expect(controller.state.core.transcript.at(-1)?.content).toBe('persisted output\n');
     expect(controller.state.core.activeExecutions).toEqual({});
+  });
+
+  it('keeps the last complete execution checkpoint when a fragmented rebootstrap disconnects', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport, undefined, undefined, []);
+    await controller.start();
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(1, 'agent_execution_started'),
+        execution_id: 'previous',
+        agent_kind: 'implementer',
+        round_label: 'round-1-implementer',
+        data: {
+          kind: 'agent_execution_started',
+          stage: 'implementation',
+          attempt: 1,
+          system_prompt: '',
+          user_prompt: 'Keep this visible',
+          activity: {
+            kind: 'agent_execution_activity_changed',
+            mode: 'thinking',
+            summary: 'Working',
+            tool: null,
+          },
+        },
+      },
+    });
+    transport.emit({
+      type: 'event',
+      event: statusEvent(2, 'previous', 'agent_output_chunk', {progress: 'Still working'}),
+    });
+    const checkpointId = 'a'.repeat(64);
+    transport.emit({
+      type: 'event_batch',
+      events: [event(1, 'server_ready')],
+      through_sequence: 1,
+      active_executions: null,
+      active_executions_checkpoint_id: checkpointId,
+      store_id: 'replacement-store',
+      history_after_sequence: 0,
+      rebootstrap: true,
+    });
+    expect(Object.keys(controller.state.core.activeExecutions)).toEqual(['previous']);
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: checkpointId,
+      chunk_index: 0,
+      chunk_count: 2,
+      payload: '[',
+      through_sequence: 1,
+      store_id: 'replacement-store',
+      history_after_sequence: 0,
+    });
+
+    transport.disconnect(new Error('Server event stream disconnected'));
+
+    expect(Object.keys(controller.state.core.activeExecutions)).toEqual(['previous']);
+    expect(controller.state.core.executionStatuses['previous']?.progress).toBe('Still working');
+    expect(controller.state.eventStreamAvailable).toBe(false);
+    await controller.stop();
+  });
+
+  it('publishes a completed fragmented rebootstrap atomically', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport, undefined, undefined, []);
+    await controller.start();
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(1, 'agent_execution_started'),
+        execution_id: 'previous',
+        agent_kind: 'implementer',
+        round_label: 'round-0-implementer',
+        data: {
+          kind: 'agent_execution_started',
+          stage: 'implementation',
+          attempt: 1,
+          system_prompt: '',
+          user_prompt: 'Previous assignment',
+          activity: {
+            kind: 'agent_execution_activity_changed',
+            mode: 'thinking',
+            summary: 'Working',
+            tool: null,
+          },
+        },
+      },
+    });
+    transport.emit({
+      type: 'event',
+      event: statusEvent(2, 'previous', 'agent_output_chunk', {progress: 'Previous progress'}),
+    });
+    const checkpoint = [
+      {
+        execution_id: 'replacement',
+        agent_kind: 'judge',
+        round_label: 'round-1-judge',
+        stage: 'judge',
+        attempt: null,
+        assignment: 'Review',
+        started_at: '2026-01-01T00:00:02Z',
+        activity: {
+          kind: 'agent_execution_activity_changed' as const,
+          mode: 'thinking' as const,
+          summary: 'Reviewing',
+          tool: null,
+        },
+        provider: null,
+        model: null,
+      },
+    ];
+    const payload = JSON.stringify(checkpoint);
+    const checkpointId = createHash('sha256').update(payload, 'utf8').digest('hex');
+    transport.emit({
+      type: 'event_batch',
+      events: [
+        event(1, 'server_ready'),
+        {
+          ...event(2, 'agent_execution_started'),
+          execution_id: 'replacement',
+          agent_kind: 'judge',
+          round_label: 'round-1-judge',
+          data: {
+            kind: 'agent_execution_started',
+            stage: 'judge',
+            attempt: null,
+            system_prompt: '',
+            user_prompt: 'Review',
+            activity: {
+              kind: 'agent_execution_activity_changed',
+              mode: 'thinking',
+              summary: 'Reviewing',
+              tool: null,
+            },
+          },
+        },
+        statusEvent(3, 'replacement', 'agent_output_chunk', {progress: 'Reviewing output'}),
+      ],
+      through_sequence: 3,
+      active_executions: null,
+      active_executions_checkpoint_id: checkpointId,
+      store_id: 'replacement-store',
+      history_after_sequence: 0,
+      rebootstrap: true,
+    });
+
+    expect(Object.keys(controller.state.core.activeExecutions)).toEqual(['previous']);
+    expect(controller.state.core.executionStatuses['previous']?.progress).toBe('Previous progress');
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: checkpointId,
+      chunk_index: 0,
+      chunk_count: 1,
+      payload,
+      through_sequence: 3,
+      store_id: 'replacement-store',
+      history_after_sequence: 0,
+    });
+
+    expect(Object.keys(controller.state.core.activeExecutions)).toEqual(['replacement']);
+    expect(controller.state.core.executionStatuses['replacement']?.progress).toBe(
+      'Reviewing output',
+    );
+    await controller.stop();
   });
 
   it('does not surface an old failure banner when a replay batch resumes running', async () => {

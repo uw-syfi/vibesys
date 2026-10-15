@@ -253,7 +253,13 @@ The root's snapshot type is the config (`ctx.checkpoint(config)`). The restart r
 through `group.start(key, fn, ...)`, which resumes the flow that had that key from its snapshot if
 the new code starts a flow of the same name there (otherwise `FlowCodeChanged`). Work since the
 last checkpoint is redone, and the results of requests in flight at the change are dropped when
-they arrive.
+they arrive. A task that is not a registered flow is part of its parent's work: it has no
+snapshot, so the restart drops it, and when the parent, restarted from its own checkpoint, starts
+that key again, the task starts afresh.
+
+Replay notices a code change when the new code issues different decisions, makes a different
+number of reads, or reads a recorded value as a type it no longer decodes as (the old code read
+the clock where the new code reads `ctx.task`). Each of these restarts the flows as above.
 
 **Resources do not leak across a restart.** A workspace a flow opened after its checkpoint is
 settled as part of the restart: the restart's first decisions withdraw each such attempt plainly

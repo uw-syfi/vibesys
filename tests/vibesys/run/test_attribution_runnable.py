@@ -101,7 +101,7 @@ def _request(root: Path, environment: str, loop: str, command: list[str]) -> Run
                 "profile_guided": {"command": command},
             },
         ),
-        config=Config.model_validate({"model": {"name": "gpt-test"}}),
+        config=Config.model_validate({"model": {"name": "gpt-5.5"}}),
         exp_name="attribution-runnable",
         runs_dir=root / "runs",
         run_environment=spec,

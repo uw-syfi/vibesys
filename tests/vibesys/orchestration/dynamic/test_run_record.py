@@ -39,6 +39,7 @@ from vibesys.orchestration.dynamic.search.api import (
     Candidate,
     Failure,
     FailureKind,
+    HandoffNote,
     NoPlan,
     PlanCheck,
     PlanUpdate,
@@ -205,7 +206,7 @@ def _plan(run: RunRecord, trace: Trace, pick: int) -> None:
         _fresh(trace, kind=WorkKind.PROFILE if index % 4 == 3 else WorkKind.IMPLEMENT)
         for index in range(count)
     ]
-    run.planned(Scheduled(PlanCheck(accepted=tuple(plans))))
+    run.planned(Scheduled(PlanCheck(reasoning="r", handoff=HandoffNote(), accepted=tuple(plans))))
 
 
 def _start(run: RunRecord, trace: Trace, _pick: int) -> None:
@@ -258,7 +259,7 @@ def _retire(run: RunRecord, _trace: Trace, pick: int) -> None:
         reason="no further progress",
         reason_kind=StrategyReason.BLOCKED,
     )
-    run.planned(Scheduled(PlanCheck(updates=(update,))))
+    run.planned(Scheduled(PlanCheck(reasoning="r", handoff=HandoffNote(), updates=(update,))))
     retired = run.hypotheses[chosen.hypothesis_id]
     assert (retired.strategy, retired.reason_kind) == (update.disposition, update.reason_kind)
 

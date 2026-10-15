@@ -25,6 +25,7 @@ from vibesys.events import (
     ToolCallData,
     ToolResultData,
     ToolResultPayload,
+    TurnUsageData,
     UsageUpdateData,
     make_core_event,
 )
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
     from vs_agent.api import (
         AgentQuotaError,
         AgentRateLimit,
+        AgentUsage,
         Attribution,
         ProviderSwitch,
         QuotaPlan,
@@ -90,6 +92,7 @@ class CoreAgentEventSink:
         | ToolResultData
         | TodoUpdateData
         | UsageUpdateData
+        | TurnUsageData
         | RateLimitUpdateData
         | QuotaPausedData
         | QuotaResumedData
@@ -216,6 +219,30 @@ class CoreAgentEventSink:
                 input_tokens=input_tokens,
                 context_window=context_window,
                 model=model,
+            ),
+            agent_kind=agent_kind,
+            round_label=round_label,
+            invocation_id=invocation_id,
+        )
+
+    def turn_usage_recorded(
+        self,
+        usage: AgentUsage,
+        *,
+        agent_kind: str | None = None,
+        round_label: str | None = None,
+        invocation_id: str | None = None,
+    ) -> None:
+        """Emit settled token and cost accounting for one finished turn."""
+        self._emit(
+            CoreEventType.TURN_USAGE_RECORDED,
+            TurnUsageData(
+                input_tokens=usage.input_tokens,
+                cache_creation_input_tokens=usage.cache_creation_input_tokens,
+                cache_read_input_tokens=usage.cache_read_input_tokens,
+                output_tokens=usage.output_tokens,
+                total_cost_usd=usage.total_cost_usd,
+                duration_ms=usage.duration_ms,
             ),
             agent_kind=agent_kind,
             round_label=round_label,

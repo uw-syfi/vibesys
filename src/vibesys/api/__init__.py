@@ -88,18 +88,28 @@ from vibesys.events import (
     WinnerSelectedData,
     WorkspaceSnapshotData,
 )
+from vibesys.log_owners import (
+    AgentInvocation,
+    GateStage,
+    LogOwner,
+    RunNarration,
+    SlurmJob,
+    StartupStep,
+    ToolBuild,
+)
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
-from vs_agent.api import AgentBackend, AgentSpec
-from vs_project.api import RunLogText, read_latest_run_log
+from vs_agent.api import HARNESSES, AgentBackend, AgentSpec, Harness, check_harness, vetted_models
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import RunStopped
 
 __all__ = [
+    "HARNESSES",
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
     "AgentExecutionStartedData",
+    "AgentInvocation",
     "AgentOutputChannel",
     "AgentOutputChunkData",
     "AgentSpec",
@@ -119,7 +129,9 @@ __all__ = [
     "EventStatus",
     "FrameworkWarningData",
     "GateFinishedData",
+    "GateStage",
     "GateStartedData",
+    "Harness",
     "IterationKind",
     "IterationMetric",
     "IterationProjection",
@@ -130,6 +142,7 @@ __all__ = [
     "IterationUnavailable",
     "IterationUnavailableReason",
     "JsonResultPayload",
+    "LogOwner",
     "ManagedAgent",
     "OrchestrationDescriptor",
     "OrchestrationRegistry",
@@ -149,7 +162,7 @@ __all__ = [
     "RunFailure",
     "RunFailureKind",
     "RunHandle",
-    "RunLogText",
+    "RunNarration",
     "RunReady",
     "RunRecord",
     "RunRecordFacts",
@@ -162,8 +175,11 @@ __all__ = [
     "RunStore",
     "RunView",
     "Runs",
+    "SlurmJob",
+    "StartupStep",
     "TodoItemData",
     "TodoUpdateData",
+    "ToolBuild",
     "ToolCallData",
     "ToolResultData",
     "ToolResultPayload",
@@ -173,9 +189,10 @@ __all__ = [
     "WorkspaceSnapshotData",
     "agent_spec_from_config",
     "boot_trace",
+    "check_harness",
     "create_session",
     "domain_modalities",
     "load_config",
     "open_run_store",
-    "read_latest_run_log",
+    "vetted_models",
 ]

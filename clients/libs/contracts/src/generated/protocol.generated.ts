@@ -277,7 +277,9 @@ export type EventType =
   | "workspace_snapshot"
   | "run_configured"
   | "framework_warning"
-  | "winner_selected";
+  | "winner_selected"
+  | "workstream_finished"
+  | "turn_usage_recorded";
 export type Text2 = string;
 /**
  * Lifecycle and command states reported in events.
@@ -328,6 +330,8 @@ export type Data =
       | RunConfiguredData
       | FrameworkWarningData
       | WinnerSelectedData
+      | WorkstreamFinishedData
+      | TurnUsageData
     )
   | null;
 export type Kind1 = "chat";
@@ -376,13 +380,14 @@ export type Total = number | null;
 export type Label = string;
 export type Kind11 = "run_failed";
 /**
- * Why a run ended without a result the operator can keep.
+ * Why a run failed to meet its goal, whether or not it preserved a partial result.
  */
 export type RunFailureKind = "budget_exhausted" | "deadline" | "no_result";
 export type Reason = string;
 export type WorkstreamsStarted = number;
 export type WorkstreamBudget = number;
 export type CandidatesKept = number;
+export type AdoptedCandidate = string | null;
 export type Kind12 = "run_interrupted";
 export type Reason1 = string;
 export type Signal = string | null;
@@ -418,6 +423,10 @@ export type Kind20 = "judge_result";
 export type Verdict = "pass" | "fail";
 export type Feedback = string;
 export type Attempt3 = number;
+export type Skipped = boolean;
+export type SkipReason = string | null;
+export type ImplementerOutcome =
+  ("continue" | "supported" | "nominated" | "disproven" | "implementation_failed") | null;
 export type Kind21 = "benchmark_result";
 export type Metric = string;
 export type Value = number;
@@ -506,6 +515,7 @@ export type Metric1 = string | null;
 export type Value2 = number | null;
 export type Unit1 = string | null;
 export type OutputTail = string | null;
+export type RoundLabel3 = string | null;
 /**
  * Closed set of framework subsystems that emit framework events.
  */
@@ -528,6 +538,8 @@ export type Objective = string | null;
 export type SearchPolicy = string | null;
 export type BenchmarkContract = boolean;
 export type ParetoObjectives = string | null;
+export type MaxContinuationRounds = number | null;
+export type MaxUnmeasuredTurns = number | null;
 /**
  * Closed set of framework subsystems that emit framework events.
  */
@@ -544,6 +556,47 @@ export type Kind39 = "winner_selected";
 export type Selection = "candidate" | "baseline";
 export type Revision3 = string;
 export type SettlementId = string | null;
+export type Kind40 = "workstream_finished";
+export type SetupFailure = boolean;
+export type Refunded = boolean;
+export type RepeatedError = boolean;
+/**
+ * Why a workstream ended without a measured candidate. Closed.
+ *
+ * See ``vibesys.events.WorkstreamFailureKind``, which this mirrors
+ * member-for-member.
+ */
+export type WorkstreamFailureKind =
+  | "stopped"
+  | "parent-unverified"
+  | "refused"
+  | "ended"
+  | "out-of-budget"
+  | "turn-failed"
+  | "invalid-reply"
+  | "render-failed"
+  | "wait-refused"
+  | "checkpoint-declined"
+  | "no-changed-candidate"
+  | "implementation-failed"
+  | "review-rejected"
+  | "no-trusted-evidence"
+  | "evidence-refused"
+  | "evidence-undecodable"
+  | "profile-capture-unavailable"
+  | "turn-limit"
+  | "repeated-turn";
+export type Role = string | null;
+export type Turns = number | null;
+export type Limit2 = number | null;
+export type Text3 = string;
+export type Kind41 = "turn_usage_recorded";
+export type InputTokens2 = number | null;
+export type CacheCreationInputTokens = number | null;
+export type CacheReadInputTokens = number | null;
+export type OutputTokens = number | null;
+export type TotalCostUsd = number | null;
+export type DurationMs = number | null;
 /**
  * True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.
  */
@@ -639,7 +692,7 @@ export type Reset = boolean;
 export type RemovedHypothesisIds = string[];
 export type ExperimentsReady = boolean | null;
 export type Iterations = IterationSlice | IterationUnavailable | null;
-export type Kind40 = "page";
+export type Kind42 = "page";
 export type SchemaVersion = 1;
 export type RunId4 = string;
 export type ProjectionRevision = string;
@@ -665,7 +718,7 @@ export type Direction = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
-export type Kind41 = "unavailable";
+export type Kind43 = "unavailable";
 export type SchemaVersion1 = 1;
 /**
  * Closed reasons why a policy cannot expose iteration navigation.
@@ -687,24 +740,70 @@ export type Path2 = string;
 export type RenamedFrom1 = string | null;
 export type Patch = string | null;
 export type Truncated1 = boolean;
-export type ServerMessage = SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage;
+export type ServerMessage =
+  SubscribedMessage | EventMessage | EventBatchMessage | ActiveExecutionsChunkMessage | ProtocolErrorMessage;
 export type Type17 = "subscribed";
 export type RequestId18 = string;
 export type ClientId18 = string;
 export type RunId5 = string;
 export type LatestSequence = number;
 export type Type18 = "event";
+/**
+ * Event batch and cursor metadata sent to subscribers.
+ */
+export type EventBatchMessage = EventBatchMessage1 | EventBatchMessage2;
 export type Type19 = "event_batch";
 export type Events1 = RunEvent[];
 export type ThroughSequence = number;
+export type ActiveExecutionsCheckpointId = null;
 export type StoreId1 = string;
 export type HistoryAfterSequence = number;
 export type Rebootstrap = boolean;
-export type Type20 = "protocol_error";
+export type Type20 = "event_batch";
+export type Events2 = RunEvent[];
+export type ThroughSequence1 = number;
+export type StoreId2 = string;
+export type HistoryAfterSequence1 = number;
+export type Rebootstrap1 = boolean;
+export type Type21 = "active_executions_chunk";
+export type CheckpointId = string;
+export type ChunkIndex = number;
+export type ChunkCount = number;
+export type Payload1 = string;
+export type ThroughSequence2 = number;
+export type StoreId3 = string;
+export type HistoryAfterSequence2 = number;
+export type Type22 = "protocol_error";
 export type RequestId19 = string | null;
 export type ClientId19 = string;
 export type Code2 = string;
 export type Message1 = string;
+export type LogOwner = StartupStep | GateStage | AgentInvocation | ToolBuild | SlurmJob | RunNarration;
+export type Kind44 = "startup_step";
+/**
+ * Where an opening environment is, in the order it gets there.
+ */
+export type EnvironmentStartupStage = "building_image" | "starting_container";
+export type Kind45 = "gate_stage";
+export type ExecutionId2 = string;
+export type Attempt4 = number;
+export type Kind46 = "agent_invocation";
+export type InvocationId2 = string;
+export type Kind47 = "tool_build";
+export type Name = string;
+export type Kind48 = "slurm_job";
+export type ExecutionId3 = string;
+export type JobId = string;
+export type Kind49 = "run_narration";
+export type At = string;
+/**
+ * A line's severity: the standard ``logging`` level at or below the record's.
+ */
+export type NarrationLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
+export type Logger = string;
+export type Thread = string;
+export type Message2 = string;
+export type Traceback = string | null;
 
 /**
  * Root schema document for the public server protocol.
@@ -715,6 +814,8 @@ export interface ProtocolDocument {
   event: RunEvent;
   snapshot: RunSnapshot;
   server_message: ServerMessage;
+  log_owner: LogOwner;
+  narration_line: NarrationLine;
 }
 /**
  * Request pausing after the active agent call.
@@ -1236,7 +1337,7 @@ export interface StartupProgress {
   label?: Label;
 }
 /**
- * Why a run ended without a result to keep, with the counts behind it.
+ * Why a run failed, what partial result it preserved, and the counts behind it.
  */
 export interface RunFailedData {
   kind: Kind11;
@@ -1248,6 +1349,9 @@ export interface RunFailedData {
  * ``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts
  * attempts core admitted, against the ``workstream_budget`` the run was allowed.
  * ``candidates_kept`` counts settled candidates eligible for adoption.
+ * ``adopted_candidate`` names the verified candidate revision core adopted even though the
+ * strategy still reported a failed outcome. Its None default preserves replay of failure events
+ * recorded before the adoption fact was added to the event contract.
  */
 export interface RunFailure {
   kind: RunFailureKind;
@@ -1255,6 +1359,7 @@ export interface RunFailure {
   workstreams_started: WorkstreamsStarted;
   workstream_budget: WorkstreamBudget;
   candidates_kept: CandidatesKept;
+  adopted_candidate?: AdoptedCandidate;
 }
 /**
  * Reason and optional signal for an interrupted run.
@@ -1347,12 +1452,18 @@ export interface SubprocessOutputData {
 }
 /**
  * Verdict and feedback returned by the judge.
+ *
+ * See ``vibesys.events.JudgeResultData`` for ``skipped``/``skip_reason``/
+ * ``implementer_outcome``.
  */
 export interface JudgeResultData {
   kind: Kind20;
   verdict: Verdict;
   feedback: Feedback;
   attempt: Attempt3;
+  skipped?: Skipped;
+  skip_reason?: SkipReason;
+  implementer_outcome?: ImplementerOutcome;
 }
 /**
  * Metric result emitted by a benchmark stage.
@@ -1527,7 +1638,9 @@ export interface GateStartedData {
  * ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
  * ``unit`` keeps the historical fallback of the metric name when the
  * contract declares no unit. ``output_tail`` carries the trailing command
- * output on failure.
+ * output on failure. ``round_label`` groups the per-recipe local-validation
+ * gates of one attempt back together, so a client folds them into a
+ * pass-fraction itself rather than the backend aggregating one.
  */
 export interface GateFinishedData {
   kind: Kind35;
@@ -1538,6 +1651,7 @@ export interface GateFinishedData {
   value?: Value2;
   unit?: Unit1;
   output_tail?: OutputTail;
+  round_label?: RoundLabel3;
   source?: FrameworkSource1;
   source_label?: SourceLabel1;
 }
@@ -1559,6 +1673,9 @@ export interface WorkspaceSnapshotData {
 }
 /**
  * One per run: the resolved configuration a loop starts with.
+ *
+ * See ``vibesys.events.RunConfiguredData`` for ``max_continuation_rounds``/
+ * ``max_unmeasured_turns``.
  */
 export interface RunConfiguredData {
   kind: Kind37;
@@ -1569,6 +1686,8 @@ export interface RunConfiguredData {
   search_policy?: SearchPolicy;
   benchmark_contract?: BenchmarkContract;
   pareto_objectives?: ParetoObjectives;
+  max_continuation_rounds?: MaxContinuationRounds;
+  max_unmeasured_turns?: MaxUnmeasuredTurns;
   source?: FrameworkSource3;
 }
 /**
@@ -1592,6 +1711,44 @@ export interface WinnerSelectedData {
   selection: Selection;
   revision: Revision3;
   settlement_id?: SettlementId;
+}
+/**
+ * One workstream (one dynamic-run round) ended; its typed failure, if any.
+ *
+ * See ``vibesys.events.WorkstreamFinishedData`` for why ``setup_failure``
+ * and ``refunded`` are always ``False`` from this event's only current
+ * producer.
+ */
+export interface WorkstreamFinishedData {
+  kind: Kind40;
+  setup_failure: SetupFailure;
+  refunded: Refunded;
+  repeated_error: RepeatedError;
+  last_error?: WorkstreamFailureData | null;
+}
+/**
+ * One workstream's typed account of why it ended without a measured candidate.
+ */
+export interface WorkstreamFailureData {
+  kind: WorkstreamFailureKind;
+  role?: Role;
+  turns?: Turns;
+  limit?: Limit2;
+  text?: Text3;
+}
+/**
+ * Settled token and cost accounting for one finished agent turn.
+ *
+ * See ``vibesys.events.TurnUsageData``.
+ */
+export interface TurnUsageData {
+  kind: Kind41;
+  input_tokens?: InputTokens2;
+  cache_creation_input_tokens?: CacheCreationInputTokens;
+  cache_read_input_tokens?: CacheReadInputTokens;
+  output_tokens?: OutputTokens;
+  total_cost_usd?: TotalCostUsd;
+  duration_ms?: DurationMs;
 }
 /**
  * One measured performance result in a run.
@@ -1696,7 +1853,7 @@ export interface ExperimentUpdate {
  * One bounded page, with enough identity to reject stale merges.
  */
 export interface IterationSlice {
-  kind?: Kind40;
+  kind?: Kind42;
   schema_version?: SchemaVersion;
   run_id: RunId4;
   projection_revision: ProjectionRevision;
@@ -1731,7 +1888,7 @@ export interface IterationMetric {
  * Typed absence, kept distinct from a supported empty tree.
  */
 export interface IterationUnavailable {
-  kind?: Kind41;
+  kind?: Kind43;
   schema_version?: SchemaVersion1;
   reason: IterationUnavailableReason;
 }
@@ -1804,23 +1961,111 @@ export interface EventMessage {
 /**
  * Event batch and cursor metadata sent to subscribers.
  */
-export interface EventBatchMessage {
+export interface EventBatchMessage1 {
   type: Type19;
   events: Events1;
   through_sequence?: ThroughSequence;
   active_executions?: ActiveExecutions;
+  active_executions_checkpoint_id?: ActiveExecutionsCheckpointId;
   store_id?: StoreId1;
   history_after_sequence?: HistoryAfterSequence;
   rebootstrap?: Rebootstrap;
 }
 /**
+ * Event batch and cursor metadata sent to subscribers.
+ */
+export interface EventBatchMessage2 {
+  type: Type20;
+  events: Events2;
+  through_sequence?: ThroughSequence1;
+  active_executions: null;
+  active_executions_checkpoint_id: string;
+  store_id?: StoreId2;
+  history_after_sequence?: HistoryAfterSequence1;
+  rebootstrap?: Rebootstrap1;
+}
+/**
+ * One bounded piece of an atomically replaced execution checkpoint.
+ *
+ * The payload pieces concatenate to the JSON encoding of ``ActiveExecutions``.
+ * A client stages one transfer and publishes the decoded list only after all
+ * pieces arrive in order. The metadata is copied from the batch whose
+ * checkpoint this replaces, so the final publication remains in the same
+ * sequence space even when the batch itself was split into event frames.
+ */
+export interface ActiveExecutionsChunkMessage {
+  type: Type21;
+  checkpoint_id: CheckpointId;
+  chunk_index: ChunkIndex;
+  chunk_count: ChunkCount;
+  payload: Payload1;
+  through_sequence: ThroughSequence2;
+  store_id: StoreId3;
+  history_after_sequence: HistoryAfterSequence2;
+}
+/**
  * Structured error envelope for protocol failures.
  */
 export interface ProtocolErrorMessage {
-  type: Type20;
+  type: Type22;
   request_id?: RequestId19;
   client_id?: ClientId19;
   code: Code2;
   message: Message1;
   diagnostic?: Diagnostic | null;
+}
+/**
+ * A step of opening the run's environment, such as building its image.
+ */
+export interface StartupStep {
+  kind: Kind44;
+  stage: EnvironmentStartupStage;
+}
+/**
+ * One attempt of one gate of a candidate's evaluation.
+ */
+export interface GateStage {
+  kind: Kind45;
+  execution_id: ExecutionId2;
+  gate: GateKind;
+  attempt: Attempt4;
+}
+/**
+ * One agent invocation, as the invocation events identify it.
+ */
+export interface AgentInvocation {
+  kind: Kind46;
+  invocation_id: InvocationId2;
+}
+/**
+ * Building or pulling a tool the run needs, such as a profiler.
+ */
+export interface ToolBuild {
+  kind: Kind47;
+  name: Name;
+}
+/**
+ * A Slurm job an execution submitted; its log is the job's own output file.
+ */
+export interface SlurmJob {
+  kind: Kind48;
+  execution_id: ExecutionId3;
+  job_id: JobId;
+}
+/**
+ * The run's own narration for humans: what it is doing, warnings, tracebacks.
+ */
+export interface RunNarration {
+  kind: Kind49;
+}
+/**
+ * One narration record, as one JSON line of a narration stream.
+ */
+export interface NarrationLine {
+  at: At;
+  level: NarrationLevel;
+  logger: Logger;
+  thread: Thread;
+  message: Message2;
+  traceback?: Traceback;
 }

@@ -23,6 +23,7 @@ from pydantic import BaseModel, JsonValue, TypeAdapter
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api.workspace_tree import (
     EntryKind,
+    TreeLimitError,
     WorkspacePathError,
     WorkspaceTree,
     open_workspace_tree,
@@ -185,11 +186,14 @@ def hash_inputs(
             kind = _input_kind(tree, relative)
             digest.update(relative.encode())
             digest.update(b"\0dir\0" if kind is EntryKind.DIRECTORY else b"\0file\0")
-            entries = (
-                _files_below(tree, relative)
-                if kind is EntryKind.DIRECTORY
-                else (PurePosixPath(*relative_parts(relative)).as_posix(),)
-            )
+            try:
+                entries = (
+                    _files_below(tree, relative, limit=max_files - total_files)
+                    if kind is EntryKind.DIRECTORY
+                    else (PurePosixPath(*relative_parts(relative)).as_posix(),)
+                )
+            except TreeLimitError as error:
+                raise ValueError(_over_limit(max_files, max_bytes)) from error
             for entry in entries:
                 total_files += 1
                 if total_files > max_files:
@@ -219,9 +223,10 @@ def _input_kind(tree: WorkspaceTree, relative: str) -> EntryKind:
     return kind
 
 
-def _files_below(tree: WorkspaceTree, relative: str) -> tuple[str, ...]:
+def _files_below(tree: WorkspaceTree, relative: str, *, limit: int) -> tuple[str, ...]:
+    """The files below ``relative``; listing stops past ``limit`` (the files budget left)."""
     try:
-        return tree.files_below(relative)
+        return tree.files_below(relative, limit=limit)
     except WorkspacePathError as error:
         message = f"validation input must not be a symlink: {error}"
         raise ValueError(message) from error

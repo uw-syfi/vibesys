@@ -1,13 +1,14 @@
 {
   "id": "host-helper",
-  "description": "Host helper scenarios replayed over one channel each: in process against the helper core and shell on simulated I/O (tests/conformance/test_host_helper.py), and over stdio against a real helper command, python -m entrypoints.host_helper or VIBESYS_HOST_HELPER_COMMAND (tests/e2e/test_host_helper.py). Every scenario assumes an empty registry and no project at the paths it names.",
+  "description": "Host helper scenarios replayed over one channel each: in process against the helper core and shell on simulated I/O (tests/conformance/test_host_helper.py), and over stdio against a real helper command, python -m entrypoints.host_helper or VIBESYS_HOST_HELPER_COMMAND (tests/e2e/test_host_helper.py). Every scenario assumes an empty registry and no project at the paths it names. The logs group runs in process only, over a log store seeded with the streams tests/conformance/test_host_helper.py writes; the real helper serves logs once the vs_logs store is wired (live-log-visibility PR 2).",
   "groups": {
     "handshake": [
       "helper-handshake",
       "helper-handshake-required",
       "helper-incompatible",
       "helper-invalid-request",
-      "helper-feature-gated"
+      "helper-feature-gated",
+      "helper-harnesses"
     ],
     "registry": [
       "helper-instances-empty",
@@ -19,6 +20,13 @@
     "host-paths": [
       "helper-project-missing",
       "helper-paths-missing"
+    ],
+    "logs": [
+      "helper-logs-list",
+      "helper-logs-read-tail",
+      "helper-logs-follow",
+      "helper-logs-truncated",
+      "helper-logs-unknown"
     ]
   }
 }

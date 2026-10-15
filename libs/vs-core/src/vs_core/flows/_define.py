@@ -298,9 +298,11 @@ class FlowDriver[C]:
         return run
 
     def _restart(self, state: FlowState, view: RunView) -> tuple[FlowState, _Run, list[Decision]]:
-        """Start every running flow again from its latest snapshot, with a fresh journal."""
-        if any(live.name is None for live in state.live.flows):
-            raise FlowCodeChanged(0)  # a flow without a registered name cannot be restarted
+        """Start every running flow again from its latest snapshot, with a fresh journal.
+
+        A task that is not a registered flow has no snapshot to start from; ``restore`` drops it
+        and leaves it to its parent, which restarts from its own snapshot, to start again.
+        """
         run = self._new_run(state.facts)
         decisions = run.restore(state.live, view, None)
         restarted = self._first_state(run, state.facts, state.live, decisions)

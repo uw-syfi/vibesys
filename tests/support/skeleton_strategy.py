@@ -113,6 +113,8 @@ class SkeletonConfig(core.Value):
     """Measure the baseline, then end with no winner: no attempt is run."""
     abandons: bool = False
     """Open the one attempt, then end with no winner: the attempt budget is spent, nothing kept."""
+    fails_after_choice: bool = False
+    """Adopt the retained choice but report failure, preserving the best partial result."""
     turns: int = 1
     """How many implementer turns the attempt asks in one session, one after another."""
     peers: int = 0
@@ -120,15 +122,22 @@ class SkeletonConfig(core.Value):
 
 
 def measurement(
-    candidate: core.RevisionRef, purpose: Literal["baseline", "official"], *, now_at: float = 0.0
+    candidate: core.RevisionRef,
+    purpose: Literal["baseline", "official"],
+    *,
+    now_at: float = 0.0,
+    facts: core.RunFacts | None = None,
 ) -> core.MeasurementPlan:
     """An accuracy-then-benchmark plan of one exact revision, ``now_at`` seconds into the clock."""
+    evaluator_digest = DIGEST if facts is None else facts.evaluator_digest
+    workload_digest = DIGEST if facts is None else facts.workload_digest
+    environment_digest = DIGEST if facts is None else facts.environment_digest
     return core.MeasurementPlan(
         purpose=purpose,
         candidate=candidate,
-        evaluator_digest=DIGEST,
-        workload_digest=DIGEST,
-        environment_digest=DIGEST,
+        evaluator_digest=evaluator_digest,
+        workload_digest=workload_digest,
+        environment_digest=environment_digest,
         stages=tuple(
             core.MeasurementStage(stage_id=name, execution_budget=10.0)
             for name in ("accuracy", "benchmark")
@@ -160,7 +169,12 @@ async def measure(
     workspace: core.Workspace | None = None,
 ) -> NoWinner | None:
     """Measure ``revision``; a failed measurement is the reason the run has no winner."""
-    plan = measurement(revision, purpose, now_at=_origin(ctx, config))
+    plan = measurement(
+        revision,
+        purpose,
+        now_at=_origin(ctx, config),
+        facts=ctx.facts,
+    )
     match await ctx.evaluation.measure(plan, workspace=workspace, within=_MEASURE_SECONDS):
         case Failed() as failed:
             return NoWinner(reason=f"measurement {failed.reason}")
@@ -293,7 +307,7 @@ async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
     # with accepted evidence for that candidate. Without a measurement the input is all there is.
     eligible = [kept for kept in ctx.workspaces.kept() if kept.settlement.eligible]
     ctx.choose(eligible[0] if eligible else INPUT)
-    return None
+    return NoWinner(reason="out of rounds", keep_choice=True) if config.fails_after_choice else None
 
 
 DECLARATION = skeleton.declaration
@@ -356,6 +370,11 @@ class SkeletonStrategy(core.Value):
     def abandoning(cls) -> SkeletonStrategy:
         """Open the one attempt the budget allows, then end with no winner and nothing kept."""
         return cls(config=SkeletonConfig(measured=False, abandons=True))
+
+    @classmethod
+    def failing_after_choice(cls) -> SkeletonStrategy:
+        """Keep and adopt a verified candidate, then return the strategy's failed outcome."""
+        return cls(config=SkeletonConfig(fails_after_choice=True))
 
     @classmethod
     def idle(cls) -> SkeletonStrategy:

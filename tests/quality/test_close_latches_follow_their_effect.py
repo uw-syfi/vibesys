@@ -15,7 +15,7 @@ Use ``vs_sim.api.CloseOnce`` or ``AsyncCloseOnce`` over a ``ReleaseStack``: the 
 only when its effect returns ``Released``, a step that raised runs again on the next call,
 and a ``with ExitStack()`` that unwinds a failed construction stays fine.
 
-``ALLOWED`` and ``KEPT_EXIT_STACKS`` hold today's sites with counts that only shrink:
+``ALLOWED`` and ``KEPT_EXIT_STACKS`` hold the remaining sites with counts that only shrink:
 converting a site means lowering its count.
 """
 
@@ -43,27 +43,18 @@ EFFECT = re.compile(
 """A call whose name says it closes something: ``close``, ``aclose``, ``stop_sandbox``, ..."""
 DROPS = frozenset({"pop", "discard", "remove"})
 
-_TO_CONVERT = "latch before an effect that can fail; convert to CloseOnce"
 _IN_MEMORY = "the effect only changes in-memory state and cannot fail"
 ALLOWED: dict[str, tuple[int, str]] = {
     "libs/vs-agent/src/vs_agent/scripted_provider.py": (1, _IN_MEMORY),
     "libs/vs-core/src/vs_core/flows/_run.py": (1, _IN_MEMORY),
-    "libs/vs-runtime/src/vs_runtime/_managed_conversation.py": (1, _TO_CONVERT),
     "libs/vs-runtime/src/vs_runtime/_workspaces.py": (
         1,
         "begin_close latches admission only; the close itself runs through AsyncCloseOnce",
     ),
-    "libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py": (1, _TO_CONVERT),
     "libs/vs-sim/src/vs_sim/sim_network.py": (1, _IN_MEMORY),
     "libs/vs-sim/src/vs_sim/sim_threads.py": (1, _IN_MEMORY),
-    "src/server/chat/factory.py": (1, _TO_CONVERT),
-    "src/server/integration.py": (1, _TO_CONVERT),
-    "src/vibesys/api/_session.py": (2, _TO_CONVERT),
 }
-KEPT_EXIT_STACKS: dict[str, tuple[int, str]] = {
-    "libs/vs-runtime/src/vs_runtime/_run_host.py": (1, "the run host closes once, at exit"),
-    "src/server/integration.py": (1, _TO_CONVERT),
-}
+KEPT_EXIT_STACKS: dict[str, tuple[int, str]] = {}
 
 
 def _callee(call: ast.Call) -> str:

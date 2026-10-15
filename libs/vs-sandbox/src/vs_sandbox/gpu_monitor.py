@@ -19,13 +19,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Protocol
 
-from vs_sim.api import Clock, SubprocessProbe, Threads
-
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
-    from vs_sim.api import CommandProbe, Worker
+    from vs_sim.api import Clock, CommandProbe, Threads, Worker
+
 GPU_QUERY_COLUMN_COUNT = 6
 GPU_PROCESS_QUERY_COLUMN_COUNT = 4
 
@@ -100,6 +99,24 @@ def pick_gpu(gpus: Sequence[GpuInfo]) -> GpuInfo | None:
 
 
 # ---------------------------------------------------------------------------
+# Contention observations
+# ---------------------------------------------------------------------------
+
+
+class GpuContentionEvents(Protocol):
+    """Where contention observations are published; vs_sandbox owns no transport.
+
+    Mirrors the shape ``vibesys.run.git_events.CoreGitTrackerEvents`` already
+    uses for the Git tracker: a product-owned adapter implements this
+    structurally, so this package never imports a particular event stream.
+    """
+
+    def contention_detected(self, *, gpu_uuid: str, new_process_count: int, detail: str) -> None:
+        """Publish that unexpected processes appeared on the monitored GPU."""
+        ...
+
+
+# ---------------------------------------------------------------------------
 # Telemetry source
 # ---------------------------------------------------------------------------
 
@@ -124,10 +141,10 @@ class NvidiaSmiTelemetry:
         executable: str = "nvidia-smi",
         timeout: float = 10.0,
         *,
-        probe: CommandProbe | None = None,
+        probe: CommandProbe,
     ) -> None:
         """Run *executable* (looked up on ``PATH`` when bare), giving up after *timeout* seconds."""
-        self._probe: CommandProbe = probe or SubprocessProbe()
+        self._probe = probe
         self._executable = executable
         self._timeout = timeout
 
@@ -213,25 +230,30 @@ class GpuContentionMonitor:
         The thread and event provider the polling loop runs on.
     clock:
         The epoch clock that stamps contention events.
+    events:
+        Where contention observations are published; best effort, so a
+        failure publishing them never stops the monitor.
     """
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692101 [PLR0913]; the monitor's three collaborators are keyword-only seams on top of its three settings.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692101 [PLR0913]; the monitor's four collaborators are keyword-only seams on top of its three settings.
         self,
         log_dir: Path,
         gpu_uuid: str,
         interval: float = 30.0,
         *,
-        telemetry: GpuTelemetry | None = None,
+        telemetry: GpuTelemetry,
         threads: Threads,
         clock: Clock,
+        events: GpuContentionEvents | None = None,
     ) -> None:
         """Configure monitoring for one GPU UUID and polling interval."""
         self._log_dir = log_dir
         self._gpu_uuid = gpu_uuid
         self._interval = interval
-        self._telemetry: GpuTelemetry = telemetry or NvidiaSmiTelemetry()
+        self._telemetry = telemetry
         self._threads = threads
         self._clock: Clock = clock
+        self._events = events
 
         self._stop_event = self._threads.event()
         self._thread: Worker | None = None
@@ -318,6 +340,13 @@ class GpuContentionMonitor:
                                 }
                             )
                             + "\n"
+                        )
+                    if self._events is not None:
+                        index_label = gpu_info.index if gpu_info is not None else self._gpu_uuid
+                        self._events.contention_detected(
+                            gpu_uuid=self._gpu_uuid,
+                            new_process_count=len(new_procs),
+                            detail=f"{len(new_procs)} new process(es) on GPU {index_label}",
                         )
             except Exception:  # noqa: BLE001  # lint-waiver: LW-009051 [BLE001]; GPU telemetry is best effort, and any driver failure must not terminate the monitor thread.
                 # Telemetry is best effort and must not terminate the monitor.

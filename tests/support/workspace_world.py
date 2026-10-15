@@ -26,6 +26,7 @@ from vs_project.api.testing import FakeGitRepositories, GitKind, run_execution_r
 from vs_runtime.api.infrastructure import (
     AgentPaths,
     BlockingOperations,
+    EnvironmentSystem,
     ProjectRunEffects,
     ProjectRunRequest,
     RunEnvironmentRequest,
@@ -37,11 +38,11 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
-from vs_runtime.api.testing import MemoryValidationPasses
+from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -63,7 +64,7 @@ if TYPE_CHECKING:
         WorkspaceResourceProvider,
     )
     from vs_sandbox.api import CommandRunner, ComputeBackendImpl
-    from vs_sim.api import BlockingRunner, Processes
+    from vs_sim.api import BlockingRunner
 
 RUN_ID = "workspace-requests"
 
@@ -149,7 +150,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     memory_paths: tuple[str, ...] = (),
     wrap_git: Callable[[GitRepository], GitRepository] | None = None,
     events: WorkspaceResourceEventSink | None = None,
-    slurm_processes: Processes = NO_PROCESSES,
+    system: EnvironmentSystem | None = None,
 ) -> Iterator[WorkspaceEnv]:
     """A fresh run with one started host. The caller closes ``env.hosts`` (async) before exit.
 
@@ -161,8 +162,8 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
     product run does. ``wrap_git`` wraps every Fake repository (not with real Git), so a
     case can stand between the run and Git, for example to kill the host at a Git step.
     ``events`` observes workspace resource events (for example a reported baseline drift);
-    the default discards them. ``slurm_processes`` runs the Slurm transport's commands; the
-    default refuses to start any.
+    the default discards them. ``system`` is the host the environments run on; the default
+    starts nothing (:func:`~vs_runtime.api.testing.idle_environment_system`).
     """
     disk = FakeGitRepositories() if git is GitKind.FAKE else REAL_GIT
     root = tmp_path / "project"
@@ -199,7 +200,9 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=backend if backend is not None else FakeComputeBackend(),
+                backend=backend
+                if backend is not None
+                else FakeComputeBackend(threads=SimThreads()),
                 agent_backend="stub",
                 cli_provider="codex",
                 run_id=RUN_ID,
@@ -212,7 +215,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                     else ()
                 ),
                 clock=ManualClock(),
-                slurm_processes=slurm_processes,
+                system=idle_environment_system() if system is None else system,
             ),
             open_session if open_session is not None else lambda _request: _Session(),
             clock=ManualClock(),

@@ -17,6 +17,7 @@ export {
   reduceIterationResult,
 } from './iteration-navigation.js';
 export {
+  type ActiveExecutionCheckpointFold,
   reduceEvent,
   reduceEventBatch,
   reduceEventPrefix,
@@ -35,6 +36,7 @@ export {
   type ExecutionTodos,
   hasRunEnded,
   initialCoreState,
+  type ProviderSwitch,
   type QuotaPause,
   type QuotaState,
   type RunLifetimeBoundary,
@@ -42,4 +44,5 @@ export {
   rehydrateCoreState,
   type TodoItem,
   type UsageMeter,
+  type WinnerSelection,
 } from './state.js';

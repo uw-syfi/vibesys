@@ -35,6 +35,7 @@ from vs_runtime._retrying_evaluation import (
     ClosableEvaluationExecutor,
     EvaluationRetries,
     RetryingEvaluationExecutor,
+    TryHandles,
 )
 
 # A stop lands in policy code as this BaseException; a policy that runs work
@@ -156,6 +157,7 @@ __all__ = [
     "SlotMeter",
     "SlotMeterError",
     "StructuredResponseError",
+    "TryHandles",
     "Unknown",
     "UnknownAgentRoleError",
     "ValidationRecipe",

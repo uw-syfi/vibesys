@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -37,20 +37,6 @@ def tool_timed_out(argv: Sequence[str], seconds: float) -> Exception:
     return subprocess.TimeoutExpired(list(argv), seconds)
 
 
-class _DockerCommandRunner(Protocol):
-    """Execute one shell-free Docker CLI command."""
-
-    def __call__(
-        self,
-        arguments: tuple[str, ...],
-        *,
-        timeout_seconds: int,
-    ) -> ToolResult:
-        """Return captured text streams or raise an OS/process timeout error."""
-        ...
-
-
-_CARGO_INSTALL_TIMEOUT_SECONDS = 600
 _SANDBOX_INSTALL_TIMEOUT_SECONDS = 660
 _MAX_INSTALL_ERROR_CHARACTERS = 2000
 _TOOL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*$")
@@ -404,26 +390,6 @@ class EvaluatorToolError(RuntimeError):
         return cls("Docker execution requires a configured backend image")
 
     @classmethod
-    def docker_missing(cls) -> EvaluatorToolError:
-        """Describe Docker being absent while resolving an evaluator image."""
-        return cls("Docker was not found while resolving the evaluator image")
-
-    @classmethod
-    def docker_pull_timed_out(cls, image: str) -> EvaluatorToolError:
-        """Describe an evaluator image pull that exceeded its timeout."""
-        return cls(f"Docker image pull timed out: {image}")
-
-    @classmethod
-    def docker_image_unresolvable(cls, image: str, detail: str) -> EvaluatorToolError:
-        """Describe a failed Docker image pull and its diagnostic output."""
-        return cls(f"Could not resolve Docker image {image!r}: {detail}")
-
-    @classmethod
-    def docker_image_id_missing(cls, image: str) -> EvaluatorToolError:
-        """Describe an image without an immutable ID after a successful pull."""
-        return cls(f"Docker image {image!r} has no resolvable immutable image ID after pull")
-
-    @classmethod
     def sandbox_installation_failed(cls, exit_code: int | None, details: str) -> EvaluatorToolError:
         """Describe a nonzero exit from the target-side tool installer."""
         return cls(f"evaluator tool sandbox installation failed (exit {exit_code}): {details}")
@@ -461,72 +427,6 @@ class EvaluatorToolError(RuntimeError):
         return cls(f"cannot publish evaluator tool installation: {target}")
 
 
-def resolve_docker_image_id(
-    image: str,
-    *,
-    command_runner: _DockerCommandRunner | None = None,
-) -> str:
-    """Resolve *image* to the immutable ID used for evaluator tool builds.
-
-    A valid cached ID avoids a pull. Otherwise Docker pulls the requested image
-    and the resolver inspects it again, rejecting mutable or malformed output.
-    """
-    run = command_runner or _run_docker_command
-    if identity := _inspect_docker_image_id(image, command_runner=run):
-        return identity
-    try:
-        pull = run(
-            ("docker", "image", "pull", image),
-            timeout_seconds=600,
-        )
-    except FileNotFoundError as exc:
-        raise EvaluatorToolError.docker_missing() from exc
-    except subprocess.TimeoutExpired as exc:
-        raise EvaluatorToolError.docker_pull_timed_out(image) from exc
-    if pull.returncode != 0:
-        detail = (pull.stderr or pull.stdout or "docker image pull failed").strip()[:500]
-        raise EvaluatorToolError.docker_image_unresolvable(image, detail)
-    if identity := _inspect_docker_image_id(image, command_runner=run):
-        return identity
-    raise EvaluatorToolError.docker_image_id_missing(image)
-
-
-def _inspect_docker_image_id(
-    image: str,
-    *,
-    command_runner: _DockerCommandRunner,
-) -> str | None:
-    try:
-        result = command_runner(
-            ("docker", "image", "inspect", "--format={{.Id}}", image),
-            timeout_seconds=30,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    identity = result.stdout.strip()
-    return (
-        identity
-        if identity.startswith("sha256:") and not any(character.isspace() for character in identity)
-        else None
-    )
-
-
-def _run_docker_command(
-    arguments: tuple[str, ...],
-    *,
-    timeout_seconds: int,
-) -> ToolResult:
-    return subprocess.run(  # noqa: S603  # lint-waiver: LW-009091 [S603]; fixed Docker argv is executed shell-free and the image remains one argument.
-        arguments,
-        capture_output=True,
-        check=False,
-        text=True,
-        timeout=timeout_seconds,
-    )
-
-
 class EvaluatorToolLifecycleHooks(SandboxLifecycleHooks):
     """Install evaluator-declared tools while a sandbox becomes ready."""
 
@@ -548,6 +448,7 @@ class EvaluatorToolLifecycleHooks(SandboxLifecycleHooks):
         result = context.sandbox.execute(
             command,
             timeout=_SANDBOX_INSTALL_TIMEOUT_SECONDS,
+            output=context.output,
         )
         if result.exit_code != 0:
             detail = _bounded_install_detail(result.output or "target-side installer failed")
@@ -614,10 +515,16 @@ def prepare_evaluator_tools(
     tools: Mapping[str, CargoGitToolSpec],
     install_parent: Path,
     *,
-    command_runner: ToolCommandRunner | None = None,
+    command_runner: ToolCommandRunner,
 ) -> dict[str, str]:
-    """Install evaluator tools under a trusted content-addressed cache and return paths."""
-    runner = command_runner or _run_cargo
+    """Install evaluator tools under a trusted content-addressed cache and return paths.
+
+    A tool whose verified receipt is missing is installed by *command_runner*,
+    which runs :func:`cargo_install_argv` where the tools are built; a
+    production caller builds them in a target sandbox instead and passes a
+    runner that refuses, so this only verifies what the sandbox published.
+    """
+    runner = command_runner
     install_parent.mkdir(parents=True, exist_ok=True)
     replacements: dict[str, str] = {}
     for name, spec in tools.items():
@@ -761,28 +668,3 @@ def _file_sha256(path: Path) -> str:
         while chunk := binary.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
-
-
-def _run_cargo(arguments: Sequence[str]) -> ToolResult:
-    with (
-        tempfile.TemporaryDirectory(prefix="vibesys-cargo-home-") as cargo_home,
-        tempfile.TemporaryDirectory(prefix="vibesys-cargo-work-") as cargo_work,
-    ):
-        cargo_environment = {
-            key: value
-            for key, value in os.environ.items()
-            if not key.startswith(("CARGO_", "GIT_CONFIG", "RUST"))
-            and key not in {"GIT_DIR", "GIT_WORK_TREE"}
-        }
-        cargo_environment["CARGO_HOME"] = cargo_home
-        if "RUSTUP_HOME" in os.environ:
-            cargo_environment["RUSTUP_HOME"] = os.environ["RUSTUP_HOME"]
-        return subprocess.run(  # noqa: S603  # lint-waiver: LW-010234 [S603]; the trusted evaluator command is passed as argv without a host shell.
-            list(arguments),
-            capture_output=True,
-            check=False,
-            cwd=cargo_work,
-            env=cargo_environment,
-            text=True,
-            timeout=_CARGO_INSTALL_TIMEOUT_SECONDS,
-        )

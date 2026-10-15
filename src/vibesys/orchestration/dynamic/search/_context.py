@@ -198,6 +198,8 @@ class PlanWorld:
     finished: tuple[FinishedWork, ...]
     refunded: int
     offered: tuple[ParentOption, ...]
+    handoffs: tuple[str, ...] = ()
+    """The paths of earlier planning calls' handoff files, newest first."""
     offer: ProfileOffer | None = None
     """What the planner may ask of a profile workstream; None when the run does not profile."""
 
@@ -280,6 +282,7 @@ class PlanWorld:
             baseline_pending=self.baseline is None,
             profiling=self.offer is not None,
             profile_fields=() if self.offer is None else tuple(str(f) for f in self.offer.fields),
+            handoff_paths=self.handoffs,
             problem=problem,
         )
         if again is None:

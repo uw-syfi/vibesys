@@ -181,6 +181,21 @@ class ProjectRunResources:
             return None
         return self._open_candidate(workspace_id, revision, reattach=True)
 
+    def leftover_candidates(self) -> tuple[str, ...]:
+        """The workspace IDs of this run's candidate worktrees on disk, in name order."""
+        worktrees = self.project.state.candidate_worktrees_directory(self._request.run_id)
+        if not worktrees.is_dir():
+            return ()
+        return tuple(
+            sorted(entry.name for entry in worktrees.iterdir() if (entry / "workspace").exists())
+        )
+
+    def remove_leftover(self, workspace_id: str) -> None:
+        """Unregister and delete a candidate worktree that no live resource owns."""
+        self.git.remove_worktree(
+            self.project.state.candidate_worktree_directory(self._request.run_id, workspace_id)
+        )
+
     def _open_candidate(
         self, workspace_id: str, revision: str, *, reattach: bool
     ) -> _ProjectWorkspaceResources:
@@ -266,6 +281,16 @@ class _ProjectWorkspaceResources:
     def close(self) -> None:
         """Release the logger and linked worktree; a failed step runs again on the next call."""
         self._close.run(self.teardown_stack.close)
+
+    def detach(self) -> None:
+        """Release the logger and keep the linked worktree, its content included, on disk.
+
+        A host that stops while core still holds this candidate leaves it where
+        ``reattach_candidate`` reopens it; only ``close`` (a discard) removes it.
+        """
+        logger = ReleaseStack()
+        logger.callback(self.logger.close)
+        self._close.run(logger.close)
 
     def __enter__(self) -> _ProjectWorkspaceResources:
         return self

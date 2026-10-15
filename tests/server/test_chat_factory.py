@@ -6,6 +6,9 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from tests.server.support import build_server_parts
 
 from server.chat.factory import (
@@ -20,7 +23,7 @@ from server.chat.prompts import (
 )
 from server.run_attachment import AgentSelection, RunAttachment
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -244,4 +247,56 @@ def test_factory_does_not_expose_a_replaced_namespace_to_an_agent(
         assert list(outside.iterdir()) == []
     finally:
         factory.close()
+        parts.close()
+
+
+@dataclass
+class _FlakyClosingAgent(_FakeManagedAgent):
+    """A managed agent whose close raises ``failures`` times before it succeeds."""
+
+    failures: int = 0
+    close_calls: int = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.close_calls <= self.failures:
+            error = "agent session close was killed"
+            raise RuntimeError(error)
+        super().close()
+
+
+@given(failures=st.integers(0, 3), extra_closes=st.integers(0, 2))
+def test_an_agent_whose_close_failed_is_closed_again_on_the_next_factory_close(
+    tmp_path_factory: pytest.TempPathFactory, failures: int, extra_closes: int
+) -> None:
+    """Regression: a failed close latched the factory and dropped its sessions, so a retry closed nothing."""
+    tmp_path = tmp_path_factory.mktemp("chat")
+    parts = build_server_parts(tmp_path / "logs")
+    agent = _FlakyClosingAgent(failures=failures)
+    factory = ExperimentChatFactory(
+        manager=parts.chat,
+        controller=parts.controller,
+        executions=parts.executions,
+        session=_FakeRunSession(agent),
+        attachment=RunAttachment(
+            chat_state_dir=tmp_path / "chat",
+            agent_defaults=_selection(),
+            agent_providers=("codex",),
+        ),
+        build_agent=build_chat_agent,
+        fallback=lambda _question: "recorded summary",
+        clock=ManualClock(),
+        threads=SimThreads(),
+    )
+    try:
+        factory.start()
+        for _ in range(failures):
+            with pytest.raises(RuntimeError, match="killed"):
+                factory.close()
+        for _ in range(1 + extra_closes):
+            factory.close()
+
+        assert agent.closed
+        assert agent.close_calls == failures + 1
+    finally:
         parts.close()

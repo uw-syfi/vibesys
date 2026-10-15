@@ -48,8 +48,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import RuntimeRunControlChannel
 from vs_runtime.api.testing import FakeRunControlEventSink
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock, SimThreads, clock_from
+from vs_sim.api.testing import ManualClock, SimThreads, clock_from, loop_threads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -106,10 +105,11 @@ def _agents(sent: Sent) -> Callable[[Path], SessionHost]:
             sent.record(request)
             writer(request)
 
+        threads = loop_threads()
         client = AgentClient(
-            FakeProvider(answer=writer.answer, on_turn=on_turn, threads=OsThreads()),
+            FakeProvider(answer=writer.answer, on_turn=on_turn, threads=threads),
             clock=ManualClock(),
-            threads=OsThreads(),
+            threads=threads,
         )
         resolver = MessageResolver(
             root,

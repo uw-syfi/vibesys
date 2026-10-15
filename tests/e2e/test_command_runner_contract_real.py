@@ -47,6 +47,7 @@ from vs_sim.api import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 #: Upper bound on a stopped process exiting; reached only when a stop failed.
 _EXIT_BOUND_SECONDS = 30.0
@@ -87,10 +88,12 @@ class _ShellHarness:
         return f"kill -{signal_number} $$"
 
     def hang(self, *, announce: bool) -> str:
-        # Relative paths: the command runs in the workspace on every kind.
+        # Relative paths: the command runs in the workspace on every kind. The
+        # child clears its environment, as harnesses that pass ``env=`` do, so a
+        # stop cannot rely on finding it by an inherited variable.
         steps = [
             "exec 3> alive",
-            "sleep 1000 &",
+            "env -i sleep 1000 &",
             f"printf %s {PARTIAL_STDOUT}",
             f"printf %s {PARTIAL_STDERR} >&2",
         ]
@@ -168,7 +171,7 @@ class TestDockerSandboxOnFakeDaemon(CommandRunnerContract):
             ),
             threads=OsThreads(),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         harness = _ShellHarness(sandbox, workspace)
         try:
             yield harness
@@ -191,7 +194,10 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
         sandbox = DockerSandbox(
             host_workspace=str(workspace),
             image=agent_image(
-                _DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock()
+                _DOCKER_BASE_IMAGE,
+                timeout=_DOCKER_BUILD_TIMEOUT_S,
+                clock=MonotonicClock(),
+                output=DISCARD,
             ),
             max_output_bytes=CAP,
             docker=SubprocessDockerCli(
@@ -199,7 +205,7 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
             ),
             threads=OsThreads(),
         )
-        sandbox.start()
+        sandbox.start(output=DISCARD)
         harness = _ShellHarness(sandbox, workspace)
         try:
             yield harness

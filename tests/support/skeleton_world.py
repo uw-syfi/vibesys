@@ -79,8 +79,13 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock, clock_from, current_virtual_clock
+from vs_sim.api.testing import (
+    ManualClock,
+    SimBlockingRunner,
+    clock_from,
+    current_virtual_clock,
+    loop_threads,
+)
 from vs_slurm.api import (
     SlurmConfig,
     SlurmSshTransport,
@@ -285,6 +290,9 @@ class World:
         if self.gate is not None:
             # The gated namespace delegates all but the execution-record writes to the real one.
             receipts = cast("StateNamespace", FaultingReceipts(receipts, self.gate))
+        # Blocking work runs on the loop's simulated threads: it overlaps the loop as it does
+        # in production, in an order the schedule seed fixes.
+        threads = loop_threads()
         bindings = core_bindings(
             receipts=receipts,
             workspaces=workspaces,
@@ -297,8 +305,8 @@ class World:
                 else self.yields(workspaces, self.env.receipts_namespace()),
             ),
             operations=self.operations,
-            threads=OsThreads(),
-            blocking=ThreadBlockingRunner(),
+            threads=threads,
+            blocking=SimBlockingRunner(threads),
         )
         # The skeleton checks for orphan waits after every commit, so a stall fails where it starts.
         bindings = dataclasses.replace(bindings, check_liveness=True)
@@ -471,10 +479,11 @@ class CandidateResolver(FakeSessionResolver):
 
 def _open_agents(root: Path) -> SessionHost:
     writer = CandidateWriter(root)
+    threads = loop_threads()
     client = AgentClient(
-        FakeProvider(answer=writer.answer, on_turn=writer, threads=OsThreads()),
+        FakeProvider(answer=writer.answer, on_turn=writer, threads=threads),
         clock=ManualClock(),
-        threads=OsThreads(),
+        threads=threads,
     )
     resolver = CandidateResolver(
         root,

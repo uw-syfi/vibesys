@@ -54,8 +54,8 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.contracts import AgentRole, AgentTool
-from vs_sim.api import MonotonicClock, OsThreads
-from vs_sim.api.testing import ManualClock, SimNetwork
+from vs_sim.api import MonotonicClock
+from vs_sim.api.testing import ManualClock, SimNetwork, loop_threads
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable
@@ -95,7 +95,7 @@ class ScriptedAgent(CandidateWriter):
     handles: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     waits_accepted: int = 0
-    network: SimNetwork = field(default_factory=lambda: SimNetwork(OsThreads()))
+    network: SimNetwork = field(default_factory=lambda: SimNetwork(loop_threads()))
     """The in-memory network the bridge listens on and the tool dials."""
 
     def __call__(self, request: AgentTurnRequest) -> None:
@@ -213,9 +213,9 @@ async def scenario(
         )
         resolvers.append(resolver)
         client = AgentClient(
-            FakeProvider(answer=agent.answer, on_turn=agent, threads=OsThreads()),
+            FakeProvider(answer=agent.answer, on_turn=agent, threads=loop_threads()),
             clock=ManualClock(),
-            threads=OsThreads(),
+            threads=loop_threads(),
         )
         return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
 
@@ -224,14 +224,14 @@ async def scenario(
             tmp_path / "evaluation.sock",
             POLICY,
             ScopeWorkspaces(
-                workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts, threads=OsThreads()))
+                workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts, threads=loop_threads()))
             ),
             AgentEvaluationRecords(
-                OwedSubmissions(ReceiptStore(receipts, threads=OsThreads())),
-                ReceiptEvidenceLedger(ReceiptStore(receipts, threads=OsThreads())),
+                OwedSubmissions(ReceiptStore(receipts, threads=loop_threads())),
+                ReceiptEvidenceLedger(ReceiptStore(receipts, threads=loop_threads())),
             ),
             network=agents[0].network,
-            threads=OsThreads(),
+            threads=loop_threads(),
         )
         resolvers[0].bridge = bridge
         bridges.append(bridge)

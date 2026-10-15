@@ -133,9 +133,14 @@ def _request(
 # ----- negotiation -----
 
 
-@given(st.integers(1, 5), st.integers(1, 5), st.lists(st.text(max_size=20), max_size=4))
-def test_hello_picks_the_highest_shared_version_and_the_known_features(
-    low: int, high: int, extra: list[str]
+@given(
+    st.integers(1, 5),
+    st.integers(1, 5),
+    st.lists(st.text(max_size=20), max_size=4),
+    st.frozensets(st.sampled_from(list(HelperFeature))),
+)
+def test_hello_picks_the_highest_shared_version_and_the_offered_features(
+    low: int, high: int, extra: list[str], offered: frozenset[HelperFeature]
 ) -> None:
     request = HelloRequest(
         request_id="h",
@@ -145,11 +150,11 @@ def test_hello_picks_the_highest_shared_version_and_the_known_features(
         app_version="a",
     )
     helper_low, helper_high = HELPER_PROTOCOL_VERSIONS
-    outcome = negotiate(request, VIBESYS_VERSION)
+    outcome = negotiate(request, VIBESYS_VERSION, offered)
     if low <= high and max(low, helper_low) <= min(high, helper_high):
         assert not isinstance(outcome, HelperError)
         assert outcome.version == min(high, helper_high)
-        assert outcome.features == frozenset(HelperFeature)
+        assert outcome.features == offered
     else:
         assert isinstance(outcome, HelperError)
         assert outcome.code is HelperErrorCode.INCOMPATIBLE

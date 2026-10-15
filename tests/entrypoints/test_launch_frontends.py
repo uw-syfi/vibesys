@@ -35,7 +35,7 @@ from vs_sim.api import (
     ThreadBlockingRunner,
     UnixNetwork,
 )
-from vs_sim.api.testing import FakePipedProcessLauncher, FakeSignalSource
+from vs_sim.api.testing import FakePipedProcessLauncher, FakeSignalSource, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -98,7 +98,7 @@ def _runs(clients: list[FakeAgentClient] | None = None, *, real_git: bool = Fals
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=agent_factory,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
             git_repository=None if real_git else FakeGitRepositories().repository,
         )
     )
@@ -151,7 +151,7 @@ def _rejecting_runs(plan: Callable[[CoreRunContext], CorePlan]) -> Runs:
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=_fake_agent,
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
             git_repository=FakeGitRepositories().repository,
         )
     )

@@ -25,10 +25,10 @@ from vibesys.run.core_services import CoreCompositionError
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.core import RunTiming
-from vs_runtime.api.testing import FakeStopTimer
+from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, SystemClock, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +50,7 @@ class _LifecycleMonitor:
 
 class _LifecycleBackend(FakeComputeBackend):
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(threads=SimThreads())
         self.monitor = _LifecycleMonitor()
 
     def make_monitor(self, log_dir: Path) -> _LifecycleMonitor:
@@ -95,7 +95,7 @@ def test_root_workspace_capabilities(tmp_path: Path) -> None:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> None:
@@ -128,7 +128,7 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     backend = _LifecycleBackend()
 

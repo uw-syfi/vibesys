@@ -34,7 +34,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
-from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec, yield_now
+from vs_sim.api import DISCARD, OutputSink, ProcessOutcome, ProcessRun, ProcessSpec, yield_now
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     CANCEL_REACTIONS,
@@ -47,6 +47,7 @@ from vs_slurm.api import (
     ClusterTarget,
     FakeCluster,
     SchedulerTrace,
+    SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmCluster,
@@ -63,7 +64,7 @@ from vs_slurm.api import SlurmBatchStageResult as _StageResult
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_sim.api import Sleeper
+    from vs_sim.api import ByteSource, OutputStream, Sleeper
 
 _POLL_INTERVAL_S = 10.0
 # The executor waits this long for a cancelled job to end before it leaves the
@@ -118,6 +119,11 @@ class _ObservedCluster:
     ) -> ClusterCollectOutcome:
         return self._inner.collect(target, by_job_id=by_job_id, observed=observed)
 
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        return self._inner.stage_output(handle, index, stream)
+
 
 class _TimelineFake(FakeCluster):
     """The Fake with one fixed production-like timeline for every batch."""
@@ -169,13 +175,14 @@ class _Faults:
         """Fail the ``index``-th command from now (0 is the next one) with a transport error."""
         self._countdown = index
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         if self._countdown is not None:
             if self._countdown == 0:
                 self._countdown = None
                 return ProcessOutcome(255, b"", b"connection lost")
             self._countdown -= 1
-        return self._inner.run(spec, timeout=timeout)
+        return self._inner.run(spec, timeout=timeout, output=DISCARD)
 
 
 @dataclass

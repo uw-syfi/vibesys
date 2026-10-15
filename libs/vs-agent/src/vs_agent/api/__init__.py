@@ -81,10 +81,16 @@ from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
     CLI_VERSIONS,
     DEFAULT_CLI_PROVIDER,
+    HARNESSES,
     NODE_VERSION,
     SHIPPED_PROVIDERS,
+    Harness,
+    UnvettedHarnessError,
+    check_harness,
     cli_mcp_config_files,
     cli_skill_dirs,
+    default_model,
+    vetted_models,
 )
 from vs_agent.reply_limits import (
     MAX_REPLY_BYTES,
@@ -165,6 +171,7 @@ __all__ = [
     "DEFAULT_CLI_PROVIDER",
     "DEFAULT_TURN_TIMEOUT_S",
     "DOCKER_PROVIDER_ENV",
+    "HARNESSES",
     "MAX_REPLY_BYTES",
     "MAX_WHITESPACE_RUN",
     "NODE_VERSION",
@@ -212,6 +219,7 @@ __all__ = [
     "CommandResultPayload",
     "Completed",
     "DurableSessionStore",
+    "Harness",
     "InvalidResponse",
     "InvocationConflictError",
     "InvocationOutcome",
@@ -246,6 +254,7 @@ __all__ = [
     "TodoItemData",
     "ToolResultPayload",
     "Unknown",
+    "UnvettedHarnessError",
     "agent_supports_tool_servers",
     "auth_bind_mounts",
     "auth_copy_paths",
@@ -253,12 +262,14 @@ __all__ = [
     "auth_env_vars",
     "auth_paths",
     "build_agent_client",
+    "check_harness",
     "cli_mcp_config_files",
     "cli_skill_dirs",
     "container_import_roots",
     "containerize_server",
     "declare_command_host_resources",
     "declare_provider_state_resources",
+    "default_model",
     "describe_validation_error",
     "inspect_invocation_journal",
     "materialize_skills",
@@ -272,6 +283,7 @@ __all__ = [
     "task_agent_host_resources",
     "todos_from_tool_call",
     "validate_env_names",
+    "vetted_models",
 ]
 
 

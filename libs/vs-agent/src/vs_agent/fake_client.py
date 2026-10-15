@@ -247,6 +247,8 @@ class FakeAgentClient:
         self._refuses_accepted_steers = False
         self._refusals: list[Callable[[], None]] = []
         self._turns_in_flight = 0
+        self.threads = threads
+        """The simulator this client's locks and events come from; turns run on it."""
         self._steer_lock = threads.lock()
 
         self._capacity_gate: CapacityGate | None = None

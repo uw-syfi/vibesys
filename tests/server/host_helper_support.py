@@ -10,19 +10,33 @@ from __future__ import annotations
 
 import json
 import posixpath
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from server.host_api import (
     Checkout,
     DetachedLaunchFailure,
+    HarnessOption,
     InstanceStatus,
     LiveInstanceRecord,
+    LogOffset,
+    LogPipe,
+    LogPipeSpan,
+    LogStream,
+    LogStreamOutcome,
+    LogTail,
     RunPhase,
     RunStatus,
     parse_helper_message,
 )
 from server.host_helper import serve_channel
+from server.host_helper_logs import (
+    HelperLogs,
+    StoredBytes,
+    UnknownInstanceError,
+    UnknownLogStreamError,
+    clip_pipes,
+)
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import HelperHost, PathHints, Scan, ScannedEntry
 from server.instances import ControlSocketStopRequester
@@ -42,11 +56,19 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import Any
 
+    from pydantic import JsonValue
+
     from vs_sim.api import Network, Threads, Worker
     from vs_sim.api.testing import SimThreads
 
 HOME = "/home/user"
 VIBESYS_VERSION = "0+test"
+HARNESSES = (
+    HarnessOption(provider="codex", model="gpt-a", default=True),
+    HarnessOption(provider="codex", model="gpt-b", default=False),
+    HarnessOption(provider="claude", model="claude-a", default=True),
+)
+"""The vetted pairs a fake host offers: two providers, each default first."""
 
 
 @dataclass
@@ -138,6 +160,116 @@ def record(
     )
 
 
+@dataclass
+class _FakeStream:
+    owner: dict[str, JsonValue]
+    command: str
+    held: bytearray = field(default_factory=bytearray)
+    oldest: int = 0
+    """The offset of ``held[0]``; bytes before it were evicted."""
+    pipes: list[LogPipeSpan] = field(default_factory=list)
+    outcome: LogStreamOutcome | None = None
+
+    @property
+    def end(self) -> int:
+        return self.oldest + len(self.held)
+
+
+@dataclass
+class FakeLogReader:
+    """An in-memory log store with the ``LogReader`` contract, and the writes a test makes to it.
+
+    ``evict`` drops a stream's oldest bytes the way a capped store does. Callers on
+    several simulated threads share it under ``threads``' lock, as the real store's
+    files are shared.
+    """
+
+    threads: Threads
+    instances: dict[str, dict[str, _FakeStream]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self._lock = self.threads.lock()
+
+    def open(
+        self, instance_id: str, stream_id: str, owner: dict[str, JsonValue], command: str
+    ) -> None:
+        with self._lock:
+            self.instances.setdefault(instance_id, {})[stream_id] = _FakeStream(owner, command)
+
+    def write(
+        self, instance_id: str, stream_id: str, data: bytes, pipe: LogPipe = LogPipe.STDOUT
+    ) -> None:
+        with self._lock:
+            stream = self.instances[instance_id][stream_id]
+            assert stream.outcome is None
+            if not data:
+                return
+            last = stream.pipes[-1] if stream.pipes else None
+            if last is not None and last.pipe is pipe:
+                stream.pipes[-1] = last.model_copy(update={"length": last.length + len(data)})
+            else:
+                stream.pipes.append(LogPipeSpan(offset=stream.end, length=len(data), pipe=pipe))
+            stream.held += data
+
+    def close(
+        self, instance_id: str, stream_id: str, outcome: LogStreamOutcome = LogStreamOutcome.ENDED
+    ) -> None:
+        with self._lock:
+            self.instances[instance_id][stream_id].outcome = outcome
+
+    def evict(self, instance_id: str, stream_id: str, before: int) -> None:
+        with self._lock:
+            stream = self.instances[instance_id][stream_id]
+            drop = max(0, min(before, stream.end) - stream.oldest)
+            del stream.held[:drop]
+            stream.oldest += drop
+            stream.pipes = list(clip_pipes(tuple(stream.pipes), stream.oldest, stream.end))
+
+    def streams(self, instance_id: str) -> tuple[LogStream, ...]:
+        with self._lock:
+            return tuple(
+                LogStream(
+                    id=stream_id,
+                    owner=stream.owner,
+                    command=stream.command,
+                    retained_start=stream.oldest,
+                    size=stream.end,
+                    outcome=stream.outcome,
+                )
+                for stream_id, stream in self._instance(instance_id).items()
+            )
+
+    def read(
+        self, instance_id: str, stream_id: str, start: LogOffset | LogTail, max_bytes: int
+    ) -> StoredBytes:
+        with self._lock:
+            streams = self._instance(instance_id)
+            if stream_id not in streams:
+                raise UnknownLogStreamError(stream_id)
+            stream = streams[stream_id]
+            match start:
+                case LogOffset(offset=offset):
+                    wanted = offset
+                case LogTail(tail_bytes=tail_bytes):
+                    wanted = max(stream.end - min(tail_bytes, max_bytes), 0)
+            first = max(wanted, stream.oldest)
+            index = first - stream.oldest
+            data = bytes(stream.held[index : index + max_bytes])
+            return StoredBytes(
+                offset=first,
+                data=data,
+                pipes=clip_pipes(tuple(stream.pipes), first, first + len(data)),
+                truncated_before=wanted < stream.oldest,
+                eof=first + len(data) >= stream.end,
+                closed=stream.outcome is not None,
+            )
+
+    def _instance(self, instance_id: str) -> dict[str, _FakeStream]:
+        if instance_id not in self.instances:
+            raise UnknownInstanceError(instance_id)
+        return self.instances[instance_id]
+
+
 def failed_launch(_: Path, __: tuple[str, ...]) -> DetachedLaunchFailure:
     """A launch that starts nothing."""
     return DetachedLaunchFailure(
@@ -153,7 +285,7 @@ def fake_host(
     directories: FakeDirectories | None = None,
     launcher: FakeRunLauncher | None = None,
 ) -> HelperHost:
-    """A helper host over Fakes, on ``threads``' clock and ``network``."""
+    """A helper host over Fakes, on ``threads``' clock and ``network``, with no log store."""
     instance_store = store or FakeInstanceStore()
     return HelperHost(
         registry=LiveRegistry(instance_store, threads),
@@ -164,7 +296,7 @@ def fake_host(
             threads,
         ),
         stop_effects=StopEffects(
-            requester=ControlSocketStopRequester(network, clock=threads),
+            requester=ControlSocketStopRequester(network, clock=threads, deadline_clock=threads),
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,
@@ -175,7 +307,14 @@ def fake_host(
         checkout=FakeCheckout(),
         dialer=network,
         vibesys_version=VIBESYS_VERSION,
+        logs=None,
+        harnesses=lambda: HARNESSES,
     )
+
+
+def with_logs(host: HelperHost, logs: FakeLogReader, threads: Threads) -> HelperHost:
+    """``host`` with ``logs`` as its log store, waited on with ``threads``' clock: it offers ``logs``."""
+    return replace(host, logs=HelperLogs(logs, threads, threads.sleep))
 
 
 @dataclass

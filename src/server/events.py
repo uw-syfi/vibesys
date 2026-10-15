@@ -123,6 +123,8 @@ class EventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
+    WORKSTREAM_FINISHED = "workstream_finished"
+    TURN_USAGE_RECORDED = "turn_usage_recorded"
 
 
 class EventStatus(StrEnum):
@@ -550,12 +552,21 @@ class SubprocessOutputData(EventPayload):
 
 
 class JudgeResultData(EventPayload):
-    """Verdict and feedback returned by the judge."""
+    """Verdict and feedback returned by the judge.
+
+    See ``vibesys.events.JudgeResultData`` for ``skipped``/``skip_reason``/
+    ``implementer_outcome``.
+    """
 
     kind: Literal["judge_result"] = "judge_result"
     verdict: Literal["pass", "fail"]
     feedback: str
     attempt: int
+    skipped: bool = False
+    skip_reason: str | None = None
+    implementer_outcome: (
+        Literal["continue", "supported", "nominated", "disproven", "implementation_failed"] | None
+    ) = None
 
 
 class BenchmarkResultData(EventPayload):
@@ -599,7 +610,9 @@ class GateFinishedData(EventPayload):
     ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
     ``unit`` keeps the historical fallback of the metric name when the
     contract declares no unit. ``output_tail`` carries the trailing command
-    output on failure.
+    output on failure. ``round_label`` groups the per-recipe local-validation
+    gates of one attempt back together, so a client folds them into a
+    pass-fraction itself rather than the backend aggregating one.
     """
 
     kind: Literal["gate_finished"] = "gate_finished"
@@ -612,6 +625,7 @@ class GateFinishedData(EventPayload):
     value: FiniteFloat | None = None
     unit: str | None = None
     output_tail: str | None = None
+    round_label: str | None = None
     source: FrameworkSource = FrameworkSource.GATES
     source_label: str | None = None
 
@@ -634,7 +648,11 @@ class WorkspaceSnapshotData(EventPayload):
 
 
 class RunConfiguredData(EventPayload):
-    """One per run: the resolved configuration a loop starts with."""
+    """One per run: the resolved configuration a loop starts with.
+
+    See ``vibesys.events.RunConfiguredData`` for ``max_continuation_rounds``/
+    ``max_unmeasured_turns``.
+    """
 
     kind: Literal["run_configured"] = "run_configured"
     run_log_path: str
@@ -645,6 +663,8 @@ class RunConfiguredData(EventPayload):
     search_policy: str | None = None
     benchmark_contract: bool = False
     pareto_objectives: str | None = None
+    max_continuation_rounds: int | None = None
+    max_unmeasured_turns: int | None = None
     source: FrameworkSource = FrameworkSource.LOOP
 
 
@@ -669,6 +689,76 @@ class WinnerSelectedData(EventPayload):
     selection: Literal["candidate", "baseline"]
     revision: str
     settlement_id: str | None = None
+
+
+class WorkstreamFailureKind(StrEnum):
+    """Why a workstream ended without a measured candidate. Closed.
+
+    See ``vibesys.events.WorkstreamFailureKind``, which this mirrors
+    member-for-member.
+    """
+
+    STOPPED = "stopped"
+    PARENT_UNVERIFIED = "parent-unverified"
+    REFUSED = "refused"
+    ENDED = "ended"
+    OUT_OF_BUDGET = "out-of-budget"
+    TURN_FAILED = "turn-failed"
+    INVALID_REPLY = "invalid-reply"
+    RENDER_FAILED = "render-failed"
+    WAIT_REFUSED = "wait-refused"
+    CHECKPOINT_DECLINED = "checkpoint-declined"
+    NO_CHANGED_CANDIDATE = "no-changed-candidate"
+    IMPLEMENTATION_FAILED = "implementation-failed"
+    REVIEW_REJECTED = "review-rejected"
+    NO_TRUSTED_EVIDENCE = "no-trusted-evidence"
+    EVIDENCE_REFUSED = "evidence-refused"
+    EVIDENCE_UNDECODABLE = "evidence-undecodable"
+    PROFILE_CAPTURE_UNAVAILABLE = "profile-capture-unavailable"
+    TURN_LIMIT = "turn-limit"
+    REPEATED_TURN = "repeated-turn"
+
+
+class WorkstreamFailureData(BaseModel):
+    """One workstream's typed account of why it ended without a measured candidate."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: WorkstreamFailureKind
+    role: str | None = None
+    turns: int | None = None
+    limit: int | None = None
+    text: str = ""
+
+
+class WorkstreamFinishedData(EventPayload):
+    """One workstream (one dynamic-run round) ended; its typed failure, if any.
+
+    See ``vibesys.events.WorkstreamFinishedData`` for why ``setup_failure``
+    and ``refunded`` are always ``False`` from this event's only current
+    producer.
+    """
+
+    kind: Literal["workstream_finished"] = "workstream_finished"
+    setup_failure: bool
+    refunded: bool
+    repeated_error: bool
+    last_error: WorkstreamFailureData | None = None
+
+
+class TurnUsageData(EventPayload):
+    """Settled token and cost accounting for one finished agent turn.
+
+    See ``vibesys.events.TurnUsageData``.
+    """
+
+    kind: Literal["turn_usage_recorded"] = "turn_usage_recorded"
+    input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_cost_usd: float | None = None
+    duration_ms: int | None = None
 
 
 EventData = Annotated[
@@ -709,7 +799,9 @@ EventData = Annotated[
     | WorkspaceSnapshotData
     | RunConfiguredData
     | FrameworkWarningData
-    | WinnerSelectedData,
+    | WinnerSelectedData
+    | WorkstreamFinishedData
+    | TurnUsageData,
     Field(discriminator="kind"),
 ]
 

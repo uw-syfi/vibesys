@@ -23,22 +23,28 @@ from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
+    EnvironmentSystem,
     RunEnvironment,
     RunEnvironmentRequest,
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
     run_environment_deprecation,
 )
-from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
+from vs_runtime.api.testing import (
+    DaemonBackend,
+    daemon_docker_config,
+    daemon_engine,
+)
 from vs_sandbox.api import DockerSandbox, SandboxKind
 from vs_sandbox.api.slurm import SlurmPolicyError, load_slurm_operator_settings
-from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe
+from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
 from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_runtime.api.infrastructure import RunEnvironmentSession
+from vs_sim.api import DISCARD
 
 _SLURM_CONFIG = """[slurm]
 name = "test-cluster"
@@ -176,7 +182,13 @@ def _request(
         benchmark_command=benchmark,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=EnvironmentSystem(
+            threads=OsThreads(),
+            network=UnixNetwork(),
+            processes=NO_PROCESSES,
+            launcher=SubprocessPipedProcessLauncher(),
+            slurm_processes=NO_PROCESSES,
+        ),
     )
 
 
@@ -242,9 +254,11 @@ def test_a_gpu_command_from_the_container_runs_in_a_slurm_job_within_the_operato
     _backend, _, session = _open(tmp_path, "slurm+gpu")
     try:
         client = str(tmp_path / "logs" / "slurm-gpu" / "vibesys-gpu")
-        ran = session.sandbox.execute(f"{client} --gpus 3 --time 45 -- echo from-the-job")
-        refused = session.sandbox.execute(f"{client} --gpus 5 -- echo too-many")
-        too_long = session.sandbox.execute(f"{client} --time 91 -- echo too-long")
+        ran = session.sandbox.execute(
+            f"{client} --gpus 3 --time 45 -- echo from-the-job", output=DISCARD
+        )
+        refused = session.sandbox.execute(f"{client} --gpus 5 -- echo too-many", output=DISCARD)
+        too_long = session.sandbox.execute(f"{client} --time 91 -- echo too-long", output=DISCARD)
 
         assert ran.exit_code == 0, ran.output
         assert "from-the-job" in ran.output
@@ -288,6 +302,29 @@ def test_the_profiler_follows_the_capability_not_the_environment_name(tmp_path: 
         finally:
             session.close()
         (tmp_path / "logs" / "slurm-capture-plan.json").unlink(missing_ok=True)
+
+
+def test_connector_transport_offers_the_remote_profiler_capability(tmp_path: Path) -> None:
+    """Regression: connector runs offered no ROCprof capability at composition time."""
+    config = tmp_path / "slurm-connector.toml"
+    config.write_text(
+        """[slurm]
+name = "test-cluster"
+remote_workspace_root = "/remote/vibesys"
+
+[slurm.transport]
+kind = "connector"
+command = ["site-slurm-connector"]
+
+[vibesys]
+remote_python = "/remote/venv/bin/python"
+""",
+        encoding="utf-8",
+    )
+    environment = SlurmEnvironment(load_slurm_operator_settings(config))
+
+    assert environment.default_profiler_id == "rocprof"
+    assert environment.supported_profiler_ids == frozenset({"auto", "none", "rocprof"})
 
 
 @pytest.mark.parametrize("transport", ["ssh", "connector"])
@@ -380,8 +417,10 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
     try:
         client = str(tmp_path / "logs" / "slurm-gpu" / "vibesys-gpu")
 
-        read = session.sandbox.execute(f"{client} -- cat {tools}/interpreter.txt")
-        write = session.sandbox.execute(f"{client} -- sh -c 'echo x > {tools}/written.txt'")
+        read = session.sandbox.execute(f"{client} -- cat {tools}/interpreter.txt", output=DISCARD)
+        write = session.sandbox.execute(
+            f"{client} -- sh -c 'echo x > {tools}/written.txt'", output=DISCARD
+        )
 
         assert (read.exit_code == 0) is exposed, read.output
         assert ("operator interpreter" in read.output) is exposed
@@ -446,7 +485,7 @@ def test_a_gpu_job_runs_an_interpreter_reached_through_a_link_chain_once_the_ali
     try:
         client = str(tmp_path / "logs" / "slurm-gpu" / "vibesys-gpu")
 
-        result = session.sandbox.execute(f"{client} -- {venv}/bin/python")
+        result = session.sandbox.execute(f"{client} -- {venv}/bin/python", output=DISCARD)
 
         assert result.exit_code == 0, result.output
         assert "interpreter ran" in result.output

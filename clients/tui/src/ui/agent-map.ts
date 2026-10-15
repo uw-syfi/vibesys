@@ -39,6 +39,7 @@ import {fillLayer} from './box-fill.js';
 import {applyPaneFocus, paneBorderColor, paneBorderStyle, paneTitle} from './focus.js';
 import {elapsedLabel} from './previews.js';
 import {splitFits} from './right-pane.js';
+import {displayWidth, truncateToWidth} from './text-width.js';
 
 const STATUS_MARKER: Record<AgentPhase['status'], string> = {
   pending: '○',
@@ -123,7 +124,7 @@ function edgeFlowColors(theme: Theme): {live: string; brighter: string; brightes
  * the graph.
  */
 function selectedLabelWidth(phase: AgentPhase): number {
-  return nodeLabel(phase, true).length;
+  return displayWidth(nodeLabel(phase, true));
 }
 
 /**
@@ -948,7 +949,7 @@ function phaseSummary(phases: readonly AgentPhase[]): string {
 
 function truncate(text: string, width: number): string {
   const room = Math.max(1, width);
-  return text.length <= room ? text : `${text.slice(0, room - 1)}…`;
+  return displayWidth(text) <= room ? text : `${truncateToWidth(text, room - 1)}…`;
 }
 
 /**

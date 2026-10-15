@@ -37,6 +37,7 @@ from vs_evaluation.api import (
     is_finished,
 )
 from vs_project.api import atomic_write_bytes
+from vs_sandbox.slurm_stage_output import CollectedStage, StageOutputFollower
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
     INITIAL_LIFE,
@@ -70,6 +71,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
     from pathlib import Path
 
+    from vs_sandbox.slurm_stage_output import SlurmStageOutputOpener
     from vs_sim.api import Clock, Processes, Sleeper
     from vs_slurm.api import (
         Cluster,
@@ -333,6 +335,7 @@ class SlurmEvaluationExecutor:
         clock: Clock,
         sleeper: Sleeper,
         cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
+        stage_output: SlurmStageOutputOpener | None = None,
     ) -> None:
         """Bind scheduler policy, durable intent, and the cluster interface.
 
@@ -340,6 +343,9 @@ class SlurmEvaluationExecutor:
         persisted, so a production clock is :class:`vs_sim.api.SystemClock`.
         ``sleeper`` paces the polls of a running job and of a cancel's confirmation. The
         executor uses ``cluster``, or reaches the configured cluster by starting ``processes``.
+        ``stage_output`` opens one stream per stage, which the stage's output reaches while
+        the job runs, read at each scheduler poll (``StageOutputFollower``); without it the
+        output reaches only the collected result.
         """
         if cluster is None:
             if processes is None:
@@ -349,6 +355,7 @@ class SlurmEvaluationExecutor:
                 config, state_root=handle_root / "cluster", processes=processes, clock=clock
             )
         self._cluster = cluster
+        self._stage_output = stage_output
         self._sleeper = sleeper
         self._poll_interval = config.poll_interval_seconds
         # Confirmation is bounded by an inspection count so that it follows the
@@ -815,21 +822,38 @@ class SlurmEvaluationExecutor:
         handle = self._handles.get(handle_id) or (durable.handle if durable is not None else None)
         if handle is None:
             raise _SlurmExecutionError.not_accepted()
-        status = await self._wait_for_batch(handle_id, handle, request, durable)
-        if status is SlurmJobStatus.CANCELLED:
-            # A cancelled job ends CANCELED however its allocation exit code reads,
-            # as poll() reports it. Collecting would let a recorded "0:0" exit
-            # contradict the scheduler and turn a requested stop into a failure.
-            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
-            return
-        collection = asyncio.create_task(self._in_thread(self._cluster.collect, handle))
+        follower = self._follower(handle_id, handle, request)
         try:
-            collected = await asyncio.shield(collection)
-        except asyncio.CancelledError:
-            with contextlib.suppress(Exception):
-                await collection
+            status = await self._wait_for_batch(handle_id, handle, request, durable, follower)
+            if status is SlurmJobStatus.CANCELLED:
+                # A cancelled job ends CANCELED however its allocation exit code reads,
+                # as poll() reports it. Collecting would let a recorded "0:0" exit
+                # contradict the scheduler and turn a requested stop into a failure.
+                follower.abort()
+                self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+                return
+            collection = asyncio.create_task(self._in_thread(self._cluster.collect, handle))
+            try:
+                collected = await asyncio.shield(collection)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await collection
+                raise
+        except BaseException:
+            follower.abort()
             raise
+        follower.settle(_collected_stages(request, collected))
         self._publish(handle_id, self._collected_observation(handle_id, request, handle, collected))
+
+    def _follower(
+        self, handle_id: str, handle: SlurmBatchHandle, request: EvaluationRequest
+    ) -> StageOutputFollower:
+        return StageOutputFollower(
+            self._stage_output,
+            handle_id,
+            tuple(step.name for step in request.stages),
+            functools.partial(self._cluster.stage_output, handle),
+        )
 
     @staticmethod
     def _collected_observation(
@@ -933,8 +957,12 @@ class SlurmEvaluationExecutor:
         handle: SlurmBatchHandle,
         request: EvaluationRequest,
         durable: _DurableSlurmEvaluation | None,
+        follower: StageOutputFollower,
     ) -> SlurmJobStatus:
-        """Persist and enforce the scheduler observation deadline; return the terminal status."""
+        """Persist and enforce the scheduler observation deadline; return the terminal status.
+
+        Each poll that finds a stage running also copies its new output (``follower``).
+        """
         wait_deadline_epoch_s = durable.wait_deadline_epoch_s if durable is not None else None
         if wait_deadline_epoch_s is None:
             remaining = self._job_timeout_seconds - handle.waited_seconds
@@ -957,10 +985,25 @@ class SlurmEvaluationExecutor:
                 active = self._lifecycle_observation(handle_id, observed, request)
                 if active is not None:
                     self._publish(handle_id, active)
+                    await self._follow(follower, request, active)
             remaining = wait_deadline_epoch_s - self._clock.now()
             if remaining <= 0:
                 raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
             await self._sleeper.sleep(min(self._poll_interval, remaining))
+
+    async def _follow(
+        self,
+        follower: StageOutputFollower,
+        request: EvaluationRequest,
+        active: ExecutorObservation,
+    ) -> None:
+        """Copy the running stage's new output; the read finishes before a cancel lands."""
+        if active.state is not EvaluationState.RUNNING or active.current_stage is None:
+            return
+        names = [step.name for step in request.stages]
+        running = names.index(active.current_stage)
+        follower.open_through(running)
+        await self._finish_in_thread(follower.follow, running)
 
     def _scheduler_view(
         self, handle_id: str, observed: ClusterObservation
@@ -1323,6 +1366,26 @@ def _stage_command(name: str, command: str | None) -> tuple[str, ...]:
     if command is None or not command.strip():
         raise _SlurmStagePayloadError.missing_command(name)
     return ("bash", "-c", command)
+
+
+def _collected_stages(
+    request: EvaluationRequest, collected: ClusterCollectOutcome
+) -> dict[int, CollectedStage]:
+    """Each collected stage's whole output, by its index in the request."""
+    if not isinstance(collected, (ClusterCollected, ClusterUnknown)) or not isinstance(
+        collected.result, SlurmBatchResult
+    ):
+        return {}
+    by_name = {item.name: item for item in collected.result.stages}
+    return {
+        index: CollectedStage(
+            stdout=item.stdout.encode(),
+            stderr=item.stderr.encode(),
+            ran=not item.skipped and item.exit_code is not None,
+        )
+        for index, step in enumerate(request.stages)
+        if (item := by_name.get(step.name)) is not None
+    }
 
 
 def _collected_batch(collected: ClusterCollectOutcome, job_id: str) -> SlurmBatchResult:

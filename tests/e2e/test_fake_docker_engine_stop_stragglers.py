@@ -20,6 +20,7 @@ from vs_sim.api.testing import join_or_fail
 
 if TYPE_CHECKING:
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 _EXIT_BOUND_SECONDS = 30.0  # Reached only when a stop failed; the pass path waits on the event.
 
@@ -45,7 +46,7 @@ def test_a_stop_after_a_lost_signal_request_still_ends_the_program(tmp_path: Pat
         docker=engine,
         threads=OsThreads(),
     )
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     try:
         engine.signal_requests_find_nothing(1)
         cancel = threading.Event()
@@ -53,7 +54,7 @@ def test_a_stop_after_a_lost_signal_request_still_ends_the_program(tmp_path: Pat
         outcome: list[bool] = []
         worker = threading.Thread(
             target=lambda: outcome.append(
-                sandbox.execute(command, timeout=3600, cancel=cancel).cancelled
+                sandbox.execute(command, timeout=3600, cancel=cancel, output=DISCARD).cancelled
             )
         )
         worker.start()
@@ -71,9 +72,9 @@ def test_a_stop_after_a_lost_signal_request_still_ends_the_program(tmp_path: Pat
 
 
 def _cancel_a_running_program(
-    tmp_path: Path, *, failing_signal_requests: int
+    tmp_path: Path, *, failing_signal_requests: int = 0, unreadable_signal_requests: int = 0
 ) -> tuple[DockerSandbox, FakeDockerEngine, list[object]]:
-    """Cancel a program in a fake container whose next signal requests fail."""
+    """Cancel a program in a fake container whose next signal requests fail or meet doubt."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     (tmp_path / "engine-state").mkdir()
@@ -91,15 +92,18 @@ def _cancel_a_running_program(
         docker=engine,
         threads=OsThreads(),
     )
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     engine.signal_requests_fail(failing_signal_requests)
+    engine.signal_requests_meet_unreadable(unreadable_signal_requests)
     cancel = threading.Event()
     outcome: list[object] = []
 
     def run() -> None:
         try:
             outcome.append(
-                sandbox.execute("echo go > ready\nsleep 1000", timeout=3600, cancel=cancel)
+                sandbox.execute(
+                    "echo go > ready\nsleep 1000", timeout=3600, cancel=cancel, output=DISCARD
+                )
             )
         except CommandStopUnconfirmedError as error:
             outcome.append(error)
@@ -128,5 +132,26 @@ def test_a_stop_whose_signal_requests_all_fail_is_unconfirmed(tmp_path: Path) ->
         assert isinstance(outcome[0], CommandStopUnconfirmedError)
         assert outcome[0].survivors is None
         assert outcome[0].result.cancelled
+    finally:
+        sandbox.stop()
+
+
+def test_a_stop_that_meets_an_unreadable_process_is_unconfirmed(tmp_path: Path) -> None:
+    """A process the stop script cannot read may be the command's, so it is no evidence."""
+    sandbox, _, outcome = _cancel_a_running_program(tmp_path, unreadable_signal_requests=1000)
+    try:
+        assert len(outcome) == 1
+        assert isinstance(outcome[0], CommandStopUnconfirmedError)
+        assert outcome[0].survivors is None
+    finally:
+        sandbox.stop()
+
+
+def test_a_stop_whose_first_answer_is_unknown_is_confirmed_by_a_later_count(
+    tmp_path: Path,
+) -> None:
+    sandbox, _, outcome = _cancel_a_running_program(tmp_path, unreadable_signal_requests=1)
+    try:
+        assert [type(result).__name__ for result in outcome] == ["CommandResult"]
     finally:
         sandbox.stop()

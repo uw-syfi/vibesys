@@ -16,6 +16,7 @@ from vs_sim.api import MonotonicClock
 
 if TYPE_CHECKING:
     import argparse
+from vs_sim.api import DISCARD
 
 
 class RunEnvironmentSelectionError(ValueError):
@@ -110,7 +111,7 @@ def run_environment_spec_from_args(
         and build_task_docker_image
         and not keeps_recorded_image
     ):
-        task_image = build_task_image(dockerfile_path, clock=MonotonicClock())
+        task_image = build_task_image(dockerfile_path, clock=MonotonicClock(), output=DISCARD)
 
     if requested_environment == "slurm-gpu":
         return RunEnvironmentSpec(

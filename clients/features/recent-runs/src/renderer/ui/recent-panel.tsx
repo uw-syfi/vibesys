@@ -1,7 +1,13 @@
 /** Recent: the runs this user opened, each with its status on its host and what it allows. */
 
 import type {HostKey} from '@vibesys/hosts';
-import {type RecentRun, type RecentStatus, type ResumeRunId, resumeDecision} from '@vibesys/runs';
+import {
+  type RecentRun,
+  type RecentStatus,
+  type ResumeRunId,
+  recentRunKey,
+  resumeDecision,
+} from '@vibesys/runs';
 import {Button} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {type ListsState, statusOf} from '../../state/lists.js';
@@ -120,7 +126,7 @@ export function RecentPanel(props: {
             const status = statusOf(lists, run);
             const {text, className} = statusText(status);
             return (
-              <tr key={`${run.host}\n${run.runId}`}>
+              <tr key={recentRunKey(run)}>
                 <td>{run.hostLabel}</td>
                 <td className="path">{run.project}</td>
                 <td>{run.task ?? '–'}</td>
