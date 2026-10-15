@@ -201,7 +201,7 @@ async def test_a_workspace_revision_can_be_measured(tmp_path: Path) -> None:
         )
 
 
-def test_every_request_role_has_a_production_executor(tmp_path: Path) -> None:
+async def test_every_request_role_has_a_production_executor(tmp_path: Path) -> None:
     with open_skeleton_world(tmp_path) as world:
         executors = world.bindings().executors
         bound = {

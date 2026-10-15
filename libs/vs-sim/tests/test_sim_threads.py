@@ -21,6 +21,7 @@ from vs_sim.api.testing import (
     VirtualDeadlockError,
     examples,
     join_or_fail,
+    loop_threads,
     run_virtual,
     undriven_threads,
 )
@@ -455,3 +456,44 @@ def test_to_thread_on_a_driven_virtual_loop_runs_on_simulated_threads(
 
     assert answers == list(range(calls))
     assert clock.now() >= 1.0
+
+
+@given(seed=st.integers(0, 2**16), calls=st.integers(1, 4))
+@settings(max_examples=examples(pr=10, nightly=50), deadline=None)
+def test_a_loop_asks_for_its_simulated_threads_and_blocking_work_overlaps_it(
+    seed: int, calls: int
+) -> None:
+    """Work run through ``loop_threads`` overlaps loop tasks, on one simulator per loop."""
+    clock = VirtualClock()
+
+    async def main() -> tuple[list[int], bool]:
+        threads = loop_threads()
+        runner = SimBlockingRunner(threads)
+        ticks: list[float] = []
+
+        def block(index: int) -> int:
+            threads.sleep(1.0)
+            return index
+
+        async def ticker() -> None:
+            for _ in range(3):
+                await clock.sleep(0.25)
+                ticks.append(clock.now())
+
+        task = asyncio.create_task(ticker())
+        answers = await asyncio.gather(*(runner.run(block, i) for i in range(calls)))
+        await task
+        return list(answers), loop_threads() is threads and len(ticks) == 3
+
+    answers, same = run_virtual(clock, main(), schedule_seed=seed)
+
+    assert answers == list(range(calls))
+    assert same
+
+
+def test_loop_threads_off_a_virtual_loop_is_refused() -> None:
+    async def main() -> None:
+        loop_threads()
+
+    with pytest.raises(RuntimeError, match="virtual loop"):
+        asyncio.run(main())

@@ -94,6 +94,7 @@ from vs_sim.sim_threads import (
     SimDeadlockError,
     SimMisuseError,
     SimThreads,
+    loop_threads,
     undriven_threads,
 )
 from vs_sim.states import Changes, wait_for_async_state, wait_for_state, yield_until
@@ -232,6 +233,7 @@ __all__ = [
     "get_or_fail",
     "hostile_json_frames",
     "join_or_fail",
+    "loop_threads",
     "match_rule",
     "non_main_thread_ids",
     "pairwise_rows",
