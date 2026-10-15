@@ -37,6 +37,48 @@ copies a growing `ByteSource` (a file in a container or on a cluster) into a sin
 store in `Project.log_directory_for(root, run_id) / "streams"`. Opening a store closes as
 `abandoned` every stream a crashed writer left open.
 
+A run opens its store in one place: run assembly (`vibesys.run.resources`) enters
+`vibesys.run.logs.open_run_logs` on the run's ownership stack, and hands the
+`LogScope[LogOwner]` it yields to the run's producers. If the store cannot be opened,
+the run goes on: a warning goes to stderr, and producers write to a bounded in-memory
+store nobody reads.
+
+## Narration
+
+The run's own narration (Python `logging` records, `lprint` lines, uncaught
+tracebacks) is one stream per run, under the `RunNarration` owner.
+
+- `vs_logs.api.NarrationHandler` is a `logging.Handler`. It writes each record as one
+  `NarrationLine` JSON object per line (`at`, `level`, `logger`, `thread`, `message`,
+  `traceback`). Before a sink is attached it keeps the newest 1000 records and counts
+  the rest; attaching writes them first, in order. If the sink fails, the handler warns
+  once on stderr and stops; the caller never sees the failure.
+- `entrypoints.detached_run` installs the handler on the root logger before it loads
+  the engine. It sets the root level to `INFO` and keeps `logging.lastResort`, so
+  stderr shows the warnings it always showed. It also installs `sys.excepthook` and
+  `threading.excepthook` (`uncaught_hook`, `uncaught_thread_hook`), which add the
+  traceback to the stream and then call the previous hook.
+- `open_run_logs` finds that handler (`installed_narration()`) and attaches the
+  narration stream until the run's resources close.
+- `RunLogger.lprint` also logs each line, without ANSI escapes, to the `run` logger
+  (`vs_project.api.LPRINT_LOGGER`) at `INFO`. A process that configures no logging
+  drops those lines.
+
+The JSON Lines framing is for the client that renders the stream. A plain-text line
+cannot carry a multi-line traceback, or a level the client can style, without a second
+parser. Product code never parses these lines back.
+
+What the stream does not hold:
+
+- Anything that dies before run assembly attaches the stream. Examples are a bad
+  argument, an import error, or a project that does not resolve. It is either a typed
+  launch failure on the registry record, or it reaches only `server.log`, through the
+  previous excepthook.
+- An exception that escapes the run after its resources closed. It reaches `server.log`
+  only.
+- A hard death (SIGKILL, the OOM killer, a native crash). A later listing records it
+  as `server_crashed`, with no exit status or signal (see Status).
+
 ## On disk
 
 ```
@@ -85,5 +127,7 @@ means the chunk reaches the final end. Every byte is read through `ByteSource`.
 | `vs_logs` store, scope, reader, follow; `LogOwner` and its TypeScript | built |
 | Startup producers (image build, container start) | not built |
 | Host helper `logs` feature and the client logs lib | not built |
-| Narration handler and excepthook | not built |
+| Narration handler and excepthook | built |
+| `NarrationLine` in the generated protocol types | not built (with the client logs lib) |
+| Exit status or signal of a hard death on the tombstone | not built: the detached server is reparented to init, so no vibesys process waits on it and can read its status |
 | Gate stages, tool builds, remote followers (Slurm, SkyPilot, dockerd) | not built |
