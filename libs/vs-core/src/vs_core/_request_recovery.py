@@ -52,6 +52,7 @@ from .types.common import (
 from .types.evaluation import (
     CancelOwnedJob,
     InspectOwnedJob,
+    JobTerminationRequested,
     ObserveOwnedJob,
     OwnedJob,
     RegisteredOwnedJob,
@@ -1603,6 +1604,7 @@ def _deadline(
     state, events = _end_open_record(
         state, record, event.reason, lost=bool(signals), first=previous_block is None
     )
+    signals = (*signals, *_orphaned_jobs(context, record, event.reason))
     observation = record.observation
     resources = []
     if (
@@ -1739,6 +1741,27 @@ def _lost_turn(
     )
 
 
+def _orphaned_jobs(
+    context: RecordsContext, record: RequestRecord, reason: FailureReason
+) -> tuple[JobTerminationRequested, ...]:
+    """The termination of every unfinished job a submission started, when core ends it.
+
+    A strategy's ``Measure`` waits on its submission's record. Once that record ends at its
+    limit or a watch, nothing waits on the job any longer: evaluation cancels it rather than
+    leave it in the scheduler's queue, holding nodes nobody will read.
+    """
+    if not isinstance(record.request, SubmitMeasurement):
+        return ()
+    cause = "deadline" if reason == FailureReason.TIMED_OUT else "retirement"
+    return tuple(
+        JobTerminationRequested(resource_id=job.resource_id, cause=cause)
+        for job in context.evaluation.jobs
+        if job.submission_id == record.request_id
+        and job.resource_id is not None
+        and not job.terminal
+    )
+
+
 def _job_step(record: RequestRecord) -> bool:
     """Whether the record is a step core takes on a job it owns: a poll, inspection or cancel.
 
@@ -1761,6 +1784,7 @@ def _decision_ended(state: RecordsState, record: RequestRecord) -> bool:
     decision = record.request.decision_id
     return decision is not None and any(
         row.failure is not None
+        and not _job_step(row)
         and row.request.decision_id == decision
         and row.request_id != record.request_id
         for row in state.records

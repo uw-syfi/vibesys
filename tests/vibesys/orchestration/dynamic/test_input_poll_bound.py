@@ -33,6 +33,7 @@ from vibesys.orchestration.dynamic.search.api import dynamic
 from vs_core.api import (
     CancelOwnedJob,
     Failed,
+    FailureReason,
     MeasurementResult,
     Measure,
     ObserveOwnedJob,
@@ -82,7 +83,7 @@ class SlowPolls:
         return self.inner(request, core)
 
 
-def _run(silent: frozenset[int], queued: int) -> tuple[Trace, SlowPolls]:
+def _run(silent: frozenset[int], queued: int, steps: int = 2000) -> tuple[Trace, SlowPolls]:
     selected = config()
     script = SlowPolls(
         inner=Executors(
@@ -94,7 +95,9 @@ def _run(silent: frozenset[int], queued: int) -> tuple[Trace, SlowPolls]:
         silent=silent,
         queued=queued,
     )
-    hosting = replace(harness(selected), shell_events=True, deadline_at=1_000_000.0)
+    hosting = replace(
+        harness(selected), shell_events=True, deadline_at=1_000_000.0, max_steps=steps
+    )
     return drive(dynamic.driver(selected, hosting.registry), selected, script, hosting), script
 
 
@@ -154,3 +157,38 @@ def test_an_unanswered_poll_never_ends_the_input_measurement(
         isinstance(request, CancelOwnedJob) and request.resource_id.root in script.baseline
         for request in trace.requests
     )
+
+
+def test_a_measurement_whose_polls_never_answer_ends_at_its_own_limit_and_cancels_its_job() -> None:
+    """With no poll ever answered, the measurement still ends: at its own limit, not a poll's.
+
+    Its job is then cancelled, never left in the scheduler's queue with nothing waiting on it.
+    """
+    # The job is never seen to end (no poll answers), so the drive stops after its steps;
+    # the measurement's limit falls well inside them.
+    trace, script = _run(frozenset(range(10_000)), 0, steps=300)
+
+    decisions = _input_decisions(trace)
+    (submission,) = (
+        record
+        for record in trace.core.records.records
+        if isinstance(record.request, SubmitMeasurement)
+        and record.request.plan.purpose == "baseline"
+    )
+    failed = [
+        event
+        for event in trace.events
+        if isinstance(event, Failed)
+        and event.decision is not None
+        and event.decision.root in decisions
+    ]
+    assert [event.reason for event in failed] == [FailureReason.TIMED_OUT]
+    assert submission.dispatched_at is not None
+    assert submission.limit_from_dispatch is not None
+    assert failed[0].limit_at == submission.dispatched_at + submission.limit_from_dispatch
+    cancels = [
+        request
+        for request in trace.requests
+        if isinstance(request, CancelOwnedJob) and request.resource_id.root in script.baseline
+    ]
+    assert len(cancels) == 1
