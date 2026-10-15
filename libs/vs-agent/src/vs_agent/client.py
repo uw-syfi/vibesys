@@ -23,6 +23,7 @@ from vs_agent.contracts import (
     AgentSkillUse,
     AgentTurnRequest,
     AgentTurnResult,
+    AgentTurnTimeoutError,
     AgentUsage,
     AuthStatus,
     MCPServerSpec,
@@ -37,6 +38,7 @@ from vs_agent.runner import parse_typed_response
 from vs_agent.session_errors import SessionResumeError
 from vs_agent.session_key import AgentSessionKey, SessionScope
 from vs_agent.session_store import NullSessionStore, SessionStore
+from vs_agent.shim_turns import terminal_result_from
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
@@ -69,6 +71,14 @@ class _CachedSession:
     #: in. Kept beside the live handle so a caller can name the conversation
     #: its next turn continues without a durable store being wired.
     provider_session_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _TurnAccounting:
+    """Usage evidence available when a turn ends, successfully or otherwise."""
+
+    usage: AgentUsage
+    skills: AgentSkillUse
 
 
 def _emit_and_log(
@@ -497,6 +507,7 @@ class AgentClient:
             channel="prompt",
         )
         result: AgentTurnResult | None = None
+        accounting = _TurnAccounting(AgentUsage(), AgentSkillUse())
         stream = _LoggerObserver(logger, observer, provider=spec.provider)
         try:
             result = self._run(
@@ -505,7 +516,16 @@ class AgentClient:
                 session_key=session_key,
                 observer=stream,
             )
+            accounting = _TurnAccounting(result.usage, result.skills)
         except Exception as exc:
+            terminal_result = terminal_result_from(exc)
+            if terminal_result is not None:
+                accounting = _TurnAccounting(terminal_result.usage, terminal_result.skills)
+            elif (
+                isinstance(exc, (AgentTurnTimeoutError, AgentOutputSchemaError))
+                and exc.usage is not None
+            ):
+                accounting = _TurnAccounting(exc.usage, AgentSkillUse())
             stream.close()
             _emit_and_log(
                 self._sink, f"\n=== {label} ROUND ERROR: {turn.label} ===", self._run_log_file
@@ -522,7 +542,7 @@ class AgentClient:
                 invocation_id=turn.invocation_id,
                 model=spec.model,
                 reasoning_effort=spec.reasoning_effort,
-                result=result,
+                accounting=accounting,
             )
         if result is None:
             message = "successful invocation did not produce a result"
@@ -537,12 +557,10 @@ class AgentClient:
         invocation_id: str | None,
         model: str | None,
         reasoning_effort: str | None,
-        result: AgentTurnResult | None,
+        accounting: _TurnAccounting,
     ) -> None:
-        usage = result.usage if result is not None else AgentUsage()
-        skills = result.skills if result is not None else AgentSkillUse()
         self._sink.turn_usage_recorded(
-            usage,
+            accounting.usage,
             agent_kind=kind,
             round_label=round_label,
             invocation_id=invocation_id,
@@ -557,8 +575,8 @@ class AgentClient:
                 provider=self._provider,
                 model=model,
                 reasoning_effort=reasoning_effort,
-                usage=usage,
-                skills=skills,
+                usage=accounting.usage,
+                skills=accounting.skills,
                 recorded_at=utc_datetime(self._clock),
             )
         except OSError as exc:
