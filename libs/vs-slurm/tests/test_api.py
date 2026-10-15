@@ -825,6 +825,107 @@ def test_service_and_setup_are_request_policy(tmp_path: Path) -> None:
     assert 'http://127.0.0.1:"${PORT}"' in connector.uploaded_script
 
 
+def _submitted_service_job(tmp_path: Path, config: SlurmConfig) -> tuple[str, str]:
+    """Run one service job on the stub connector; return its job script and sbatch command."""
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    connector = _FakeConnector()
+    service = SlurmService(
+        command=("python", "-m", "server", "--port", "VIBESYS_DYNAMIC_PORT"),
+        readiness_url="http://127.0.0.1:VIBESYS_DYNAMIC_PORT/health",
+        startup_timeout_seconds=30,
+    )
+    SlurmJobRunner(config, processes=connector, clock=ManualClock()).run(
+        SlurmJobRequest(workspace=workspace, command=("python", "check.py"), service=service),
+        pause=_unpaused,
+    )
+    assert connector.uploaded_script is not None
+    submissions = [
+        str(request["command"])
+        for request in connector.requests
+        if request["operation"] == "exec" and "sbatch-rr" in str(request["command"])
+    ]
+    assert len(submissions) == 1
+    return connector.uploaded_script, submissions[0]
+
+
+@given(grace=st.integers(min_value=1, max_value=20))
+@settings(max_examples=examples(pr=5, nightly=20), deadline=None)
+def test_service_teardown_signals_its_whole_group_and_is_bounded(grace: int) -> None:
+    """Regression (2026-10-15): the script waited unbounded on the service's parent pid only.
+
+    A vLLM server whose workers ignored the parent's SIGTERM outlived Slurm's KillWait, and
+    Slurm drained the node. The service now runs in its own session; teardown sends TERM to
+    its process group, gives it the configured grace, then KILLs the group and stops waiting
+    after a fixed bound. Running the script under bash is the real-tier test in
+    ``tests/e2e/test_slurm_service_teardown.py``.
+    """
+    with tempfile.TemporaryDirectory() as temporary:
+        script, _submission = _submitted_service_job(
+            Path(temporary), _config(service_stop_grace_seconds=grace)
+        )
+
+    assert 'setsid python -m server --port "${PORT}" > .vs-slurm-service.log 2>&1 &' in script
+    teardown = script[script.index("stop_service() {") : script.index("trap stop_service EXIT")]
+    term = teardown.index('kill -TERM -- "-$service_pid"')
+    kill = teardown.index('kill -KILL -- "-$service_pid"')
+    assert f"service_deadline=$((SECONDS + {grace}))" in teardown[term:kill]
+    assert "service_deadline=$((SECONDS + 5))" in teardown[kill:]
+    assert teardown.count('[ "$SECONDS" -lt "$service_deadline" ]') == 2
+    assert "wait" not in teardown.replace("service_deadline", "")
+    assert "trap 'exit 143' TERM" in script
+
+
+def test_jobs_are_submitted_without_scheduler_requeue(tmp_path: Path) -> None:
+    """VibeSys owns retries: a requeue after a node failure would silently rerun finished work."""
+    _script, submission = _submitted_service_job(tmp_path, _config())
+
+    argv = shlex.split(submission.split("&&", 1)[1])
+    assert argv[0] == "/operator/bin/sbatch-rr"
+    assert argv.index("--no-requeue") > argv.index("00:20:00")
+    assert argv[-1].endswith("/run.sbatch")
+    assert "--requeue" not in argv
+
+
+@pytest.mark.parametrize("arguments", [("--requeue",), ("-p", "gpu", "--requeue")])
+def test_operator_sbatch_arguments_cannot_turn_requeue_back_on(arguments: tuple[str, ...]) -> None:
+    with pytest.raises(ValidationError, match="--requeue"):
+        _config(sbatch_arguments=arguments)
+
+
+@given(grace=st.one_of(st.integers(max_value=0), st.integers(min_value=21)))
+def test_service_stop_grace_outside_its_range_is_rejected_by_name(grace: int) -> None:
+    """The grace plus the 5 s reap bound must stay under Slurm's default KillWait of 30 s."""
+    with pytest.raises(ValidationError, match="service_stop_grace_seconds"):
+        _config(service_stop_grace_seconds=grace)
+
+
+def test_service_stop_grace_defaults_to_its_maximum_and_loads_from_the_operator_file(
+    tmp_path: Path,
+) -> None:
+    assert _config().service_stop_grace_seconds == 20
+    path = tmp_path / "slurm.toml"
+    path.write_text(
+        """[slurm]
+name = "research-cluster"
+remote_workspace_root = "/operator/runs"
+service_stop_grace_seconds = "10"
+
+[slurm.transport]
+kind = "ssh"
+host = "cluster.example"
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(SlurmConfigError, match="service_stop_grace_seconds"):
+        load_slurm_config(path)
+    path.write_text(
+        path.read_text(encoding="utf-8").replace('"10"', "10"),
+        encoding="utf-8",
+    )
+    assert load_slurm_config(path).service_stop_grace_seconds == 10
+
+
 @pytest.mark.parametrize("path", ["/outside/out.json", "../out.json", "nested/../out.json"])
 def test_artifact_paths_are_candidate_relative(path: str, tmp_path: Path) -> None:
     workspace = tmp_path / "candidate"

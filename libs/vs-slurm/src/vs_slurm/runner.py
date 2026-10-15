@@ -32,6 +32,7 @@ from vs_sim.api import (
 from . import connector_protocol
 from .config import (
     PORT_PLACEHOLDER,
+    SERVICE_KILL_REAP_SECONDS,
     SlurmConfig,
     SlurmConfigError,
     SlurmConnectorTransport,
@@ -159,6 +160,7 @@ class _JobScriptRequest:
     command: Sequence[str]
     setup_script: str | None
     service: SlurmService | None
+    service_stop_grace_seconds: int
     phase_timing_root: PurePosixPath | None = None
 
 
@@ -545,6 +547,7 @@ class SlurmJobRunner:
                         command=request.command,
                         setup_script=request.setup_script,
                         service=request.service,
+                        service_stop_grace_seconds=self._config.service_stop_grace_seconds,
                         phase_timing_root=phase_timing_root,
                     )
                 ),
@@ -1207,6 +1210,9 @@ class SlurmJobRunner:
             f"--job-name={operation_job_name(self._config, base.name)}",
             f"--output={output.as_posix()}",
             f"--error={output.as_posix()}",
+            # VibeSys retries a job itself; a scheduler requeue (after a node failure)
+            # would rerun finished stages behind its back.
+            "--no-requeue",
             script.as_posix(),
         )
         result = self._transport.exec(f"cd {shlex.quote(base.as_posix())} && {shlex.join(argv)}")
@@ -1728,7 +1734,12 @@ def _job_script(request: _JobScriptRequest) -> str:
     lines.append("set +e")
     if service is not None:
         lines.extend(
-            _service_script(service, phase_timing_root=phase_timing_root, workspace=workspace)
+            _service_script(
+                service,
+                stop_grace_seconds=request.service_stop_grace_seconds,
+                phase_timing_root=phase_timing_root,
+                workspace=workspace,
+            )
         )
     elif phase_timing_root is not None:
         timing_path = workspace / phase_timing_root / "service-startup-seconds.txt"
@@ -1755,6 +1766,7 @@ def _job_script(request: _JobScriptRequest) -> str:
 def _service_script(
     service: SlurmService,
     *,
+    stop_grace_seconds: int,
     phase_timing_root: PurePosixPath | None = None,
     workspace: PurePosixPath | None = None,
 ) -> list[str]:
@@ -1763,9 +1775,24 @@ def _service_script(
     lines = [
         "export PORT=$((20000 + SLURM_JOB_ID % 10000))",
         'service_pid=""',
-        'stop_service() { if [ -n "$service_pid" ]; then kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true; fi; }',
+        # The service runs in its own session, so its process group is every process it
+        # started (a server's workers too). Teardown signals the whole group and is bounded:
+        # TERM, at most the grace for the group to go, KILL, at most the reap bound, exit.
+        # An unbounded wait here outlives Slurm's KillWait, and Slurm drains the node.
+        "stop_service() {",
+        '  [ -n "$service_pid" ] || return 0',
+        '  kill -TERM -- "-$service_pid" 2>/dev/null',
+        f"  service_deadline=$((SECONDS + {stop_grace_seconds}))",
+        '  while kill -0 -- "-$service_pid" 2>/dev/null && [ "$SECONDS" -lt "$service_deadline" ]; do sleep 0.2; done',
+        '  kill -KILL -- "-$service_pid" 2>/dev/null',
+        f"  service_deadline=$((SECONDS + {SERVICE_KILL_REAP_SECONDS}))",
+        '  while kill -0 -- "-$service_pid" 2>/dev/null && [ "$SECONDS" -lt "$service_deadline" ]; do sleep 0.2; done',
+        "  return 0",
+        "}",
         "trap stop_service EXIT",
-        f"{command} > .vs-slurm-service.log 2>&1 &",
+        # Slurm's SIGTERM at a cancel or time limit runs the teardown above too.
+        "trap 'exit 143' TERM",
+        f"setsid {command} > .vs-slurm-service.log 2>&1 &",
         "service_pid=$!",
         "ready=0",
         "service_started=$SECONDS",
