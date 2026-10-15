@@ -12,6 +12,13 @@ Parent revision: `{{ rev(parent_revision) }}`
 
 Evidence references:
 {{ citations(evidence) }}
+{% if rebase_onto %}
+
+The run's main revision moved to `{{ rev(rebase_onto) }}` since this hypothesis last ran: a
+merge combined other candidates into it. Before anything else, rebase your work onto it
+(`git rebase {{ rev(rebase_onto) }}`, resolving conflicts so both your change and main's
+behavior survive), and build this turn's candidate on the rebased tree.
+{% endif %}
 {% if worktree_revision %}
 
 This continues your earlier work on this hypothesis. The worktree is at the

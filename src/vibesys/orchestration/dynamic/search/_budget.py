@@ -12,7 +12,7 @@ from vibesys.orchestration.dynamic.search._planner import (
     MAX_CORRECTIONS,
     MAX_FRESH_ASKS,
 )
-from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, PROFILER
+from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, MERGER, PROFILER
 from vs_core.api.search import MAX_SUBMISSIONS_PER_MEASUREMENT
 
 ADOPTION_ROUNDS = 3
@@ -25,7 +25,7 @@ def budget(config: DynamicConfig) -> RunBudget:
     planning = (1 + MAX_CORRECTIONS + MAX_FRESH_ASKS) * LOST_TURNS.max_tries
     chain = max(
         turn_chain(corrections=role.corrections, lost_turns=role.lost_turns)
-        for role in (IMPLEMENTER, JUDGE, PROFILER)
+        for role in (IMPLEMENTER, JUDGE, MERGER, PROFILER)
     )
     # An implementer asked until a candidate reaches measurement, then once per resumed
     # measurement submission, and the judge once for each review.

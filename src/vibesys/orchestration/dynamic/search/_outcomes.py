@@ -233,6 +233,8 @@ class Work:
     """The latest candidate the implementer made, reviewed or not."""
     workspace: Workspace | None = None
     """The workspace once it opened; None before, and when the workstream never got one."""
+    merged: MergeReport | None = None
+    """The merger's commit, once it made one, so a failed measurement still settles with it."""
 
     def ended(self, ended: "WorkEndedError") -> Closing:
         """The closing of work that did not finish: what it carried, with the failure."""
@@ -241,11 +243,12 @@ class Work:
             evidence=Evidence(proof=ended.proof),
             cause=ended.failure,
             unreachable=ended.unreachable,
+            merge=self.merged,
         )
 
     def stopped(self) -> Closing:
         """The closing of work the operator stopped."""
-        return Closing(result=self.carried, cause=STOPPED)
+        return Closing(result=self.carried, cause=STOPPED, merge=self.merged)
 
 
 class WorkEndedError(Exception):
@@ -327,10 +330,9 @@ def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
     """The assessments, eligibility and retention the closing proposes for the workspace.
 
     A profile workstream measures a revision without proposing one, so it settles as ineligible
-    and discarded. A candidate is eligible when it passed the task's gates and beats the input.
+    and discarded. A candidate, an implementer's or a merger's commit, is retained when it passed
+    accuracy and is eligible when it passed the task's gates and beats the input.
     """
-    if w.plan.kind is WorkKind.MERGE:
-        return merge_assertion(closing)
     if w.plan.kind is WorkKind.PROFILE:
         profile = reading_of(closing.readings, EvidenceKind.PROFILING)
         return Settle(
@@ -354,21 +356,6 @@ def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
         gates=gates_of(terms),
         beats_input=beats,
         unsettled=UNSETTLED,
-    )
-
-
-def merge_assertion(closing: Closing) -> Settle:
-    """A merge keeps its commit as the new main, unmeasured, so it is not yet winner-eligible.
-
-    Main's own trusted measurement, in a workspace of its own, is what can make it eligible.
-    """
-    merged = closing.cause is None and closing.candidate is not None
-    return Settle(
-        assessments=(),
-        eligible=False,
-        retention="candidate" if merged else "discard",
-        outcome="succeeded" if merged else "failed",
-        candidate=closing.candidate if merged else None,
     )
 
 

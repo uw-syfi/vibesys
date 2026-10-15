@@ -607,7 +607,8 @@ class MergeResult(RevisionReply):
     )
     summary: str = Field(min_length=1, description="What you merged, in order, and how.")
     tests: str = Field(
-        min_length=1, description="The CPU-level tests you ran on the merged tree, and their result."
+        min_length=1,
+        description="The CPU-level tests you ran on the merged tree, and their result.",
     )
     reason: str = Field(
         default="",

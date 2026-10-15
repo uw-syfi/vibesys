@@ -150,8 +150,8 @@ class _Planning(RolePromptContext):
     """The run's main: where a new workstream that names no parent starts."""
     main_measurement: MainMeasurement | None = None
     """The latest trusted measurement of a merged main; None while main is the input."""
-    main_measuring: bool = False
-    """The current main is queued for, or in, its trusted measurement."""
+    merge_running: str | None = None
+    """The merge under way, if one is: main moves when it finishes."""
     mergeable: tuple[MergeableRow, ...] = ()
     merges: tuple[MergeRecord, ...] = ()
     """Every finished merge, oldest first."""

@@ -24,6 +24,7 @@ from vibesys.orchestration.dynamic.search._context import (
 )
 from vibesys.orchestration.dynamic.search._handoff import HandoffWritten
 from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
+from vibesys.orchestration.dynamic.search._main import MainLine
 from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamDone,
     WorkstreamStart,
@@ -40,6 +41,9 @@ from vibesys.orchestration.dynamic.search._plan import PlanCheck
 from vibesys.orchestration.dynamic.search._values import (
     FinishedWork,
     HypothesisRecord,
+    MainMeasurement,
+    MergeRecord,
+    MergeSource,
     PlanProblem,
     Unreachable,
     WorkKind,
@@ -103,7 +107,11 @@ class RunSnapshot(Value):
     parents: tuple[ParentSnapshot, ...] = ()
     unreachable: tuple[Unreachable, ...] = ()
     leading: str | None = None
-    """The hypothesis whose candidate leads now; None while the input does."""
+    """The hypothesis (or merge) whose candidate leads now; None while the input does."""
+    main: RevisionRef | None = None
+    """The run's main revision now: where new work that names no parent starts."""
+    main_measurement: MainMeasurement | None = None
+    merges: tuple[MergeRecord, ...] = ()
 
 
 @dataclass
@@ -135,6 +143,14 @@ class RunRecord:
     """The paths of the planning calls' handoff files, oldest first, as the owner last listed them."""
     kept: dict[str, Kept] = field(default_factory=dict)
     """The candidates closed workspaces retained that were winner-eligible, by settlement."""
+    main: MainLine = field(init=False)
+    """The run's main revision, which only a sound merge moves."""
+    main_seen: dict[str, int] = field(default_factory=dict)
+    """Main's generation when each hypothesis last started: behind it, the hypothesis rebases."""
+
+    def __post_init__(self) -> None:
+        """Main starts at the run's input."""
+        self.main = MainLine(revision=self.base, baseline=self.baseline)
 
     # -- what the run has left -----------------------------------------------------------------
 
@@ -174,8 +190,14 @@ class RunRecord:
         """The parents the planner may choose from now."""
         return offered_parents(self.parents, self.withheld)
 
+    def _merge_ids(self) -> frozenset[str]:
+        """The IDs merges were scheduled under, finished or running."""
+        work = (*self.finished_work, *self.running.values())
+        return frozenset(item.plan.work_id for item in work if item.plan.kind is WorkKind.MERGE)
+
     def world(self) -> PlanWorld:
         """What a planning call reads of the run now."""
+        offered = self.offered()
         return PlanWorld(
             config=self.config,
             base=self.base,
@@ -184,8 +206,12 @@ class RunRecord:
             running=tuple(self.running.values()),
             finished=tuple(self.finished_work),
             refunded=self.refunded,
-            offered=self.offered(),
+            offered=offered,
             handoffs=tuple(reversed(self.handoffs)),
+            main=self.main.revision,
+            main_measurement=self.main.measurement,
+            merges=tuple(self.main.merges),
+            mergeable=self.main.mergeable(offered, self.terms, self._merge_ids()),
             offer=ProfileOffer(
                 fields=tuple(ProfileField(item) for item in self.terms.profile_fields)
             )
@@ -216,7 +242,7 @@ class RunRecord:
         """The revision a plan builds on and the hypothesis it descends from, frozen at scheduling.
 
         A hypothesis that goes on builds on its own last candidate, else on the parent it had; any
-        other parent is resolved only from what was offered, and falls back to the input.
+        other parent is resolved only from what was offered, and falls back to the run's main.
         """
         continued = self._own_last_round(plan)
         if continued is not None:
@@ -225,7 +251,7 @@ class RunRecord:
             found = resolve(self.parents, plan.parent_hypothesis_id, plan.parent_revision)
             if found is not None:
                 return found.revision, plan.parent_hypothesis_id
-        return self.base, None
+        return self.main.revision, None
 
     def _own_last_round(self, plan: WorkPlan) -> tuple[RevisionRef, str | None] | None:
         prior = self.hypotheses.get(plan.work_id)
@@ -246,8 +272,10 @@ class RunRecord:
             parent, lineage = self.parent_of(plan)
             record = self.hypotheses.get(plan.work_id)
             prior = record.rounds[-1] if record is not None and record.rounds else None
+            rebase = self._rebase_onto(plan)
             if plan.kind is WorkKind.IMPLEMENT:
                 self.hypotheses[plan.work_id] = _hypotheses.scheduled(record, plan, sequence)
+                self.main_seen[plan.work_id] = self.main.generation
             start = WorkstreamStart(
                 key=workstream_key(sequence, plan.work_id),
                 sequence=sequence,
@@ -257,10 +285,28 @@ class RunRecord:
                 prior=prior,
                 config=self.config,
                 baseline=self.baseline,
+                merge=self._sources(plan),
+                rebase_onto=rebase,
             )
             self.running[start.key] = start
             starts.append(start)
         return starts
+
+    def _rebase_onto(self, plan: WorkPlan) -> RevisionRef | None:
+        """Main, when a hypothesis that goes on last started before main moved; else None."""
+        if self._own_last_round(plan) is None:
+            return None
+        seen = self.main_seen.get(plan.work_id, 0)
+        return self.main.revision if self.main.generation > seen else None
+
+    def _sources(self, plan: WorkPlan) -> tuple[MergeSource, ...]:
+        """A merge's candidates as the exact revisions offered now, in the planner's order."""
+        found = (resolve(self.parents, item, None) for item in plan.candidates)
+        return tuple(
+            MergeSource(hypothesis_id=item, revision=option.revision)
+            for item, option in zip(plan.candidates, found, strict=True)
+            if option is not None
+        )
 
     def finished(self, done: WorkstreamDone) -> None:
         """Keep what a finished workstream leaves behind: its record, round and parent."""
@@ -289,6 +335,8 @@ class RunRecord:
         current = self.hypotheses.get(start.plan.work_id)
         if current is not None and not profile and done.settlement is not None:
             self.hypotheses[start.plan.work_id] = _hypotheses.with_round(current, done)
+        if start.plan.kind is WorkKind.MERGE:
+            self.main.finished(done, self.terms)
         self._offer_as_parent(done)
         self._keep(done)
 
@@ -320,8 +368,9 @@ class RunRecord:
     # -- the winner ----------------------------------------------------------------------------
 
     def eligible_rounds(self) -> tuple[candidates.EligibleRound, ...]:
-        """Every winner-eligible round of the run."""
-        return tuple(
+        """Every winner-eligible round of the run, merged mains included."""
+        merged = tuple(item for item in self.main.rounds if item.settlement.root in self.kept)
+        return merged + tuple(
             candidates.EligibleRound(
                 hypothesis_id=hypothesis.hypothesis_id,
                 sequence=row.sequence,
@@ -385,4 +434,7 @@ class RunRecord:
             parents=self.parents,
             unreachable=tuple(self.unreachable),
             leading=self.winner().hypothesis_id,
+            main=self.main.revision,
+            main_measurement=self.main.measurement,
+            merges=tuple(self.main.merges),
         )

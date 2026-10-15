@@ -172,6 +172,8 @@ class FailureKind(StrEnum):
     """The last turn left nothing an earlier turn had not, so another would repeat it."""
     MERGE_REFUSED = "merge-refused"
     """The merger could not follow the merge instructions and stopped; its reply says why."""
+    MERGE_UNSOUND = "merge-unsound"
+    """The merged commit did not pass the trusted accuracy check, so main did not move to it."""
 
 
 _FIELDS: dict[FailureKind, tuple[frozenset[str], frozenset[str]]] = {
@@ -311,11 +313,12 @@ class MergeOutcome(StrEnum):
     """How a merge workstream ended. Closed."""
 
     MERGED = "merged"
-    """The merger merged the candidates and its tests passed: main advanced to its commit."""
+    """The merged commit passed the trusted accuracy check and main advanced to it."""
     REFUSED = "refused"
     """The merger could not follow the instructions and stopped: main is unchanged."""
     FAILED = "failed"
-    """The workstream ended without the merger's answer (a lost turn, a stop): main is unchanged."""
+    """The merge ended without a sound commit (a lost turn, a stop, a failed check): main is
+    unchanged; ``failure`` says why."""
 
 
 class MergeRecord(Value):
@@ -332,13 +335,17 @@ class MergeRecord(Value):
     reason: str = ""
     """Why the merger refused; empty unless it did."""
     revision: RevisionRef | None = None
-    """The new main; None unless the merge merged."""
+    """The merger's commit, when it made one; the new main when the merge merged."""
+    accuracy_passed: bool | None = None
+    benchmark_passed: bool | None = None
+    metrics: tuple[MetricRow, ...] = ()
+    """What the trusted measurement of the commit read; empty when it was not measured."""
     failure: Failure | None = None
     """Why a failed merge ended."""
 
 
 class MainMeasurement(Value):
-    """The trusted measurement of one main revision, and how it compares with the one before."""
+    """The trusted measurement of the run's main, and how it compares with main before it."""
 
     revision: RevisionRef
     merge_id: str
@@ -346,12 +353,10 @@ class MainMeasurement(Value):
     accuracy_passed: bool | None = None
     benchmark_passed: bool | None = None
     metrics: tuple[MetricRow, ...] = ()
-    failure: Failure | None = None
-    """Why the measurement ended without a result; None when it has one."""
     previous: tuple[MetricRow, ...] = ()
-    """What main measured before this merge (the input's baseline before the first merge)."""
+    """What main measured before this merge (the input's measurement before the first merge)."""
     regressed: bool = False
-    """Main measures worse than before the merge, or fails a trusted check it passed before."""
+    """Main measures worse than before the merge, or fails the benchmark check it passed."""
 
 
 # -- what the planner is told about a reply that cannot be scheduled -------------------------------

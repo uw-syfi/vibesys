@@ -33,7 +33,7 @@ async def do_work(ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work) -> C
         if w.plan.kind is WorkKind.PROFILE:
             return await profile(ctx, w, ws)
         if w.plan.kind is WorkKind.MERGE:
-            return await merge(ctx, w, ws)
+            return await merge(ctx, w, ws, work)
         return await implement_and_measure(ctx, w, ws, work)
     except WorkEndedError as ended:
         return work.ended(ended)
@@ -65,32 +65,40 @@ async def profile(ctx: Flow, w: WorkstreamStart, ws: Workspace) -> Closing:
     return Closing(evidence=await measure_and_interpret(ctx, w, ws, w.parent))
 
 
-async def merge(ctx: Flow, w: WorkstreamStart, ws: Workspace) -> Closing:
-    """Have a new merger session merge the candidates on its checkout of main, in one turn.
+async def merge(ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work) -> Closing:
+    """Have a new merger session merge the candidates on its checkout of main, then measure it.
 
-    A merge that merged leaves the commit core checkpointed, which becomes main once the
-    workspace settles; a refusal leaves main as it is and carries the merger's reason.
+    The merger takes one turn. Its commit is measured with the trusted evaluations, like an
+    implementer's candidate; it becomes main once the workspace settles with it retained. A
+    refusal leaves main as it is and carries the merger's reason.
     """
     merger = ctx.agents.session(MERGER, workspace=ws, revision=w.parent)
     match await merger.turn(merge_prompt(w.plan, w.parent, w.merge)):
         case TurnFinished(reply=MergeResult() as reply, checkpoint=checkpoint):
-            return _merged(w, reply, checkpoint)
+            report = _merged(w, reply, checkpoint)
         case Failed() as failed:
             raise ended_by(failed, AgentName.MERGER, plan=w.plan)
         case TurnFinished() as unexpected:
             message = f"the merger answered with {type(unexpected.reply).__name__}"
             raise TypeError(message)
-
-
-def _merged(w: WorkstreamStart, reply: MergeResult, checkpoint: object) -> Closing:
-    """The closing of the merger's answer: its commit, or its refusal with the reason."""
-    if reply.outcome is MergeOutcomeKind.REFUSED:
-        report = MergeReport(outcome=MergeOutcome.REFUSED, summary=reply.summary, reason=reply.reason)
+    if report.outcome is MergeOutcome.REFUSED:
         return Closing(merge=report, cause=Failure(kind=FailureKind.MERGE_REFUSED))
+    work.merged = report
+    if report.revision is None or not ctx.task.terms.measured:
+        return Closing(merge=report)
+    evidence = await measure_and_interpret(ctx, w, ws, report.revision)
+    return Closing(merge=report, evidence=evidence)
+
+
+def _merged(w: WorkstreamStart, reply: MergeResult, checkpoint: object) -> MergeReport:
+    """What the merger answered: its commit, or its refusal with the reason."""
+    if reply.outcome is MergeOutcomeKind.REFUSED:
+        return MergeReport(outcome=MergeOutcome.REFUSED, summary=reply.summary, reason=reply.reason)
     if isinstance(checkpoint, Declined):
-        raise WorkEndedError(Failure(kind=FailureKind.CHECKPOINT_DECLINED, declined=checkpoint.reason))
+        raise WorkEndedError(
+            Failure(kind=FailureKind.CHECKPOINT_DECLINED, declined=checkpoint.reason)
+        )
     revision = getattr(checkpoint, "revision", None)
     if revision is None or revision == w.parent:
         raise WorkEndedError(Failure(kind=FailureKind.NO_CHANGED_CANDIDATE))
-    report = MergeReport(outcome=MergeOutcome.MERGED, summary=reply.summary, revision=revision)
-    return Closing(merge=report)
+    return MergeReport(outcome=MergeOutcome.MERGED, summary=reply.summary, revision=revision)

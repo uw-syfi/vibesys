@@ -19,6 +19,7 @@ from vibesys.orchestration.dynamic.search._plan import PlanLedger
 from vibesys.orchestration.dynamic.search._prompts import (
     BuildableRow,
     HistoryRow,
+    MergeableRow,
     PlannerCorrection,
     PlannerPrompt,
     ProfileHistoryRow,
@@ -28,6 +29,8 @@ from vibesys.orchestration.dynamic.search._prompts import (
 from vibesys.orchestration.dynamic.search._values import (
     FinishedWork,
     HypothesisRecord,
+    MainMeasurement,
+    MergeRecord,
     PlanProblem,
     WorkKind,
     WorkPlan,
@@ -201,6 +204,12 @@ class PlanWorld:
     """The paths of earlier planning calls' handoff files, newest first."""
     offer: ProfileOffer | None = None
     """What the planner may ask of a profile workstream; None when the run does not profile."""
+    main: RevisionRef | None = None
+    """The run's main revision; None means the input."""
+    main_measurement: MainMeasurement | None = None
+    merges: tuple[MergeRecord, ...] = ()
+    """Every finished merge, oldest first."""
+    mergeable: tuple[MergeableRow, ...] = ()
 
     @property
     def active(self) -> int:
@@ -231,10 +240,16 @@ class PlanWorld:
         profiles |= {
             item.plan.work_id for item in self.running if item.plan.kind is WorkKind.PROFILE
         }
+        merges = {item.plan.work_id for item in self.finished if item.plan.kind is WorkKind.MERGE}
+        running_merges = {
+            item.plan.work_id for item in self.running if item.plan.kind is WorkKind.MERGE
+        }
         return PlanLedger(
             hypotheses=self.hypotheses,
             running=frozenset(item.plan.work_id for item in self.running),
             profile_ids=frozenset(profiles),
+            merge_ids=frozenset(merges | running_merges),
+            merging=bool(running_merges),
         )
 
     def prompt(
@@ -281,6 +296,14 @@ class PlanWorld:
             profiling=self.offer is not None,
             profile_fields=() if self.offer is None else tuple(str(f) for f in self.offer.fields),
             handoff_paths=self.handoffs,
+            main_revision=self.main or self.base,
+            main_measurement=self.main_measurement,
+            merge_running=next(
+                (item.plan.work_id for item in self.running if item.plan.kind is WorkKind.MERGE),
+                None,
+            ),
+            mergeable=self.mergeable,
+            merges=self.merges,
             problem=problem,
         )
         if again is None:

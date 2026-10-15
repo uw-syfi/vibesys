@@ -80,6 +80,7 @@ def render_handoff(request: WriteHandoff) -> str:
         scheduled=request.scheduled,
         updates=request.updates,
         handoff=request.handoff,
+        merges=request.merges,
     )
 
 

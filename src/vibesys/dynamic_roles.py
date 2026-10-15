@@ -7,7 +7,8 @@ tools the agent is given. Each role's id comes from the search's id scheme, so t
 search asks and the roles the host declares cannot drift apart.
 
 The implementer and the judge carry the bridged evaluation tool; no other role carries a tool,
-so none needs an MCP server.
+so none needs an MCP server. The merger writes its checkout of main and measures nothing
+itself: the search measures its commit with the trusted evaluations.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from vibesys.core_roles import (
     MEASURING_READER,
     MEASURING_WRITER,
     READER,
+    WRITER,
     RoleKind,
     core_role,
 )
@@ -47,5 +49,6 @@ ORCHESTRATOR = _role(search.PLANNER, READER)
 IMPLEMENTER = _role(search.IMPLEMENTER, MEASURING_WRITER)
 JUDGE = _role(search.JUDGE, MEASURING_READER)
 PROFILER = _role(search.PROFILER, CONTINUING_READER)
+MERGER = _role(search.MERGER, WRITER)
 
-CORE_ROLES = (ORCHESTRATOR, IMPLEMENTER, JUDGE, PROFILER)
+CORE_ROLES = (ORCHESTRATOR, IMPLEMENTER, JUDGE, PROFILER, MERGER)
