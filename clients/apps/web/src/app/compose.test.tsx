@@ -8,8 +8,9 @@ import {
   parseReplayScenario,
 } from '@vibesys/feature-campaign/state';
 import {targetFromCapability} from '@vibesys/feature-gateway-connect/renderer';
+import {FakeLifecycle, sessionWith} from '@vibesys/run-session/testing';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {createDemoApp, createLiveCampaignApp} from './compose.js';
+import {createDemoApp, createLiveApp, createLiveCampaignApp} from './compose.js';
 
 const campaignRecord = parseReplayScenario(
   JSON.parse(
@@ -116,6 +117,17 @@ test('the page owner releases a preview stream independently of React render lif
   expect(active).toBe(true);
   page.close();
   expect(active).toBe(false);
+});
+
+test('the live page defaults to the run view, with a toggle into the live campaign view', () => {
+  const {session} = sessionWith(new FakeLifecycle());
+
+  const html = renderToStaticMarkup(createLiveApp(session));
+
+  expect(html).toContain('VIBESYS / RUN VIEWER');
+  expect(html).toContain('id="run-campaign-toggle"');
+  expect(html).toContain('View campaign');
+  expect(html).not.toContain('campaign-shell');
 });
 
 test('live campaign replay with no usage omits the token column', () => {

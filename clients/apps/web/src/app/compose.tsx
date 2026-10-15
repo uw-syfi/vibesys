@@ -4,7 +4,11 @@ import {
   createCampaignReplayStore,
   createLiveCampaignStore,
 } from '@vibesys/feature-campaign/renderer';
-import type {CampaignRecord, CampaignStream} from '@vibesys/feature-campaign/state';
+import {
+  type CampaignRecord,
+  type CampaignStream,
+  webSessionCampaignStream,
+} from '@vibesys/feature-campaign/state';
 import {ConversationPanel} from '@vibesys/feature-conversation/renderer';
 import {
   createGatewayConnectStore,
@@ -19,7 +23,7 @@ import type {RunStore, WebSession} from '@vibesys/run-session';
 import {hasRunEnded} from '@vibesys/run-state';
 import type {Store} from '@vibesys/store';
 import {Button, Dialog} from '@vibesys/ui';
-import {type JSX, type ReactNode, useState, useSyncExternalStore} from 'react';
+import {type JSX, type ReactNode, useEffect, useState, useSyncExternalStore} from 'react';
 import {bootstrapGateway, fetchCampaignFixture} from '../platform/backend.js';
 import '@vibesys/ui/tokens.css';
 import '@vibesys/feature-gateway-connect/styles.css';
@@ -142,30 +146,73 @@ function Demo({
   );
 }
 
+/** Loading/error chrome around `CampaignDashboard`, by which of its three sources is live: a
+ * fixture replay ('Preview'), the dev-only fixture-replayed-as-a-stream path ('Stream preview'),
+ * or (`undefined`) a real desktop run's own live campaign stream. */
+interface CampaignChrome {
+  readonly testid: 'replay-banner' | 'campaign-stream-banner' | 'live-campaign-banner';
+  readonly ariaLabel: string;
+  readonly errorPrefix: string;
+  readonly loadFailedCopy: string;
+  readonly waitingCopy: string;
+  readonly showRetry: boolean;
+}
+
+function campaignChrome(previewLabel: 'Preview' | 'Stream preview' | undefined): CampaignChrome {
+  if (previewLabel === 'Preview') {
+    return {
+      testid: 'replay-banner',
+      ariaLabel: 'Replay status',
+      errorPrefix: 'Replay failed to load',
+      loadFailedCopy: 'The replay fixture could not be loaded.',
+      waitingCopy: 'Loading fixture replay…',
+      showRetry: true,
+    };
+  }
+  if (previewLabel === 'Stream preview') {
+    return {
+      testid: 'campaign-stream-banner',
+      ariaLabel: 'Live stream status',
+      errorPrefix: 'Live campaign stream error',
+      loadFailedCopy: 'The replay fixture could not be loaded.',
+      waitingCopy: 'Waiting for the live campaign stream…',
+      showRetry: false,
+    };
+  }
+  return {
+    testid: 'live-campaign-banner',
+    ariaLabel: 'Live campaign status',
+    errorPrefix: 'Live campaign error',
+    loadFailedCopy: 'The live campaign could not be loaded.',
+    waitingCopy: 'Waiting for the live campaign…',
+    showRetry: false,
+  };
+}
+
 function Campaign({
   store,
   previewLabel,
   headerAction,
 }: {
   readonly store: CampaignStore;
-  readonly previewLabel: 'Preview' | 'Stream preview';
+  readonly previewLabel?: 'Preview' | 'Stream preview';
   readonly headerAction: ReactNode;
 }): JSX.Element {
   const {scenario, campaign, error} = useStore(store);
-  const streaming = previewLabel === 'Stream preview';
+  const chrome = campaignChrome(previewLabel);
   return (
     <>
       {error !== null && (
         <div
           className="stale-banner campaign-alert"
           role="alert"
-          aria-label={streaming ? 'Live stream status' : 'Replay status'}
-          data-testid={streaming ? 'campaign-stream-banner' : 'replay-banner'}
+          aria-label={chrome.ariaLabel}
+          data-testid={chrome.testid}
         >
           <span>
-            {streaming ? 'Live campaign stream error' : 'Replay failed to load'}: {error}
+            {chrome.errorPrefix}: {error}
           </span>
-          {!streaming && (
+          {chrome.showRetry && (
             <button type="button" onClick={() => store.dispatch({type: 'load'})}>
               Retry
             </button>
@@ -175,19 +222,13 @@ function Campaign({
       {scenario === null || campaign === null ? (
         <main className="campaign-loading">
           {headerAction}
-          <p>
-            {error !== null
-              ? 'The replay fixture could not be loaded.'
-              : streaming
-                ? 'Waiting for the live campaign stream…'
-                : 'Loading fixture replay…'}
-          </p>
+          <p>{error !== null ? chrome.loadFailedCopy : chrome.waitingCopy}</p>
         </main>
       ) : (
         <CampaignDashboard
           scenario={scenario}
           campaign={campaign}
-          previewLabel={previewLabel}
+          {...(previewLabel === undefined ? {} : {previewLabel})}
           headerAction={headerAction}
         />
       )}
@@ -210,10 +251,34 @@ export function createLiveApp(session: WebSession): JSX.Element {
   return <Live session={session} run={session.store} />;
 }
 
+type RunView = 'run' | 'campaign';
+
 function Live({session, run}: {readonly session: WebSession; readonly run: RunStore}): JSX.Element {
   const iterations = useSyncExternalStore(run.subscribe, run.getIterations, run.getIterations);
   const state = useStore(run);
   const sessionState = useStore(session);
+  const [view, setView] = useState<RunView>('run');
+  // Created once for this page's lifetime, over the same session the run page reads: it
+  // subscribes to `session.store`, which (unlike the session's own transport) supports multiple
+  // independent subscribers, so this coexists with the run page's own subscription below.
+  const [campaignStore] = useState(() =>
+    createLiveCampaignStore(webSessionCampaignStream(session)),
+  );
+  useEffect(() => campaignStore.close, [campaignStore]);
+
+  const toggle = (
+    <Button
+      id="run-campaign-toggle"
+      onClick={() => setView(current => (current === 'run' ? 'campaign' : 'run'))}
+    >
+      {view === 'run' ? 'View campaign' : 'View run'}
+    </Button>
+  );
+
+  if (view === 'campaign') {
+    return <Campaign store={campaignStore} headerAction={toggle} />;
+  }
+
   return (
     <RunPage
       run={state}
@@ -225,13 +290,16 @@ function Live({session, run}: {readonly session: WebSession; readonly run: RunSt
       onRetryReplay={NOTHING}
       onCommand={session.command}
       headerAction={
-        <ConversationPanel
-          session={session}
-          runId={state.runId}
-          transcript={state.chatTranscript}
-          connected={sessionState.controls.status === 'connected'}
-          steerAvailable={!hasRunEnded(state)}
-        />
+        <>
+          {toggle}
+          <ConversationPanel
+            session={session}
+            runId={state.runId}
+            transcript={state.chatTranscript}
+            connected={sessionState.controls.status === 'connected'}
+            steerAvailable={!hasRunEnded(state)}
+          />
+        </>
       }
     />
   );
