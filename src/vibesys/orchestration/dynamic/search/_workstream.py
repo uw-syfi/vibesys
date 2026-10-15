@@ -8,6 +8,8 @@ typed failure), and after an operator stop, which interrupts the work wherever i
 
 from dataclasses import dataclass
 
+from vibesys.candidates.api import Baseline
+from vibesys.orchestration.dynamic.search._measure import the_input
 from vibesys.orchestration.dynamic.search._outcomes import (
     Closing,
     Work,
@@ -47,7 +49,9 @@ async def workstream(ctx: Flow, w: WorkstreamStart) -> WorkstreamDone:
                 return WorkstreamDone.not_opened(w, failure_of(opened.failed, None))
             work.workspace = opened
             closing = await do_work(ctx, w, opened, work)
-            keep(ctx, w, opened, closing)
+            if closing.scored:
+                await the_input(ctx, w, work)  # a candidate is scored against it
+            keep(ctx, w, opened, closing, work.baseline)
     except Stopped:
         closing = work.stopped()
     return WorkstreamDone.closed(w, work.workspace, closing)
@@ -76,12 +80,14 @@ async def verify_parent(ctx: Flow, w: WorkstreamStart) -> Unverified | None:
             )
 
 
-def keep(ctx: Flow, w: WorkstreamStart, ws: Workspace, closing: Closing) -> None:
+def keep(
+    ctx: Flow, w: WorkstreamStart, ws: Workspace, closing: Closing, baseline: Baseline | None
+) -> None:
     """Assert what the workstream established for the workspace to settle with.
 
     If core will not take that assertion, the workspace settles as a plain failure instead.
     """
-    proposed = assertion(w, closing, ctx.task.terms)
+    proposed = assertion(w, closing, ctx.task.terms, baseline)
     kept = Assessment(
         outcome=proposed.outcome,
         assessments=proposed.assessments,

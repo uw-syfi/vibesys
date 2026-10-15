@@ -68,9 +68,15 @@ def begin_with_evidence(
     facts: RunFacts = FACTS,
     **world: Unpack[EvidenceWorld],
 ) -> EvidenceHost:
-    """Start the dynamic search of ``cfg`` under an `EvidenceHost` over a task with ``facts``."""
+    """Start the dynamic search of ``cfg`` under an `EvidenceHost` over a task with ``facts``.
+
+    Like `begin`, the host answers the input's measurement first, so a story starts from a
+    measured input with the first planner turn open.
+    """
     run = start_flow(dynamic, cfg, facts=facts, restarting=restarting)
-    return EvidenceHost(run, cfg, **world)
+    host = EvidenceHost(run, cfg, **world)
+    host.measure_input()
+    return host
 
 
 def plan(host: Host, *entries: dict[str, object]) -> None:

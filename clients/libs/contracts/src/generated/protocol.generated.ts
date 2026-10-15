@@ -778,6 +778,27 @@ export type RequestId19 = string | null;
 export type ClientId19 = string;
 export type Code2 = string;
 export type Message1 = string;
+export type LogOwner = StartupStep | GateStage | ToolBuild | RunNarration;
+export type Kind44 = "startup_step";
+/**
+ * Where an opening environment is, in the order it gets there.
+ */
+export type EnvironmentStartupStage = "building_image" | "starting_container";
+export type Kind45 = "gate_stage";
+export type ExecutionId2 = string;
+export type Attempt4 = number;
+export type Kind46 = "tool_build";
+export type Name = string;
+export type Kind47 = "run_narration";
+export type At = string;
+/**
+ * A line's severity: the standard ``logging`` level at or below the record's.
+ */
+export type NarrationLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
+export type Logger = string;
+export type Thread = string;
+export type Message2 = string;
+export type Traceback = string | null;
 
 /**
  * Root schema document for the public server protocol.
@@ -788,6 +809,8 @@ export interface ProtocolDocument {
   event: RunEvent;
   snapshot: RunSnapshot;
   server_message: ServerMessage;
+  log_owner: LogOwner;
+  narration_line: NarrationLine;
 }
 /**
  * Request pausing after the active agent call.
@@ -1985,4 +2008,44 @@ export interface ProtocolErrorMessage {
   code: Code2;
   message: Message1;
   diagnostic?: Diagnostic | null;
+}
+/**
+ * A step of opening the run's environment, such as building its image.
+ */
+export interface StartupStep {
+  kind: Kind44;
+  stage: EnvironmentStartupStage;
+}
+/**
+ * One attempt of one gate of a candidate's evaluation.
+ */
+export interface GateStage {
+  kind: Kind45;
+  execution_id: ExecutionId2;
+  gate: GateKind;
+  attempt: Attempt4;
+}
+/**
+ * Building or pulling a tool the run needs, such as a profiler.
+ */
+export interface ToolBuild {
+  kind: Kind46;
+  name: Name;
+}
+/**
+ * The run's own narration for humans: what it is doing, warnings, tracebacks.
+ */
+export interface RunNarration {
+  kind: Kind47;
+}
+/**
+ * One narration record, as one JSON line of a narration stream.
+ */
+export interface NarrationLine {
+  at: At;
+  level: NarrationLevel;
+  logger: Logger;
+  thread: Thread;
+  message: Message2;
+  traceback?: Traceback;
 }

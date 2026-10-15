@@ -349,6 +349,8 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             run_environment=run_environment_spec_from_args(args),
             agent_backend=args.agent_backend,
             cli_provider=args.cli_provider,
+            # A resume keeps the harness its run was started with, vetted then or not.
+            allow_unvetted_model=args.allow_unvetted_model or args.resume is not None,
             backend=backend,
             remote_repo=args.repo,
             repo_visibility=args.repo_visibility,

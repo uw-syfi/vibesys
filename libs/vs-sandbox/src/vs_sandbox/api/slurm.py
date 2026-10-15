@@ -51,6 +51,15 @@ from vs_sandbox.slurm_gpu_alias import (
     load_slurm_gpu_alias_settings,
     translate_slurm_gpu,
 )
+from vs_sandbox.slurm_ledger import (
+    Attached,
+    AttachOutcome,
+    AttachPending,
+    LedgerAttachError,
+    LedgerWithdrawnError,
+    SlurmLedgerAttachment,
+    open_ledger_attachment,
+)
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
     SlurmOperatorSettings,
@@ -74,7 +83,13 @@ from vs_sandbox.slurm_profile import (
     split_profile_stats,
     trusted_profile_command,
 )
+from vs_sandbox.slurm_queue_status import (
+    SlurmQueueStatusReader,
+    queue_status_from_snapshot,
+    slurm_queue_status_reader,
+)
 from vs_sandbox.slurm_settings_toml import render_slurm_operator_toml, write_slurm_operator_toml
+from vs_sandbox.slurm_stage_output import SlurmStageOutputOpener
 
 #: The single-file, standard-library-only client an agent's container runs.
 HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
@@ -91,6 +106,9 @@ __all__ = [
     "AgentGpuConfig",
     "AgentGpuLauncher",
     "AgentGpuRequestError",
+    "AttachOutcome",
+    "AttachPending",
+    "Attached",
     "BrokerReplyError",
     "BrokerTransport",
     "BrokeredProcesses",
@@ -103,6 +121,8 @@ __all__ = [
     "HostCommandBrokerError",
     "HostJobConfinement",
     "JobConfinement",
+    "LedgerAttachError",
+    "LedgerWithdrawnError",
     "ProfileCaptureDescriptor",
     "ProfileStats",
     "ReadOnlyPathLinkError",
@@ -116,11 +136,14 @@ __all__ = [
     "SlurmExecutionMetadata",
     "SlurmExecutionPolicy",
     "SlurmGpuAliasError",
+    "SlurmLedgerAttachment",
     "SlurmOperatorSettings",
     "SlurmOutcomeUnknownError",
     "SlurmPolicyError",
     "SlurmProcessBroker",
     "SlurmProcessBrokerError",
+    "SlurmQueueStatusReader",
+    "SlurmStageOutputOpener",
     "SlurmStagePayload",
     "SlurmTargetLifecycle",
     "agent_gpu_capability",
@@ -130,10 +153,13 @@ __all__ = [
     "load_slurm_gpu_alias_settings",
     "load_slurm_operator_settings",
     "load_slurm_policy",
+    "open_ledger_attachment",
     "profile_capture_descriptor",
+    "queue_status_from_snapshot",
     "read_slurm_capture_plan",
     "render_slurm_operator_toml",
     "require_profile_fields",
+    "slurm_queue_status_reader",
     "split_profile_stats",
     "translate_slurm_gpu",
     "trusted_profile_command",

@@ -58,8 +58,9 @@ class MainLine:
 
     revision: RevisionRef
     """Main now: the input until a merge moves it."""
-    baseline: candidates.Baseline
-    """The input's own measurement, which main is compared with until a merge measures it."""
+    baseline: candidates.Baseline | None
+    """The input's own measurement, which main is compared with until a merge measures it; None
+    while it has not landed."""
     generation: int = 0
     """How many times main has moved."""
     measurement: MainMeasurement | None = None
@@ -74,13 +75,13 @@ class MainLine:
         """Main's headline metric now: its own measurement, else the input's."""
         if self.measurement is not None:
             return self.measurement.metrics[0] if self.measurement.metrics else None
-        seen = candidates.reading(self.baseline)
+        seen = None if self.baseline is None else candidates.reading(self.baseline)
         return seen.metrics[0] if seen is not None and seen.metrics else None
 
     def _benchmark_passed(self) -> bool | None:
         if self.measurement is not None:
             return self.measurement.benchmark_passed
-        seen = candidates.reading(self.baseline)
+        seen = None if self.baseline is None else candidates.reading(self.baseline)
         return None if seen is None else seen.benchmark_passed
 
     def options(

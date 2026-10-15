@@ -40,11 +40,16 @@ from vs_runtime._bundled_paths import (
 )
 from vs_runtime._capacity_gate import CapacityHandling, CapacityTimer, install_capacity_gate
 from vs_runtime._container_runtime_policy import DockerInDockerUnsupportedError
-from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
+from vs_runtime._docker_evaluator_tools import (
+    DockerToolBuilder,
+    prepare_docker_evaluator_resources,
+)
 from vs_runtime._environment_startup import (
     EnvironmentStartup,
     EnvironmentStartupSink,
     EnvironmentStartupStage,
+    StartupOutputOpener,
+    ToolBuildOutputOpener,
 )
 from vs_runtime._environment_system import EnvironmentSystem
 from vs_runtime._evaluator_packages import (
@@ -453,6 +458,7 @@ __all__ = [
     "DockerEnvironmentConfig",
     "DockerEnvironmentFacts",
     "DockerInDockerUnsupportedError",
+    "DockerToolBuilder",
     "DurableEventJournal",
     "EnvironmentStartup",
     "EnvironmentStartupSink",
@@ -554,11 +560,13 @@ __all__ = [
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
     "StageFailureText",
+    "StartupOutputOpener",
     "StateValidationPasses",
     "StopGraceError",
     "StopTimer",
     "Switch",
     "TerminalSignal",
+    "ToolBuildOutputOpener",
     "ToolLocation",
     "ToolSite",
     "TrustedAccuracyResult",

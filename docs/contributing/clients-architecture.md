@@ -347,6 +347,7 @@ exclusions are tracked in #1969.
 | `feature-run-control`'s commands and banner | machine | migrated (#1950) |
 | `@vibesys/connection`'s `HostConnection` | machine | migrated (phase 8) |
 | `feature-web-theme`'s current host-default request | machine | native (#2168) |
+| `feature-run-view`'s startup log panel (`startupLogMachine`) | machine | native |
 | `feature-start-run`, `feature-hosts`, `feature-gateway-connect`, `feature-replay` screen stores | reducer with reply tokens | one feature per change |
 
 ## Build model

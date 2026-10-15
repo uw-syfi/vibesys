@@ -35,6 +35,13 @@ from vibesys.inputs._objectives import (
     ParetoInput,
     load_objectives,
 )
+from vibesys.inputs._plan import (
+    DeviationPolicy,
+    PlanStep,
+    StepEvaluation,
+    TaskPlan,
+    outline_problems,
+)
 from vibesys.inputs._synthesis import (
     EVALUATOR_SRC_DIRNAME,
     InputSynthesisError,
@@ -50,6 +57,7 @@ __all__ = [
     "AgentInput",
     "BenchmarkCommand",
     "BenchmarkResult",
+    "DeviationPolicy",
     "EnvironmentInput",
     "EvaluatorInput",
     "InputBundle",
@@ -61,8 +69,11 @@ __all__ = [
     "ObjectiveAxisInput",
     "ObjectivesInput",
     "ParetoInput",
+    "PlanStep",
     "ProfileGuidedInput",
+    "StepEvaluation",
     "SynthesizedInputSpec",
+    "TaskPlan",
     "WorkspaceInput",
     "WorkspaceSource",
     "benchmark_output_argument",
@@ -70,6 +81,7 @@ __all__ = [
     "load_objectives",
     "load_project_task",
     "load_task",
+    "outline_problems",
     "render_input_manifest",
     "synthesize_input_bundle",
     "with_operator_constraints",

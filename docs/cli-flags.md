@@ -27,7 +27,7 @@ named role:
 
 ```toml
 [model]
-name = "gpt-5.4"
+name = "gpt-5.6-sol"
 
 [thinking]
 level = "high"
@@ -36,6 +36,15 @@ level = "high"
 model = "gpt-5.6-sol"
 reasoning_effort = "xhigh"
 ```
+
+Every model must be a vetted model of the CLI provider: VibeSys runs only the
+provider and model pairs in `vs_agent.provider_policy.HARNESSES`. Without
+`[model].name` or `--model`, a run uses its provider's default model (the
+provider's first vetted model). An unvetted model in `[model].name`, `--model`,
+a role entry, or `[agent.quota].fallback_model` is rejected before the run
+builds anything, with the key and the vetted models. At a terminal,
+`--allow-unvetted-model` runs it anyway; runs started from the desktop app
+cannot opt out. A resume keeps the pair its run was started with.
 
 Unknown role IDs are rejected against the selected orchestration before run
 resources open. The run manifest records the total resolved role map. Resume

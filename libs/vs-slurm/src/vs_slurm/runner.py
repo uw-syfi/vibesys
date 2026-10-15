@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import (
+    DISCARD,
     ProcessGroupUnreaped,
     ProcessOutcome,
     ProcessOutputTooLarge,
@@ -39,6 +40,9 @@ from .config import (
     SlurmSshTransport,
     shell_join_with_port,
 )
+from .errors import SlurmError, SlurmSubmissionRejectedError
+from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
+from .remote_file import SlurmFileSource
 from .remote_operations import (
     RemoteOperationClaim,
     RemoteOperationEvidence,
@@ -74,6 +78,9 @@ _JOB_ID = re.compile(r"^Submitted batch job ([0-9]+)\r?\n", re.MULTILINE)
 # The allocation's own exit status when its server never answered the readiness probe
 # (it exited or hung while starting), so no stage ran. The job script writes it.
 SERVICE_NOT_READY_EXIT_CODE = 70
+# A stage's exit status when its time limit stopped it: ``timeout(1)`` exits 124 after
+# its TERM, and 137 when the stage outlived the TERM and ``--kill-after`` killed it.
+STAGE_TIMEOUT_EXIT_CODES = frozenset({124, 137})
 _MAX_PROCESS_EXIT_CODE = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
 _SERVICE_LOG_TAIL = "service-log-tail.txt"
@@ -379,158 +386,6 @@ class SlurmJobWaitResult(BaseModel):
         return self.status.terminal
 
 
-class SlurmError(RuntimeError):
-    """Actionable failure from validation, transport, Slurm, or artifact collection."""
-
-    @classmethod
-    def invalid_operation_record(cls, operation_id: str) -> SlurmError:
-        """Describe a persisted record stored under another operation identity."""
-        return cls(f"operation record identity mismatch at {operation_id}.json")
-
-    @classmethod
-    def invalid_operation_id(cls) -> SlurmError:
-        """Describe an unsafe stable operation identifier."""
-        return cls("operation_id must contain 1 to 128 safe identifier characters")
-
-    @classmethod
-    def invalid_job_id(cls) -> SlurmError:
-        """Describe a nonnumeric scheduler identifier."""
-        return cls("job_id must be numeric")
-
-    @classmethod
-    def operation_identity_ambiguous(cls) -> SlurmError:
-        """Describe multiple scheduler jobs matching a stable operation ID."""
-        return cls("stable operation ID matched multiple scheduler jobs")
-
-    @classmethod
-    def invalid_script_states(cls) -> SlurmError:
-        """Describe an empty or incorrectly typed fake scheduler sequence."""
-        return cls("states must contain SlurmJobStatus observations")
-
-    @classmethod
-    def invalid_command(cls) -> SlurmError:
-        """Describe an empty or malformed command vector."""
-        return cls("Slurm job command must be a non-empty argv")
-
-    @classmethod
-    def invalid_batch_request(cls) -> SlurmError:
-        """Describe an empty batch or an unsafe or repeated stage name."""
-        return cls("Slurm batch must contain stages with unique safe names")
-
-    @classmethod
-    def invalid_stage_timeout(cls) -> SlurmError:
-        """Describe a stage timeout outside the supported integer range."""
-        return cls("Slurm batch stage timeout must be a positive integer number of seconds")
-
-    @classmethod
-    def content_stage_failed(cls) -> SlurmError:
-        """Describe a local tree that could not be safely content-addressed."""
-        return cls("Slurm input changed or became invalid during content-addressed staging")
-
-    @classmethod
-    def content_cache_busy(cls, detail: str) -> SlurmError:
-        """Describe a transient staging condition that can be retried."""
-        return cls(f"Slurm content staging is temporarily unavailable: {detail}")
-
-    @classmethod
-    def workspace_is_not_directory(cls) -> SlurmError:
-        """Describe a missing or non-directory workspace."""
-        return cls("Slurm job workspace must be an existing directory")
-
-    @classmethod
-    def missing_job_id(cls) -> SlurmError:
-        """Describe submission output without a job identifier."""
-        return cls("sbatch did not return a Slurm job id")
-
-    @classmethod
-    def truncated_output(cls) -> SlurmError:
-        """Describe a scheduler answer that lost its end line in transit."""
-        return cls("Slurm scheduler output did not arrive whole")
-
-    @classmethod
-    def job_timed_out(cls, job_id: str) -> SlurmError:
-        """Describe a job that exceeded its configured deadline."""
-        return cls(f"Slurm job {job_id} exceeded the configured timeout")
-
-    @classmethod
-    def transport_unavailable(cls, operation: str) -> SlurmError:
-        """Describe a missing transport executable."""
-        return cls(f"Slurm transport is unavailable during {operation}")
-
-    @classmethod
-    def transport_timed_out(cls, operation: str) -> SlurmError:
-        """Describe a transport request that exceeded its deadline."""
-        return cls(f"Slurm transport timed out during {operation}")
-
-    @classmethod
-    def transport_failed(cls, operation: str, returncode: int) -> SlurmError:
-        """Describe an unsuccessful transport operation without exposing output."""
-        return cls(f"Slurm transport {operation} failed with exit code {returncode}")
-
-    @classmethod
-    def invalid_connector_response(cls, operation: str) -> SlurmError:
-        """Describe a response that violates the connector protocol."""
-        return cls(f"Slurm connector returned an invalid response during {operation}")
-
-    @classmethod
-    def invalid_artifact_path(cls) -> SlurmError:
-        """Describe an artifact outside the staged workspace."""
-        return cls("Slurm artifact paths must be safe candidate-relative paths")
-
-    @classmethod
-    def invalid_support_path(cls) -> SlurmError:
-        """Describe an invalid local or remote support tree."""
-        return cls("Slurm support trees must map safe relative paths to directories")
-
-    @classmethod
-    def invalid_setup_script(cls) -> SlurmError:
-        """Describe an unsafe remote setup script path."""
-        return cls("Slurm setup script must be an absolute normalized POSIX path")
-
-    @classmethod
-    def malformed_result(cls) -> SlurmError:
-        """Describe missing or malformed job result files."""
-        return cls("Slurm job returned a missing or malformed status artifact")
-
-    @classmethod
-    def cancelled(cls, job_id: str) -> SlurmError:
-        """Describe a submitted job cancelled by its caller."""
-        return cls(f"Slurm job {job_id} was cancelled")
-
-    @classmethod
-    def cancelled_before_submission(cls) -> SlurmError:
-        """Describe a request cancelled before side effects began."""
-        return cls("Slurm job was cancelled before submission")
-
-    @classmethod
-    def job_not_terminal(cls, job_id: str) -> SlurmError:
-        """Describe a collection attempt before scheduler completion."""
-        return cls(f"Slurm job {job_id} is not terminal")
-
-    @classmethod
-    def invalid_wait_timeout(cls) -> SlurmError:
-        """Describe a non-positive bounded observation interval."""
-        return cls("timeout_seconds must be greater than zero")
-
-    @classmethod
-    def handle_config_mismatch(cls) -> SlurmError:
-        """Describe a handle used against a different configured cluster."""
-        return cls("Slurm job handle does not belong to this cluster configuration")
-
-    @classmethod
-    def invalid_handle(cls) -> SlurmError:
-        """Describe a handle whose remote paths do not match its identity."""
-        return cls("Slurm job handle contains paths outside its operation workspace")
-
-
-class SlurmSubmissionRejectedError(SlurmError):
-    """Submission failed before the scheduler submission call was invoked.
-
-    The original SlurmError diagnostic is preserved. Once the sbatch call
-    begins, transport loss has unknown acceptance and never uses this type.
-    """
-
-
 @dataclass
 class _SubmissionBoundary:
     started: bool = False
@@ -757,28 +612,7 @@ class SlurmJobRunner:
         )
         return SlurmBatchHandle(
             job=job,
-            stages=tuple(
-                SlurmBatchStageHandle(
-                    name=stage.name,
-                    file_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=item.remote_path,
-                            local_path=item.local_path,
-                            kind="file",
-                        )
-                        for item in stage.file_artifacts
-                    ),
-                    tree_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=item.remote_path,
-                            local_path=item.local_path,
-                            kind="tree",
-                        )
-                        for item in stage.tree_artifacts
-                    ),
-                )
-                for stage in stages
-            ),
+            stages=batch_stage_handles(request),
             submission_seconds=max(0.0, self._clock.now() - started),
             stop_on_failure=request.stop_on_failure,
         )
@@ -796,6 +630,10 @@ class SlurmJobRunner:
             return max(0, int(output))
         except ValueError as error:
             raise SlurmError.malformed_result() from error
+
+    def remote_file(self, path: PurePosixPath) -> SlurmFileSource:
+        """The cluster file at ``path``, read through this runner's transport as it grows."""
+        return SlurmFileSource(path, self._whole_reading)
 
     def poll_batch(self, handle: SlurmBatchHandle) -> SlurmJobStatus:
         """Read the scheduler state of a batch handle."""
@@ -1106,7 +944,7 @@ class SlurmJobRunner:
         invocation = _safe_component(operation_id)
         base = PurePosixPath(self._config.remote_workspace_root) / self._config.name / invocation
         if isinstance(request, SlurmBatchRequest):
-            stages = _validate_batch_request(request)
+            _validate_batch_request(request)
             job = self.recover_handle(
                 SlurmJobRequest(
                     workspace=request.workspace,
@@ -1124,27 +962,7 @@ class SlurmJobRunner:
                 job=job,
                 submission_seconds=0.0,
                 stop_on_failure=request.stop_on_failure,
-                stages=tuple(
-                    SlurmBatchStageHandle(
-                        name=stage.name,
-                        file_artifacts=tuple(
-                            SlurmArtifactTarget(
-                                remote_path=a.remote_path,
-                                local_path=a.local_path,
-                                kind="file",
-                                collect_on_failure=a.collect_on_failure,
-                            )
-                            for a in stage.file_artifacts
-                        ),
-                        tree_artifacts=tuple(
-                            SlurmArtifactTarget(
-                                remote_path=a.remote_path, local_path=a.local_path, kind="tree"
-                            )
-                            for a in stage.tree_artifacts
-                        ),
-                    )
-                    for stage in stages
-                ),
+                stages=batch_stage_handles(request),
             )
         _validate_request(request)
         return SlurmJobHandle(
@@ -1221,6 +1039,10 @@ class SlurmJobRunner:
         if refined != INITIAL_LIFE or queue_failure is None:
             return _queue_reading(refined, queue)
         raise queue_failure
+
+    def read_queue(self) -> QueueSnapshot:
+        """One read-only query (see ``queue_view``); raises ``SlurmError`` or ``QueueViewError``."""
+        return parse_queue_snapshot(self._read_scheduler(queue_snapshot_command()))
 
     def _queue_state(self, job_id: str) -> str:
         """The queue's line for the job."""
@@ -1391,13 +1213,11 @@ class _ProcessTransport:
         max_output_bytes: int | None = None,
     ) -> _TransportResponse:
         """Run one transport program; its output is UTF-8 (``UnicodeDecodeError`` otherwise)."""
-        spec = ProcessSpec(
-            tuple(self._launch(argv)), input=b"" if stdin is None else stdin.encode()
-        )
+        spec = ProcessSpec(tuple(self._launch(argv)), input=(stdin or "").encode())
         if max_output_bytes is not None:
             spec = replace(spec, max_output_bytes=max_output_bytes)
         try:
-            run = self._processes.run(spec, timeout=self._timeout)
+            run = self._processes.run(spec, timeout=self._timeout, output=DISCARD)
         except FileNotFoundError as exc:
             raise SlurmError.transport_unavailable(operation) from exc
         match run:
@@ -1692,6 +1512,29 @@ def _validate_request(
         for item in request.tree_artifacts
     ]
     return source, support, files, trees
+
+
+def batch_stage_handles(request: SlurmBatchRequest) -> tuple[SlurmBatchStageHandle, ...]:
+    """Each stage's artifact targets as the request declares them: remote paths to local ones."""
+    return tuple(
+        SlurmBatchStageHandle(
+            name=stage.name,
+            file_artifacts=tuple(
+                SlurmArtifactTarget(
+                    remote_path=a.remote_path,
+                    local_path=a.local_path,
+                    kind="file",
+                    collect_on_failure=a.collect_on_failure,
+                )
+                for a in stage.file_artifacts
+            ),
+            tree_artifacts=tuple(
+                SlurmArtifactTarget(remote_path=a.remote_path, local_path=a.local_path, kind="tree")
+                for a in stage.tree_artifacts
+            ),
+        )
+        for stage in _validate_batch_request(request)
+    )
 
 
 def _validate_support(support_trees: Mapping[str, Path] | None) -> list[tuple[PurePosixPath, Path]]:

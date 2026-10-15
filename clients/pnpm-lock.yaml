@@ -161,6 +161,9 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/logs':
+        specifier: workspace:*
+        version: link:../../libs/logs
       '@vibesys/run-session':
         specifier: workspace:*
         version: link:../../libs/run-session
@@ -354,6 +357,9 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/logs':
+        specifier: workspace:*
+        version: link:../../libs/logs
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
@@ -496,6 +502,15 @@ importers:
 
   features/run-view:
     dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../libs/contracts
+      '@vibesys/logs':
+        specifier: workspace:*
+        version: link:../../libs/logs
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../libs/machine
       '@vibesys/run-session':
         specifier: workspace:*
         version: link:../../libs/run-session
@@ -511,6 +526,9 @@ importers:
       react:
         specifier: 19.1.1
         version: 19.1.1
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -521,9 +539,6 @@ importers:
       '@types/react-dom':
         specifier: 19.1.9
         version: 19.1.9(@types/react@19.1.13)
-      '@vibesys/contracts':
-        specifier: workspace:*
-        version: link:../../libs/contracts
       happy-dom:
         specifier: 20.14.5
         version: 20.14.5
@@ -561,6 +576,9 @@ importers:
       '@types/react-dom':
         specifier: 19.1.9
         version: 19.1.9(@types/react@19.1.13)
+      happy-dom:
+        specifier: 20.14.5
+        version: 20.14.5
       react-dom:
         specifier: 19.1.1
         version: 19.1.1(react@19.1.1)
@@ -601,6 +619,9 @@ importers:
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../hosts
+      '@vibesys/logs':
+        specifier: workspace:*
+        version: link:../logs
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../machine
@@ -660,9 +681,37 @@ importers:
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../hosts
+      '@vibesys/logs':
+        specifier: workspace:*
+        version: link:../logs
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../runs
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../store
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/logs:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../machine
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../transport
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2

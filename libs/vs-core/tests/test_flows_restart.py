@@ -18,7 +18,7 @@ import vs_core.api as core
 from vs_core.api.testing import FlowRun, RestartPolicy, fake_search
 from vs_sim.api.testing import examples
 
-from .flow_support import ROLES, Config, Plan, ask, open_workspace, start
+from .flow_support import ROLES, Config, Plan, answer_of, ask, open_workspace, start
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -352,6 +352,58 @@ def test_a_restart_policy_restarts_only_after_the_steps_it_names() -> None:
     assert _answered(RestartPolicy(after_stop=True)) == 0
 
 
+# -- latches across a restart -------------------------------------------------------------------
+
+LEARNED = core.LatchKey[int]("learned")
+
+
+class Known(core.Value):
+    """The root's config and snapshot: what it learned, once it has."""
+
+    learned: int | None = None
+
+
+class Shared(core.Value):
+    """What the root publishes: its worker's result, and the latch as the root first saw it."""
+
+    result: int
+    latch_at_start: int | None
+
+
+def latch_search(label: str) -> SearchDef[Known]:
+    """A root that learns a value and shares it through a latch with a worker it started.
+
+    The worker asks its own turn (``label``: changing it changes the code), checkpoints the
+    answer, then waits for the latch. The root, as `flows.md` asks, sets the latch again from
+    its snapshot when it restarts after learning.
+    """
+
+    @core.flow(snapshot=Job, name="latch-worker")
+    async def worker(ctx: core.Flow, job: Job) -> int:
+        ctx.checkpoint(job)
+        own = job.step
+        if own == 0:
+            own = answer_of(await ask(ctx, label))
+            ctx.checkpoint(Job(step=own))
+        return own + await ctx.latch(LEARNED)
+
+    @fake_search("flows", Known, ROLES)
+    async def root(ctx: core.Flow, known: Known) -> None:
+        ctx.checkpoint(known)
+        at_start = ctx.latch(LEARNED).value
+        async with ctx.group() as workers:
+            workers.start("w", worker, Job())
+            learned = known.learned
+            if learned is None:
+                learned = answer_of(await ask(ctx, "learn"))
+                ctx.checkpoint(Known(learned=learned))
+            ctx.latch(LEARNED).set(learned)
+            results = [result async for result in workers]
+        ctx.publish(Shared(result=results[0], latch_at_start=at_start))  # ty: ignore[invalid-argument-type]
+
+    return root
+
+
 def _reader(reads: int, capabilities_at: int | None) -> SearchDef[Config]:
     """A root that reads the clock then asks, ``reads`` times; one read may be another type."""
 
@@ -366,6 +418,37 @@ def _reader(reads: int, capabilities_at: int | None) -> SearchDef[Config]:
             await ask(ctx, f"s{index}")
 
     return root
+
+
+def test_a_latch_set_before_a_restart_starts_empty_and_is_set_again_from_the_snapshot() -> None:
+    run = FlowRun.start(latch_search("own"), Known())
+    run.reply(run.expect_turn("learn"), Plan(n=5))  # set before the restart; the worker still asks
+    stale = run.expect_turn("own")
+
+    run.swap(latch_search("own, again"))
+    run.reply(stale, Plan(n=1))  # the first event the new code sees: the flows restart
+
+    assert run.state.base is not None
+    assert not [a for a in run.open if a.prompt is not None and a.prompt.text == "learn"]
+    run.reply(run.expect_turn("own, again"), Plan(n=1))
+    # The restored root saw the latch empty, set it from its snapshot, and the worker got it.
+    assert run.driver.published(run.state, Shared) == Shared(result=6, latch_at_start=None)
+    assert run.finished is not None
+
+
+def test_a_latch_set_after_a_restart_reaches_the_restored_worker_that_waits_for_it() -> None:
+    run = FlowRun.start(latch_search("own"), Known())
+    run.reply(run.expect_turn("own"), Plan(n=1))  # the worker checkpoints and waits on the latch
+    stale = run.expect_turn("learn")
+
+    run.swap(latch_search("own, again"))
+    run.reply(stale, Plan(n=5))  # dropped: the root restarts from its first snapshot
+
+    assert run.state.base is not None
+    assert [d.decision for d in run.state.dropped] == [stale.decision]
+    run.reply(run.expect_turn("learn"), Plan(n=7))
+    assert run.driver.published(run.state, Shared) == Shared(result=8, latch_at_start=None)
+    assert run.finished is not None
 
 
 @settings(max_examples=examples(pr=10, nightly=200), deadline=None)

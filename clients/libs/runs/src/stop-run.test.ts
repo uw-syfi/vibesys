@@ -63,6 +63,15 @@ function checkStep(before: StopState, event: StopEvent, next: StopStep, accepted
   if (before.phase === 'ended') expect(next.state).toBe(before);
   if (event.type === 'ended') expect(next.state.phase).toBe('ended');
   if (next.effect === null) return;
+  if (next.effect.kind === 'confirm') {
+    expect(['idle', 'error']).toContain(before.phase);
+    expect(event.type).toBe('request');
+    expect(next.state.phase).toBe('confirming');
+    if (next.state.phase !== 'confirming')
+      throw new Error('confirmation request without its state');
+    expect(next.effect.force).toBe(next.state.force);
+    return;
+  }
   // A stop command is sent only from a confirmed dialog, and never after an accepted stop.
   expect(before.phase).toBe('confirming');
   expect(event.type).toBe('confirm');
@@ -96,8 +105,17 @@ describe('stop flow', () => {
   });
 
   test('cancelling the confirmation sends nothing and returns to idle', () => {
-    const confirming = stopStep(STOP_IDLE, {type: 'request', force: false}).state;
+    const requested = stopStep(STOP_IDLE, {type: 'request', force: false});
+    expect(requested.effect).toEqual({kind: 'confirm', force: false});
+    const confirming = requested.state;
     expect(stopStep(confirming, {type: 'cancel'})).toEqual({state: STOP_IDLE, effect: null});
+  });
+
+  test('a duplicate request cannot acquire confirmation ownership', () => {
+    const requested = stopStep(STOP_IDLE, {type: 'request', force: false});
+    const duplicate = stopStep(requested.state, {type: 'request', force: false});
+
+    expect(duplicate).toEqual({state: requested.state, effect: null});
   });
 
   test('withdrawing an unsent stop returns to idle but cannot retract an accepted stop', () => {

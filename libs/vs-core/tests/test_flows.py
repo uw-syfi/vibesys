@@ -277,6 +277,56 @@ def test_leaving_a_group_waits_for_every_task(begin: Begin) -> None:
     assert ended(run).reason == "no-winner: all done"
 
 
+# -- latches ------------------------------------------------------------------------------------
+
+LEARNED = core.LatchKey[int]("learned")
+
+
+async def learns_then_shares(ctx: core.Flow, _config: Config) -> core.NoWinner:
+    """Two tasks wait for what the root learns; one asks its own turn first."""
+
+    async def waiter(ctx: core.Flow, turns: int) -> int:
+        own = sum([answer_of(await ask(ctx, "own")) for _ in range(turns)])
+        return own + await ctx.latch(LEARNED)
+
+    async with ctx.group() as waiters:
+        waiters.start("a", waiter, 1)
+        waiters.start("b", waiter, 0)
+        ctx.latch(LEARNED).set(answer_of(await ask(ctx, "learn")))
+        results = sorted([done async for done in waiters], key=str)
+    return core.NoWinner(reason=f"results {results}")
+
+
+def test_a_latch_gives_every_waiter_the_value_set_once_whenever_it_waits(begin: Begin) -> None:
+    run = begin(learns_then_shares)
+    assert sorted(waits(run)) == ["a/own", "learn"]
+    answer(run, "learn", 5)
+    assert run.finished is None  # b has the value; a still waits for its own turn
+    answer(run, "own", 1)
+    assert ended(run).reason == "no-winner: results [5, 6]"
+
+
+def test_setting_a_latch_twice_is_a_bug(begin: Begin) -> None:
+    async def twice(ctx: core.Flow, _config: Config) -> None:
+        ctx.latch(LEARNED).set(1)
+        ctx.latch(LEARNED).set(2)
+
+    with pytest.raises(core.ContractError, match="set once"):
+        begin(twice)
+
+
+def test_two_latch_keys_with_one_name_are_refused_whatever_their_types(begin: Begin) -> None:
+    """A second key under a name in use could hold another type: one cell would mix them."""
+    clashing = core.LatchKey[str](LEARNED.name)
+
+    async def mixes(ctx: core.Flow, _config: Config) -> None:
+        ctx.latch(LEARNED).set(1)
+        await ctx.latch(clashing)
+
+    with pytest.raises(core.ContractError, match="another latch key has this name"):
+        begin(mixes)
+
+
 # -- stops, resources ---------------------------------------------------------------------------
 
 

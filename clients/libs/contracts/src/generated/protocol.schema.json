@@ -1355,6 +1355,15 @@
       "title": "DiagnosticSeverity",
       "type": "string"
     },
+    "EnvironmentStartupStage": {
+      "description": "Where an opening environment is, in the order it gets there.",
+      "enum": [
+        "building_image",
+        "starting_container"
+      ],
+      "title": "EnvironmentStartupStage",
+      "type": "string"
+    },
     "EventBatchMessage": {
       "additionalProperties": false,
       "description": "Event batch and cursor metadata sent to subscribers.",
@@ -2055,6 +2064,39 @@
       ],
       "title": "GateKind",
       "type": "string"
+    },
+    "GateStage": {
+      "additionalProperties": false,
+      "description": "One attempt of one gate of a candidate's evaluation.",
+      "properties": {
+        "kind": {
+          "const": "gate_stage",
+          "default": "gate_stage",
+          "title": "Kind",
+          "type": "string"
+        },
+        "execution_id": {
+          "minLength": 1,
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "gate": {
+          "$ref": "#/$defs/GateKind"
+        },
+        "attempt": {
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "execution_id",
+        "gate",
+        "attempt"
+      ],
+      "title": "GateStage",
+      "type": "object"
     },
     "GateStartedData": {
       "additionalProperties": false,
@@ -3136,6 +3178,90 @@
         "attempt"
       ],
       "title": "JudgeResultData",
+      "type": "object"
+    },
+    "LogOwner": {
+      "discriminator": {
+        "mapping": {
+          "gate_stage": "#/$defs/GateStage",
+          "run_narration": "#/$defs/RunNarration",
+          "startup_step": "#/$defs/StartupStep",
+          "tool_build": "#/$defs/ToolBuild"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/StartupStep"
+        },
+        {
+          "$ref": "#/$defs/GateStage"
+        },
+        {
+          "$ref": "#/$defs/ToolBuild"
+        },
+        {
+          "$ref": "#/$defs/RunNarration"
+        }
+      ]
+    },
+    "NarrationLevel": {
+      "description": "A line's severity: the standard ``logging`` level at or below the record's.",
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARNING",
+        "ERROR",
+        "CRITICAL"
+      ],
+      "title": "NarrationLevel",
+      "type": "string"
+    },
+    "NarrationLine": {
+      "additionalProperties": false,
+      "description": "One narration record, as one JSON line of a narration stream.",
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "level": {
+          "$ref": "#/$defs/NarrationLevel"
+        },
+        "logger": {
+          "title": "Logger",
+          "type": "string"
+        },
+        "thread": {
+          "title": "Thread",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "traceback": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Traceback"
+        }
+      },
+      "required": [
+        "at",
+        "level",
+        "logger",
+        "thread",
+        "message"
+      ],
+      "title": "NarrationLine",
       "type": "object"
     },
     "OutputData": {
@@ -4676,6 +4802,23 @@
       "title": "RunInterruptedData",
       "type": "object"
     },
+    "RunNarration": {
+      "additionalProperties": false,
+      "description": "The run's own narration for humans: what it is doing, warnings, tracebacks.",
+      "properties": {
+        "kind": {
+          "const": "run_narration",
+          "default": "run_narration",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "RunNarration",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
     "RunSnapshot": {
       "additionalProperties": false,
       "description": "Current server projection of a run's public state.",
@@ -4989,6 +5132,27 @@
       "title": "StartupStage",
       "type": "string"
     },
+    "StartupStep": {
+      "additionalProperties": false,
+      "description": "A step of opening the run's environment, such as building its image.",
+      "properties": {
+        "kind": {
+          "const": "startup_step",
+          "default": "startup_step",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/$defs/EnvironmentStartupStage"
+        }
+      },
+      "required": [
+        "kind",
+        "stage"
+      ],
+      "title": "StartupStep",
+      "type": "object"
+    },
     "SteerCommand": {
       "additionalProperties": false,
       "description": "Send steering text to the active run.",
@@ -5260,6 +5424,29 @@
       "required": [
         "kind"
       ]
+    },
+    "ToolBuild": {
+      "additionalProperties": false,
+      "description": "Building or pulling a tool the run needs, such as a profiler.",
+      "properties": {
+        "kind": {
+          "const": "tool_build",
+          "default": "tool_build",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "ToolBuild",
+      "type": "object"
     },
     "ToolCallData": {
       "additionalProperties": false,
@@ -5914,6 +6101,12 @@
         }
       ],
       "title": "Server Message"
+    },
+    "log_owner": {
+      "$ref": "#/$defs/LogOwner"
+    },
+    "narration_line": {
+      "$ref": "#/$defs/NarrationLine"
     }
   },
   "required": [
@@ -5921,7 +6114,9 @@
     "response",
     "event",
     "snapshot",
-    "server_message"
+    "server_message",
+    "log_owner",
+    "narration_line"
   ],
   "title": "ProtocolDocument",
   "type": "object"

@@ -1,6 +1,9 @@
-[model]
-name = "gpt-5.4"
-# Choose a model supported by the selected CLI provider.
+# [model]
+# name = "gpt-5.6-sol"
+# Optional. Must be a vetted model of the selected CLI provider (the list is
+# vs_agent.provider_policy.HARNESSES); omitted, each provider runs its default:
+# codex gpt-5.6-sol, claude claude-opus-5. --model overrides, and
+# --allow-unvetted-model (terminal only) runs a model outside the list.
 
 # [thinking]
 # level = "medium"          # minimal, low, medium, high (Gemini 3+ models)
@@ -37,7 +40,7 @@ name = "gpt-5.4"
 # wait_seconds = 14400       # positive integer seconds; only with "wait" or "fallback"
 # retry_seconds = 300        # seconds between attempts when no reset time is known
 # fallback_provider = "codex"   # claude | codex | gemini | opencode; not the run's own provider
-# fallback_model = "gpt-5.4"    # needs fallback_provider, and the reverse
+# fallback_model = "gpt-5.6-sol"  # a vetted model of fallback_provider; needs it, and the reverse
 
 # [evaluation]
 # Added to declared stage execution budgets to bound evaluation suspension.

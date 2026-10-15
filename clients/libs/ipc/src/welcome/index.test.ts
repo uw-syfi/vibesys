@@ -27,6 +27,10 @@ const VALUES: readonly unknown[] = [
   '--rounds 2',
   {},
   [],
+  {provider: 'codex', model: 'gpt-a'},
+  {provider: 'codex', model: 'gpt-a', extra: true},
+  {provider: 'codex'},
+  {provider: '', model: 'gpt-a'},
 ];
 
 /** One valid argument vector for every privileged welcome request. */
@@ -41,9 +45,12 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.cancelInspection]: [1],
   [WELCOME_CHANNELS.signIn]: ['local'],
   [WELCOME_CHANNELS.complete]: ['local', '/project/'],
-  [WELCOME_CHANNELS.inspect]: ['local', '0123456789ab', false, 1],
+  [WELCOME_CHANNELS.inspect]: ['local', '0123456789ab', 1],
+  [WELCOME_CHANNELS.logs]: ['local', '0123456789ab', {kind: 'list'}],
+  [WELCOME_CHANNELS.releaseLogs]: [],
   [WELCOME_CHANNELS.tasks]: ['local', '/project'],
-  [WELCOME_CHANNELS.start]: ['local', '/project', 'spsc', '', 1],
+  [WELCOME_CHANNELS.harnesses]: ['local'],
+  [WELCOME_CHANNELS.start]: ['local', '/project', 'spsc', '', null, 1],
   [WELCOME_CHANNELS.cancelStart]: [1],
   [WELCOME_CHANNELS.attach]: ['local', '0123456789ab'],
   [WELCOME_CHANNELS.resume]: ['local', '/project', 'run-1'],
@@ -60,6 +67,11 @@ function checkAccepted(request: WelcomeRequest): void {
     expect(isTaskName(request.task)).toBe(true);
     expect(typeof request.args).toBe('string');
     expect(Number.isSafeInteger(request.start) && request.start > 0).toBe(true);
+    if (request.harness !== null) {
+      expect(Object.keys(request.harness).sort()).toEqual(['model', 'provider']);
+      expect(request.harness.provider).not.toBe('');
+      expect(request.harness.model).not.toBe('');
+    }
   }
   if (request.kind === 'set-checkout' || request.kind === 'cancel-checkout') {
     expect(Number.isSafeInteger(request.change) && request.change > 0).toBe(true);
@@ -91,19 +103,29 @@ describe('parseWelcomeRequest', () => {
     }
   });
 
-  test('a start carries the task, the run arguments as typed, and its token', () => {
+  test('a start carries the task, the run arguments as typed, its harness, and its token', () => {
     expect(
-      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', '--rounds 2', 3]),
+      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', '--rounds 2', null, 3]),
     ).toEqual({
       kind: 'start',
       host: {kind: 'local'},
       project: '/p',
       task: 'spsc',
       args: '--rounds 2',
+      harness: null,
       start: 3,
     });
+    const harness = {provider: 'claude', model: 'claude-a'};
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', '', harness, 3]),
+    ).toMatchObject({kind: 'start', harness});
+    for (const bad of ['claude-a', {...harness, allow_unvetted: true}, {model: 'm'}]) {
+      expect(() =>
+        parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', '', bad, 3]),
+      ).toThrow('pick one of the vetted models, or the project default');
+    }
     expect(() =>
-      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', ['--rounds'], 3]),
+      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', ['--rounds'], null, 3]),
     ).toThrow('the run arguments must be text');
     expect(() =>
       parseWelcomeRequest(WELCOME_CHANNELS.resume, ['local', '/p', '-oProxyCommand']),
@@ -126,25 +148,19 @@ describe('parseWelcomeRequest', () => {
     );
   });
 
-  test('inspection validates the host and id and treats only true as log consent', () => {
-    expect(
-      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['ssh:gpu', '0123456789ab', true, 7]),
-    ).toEqual({
+  test('inspection validates the host and id and asks for no server log', () => {
+    expect(parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['ssh:gpu', '0123456789ab', 7])).toEqual({
       kind: 'inspect',
       host: {kind: 'ssh', alias: 'gpu'},
       instance: '0123456789ab',
-      includeLog: true,
       inspection: 7,
     });
     expect(() =>
-      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', 'true', 8]),
-    ).toThrow('include log must be a boolean');
-    expect(() =>
-      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', false, 0]),
+      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', 0]),
     ).toThrow('an inspection is named by a positive integer');
-    expect(() =>
-      parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '../etc', false, 9]),
-    ).toThrow('12-digit instance id');
+    expect(() => parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '../etc', 9])).toThrow(
+      '12-digit instance id',
+    );
     expect(parseWelcomeRequest(WELCOME_CHANNELS.cancelInspection, [9])).toEqual({
       kind: 'cancel-inspection',
       inspection: 9,
@@ -152,6 +168,46 @@ describe('parseWelcomeRequest', () => {
     expect(() => parseWelcomeRequest(WELCOME_CHANNELS.cancelInspection, [0])).toThrow(
       'an inspection is named by a positive integer',
     );
+  });
+
+  test('a logs request names its host and instance, and a read only that instance', () => {
+    const read = {
+      instance_id: '0123456789ab',
+      stream_id: 's1',
+      start: {tail_bytes: 1024},
+      max_bytes: 4096,
+      wait_ms: 0,
+    };
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.logs, [
+        'ssh:gpu',
+        '0123456789ab',
+        {kind: 'read', token: 'l1', read},
+      ]),
+    ).toEqual({
+      kind: 'logs',
+      host: {kind: 'ssh', alias: 'gpu'},
+      instance: '0123456789ab',
+      request: {kind: 'read', token: 'l1', read},
+    });
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.logs, [
+        'local',
+        '0123456789ab',
+        {kind: 'withdraw', token: 'l1'},
+      ]),
+    ).toMatchObject({kind: 'logs', request: {kind: 'withdraw', token: 'l1'}});
+    expect(() =>
+      parseWelcomeRequest(WELCOME_CHANNELS.logs, [
+        'local',
+        '0123456789ab',
+        {kind: 'read', token: 'l2', read: {...read, instance_id: 'ba9876543210'}},
+      ]),
+    ).toThrow('the logs read names ba9876543210, not 0123456789ab');
+    expect(() =>
+      parseWelcomeRequest(WELCOME_CHANNELS.logs, ['local', '0123456789ab', {kind: 'tail'}]),
+    ).toThrow('the logs request is not a listing, a read, or a withdrawal');
+    expect(parseWelcomeRequest(WELCOME_CHANNELS.releaseLogs, [])).toEqual({kind: 'release-logs'});
   });
 
   test('an unknown channel is refused by name', () => {
@@ -177,9 +233,6 @@ describe('parseWelcomeRequest', () => {
   test('required boolean fields preserve both true and false', () => {
     for (const value of [false, true]) {
       expect(
-        parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', value, 1]),
-      ).toMatchObject({kind: 'inspect', includeLog: value});
-      expect(
         parseWelcomeRequest(WELCOME_CHANNELS.stop, ['local', '0123456789ab', value]),
       ).toMatchObject({kind: 'stop', force: value});
     }
@@ -187,9 +240,6 @@ describe('parseWelcomeRequest', () => {
 
   test('regression: malformed boolean fields are rejected instead of authorizing false', () => {
     for (const value of [undefined, null, 0, 1, 'false', 'true', {}, []]) {
-      expect(() =>
-        parseWelcomeRequest(WELCOME_CHANNELS.inspect, ['local', '0123456789ab', value, 1]),
-      ).toThrow('include log must be a boolean');
       expect(() =>
         parseWelcomeRequest(WELCOME_CHANNELS.stop, ['local', '0123456789ab', value]),
       ).toThrow('force stop must be a boolean');

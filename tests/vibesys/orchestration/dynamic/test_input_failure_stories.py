@@ -1,8 +1,9 @@
 """What the search does with an input whose own benchmark fails, round after round.
 
-The input is measured once, before any candidate. When its benchmark fails, that is a permanent
-fact of the input revision: every planning turn of the run is told the failure and what the
-evaluator printed, the input has no baseline value, and the best candidate wins. How the failure
+The input is measured once, before any candidate (the first planning turn may be asked while it is
+still being measured). When its benchmark fails, that is a permanent fact of the input revision:
+every planning turn after the measurement is told the failure and what the evaluator printed, the
+input has no baseline value, and the best candidate wins. How the failure
 is classified from the evaluator's evidence (`test_input_measurement.py` in `tests/vibesys/candidates`),
 how often the backend measures an ambiguous failure (`libs/vs-runtime`) and that a restarted host
 neither measures the input again nor redoes finished work (core's recovery, which `FlowRun` adds
@@ -24,17 +25,21 @@ from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.candidates.api import InputFailureKind
-from vibesys.orchestration.dynamic.search.api import PlannerPrompt, PromptTemplate
-from vs_core.api import Finish, Measure, Operation, RevisionRef, StartAttempt, Wait
+from vibesys.orchestration.dynamic.search.api import (
+    PlannerCorrection,
+    PlannerPrompt,
+    PromptTemplate,
+)
+from vs_core.api import FailureReason, Finish, Measure, Operation, RevisionRef, StartAttempt, Wait
 
 MODES = across_restarts
 # What a benchmark that stopped itself printed, with a run of backticks that could close a fence.
 STOP_TEXT = "warmup stopped: 1/100 rounds ```python"
 
 
-def _planner_prompt(host: EvidenceHost) -> PlannerPrompt:
+def _planner_prompt(host: EvidenceHost) -> PlannerPrompt | PlannerCorrection:
     context = host.run.expect_turn(role=PLANNER_LABEL).context
-    assert isinstance(context, PlannerPrompt)
+    assert isinstance(context, PlannerPrompt | PlannerCorrection)
     return context
 
 
@@ -49,7 +54,7 @@ def _input_measurements(host: EvidenceHost) -> int:
 
 
 @MODES
-def test_input_benchmark_failure_is_told_to_every_planning_turn_and_the_best_candidate_wins(
+def test_input_benchmark_failure_is_told_to_every_later_planning_turn_and_the_best_candidate_wins(
     *, restarting: bool
 ) -> None:
     host = begin_with_evidence(
@@ -59,6 +64,8 @@ def test_input_benchmark_failure_is_told_to_every_planning_turn_and_the_best_can
         crash_text=STOP_TEXT,
     )
     host.drain_until_turn(PLANNER_LABEL)
+    pending = _planner_prompt(host)
+    host.run.fail(host.run.expect_turn(role=PLANNER_LABEL), FailureReason.TIMED_OUT)
     first = _planner_prompt(host)
     plan(host, implement("h1"))
     finish_workstream(host, "h1", "c1")
@@ -74,7 +81,10 @@ def test_input_benchmark_failure_is_told_to_every_planning_turn_and_the_best_can
     finish_workstream(host, "h2", "c2")
     host.drain()
 
+    assert pending.baseline_pending
+    assert pending.input_failure is None
     for prompt in (first, second):
+        assert not prompt.baseline_pending
         assert prompt.input_failure is not None
         assert prompt.input_failure.kind is InputFailureKind.BENCHMARK_FAILED
         assert prompt.input_failure.output == STOP_TEXT

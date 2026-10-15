@@ -16,7 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, precondition, rule
 
-from vs_sim.api import ProcessTimedOut
+from vs_sim.api import DISCARD, OutputSink, ProcessTimedOut
 from vs_sim.api.testing import ManualClock, examples, wait_until_started_sync
 from vs_slurm.api import (
     INITIAL_LIFE,
@@ -886,11 +886,14 @@ def test_local_rejection_survives_lost_remote_rejection_publication(tmp_path: Pa
     connector.script("rejected-publication", rejected_reason="staging rejected")
 
     class _LosesRejectionPublication:
-        def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        def run(
+            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink
+        ) -> ProcessRun:
+            del output
             if b"rejected.json.pending." in spec.input:
                 message = "rejection publication unavailable"
                 raise OSError(message)
-            return connector.run(spec, timeout=timeout)
+            return connector.run(spec, timeout=timeout, output=DISCARD)
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -931,8 +934,10 @@ def test_fresh_operation_transport_failures_are_typed_unknown(
     tmp_path: Path, action: str, error: Exception | ProcessTimedOut
 ) -> None:
     class _Fails:
-        def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
-            del spec, timeout
+        def run(
+            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink
+        ) -> ProcessRun:
+            del spec, timeout, output
             if isinstance(error, ProcessTimedOut):
                 return error
             raise error
@@ -977,6 +982,66 @@ def test_artifact_destination_failure_preserves_typed_unknown_evidence(case: _Ca
     assert isinstance(outcome.result, SlurmJobResult)
     assert outcome.result.exit_code == 0
     assert outcome.result.collection_failure
+
+
+def test_collect_lands_artifacts_where_the_callers_handle_says(case: _Case) -> None:
+    """A run attaching to another run's job (#2757) collects into its own workspace."""
+    submitter = case.workspace.parent / "submitter" / "evidence.txt"
+    attacher = case.workspace.parent / "attacher" / "evidence.txt"
+    case.script(
+        "attached",
+        states=(SlurmJobStatus.COMPLETED,),
+        result=SlurmBatchResult(
+            job_id="42",
+            job_exit_code=0,
+            job_output="",
+            stages=(
+                SlurmBatchStageResult(
+                    name="work",
+                    exit_code=0,
+                    stdout="",
+                    stderr="",
+                    elapsed_seconds=0.0,
+                    skipped=False,
+                ),
+            ),
+            phase_timings_seconds={},
+            content_cache_hits=0,
+        ),
+        artifact_contents={"evidence.txt": "evidence"},
+    )
+    request = SlurmBatchRequest(
+        workspace=case.workspace,
+        stages=(
+            SlurmBatchStage(
+                name="work",
+                command=("sh", "-c", "printf evidence > evidence.txt"),
+                file_artifacts=(SlurmFileArtifact("evidence.txt", submitter),),
+            ),
+        ),
+    )
+    submitted = case.cluster.submit(request, operation_id="attached")
+    assert isinstance(submitted, ClusterSubmitted)
+    assert isinstance(submitted.handle, SlurmBatchHandle)
+    stage = submitted.handle.stages[0]
+    rebased = submitted.handle.model_copy(
+        update={
+            "stages": (
+                stage.model_copy(
+                    update={
+                        "file_artifacts": tuple(
+                            item.model_copy(update={"local_path": attacher})
+                            for item in stage.file_artifacts
+                        )
+                    }
+                ),
+            )
+        }
+    )
+    collected = case.fresh().collect(rebased)
+    assert isinstance(collected, ClusterCollected)
+    assert attacher.read_text(encoding="utf-8") == "evidence"
+    assert not submitter.exists()
 
 
 def test_cancellation_reconciles_a_job_that_completed_after_last_observation(case: _Case) -> None:

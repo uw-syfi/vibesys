@@ -17,6 +17,7 @@ from vs_sandbox.slurm_broker import _write_reply
 # test-isolation: this pins the exact shared broker wire envelope around the public transport cap.
 from vs_sandbox.slurm_broker_protocol import MAX_FRAME_BYTES, BrokerRan, ProcessReply
 from vs_sim.api import (
+    DISCARD,
     OsProcesses,
     ProcessOutcome,
     ProcessOutputTooLarge,
@@ -48,7 +49,7 @@ def _brokered(
     broker: SlurmProcessBroker, argv: tuple[str, ...], stdin: bytes = b"", timeout: float = 5
 ) -> ProcessOutcome:
     processes = BrokeredProcesses(broker.socket_path, broker.token, network=UnixNetwork())
-    run = processes.run(ProcessSpec(argv, input=stdin), timeout=timeout)
+    run = processes.run(ProcessSpec(argv, input=stdin), timeout=timeout, output=DISCARD)
     assert isinstance(run, ProcessOutcome)
     return run
 
