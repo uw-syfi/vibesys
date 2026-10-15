@@ -29,6 +29,15 @@
     },
     {
       "path": "../../libs/transport/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/logs/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/machine/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/contracts/tsconfig.host-helper.json"
     }
   ]
 }
