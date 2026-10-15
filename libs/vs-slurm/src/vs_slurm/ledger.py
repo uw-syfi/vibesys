@@ -38,6 +38,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+
 from vs_decode.api import Unreadable, decode_json
 
 from .runner import (
