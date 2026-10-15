@@ -106,6 +106,69 @@ describe('core state projection', () => {
     expect(rejected.diagnostics[0]?.code).toBe('run_identity_mismatch');
   });
 
+  it('rejects a completed fragmented checkpoint whose deferred batch was foreign', () => {
+    const checkpointId = 'a'.repeat(64);
+    const current = reduceEventBatch(
+      initialCoreState(),
+      [{...outputEvent(1, 'kept'), run_id: 'run-a'}],
+      [checkpoint('mine')],
+      1,
+      0,
+    );
+    const deferred = reduceEventBatch(
+      current,
+      [{...outputEvent(2, 'foreign'), run_id: 'run-b'}],
+      null,
+      2,
+      17,
+      {kind: 'deferred', checkpointId},
+    );
+
+    expect(Object.keys(deferred.activeExecutions)).toEqual(['mine']);
+    const completed = reduceEventBatch(deferred, [], [checkpoint('theirs')], 2, 17, {
+      kind: 'complete',
+      checkpointId,
+    });
+
+    expect(completed.runId).toBe('run-a');
+    expect(completed.sequence).toBe(1);
+    expect(completed.historyAfterSequence).toBe(0);
+    expect(Object.keys(completed.activeExecutions)).toEqual(['mine']);
+    expect(completed.diagnostics[0]?.code).toBe('run_identity_mismatch');
+  });
+
+  it('keeps a single stream event inside an incomplete checkpoint transaction', () => {
+    const checkpointId = 'd'.repeat(64);
+    const previous = reduceEventBatch(
+      initialCoreState(),
+      [executionEvent(1, 'agent_execution_started', 'previous', startedData('Previous'))],
+      [checkpoint('previous')],
+      1,
+      0,
+    );
+    const deferred = reduceEventBatch(
+      previous,
+      [executionEvent(2, 'agent_execution_started', 'replacement', startedData('Replacement'))],
+      null,
+      2,
+      0,
+      {kind: 'deferred', checkpointId},
+    );
+
+    const streamed = reduceEvent(
+      deferred,
+      statusEvent(3, 'replacement', 'agent_output_chunk', {progress: 'Streamed'}),
+    );
+    expect(Object.keys(streamed.activeExecutions)).toEqual(['previous']);
+    expect(streamed.executionStatuses.replacement).toBeUndefined();
+
+    const completed = reduceEventBatch(streamed, [], [checkpoint('replacement')], 3, 0, {
+      kind: 'complete',
+      checkpointId,
+    });
+    expect(completed.executionStatuses.replacement?.progress).toBe('Streamed');
+  });
+
   it('applies the identity guard to snapshots and response events', () => {
     const current = reduceSnapshot(initialCoreState(), {
       run_id: 'run-a',
@@ -152,6 +215,199 @@ describe('core state projection', () => {
     expect(state.transcript.map(entry => entry.content)).toEqual(['kept']);
     expect(state.agentKind).toBe('judge');
     expect(state.activeExecutions['exec-1']?.roundNumber).toBe(2);
+  });
+
+  it('keeps a newer snapshot authoritative over a pending fragmented checkpoint', () => {
+    const checkpointId = 'a'.repeat(64);
+    const current = reduceEventBatch(
+      initialCoreState(),
+      [
+        {
+          ...executionEvent(8, 'agent_execution_started', 'previous', startedData('Previous')),
+          run_id: 'run',
+        },
+        {
+          ...statusEvent(9, 'previous', 'agent_output_chunk', {progress: 'Previous progress'}),
+          run_id: 'run',
+        },
+      ],
+      [checkpoint('previous')],
+      9,
+      0,
+    );
+    const deferred = reduceEventRebootstrap(
+      current,
+      [
+        {...fixtureEvent(9, 'server_ready'), run_id: 'run'},
+        {
+          ...executionEvent(
+            10,
+            'agent_execution_started',
+            'replacement',
+            startedData('Replacement'),
+          ),
+          run_id: 'run',
+        },
+        {
+          ...statusEvent(11, 'replacement', 'agent_output_chunk', {
+            progress: 'Reviewing output',
+          }),
+          run_id: 'run',
+        },
+      ],
+      null,
+      11,
+      0,
+      {kind: 'deferred', checkpointId},
+    );
+
+    const snapshotted = reduceSnapshot(deferred, {
+      run_id: 'run',
+      status: 'running',
+      sequence: 12,
+      active_executions: [checkpoint('replacement')],
+    });
+    const completed = reduceEventBatch(snapshotted, [], [checkpoint('stale')], 11, 0, {
+      kind: 'complete',
+      checkpointId,
+    });
+
+    expect(Object.keys(completed.activeExecutions)).toEqual(['replacement']);
+    expect(completed.executionStatuses['replacement']?.progress).toBe('Reviewing output');
+  });
+
+  it('lets later frames advance a checkpoint beyond a racing snapshot', () => {
+    const checkpointId = 'a'.repeat(64);
+    const deferred = reduceEventRebootstrap(
+      initialCoreState(),
+      [
+        {...fixtureEvent(9, 'server_ready'), run_id: 'run'},
+        {
+          ...executionEvent(
+            10,
+            'agent_execution_started',
+            'replacement',
+            startedData('Replacement'),
+          ),
+          run_id: 'run',
+        },
+      ],
+      null,
+      10,
+      0,
+      {kind: 'deferred', checkpointId},
+    );
+    const snapshotted = reduceSnapshot(deferred, {
+      run_id: 'run',
+      status: 'running',
+      sequence: 11,
+      active_executions: [
+        checkpoint('replacement', {
+          activity: {
+            kind: 'agent_execution_activity_changed',
+            mode: 'thinking',
+            summary: 'Snapshot',
+            tool: null,
+          },
+        }),
+      ],
+    });
+    const continued = reduceEventBatch(
+      snapshotted,
+      [
+        {
+          ...statusEvent(12, 'replacement', 'agent_output_chunk', {
+            progress: 'Reviewing output',
+          }),
+          run_id: 'run',
+        },
+      ],
+      null,
+      12,
+      7,
+      {kind: 'deferred', checkpointId},
+    );
+    expect(continued.activeExecutions['replacement']?.activity.summary).toBe('Snapshot');
+
+    const completed = reduceEventBatch(
+      continued,
+      [],
+      [
+        checkpoint('replacement', {
+          activity: {
+            kind: 'agent_execution_activity_changed',
+            mode: 'thinking',
+            summary: 'Final checkpoint',
+            tool: null,
+          },
+        }),
+      ],
+      12,
+      7,
+      {kind: 'complete', checkpointId},
+    );
+
+    expect(completed.activeExecutions['replacement']?.activity.summary).toBe('Final checkpoint');
+    expect(completed.executionStatuses['replacement']?.progress).toBe('Reviewing output');
+    expect(completed.historyAfterSequence).toBe(7);
+  });
+
+  it('keeps snapshot liveness against every older checkpoint, not only its pending transfer', () => {
+    const snapshotted = reduceSnapshot(initialCoreState(), {
+      run_id: 'run',
+      status: 'running',
+      sequence: 12,
+      active_executions: [
+        checkpoint('snapshot', {
+          activity: {
+            kind: 'agent_execution_activity_changed',
+            mode: 'thinking',
+            summary: 'Snapshot view',
+            tool: null,
+          },
+        }),
+      ],
+    });
+    const stale = reduceEventBatch(
+      snapshotted,
+      [
+        {
+          ...executionEvent(11, 'agent_execution_started', 'stale', startedData('Stale')),
+          run_id: 'run',
+        },
+      ],
+      [checkpoint('stale')],
+      11,
+      0,
+    );
+
+    expect(Object.keys(stale.activeExecutions)).toEqual(['snapshot']);
+    expect(stale.activeExecutions.snapshot?.activity.summary).toBe('Snapshot view');
+
+    const current = reduceEventBatch(stale, [], [checkpoint('current')], 13, 0);
+    expect(Object.keys(current.activeExecutions)).toEqual(['current']);
+  });
+
+  it('starts a deferred rebootstrap fresh even when its checkpoint digest is unchanged', () => {
+    const checkpointId = 'a'.repeat(64);
+    const previous = reduceEventRebootstrap(
+      initialCoreState(),
+      [outputEvent(1, 'old log')],
+      null,
+      1,
+      0,
+      {kind: 'deferred', checkpointId},
+    );
+    const replacement = reduceEventRebootstrap(
+      previous,
+      [outputEvent(1, 'replacement log')],
+      null,
+      1,
+      0,
+      {kind: 'deferred', checkpointId},
+    );
+
+    expect(replacement.transcript.map(entry => entry.content)).toEqual(['replacement log']);
   });
 
   it('rejects a snapshot older than the projected event cursor', () => {
@@ -1509,6 +1765,50 @@ describe('events delivered in an RPC response', () => {
     raced = reduceEvent(raced, newer);
 
     expect(raced.chatThreads).toEqual(canonical.chatThreads);
+  });
+
+  it('stages response execution facts inside an incomplete checkpoint transaction', () => {
+    const checkpointId = 'c'.repeat(64);
+    const previous = reduceEventBatch(
+      initialCoreState(),
+      [executionEvent(1, 'agent_execution_started', 'previous', startedData('Previous'))],
+      [checkpoint('previous')],
+      1,
+      0,
+    );
+    const started = executionEvent(
+      2,
+      'agent_execution_started',
+      'replacement',
+      startedData('Replacement'),
+    );
+    const responseStatus = statusEvent(3, 'replacement', 'agent_output_chunk', {
+      progress: 'Arrived by response',
+    });
+    const deferred = reduceEventBatch(previous, [started], null, 2, 0, {
+      kind: 'deferred',
+      checkpointId,
+    });
+
+    const responded = reduceResponseEvents(deferred, [responseStatus]);
+    expect(Object.keys(responded.activeExecutions)).toEqual(['previous']);
+    expect(responded.executionStatuses.replacement).toBeUndefined();
+
+    const completed = reduceEventBatch(responded, [], [checkpoint('replacement')], 3, 0, {
+      kind: 'complete',
+      checkpointId,
+    });
+    expect(completed.executionStatuses.replacement?.progress).toBe('Arrived by response');
+
+    const caught = reduceEvent(completed, responseStatus);
+    const ordinary = reduceEventBatch(
+      previous,
+      [started, responseStatus],
+      [checkpoint('replacement')],
+      3,
+      0,
+    );
+    expect(caught).toEqual(ordinary);
   });
 
   it('reproduces a whole-stream fold however the two routes race', () => {

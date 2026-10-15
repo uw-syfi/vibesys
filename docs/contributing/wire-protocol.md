@@ -81,12 +81,15 @@ checkpoint and any one event cannot share a bounded batch, the event frames carr
 `active_executions: null`, meaning "preserve the last complete checkpoint while this replay updates
 it", plus `active_executions_checkpoint_id`, followed by ordered `active_executions_chunk` messages
 with that identity. Their payloads concatenate to the JSON encoding of the generated
-`ActiveExecutions` type. The persistent client stream owns reassembly for one connection generation
-and emits one synthetic `event_batch` only after the complete payload validates and its SHA-256
-matches `checkpoint_id`. An ordinary live transfer needs only the completed checkpoint. A
-rebootstrap transfer also repeats its retained replay events and `rebootstrap: true`, rebuilding the
-same state as the unsplit authoritative batch instead of reconciling into the pre-replay fold. A
-checkpoint prefix is never passed to the run-state fold. Fragments require the
+`ActiveExecutions` type. The persistent client stream owns reassembly for one connection generation.
+Each deferred event frame folds exactly once into a private, serializable execution projection while
+the public state retains its last complete execution checkpoint and statuses. After the complete
+payload validates and its SHA-256 matches `checkpoint_id`, the stream emits one synthetic empty,
+non-rebootstrap `event_batch`; folding it atomically publishes the staged execution projection and
+the authoritative checkpoint without retaining or replaying the event frames. An ordinary live
+transfer needs only the completed checkpoint. A rebootstrap transfer rebuilds the same state as the
+unsplit authoritative batch inside that private transaction instead of reconciling into the
+pre-replay fold. A checkpoint prefix is never passed to the run-state fold. Fragments require the
 matching deferred batch immediately before their transfer; a new deferred or ordinary authoritative
 batch supersedes an interrupted transfer and fences its late fragments. A gap, duplicate,
 interleaved unrelated message, changed identity, changed cursor metadata, or content digest mismatch

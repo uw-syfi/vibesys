@@ -13,6 +13,7 @@ import {
   type PersistentEventStreamCallbacks,
   type PersistentEventStreamOptions,
   type StreamConnectionState,
+  type StreamMessageContext,
   type StreamTransport,
 } from './persistent-event-stream.js';
 import {expect} from './test-support/expect.js';
@@ -99,15 +100,11 @@ interface Env {
 
 function harness(env: Env): {
   callbacks: PersistentEventStreamCallbacks;
-  messages: Array<{message: ServerMessage; resumed: boolean; connectionGeneration: number}>;
+  messages: Array<{message: ServerMessage} & StreamMessageContext>;
   states: StreamConnectionState[];
   nextState(): Promise<StreamConnectionState>;
 } {
-  const messages: Array<{
-    message: ServerMessage;
-    resumed: boolean;
-    connectionGeneration: number;
-  }> = [];
+  const messages: Array<{message: ServerMessage} & StreamMessageContext> = [];
   const states: StreamConnectionState[] = [];
   const stateWaiters: Array<(state: StreamConnectionState) => void> = [];
   return {
@@ -410,30 +407,45 @@ describe('PersistentEventStream', () => {
       active_executions: null,
       rebootstrap: true,
     });
+    expect(messages[0]?.activeExecutionCheckpoint).toEqual({
+      kind: 'deferred',
+      checkpointId: id,
+    });
+    expect(messages[1]?.activeExecutionCheckpoint).toEqual({
+      kind: 'deferred',
+      checkpointId: id,
+    });
 
     transport.emit(chunk(1, payload.slice(split)));
     expect(messages).toHaveLength(3);
     expect(messages[2]?.message).toMatchObject({
       type: 'event_batch',
-      events: replayEvents,
+      events: [],
       through_sequence: 9,
       store_id: 'store',
       history_after_sequence: 3,
       active_executions: [{execution_id: 'new-execution'}],
-      rebootstrap: true,
+      rebootstrap: false,
     });
+    expect(messages[2]?.activeExecutionCheckpoint).toEqual({
+      kind: 'complete',
+      checkpointId: id,
+    });
+    expect(
+      messages.flatMap(({message}) => (message.type === 'event_batch' ? message.events : [])),
+    ).toEqual(replayEvents);
     await stream.close();
   });
 
-  it('stages many singleton replay frames before one authoritative replay', async () => {
+  it('does not retain or repeat many singleton frames before checkpoint completion', async () => {
     const transport = new StubTransport();
     const {callbacks, messages} = harness({cursor: 0, reconnect: true});
     const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
     await stream.subscribe(callbacks);
     const checkpoint = '[]';
     const id = checkpointId(checkpoint);
-    // Rebuilding the cumulative history for this input copies about 1.25B
-    // event references; frame staging keeps the regression purely structural.
+    // Retaining these frames in the assembler would make an otherwise bounded
+    // checkpoint transaction grow with every valid event frame.
     const frameCount = 50_000;
 
     for (let sequence = 1; sequence <= frameCount; sequence += 1) {
@@ -458,10 +470,27 @@ describe('PersistentEventStream', () => {
     expect(messages).toHaveLength(frameCount + 1);
     const completed = messages.at(-1)?.message;
     if (completed?.type !== 'event_batch') throw new Error('Expected the completed checkpoint');
-    expect(completed.events).toHaveLength(frameCount);
-    for (let index = 0; index < frameCount; index += 1) {
-      expect(completed.events[index]?.sequence).toBe(index + 1);
-    }
+    expect(completed.events).toEqual([]);
+    expect(completed.rebootstrap).toBe(false);
+    await stream.close();
+  });
+
+  it('rejects a rebootstrap marker after the first deferred event frame', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const id = checkpointId('[]');
+
+    transport.emit(deferredCheckpoint(id, 1, {events: [event(1, 'agent_output_chunk')]}));
+    expect(() =>
+      transport.emit(
+        deferredCheckpoint(id, 2, {
+          events: [event(2, 'agent_output_chunk')],
+          rebootstrap: true,
+        }),
+      ),
+    ).toThrow('rebootstrap marker repeated after the first deferred event frame');
     await stream.close();
   });
 

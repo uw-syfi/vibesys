@@ -1,7 +1,6 @@
 import type {
   ActiveExecutionsChunkMessage,
   EventBatchMessage,
-  RunEvent,
   ServerMessage,
 } from '@vibesys/contracts';
 import {BackendClientError, parseActiveExecutionsCheckpoint} from '@vibesys/contracts';
@@ -21,8 +20,6 @@ interface StagedCheckpoint {
   readonly throughSequence: number;
   readonly storeId: string;
   readonly historyAfterSequence: number;
-  readonly replayFrames: Array<readonly RunEvent[]>;
-  readonly rebootstrap: boolean;
 }
 
 interface DeferredCheckpoint {
@@ -30,11 +27,33 @@ interface DeferredCheckpoint {
   readonly throughSequence: number;
   readonly storeId: string;
   readonly historyAfterSequence: number;
-  readonly replayFrames: Array<readonly RunEvent[]>;
-  readonly rebootstrap: boolean;
 }
 
 type SemanticServerMessage = Exclude<ServerMessage, {type: 'active_executions_chunk'}>;
+
+export interface ActiveExecutionCheckpointDisposition {
+  readonly kind: 'deferred' | 'complete';
+  readonly checkpointId: string;
+}
+
+const completedCheckpoints = new WeakMap<EventBatchMessage, string>();
+
+/**
+ * Describes the private fold transaction carried by an event batch.
+ *
+ * Deferred wire batches name themselves. Completed batches are synthetic
+ * objects produced below and are branded out of band, keeping the wire model
+ * closed while letting the run fold commit its staged execution projection.
+ */
+export function activeExecutionCheckpointDisposition(
+  message: EventBatchMessage,
+): ActiveExecutionCheckpointDisposition | undefined {
+  if (message.active_executions === null) {
+    return {kind: 'deferred', checkpointId: message.active_executions_checkpoint_id};
+  }
+  const checkpointId = completedCheckpoints.get(message);
+  return checkpointId === undefined ? undefined : {kind: 'complete', checkpointId};
+}
 
 function checkpointFailure(message: string): BackendClientError {
   return new BackendClientError('parse', `Invalid active-execution checkpoint: ${message}`);
@@ -44,6 +63,9 @@ function requireDeferredContinuation(
   previous: DeferredCheckpoint,
   message: EventBatchMessage,
 ): void {
+  if (message.rebootstrap === true) {
+    throw checkpointFailure('rebootstrap marker repeated after the first deferred event frame');
+  }
   if (
     message.store_id !== previous.storeId ||
     message.history_after_sequence !== previous.historyAfterSequence ||
@@ -98,19 +120,11 @@ export class ActiveExecutionCheckpointAssembler {
       // identity fences every late fragment of the abandoned transfer.
       this.reset();
     } else if (deferred !== null) requireDeferredContinuation(deferred, message);
-    const continuation = this.#deferred;
-    const rebootstrap = (continuation?.rebootstrap ?? false) || message.rebootstrap === true;
-    // Retain each input frame once. Rebuilding one accumulated array here
-    // makes a fragmented replay quadratic in the number of delivered events.
-    const replayFrames = continuation?.replayFrames ?? [];
-    if (rebootstrap && message.events.length > 0) replayFrames.push(message.events);
     this.#deferred = {
       checkpointId,
       throughSequence: message.through_sequence ?? 0,
       storeId: message.store_id ?? '',
       historyAfterSequence: message.history_after_sequence ?? 0,
-      replayFrames,
-      rebootstrap,
     };
   }
 
@@ -144,8 +158,6 @@ export class ActiveExecutionCheckpointAssembler {
         throughSequence: message.through_sequence,
         storeId: message.store_id,
         historyAfterSequence: message.history_after_sequence,
-        replayFrames: deferred.replayFrames,
-        rebootstrap: deferred.rebootstrap,
       };
     } else {
       this.#append(message);
@@ -158,23 +170,20 @@ export class ActiveExecutionCheckpointAssembler {
       throw checkpointFailure('checkpoint_id does not match the assembled UTF-8 payload');
     }
     const activeExecutions = parseActiveExecutionsCheckpoint(payload);
-    // The completed semantic batch is the only owner that needs one flat
-    // history. Release the staging references as soon as ownership transfers.
-    const replayEvents = staged.rebootstrap ? staged.replayFrames.flat() : [];
-    staged.replayFrames.length = 0;
-    return {
+    const completed: EventBatchMessage = {
       type: 'event_batch',
-      // A deferred rebootstrap was already projected over the previous public
-      // checkpoint. Replaying it once with the complete checkpoint rebuilds
-      // the same state as the unsplit authoritative batch; an ordinary live
-      // transfer keeps its already-folded events deduplicated.
-      events: replayEvents,
+      // Every deferred event frame was already folded exactly once. Completion
+      // publishes only the authoritative checkpoint, so the assembler retains
+      // no unbounded replay history and consumers observe no duplicate effects.
+      events: [],
       through_sequence: staged.throughSequence,
       active_executions: activeExecutions,
       store_id: staged.storeId,
       history_after_sequence: staged.historyAfterSequence,
-      rebootstrap: staged.rebootstrap,
+      rebootstrap: false,
     };
+    completedCheckpoints.set(completed, staged.checkpointId);
+    return completed;
   }
 
   #append(message: ActiveExecutionsChunkMessage): void {

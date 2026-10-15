@@ -106,14 +106,17 @@ def test_folding_the_chunks_in_order_is_folding_the_batch(
       earlier chunks of the same replay.
     - Each cursor is the last sequence its chunk carried, except the final
       one, which keeps the batch's watermark.
-    - Each chunk fits the budget unless it is a lone event (or the empty
-      checkpoint) that alone does not.
+    - Every returned chunk fits the budget; an impossible event or checkpoint
+      rejects the projection instead of being mislabeled as bounded.
     - No split is premature: two neighbors joined under the batch's longest
       envelope would not have fit.
     """
     batch = _batch(texts, watermark_gap=watermark_gap, rebootstrap=rebootstrap, floor=floor)
 
-    chunks = list(batch.split_within(budget))
+    try:
+        chunks = list(batch.split_within(budget))
+    except ValueError:
+        return
 
     assert chunks
     assert [event for chunk in chunks for event in chunk.events] == batch.events
@@ -129,12 +132,23 @@ def test_folding_the_chunks_in_order_is_folding_the_batch(
         for chunk in chunks
     )
     for chunk in chunks:
-        assert len(chunk.model_dump_json().encode()) <= budget or len(chunk.events) <= 1
+        assert len(chunk.model_dump_json().encode()) <= budget
     for left, right in pairwise(chunks):
         merged = batch.model_copy(
             update={"events": [*left.events, *right.events], "rebootstrap": False}
         )
         assert len(merged.model_dump_json().encode()) > budget
+
+
+def test_whole_batch_split_rejects_an_oversized_empty_checkpoint() -> None:
+    """The legacy whole-batch API never calls an oversized checkpoint bounded."""
+    batch = EventBatchMessage(
+        events=[],
+        active_executions=[_active(0, "x" * 1_100_000)],
+    )
+
+    with pytest.raises(ValueError, match="frame budget"):
+        next(batch.split_within(MAX_SERVER_MESSAGE_BYTES))
 
 
 @settings(max_examples=examples(pr=30, nightly=300))

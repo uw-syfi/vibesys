@@ -1,3 +1,4 @@
+export type {ActiveExecutionCheckpointDisposition} from './active-execution-checkpoint.js';
 export {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 export {
   ControlChannel,

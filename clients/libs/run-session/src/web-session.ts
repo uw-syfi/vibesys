@@ -308,7 +308,14 @@ export class WebSession {
     const firstGeneration = previousStoreId === null;
     const storeReplaced = previousStoreId !== null && storeId !== previousStoreId;
     const previousRun = this.store.getState();
-    this.#dispatchRun({type: 'batch', message, reconciliation});
+    this.#dispatchRun({
+      type: 'batch',
+      message,
+      reconciliation,
+      ...(context.activeExecutionCheckpoint === undefined
+        ? {}
+        : {activeExecutionCheckpoint: context.activeExecutionCheckpoint}),
+    });
     const rejection = runIdentityRejection(previousRun, this.store.getState());
     this.#streamStoreId = storeId;
     if (storeReplaced) {

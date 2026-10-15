@@ -769,51 +769,24 @@ class EventBatchMessage(ProtocolModel):
           would tell the consumer to discard the earlier chunks of the same
           replay.
 
-        Chunking is on serialized size, not on event count: measured on a run of
-        output events the per-event JSON ranges from 282 to 647 bytes, so no
-        count is both safe and economical. The split is computed from measured
-        byte lengths rather than by serializing candidate chunks, which would be
-        quadratic. The arithmetic is exact because compact JSON renders a list
-        as its items joined by commas: a chunk costs its envelope (measured once
-        per spelling of ``rebootstrap``, at the batch's own
-        ``through_sequence``, the longest number any chunk carries) plus each
-        event's own serialization plus one separator between neighbors.
-
-        A chunk always carries at least one whole event, so an event larger than
-        the budget travels alone in an oversized chunk. The recording boundary's
-        per-event serialized-size contract keeps that case below the
-        supported-peer cap; this method neither truncates nor special-cases
-        event payloads. A batch with no events yields itself, so an empty
-        checkpoint still reports its watermark.
+        Chunking is on serialized size, not event count. If one event or the
+        repeated authoritative checkpoint cannot fit, the method fails before
+        yielding anything; callers that need bounded checkpoint fragmentation
+        use :meth:`stream_messages_within` instead.
         """
-        if not self.events:
-            yield self
-            return
-        room = budget - max(
-            len(
-                self.model_copy(update={"events": [], "rebootstrap": flag})
-                .model_dump_json()
-                .encode()
-            )
-            for flag in (False, True)
+        active_size = (
+            None
+            if self.active_executions is None
+            else _active_executions_json_size(self.active_executions)
         )
-        start = 0
-        used = 0
-        for index, event in enumerate(self.events):
-            size = len(event.model_dump_json().encode())
-            if index > start and used + 1 + size > room:
-                yield self.model_copy(
-                    update={
-                        "events": self.events[start:index],
-                        "through_sequence": self.events[index - 1].sequence,
-                        "rebootstrap": self.rebootstrap and start == 0,
-                    }
-                )
-                start, used = index, 0
-            used += size + (1 if index > start else 0)
-        yield self.model_copy(
-            update={"events": self.events[start:], "rebootstrap": self.rebootstrap and start == 0}
+        batches = _bounded_event_batches(
+            self,
+            budget=budget,
+            active_executions_size=active_size,
         )
+        if batches is None:
+            _raise_event_batch_budget_error(budget)
+        yield from batches
 
     def stream_messages_within(
         self, budget: int

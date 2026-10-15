@@ -7,6 +7,7 @@
 
 import type {EventBatchMessage, RunEvent, RunSnapshot} from '@vibesys/contracts';
 import {
+  type ActiveExecutionCheckpointFold,
   type CoreState,
   type IterationNavigationState,
   initialCoreState,
@@ -27,6 +28,11 @@ export type RunAction =
       readonly type: 'batch';
       readonly message: EventBatchMessage;
       readonly reconciliation: BatchReconciliation;
+      /**
+       * The private transaction the persistent stream derived while assembling
+       * a fragmented execution checkpoint.
+       */
+      readonly activeExecutionCheckpoint?: ActiveExecutionCheckpointFold;
     };
 
 export function runStep(state: CoreState, action: RunAction): Step<CoreState, never> {
@@ -46,6 +52,7 @@ export function runStep(state: CoreState, action: RunAction): Step<CoreState, ne
           message.active_executions,
           message.through_sequence,
           reconciliation.historyFloor,
+          action.activeExecutionCheckpoint,
         ),
       );
     }

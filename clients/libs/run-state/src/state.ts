@@ -150,6 +150,27 @@ interface CoreStateProvenance {
   readonly version: 1;
   readonly replay: ReplayProvenance;
   readonly runMap: RunMapProvenance;
+  /**
+   * Newest snapshot whose active-execution view has been accepted. Event
+   * checkpoints may replace that view only when their own watermark advances
+   * beyond this sequence. Snapshots do not move the subscription cursor, so
+   * this fence must be serializable reducer provenance rather than inferred
+   * from `CoreState.sequence`.
+   */
+  readonly activeExecutionSnapshotSequence?: number;
+  /**
+   * Execution-only working state while a fragmented authoritative checkpoint
+   * is incomplete. The public projection keeps its last complete maps; this
+   * serializable provenance lets later event frames advance the hidden maps
+   * without retaining the replay events themselves.
+   */
+  readonly activeExecutionCheckpoint?: Readonly<{
+    checkpointId: string;
+    throughSequence: number | undefined;
+    acceptsMetadata: boolean;
+    activeExecutions: Readonly<Record<string, ActiveAgentExecution>>;
+    executionStatuses: Readonly<Record<string, ExecutionStatus>>;
+  }>;
 }
 
 /**
@@ -312,6 +333,12 @@ export function rehydrateCoreState(state: CoreState): CoreState {
       responses: provenance.replay.responses,
     },
     runMap: rehydrateRunMapProvenance(provenance.runMap),
+    ...(provenance.activeExecutionSnapshotSequence === undefined
+      ? {}
+      : {activeExecutionSnapshotSequence: provenance.activeExecutionSnapshotSequence}),
+    ...(provenance.activeExecutionCheckpoint === undefined
+      ? {}
+      : {activeExecutionCheckpoint: provenance.activeExecutionCheckpoint}),
   };
   installRunMapArrays(clone, coreStateProvenance(clone).runMap);
   return publishCoreState(clone);

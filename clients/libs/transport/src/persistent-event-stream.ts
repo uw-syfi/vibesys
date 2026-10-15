@@ -1,6 +1,10 @@
 import type {ServerMessage} from '@vibesys/contracts';
 import {BackendClientError, isServerRejection} from '@vibesys/contracts';
-import {ActiveExecutionCheckpointAssembler} from './active-execution-checkpoint.js';
+import {
+  ActiveExecutionCheckpointAssembler,
+  type ActiveExecutionCheckpointDisposition,
+  activeExecutionCheckpointDisposition,
+} from './active-execution-checkpoint.js';
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 import {defaultScheduleTimeout, type ScheduleTimeout} from './control-channel.js';
 import type {EventSubscription, SubscribeOptions} from './transport.js';
@@ -34,6 +38,8 @@ export interface StreamMessageContext {
   readonly resumed: boolean;
   /** Monotone identity of the owned dial, used to distinguish in-loop from replacement batches. */
   readonly connectionGeneration: number;
+  /** Execution-checkpoint transaction metadata derived by this persistent stream. */
+  readonly activeExecutionCheckpoint?: ActiveExecutionCheckpointDisposition;
 }
 
 /** What an explicit fresh-bootstrap request means for the caller's current stream generation. */
@@ -445,7 +451,13 @@ export class PersistentEventStream {
     const batchRebootstrap = message.type === 'event_batch' && message.rebootstrap === true;
     const messageResumed = resumed && !batchRebootstrap;
     if (!messageResumed && message.type === 'event_batch') this.#bootstrapped = true;
-    this.#active().onMessage(message, {resumed: messageResumed, connectionGeneration: token});
+    const activeExecutionCheckpoint =
+      message.type === 'event_batch' ? activeExecutionCheckpointDisposition(message) : undefined;
+    this.#active().onMessage(message, {
+      resumed: messageResumed,
+      connectionGeneration: token,
+      ...(activeExecutionCheckpoint === undefined ? {} : {activeExecutionCheckpoint}),
+    });
   }
 
   /**

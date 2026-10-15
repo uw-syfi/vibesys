@@ -22,6 +22,7 @@ import {
   type ScheduleTimeout,
   type ServerTransport,
   type StreamConnectionState,
+  type StreamMessageContext,
   StreamReconciler,
 } from '@vibesys/transport';
 import type {StartupTrace} from './boot-trace.js';
@@ -413,7 +414,7 @@ export class SocketSessionController implements SessionController {
         // can be dropped if the run swapped its durable log while we were gone.
         storeId: () => this.#reconciler.storeId(),
         shouldReconnect: () => this.#shouldReconnectStream(),
-        onMessage: (message, {resumed}) => this.#onMessage(message, resumed),
+        onMessage: (message, context) => this.#onMessage(message, context),
         onConnectionState: state => this.#onConnectionState(state),
       }),
     ]);
@@ -1571,8 +1572,8 @@ export class SocketSessionController implements SessionController {
     }
   }
 
-  #onMessage(message: PersistentStreamMessage, resumed: boolean): void {
-    const dispatched = this.#dispatchMessage(message, resumed);
+  #onMessage(message: PersistentStreamMessage, context: StreamMessageContext): void {
+    const dispatched = this.#dispatchMessage(message, context);
     if (dispatched === null) return;
     const {events, iterationStoreReplaced} = dispatched;
     this.#refreshExperimentsFor(events);
@@ -1584,7 +1585,7 @@ export class SocketSessionController implements SessionController {
 
   #dispatchMessage(
     message: PersistentStreamMessage,
-    resumed: boolean,
+    context: StreamMessageContext,
   ): {readonly events: readonly RunEvent[]; readonly iterationStoreReplaced: boolean} | null {
     switch (message.type) {
       case 'event':
@@ -1592,7 +1593,7 @@ export class SocketSessionController implements SessionController {
         return {events: [message.event], iterationStoreReplaced: false};
       case 'event_batch': {
         const previousIterationStore = this.#reconciler.storeId();
-        const reconciliation = this.#reconciler.reconcileBatch(message, {resumed});
+        const reconciliation = this.#reconciler.reconcileBatch(message, context);
         if (reconciliation.kind === 'rebootstrap') {
           this.#streamGeneration += 1;
           this.#snapshotWatermark = null;
@@ -1604,6 +1605,7 @@ export class SocketSessionController implements SessionController {
             message.active_executions,
             message.through_sequence,
             reconciliation.historyFloor,
+            context.activeExecutionCheckpoint,
           ),
         );
         return {

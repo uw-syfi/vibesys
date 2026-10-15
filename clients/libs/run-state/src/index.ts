@@ -17,6 +17,7 @@ export {
   reduceIterationResult,
 } from './iteration-navigation.js';
 export {
+  type ActiveExecutionCheckpointFold,
   reduceEvent,
   reduceEventBatch,
   reduceEventPrefix,
