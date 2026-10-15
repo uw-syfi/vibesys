@@ -61,7 +61,7 @@ class _EnvironmentRequest:
 
 
 class _EnvironmentSession:
-    def __init__(self, *, path_error: BaseException | None = None) -> None:
+    def __init__(self, *, path_error: BaseException | None = None, close_failures: int = 0) -> None:
         def agent_path(host: object) -> str:
             if path_error is not None:
                 raise path_error
@@ -70,9 +70,13 @@ class _EnvironmentSession:
         self.sandbox = SimpleNamespace(agent_path=agent_path)
         self.view = SimpleNamespace(cli_sandboxed=False, isolated=False)
         self.close_count = 0
+        self.close_failures = close_failures
 
     def close(self) -> None:
         self.close_count += 1
+        if self.close_count <= self.close_failures:
+            message = "docker rm -f was killed"
+            raise RuntimeError(message)
 
 
 def _identity_path(host: object) -> str:
@@ -82,8 +86,9 @@ def _identity_path(host: object) -> str:
 class _Environment:
     """Deterministic fake for the private run-environment resource."""
 
-    def __init__(self, *, path_error: BaseException | None = None) -> None:
+    def __init__(self, *, path_error: BaseException | None = None, close_failures: int = 0) -> None:
         self._path_error = path_error
+        self._close_failures = close_failures
         self.requests: list[_EnvironmentRequest] = []
         self.sessions: list[_EnvironmentSession] = []
 
@@ -92,7 +97,9 @@ class _Environment:
 
     def _open(self, request: _EnvironmentRequest) -> _EnvironmentSession:
         self.requests.append(request)
-        session = _EnvironmentSession(path_error=self._path_error)
+        session = _EnvironmentSession(
+            path_error=self._path_error, close_failures=self._close_failures
+        )
         self.sessions.append(session)
         return session
 
@@ -235,6 +242,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
                 "agent": {"backend": "stub", "cli_provider": "codex"},
             }
         ),
+        allow_unvetted_model=False,
         backend=ComputeBackend.CPU,
         skill_source_dirs=(),
         host_resources=(),
@@ -327,6 +335,29 @@ def test_managed_agent_hides_environment_and_owns_cleanup(
     assert environment.sessions[-1].close_count == 1
     with pytest.raises(RuntimeError, match="closed"):
         agent.turn("Another question")
+
+
+@pytest.mark.parametrize("failures", [1, 2])
+def test_an_environment_whose_close_failed_is_closed_again_on_the_next_session_close(
+    tmp_path: Path, agent_settings: LaunchSettings, failures: int
+) -> None:
+    """Regression: a failed close latched the session and its scope, so a retry closed nothing."""
+    environment = _Environment(close_failures=failures)
+    session = _session(tmp_path, agent_settings)
+    session._handle_resources(_resources(tmp_path, environment))  # noqa: SLF001  # lint-waiver: LW-948032 [SLF001]; exercise real product composition over deterministic resources.
+    evidence = tmp_path / "evidence"
+    evidence.mkdir()
+    session.create_auxiliary_agent(_launch(evidence))
+
+    for _ in range(failures):
+        with pytest.raises(RuntimeError, match="killed"):
+            session.close()
+        with pytest.raises(RuntimeError, match="closed"):
+            session.create_auxiliary_agent(_launch(evidence))
+    session.close()
+    session.close()
+
+    assert environment.sessions[-1].close_count == failures + 1
 
 
 def test_auxiliary_agent_creation_requires_readiness_and_existing_inputs(

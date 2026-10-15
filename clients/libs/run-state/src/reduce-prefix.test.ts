@@ -7,10 +7,12 @@ import {
   timestamp,
 } from '@vibesys/contracts/testing';
 import {
+  type ActiveExecutionCheckpoint,
   type CoreState,
   initialCoreState,
   reduceEventBatch,
   reduceEventPrefix,
+  reduceEventRebootstrap,
   reduceSnapshot,
   rehydrateCoreState,
 } from './index.js';
@@ -156,6 +158,112 @@ describe('serialized reducer resume', () => {
     expect(merged).toEqual(full);
     expect(merged.usage).toEqual({inputTokens: 9_000, contextWindow: 200_000, model: null});
   });
+
+  for (const boundary of cloneBoundaries) {
+    it(`retains an incomplete execution checkpoint across ${boundary.name}`, () => {
+      const checkpointId = 'a'.repeat(64);
+      const previousEvents = [
+        executionStartedEvent(8, 'previous'),
+        executionStatusEvent(9, 'previous', 'agent_output_chunk', {progress: 'Still working'}),
+      ];
+      const replay = [
+        fixtureEvent(1, 'server_ready'),
+        executionStartedEvent(2, 'replacement'),
+        executionStatusEvent(3, 'replacement', 'agent_output_chunk', {
+          progress: 'Reviewing output',
+        }),
+      ];
+      const checkpoint = [
+        {
+          execution_id: 'replacement',
+          agent_kind: 'judge',
+          round_label: 'round-1-judge',
+          stage: 'judge',
+          attempt: null,
+          assignment: 'Review',
+          started_at: timestamp(2),
+          activity: {
+            kind: 'agent_execution_activity_changed' as const,
+            mode: 'thinking' as const,
+            summary: 'Reviewing',
+            tool: null,
+          },
+          provider: null,
+          model: null,
+        },
+      ] satisfies ActiveExecutionCheckpoint;
+      const previous = reduceEventBatch(initialCoreState(), previousEvents);
+      const deferred = reduceEventRebootstrap(previous, replay.slice(0, 2), null, 2, 0, {
+        kind: 'deferred',
+        checkpointId,
+      });
+
+      const resumed = reduceEventBatch(boundary.copy(deferred), replay.slice(2), null, 3, 0, {
+        kind: 'deferred',
+        checkpointId,
+      });
+      expect(Object.keys(resumed.activeExecutions)).toEqual(['previous']);
+      expect(resumed.executionStatuses['previous']?.progress).toBe('Still working');
+
+      const completed = reduceEventBatch(resumed, [], checkpoint, 3, 0, {
+        kind: 'complete',
+        checkpointId,
+      });
+      const ordinary = reduceEventRebootstrap(previous, replay, checkpoint, 3, 0);
+      expect(completed).toEqual(ordinary);
+      expect(completed.executionStatuses['replacement']?.progress).toBe('Reviewing output');
+    });
+
+    it(`retains a fragmented checkpoint through prefix backfill after ${boundary.name}`, () => {
+      const checkpointId = 'b'.repeat(64);
+      const previousEvents = [
+        executionStartedEvent(8, 'previous'),
+        executionStatusEvent(9, 'previous', 'agent_output_chunk', {progress: 'Previous'}),
+      ];
+      const replay = [
+        executionStartedEvent(1, 'replacement'),
+        executionStatusEvent(2, 'replacement', 'agent_output_chunk', {
+          progress: 'Backfilled and staged',
+        }),
+      ];
+      const checkpoint = [
+        {
+          execution_id: 'replacement',
+          agent_kind: 'implementer',
+          round_label: 'round-1',
+          stage: 'implementation',
+          attempt: null,
+          assignment: 'Implement the queue',
+          started_at: timestamp(1),
+          activity: {
+            kind: 'agent_execution_activity_changed' as const,
+            mode: 'thinking' as const,
+            summary: 'Starting',
+            tool: null,
+          },
+          provider: null,
+          model: null,
+        },
+      ] satisfies ActiveExecutionCheckpoint;
+      const previous = reduceEventBatch(initialCoreState(), previousEvents);
+      const deferred = reduceEventRebootstrap(previous, replay.slice(1), null, 2, 1, {
+        kind: 'deferred',
+        checkpointId,
+      });
+
+      const backfilled = reduceEventPrefix(boundary.copy(deferred), replay.slice(0, 1), 0);
+      expect(Object.keys(backfilled.activeExecutions)).toEqual(['previous']);
+      expect(backfilled.executionStatuses['previous']?.progress).toBe('Previous');
+
+      const completed = reduceEventBatch(backfilled, [], checkpoint, 2, 0, {
+        kind: 'complete',
+        checkpointId,
+      });
+      const ordinary = reduceEventRebootstrap(previous, replay, checkpoint, 2, 0);
+      expect(completed).toEqual(ordinary);
+      expect(completed.executionStatuses['replacement']?.progress).toBe('Backfilled and staged');
+    });
+  }
 
   for (const boundary of cloneBoundaries) {
     for (const seed of [1, 7, 42, 1234]) {

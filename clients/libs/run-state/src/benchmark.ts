@@ -14,6 +14,8 @@ export interface BenchmarkRecord {
   readonly metric: string;
   readonly value: number;
   readonly unit: string;
+  /** Timestamp of the event the observation was read from. */
+  readonly timestamp: string;
 }
 
 /** The benchmark observation `event` carries, or null when it carries none. */
@@ -31,6 +33,7 @@ export function benchmarkRecordFromEvent(
       metric: data.metric,
       value: data.value,
       unit: data.unit,
+      timestamp: event.timestamp,
     };
   }
   if (data?.kind === 'round_finished' && typeof data.perf_metric === 'number') {
@@ -42,6 +45,7 @@ export function benchmarkRecordFromEvent(
       metric: unit,
       value: data.perf_metric,
       unit,
+      timestamp: event.timestamp,
     };
   }
   // A completed benchmark gate carries the measurement `benchmark_result`
@@ -64,5 +68,6 @@ export function benchmarkRecordFromEvent(
     metric: data.metric,
     value: data.value,
     unit: data.unit ?? data.metric,
+    timestamp: event.timestamp,
   };
 }

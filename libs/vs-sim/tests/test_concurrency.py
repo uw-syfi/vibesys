@@ -7,11 +7,14 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vs_sim.api import OsThreads, UnixNetwork
+import pytest
+
+from vs_sim.api import OsThreads, UnixNetwork, WorkerStartRefusedError
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     NetworkContract,
     NetworkUnderTest,
+    RefusingThreads,
     SimNetwork,
     SimThreads,
     ThreadsContract,
@@ -24,7 +27,6 @@ if TYPE_CHECKING:
 
 _REAL_TICK_S = 0.001
 #: A socket-sized buffer, so the simulated network blocks a sender as a real one does.
-_SIM_BUFFER_BYTES = 256 << 10
 
 
 class TestOsThreads(ThreadsContract):
@@ -46,6 +48,26 @@ class TestSimThreadsSeeded(ThreadsContract):
     def threads_under_test(self, seed: int) -> ThreadsUnderTest:
         sim = SimThreads(schedule_seed=seed)
         return ThreadsUnderTest(sim, sim.run, tick=1.0, exact=True)
+
+
+class TestRefusingThreads(ThreadsContract):
+    def threads_under_test(self, seed: int) -> ThreadsUnderTest:
+        sim = SimThreads(schedule_seed=seed)
+        return ThreadsUnderTest(RefusingThreads(sim, {}), sim.run, tick=1.0, exact=True)
+
+
+def test_refusing_threads_consumes_only_the_scripted_starts() -> None:
+    sim = SimThreads()
+    threads = RefusingThreads(sim, {"client": 1})
+    ran: list[str] = []
+
+    def main() -> None:
+        with pytest.raises(WorkerStartRefusedError, match="client"):
+            threads.spawn(lambda: ran.append("refused"), name="client")
+        threads.spawn(lambda: ran.append("started"), name="client")
+
+    sim.run(main)
+    assert ran == ["started"]
 
 
 def _unix_paths() -> Callable[[str], str]:
@@ -104,7 +126,7 @@ class TestSimNetworkFifo(NetworkContract):
         del seed  # first-in first-out has one interleaving
         sim = SimThreads()
         return NetworkUnderTest(
-            SimNetwork(sim, buffer_bytes=_SIM_BUFFER_BYTES),
+            SimNetwork(sim),
             ThreadsUnderTest(sim, sim.run, tick=1.0, exact=True),
             lambda n: n,
         )
@@ -114,7 +136,7 @@ class TestSimNetworkSeeded(NetworkContract):
     def network_under_test(self, seed: int) -> NetworkUnderTest:
         sim = SimThreads(schedule_seed=seed)
         return NetworkUnderTest(
-            SimNetwork(sim, buffer_bytes=_SIM_BUFFER_BYTES),
+            SimNetwork(sim),
             ThreadsUnderTest(sim, sim.run, tick=1.0, exact=True),
             lambda n: n,
         )
@@ -127,7 +149,7 @@ class TestSimNetworkOverOsThreads(NetworkContract):
         del seed  # real threads have one interleaving
         threads = OsThreads()
         return NetworkUnderTest(
-            SimNetwork(threads, buffer_bytes=_SIM_BUFFER_BYTES),
+            SimNetwork(threads),
             ThreadsUnderTest(threads, lambda program: program(), tick=_REAL_TICK_S, exact=False),
             lambda n: n,
         )

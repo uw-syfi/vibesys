@@ -39,6 +39,7 @@ class ToolRefusal(StrEnum):
     RUN_FAILING = "run_failing"
     MALFORMED = "malformed"
     UNKNOWN_CALLER = "unknown_caller"
+    NESTED_REPOSITORY = "nested_repository"
     REFUSED = "refused"
 
 

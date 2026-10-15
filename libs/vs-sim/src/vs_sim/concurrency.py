@@ -110,6 +110,14 @@ class Worker(Protocol):
         ...
 
 
+class WorkerStartRefusedError(RuntimeError):
+    """The operating system refused to start a requested worker thread."""
+
+    def __init__(self, name: str) -> None:
+        """Name the worker whose start was refused."""
+        super().__init__(f"worker start refused: {name}")
+
+
 class ThreadLocal[T](Protocol):
     """A value each thread sees its own copy of, made on that thread's first ``get``."""
 
@@ -168,7 +176,13 @@ class OsThreads:
     def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
         """Start ``target`` on a new ``threading.Thread``."""
         thread = threading.Thread(target=target, name=name, daemon=daemon)
-        thread.start()
+        try:
+            thread.start()
+        except RuntimeError as error:
+            # This is a fresh Thread, so Thread.start()'s usual programming
+            # error (starting one object twice) is impossible. The remaining
+            # RuntimeError is the runtime refusing a new native thread.
+            raise WorkerStartRefusedError(name) from error
         return thread
 
     def lock(self) -> Lock:

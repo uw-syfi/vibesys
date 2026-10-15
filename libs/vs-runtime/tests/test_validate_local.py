@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime.api import ArtifactStore
+    from vs_runtime.api.infrastructure import FrameworkValidationResult, ValidationRecipe
 
 
 class Validate(ValidateLocalBase):
@@ -81,8 +82,26 @@ def _recipe_file(root: Path, identity: str, *names: str) -> None:
     )
 
 
+class _FakeLocalValidationEvents:
+    """Records every recipe lifecycle observation `ValidateLocalOwner` publishes."""
+
+    def __init__(self) -> None:
+        self.started_recipes: list[ValidationRecipe] = []
+        self.finished_results: list[FrameworkValidationResult] = []
+
+    def started(self, recipe: ValidationRecipe) -> None:
+        self.started_recipes.append(recipe)
+
+    def finished(self, result: FrameworkValidationResult) -> None:
+        self.finished_results.append(result)
+
+
 def _owner(
-    root: Path, retained: set[str], *, parallel: bool = True
+    root: Path,
+    retained: set[str],
+    *,
+    parallel: bool = True,
+    events: _FakeLocalValidationEvents | None = None,
 ) -> tuple[ValidateLocalOwner, FakeWorkspaces, FakeCommands, _Store]:
     workspaces = FakeWorkspaces(
         FakeWorkspace(path=root, known_revisions=retained), supports_parallel_candidates=parallel
@@ -95,6 +114,7 @@ def _owner(
         workspaces,
         _commit_of,
         cast("ArtifactStore", store),
+        events=events,
     )
     return owner, workspaces, commands, store
 
@@ -114,6 +134,35 @@ async def test_passing_recipes_report_success_and_store_the_report(tmp_path: Pat
     assert [call.command for call in commands.trusted_shell_calls] == ["echo unit", "echo smoke"]
     (report,) = store.written
     assert [item["recipe"]["name"] for item in json.loads(report)["results"]] == ["unit", "smoke"]
+
+
+async def test_an_injected_events_seam_observes_each_recipe_s_start_and_settled_result(
+    tmp_path: Path,
+) -> None:
+    events = _FakeLocalValidationEvents()
+    owner, _workspaces, commands, _store = _owner(tmp_path, {"r1"}, events=events)
+    _recipe_file(tmp_path, "id", "unit", "smoke")
+    commands.script(
+        CommandResult(output="ok", exit_code=0), CommandResult(output="ok", exit_code=0)
+    )
+
+    outcome = await owner.validate(_request(), "id")
+
+    assert outcome["passed"] is True
+    assert [recipe.name for recipe in events.started_recipes] == ["unit", "smoke"]
+    assert [result.recipe.name for result in events.finished_results] == ["unit", "smoke"]
+    assert all(result.passed for result in events.finished_results)
+
+
+async def test_with_no_injected_events_validation_still_succeeds(tmp_path: Path) -> None:
+    """The events seam is optional: omitting it changes no observable behavior."""
+    owner, _, commands, _ = _owner(tmp_path, {"r1"})
+    _recipe_file(tmp_path, "id", "unit")
+    commands.script(CommandResult(output="ok", exit_code=0))
+
+    outcome = await owner.validate(_request(), "id")
+
+    assert outcome["passed"] is True
 
 
 async def test_the_first_failing_recipe_is_named_and_the_rest_do_not_run(tmp_path: Path) -> None:

@@ -17,6 +17,8 @@ new decision (or a change to an existing one) has one place to make it.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from vs_agent import provider_profiles
 
 SHIPPED_PROVIDERS: tuple[str, ...] = ("claude", "codex", "gemini", "opencode")
@@ -28,6 +30,68 @@ declarations nor a container install recipe for, so it is not offered here.
 
 DEFAULT_CLI_PROVIDER = "codex"
 """The CLI provider selected when neither a flag nor config names one."""
+
+
+# --- Vetted harnesses --------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Harness:
+    """One CLI provider and one model it runs."""
+
+    provider: str
+    model: str
+
+
+HARNESSES: tuple[Harness, ...] = (
+    Harness("codex", "gpt-5.6-sol"),
+    Harness("codex", "gpt-5.6-luna"),
+    Harness("codex", "gpt-5.6-terra"),
+    Harness("codex", "gpt-5.5"),
+    Harness("claude", "claude-opus-5"),
+    Harness("claude", "claude-fable-5"),
+    Harness("claude", "claude-sonnet-5"),
+    Harness("claude", "claude-haiku-4-5"),
+    Harness("opencode", "google-vertex/gemini-3-pro-preview"),
+)
+"""The provider and model pairs VibeSys runs agents with, the one list of them.
+
+A run uses only these unless its operator opts out at the terminal
+(``--allow-unvetted-model``). A provider's first entry is its default model. A
+shipped provider with no entry (Gemini today) runs only with that opt-out.
+Which pairs are vetted is VibeSys's launch policy; whether a CLI accepts a
+model is agentshim's provider knowledge.
+"""
+
+
+class UnvettedHarnessError(ValueError):
+    """A provider and model pair outside :data:`HARNESSES`."""
+
+    def __init__(self, provider: str, model: str | None) -> None:
+        """Name the pair and the models vetted for ``provider``; ``model`` None names none."""
+        self.provider = provider
+        self.model = model
+        self.allowed = vetted_models(provider)
+        allowed = ", ".join(self.allowed) if self.allowed else "none"
+        chosen = "no model is named" if model is None else f"model {model!r} is not vetted"
+        super().__init__(f"{chosen} for provider {provider!r}; vetted models: {allowed}")
+
+
+def vetted_models(provider: str) -> tuple[str, ...]:
+    """The models vetted for ``provider``, its default first."""
+    return tuple(harness.model for harness in HARNESSES if harness.provider == provider)
+
+
+def default_model(provider: str) -> str | None:
+    """The model a run on ``provider`` uses when nothing names one; ``None`` if none is vetted."""
+    models = vetted_models(provider)
+    return models[0] if models else None
+
+
+def check_harness(provider: str, model: str) -> None:
+    """Raise :class:`UnvettedHarnessError` unless ``(provider, model)`` is vetted."""
+    if Harness(provider, model) not in HARNESSES:
+        raise UnvettedHarnessError(provider, model)
 
 
 # --- Docker container environment -------------------------------------------

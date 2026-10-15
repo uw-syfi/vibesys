@@ -74,7 +74,7 @@ class FalseyFakeBackendFactory:
 
     def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
         self.calls += 1
-        return FakeComputeBackend()
+        return FakeComputeBackend(threads=SimThreads())
 
 
 class FalseyFakeSessionAgents:
@@ -207,7 +207,7 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
             agent_client_factory=lambda **_kwargs: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
             ),
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(),
+            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
             git_repository=FakeGitRepositories().repository,
             invocation_store_factory=factory if injected else None,
         )

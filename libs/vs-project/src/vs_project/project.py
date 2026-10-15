@@ -188,6 +188,15 @@ class Project:
         return ProjectState.log_directory_for(project_root, run_id)
 
     @classmethod
+    def log_streams_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return where a run's log store (``vs_logs``) keeps its streams.
+
+        The run writes there and the host helper reads there; both ask here, so the
+        layout has one owner.
+        """
+        return cls.log_directory_for(project_root, run_id) / "streams"
+
+    @classmethod
     def agent_homes_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return the machine-local root of one run's dedicated agent CLI homes."""
         return ProjectState.agent_homes_directory_for(project_root, run_id)

@@ -1,5 +1,11 @@
+import {createHash} from 'node:crypto';
 import {describe, it} from 'node:test';
-import type {RunEvent, ServerMessage} from '@vibesys/contracts';
+import type {
+  ActiveExecutionsChunkMessage,
+  EventBatchMessage,
+  RunEvent,
+  ServerMessage,
+} from '@vibesys/contracts';
 import {BackendClientError, ServerError} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
 import {
@@ -7,11 +13,38 @@ import {
   type PersistentEventStreamCallbacks,
   type PersistentEventStreamOptions,
   type StreamConnectionState,
+  type StreamMessageContext,
   type StreamTransport,
 } from './persistent-event-stream.js';
 import {expect} from './test-support/expect.js';
 import {FakeClock} from './testing/index.js';
 import type {EventSubscription} from './transport.js';
+
+function checkpointId(payload: string): string {
+  return createHash('sha256').update(payload, 'utf8').digest('hex');
+}
+
+function deferredCheckpoint(
+  id: string,
+  throughSequence = 1,
+  overrides: Partial<
+    Omit<
+      Extract<EventBatchMessage, {active_executions: null}>,
+      'type' | 'active_executions' | 'active_executions_checkpoint_id'
+    >
+  > = {},
+): Extract<EventBatchMessage, {active_executions: null}> {
+  return {
+    type: 'event_batch',
+    events: [],
+    active_executions: null,
+    active_executions_checkpoint_id: id,
+    through_sequence: throughSequence,
+    store_id: 'store',
+    history_after_sequence: 0,
+    ...overrides,
+  };
+}
 
 /** A production stream with only its public scheduling seam replaced. */
 class TestEventStream extends PersistentEventStream {
@@ -67,15 +100,11 @@ interface Env {
 
 function harness(env: Env): {
   callbacks: PersistentEventStreamCallbacks;
-  messages: Array<{message: ServerMessage; resumed: boolean; connectionGeneration: number}>;
+  messages: Array<{message: ServerMessage} & StreamMessageContext>;
   states: StreamConnectionState[];
   nextState(): Promise<StreamConnectionState>;
 } {
-  const messages: Array<{
-    message: ServerMessage;
-    resumed: boolean;
-    connectionGeneration: number;
-  }> = [];
+  const messages: Array<{message: ServerMessage} & StreamMessageContext> = [];
   const states: StreamConnectionState[] = [];
   const stateWaiters: Array<(state: StreamConnectionState) => void> = [];
   return {
@@ -262,6 +291,10 @@ class StubTransport implements StreamTransport {
     });
   }
 
+  emit(message: ServerMessage): void {
+    this.#message?.(message);
+  }
+
   emitProtocolError(): void {
     this.#message?.({type: 'protocol_error', code: 'stream_failed', message: 'Replay failed'});
   }
@@ -310,6 +343,553 @@ async function checkDisconnectCase(
 }
 
 describe('PersistentEventStream', () => {
+  it('publishes a fragmented active-execution checkpoint only after its final chunk', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const payload = JSON.stringify([
+      {
+        execution_id: 'new-execution',
+        agent_kind: 'implementer',
+        round_label: 'round-1',
+        stage: 'implementer',
+        attempt: null,
+        assignment: 'new é水𝄞 assignment',
+        started_at: '2026-01-01T00:00:00Z',
+        activity: {
+          kind: 'agent_execution_activity_changed',
+          mode: 'thinking',
+          summary: 'working',
+          tool: null,
+        },
+        provider: null,
+        model: null,
+      },
+    ]);
+    const split = Math.floor(payload.length / 2);
+    const id = checkpointId(payload);
+    const chunk = (
+      chunkIndex: number,
+      part: string,
+      chunkId = id,
+    ): ActiveExecutionsChunkMessage => ({
+      type: 'active_executions_chunk',
+      checkpoint_id: chunkId,
+      chunk_index: chunkIndex,
+      chunk_count: 2,
+      payload: part,
+      through_sequence: 9,
+      store_id: 'store',
+      history_after_sequence: 3,
+    });
+
+    const firstReplay = event(8, 'agent_output_chunk', 'first replayed output');
+    const secondReplay = event(9, 'agent_output_chunk', 'second replayed output');
+    const replayEvents = [firstReplay, secondReplay];
+    transport.emit(
+      deferredCheckpoint(id, 8, {
+        events: [firstReplay],
+        history_after_sequence: 3,
+        rebootstrap: true,
+      }),
+    );
+    transport.emit(
+      deferredCheckpoint(id, 9, {
+        events: [secondReplay],
+        history_after_sequence: 3,
+      }),
+    );
+    transport.emit(chunk(0, payload.slice(0, split)));
+    expect(messages).toHaveLength(2);
+    expect(messages[0]?.message).toMatchObject({
+      type: 'event_batch',
+      active_executions: null,
+      rebootstrap: true,
+    });
+    expect(messages[0]?.activeExecutionCheckpoint).toEqual({
+      kind: 'deferred',
+      checkpointId: id,
+    });
+    expect(messages[1]?.activeExecutionCheckpoint).toEqual({
+      kind: 'deferred',
+      checkpointId: id,
+    });
+
+    transport.emit(chunk(1, payload.slice(split)));
+    expect(messages).toHaveLength(3);
+    expect(messages[2]?.message).toMatchObject({
+      type: 'event_batch',
+      events: [],
+      through_sequence: 9,
+      store_id: 'store',
+      history_after_sequence: 3,
+      active_executions: [{execution_id: 'new-execution'}],
+      rebootstrap: false,
+    });
+    expect(messages[2]?.activeExecutionCheckpoint).toEqual({
+      kind: 'complete',
+      checkpointId: id,
+    });
+    expect(
+      messages.flatMap(({message}) => (message.type === 'event_batch' ? message.events : [])),
+    ).toEqual(replayEvents);
+    await stream.close();
+  });
+
+  it('does not retain or repeat many singleton frames before checkpoint completion', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const checkpoint = '[]';
+    const id = checkpointId(checkpoint);
+    // Retaining these frames in the assembler would make an otherwise bounded
+    // checkpoint transaction grow with every valid event frame.
+    const frameCount = 50_000;
+
+    for (let sequence = 1; sequence <= frameCount; sequence += 1) {
+      transport.emit(
+        deferredCheckpoint(id, sequence, {
+          events: [event(sequence, 'agent_output_chunk')],
+          rebootstrap: sequence === 1,
+        }),
+      );
+    }
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: id,
+      chunk_index: 0,
+      chunk_count: 1,
+      payload: checkpoint,
+      through_sequence: frameCount,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+
+    expect(messages).toHaveLength(frameCount + 1);
+    const completed = messages.at(-1)?.message;
+    if (completed?.type !== 'event_batch') throw new Error('Expected the completed checkpoint');
+    expect(completed.events).toEqual([]);
+    expect(completed.rebootstrap).toBe(false);
+    await stream.close();
+  });
+
+  it('rejects a rebootstrap marker after the first deferred event frame', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const id = checkpointId('[]');
+
+    transport.emit(deferredCheckpoint(id, 1, {events: [event(1, 'agent_output_chunk')]}));
+    expect(() =>
+      transport.emit(
+        deferredCheckpoint(id, 2, {
+          events: [event(2, 'agent_output_chunk')],
+          rebootstrap: true,
+        }),
+      ),
+    ).toThrow('rebootstrap marker repeated after the first deferred event frame');
+    await stream.close();
+  });
+
+  it('lets a new first chunk supersede an incomplete checkpoint without publishing a prefix', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const first = (id: string, payload: string): ActiveExecutionsChunkMessage => ({
+      type: 'active_executions_chunk',
+      checkpoint_id: id,
+      chunk_index: 0,
+      chunk_count: 2,
+      payload,
+      through_sequence: 1,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+
+    const abandonedId = 'a'.repeat(64);
+    transport.emit(deferredCheckpoint(abandonedId));
+    transport.emit(first(abandonedId, '[{"discarded":'));
+    const replacementId = checkpointId('[]');
+    transport.emit(deferredCheckpoint(replacementId));
+    transport.emit(first(replacementId, '['));
+    transport.emit({...first(replacementId, ']'), chunk_index: 1});
+
+    expect(messages).toHaveLength(3);
+    expect(messages[2]?.message).toMatchObject({type: 'event_batch', active_executions: []});
+    await stream.close();
+  });
+
+  it('lets a new deferred checkpoint supersede one that received no fragment', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const abandonedId = 'a'.repeat(64);
+    const replacementId = checkpointId('[]');
+
+    transport.emit(deferredCheckpoint(abandonedId, 1));
+    transport.emit(deferredCheckpoint(replacementId, 2));
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: replacementId,
+      chunk_index: 0,
+      chunk_count: 1,
+      payload: '[]',
+      through_sequence: 2,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+
+    expect(messages).toHaveLength(3);
+    expect(messages[2]?.message).toMatchObject({
+      type: 'event_batch',
+      active_executions: [],
+      through_sequence: 2,
+    });
+    await stream.close();
+  });
+
+  it('rejects a duplicate, gap, or metadata change instead of assembling mixed checkpoints', async () => {
+    const cases = [
+      {name: 'duplicate', secondIndex: 1, thirdIndex: 1, thirdStore: 'store'},
+      {name: 'gap', secondIndex: 2, thirdIndex: 2, thirdStore: 'store'},
+      {name: 'metadata', secondIndex: 1, thirdIndex: 2, thirdStore: 'other-store'},
+    ] as const;
+    for (const item of cases) {
+      const transport = new StubTransport();
+      const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+      const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+      await stream.subscribe(callbacks);
+      const part = (chunkIndex: number, storeId = 'store'): ActiveExecutionsChunkMessage => ({
+        type: 'active_executions_chunk',
+        checkpoint_id: 'c'.repeat(64),
+        chunk_index: chunkIndex,
+        chunk_count: 3,
+        payload: chunkIndex === 0 ? '[' : chunkIndex === 2 ? ']' : '',
+        through_sequence: 1,
+        store_id: storeId,
+        history_after_sequence: 0,
+      });
+      transport.emit(deferredCheckpoint('c'.repeat(64)));
+      transport.emit(part(0));
+      if (item.name !== 'gap') transport.emit(part(item.secondIndex));
+
+      expect(() => transport.emit(part(item.thirdIndex, item.thirdStore))).toThrow(
+        'Invalid active-execution checkpoint',
+      );
+      expect(messages).toHaveLength(1);
+      await stream.close();
+    }
+  });
+
+  it('rejects completed content whose SHA-256 does not match its checkpoint identity', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+
+    transport.emit(deferredCheckpoint(checkpointId('[ ]')));
+    expect(() =>
+      transport.emit({
+        type: 'active_executions_chunk',
+        checkpoint_id: checkpointId('[ ]'),
+        chunk_index: 0,
+        chunk_count: 1,
+        payload: '[]',
+        through_sequence: 1,
+        store_id: 'store',
+        history_after_sequence: 0,
+      }),
+    ).toThrow('checkpoint_id does not match the assembled UTF-8 payload');
+    expect(messages).toHaveLength(1);
+    await stream.close();
+  });
+
+  it('rejects an aggregate checkpoint above the staged UTF-8 byte bound', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const payload = '𝄞'.repeat(64 * 1024);
+    const part = (chunkIndex: number): ActiveExecutionsChunkMessage => ({
+      type: 'active_executions_chunk',
+      checkpoint_id: 'd'.repeat(64),
+      chunk_index: chunkIndex,
+      chunk_count: 256,
+      payload,
+      through_sequence: 1,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+    transport.emit(deferredCheckpoint('d'.repeat(64)));
+    for (let index = 0; index < 64; index += 1) transport.emit(part(index));
+
+    expect(() => transport.emit(part(64))).toThrow(
+      'assembled payload exceeds 16777216 UTF-8 bytes',
+    );
+    expect(messages).toHaveLength(1);
+    await stream.close();
+  });
+
+  it('resumes after event frames when a fragmented checkpoint fails validation', async () => {
+    const transport = new StubTransport();
+    const env = {cursor: 0, reconnect: true, storeId: 'store'};
+    const {callbacks, messages} = harness(env);
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: [0]});
+    await stream.subscribe(callbacks);
+    transport.emit({
+      type: 'event_batch',
+      events: [event(1, 'agent_output_chunk', 'delivered\n')],
+      through_sequence: 1,
+      active_executions: null,
+      active_executions_checkpoint_id: 'e'.repeat(64),
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+    env.cursor = 1;
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: 'e'.repeat(64),
+      chunk_index: 0,
+      chunk_count: 2,
+      payload: '[',
+      through_sequence: 1,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+
+    expect(() =>
+      transport.emit({
+        type: 'active_executions_chunk',
+        checkpoint_id: 'e'.repeat(64),
+        chunk_index: 1,
+        chunk_count: 2,
+        payload: ']',
+        through_sequence: 1,
+        store_id: 'store',
+        history_after_sequence: 0,
+      }),
+    ).toThrow('checkpoint_id does not match the assembled UTF-8 payload');
+    transport.sever(
+      new BackendClientError('parse', 'Invalid active-execution checkpoint content digest'),
+    );
+    await stream.settle();
+    expect(transport.subscribeCalls.at(-1)).toEqual({
+      afterSequence: 1,
+      tail: undefined,
+      storeId: 'store',
+    });
+    const recovered = '[]';
+    const recoveredId = checkpointId(recovered);
+    transport.emit(deferredCheckpoint(recoveredId));
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: recoveredId,
+      chunk_index: 0,
+      chunk_count: 1,
+      payload: recovered,
+      through_sequence: 1,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+
+    expect(messages).toHaveLength(3);
+    expect(messages[2]?.message).toMatchObject({
+      type: 'event_batch',
+      events: [],
+      through_sequence: 1,
+      active_executions: [],
+    });
+    await stream.close();
+  });
+
+  it('rejects fragments that are not immediately owned by a deferred batch', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+
+    expect(() =>
+      transport.emit({
+        type: 'active_executions_chunk',
+        checkpoint_id: checkpointId('[]'),
+        chunk_index: 0,
+        chunk_count: 1,
+        payload: '[]',
+        through_sequence: 1,
+        store_id: 'store',
+        history_after_sequence: 0,
+      }),
+    ).toThrow('first chunk has no preceding deferred event batch');
+    expect(messages).toEqual([]);
+    await stream.close();
+  });
+
+  it('lets an ordinary authoritative checkpoint supersede an incomplete transfer', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const abandonedId = checkpointId('[]');
+    transport.emit(deferredCheckpoint(abandonedId));
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: abandonedId,
+      chunk_index: 0,
+      chunk_count: 2,
+      payload: '[',
+      through_sequence: 1,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+    transport.emit({
+      type: 'event_batch',
+      events: [],
+      active_executions: [],
+      through_sequence: 2,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+
+    expect(() =>
+      transport.emit({
+        type: 'active_executions_chunk',
+        checkpoint_id: abandonedId,
+        chunk_index: 1,
+        chunk_count: 2,
+        payload: ']',
+        through_sequence: 1,
+        store_id: 'store',
+        history_after_sequence: 0,
+      }),
+    ).toThrow('chunk 1 has no first chunk');
+    expect(messages).toHaveLength(2);
+    expect(messages[1]?.message).toMatchObject({active_executions: [], through_sequence: 2});
+    await stream.close();
+  });
+
+  it('fences late fragments with the newer deferred checkpoint identity', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const abandonedId = 'a'.repeat(64);
+    transport.emit(deferredCheckpoint(abandonedId));
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: abandonedId,
+      chunk_index: 0,
+      chunk_count: 2,
+      payload: '[',
+      through_sequence: 1,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+
+    const replacementId = checkpointId('[]');
+    transport.emit(deferredCheckpoint(replacementId, 2));
+    expect(() =>
+      transport.emit({
+        type: 'active_executions_chunk',
+        checkpoint_id: abandonedId,
+        chunk_index: 1,
+        chunk_count: 2,
+        payload: ']',
+        through_sequence: 1,
+        store_id: 'store',
+        history_after_sequence: 0,
+      }),
+    ).toThrow('chunk 1 has no first chunk');
+    expect(() =>
+      transport.emit({
+        type: 'active_executions_chunk',
+        checkpoint_id: abandonedId,
+        chunk_index: 0,
+        chunk_count: 2,
+        payload: '[',
+        through_sequence: 1,
+        store_id: 'store',
+        history_after_sequence: 0,
+      }),
+    ).toThrow('first chunk does not match its deferred event batch');
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: replacementId,
+      chunk_index: 0,
+      chunk_count: 1,
+      payload: '[]',
+      through_sequence: 2,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+
+    expect(messages.at(-1)?.message).toMatchObject({
+      active_executions: [],
+      through_sequence: 2,
+    });
+    await stream.close();
+  });
+
+  it('rejects unrelated messages interleaved before a deferred checkpoint completes', async () => {
+    const transport = new StubTransport();
+    const {callbacks} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    transport.emit(deferredCheckpoint(checkpointId('[]')));
+
+    expect(() => transport.emit({type: 'event', event: event(2, 'agent_output_chunk')})).toThrow(
+      'event interrupted a deferred checkpoint transfer',
+    );
+    await stream.close();
+  });
+
+  it('hashes lone UTF-16 surrogates with standard UTF-8 replacement semantics', async () => {
+    const transport = new StubTransport();
+    const {callbacks, messages} = harness({cursor: 0, reconnect: true});
+    const stream = new TestEventStream(transport, {reconnectDelaysMs: []});
+    await stream.subscribe(callbacks);
+    const payload = JSON.stringify([
+      {
+        execution_id: 'surrogate',
+        agent_kind: 'implementer',
+        round_label: 'round-1',
+        stage: 'implementer',
+        attempt: null,
+        assignment: 'marker',
+        started_at: '2026-01-01T00:00:00Z',
+        activity: {
+          kind: 'agent_execution_activity_changed',
+          mode: 'thinking',
+          summary: 'working',
+          tool: null,
+        },
+        provider: null,
+        model: null,
+      },
+    ]).replace('marker', '\ud800');
+    const id = checkpointId(payload);
+    transport.emit(deferredCheckpoint(id));
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: id,
+      chunk_index: 0,
+      chunk_count: 1,
+      payload,
+      through_sequence: 1,
+      store_id: 'store',
+      history_after_sequence: 0,
+    });
+
+    expect(messages.at(-1)?.message).toMatchObject({
+      active_executions: [{execution_id: 'surrogate', assignment: '\ud800'}],
+    });
+    await stream.close();
+  });
+
   it('boots with the tail, tags the bootstrap batch, and stays connected quietly', async () => {
     const transport = new StubTransport();
     const {callbacks, messages, states} = harness({cursor: 0, reconnect: true});

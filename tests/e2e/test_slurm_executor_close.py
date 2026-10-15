@@ -16,7 +16,7 @@ from vs_evaluation.api import EvaluationRequest, EvaluationStep
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
 from vs_sim.api import SystemClock
-from vs_sim.api.testing import wait_until_started
+from vs_sim.api.testing import ManualClock, wait_until_started
 from vs_slurm.api import (
     ClusterInspectOutcome,
     ClusterTarget,
@@ -36,7 +36,7 @@ class _HeldInspectCluster(FakeCluster):
     """A scheduler whose inspection, once held, parks its worker thread until the gate opens."""
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(clock=ManualClock())
         self.held = False
         self.inspect_entered = threading.Event()
         self.inspect_gate = threading.Event()

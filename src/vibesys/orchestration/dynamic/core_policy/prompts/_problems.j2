@@ -47,6 +47,8 @@ strategy update names unknown hypothesis {{ quoted(item.subject) }}
 cannot update incomplete hypothesis {{ quoted(item.subject) }}
 {%- elif item.code.value == 'outside-plan' -%}
 {{ quoted(item.subject) }} is not a failed step of the task's plan; until every step is done, continue only failed steps
+{%- elif item.code.value == 'expectation-unknown' -%}
+{{ quoted(item.subject) }} is not a workstream of this reply; name only workstreams this reply schedules
 {%- else -%}
 {{ item.code.value }}
 {%- endif %}

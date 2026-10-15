@@ -4,13 +4,27 @@
  * (`clients/.dependency-cruiser.mjs` and `clients/tools/lint-rules/web-fetch-only-in-backend.grit` hold
  * it to that): the control transport (a WebSocket, or the desktop shell's bridge shaped as one)
  * that `@vibesys/run-session`'s `connectRun` runs the run over, the gateway's capability exchange,
- * and the replay fixture. It is also the
+ * the campaign fixture, and the desktop run page's log requests. It is also the
  * entry of the browser transport bundle that `check:web-browser-bundle` keeps free of Node builtins.
  */
 
-import {type RunEvent, validateRunEvent} from '@vibesys/contracts';
+import {
+  type CampaignFrame,
+  type CampaignRecord,
+  type CampaignStream,
+  parseCampaignFrame,
+  parseReplayScenario,
+} from '@vibesys/feature-campaign/state';
+import type {RunLogsRequest} from '@vibesys/ipc';
+import type {LogListOutcome, LogReadOutcome, RunLogSource} from '@vibesys/logs';
 import type {TransportHooks} from '@vibesys/run-session';
-import type {ControlTransport, ScheduleTimeout} from '@vibesys/transport';
+import {
+  type AbortSignalLike,
+  type ControlTransport,
+  abortReason as reasonOf,
+  registerAbort,
+  type ScheduleTimeout,
+} from '@vibesys/transport';
 import {type WebSocketLike, WebSocketTransport} from '@vibesys/transport/websocket';
 
 export type {ControlTransport, WebSocketLike};
@@ -149,30 +163,109 @@ function abortReason(signal: AbortSignal): Error {
   return new DOMException('Gateway connection was aborted', 'AbortError');
 }
 
-/** Fetch a JSONL replay fixture and validate every event; any bad line rejects the whole file. */
-export async function fetchReplayFixture(url: string, fetcher: Fetch = fetch): Promise<RunEvent[]> {
-  const response = await fetcher(url);
-  if (!response.ok) throw new Error(`Replay fixture request failed with ${response.status}`);
-  const events: RunEvent[] = [];
-  for (const [index, line] of (await response.text()).split('\n').entries()) {
-    if (line.trim().length === 0) continue;
-    const lineNumber = index + 1;
-    let value: unknown;
-    try {
-      value = JSON.parse(line);
-    } catch (reason) {
-      throw new Error(`Replay fixture contains invalid JSON on line ${lineNumber}`, {
-        cause: reason,
-      });
-    }
-    try {
-      events.push(validateRunEvent(value));
-    } catch (reason) {
-      const detail = reason instanceof Error ? `: ${reason.message}` : '';
-      throw new Error(`Replay fixture contains invalid event on line ${lineNumber}${detail}`, {
-        cause: reason,
-      });
-    }
+/** Load and validate the source-backed campaign record at the browser's I/O boundary. */
+export async function fetchCampaignFixture(
+  signal: AbortSignal,
+  fetcher: Fetch = fetch,
+): Promise<CampaignRecord> {
+  const url = new URL('../../dev/fixtures/trajectory-replay.json', import.meta.url).href;
+  const response = await fetcher(url, {signal, cache: 'no-store'});
+  if (!response.ok) throw new Error(`Campaign fixture request failed with ${response.status}`);
+  return parseReplayScenario(await response.json());
+}
+
+interface CampaignEventSource {
+  onmessage: ((event: {readonly data: string}) => void) | null;
+  onerror: ((event: unknown) => void) | null;
+  readonly readyState: number;
+  close(): void;
+}
+
+/** Parsed SSE frames; unreadable input ends the subscription, and owner close releases it once. */
+export class EventSourceCampaignStream implements CampaignStream {
+  constructor(
+    private readonly url: string,
+    private readonly open: (url: string) => CampaignEventSource = url =>
+      new EventSource(url) as unknown as CampaignEventSource,
+  ) {}
+
+  subscribe(onFrame: (frame: CampaignFrame) => void, onError: (error: Error) => void): () => void {
+    const source = this.open(this.url);
+    let released = false;
+    const release = (): boolean => {
+      if (released) return false;
+      released = true;
+      source.onmessage = null;
+      source.onerror = null;
+      source.close();
+      return true;
+    };
+    const fail = (error: Error): void => {
+      if (release()) onError(error);
+    };
+    source.onmessage = event => {
+      if (released) return;
+      let frame: CampaignFrame;
+      try {
+        frame = parseCampaignFrame(JSON.parse(event.data));
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
+      onFrame(frame);
+    };
+    source.onerror = () => {
+      // CONNECTING is recoverable: EventSource retries and the fold ignores replayed sequences.
+      if (source.readyState === 2) fail(new Error('Campaign stream connection error'));
+    };
+    return () => void release();
   }
-  return events;
+}
+
+/** One logs request to the desktop app's main process (the run preload's `logs`). */
+export type AskLogs = (request: RunLogsRequest) => Promise<unknown>;
+
+function isOutcome(value: unknown): value is {readonly ok: boolean} {
+  return (
+    typeof value === 'object' && value !== null && typeof Reflect.get(value, 'ok') === 'boolean'
+  );
+}
+
+/**
+ * Ask `request`, resolving a refusal or a malformed answer as a `transport` failure. An IPC
+ * request cannot be withdrawn, so an aborted request rejects at once and its late answer is
+ * dropped; the main process's own request ends by its wait bound or when the run's page goes away.
+ */
+function askLogs<T extends LogListOutcome | LogReadOutcome>(
+  logs: AskLogs,
+  request: RunLogsRequest,
+  signal: AbortSignalLike,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const registration = registerAbort(signal, () => reject(reasonOf(signal)));
+    if (registration.aborted) {
+      reject(reasonOf(signal));
+      return;
+    }
+    const failed = (message: string): T =>
+      ({ok: false, failure: {code: 'transport', message}}) as T;
+    logs(request).then(
+      answer => {
+        registration.detach();
+        resolve(isOutcome(answer) ? (answer as T) : failed('the desktop app sent no log answer'));
+      },
+      (error: unknown) => {
+        registration.detach();
+        resolve(failed(error instanceof Error ? error.message : String(error)));
+      },
+    );
+  });
+}
+
+/** The run page's `RunLogSource` over the desktop app's logs requests. */
+export function bridgeLogSource(logs: AskLogs): RunLogSource {
+  return {
+    list: signal => askLogs<LogListOutcome>(logs, {kind: 'list'}, signal),
+    read: (input, signal) => askLogs<LogReadOutcome>(logs, {kind: 'read', read: input}, signal),
+  };
 }

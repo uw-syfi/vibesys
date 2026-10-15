@@ -51,7 +51,7 @@ class _QueuedCluster(FakeCluster):
     """Every accepted batch stays PENDING; records which identities were submitted."""
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(clock=ManualClock())
         self.submitted: list[str] = []
         self.holder_accepted = threading.Event()
 

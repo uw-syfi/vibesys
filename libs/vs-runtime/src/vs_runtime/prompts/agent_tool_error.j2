@@ -14,6 +14,7 @@
 {%- elif reason == "run_failing" %}the run hit an internal error and is ending; finish your turn without evaluating
 {%- elif reason == "busy" %}the run could not take this call right now; call the tool again
 {%- elif reason == "malformed" %}malformed evaluation call; send exactly the fields the tool schema lists
+{%- elif reason == "nested_repository" %}the workspace holds a nested Git repository (a `.git` file or directory below the workspace root), so the run cannot snapshot it safely; remove each nested `.git` (find them with `find . -mindepth 2 -name .git`) or move that repository outside the workspace, then submit again
 {%- elif reason == "unknown_caller" %}unknown evaluation token; this tool only works in the turn it was issued for
 {%- else %}the run refused this evaluation call
 {%- endif %}

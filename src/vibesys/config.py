@@ -46,7 +46,15 @@ class _Strict(BaseModel):
 class ModelCfg(_Strict):
     """Model identifier from agent.toml."""
 
-    name: str = Field(description="Model identifier, e.g. 'claude-sonnet-4-6'. Required.")
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description=(
+            "Model identifier, e.g. 'claude-opus-5'. The --model flag overrides. Must be a "
+            "vetted model of the selected CLI provider; None uses that provider's default."
+        ),
+    )
 
 
 class ThinkingCfg(_Strict):
@@ -219,7 +227,8 @@ class AgentCfg(_Strict):
         default=None,
         description=(
             "Which CLI coding-agent to drive: codex | claude | gemini | opencode. "
-            "The --cli-provider flag overrides; defaults to 'codex'."
+            "The --cli-provider flag overrides; defaults to 'codex'. [model].name "
+            "must be one of its vetted models."
         ),
     )
     cli_timeout: int | None = Field(
@@ -275,6 +284,25 @@ class EvaluationCfg(_Strict):
         strict=True,
         gt=0,
         description="How often the core polls a running evaluation job, in seconds.",
+    )
+    queue_wait_budget_seconds: int = Field(
+        default=43_200,
+        strict=True,
+        gt=0,
+        description=(
+            "How long one measurement's job may wait in the executor's queue (Slurm "
+            "PENDING) before the run gives the measurement up as queue-budget-spent. "
+            "Queue time does not count against the measurement's own time limit."
+        ),
+    )
+    queue_notice_interval_seconds: int = Field(
+        default=600,
+        strict=True,
+        gt=0,
+        description=(
+            "How often the run reports a measurement job that is still queued, with the "
+            "executor's pending reason, in seconds of queue time."
+        ),
     )
     observe_backoff_cap_seconds: int = Field(
         default=120,
@@ -418,7 +446,10 @@ class Config(_Strict):
 
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
-    model: ModelCfg = Field(description="[model] — model name and provider. Required.")
+    model: ModelCfg = Field(
+        default_factory=ModelCfg,
+        description="[model] — the agent model; omitted uses the CLI provider's default.",
+    )
     thinking: ThinkingCfg = Field(
         default_factory=ThinkingCfg, description="[thinking] — reasoning/thinking controls."
     )

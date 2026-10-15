@@ -2,6 +2,7 @@ import type {WebSessionState} from '@vibesys/run-session';
 import {type CoreState, hasRunEnded, type RunStartupState} from '@vibesys/run-state';
 import {activeRunFocus, phaseText} from '@vibesys/run-state/rounds';
 import type {ControlChannelState} from '@vibesys/transport';
+import {formatElapsed} from './duration.js';
 
 /** The control-channel outage a banner describes, once there is one to show. */
 type ControlOutage = Extract<ControlChannelState, {status: 'disconnected'}>;
@@ -179,16 +180,36 @@ export const STARTUP_STAGE_LABELS: Readonly<Record<RunStartupState['stage'], str
   starting_container: 'Starting container',
 };
 
+/** How long the backend may stay silent before the starting label says so, in milliseconds. */
+export const STARTUP_QUIET_AFTER_MS = 60_000;
+
 /**
- * A starting run's stage and progress in words, e.g. `Building image 12/30: RUN pip install`.
- * Mirrors `instancePhaseText`'s format in `clients/libs/hosts/src/listing.ts` exactly.
+ * A starting run's stage, progress and timing in words, e.g.
+ * `Building image 12/30: RUN pip install · 4m12s · quiet for 2m00s`.
+ * The stage and progress mirror `instancePhaseText`'s format in `clients/libs/hosts/src/listing.ts`
+ * exactly. The elapsed time is the current stage's, and `quiet for` appears once nothing has
+ * been heard for `STARTUP_QUIET_AFTER_MS`. Pure in `now` (epoch milliseconds): a clock earlier
+ * than a timestamp reads as zero, and an unparseable timestamp drops its part.
  */
-function startupStatusLabel(startup: RunStartupState): string {
+export function startupStatusLabel(startup: RunStartupState, now: number): string {
   const stage = STARTUP_STAGE_LABELS[startup.stage];
   const progress = startup.progress;
-  if (progress === null) return stage;
-  const count = `${progress.done}/${progress.total ?? '?'}`;
-  return progress.label === '' ? `${stage} ${count}` : `${stage} ${count}: ${progress.label}`;
+  const parts: string[] = [];
+  if (progress === null) {
+    parts.push(stage);
+  } else {
+    const count = `${progress.done}/${progress.total ?? '?'}`;
+    parts.push(
+      progress.label === '' ? `${stage} ${count}` : `${stage} ${count}: ${progress.label}`,
+    );
+  }
+  const stageSince = Date.parse(startup.stageSince);
+  if (!Number.isNaN(stageSince)) parts.push(formatElapsed(now - stageSince));
+  const lastActivity = Date.parse(startup.lastActivityAt);
+  if (!Number.isNaN(lastActivity) && now - lastActivity >= STARTUP_QUIET_AFTER_MS) {
+    parts.push(`quiet for ${formatElapsed(now - lastActivity)}`);
+  }
+  return parts.join(' · ');
 }
 
 /** Header copy used before a live session has loaded its first snapshot. */
@@ -245,7 +266,11 @@ export function connectionBanners(run: CoreState, session: WebSessionState): Con
  * fact about a live run. Replay mode keeps its existing loading heading; a live
  * session names gateway connectivity until a snapshot establishes run state.
  */
-export function pageHeader(run: CoreState, session: WebSessionState | null): PageHeader {
+export function pageHeader(
+  run: CoreState,
+  session: WebSessionState | null,
+  now: number,
+): PageHeader {
   if (session !== null && !session.hasSnapshot) {
     const unreachable = pageGatewayOutage(session) !== null;
     const copy = !unreachable
@@ -271,7 +296,7 @@ export function pageHeader(run: CoreState, session: WebSessionState | null): Pag
       className: `status-${run.status}`,
       label:
         run.status === 'starting' && run.startup !== null
-          ? startupStatusLabel(run.startup)
+          ? startupStatusLabel(run.startup, now)
           : run.status,
     },
   };

@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sim.api import SubprocessProbe
-
 if TYPE_CHECKING:
     from vs_sim.api import CommandProbe
 
@@ -41,10 +39,10 @@ class SystemAcceleratorDiscovery:
         *,
         device_root: Path = Path("/dev"),
         executable_search_path: str | None = None,
-        probe: CommandProbe | None = None,
+        probe: CommandProbe,
     ) -> None:
         """Configure the filesystem and command seams used for discovery."""
-        self._probe: CommandProbe = probe or SubprocessProbe()
+        self._probe = probe
         self._device_root = Path(device_root)
         self._executable_search_path = executable_search_path
 

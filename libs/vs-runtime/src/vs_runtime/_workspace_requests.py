@@ -49,6 +49,7 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspaceObserved,
 )
+from vs_project.api import NestedRepositoryError
 from vs_runtime._core_identity import core_identity
 from vs_runtime._core_requests import (
     ExecutionContext,
@@ -738,7 +739,17 @@ class RuntimeWorkspaceRequests:
         # deterministic label rather than commit a second time.
         commit = await workspace.find_snapshot(label) if resumed else None
         if commit is None:
-            commit = await workspace.snapshot_and_retain(label, retention_label=retention_label)
+            try:
+                commit = await workspace.snapshot_and_retain(label, retention_label=retention_label)
+            except NestedRepositoryError as error:
+                # The agent left a repository in its workspace that host Git must not read;
+                # the snapshot fails for good, and the diagnostic says which paths.
+                return _Facts(
+                    ObservationStatus.FAILED,
+                    accepted=True,
+                    resource_id=resource_id,
+                    diagnostic=str(error),
+                )
         else:
             await workspace.retain(commit, label=retention_label)
         self._receipts.record_revision(commit, owner)

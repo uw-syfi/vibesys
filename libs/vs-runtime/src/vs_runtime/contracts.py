@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from vs_runtime._operation_wiring import OperationRole
     from vs_runtime._run_environment import RunEnvironmentView
     from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, OutputSink, Threads
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
@@ -629,8 +629,12 @@ class Evaluation(Protocol):
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        output: OutputSink,
     ) -> AccuracyEvaluation:
-        """Evaluate correctness, optionally reusing an exact-candidate pass."""
+        """Evaluate correctness, optionally reusing an exact-candidate pass.
+
+        The accuracy command's raw output is written to *output* while it runs.
+        """
         ...
 
     async def benchmark(
@@ -638,8 +642,12 @@ class Evaluation(Protocol):
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        output: OutputSink,
     ) -> BenchmarkEvaluation:
-        """Measure one live workspace against policy-selected objectives."""
+        """Measure one live workspace against policy-selected objectives.
+
+        The benchmark command's raw output is written to *output* while it runs.
+        """
         ...
 
     async def validate_local(
@@ -694,6 +702,10 @@ class CoreRunContext:
     """How often a running evaluation job is polled."""
     observe_backoff_cap_seconds: int
     """The longest wait after a poll that could not read the job."""
+    queue_wait_budget_seconds: int
+    """How long one measurement's job may wait in its executor's queue."""
+    queue_notice_interval_seconds: int
+    """How often a job still queued is reported, in seconds of queue time."""
     request_retries: RequestRetries
     """How the backend wants a request its executor did not run re-sent; a fact, not a choice."""
     max_run_seconds: int | None

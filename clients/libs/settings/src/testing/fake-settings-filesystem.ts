@@ -52,6 +52,7 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
   readonly #files = new Map<string, string>();
   readonly #readFailures = new Map<string, unknown[]>();
   readonly #replaceFailures = new Map<string, unknown[]>();
+  #nextStaging = 0;
   #nextWrite: WriteGate | null = null;
   #nextReplace: WriteGate | null = null;
 
@@ -102,7 +103,12 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
     return this.text(path);
   }
 
-  async writePrivateText(path: string, text: string): Promise<void> {
+  async stagePrivateText(target: string, text: string): Promise<string> {
+    let path: string;
+    do {
+      path = `${target}.${this.#nextStaging}.tmp`;
+      this.#nextStaging += 1;
+    } while (this.#files.has(path));
     this.operations.push({kind: 'write', path});
     const gate = this.#nextWrite;
     this.#nextWrite = null;
@@ -110,6 +116,12 @@ export class FakeSettingsFilesystem implements SettingsFilesystem {
       gate.arrive();
       await gate.released;
     }
+    this.#files.set(path, text);
+    return path;
+  }
+
+  /** Replace a file's bytes directly when arranging a test's external filesystem state. */
+  setText(path: string, text: string): void {
     this.#files.set(path, text);
   }
 

@@ -9,7 +9,15 @@
  */
 
 import type {RelayPort} from '@vibesys/feature-run-control/main';
-import {type ChromeState, CONNECT_CHANNEL, WAKE_CHANNEL, type WelcomeEvent} from '@vibesys/ipc';
+import {
+  type ChromeState,
+  CONNECT_CHANNEL,
+  LOGS_CHANNEL,
+  type RunLogsReply,
+  type RunLogsRequest,
+  WAKE_CHANNEL,
+  type WelcomeEvent,
+} from '@vibesys/ipc';
 import {
   BaseWindow,
   dialog,
@@ -20,7 +28,7 @@ import {
 } from 'electron';
 import {APP_ENTRY_URL, WELCOME_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
-import {bindRunIpc, type PendingRunPort} from './run-ipc.js';
+import {type PendingRunPort, RunIpcRegistry} from './run-ipc.js';
 import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
 import type {WelcomeDocument} from './welcome-ipc.js';
 import {
@@ -30,12 +38,50 @@ import {
 } from './welcome-page-lifecycle.js';
 import {TITLEBAR_HEIGHT, windowChrome} from './window-chrome.js';
 
+/**
+ * The one process-wide run-connect registry every window competes through.
+ *
+ * Lazily built from whichever window constructs first: every window in this process uses the same
+ * `log`, so which one happens to create the registry is not observable.
+ */
+let sharedRunIpc: RunIpcRegistry | null = null;
+function runIpcRegistry(log: (message: string) => void): RunIpcRegistry {
+  sharedRunIpc ??= new RunIpcRegistry(
+    {
+      onConnect: listener => {
+        ipcMain.on(CONNECT_CHANNEL, event => {
+          const port = event.ports[0];
+          listener({
+            port: port === undefined ? null : pendingRunPort(port),
+            senderId: event.sender.id,
+            senderUrl: event.senderFrame?.url ?? null,
+          });
+        });
+      },
+      onLogs: listener => {
+        ipcMain.handle(LOGS_CHANNEL, (event, request: unknown) =>
+          listener({
+            request,
+            senderId: event.sender.id,
+            senderUrl: event.senderFrame?.url ?? null,
+          }),
+        );
+      },
+    },
+    APP_ENTRY_URL,
+    log,
+  );
+  return sharedRunIpc;
+}
+
 export interface AppWindowDeps {
   readonly log: (message: string) => void;
-  /** The run page opened one connection. */
-  readonly connect: (port: RelayPort) => void;
-  /** The native window or its current run page disappeared: detach the attached run. */
-  readonly closed: () => void;
+  /** The run page opened one connection, for the run bound to it (`openRunPage`'s `runId`). */
+  readonly connect: (port: RelayPort, runId: string) => void;
+  /** The run page asked about its run's logs (`openRunPage`'s `runId`). */
+  readonly logs: (runId: string, request: RunLogsRequest) => Promise<RunLogsReply<RunLogsRequest>>;
+  /** The native window or its current run page disappeared: detach the run bound to it. */
+  readonly closed: (runId: string) => void;
   /** The welcome surface exhausted its bounded recovery; enter fatal app shutdown. */
   readonly fatal: (error: Error) => void;
 }
@@ -60,6 +106,10 @@ export class AppWindow {
   /** Stable welcome-document authority across the one allowed WebContentsView recreation. */
   readonly welcome: WelcomeDocument;
   #mode: ChromeState['mode'] = 'welcome';
+  /** The run bound to the current run page, if any; null before one ever opened. */
+  #currentRunId: string | null = null;
+  /** Withdraws this window's admission claim from the shared run-connect registry. */
+  readonly #unregisterRunIpc: () => void;
 
   constructor(deps: AppWindowDeps) {
     this.#deps = deps;
@@ -74,7 +124,7 @@ export class AppWindow {
     this.#runPages = new RunPageLifecycle({
       retire: view => this.#retireRunPage(view),
       showWelcome: () => this.#showWelcome(),
-      currentPageLost: () => this.#deps.closed(),
+      currentPageLost: () => this.#detachCurrentRun(),
     });
     this.#welcomePages = new WelcomePageLifecycle({
       recreate: () => sandboxedView('welcome.cjs'),
@@ -96,27 +146,28 @@ export class AppWindow {
       this.#runPages.abandon();
       this.#welcomePages.abandon();
       for (const listener of [...this.#welcomeDestroyed]) listener();
-      this.#deps.closed();
+      this.#detachCurrentRun();
+      this.#unregisterRunIpc();
     });
     this.#welcomePages.start(sandboxedView('welcome.cjs'));
-    bindRunIpc(
-      {
-        onConnect: listener => {
-          ipcMain.on(CONNECT_CHANNEL, event => {
-            const port = event.ports[0];
-            listener({
-              port: port === undefined ? null : pendingRunPort(port),
-              senderId: event.sender.id,
-              senderUrl: event.senderFrame?.url ?? null,
-            });
-          });
-        },
+    this.#unregisterRunIpc = runIpcRegistry(deps.log).register({
+      currentSenderId: () => this.#runPages.current?.webContents.id ?? null,
+      // The registry only admits a port whose sender is this window's current run page, so
+      // `#currentRunId` names the same run this port's connection is for.
+      connect: port => {
+        const runId = this.#currentRunId;
+        if (runId === null) {
+          port.close();
+          return;
+        }
+        this.#deps.connect(port, runId);
       },
-      APP_ENTRY_URL,
-      () => this.#runPages.current?.webContents.id ?? null,
-      deps.connect,
-      deps.log,
-    );
+      logs: request => {
+        const runId = this.#currentRunId;
+        if (runId === null) return Promise.reject(new Error('this window shows no run'));
+        return this.#deps.logs(runId, request);
+      },
+    });
   }
 
   get mode(): ChromeState['mode'] {
@@ -129,12 +180,26 @@ export class AppWindow {
     this.#layout();
   }
 
-  /** Replace the run page with a new one for a run on `hostLabel`, and show it. */
-  openRunPage(hostLabel: string): {wake(): void; close(): void} {
+  /**
+   * Replace the run page with a new one for `runId`, and show it.
+   *
+   * This app shows one run page at a time: opening a second run's page here always replaces the
+   * first, the same way it always has. `runId` lets this window tell IPC admission and the
+   * `closed`/`connect` callbacks which run its one page is for, so run-control's binding for a run
+   * that is not the one currently shown is never reached by this window's events.
+   */
+  openRunPage(
+    runId: string,
+    title: {readonly hostLabel: string; readonly task: string | null},
+  ): {
+    wake(): void;
+    close(): void;
+  } {
     const view = sandboxedView('run.cjs');
     this.#runPages.replace(view);
+    this.#currentRunId = runId;
     this.#window.contentView.addChildView(view);
-    this.#window.setTitle(`VibeSys · ${hostLabel}`);
+    this.#window.setTitle(`VibeSys · ${title.hostLabel}`);
     void observeRunPage(
       view.webContents,
       APP_ENTRY_URL,
@@ -147,6 +212,7 @@ export class AppWindow {
         if (!view.webContents.isDestroyed()) view.webContents.send(WAKE_CHANNEL);
       },
       close: () => {
+        if (this.#currentRunId === runId) this.#currentRunId = null;
         this.#runPages.close(view);
       },
     };
@@ -180,6 +246,11 @@ export class AppWindow {
     this.#window.focus();
   }
 
+  /** Close this window, as the user closing it would: `'closed'` detaches its current run. */
+  close(): void {
+    if (!this.#window.isDestroyed()) this.#window.close();
+  }
+
   #retireRunPage(view: WebContentsView): void {
     if (!this.#window.isDestroyed()) this.#window.contentView.removeChildView(view);
     if (!view.webContents.isDestroyed()) view.webContents.close();
@@ -202,6 +273,14 @@ export class AppWindow {
   #retireWelcomePage(view: WebContentsView): void {
     if (!this.#window.isDestroyed()) this.#window.contentView.removeChildView(view);
     if (!view.webContents.isDestroyed()) view.webContents.close();
+  }
+
+  /** Report the current run page's loss, if it has one; safe before any run page ever opened. */
+  #detachCurrentRun(): void {
+    const runId = this.#currentRunId;
+    if (runId === null) return;
+    this.#currentRunId = null;
+    this.#deps.closed(runId);
   }
 
   #showWelcome(): void {

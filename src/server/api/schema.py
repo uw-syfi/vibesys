@@ -20,12 +20,21 @@ from server.api.iterations import IterationSlice
 from server.api.protocol import ProtocolRequest, Response, RunSnapshot, ServerMessage
 from server.events import RunEvent
 from server.host_api import (
+    HELPER_FIELD_FEATURES,
     HELPER_REQUEST_FEATURES,
     ChannelEnd,
     HelperMessage,
     HelperRequest,
+    RunStartCompensationFailure,
 )
-from vibesys.api import IterationKind, IterationMetric, IterationStatus, IterationSummary
+from vibesys.api import (
+    IterationKind,
+    IterationMetric,
+    IterationStatus,
+    IterationSummary,
+    LogOwner,
+)
+from vs_logs.api import NarrationLine
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -103,6 +112,10 @@ class ProtocolDocument(BaseModel):
     event: RunEvent
     snapshot: RunSnapshot
     server_message: ServerMessage
+    log_owner: LogOwner
+    """What a run's log stream is for; the host helper's log listing carries it."""
+    narration_line: NarrationLine
+    """One JSON line of a ``run_narration`` stream, which a log view decodes."""
 
 
 class HostHelperDocument(BaseModel):
@@ -113,6 +126,7 @@ class HostHelperDocument(BaseModel):
     request: HelperRequest
     message: HelperMessage
     channel_end: ChannelEnd
+    compensation_failure: RunStartCompensationFailure
 
 
 def host_helper_json_schema() -> dict[str, Any]:
@@ -123,6 +137,7 @@ def host_helper_json_schema() -> dict[str, Any]:
     """
     document = require_tagged_union_discriminants(HostHelperDocument.model_json_schema())
     document["x-vibesys-feature-by-request"] = _host_helper_feature_by_request(document)
+    document["x-vibesys-feature-by-field"] = _host_helper_feature_by_field(document)
     return document
 
 
@@ -140,6 +155,23 @@ def _host_helper_feature_by_request(document: dict[str, Any]) -> dict[str, str]:
             message = f"helper request tag {tag!r} has more than one feature gate"
             raise ValueError(message)
         result[tag] = feature.value
+    return result
+
+
+def _host_helper_feature_by_field(document: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Export the server's optional-field gates, refusing a field the request does not have."""
+    request_tags = document["properties"]["request"]["discriminator"]["mapping"]
+    result: dict[str, dict[str, str]] = {}
+    for request_type, fields in HELPER_FIELD_FEATURES.items():
+        tag = request_type.model_fields["type"].default
+        if not isinstance(tag, str) or tag not in request_tags:
+            message = f"gated helper request {request_type.__name__} has no request-union tag"
+            raise ValueError(message)
+        for name in fields:
+            if name not in request_type.model_fields:
+                message = f"gated field {name!r} is not a field of {request_type.__name__}"
+                raise ValueError(message)
+        result[tag] = {name: feature.value for name, feature in fields.items()}
     return result
 
 
@@ -174,6 +206,8 @@ _HOST_HELPER_DESCRIPTOR_KEYWORDS = frozenset(
         "x-vibesys-max-utf8-bytes",
         # Generated from HELPER_REQUEST_FEATURES; both helper implementations consume it.
         "x-vibesys-feature-by-request",
+        # Generated from HELPER_FIELD_FEATURES; both helper implementations consume it.
+        "x-vibesys-feature-by-field",
     }
 )
 """What the TypeScript walker's strict mode enforces (``contracts/src/schema-walker.ts``)."""

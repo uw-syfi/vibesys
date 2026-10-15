@@ -215,6 +215,23 @@ describe('StreamReconciler batch dispositions', () => {
     });
   });
 
+  it('honors an explicit rebootstrap when store and floor are unchanged', () => {
+    for (const context of [FRESH, RESUMED]) {
+      const reconciler = new StreamReconciler({backfillChunk: 100});
+      reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 100}), FRESH);
+      const replay = eventBatch([tailEvent(101)], {
+        store_id: 'log',
+        history_after_sequence: 100,
+        rebootstrap: true,
+      });
+
+      expect(reconciler.reconcileBatch(replay, context)).toEqual({
+        kind: 'rebootstrap',
+        historyFloor: 100,
+      });
+    }
+  });
+
   it('extends a fresh batch that re-declares the floor the stream already declared', () => {
     const reconciler = new StreamReconciler({backfillChunk: 100});
     reconciler.reconcileBatch(batch({storeId: 'log', declaredFloor: 100}), FRESH);

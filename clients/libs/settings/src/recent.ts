@@ -1,13 +1,13 @@
 /**
  * The runs the user opened (`recent.json` in the app's user data), as pure, validated data. The
  * welcome view lists them for one-click reattach and resume. An entry names its run by
- * `(host, runId)`, recorded from the run's record when the app starts or attaches to it, never
- * later and never guessed. The latest attached or inspected server id is retained only as the
- * locator for ID-scoped diagnostics after registry tombstones expire; status still comes from the
- * host's registry, never from this file.
+ * `(host, project, runId)`, recorded from the run's record when the app starts or attaches to it,
+ * never later and never guessed. Run IDs are project-scoped. The latest attached or inspected
+ * server id is retained only as the locator for ID-scoped diagnostics after registry tombstones
+ * expire; status still comes from the host's registry, never from this file.
  */
 import {type HostKey, hostFromKey, validHostPath} from '@vibesys/hosts';
-import {isInstanceId, isRunId, isTaskName} from '@vibesys/runs';
+import {isInstanceId, isRunId, isTaskName, recentRunKey} from '@vibesys/runs';
 import {object, onlyKeys, SettingsError} from './parse.js';
 
 /** One run the user opened, as `recent.json` stores it (the welcome view lists `RecentRun`). */
@@ -106,7 +106,7 @@ export function parseRecent(value: unknown): RecentFile {
 }
 
 function sameRun(a: StoredRecentRun, b: StoredRecentRun): boolean {
-  return a.host === b.host && a.runId === b.runId;
+  return recentRunKey(a) === recentRunKey(b);
 }
 
 /**
@@ -136,9 +136,7 @@ export function rememberInstance(file: RecentFile, inspected: RecentInstance): R
   return {
     version: 3,
     runs: file.runs.map(run =>
-      run.host === inspected.host &&
-      run.project === inspected.project &&
-      run.runId === inspected.runId
+      recentRunKey(run) === recentRunKey(inspected)
         ? {...run, instanceId: inspected.instanceId}
         : run,
     ),

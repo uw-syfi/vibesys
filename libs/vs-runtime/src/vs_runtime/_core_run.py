@@ -41,6 +41,7 @@ from vs_core.api import (
     ControlInput,
     CoreState,
     RecoveryPhase,
+    RequestPhase,
     RunControlEvent,
     RunResultProposal,
     RunStatus,
@@ -48,9 +49,11 @@ from vs_core.api import (
     StopMode,
     orphan_waits,
     project,
+    unreleased_records,
 )
 from vs_runtime._core_loop import LeaseUnavailableError
 from vs_runtime._steer_delivery import SteerConsumption, steer_input, unrecorded_steers
+from vs_runtime._workspace_holds import core_workspace_holds
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -59,6 +62,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_loop import CoreRuntime, PublicationDelivery
     from vs_runtime._core_requests import ExecutorRefusal
     from vs_runtime._run_control import RunControlChannel
+    from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sim.api import SleepingClock, Threads
 
 
@@ -263,14 +267,32 @@ class RunControlBridge:
         return RunControlEvent(control=control, now_at=now_at)
 
 
+class CoreHeldWorkspaces(Protocol):
+    """The run's candidate workspaces, kept on disk across a host stop only while core holds them."""
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        """Decide what outlives this host from what core references, as *holds* reads it."""
+        ...
+
+    async def release_unheld(self) -> None:
+        """Discard every candidate worktree on disk that core no longer references."""
+        ...
+
+
 @dataclass(frozen=True)
 class CoreRunHost:
-    """The process-local pieces one run loop drives."""
+    """The process-local pieces one run loop drives.
+
+    ``workspaces``, when given, follow the run's core state: a start discards the worktrees a
+    stopped host left that core no longer references, and the host's close keeps only those
+    core still holds (none once the run's result is final).
+    """
 
     shell: CoreRuntime
     delivery: PublicationDelivery
     clock: SleepingClock
     controls: RunControlBridge | None = None
+    workspaces: CoreHeldWorkspaces | None = None
 
 
 def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
@@ -286,6 +308,11 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     (a live holder renews, so it would still hold the lease after that). The wait is
     in clock time: a simulated clock makes it instant. Raises ``LeaseUnavailableError``
     naming the bound when the lease is still held after it.
+
+    Once started, the host's ``workspaces`` follow core's recovered state: worktrees a
+    stopped host left that core no longer references are discarded now. If following or
+    sweeping those workspaces fails or is cancelled, startup releases its newly acquired
+    lease before propagating the interruption.
     """
     give_up_at = host.clock.now() + config.lease_duration
     while True:
@@ -302,7 +329,30 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
                 raise LeaseUnavailableError(message) from error
             await host.clock.sleep(min(config.recovery_poll_interval, remaining))
         else:
-            return
+            break
+    try:
+        await _follow_core(host)
+    except BaseException as start_error:
+        try:
+            host.shell.release_lease(now_at=host.clock.now())
+        except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-114090 [BLE001]; cancellation and other startup failures must retain their identity if lease rollback also fails.
+            # > Catching only Exception would let an unexpected BaseException from the release
+            # > boundary replace startup; separate handlers would duplicate one rollback rule.
+            start_error.add_note(
+                "Additional error while releasing the lease after core startup failed: "
+                f"{type(cleanup_error).__name__}: {cleanup_error}"
+            )
+        raise
+
+
+async def _follow_core(host: CoreRunHost) -> None:
+    """Bind the run's workspaces to core's state and discard what core no longer references."""
+    workspaces = host.workspaces
+    if workspaces is None:
+        return
+    shell = host.shell
+    workspaces.follow(lambda: core_workspace_holds(shell.record.envelope.core))
+    await workspaces.release_unheld()
 
 
 async def drive_core(
@@ -519,15 +569,43 @@ class _Loop:
         A blocked check reopens only on an observation, and with nothing in flight and no
         timer due none will come: the run would sit running until its deadline. So the loop
         stops it with a ``blocked`` result that says why, as it stops a run at its deadline.
+        A blocked check whose last inspection has already answered can never resolve either,
+        so recovery can never open, whatever unrelated timers (another turn's deadline) are
+        still due: waiting for them would hold admission closed in silence.
         """
         return (
             core.records.recovery.phase == RecoveryPhase.BLOCKED
             and core.run.result is None
-            and not self._shell.in_flight
-            and self._next_wake(core) is None
-            and self._shell.next_wake_at is None
             and not any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+            and (
+                (
+                    not self._shell.in_flight
+                    and self._next_wake(core) is None
+                    and self._shell.next_wake_at is None
+                )
+                or self._blocked_for_good(core)
+            )
         )
+
+    def _blocked_for_good(self, core: CoreState) -> bool:
+        """Whether some blocked check has had its last answer and nothing about it still runs.
+
+        The reconciliation deadline blocks a check and sends one last inspection of its target;
+        once that inspection has settled without resolving the check, no observation about
+        the target is left to come (a restart keeps it blocked too).
+        """
+        running = {request.request_id for request in self._shell.in_flight}
+        for check in core.records.recovery.checks:
+            if check.resolution != "blocked" or check.inspection is None:
+                continue
+            inspection = core.records.record(check.inspection)
+            if (
+                inspection is not None
+                and inspection.phase in (RequestPhase.COMPLETED, RequestPhase.BLOCKED)
+                and not {check.target, check.inspection} & running
+            ):
+                return True
+        return False
 
     def _signature(self) -> object:
         """Everything that changes when work happened; time, liveness and the revision do not."""
@@ -552,7 +630,12 @@ class _Loop:
             await self._wait_while_running(due)
             return
         paused = core.run.status == RunStatus.PAUSED
-        recovering = core.records.recovery.phase != RecoveryPhase.READY
+        # Recovery that the loop already stopped as blocked reopens on nothing: polling it
+        # would only wait out the deadline before the same stall.
+        recovering = core.records.recovery.phase != RecoveryPhase.READY and not (
+            core.records.recovery.phase == RecoveryPhase.BLOCKED
+            and any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+        )
         past_deadline = now >= core.run.deadline_at
         if due is None and not paused and (not recovering or past_deadline):
             raise RunStalledError(_describe(core, self._stall_notes()))
@@ -640,10 +723,19 @@ def _describe(core: CoreState, notes: Sequence[str]) -> str:
     ]
     if waiting:
         text += f"; attempts waiting for a release {waiting}"
+    # A completed owned job or turn whose release is unproven holds closure, though no
+    # record is open: name it, or the report blames the strategy for a release core lacks.
+    unreleased = [
+        f"{record.request.kind}:{record.request_id.root}"
+        for record in unreleased_records(core)
+        if record.phase == RequestPhase.COMPLETED
+    ]
+    if unreleased:
+        text += f"; completed records whose release is unproven {unreleased}"
     orphans = [f"{wait.waiter.value} {wait.subject}" for wait in orphan_waits(core)]
     if orphans:
         text += f"; waits nothing will end {orphans}"
-    if not open_records and not waiting and not orphans:
+    if not open_records and not waiting and not unreleased and not orphans:
         text += f"; {_unfinished(core)}"
     if notes:
         text += f"; {'; '.join(notes)}"

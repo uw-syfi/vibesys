@@ -53,6 +53,7 @@ def retiring_plan(disposition: str, reason_kind: str) -> str:
                     "reason": "no further progress",
                 }
             ],
+            "handoff": {"expectations": [], "doubts": []},
         }
     )
 

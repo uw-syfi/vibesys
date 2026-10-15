@@ -65,7 +65,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "server_stalled",
         "client_stalled",
         "server_failed",
-        "client_failed"
+        "client_failed",
+        "server_unresponsive"
       ],
       "title": "ChannelEndOutcome",
       "type": "string"
@@ -198,6 +199,114 @@ const hostHelperSchema: Record<string, unknown> = {
         "message"
       ],
       "title": "FailureReason",
+      "type": "object"
+    },
+    "HarnessChoice": {
+      "additionalProperties": false,
+      "description": "One agent CLI provider and one model it runs.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "title": "HarnessChoice",
+      "type": "object"
+    },
+    "HarnessOption": {
+      "additionalProperties": false,
+      "description": "A vetted provider and model pair a run may start with.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "default": {
+          "type": "boolean",
+          "title": "Default"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "default"
+      ],
+      "title": "HarnessOption",
+      "type": "object"
+    },
+    "HarnessesListReply": {
+      "additionalProperties": false,
+      "description": "The vetted pairs, grouped by provider with each provider's default first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "harnesses.list",
+          "default": "harnesses.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "harnesses": {
+          "items": {
+            "$ref": "#/$defs/HarnessOption"
+          },
+          "title": "Harnesses",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "harnesses"
+      ],
+      "title": "HarnessesListReply",
+      "type": "object"
+    },
+    "HarnessesListRequest": {
+      "additionalProperties": false,
+      "description": "The vetted provider and model pairs ``run.start``'s ``harness`` accepts.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "harnesses.list",
+          "default": "harnesses.list",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "HarnessesListRequest",
       "type": "object"
     },
     "HelloReply": {
@@ -423,6 +532,9 @@ const hostHelperSchema: Record<string, unknown> = {
         "run_gone",
         "connect_denied",
         "connect_failed",
+        "unknown_instance",
+        "unknown_log_stream",
+        "unvetted_harness",
         "internal"
       ],
       "title": "HelperErrorCode",
@@ -433,7 +545,9 @@ const hostHelperSchema: Record<string, unknown> = {
       "enum": [
         "instances_watch",
         "paths_complete",
-        "instances_inspect"
+        "instances_inspect",
+        "logs",
+        "harnesses"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -798,7 +912,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "InstancesInspectRequest": {
       "additionalProperties": false,
-      "description": "Inspect one detached server without starting another host process.",
+      "description": "Inspect one detached server without starting another host process.\n\n``include_log`` is deprecated: it asks for a tail of ``server.log``, the detached\nserver's raw output, which is for a person at a terminal. No client UI may depend on\nit; a run's logs come from its log store through ``logs.list`` and ``logs.read``. The\nhelper keeps answering it so older clients keep working, and removes it at the next\nhelper protocol version (2).",
       "properties": {
         "request_id": {
           "maxLength": 128,
@@ -1028,6 +1142,7 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "InstancesWatchRequest",
       "type": "object"
     },
+    "JsonValue": {},
     "LiveInstanceRecord": {
       "additionalProperties": false,
       "description": "What a detached server publishes about itself (version 4).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal. When the server\nexits it leaves its last record, with an ended phase and ``ended_at``, as a\ntombstone the registry keeps for a day.",
@@ -1130,6 +1245,353 @@ const hostHelperSchema: Record<string, unknown> = {
         "vibesys_version"
       ],
       "title": "LiveInstanceRecord",
+      "type": "object"
+    },
+    "LogChunk": {
+      "additionalProperties": false,
+      "description": "Bytes ``[offset, next_offset)`` of a stream, decoded as UTF-8 text.\n\nThe helper cuts a chunk that more bytes follow after the last line end in\nits window, or, with no line end there, before a character the window\nsplits; so ``data`` decodes without loss except for bytes that are not\nUTF-8, which become U+FFFD. ``next_offset - offset`` counts bytes.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "data": {
+          "title": "Data",
+          "type": "string",
+          "x-vibesys-max-utf8-bytes": 196608
+        },
+        "next_offset": {
+          "minimum": 0,
+          "title": "Next Offset",
+          "type": "integer"
+        },
+        "eof": {
+          "title": "Eof",
+          "type": "boolean"
+        },
+        "closed": {
+          "title": "Closed",
+          "type": "boolean"
+        },
+        "truncated_before": {
+          "title": "Truncated Before",
+          "type": "boolean"
+        },
+        "pipes": {
+          "items": {
+            "$ref": "#/$defs/LogPipeSpan"
+          },
+          "title": "Pipes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "offset",
+        "data",
+        "next_offset",
+        "eof",
+        "closed",
+        "truncated_before",
+        "pipes"
+      ],
+      "title": "LogChunk",
+      "type": "object"
+    },
+    "LogOffset": {
+      "additionalProperties": false,
+      "description": "Read from this byte offset of the stream.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "offset"
+      ],
+      "title": "LogOffset",
+      "type": "object"
+    },
+    "LogPipe": {
+      "description": "Which of a command's output pipes wrote some bytes.",
+      "enum": [
+        "stdout",
+        "stderr"
+      ],
+      "title": "LogPipe",
+      "type": "string"
+    },
+    "LogPipeSpan": {
+      "additionalProperties": false,
+      "description": "Bytes ``[offset, offset + length)`` of a stream were written by ``pipe``.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "length": {
+          "exclusiveMinimum": 0,
+          "title": "Length",
+          "type": "integer"
+        },
+        "pipe": {
+          "$ref": "#/$defs/LogPipe"
+        }
+      },
+      "required": [
+        "offset",
+        "length",
+        "pipe"
+      ],
+      "title": "LogPipeSpan",
+      "type": "object"
+    },
+    "LogStream": {
+      "additionalProperties": false,
+      "description": "One recorded log stream of an instance, as its store indexes it.",
+      "properties": {
+        "id": {
+          "pattern": "^[0-9]{6,12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "owner": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Owner",
+          "type": "object"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "retained_start": {
+          "minimum": 0,
+          "title": "Retained Start",
+          "type": "integer"
+        },
+        "size": {
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogStreamOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "owner",
+        "command",
+        "retained_start",
+        "size",
+        "outcome"
+      ],
+      "title": "LogStream",
+      "type": "object"
+    },
+    "LogStreamOutcome": {
+      "description": "How a stream was closed.",
+      "enum": [
+        "ended",
+        "failed",
+        "abandoned"
+      ],
+      "title": "LogStreamOutcome",
+      "type": "string"
+    },
+    "LogTail": {
+      "additionalProperties": false,
+      "description": "Read the last ``tail_bytes`` bytes the stream holds, from the first line start in them.",
+      "properties": {
+        "tail_bytes": {
+          "maximum": 65536,
+          "minimum": 1,
+          "title": "Tail Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tail_bytes"
+      ],
+      "title": "LogTail",
+      "type": "object"
+    },
+    "LogsListReply": {
+      "additionalProperties": false,
+      "description": "The instance's streams, oldest first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "logs.list",
+          "default": "logs.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "streams": {
+          "items": {
+            "$ref": "#/$defs/LogStream"
+          },
+          "title": "Streams",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "streams"
+      ],
+      "title": "LogsListReply",
+      "type": "object"
+    },
+    "LogsListRequest": {
+      "additionalProperties": false,
+      "description": "The log streams recorded for one instance, live or ended.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "logs.list",
+          "default": "logs.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "instance_id"
+      ],
+      "title": "LogsListRequest",
+      "type": "object"
+    },
+    "LogsReadReply": {
+      "additionalProperties": false,
+      "description": "One chunk of the stream.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "logs.read",
+          "default": "logs.read",
+          "title": "Type",
+          "type": "string"
+        },
+        "chunk": {
+          "$ref": "#/$defs/LogChunk"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "chunk"
+      ],
+      "title": "LogsReadReply",
+      "type": "object"
+    },
+    "LogsReadRequest": {
+      "additionalProperties": false,
+      "description": "One bounded chunk of a stream; at the end of an open stream, wait up to ``wait_ms`` for more.\n\nA wait ends as soon as bytes arrive or the stream closes, and always before\nthe request's deadline, so a follower keeps exactly one read in flight.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "logs.read",
+          "default": "logs.read",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "stream_id": {
+          "pattern": "^[0-9]{6,12}$",
+          "title": "Stream Id",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogOffset"
+            },
+            {
+              "$ref": "#/$defs/LogTail"
+            }
+          ],
+          "title": "Start"
+        },
+        "max_bytes": {
+          "maximum": 65536,
+          "minimum": 4,
+          "title": "Max Bytes",
+          "type": "integer"
+        },
+        "wait_ms": {
+          "default": 0,
+          "maximum": 30000,
+          "minimum": 0,
+          "title": "Wait Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "instance_id",
+        "stream_id",
+        "start",
+        "max_bytes"
+      ],
+      "title": "LogsReadRequest",
       "type": "object"
     },
     "MissingLogTail": {
@@ -1507,6 +1969,32 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunRole",
       "type": "string"
     },
+    "RunStartCompensationEvidence": {
+      "discriminator": {
+        "mapping": {
+          "stop_failed": "#/$defs/StopFailedCompensationFailure",
+          "stop_unconfirmed": "#/$defs/StopUnconfirmedCompensationFailure",
+          "worker_start_refused": "#/$defs/WorkerStartRefusedCompensationFailure"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/WorkerStartRefusedCompensationFailure"
+        },
+        {
+          "$ref": "#/$defs/StopFailedCompensationFailure"
+        },
+        {
+          "$ref": "#/$defs/StopUnconfirmedCompensationFailure"
+        }
+      ]
+    },
+    "RunStartCompensationFailure": {
+      "$ref": "#/$defs/RunStartCompensationEvidence",
+      "description": "One strict stderr line preserving an undisclosed instance cleanup failure.\n\nA successful ``run.start`` reply could not reach the client, so only this\ndiagnostic can tell an operator which live instance may need recovery. The\ndiscriminated variants make result presence and nonterminal outcomes part of\nthe generated schema rather than Python-only validation.",
+      "title": "RunStartCompensationFailure"
+    },
     "RunStartReply": {
       "additionalProperties": false,
       "description": "The started server's record, or why nothing started.",
@@ -1545,7 +2033,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "RunStartRequest": {
       "additionalProperties": false,
-      "description": "Start a detached run (``vibesys --detach``) in ``project``.",
+      "description": "Start a detached run (``vibesys --detach``) in ``project``.\n\n``args`` never carry ``UNVETTED_MODEL_FLAG`` (or an abbreviation of it): a run\nstarted through the helper uses only vetted harnesses. With ``harness``, they\ncarry neither ``CLI_PROVIDER_FLAG`` nor ``MODEL_FLAG``, so the pair has one source.",
       "properties": {
         "request_id": {
           "maxLength": 128,
@@ -1603,6 +2091,17 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Resume"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessChoice"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -1870,6 +2369,54 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "StartupStage",
       "type": "string"
     },
+    "StopFailedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The registry stop raised before returning typed evidence.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "stop_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "instance_id"
+      ],
+      "title": "StopFailedCompensationFailure",
+      "type": "object"
+    },
     "StopOutcome": {
       "description": "What ``vibesys instances stop`` observed.",
       "enum": [
@@ -1890,6 +2437,52 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "StopRoute",
       "type": "string"
+    },
+    "StopUnconfirmedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The registry returned a typed result that does not prove terminal cleanup.\n\nThe stop result is the one source of the instance identity in this variant,\nso a serialized report cannot carry two identities that disagree.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "stop_unconfirmed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stop_result": {
+          "$ref": "#/$defs/UnconfirmedInstanceStopResult"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "stop_result"
+      ],
+      "title": "StopUnconfirmedCompensationFailure",
+      "type": "object"
     },
     "TaskList": {
       "additionalProperties": false,
@@ -1999,6 +2592,49 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "TasksListRequest",
       "type": "object"
     },
+    "UnconfirmedInstanceStopResult": {
+      "additionalProperties": false,
+      "description": "A complete stop result whose outcome does not prove terminal cleanup.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "stopping",
+            "still_running",
+            "unsupported"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopRoute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "outcome"
+      ],
+      "title": "UnconfirmedInstanceStopResult",
+      "type": "object"
+    },
     "UnreadableRecord": {
       "additionalProperties": false,
       "description": "A registry entry this reader cannot interpret; ``version`` is ``None`` if it has none.",
@@ -2026,6 +2662,54 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "UnreadableRecord",
       "type": "object"
+    },
+    "WorkerStartRefusedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The helper could not start the worker that owns the compensating stop.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "worker_start_refused",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "instance_id"
+      ],
+      "title": "WorkerStartRefusedCompensationFailure",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -2034,11 +2718,14 @@ const hostHelperSchema: Record<string, unknown> = {
     "request": {
       "discriminator": {
         "mapping": {
+          "harnesses.list": "#/$defs/HarnessesListRequest",
           "hello": "#/$defs/HelloRequest",
           "instances.inspect": "#/$defs/InstancesInspectRequest",
           "instances.list": "#/$defs/InstancesListRequest",
           "instances.unwatch": "#/$defs/InstancesUnwatchRequest",
           "instances.watch": "#/$defs/InstancesWatchRequest",
+          "logs.list": "#/$defs/LogsListRequest",
+          "logs.read": "#/$defs/LogsReadRequest",
           "paths.complete": "#/$defs/PathsCompleteRequest",
           "ping": "#/$defs/PingRequest",
           "run.connect": "#/$defs/RunConnectRequest",
@@ -2085,6 +2772,15 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         {
           "$ref": "#/$defs/PathsCompleteRequest"
+        },
+        {
+          "$ref": "#/$defs/LogsListRequest"
+        },
+        {
+          "$ref": "#/$defs/LogsReadRequest"
+        },
+        {
+          "$ref": "#/$defs/HarnessesListRequest"
         }
       ],
       "title": "Request"
@@ -2093,12 +2789,15 @@ const hostHelperSchema: Record<string, unknown> = {
       "discriminator": {
         "mapping": {
           "error": "#/$defs/HelperError",
+          "harnesses.list": "#/$defs/HarnessesListReply",
           "hello": "#/$defs/HelloReply",
           "instances.changed": "#/$defs/InstancesChanged",
           "instances.inspect": "#/$defs/InstancesInspectReply",
           "instances.list": "#/$defs/InstancesListReply",
           "instances.unwatch": "#/$defs/InstancesUnwatchReply",
           "instances.watch": "#/$defs/InstancesWatchReply",
+          "logs.list": "#/$defs/LogsListReply",
+          "logs.read": "#/$defs/LogsReadReply",
           "paths.complete": "#/$defs/PathsCompleteReply",
           "ping": "#/$defs/PingReply",
           "run.connect": "#/$defs/RunConnectReply",
@@ -2147,6 +2846,15 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/PathsCompleteReply"
         },
         {
+          "$ref": "#/$defs/LogsListReply"
+        },
+        {
+          "$ref": "#/$defs/LogsReadReply"
+        },
+        {
+          "$ref": "#/$defs/HarnessesListReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -2157,12 +2865,16 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "channel_end": {
       "$ref": "#/$defs/ChannelEnd"
+    },
+    "compensation_failure": {
+      "$ref": "#/$defs/RunStartCompensationFailure"
     }
   },
   "required": [
     "request",
     "message",
-    "channel_end"
+    "channel_end",
+    "compensation_failure"
   ],
   "title": "HostHelperDocument",
   "type": "object",
@@ -2170,7 +2882,15 @@ const hostHelperSchema: Record<string, unknown> = {
     "instances.inspect": "instances_inspect",
     "instances.watch": "instances_watch",
     "instances.unwatch": "instances_watch",
-    "paths.complete": "paths_complete"
+    "paths.complete": "paths_complete",
+    "logs.list": "logs",
+    "logs.read": "logs",
+    "harnesses.list": "harnesses"
+  },
+  "x-vibesys-feature-by-field": {
+    "run.start": {
+      "harness": "harnesses"
+    }
   }
 };
 

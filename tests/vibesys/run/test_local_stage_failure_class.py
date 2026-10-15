@@ -69,10 +69,10 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
     open_run_environment_resources,
 )
-from vs_runtime.api.testing import MemoryValidationPasses
+from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, SimThreads
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -82,7 +82,7 @@ if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest
     from vs_runtime.api import AgentRole, OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 _RUN_ID = "lost-stage"
 _HANDLE = "handle-1"
@@ -114,9 +114,10 @@ class _LosesStageCommands(FakeCommandRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         del cancel  # no stage of this test is cancelled
-        result = super().execute(command, timeout=timeout)
+        result = super().execute(command, timeout=timeout, output=output)
         if _ACCURACY in command or _BENCHMARK in command:
             return self.lost
         return result
@@ -230,7 +231,7 @@ def _measure_with_lost_command(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     request = ProjectRunRequest(
         project_root=root,
@@ -262,7 +263,7 @@ def _measure_with_lost_command(
                 log_dir=project.logger.log_dir,
                 workspace=root,
                 ref_dir=None,
-                backend=FakeComputeBackend(),
+                backend=FakeComputeBackend(threads=SimThreads()),
                 agent_backend="claude",
                 cli_provider="claude",
                 run_id=_RUN_ID,
@@ -270,7 +271,7 @@ def _measure_with_lost_command(
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
                 clock=ManualClock(),
-                slurm_processes=NO_PROCESSES,
+                system=idle_environment_system(),
             ),
             lambda _request: _Session(sandbox),
             clock=ManualClock(),

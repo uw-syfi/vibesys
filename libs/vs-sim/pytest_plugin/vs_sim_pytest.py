@@ -71,7 +71,7 @@ import pytest
 from _pytest.runner import runtestprotocol
 
 # The contract suites are test code: let pytest show their assertions with introspection.
-pytest.register_assert_rewrite("vs_sim.contracts")
+pytest.register_assert_rewrite("vs_sim.contracts", "vs_sim.output_contracts")
 
 from vs_sim.api.testing import (  # noqa: E402  # LW-163810 [E402]; the assert-rewrite registration must run before vs_sim.contracts is first imported, which this import does.
     SCHEDULE_SEED_OPTION,
@@ -80,6 +80,7 @@ from vs_sim.api.testing import (  # noqa: E402  # LW-163810 [E402]; the assert-r
     EventTrace,
     Sim,
     explore_seed,
+    refused_starts,
     replay_hint,
     seed_for_test,
     set_depth,
@@ -413,10 +414,18 @@ def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> object | None:
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_call(item: pytest.Item) -> Generator[None]:
-    """Fail a test that spawned simulated threads on a simulator nothing drove."""
+    """Fail a test that spawned simulated threads on a simulator nothing drove, or started a refused process."""
     del item
     undriven_threads()
+    refused_starts()
     yield
+    refused = refused_starts()
+    if refused:
+        pytest.fail(
+            "a refusing Fake turned away a process start (product code may have swallowed "
+            f"the error): {'; '.join(refused)}",
+            pytrace=False,
+        )
     stranded = undriven_threads()
     if stranded:
         pytest.fail(

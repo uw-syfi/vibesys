@@ -26,7 +26,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
-from vs_sim.api import ProcessOutcome, ProcessRun, ProcessSpec
+from vs_sim.api import OutputSink, ProcessOutcome, ProcessRun, ProcessSpec
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import SlurmCluster, SlurmConfig, SlurmConnectorTransport, SlurmJobRunner
 from vs_slurm.fake_connector import HOLD_FILE, executing_cluster, handle, recorded_commands
@@ -43,7 +43,8 @@ class _HeldReplyConnector:
         self.submitted = threading.Event()
         self.release_reply = threading.Event()
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
+        del output
         stdin = spec.input.decode() or None
         del timeout
         request = json.loads(stdin or "{}")

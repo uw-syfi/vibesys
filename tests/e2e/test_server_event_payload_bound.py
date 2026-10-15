@@ -8,10 +8,17 @@ from datetime import UTC, datetime
 from inspect import signature
 from typing import TYPE_CHECKING, cast
 
+from pydantic import TypeAdapter
 from tests.server.support import REQUEST_TIME, build_server_parts
 from websockets.asyncio.client import connect
 
-from server.api.protocol import EventBatchMessage, SubscribeRequest
+from server.api.protocol import (
+    ActiveExecutions,
+    ActiveExecutionsChunkMessage,
+    EventBatchMessage,
+    ServerMessage,
+    SubscribeRequest,
+)
 from server.events import MAX_SERIALIZED_RUN_EVENT_BYTES, EventType, OutputData, make_event
 from server.transport.websocket import WebSocketGateway
 from vs_sim.api import MonotonicClock, OsThreads, ThreadBlockingRunner
@@ -93,3 +100,57 @@ def test_one_event_past_the_peer_frame_cap_arrives_cut_and_the_socket_stays_open
         event.text == "" and event.data == OutputData(stream="stdout", content="still connected")
         for event in second.events
     )
+
+
+def test_stock_websocket_client_receives_an_oversized_active_checkpoint_in_bounded_frames(
+    tmp_path: Path,
+) -> None:
+    """The public gateway keeps its active checkpoint below the peer's real cap."""
+    parts = build_server_parts(tmp_path / "logs")
+    assignment = "x" * (_CLIENT_FRAME_CAP + 64 * 1024)
+    execution = parts.start_execution("implementer", "round-1", assignment)
+
+    async def receive(gateway: WebSocketGateway) -> tuple[list[str], list[object]]:
+        origin = f"http://127.0.0.1:{gateway.bound_port}"
+        frames: list[str] = []
+        messages: list[object] = []
+        async with connect(gateway.websocket_url, origin=cast("Origin", origin)) as websocket:
+            await websocket.send(
+                SubscribeRequest(
+                    timestamp=REQUEST_TIME, client_id="large-checkpoint-client"
+                ).model_dump_json()
+            )
+            assert json.loads(await _next_frame(websocket))["type"] == "subscribed"
+            first_frame = await _next_frame(websocket)
+            frames.append(first_frame)
+            first = TypeAdapter(ServerMessage).validate_json(first_frame)
+            messages.append(first)
+            assert isinstance(first, EventBatchMessage)
+            assert first.active_executions is None
+            while True:
+                frame = await _next_frame(websocket)
+                frames.append(frame)
+                message = TypeAdapter(ServerMessage).validate_json(frame)
+                messages.append(message)
+                if isinstance(message, ActiveExecutionsChunkMessage) and (
+                    message.chunk_index + 1 == message.chunk_count
+                ):
+                    return frames, messages
+
+    with WebSocketGateway(
+        parts.api,
+        clock=MonotonicClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
+        frames, messages = asyncio.run(receive(gateway))
+    parts.close()
+
+    assert all(len(frame.encode()) <= _CLIENT_FRAME_CAP for frame in frames)
+    chunks = [message for message in messages if isinstance(message, ActiveExecutionsChunkMessage)]
+    assert [chunk.chunk_index for chunk in chunks] == list(range(len(chunks)))
+    assert {chunk.chunk_count for chunk in chunks} == {len(chunks)}
+    active = TypeAdapter(ActiveExecutions).validate_json("".join(chunk.payload for chunk in chunks))
+    assert [(item.execution_id, item.assignment) for item in active] == [
+        (execution.execution_id, assignment)
+    ]

@@ -41,6 +41,179 @@ import {
 } from './state.js';
 import {TranscriptFolder} from './transcript-folder.js';
 
+/** How one event batch participates in a fragmented active-execution checkpoint. */
+export interface ActiveExecutionCheckpointFold {
+  readonly kind: 'deferred' | 'complete';
+  readonly checkpointId: string;
+}
+
+function withoutDeferredExecutionCheckpoint(state: CoreState): CoreState {
+  const provenance = coreStateProvenance(state);
+  if (provenance.activeExecutionCheckpoint === undefined) return state;
+  const {activeExecutionCheckpoint: _discarded, ...settled} = provenance;
+  return cloneCoreStateWith(state, {provenance: settled});
+}
+
+function settleDeferredExecutionCheckpoint(state: CoreState): CoreState {
+  const pending = coreStateProvenance(state).activeExecutionCheckpoint;
+  if (pending === undefined) return state;
+  return cloneCoreStateWith(withoutDeferredExecutionCheckpoint(state), {
+    activeExecutions: pending.activeExecutions,
+    executionStatuses: pending.executionStatuses,
+  });
+}
+
+function checkpointWorkingState(
+  state: CoreState,
+  checkpoint: ActiveExecutionCheckpointFold,
+  rebootstrap: boolean,
+): CoreState {
+  const pending = coreStateProvenance(state).activeExecutionCheckpoint;
+  if (checkpoint.kind === 'complete') {
+    if (pending?.checkpointId !== checkpoint.checkpointId) {
+      throw new Error(
+        `Active-execution checkpoint ${checkpoint.checkpointId} has no deferred fold`,
+      );
+    }
+    return cloneCoreStateWith(state, {
+      activeExecutions: pending.activeExecutions,
+      executionStatuses: pending.executionStatuses,
+    });
+  }
+  if (rebootstrap) return initialCoreState();
+  if (pending?.checkpointId === checkpoint.checkpointId) {
+    return cloneCoreStateWith(state, {
+      activeExecutions: pending.activeExecutions,
+      executionStatuses: pending.executionStatuses,
+    });
+  }
+  return settleDeferredExecutionCheckpoint(state);
+}
+
+function deferExecutionCheckpoint(
+  publicState: CoreState,
+  workingState: CoreState,
+  checkpointId: string,
+  acceptsMetadata: boolean,
+  throughSequence: number | undefined,
+): CoreState {
+  return cloneCoreStateWith(workingState, {
+    activeExecutions: publicState.activeExecutions,
+    executionStatuses: publicState.executionStatuses,
+    provenance: {
+      ...coreStateProvenance(workingState),
+      activeExecutionCheckpoint: {
+        checkpointId,
+        throughSequence,
+        acceptsMetadata,
+        activeExecutions: workingState.activeExecutions,
+        executionStatuses: workingState.executionStatuses,
+      },
+    },
+  });
+}
+
+/** Fold one delivery route against staged execution maps without publishing them early. */
+function foldRoutedEventsDuringCheckpoint(
+  state: CoreState,
+  events: readonly RunEvent[],
+  route: DeliveryRoute,
+): CoreState {
+  const pending = coreStateProvenance(state).activeExecutionCheckpoint;
+  if (pending === undefined) {
+    const batch = foldIdentityAwareBatch(state, events, route);
+    return retainReplayDeliveries(state, batch.state, batch.retainedDeliveries);
+  }
+  const working = cloneCoreStateWith(state, {
+    activeExecutions: pending.activeExecutions,
+    executionStatuses: pending.executionStatuses,
+  });
+  const batch = foldIdentityAwareBatch(working, events, route);
+  const retained = retainReplayDeliveries(state, batch.state, batch.retainedDeliveries);
+  return cloneCoreStateWith(retained, {
+    activeExecutions: state.activeExecutions,
+    executionStatuses: state.executionStatuses,
+    provenance: {
+      ...coreStateProvenance(retained),
+      activeExecutionCheckpoint: {
+        ...pending,
+        activeExecutions: retained.activeExecutions,
+        executionStatuses: retained.executionStatuses,
+      },
+    },
+  });
+}
+
+interface CheckpointMetadataDecision {
+  readonly acceptsIdentity: boolean;
+  readonly throughSequence: number | undefined;
+  readonly blockedBySnapshot: boolean;
+  readonly publishesMetadata: boolean;
+}
+
+function checkpointMetadataDecision(
+  state: CoreState,
+  checkpoint: ActiveExecutionCheckpointFold | undefined,
+  batchAcceptsMetadata: boolean,
+  throughSequence: number | undefined,
+  startsNewTransaction = false,
+): CheckpointMetadataDecision {
+  const pending = coreStateProvenance(state).activeExecutionCheckpoint;
+  const continuesPending =
+    !startsNewTransaction &&
+    (checkpoint?.kind === 'complete' ||
+      (checkpoint?.kind === 'deferred' && pending?.checkpointId === checkpoint.checkpointId));
+  const acceptsIdentity = continuesPending
+    ? (pending?.acceptsMetadata ?? false) && batchAcceptsMetadata
+    : batchAcceptsMetadata;
+  const candidateThrough = continuesPending
+    ? (throughSequence ?? pending?.throughSequence)
+    : throughSequence;
+  const snapshotSequence = startsNewTransaction
+    ? undefined
+    : coreStateProvenance(state).activeExecutionSnapshotSequence;
+  const blockedBySnapshot =
+    snapshotSequence !== undefined &&
+    (candidateThrough === undefined || candidateThrough <= snapshotSequence);
+  return {
+    acceptsIdentity,
+    throughSequence: candidateThrough,
+    blockedBySnapshot,
+    publishesMetadata: acceptsIdentity && !blockedBySnapshot,
+  };
+}
+
+function batchThroughSequence(
+  events: readonly RunEvent[],
+  throughSequence: number | undefined,
+): number | undefined {
+  return throughSequence ?? events.at(-1)?.sequence;
+}
+
+/** Keep a snapshot's liveness while still accepting event-derived status detail. */
+function preserveSnapshotExecutionLiveness(
+  before: CoreState,
+  after: CoreState,
+  metadata: CheckpointMetadataDecision,
+): CoreState {
+  if (!metadata.blockedBySnapshot) return after;
+  return cloneCoreStateWith(after, {
+    activeExecutions: before.activeExecutions,
+    executionStatuses: reconcileExecutionStatuses(after.executionStatuses, before.activeExecutions),
+  });
+}
+
+/** Remove the snapshot fence only after a genuinely newer checkpoint commits. */
+function finishExecutionCheckpoint(state: CoreState, checkpointApplied: boolean): CoreState {
+  let next = withoutDeferredExecutionCheckpoint(state);
+  if (!checkpointApplied) return next;
+  const provenance = coreStateProvenance(next);
+  if (provenance.activeExecutionSnapshotSequence === undefined) return next;
+  const {activeExecutionSnapshotSequence: _settled, ...remaining} = provenance;
+  next = cloneCoreStateWith(next, {provenance: remaining});
+  return next;
+}
+
 function isRunLifetimeBoundary(event: RunEvent): boolean {
   switch (event.type) {
     case 'run_started':
@@ -78,16 +251,55 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
   // snapshot can arrive after the events it was taken alongside. Once the fold
   // has seen the run end, a snapshot no newer than the fold cannot un-end it;
   // a genuinely newer one (a resumed run) still applies.
-  if (hasRunEnded(registered) && snapshot.sequence <= registered.sequence) {
+  const previousSnapshotSequence = coreStateProvenance(registered).activeExecutionSnapshotSequence;
+  if (snapshotCannotAdvanceLiveness(registered, snapshot.sequence, previousSnapshotSequence)) {
     return publishCoreState(registered);
   }
-  const next = cloneCoreStateWith(registered, {
+  const pending = coreStateProvenance(registered).activeExecutionCheckpoint;
+  const supersedesPending =
+    pending !== undefined && snapshot.sequence >= (pending.throughSequence ?? registered.sequence);
+  const snapshotBase = supersedesPending
+    ? settleDeferredExecutionCheckpoint(registered)
+    : registered;
+  const activeExecutions = activeExecutionsFromCheckpoint(snapshot.active_executions ?? []);
+  const executionStatuses = supersedesPending
+    ? reconcileExecutionStatuses(snapshotBase.executionStatuses, activeExecutions)
+    : snapshotBase.executionStatuses;
+  let next = cloneCoreStateWith(snapshotBase, {
     status: snapshot.status,
     agentKind: snapshot.agent_kind ?? null,
     roundLabel: snapshot.round_label ?? null,
-    activeExecutions: activeExecutionsFromCheckpoint(snapshot.active_executions ?? []),
+    activeExecutions,
+    executionStatuses,
+    provenance: {
+      ...coreStateProvenance(snapshotBase),
+      activeExecutionSnapshotSequence: Math.max(previousSnapshotSequence ?? 0, snapshot.sequence),
+    },
   });
+  if (supersedesPending && pending !== undefined) {
+    next = cloneCoreStateWith(next, {
+      provenance: {
+        ...coreStateProvenance(next),
+        activeExecutionCheckpoint: {
+          checkpointId: pending.checkpointId,
+          throughSequence: pending.throughSequence,
+          acceptsMetadata: pending.acceptsMetadata,
+          activeExecutions,
+          executionStatuses,
+        },
+      },
+    });
+  }
   return publishCoreState(next);
+}
+
+function snapshotCannotAdvanceLiveness(
+  state: CoreState,
+  sequence: number,
+  previousSnapshotSequence: number | undefined,
+): boolean {
+  if (hasRunEnded(state) && sequence <= state.sequence) return true;
+  return previousSnapshotSequence !== undefined && sequence < previousSnapshotSequence;
 }
 
 /**
@@ -106,22 +318,56 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
 export function reduceEventBatch(
   state: CoreState,
   events: readonly RunEvent[],
-  activeExecutions?: ActiveExecutionCheckpoint,
+  activeExecutions?: ActiveExecutionCheckpoint | null,
   throughSequence?: number,
   historyAfterSequence?: number,
+  activeExecutionCheckpoint?: ActiveExecutionCheckpointFold,
 ): CoreState {
-  const batch = foldIdentityAwareBatch(state, events);
-  const retained = retainReplayDeliveries(state, batch.state, batch.retainedDeliveries);
-  if (!batch.acceptsMetadata) return publishCoreState(retained);
-  const reduced =
-    historyAfterSequence === undefined
-      ? retained
-      : cloneCoreStateWith(retained, {historyAfterSequence});
-  return publishCoreState(
-    activeExecutions === undefined
-      ? reduced
-      : reconcileActiveExecutions(reduced, activeExecutions, throughSequence),
+  if (activeExecutionCheckpoint?.kind === 'deferred' && activeExecutions !== null) {
+    throw new Error('A deferred active-execution fold requires a null checkpoint');
+  }
+  if (activeExecutionCheckpoint?.kind === 'complete' && activeExecutions == null) {
+    throw new Error('A completed active-execution fold requires an authoritative checkpoint');
+  }
+  const working =
+    activeExecutionCheckpoint === undefined
+      ? settleDeferredExecutionCheckpoint(state)
+      : checkpointWorkingState(state, activeExecutionCheckpoint, false);
+  const batch = foldIdentityAwareBatch(working, events);
+  const retained = retainReplayDeliveries(working, batch.state, batch.retainedDeliveries);
+  if (!batch.acceptsMetadata && activeExecutionCheckpoint === undefined) {
+    return publishCoreState(retained);
+  }
+  const metadata = checkpointMetadataDecision(
+    state,
+    activeExecutionCheckpoint,
+    batch.acceptsMetadata,
+    batchThroughSequence(events, throughSequence),
   );
+  const snapshotSafe = preserveSnapshotExecutionLiveness(working, retained, metadata);
+  const reduced =
+    !metadata.publishesMetadata || historyAfterSequence === undefined
+      ? snapshotSafe
+      : cloneCoreStateWith(snapshotSafe, {historyAfterSequence});
+  if (activeExecutionCheckpoint?.kind === 'deferred') {
+    return publishCoreState(
+      deferExecutionCheckpoint(
+        state,
+        reduced,
+        activeExecutionCheckpoint.checkpointId,
+        metadata.acceptsIdentity,
+        metadata.throughSequence,
+      ),
+    );
+  }
+  const checkpointApplied =
+    activeExecutions != null &&
+    metadata.publishesMetadata &&
+    (metadata.throughSequence === undefined || metadata.throughSequence >= reduced.sequence);
+  const reconciled = !checkpointApplied
+    ? reduced
+    : reconcileActiveExecutions(reduced, activeExecutions, metadata.throughSequence);
+  return publishCoreState(finishExecutionCheckpoint(reconciled, checkpointApplied));
 }
 
 /**
@@ -142,26 +388,66 @@ export function reduceEventBatch(
 export function reduceEventRebootstrap(
   state: CoreState,
   events: readonly RunEvent[],
-  activeExecutions: ActiveExecutionCheckpoint | undefined,
+  activeExecutions: ActiveExecutionCheckpoint | null | undefined,
   throughSequence: number | undefined,
   historyAfterSequence: number,
+  activeExecutionCheckpoint?: ActiveExecutionCheckpointFold,
 ): CoreState {
-  const empty = initialCoreState();
+  if (activeExecutionCheckpoint?.kind === 'deferred' && activeExecutions !== null) {
+    throw new Error('A deferred active-execution fold requires a null checkpoint');
+  }
+  if (activeExecutionCheckpoint?.kind === 'complete' && activeExecutions == null) {
+    throw new Error('A completed active-execution fold requires an authoritative checkpoint');
+  }
+  // Null is the wire's explicit "authoritative checkpoint follows in
+  // fragments" marker. Seed the fresh replay with the last complete execution
+  // checkpoint so its event prefix may update that state without exposing a
+  // transient empty list. Status is event-derived and belongs to the old
+  // sequence space, so only replayed status events rebuild it. Omitted legacy
+  // data retains the old fresh-fold behavior; a list, including [], replaces
+  // after the replay.
+  const empty =
+    activeExecutionCheckpoint === undefined
+      ? activeExecutions === null
+        ? cloneCoreStateWith(initialCoreState(), {
+            activeExecutions: state.activeExecutions,
+          })
+        : initialCoreState()
+      : checkpointWorkingState(state, activeExecutionCheckpoint, true);
   const batch = foldIdentityAwareBatch(empty, events);
   let reduced = retainReplayDeliveries(empty, batch.state, batch.retainedDeliveries);
-  if (batch.acceptsMetadata) {
+  const metadata = checkpointMetadataDecision(
+    state,
+    activeExecutionCheckpoint,
+    batch.acceptsMetadata,
+    batchThroughSequence(events, throughSequence),
+    true,
+  );
+  if (metadata.publishesMetadata) {
     reduced = cloneCoreStateWith(reduced, {historyAfterSequence});
-    if (activeExecutions !== undefined) {
+    if (activeExecutions !== undefined && activeExecutions !== null) {
       reduced = reconcileActiveExecutions(reduced, activeExecutions, throughSequence);
     }
   }
   // The snapshot registry is valid across a store swap only when the replay
   // proves it still describes the same run. Unknown or mixed identity resets
   // it rather than relabeling another run's threads.
-  if (state.runId === null || reduced.runId !== state.runId || !batch.acceptsMetadata) {
-    return publishCoreState(reduced);
+  const registered =
+    state.runId === null || reduced.runId !== state.runId || !batch.acceptsMetadata
+      ? reduced
+      : retainRegisteredChatThreads(reduced, state.chatThreads);
+  if (activeExecutionCheckpoint?.kind === 'deferred') {
+    return publishCoreState(
+      deferExecutionCheckpoint(
+        state,
+        registered,
+        activeExecutionCheckpoint.checkpointId,
+        metadata.acceptsIdentity,
+        metadata.throughSequence,
+      ),
+    );
   }
-  return publishCoreState(retainRegisteredChatThreads(reduced, state.chatThreads));
+  return publishCoreState(withoutDeferredExecutionCheckpoint(registered));
 }
 
 /**
@@ -181,6 +467,8 @@ export function reduceEventPrefix(
   events: readonly RunEvent[],
   historyAfterSequence: number,
 ): CoreState {
+  const provenance = coreStateProvenance(state);
+  const pending = provenance.activeExecutionCheckpoint;
   const prefixAcceptsMetadata = acceptsRunMetadata(state.runId, events);
   const deliveries = [...ownedReplayEvents(events, 'stream'), ...retainedReplayEvents(state)].sort(
     compareReplayDeliveries,
@@ -188,6 +476,15 @@ export function reduceEventPrefix(
   const empty = cloneCoreStateWith(initialCoreState(), {runId: state.runId});
   const replay = foldReplayDeliveries(empty, deliveries);
   let reduced = retainRegisteredChatThreads(replay.state, state.chatThreads);
+  const replayedStatuses = reduced.executionStatuses;
+  let snapshotSafeHiddenStatuses: CoreState['executionStatuses'] | undefined;
+  if (pending !== undefined) {
+    const hiddenStatuses = mergeExecutionStatuses(replayedStatuses, pending.executionStatuses);
+    snapshotSafeHiddenStatuses =
+      provenance.activeExecutionSnapshotSequence === undefined
+        ? hiddenStatuses
+        : reconcileExecutionStatuses(hiddenStatuses, pending.activeExecutions);
+  }
   reduced = cloneCoreStateWith(reduced, {
     runId: state.runId ?? replay.state.runId,
     sequence: state.sequence,
@@ -196,11 +493,25 @@ export function reduceEventPrefix(
     agentKind: state.agentKind ?? replay.state.agentKind,
     roundLabel: state.roundLabel ?? replay.state.roundLabel,
     activeExecutions: state.activeExecutions,
-    executionStatuses: reconcileExecutionStatuses(
-      reduced.executionStatuses,
-      state.activeExecutions,
-    ),
+    executionStatuses:
+      pending === undefined
+        ? reconcileExecutionStatuses(replayedStatuses, state.activeExecutions)
+        : state.executionStatuses,
     historyAfterSequence: prefixAcceptsMetadata ? historyAfterSequence : state.historyAfterSequence,
+    provenance: {
+      ...coreStateProvenance(reduced),
+      ...(provenance.activeExecutionSnapshotSequence === undefined
+        ? {}
+        : {activeExecutionSnapshotSequence: provenance.activeExecutionSnapshotSequence}),
+      ...(pending === undefined
+        ? {}
+        : {
+            activeExecutionCheckpoint: {
+              ...pending,
+              executionStatuses: snapshotSafeHiddenStatuses ?? pending.executionStatuses,
+            },
+          }),
+    },
   });
   replaceReplayEvents(reduced, replay.retainedDeliveries);
   return publishCoreState(reduced);
@@ -254,6 +565,9 @@ function boundaryFor(
 }
 
 export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
+  if (coreStateProvenance(state).activeExecutionCheckpoint !== undefined) {
+    return publishCoreState(foldRoutedEventsDuringCheckpoint(state, [event], 'stream'));
+  }
   const folded = foldEvent(state, event, null);
   return publishCoreState(
     retainReplayDeliveries(state, folded, ownedReplayEvents([event], 'stream')),
@@ -278,8 +592,22 @@ export function reduceEvent(state: CoreState, event: RunEvent): CoreState {
  * and only advance the cursor over them.
  */
 export function reduceResponseEvents(state: CoreState, events: readonly RunEvent[]): CoreState {
-  const batch = foldIdentityAwareBatch(state, events, 'response');
-  return publishCoreState(retainReplayDeliveries(state, batch.state, batch.retainedDeliveries));
+  return publishCoreState(foldRoutedEventsDuringCheckpoint(state, events, 'response'));
+}
+
+/** Merge status replay with staged status, keeping the newest event per execution. */
+function mergeExecutionStatuses(
+  replayed: CoreState['executionStatuses'],
+  staged: CoreState['executionStatuses'],
+): CoreState['executionStatuses'] {
+  let merged = replayed;
+  for (const [executionId, status] of Object.entries(staged)) {
+    const current = merged[executionId];
+    if (current !== undefined && current.sequence > status.sequence) continue;
+    if (merged === replayed) merged = {...replayed};
+    (merged as Record<string, typeof status>)[executionId] = status;
+  }
+  return merged;
 }
 
 interface RunIdentityFold {

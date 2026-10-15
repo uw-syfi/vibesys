@@ -28,8 +28,9 @@ from vibesys.api import (
 )
 from vibesys.api.request import load_task
 from vibesys.run.integration import LocalRunIntegration
+from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, examples
+from vs_sim.api.testing import ManualClock, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -75,7 +76,7 @@ def _run_restore(request: RunRequest, code: str, memory: str) -> None:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> None:

@@ -15,6 +15,14 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vs_sim.blocking import BlockingRunner, ThreadBlockingRunner
+    from vs_sim.byte_source import (
+        ByteSource,
+        ByteSourceChangedError,
+        LocalFileSource,
+        SourceChange,
+        SourceWatch,
+        check_read,
+    )
     from vs_sim.clock import (
         Clock,
         MonotonicClock,
@@ -23,18 +31,36 @@ if TYPE_CHECKING:
         SystemClock,
         utc_datetime,
     )
-    from vs_sim.concurrency import Condition, Event, Lock, OsThreads, ThreadLocal, Threads, Worker
+    from vs_sim.concurrency import (
+        Condition,
+        Event,
+        Lock,
+        OsThreads,
+        ThreadLocal,
+        Threads,
+        Worker,
+        WorkerStartRefusedError,
+    )
     from vs_sim.loopback_http import HttpReply, LoopbackHttp, UrllibLoopbackHttp
-    from vs_sim.network import Connection, Listener, Network, UnixNetwork
+    from vs_sim.network import Connection, DeadlineNetwork, Listener, Network, UnixNetwork
     from vs_sim.os_platform import Platform
-    from vs_sim.probes import CommandProbe, ProbeResult, SubprocessProbe
+    from vs_sim.output import (
+        DEFAULT_MAX_LINE_BYTES,
+        DISCARD,
+        Capture,
+        LineCallback,
+        Lines,
+        OutputSink,
+        OutputStream,
+        tee,
+    )
+    from vs_sim.probes import CommandProbe, ProbeResult, ProcessesProbe, SubprocessProbe
     from vs_sim.processes import (
         DEFAULT_MAX_OUTPUT_BYTES,
         ForegroundChild,
         ForegroundLauncher,
         InheritedStdioLauncher,
         OsProcesses,
-        OutputStream,
         PipedProcess,
         PipedProcessLauncher,
         Processes,
@@ -49,6 +75,7 @@ if TYPE_CHECKING:
         RunningProcess,
         SubprocessLauncher,
         SubprocessPipedProcessLauncher,
+        forward_output,
         run_foreground,
     )
     from vs_sim.randomness import RandomSource, SeededRandom, SystemRandomSource, derive_seed
@@ -94,12 +121,15 @@ _MODULES: dict[str, str] = {
     "ThreadLocal": "vs_sim.concurrency",
     "Threads": "vs_sim.concurrency",
     "Worker": "vs_sim.concurrency",
+    "WorkerStartRefusedError": "vs_sim.concurrency",
     "Connection": "vs_sim.network",
+    "DeadlineNetwork": "vs_sim.network",
     "Listener": "vs_sim.network",
     "Network": "vs_sim.network",
     "UnixNetwork": "vs_sim.network",
     "CommandProbe": "vs_sim.probes",
     "ProbeResult": "vs_sim.probes",
+    "ProcessesProbe": "vs_sim.probes",
     "SubprocessProbe": "vs_sim.probes",
     "ForegroundChild": "vs_sim.processes",
     "ForegroundLauncher": "vs_sim.processes",
@@ -113,7 +143,20 @@ _MODULES: dict[str, str] = {
     "ProcessSpec": "vs_sim.processes",
     "Processes": "vs_sim.processes",
     "DEFAULT_MAX_OUTPUT_BYTES": "vs_sim.processes",
-    "OutputStream": "vs_sim.processes",
+    "OutputStream": "vs_sim.output",
+    "OutputSink": "vs_sim.output",
+    "DISCARD": "vs_sim.output",
+    "DEFAULT_MAX_LINE_BYTES": "vs_sim.output",
+    "Capture": "vs_sim.output",
+    "LineCallback": "vs_sim.output",
+    "Lines": "vs_sim.output",
+    "tee": "vs_sim.output",
+    "ByteSource": "vs_sim.byte_source",
+    "ByteSourceChangedError": "vs_sim.byte_source",
+    "LocalFileSource": "vs_sim.byte_source",
+    "SourceChange": "vs_sim.byte_source",
+    "SourceWatch": "vs_sim.byte_source",
+    "check_read": "vs_sim.byte_source",
     "ProcessGroupUnreaped": "vs_sim.processes",
     "ProcessOutputTooLarge": "vs_sim.processes",
     "ProcessRun": "vs_sim.processes",
@@ -123,6 +166,7 @@ _MODULES: dict[str, str] = {
     "SubprocessLauncher": "vs_sim.processes",
     "SubprocessPipedProcessLauncher": "vs_sim.processes",
     "run_foreground": "vs_sim.processes",
+    "forward_output": "vs_sim.processes",
     "RandomSource": "vs_sim.randomness",
     "SeededRandom": "vs_sim.randomness",
     "SystemRandomSource": "vs_sim.randomness",
@@ -170,20 +214,29 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "DEFAULT_MAX_LINE_BYTES",
     "DEFAULT_MAX_OUTPUT_BYTES",
+    "DISCARD",
     "AsyncCloseOnce",
     "BlockingRunner",
+    "ByteSource",
+    "ByteSourceChangedError",
+    "Capture",
     "Clock",
     "CloseOnce",
     "CommandProbe",
     "Condition",
     "Connection",
+    "DeadlineNetwork",
     "Event",
     "ForegroundChild",
     "ForegroundLauncher",
     "HttpReply",
     "InheritedStdioLauncher",
+    "LineCallback",
+    "Lines",
     "Listener",
+    "LocalFileSource",
     "Lock",
     "LoopSignalSource",
     "LoopbackHttp",
@@ -194,6 +247,7 @@ __all__ = [
     "NothingLeft",
     "OsProcesses",
     "OsThreads",
+    "OutputSink",
     "OutputStream",
     "PidfdProcessSignaller",
     "PipedProcess",
@@ -210,6 +264,7 @@ __all__ = [
     "ProcessTimedOut",
     "ProcessTimeoutError",
     "Processes",
+    "ProcessesProbe",
     "RandomSource",
     "ReleaseEvidence",
     "ReleaseStack",
@@ -222,6 +277,8 @@ __all__ = [
     "Signals",
     "Sleeper",
     "SleepingClock",
+    "SourceChange",
+    "SourceWatch",
     "StreamingCommand",
     "SubprocessLauncher",
     "SubprocessPipedProcessLauncher",
@@ -236,9 +293,13 @@ __all__ = [
     "UrllibLoopbackHttp",
     "WakeupFdSignalRelay",
     "Worker",
+    "WorkerStartRefusedError",
+    "check_read",
     "derive_seed",
+    "forward_output",
     "run_foreground",
     "sync_descriptor",
+    "tee",
     "utc_datetime",
     "yield_now",
 ]

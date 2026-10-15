@@ -5,8 +5,8 @@ which calls :func:`answer`, or :func:`connect` for ``run.connect``. Each request
 reads the registry, the project, or the filesystem afresh through
 :class:`HelperHost`, so answering keeps no state between requests. The pure
 decisions it needs (:func:`negotiate`, :func:`select_completions`,
-:func:`run_summaries`, :func:`launch_arguments`) are public so they can be
-tested on their own.
+:func:`run_summaries`, :func:`launch_arguments`, :func:`refused_argument`,
+:func:`unvetted_harness`) are public so they can be tested on their own.
 
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
@@ -16,7 +16,8 @@ Public surface: ``answer``, ``connect``, ``negotiate``, ``Negotiated``,
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
 ``ProjectLookupError``, ``ScannedEntry``, ``Scan``, ``PathHints``);
 ``complete_path``, ``select_completions``, ``split_prefix``, ``run_summaries``,
-``launch_arguments``; and the limit ``SCAN_LIMIT``.
+``launch_arguments``, ``refused_argument``, ``unvetted_harness``; and the limit
+``SCAN_LIMIT``.
 """
 
 from __future__ import annotations
@@ -27,10 +28,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, assert_never
 
 from server.host_api import (
+    CLI_PROVIDER_FLAG,
     HELPER_PROTOCOL_VERSIONS,
+    MODEL_FLAG,
     PATHS_COMPLETE_CAP,
+    UNVETTED_MODEL_FLAG,
     Checkout,
     DetachedLaunchFailure,
+    HarnessesListReply,
+    HarnessesListRequest,
+    HarnessOption,
     HelloReply,
     HelloRequest,
     HelperError,
@@ -46,6 +53,8 @@ from server.host_api import (
     InstancesUnwatchRequest,
     InstancesWatchRequest,
     LiveInstanceRecord,
+    LogsListRequest,
+    LogsReadRequest,
     PathEntry,
     PathsCompleteReply,
     PathsCompleteRequest,
@@ -67,6 +76,7 @@ from server.host_api import (
     TasksListReply,
     TasksListRequest,
 )
+from server.host_helper_logs import HelperLogs, list_logs, read_log
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
@@ -74,7 +84,7 @@ from server.relay import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping
     from datetime import datetime
 
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
@@ -93,8 +103,13 @@ class Negotiated:
     features: frozenset[HelperFeature]
 
 
-def negotiate(request: HelloRequest, vibesys_version: str) -> Negotiated | HelperError:
-    """The highest version both ends speak and the features both know, or ``incompatible``."""
+def negotiate(
+    request: HelloRequest, vibesys_version: str, offered: frozenset[HelperFeature]
+) -> Negotiated | HelperError:
+    """The highest version both ends speak and the ``offered`` features the client asked for.
+
+    Returns ``incompatible`` when no version is shared.
+    """
     low, high = HELPER_PROTOCOL_VERSIONS
     client_low, client_high = request.client_versions
     version = min(high, client_high)
@@ -109,7 +124,7 @@ def negotiate(request: HelloRequest, vibesys_version: str) -> Negotiated | Helpe
             supported_versions=HELPER_PROTOCOL_VERSIONS,
             vibesys_version=vibesys_version,
         )
-    known = {feature.value: feature for feature in HelperFeature}
+    known = {feature.value: feature for feature in offered}
     return Negotiated(
         version=version,
         features=frozenset(known[name] for name in request.features if name in known),
@@ -246,6 +261,16 @@ class HelperHost:
     checkout: CheckoutProbe
     dialer: Dialer
     vibesys_version: str
+    harnesses: Callable[[], tuple[HarnessOption, ...]]
+    """The vetted provider and model pairs, read when a request needs them: the list
+    lives with the agent library, which the helper does not load to answer ``hello``."""
+    logs: HelperLogs | None
+    """The run log store; ``None`` on a host that has none, which then does not offer ``logs``."""
+
+    def offered_features(self) -> frozenset[HelperFeature]:
+        """The features this host can serve: every one, less ``logs`` without a log store."""
+        absent = {HelperFeature.LOGS} if self.logs is None else set()
+        return frozenset(HelperFeature) - absent
 
 
 def split_prefix(prefix: str, home: str) -> tuple[str, str]:
@@ -342,9 +367,59 @@ def run_summaries(root: Path, runs: Iterable[ProjectRun], listing: InstanceList)
     return RunList(project_root=project_root, runs=tuple(summaries))
 
 
+def _abbreviates(token: str, flag: str) -> bool:
+    """Whether argparse reads ``token`` (``--name`` or ``--name=value``) as ``flag``.
+
+    Run options are parsed with argparse's default ``allow_abbrev``, so any
+    unambiguous prefix of a long option selects it.
+    """
+    name = token.split("=", 1)[0]
+    return name.startswith("--") and len(name) > len("--") and flag.startswith(name)
+
+
+def refused_argument(request: RunStartRequest) -> str | None:
+    """Why ``request``'s ``args`` cannot start a run, or ``None`` when they can.
+
+    A run started through the helper never opts out of the vetted harness list,
+    and with ``harness`` its provider and model come from nowhere else.
+    """
+    refused: tuple[str, ...] = (UNVETTED_MODEL_FLAG,)
+    if request.harness is not None:
+        refused = (*refused, CLI_PROVIDER_FLAG, MODEL_FLAG)
+    for token in request.args:
+        for flag in refused:
+            if _abbreviates(token, flag):
+                if flag == UNVETTED_MODEL_FLAG:
+                    return f"{token} selects {flag}; runs started here use only vetted harnesses"
+                return f"{token} selects {flag}, which the chosen harness already sets"
+    return None
+
+
+def unvetted_harness(
+    request: RunStartRequest, harnesses: tuple[HarnessOption, ...]
+) -> HelperError | None:
+    """``unvetted_harness`` naming the allowed models when ``request.harness`` is not offered."""
+    choice = request.harness
+    if choice is None or any(
+        (option.provider, option.model) == (choice.provider, choice.model) for option in harnesses
+    ):
+        return None
+    allowed = [option.model for option in harnesses if option.provider == choice.provider]
+    message = (
+        f"model {choice.model!r} is not vetted for provider {choice.provider!r}; "
+        f"vetted models: {', '.join(allowed) if allowed else 'none'}"
+    )
+    return _error(request.request_id, HelperErrorCode.UNVETTED_HARNESS, message)
+
+
 def launch_arguments(request: RunStartRequest) -> tuple[str, ...]:
     """The ``vibesys`` arguments that start ``request`` detached; the resume target comes last."""
     task = ("--task", request.task) if request.task is not None else ()
+    harness = (
+        ()
+        if request.harness is None
+        else (CLI_PROVIDER_FLAG, request.harness.provider, MODEL_FLAG, request.harness.model)
+    )
     match request.resume:
         case None:
             resume: tuple[str, ...] = ()
@@ -354,7 +429,7 @@ def launch_arguments(request: RunStartRequest) -> tuple[str, ...]:
             resume = ("--resume",)
         case _:
             assert_never(request.resume)
-    return ("--detach", *task, *request.args, *resume)
+    return ("--detach", *task, *harness, *request.args, *resume)
 
 
 def _host_path(text: str, directories: Directories) -> str:
@@ -378,7 +453,7 @@ def _answer(request: HelperRequest, host: HelperHost) -> HelperReply | HelperErr
     reply: HelperReply | HelperError
     match request:
         case HelloRequest():
-            negotiated = negotiate(request, host.vibesys_version)
+            negotiated = negotiate(request, host.vibesys_version, host.offered_features())
             reply = (
                 negotiated
                 if isinstance(negotiated, HelperError)
@@ -392,30 +467,55 @@ def _answer(request: HelperRequest, host: HelperHost) -> HelperReply | HelperErr
             )
         case InstancesListRequest() | InstancesInspectRequest():
             reply = _instances_reply(request, host)
-        case TasksListRequest(project=project):
-            tasks = host.projects.tasks(Path(_host_path(project, host.directories)))
-            reply = TasksListReply(request_id=request_id, tasks=tasks)
-        case RunsListRequest(project=project):
-            root, runs = host.projects.runs(Path(_host_path(project, host.directories)))
-            summaries = run_summaries(root, runs, host.registry.list())
-            reply = RunsListReply(request_id=request_id, runs=summaries)
-        case RunStartRequest(project=project):
-            root = host.projects.require_initialized(Path(_host_path(project, host.directories)))
-            launch = host.launcher.start(root, launch_arguments(request))
-            reply = RunStartReply(request_id=request_id, launch=launch)
+        case TasksListRequest() | RunsListRequest():
+            reply = _project_reply(request, host)
+        case RunStartRequest():
+            reply = _start(request, host)
         case RunStopRequest(instance_id=instance_id, force=force):
             result = host.registry.stop(instance_id, host.stop_effects, force=force)
             reply = RunStopReply(request_id=request_id, result=result)
-        case PingRequest():
-            reply = PingReply(request_id=request_id)
-        case PathsCompleteRequest():
-            reply = complete_path(request, host.directories)
+        case (
+            PingRequest()
+            | PathsCompleteRequest()
+            | HarnessesListRequest()
+            | LogsListRequest()
+            | LogsReadRequest()
+        ):
+            reply = _host_read_reply(request, host)
         case InstancesWatchRequest() | InstancesUnwatchRequest() | RunConnectRequest():
             message = f"{request.type} is answered by the channel, not executed"
             reply = _error(request_id, HelperErrorCode.INTERNAL, message)
         case _:
             assert_never(request)
     return reply
+
+
+def _project_reply(
+    request: TasksListRequest | RunsListRequest, host: HelperHost
+) -> TasksListReply | RunsListReply:
+    """Answer one read of a project's tasks or runs."""
+    project = Path(_host_path(request.project, host.directories))
+    match request:
+        case TasksListRequest(request_id=request_id):
+            return TasksListReply(request_id=request_id, tasks=host.projects.tasks(project))
+        case RunsListRequest(request_id=request_id):
+            root, runs = host.projects.runs(project)
+            summaries = run_summaries(root, runs, host.registry.list())
+            return RunsListReply(request_id=request_id, runs=summaries)
+
+
+def _start(request: RunStartRequest, host: HelperHost) -> RunStartReply | HelperError:
+    """Launch ``request`` once its arguments and harness are acceptable."""
+    refusal = refused_argument(request)
+    if refusal is not None:
+        return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, refusal)
+    if request.harness is not None:
+        unvetted = unvetted_harness(request, host.harnesses())
+        if unvetted is not None:
+            return unvetted
+    root = host.projects.require_initialized(Path(_host_path(request.project, host.directories)))
+    launch = host.launcher.start(root, launch_arguments(request))
+    return RunStartReply(request_id=request.request_id, launch=launch)
 
 
 def _instances_reply(
@@ -430,6 +530,35 @@ def _instances_reply(
         ):
             inspection = host.inspector.inspect(instance_id, include_log=include_log)
             return InstancesInspectReply(request_id=request_id, inspection=inspection)
+
+
+def _host_read_reply(
+    request: PingRequest
+    | PathsCompleteRequest
+    | HarnessesListRequest
+    | LogsListRequest
+    | LogsReadRequest,
+    host: HelperHost,
+) -> HelperReply | HelperError:
+    """Answer a request that only reads the channel or the host.
+
+    The channel admits a ``logs`` request only when ``hello`` offered the feature,
+    which it does only for a host with a log store.
+    """
+    match request:
+        case PingRequest(request_id=request_id):
+            return PingReply(request_id=request_id)
+        case PathsCompleteRequest():
+            return complete_path(request, host.directories)
+        case HarnessesListRequest(request_id=request_id):
+            return HarnessesListReply(request_id=request_id, harnesses=host.harnesses())
+        case LogsListRequest() | LogsReadRequest() if host.logs is None:
+            message = f"{request.type} needs a log store, which this host does not have"
+            return _error(request.request_id, HelperErrorCode.INTERNAL, message)
+        case LogsListRequest():
+            return list_logs(request, host.logs)
+        case LogsReadRequest():
+            return read_log(request, host.logs)
 
 
 _CONNECT_ERRORS: Final[Mapping[ChannelEndOutcome, HelperErrorCode]] = {

@@ -10,6 +10,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
+from vs_slurm.api import MAX_TRANSPORT_STREAM_BYTES
+
 MAX_FRAME_BYTES = 16 * 1024 * 1024
 """The longest line either side reads, newline included."""
 
@@ -23,6 +25,7 @@ class ProcessCall(BaseModel):
     argv: tuple[str, ...] = Field(min_length=1)
     stdin: str | None
     timeout: float = Field(gt=0)
+    max_output_bytes: int = Field(ge=0, le=MAX_TRANSPORT_STREAM_BYTES)
 
 
 class ProcessReply(BaseModel):

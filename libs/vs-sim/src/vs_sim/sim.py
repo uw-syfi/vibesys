@@ -9,7 +9,7 @@ from vs_sim.child import run_in_child
 from vs_sim.gate import Gate
 from vs_sim.os_platform import Platform
 from vs_sim.randomness import SeededRandom, derive_seed
-from vs_sim.sim_network import SimNetwork
+from vs_sim.sim_network import DEFAULT_BUFFER_BYTES, SimNetwork
 from vs_sim.sim_threads import SimBlockingRunner, SimThreads
 from vs_sim.virtual import VirtualClock, WallClockView, run_virtual
 
@@ -109,19 +109,21 @@ class Sim:
         processes: Processes,
         signaller: ProcessSignaller,
         network_faults: Sequence[LinkFault] = (),
+        network_buffer_bytes: int = DEFAULT_BUFFER_BYTES,
     ) -> Platform:
         """A :class:`Platform` on this simulation's timeline, over ``threads`` (from :meth:`threads`).
 
         Its clock is :attr:`wall_clock`; ``threads.now()`` is the monotonic reading of the same
         timeline. Blocking calls and sockets run on ``threads``; processes and signals are the
-        Fakes given. The network fires ``network_faults`` (see :class:`SimNetwork`).
+        Fakes given. The network fires ``network_faults`` and holds ``network_buffer_bytes``
+        unread per direction of a connection (see :class:`SimNetwork`).
         """
         return Platform(
             clock=self.wall_clock,
             threads=threads,
             blocking=SimBlockingRunner(threads),
             processes=processes,
-            network=SimNetwork(threads, faults=network_faults),
+            network=SimNetwork(threads, buffer_bytes=network_buffer_bytes, faults=network_faults),
             signaller=signaller,
         )
 

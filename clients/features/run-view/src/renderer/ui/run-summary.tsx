@@ -33,6 +33,10 @@ export function RunSummary({
         <span>Usage</span>
         <strong>{usageText(run)}</strong>
       </div>
+      <div>
+        <span>Result</span>
+        <strong>{resultText(run)}</strong>
+      </div>
     </section>
   );
 }
@@ -43,4 +47,17 @@ function usageText(run: CoreState): string {
   const context =
     usage.contextWindow === null ? null : ` / ${usage.contextWindow.toLocaleString()}`;
   return `${usage.inputTokens.toLocaleString()}${context ?? ''}`;
+}
+
+/** Selected once per run, from `winner_selected`; `Pending` before that event. */
+function resultText(run: CoreState): string {
+  const winner = run.winner;
+  if (winner === null) return 'Pending';
+  if (winner.selection === 'baseline') return `Baseline kept (${shortRevision(winner.revision)})`;
+  const settlement = winner.settlementId === null ? '' : ` · ${winner.settlementId}`;
+  return `Candidate ${shortRevision(winner.revision)}${settlement}`;
+}
+
+function shortRevision(revision: string): string {
+  return revision.slice(0, 7);
 }

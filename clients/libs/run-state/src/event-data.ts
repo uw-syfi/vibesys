@@ -26,6 +26,7 @@ import {
 } from './state.js';
 import {appendTranscript, eventToTranscriptEntry, RUN_TRANSCRIPT} from './transcript-fold.js';
 import type {TranscriptFolder} from './transcript-folder.js';
+import {workstreamsWithFinish, workstreamsWithUsage} from './workstream.js';
 
 type RunEventData = NonNullable<RunEvent['data']>;
 
@@ -134,7 +135,9 @@ const EVENT_DATA_HANDLERS = {
   workspace_snapshot: ignoredEventData,
   run_configured: ignoredEventData,
   framework_warning: ignoredEventData,
-  winner_selected: ignoredEventData,
+  winner_selected: runEventData(applyWinnerSelectedData),
+  workstream_finished: runEventData(applyWorkstreamFinishedData),
+  turn_usage_recorded: runEventData(applyTurnUsageData),
 } satisfies Record<EventDataKind, EventDataHandlers>;
 
 export function eventDataHandlers(data: RunEvent['data']): EventDataHandlers | null | undefined {
@@ -178,6 +181,36 @@ function applyBenchmarkData(state: CoreState, event: RunEvent, sequence: number)
     : cloneCoreStateWith(state, {benchmarks: [...state.benchmarks, benchmark]});
 }
 
+function applyWinnerSelectedData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'winner_selected') return state;
+  return cloneCoreStateWith(state, {
+    winner: {
+      selection: data.selection,
+      revision: data.revision,
+      settlementId: data.settlement_id ?? null,
+    },
+  });
+}
+
+function applyWorkstreamFinishedData(
+  state: CoreState,
+  event: RunEvent,
+  sequence: number,
+): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'workstream_finished') return state;
+  const workstreams = workstreamsWithFinish(state.workstreams, event, data, sequence);
+  return workstreams === state.workstreams ? state : cloneCoreStateWith(state, {workstreams});
+}
+
+function applyTurnUsageData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'turn_usage_recorded') return state;
+  const workstreams = workstreamsWithUsage(state.workstreams, event, data);
+  return workstreams === state.workstreams ? state : cloneCoreStateWith(state, {workstreams});
+}
+
 function applyExperimentsChangedData(
   state: CoreState,
   _event: RunEvent,
@@ -190,9 +223,13 @@ function applyRunStartupProgressData(state: CoreState, event: RunEvent): CoreSta
   const data = event.data;
   if (data?.kind !== 'run_startup_progress') return state;
   const progress = data.progress;
+  const previous = state.startup;
   return cloneCoreStateWith(state, {
     startup: {
       stage: data.stage,
+      stageSince:
+        previous !== null && previous.stage === data.stage ? previous.stageSince : event.timestamp,
+      lastActivityAt: event.timestamp,
       progress:
         progress == null
           ? null
@@ -209,12 +246,17 @@ function applyRunStatusData(state: CoreState, event: RunEvent): CoreState {
   return applyRunStatus(state, data.status);
 }
 
-/** The quota state after `event`: a pause sets it, any event that settles the stop clears it. */
+/**
+ * The quota state after `event`: a pause sets it, any event that settles the stop clears it.
+ * `provider_switched` additionally records what it switched, in `lastSwitch`: that fact is
+ * sticky, so every branch carries the previous one forward rather than dropping it.
+ */
 function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): QuotaState {
   const data = event.data;
   switch (data?.kind) {
     case 'quota_paused':
       return {
+        ...quota,
         sequence,
         pause: {
           provider: data.provider,
@@ -231,8 +273,21 @@ function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): Q
       };
     case 'quota_resumed':
     case 'quota_abandoned':
+      return {...quota, sequence, pause: null};
     case 'provider_switched':
-      return {sequence, pause: null};
+      return {
+        ...quota,
+        sequence,
+        pause: null,
+        lastSwitch: {
+          sequence,
+          fromProvider: data.from_provider,
+          toProvider: data.to_provider,
+          toModel: data.to_model,
+          reason: data.reason,
+          detail: data.detail,
+        },
+      };
     default:
       return quota;
   }

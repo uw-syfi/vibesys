@@ -1,0 +1,43 @@
+{
+  "id": "active-execution-checkpoint-fragmentation",
+  "title": "An oversized active-execution checkpoint is transferred atomically",
+  "description": "A subscription whose active execution assignment exceeds one frame receives bounded event frames marked as deferred, followed by ordered checkpoint fragments that reconstruct the exact authoritative execution list on both transports.",
+  "role": "subscribe",
+  "transports": [
+    "unix",
+    "websocket"
+  ],
+  "decisions": [
+    "WP-GRANULARITY"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "subscribe",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "after_sequence": 0
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "subscribed"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "event_batch",
+        "active_executions": null
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "active_executions_chunk",
+        "chunk_index": 0
+      }
+    }
+  ]
+}

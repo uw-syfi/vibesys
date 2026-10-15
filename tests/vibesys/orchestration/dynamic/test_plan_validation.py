@@ -195,6 +195,11 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             Record(hypotheses=[FINISHED_A], repairable=frozenset({"a"})),
             "workstreams.0",
         ),
+        ViolationCode.EXPECTATION_UNKNOWN: (
+            portfolio(implement_entry("n"), expected=("n", "z")),
+            Record(),
+            "handoff.expectations.1.work_id",
+        ),
     }
 
 

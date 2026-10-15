@@ -1,8 +1,9 @@
 """Server-owned enumeration of the chat agent selections a run offers.
 
 Clients render what this module produces and enumerate nothing themselves.
-The options describe the CLI providers the run supports plus the models worth
-suggesting under each.
+The options describe the CLI providers the run supports plus the vetted models
+(``vibesys.api.vetted_models``) under each; a thread runs only a vetted model,
+or the run's own when its operator opted out of the vetted list.
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from vibesys.api import vetted_models
 
 ChatModelSource = Literal["run", "role", "suggested"]
 
@@ -38,32 +41,6 @@ class ChatOptions(_ChatOptionModel):
     """All offered chat selections grouped by provider."""
 
     providers: list[ChatProviderOptions] = Field(default_factory=list)
-
-
-# A deployment default, not the library's: this is the opencode model VibeSys
-# offers first, and it is stated here so the chat surface does not depend on the
-# agent CLI package for it.
-_OPENCODE_DEFAULT_MODEL = "google-vertex/gemini-3-pro-preview"
-
-
-# A short suggestion list, not a registry: the model a thread actually runs is
-# whatever the provider's CLI accepts, and the client's free-text entry stays
-# the escape hatch for anything not named here.
-#
-# The codex and claude slugs mirror the release-curated alias catalogs those
-# CLIs ship. Gemini ships no curated list here, so its group
-# offers the free-text entry alone rather than guessed slugs.
-_SUGGESTED_MODELS: dict[str, tuple[str, ...]] = {
-    "codex": ("gpt-5.6-sol", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.5"),
-    "claude": (
-        "claude-fable-5",
-        "claude-opus-5",
-        "claude-sonnet-5",
-        "claude-haiku-4-5",
-    ),
-    "gemini": (),
-    "opencode": (_OPENCODE_DEFAULT_MODEL,),
-}
 
 
 @dataclass(frozen=True)
@@ -116,6 +93,6 @@ def _models_for(provider: str, settings: ChatRunSettings) -> list[ChatModelOptio
         add(settings.model, "run", default=True)
         for role_model in settings.role_models:
             add(role_model, "role")
-    for suggestion in _SUGGESTED_MODELS.get(provider, ()):
+    for suggestion in vetted_models(provider):
         add(suggestion, "suggested")
     return options

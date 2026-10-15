@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from vs_sandbox.api import CommandResult
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import SimThreads
 
 
 def test_unscripted_command_returns_the_default_result() -> None:
     sandbox = FakeCommandRunner()
 
-    result = sandbox.execute("anything")
+    result = sandbox.execute("anything", output=DISCARD)
 
     assert result.exit_code == 0
     assert result.output == ""
@@ -24,8 +25,8 @@ def test_scripted_command_returns_its_configured_result_every_time() -> None:
     sandbox = FakeCommandRunner()
     sandbox.script("git status", CommandResult(output="clean", exit_code=0))
 
-    first = sandbox.execute("git status")
-    second = sandbox.execute("git status")
+    first = sandbox.execute("git status", output=DISCARD)
+    second = sandbox.execute("git status", output=DISCARD)
 
     assert first.output == "clean"
     assert second.output == "clean"
@@ -34,7 +35,7 @@ def test_scripted_command_returns_its_configured_result_every_time() -> None:
 def test_default_result_is_configurable() -> None:
     sandbox = FakeCommandRunner(default_result=CommandResult(output="boom", exit_code=1))
 
-    result = sandbox.execute("unscripted")
+    result = sandbox.execute("unscripted", output=DISCARD)
 
     assert result.exit_code == 1
     assert result.output == "boom"
@@ -43,8 +44,8 @@ def test_default_result_is_configurable() -> None:
 def test_execute_records_every_call() -> None:
     sandbox = FakeCommandRunner()
 
-    sandbox.execute("echo one", timeout=5)
-    sandbox.execute("echo two")
+    sandbox.execute("echo one", timeout=5, output=DISCARD)
+    sandbox.execute("echo two", output=DISCARD)
 
     assert [call.command for call in sandbox.calls] == ["echo one", "echo two"]
     assert sandbox.calls[0].timeout == 5
@@ -54,7 +55,7 @@ def test_execute_records_every_call() -> None:
 def test_invalid_commands_are_not_recorded() -> None:
     sandbox = FakeCommandRunner()
 
-    sandbox.execute("")
+    sandbox.execute("", output=DISCARD)
 
     assert sandbox.calls == []
 
@@ -98,7 +99,7 @@ def test_a_hang_reports_it_is_running_before_it_waits_for_a_cancel() -> None:
     sandbox.script_hang("hang", stdout="partial-out", stderr="partial-err")
     cancel = _ObservedCancel(sandbox)
 
-    result = sandbox.execute("hang", cancel=cancel)
+    result = sandbox.execute("hang", cancel=cancel, output=DISCARD)
 
     assert cancel.hanging_when_waited_on is True
     assert result.cancelled
@@ -112,7 +113,7 @@ def test_a_cancel_set_before_the_call_never_starts_the_hang() -> None:
     cancel = SimThreads().event()
     cancel.set()
 
-    result = sandbox.execute("hang", cancel=cancel)
+    result = sandbox.execute("hang", cancel=cancel, output=DISCARD)
 
     assert result.cancelled
     assert result.stdout == ""

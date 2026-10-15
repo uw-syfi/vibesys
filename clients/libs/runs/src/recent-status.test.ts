@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {HostListing, HostRun} from '@vibesys/hosts';
+import {type RecentRun, recentRunKey} from '@vibesys/runs';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import type {RecentRun} from './recent-status.js';
 import {recentStatus} from './recent-status.js';
 
 const RECENT: RecentRun = {
@@ -26,6 +26,13 @@ function server(id: number, startedAt: number, status: string, runId = 'run-1'):
 }
 
 describe('recentStatus', () => {
+  test('recent identity includes the project that scopes a run id', () => {
+    const reattached: RecentRun = {...RECENT, attachedAt: 99};
+
+    expect(recentRunKey(RECENT)).not.toBe(recentRunKey({...RECENT, project: '/another-project'}));
+    expect(recentRunKey(RECENT)).toBe(recentRunKey(reattached));
+  });
+
   test('regression: a run resumed and ended again reads as its latest server ended, in any order', () => {
     for (const seed of SEEDS.slice(0, 50)) {
       const random = new Seeded(seed);

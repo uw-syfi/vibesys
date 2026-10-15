@@ -7,7 +7,10 @@ function syncDialog(dialog: HTMLDialogElement, open: boolean): void {
 }
 
 function activeElement(): HTMLElement | null {
-  return document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  // An initially open dialog has no opener; let its named fallback receive focus.
+  return document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+    ? document.activeElement
+    : null;
 }
 
 function restoreFocus(opener: HTMLElement | null, fallbackId: string | undefined): void {

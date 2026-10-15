@@ -9,6 +9,8 @@ gateways can provide a versioned JSON connector executable.
 
 from typing import Protocol
 
+from vs_sim.api import ByteSource, OutputStream
+
 from .cluster import SlurmCluster
 from .cluster_types import (
     ClusterCancelOutcome,
@@ -39,10 +41,24 @@ from .config import (
     load_slurm_config,
     shell_join_with_port,
 )
+from .connector_protocol import (
+    MAX_CONNECTOR_REQUEST_BYTES,
+    MAX_CONNECTOR_RESPONSE_BYTES,
+    MAX_TRANSPORT_STREAM_BYTES,
+    SLURM_CONNECTOR_REQUEST,
+    SlurmConnectorExecRequest,
+    SlurmConnectorGetRequest,
+    SlurmConnectorPutRequest,
+    SlurmConnectorRequest,
+    SlurmConnectorResponse,
+    SlurmConnectorSyncToRequest,
+)
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
 from .identity import runtime_content_identity
 from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
+from .remote_file import MAX_READ_BYTES as MAX_REMOTE_READ_BYTES
+from .remote_file import RemoteFileAnswerError, SlurmFileSource
 from .runner import (
     SERVICE_NOT_READY_EXIT_CODE,
     SchedulerReading,
@@ -104,16 +120,27 @@ from .trace_replay import (
     TraceConnector,
     TraceStep,
 )
+from .transport_broker import (
+    SlurmTransportBrokerPolicy,
+    SlurmTransportRequestError,
+    slurm_transport_broker_available,
+    slurm_transport_broker_policy,
+)
 
 __all__ = [
     "CANCEL_REACTIONS",
     "DEFAULT_COMMAND_SECONDS",
     "INITIAL_LIFE",
     "LIFETIMES",
+    "MAX_CONNECTOR_REQUEST_BYTES",
+    "MAX_CONNECTOR_RESPONSE_BYTES",
+    "MAX_REMOTE_READ_BYTES",
+    "MAX_TRANSPORT_STREAM_BYTES",
     "PORT_PLACEHOLDER",
     "REQUESTS_FILE",
     "SCHEDULER_READ_END",
     "SERVICE_NOT_READY_EXIT_CODE",
+    "SLURM_CONNECTOR_REQUEST",
     "AccountingRow",
     "Cluster",
     "ClusterCancelOutcome",
@@ -142,6 +169,7 @@ __all__ = [
     "Notice",
     "QueueRow",
     "Queued",
+    "RemoteFileAnswerError",
     "Running",
     "SchedulerReading",
     "SchedulerTrace",
@@ -156,9 +184,16 @@ __all__ = [
     "SlurmCluster",
     "SlurmConfig",
     "SlurmConfigError",
+    "SlurmConnectorExecRequest",
+    "SlurmConnectorGetRequest",
+    "SlurmConnectorPutRequest",
+    "SlurmConnectorRequest",
+    "SlurmConnectorResponse",
+    "SlurmConnectorSyncToRequest",
     "SlurmConnectorTransport",
     "SlurmError",
     "SlurmFileArtifact",
+    "SlurmFileSource",
     "SlurmJobHandle",
     "SlurmJobRequest",
     "SlurmJobResult",
@@ -174,6 +209,8 @@ __all__ = [
     "SlurmSubmissionRejectedError",
     "SlurmTimingProfile",
     "SlurmTransport",
+    "SlurmTransportBrokerPolicy",
+    "SlurmTransportRequestError",
     "SlurmTreeArtifact",
     "Step",
     "TraceConnector",
@@ -191,6 +228,8 @@ __all__ = [
     "phase_of",
     "runtime_content_identity",
     "shell_join_with_port",
+    "slurm_transport_broker_available",
+    "slurm_transport_broker_policy",
     "split_framed_scheduler_query",
     "status_of",
     "tree_content_identity",
@@ -229,4 +268,14 @@ class Cluster(Protocol):
         observed: ClusterObservation | None = None,
     ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown."""
+        ...
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        """What stage ``index`` of the batch has written to ``stream`` so far, as it grows.
+
+        The source reads the stage's output file where the job writes it; it raises
+        ``FileNotFoundError`` until the stage has started. Reading it never changes the job.
+        """
         ...

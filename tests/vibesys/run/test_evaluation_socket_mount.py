@@ -25,11 +25,10 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeDockerBuildRunner
 from vs_runtime.api.core import RunTiming
-from vs_runtime.api.testing import FakeStopTimer
+from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import (
-    NO_PROCESSES,
     FakePipedProcessLauncher,
     ManualClock,
     VirtualClock,
@@ -46,9 +45,15 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
     engine = FakeDockerEngine(root / "engine", launcher=FakePipedProcessLauncher())
 
     def backend_factory(
-        _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object
+        _name: object,
+        *,
+        log_dir: Path,
+        log: object = None,
+        image: str | None = None,
+        clock: object,
+        events: object | None = None,
     ) -> _DaemonBackend:
-        del clock  # the fake backend records no timestamps
+        del clock, events  # the fake backend records no timestamps and has no device to watch
         made = _DaemonBackend(
             log_dir,
             log=log,  # ty: ignore[invalid-argument-type]
@@ -72,7 +77,7 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     clock = VirtualClock(at=0.0)
 

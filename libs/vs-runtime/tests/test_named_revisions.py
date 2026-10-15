@@ -62,7 +62,6 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
 
-pytestmark = pytest.mark.asyncio
 
 # Each example builds a run. A pull request draws a sample; the nightly depth searches deeper.
 _EXAMPLES = settings(
