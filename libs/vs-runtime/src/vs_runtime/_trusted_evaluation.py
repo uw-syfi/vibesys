@@ -47,6 +47,7 @@ from vs_runtime._failure_classification import (
 from vs_runtime._model_requests import ModelRequestError
 from vs_runtime.contracts import BenchmarkFailureKind
 from vs_sandbox.api import CommandResult
+from vs_sim.api import DISCARD
 
 # Parses untrusted JSON with nesting bounded, failing as a ValueError.
 _JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
@@ -60,7 +61,7 @@ if TYPE_CHECKING:
     from vs_project.api import GitTracker
     from vs_runtime.api.infrastructure import ModelRequestReconciler
     from vs_sandbox.api import CommandRunner
-    from vs_sim.api import BlockingRunner, Event, Threads
+    from vs_sim.api import BlockingRunner, Event, OutputSink, Threads
 
 _BENCHMARK_OUTPUT_PREFIX = "/tmp/vibesys-framework-benchmark-"  # noqa: S108  # lint-waiver: LW-837218 [S108]; remote sandbox bridges allowlist this fixed transport path and every nonce is removed after use.
 _BENCHMARK_MARKER = "__VIBESYS_FRAMEWORK_BENCHMARK_JSON__"
@@ -333,8 +334,13 @@ class TrustedBenchmarkResult(BaseModel):
 class TrustedEvaluationExecutor(Protocol):
     """Serialize trusted evaluation effects for one workspace."""
 
-    async def accuracy(self, *, command_override: str | None = None) -> TrustedAccuracyResult:
-        """Run the configured accuracy command and enforce input integrity."""
+    async def accuracy(
+        self, *, command_override: str | None = None, output: OutputSink = DISCARD
+    ) -> TrustedAccuracyResult:
+        """Run the configured accuracy command and enforce input integrity.
+
+        The command's stdout and stderr are written to *output* as it runs.
+        """
         ...
 
     async def benchmark(
@@ -342,8 +348,13 @@ class TrustedEvaluationExecutor(Protocol):
         *,
         command_override: str | None = None,
         required_metrics: frozenset[str] = frozenset(),
+        output: OutputSink = DISCARD,
     ) -> TrustedBenchmarkResult:
-        """Run and decode the configured benchmark result contract."""
+        """Run and decode the configured benchmark result contract.
+
+        The benchmark command's stdout and stderr, framed result included, are
+        written to *output* as it runs; reading a truncated result back is not.
+        """
         ...
 
 
@@ -382,21 +393,24 @@ class RuntimeTrustedEvaluation:
         self._model_requests = model_requests
         self._lock = asyncio.Lock()
 
-    async def accuracy(self, *, command_override: str | None = None) -> TrustedAccuracyResult:
+    async def accuracy(
+        self, *, command_override: str | None = None, output: OutputSink = DISCARD
+    ) -> TrustedAccuracyResult:
         """Run one accuracy operation without overlapping workspace mutation."""
         async with self._lock:
-            return await self._run_sync(partial(self._accuracy, command_override))
+            return await self._run_sync(partial(self._accuracy, command_override, output))
 
     async def benchmark(
         self,
         *,
         command_override: str | None = None,
         required_metrics: frozenset[str] = frozenset(),
+        output: OutputSink = DISCARD,
     ) -> TrustedBenchmarkResult:
         """Run one benchmark operation without overlapping workspace mutation."""
         async with self._lock:
             return await self._run_sync(
-                partial(self._benchmark, command_override, required_metrics)
+                partial(self._benchmark, command_override, required_metrics, output)
             )
 
     async def _run_sync[Result](
@@ -429,7 +443,9 @@ class RuntimeTrustedEvaluation:
             return (), f"Model-weight request could not be satisfied: {error}"
         return volumes, None
 
-    def _accuracy(self, command_override: str | None, cancel: Event) -> TrustedAccuracyResult:
+    def _accuracy(
+        self, command_override: str | None, sink: OutputSink, cancel: Event
+    ) -> TrustedAccuracyResult:
         command = self._plan.accuracy_command
         volumes, failure = self._provision()
         if failure is not None:
@@ -462,6 +478,7 @@ class RuntimeTrustedEvaluation:
             timeout=self._timeout(self._plan.accuracy_timeout_seconds),
             label="accuracy",
             cancel=cancel,
+            sink=sink,
         )
         output = execution_failure or result.output.strip()
         passed = execution_failure is None and result.exit_code == 0
@@ -497,6 +514,7 @@ class RuntimeTrustedEvaluation:
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
+        sink: OutputSink,
         cancel: Event,
     ) -> TrustedBenchmarkResult:
         contract = self._plan.benchmark_contract
@@ -548,6 +566,7 @@ class RuntimeTrustedEvaluation:
                 timeout=self._timeout(self._plan.benchmark_timeout_seconds),
                 label="benchmark",
                 cancel=cancel,
+                sink=sink,
             )
             decoded = _Decoded(output=execution_failure or result.output.strip(), passed=False)
             framed = decoded.output
@@ -603,9 +622,10 @@ class RuntimeTrustedEvaluation:
         timeout: int | None,
         label: str,
         cancel: Event,
+        sink: OutputSink,
     ) -> tuple[CommandResult, str | None]:
         try:
-            result = self._sandbox.execute(command, timeout=timeout, cancel=cancel)
+            result = self._sandbox.execute(command, timeout=timeout, cancel=cancel, output=sink)
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-837217 [BLE001]; trusted command failures are typed policy-visible outcomes rather than run-fatal exceptions.
             return CommandResult(output="", exit_code=None), (
                 f"{label} command could not be executed: {error}"

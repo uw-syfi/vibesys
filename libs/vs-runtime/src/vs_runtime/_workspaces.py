@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
     from vs_runtime.contracts import CandidateWorkspace, Workspace
     from vs_sandbox.api import CommandRunner
-    from vs_sim.api import BlockingRunner
+    from vs_sim.api import BlockingRunner, OutputSink
 
 
 class WorkspaceResource(Protocol):
@@ -98,13 +98,20 @@ class WorkspaceResource(Protocol):
     @property
     def evaluation_spec(self) -> WorkspaceEvaluationSpec: ...
 
-    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult: ...
+    async def trusted_accuracy(
+        self, command_override: str | None, output: OutputSink
+    ) -> TrustedAccuracyResult:
+        """Run trusted accuracy here, writing its command's output to *output*."""
+        ...
 
     async def trusted_benchmark(
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
-    ) -> TrustedBenchmarkResult: ...
+        output: OutputSink,
+    ) -> TrustedBenchmarkResult:
+        """Run the trusted benchmark here, writing its command's output to *output*."""
+        ...
 
     def close(self) -> None:
         """Discard: release what this workspace owns, a candidate's content included."""

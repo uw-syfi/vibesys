@@ -35,6 +35,7 @@ from vs_runtime.contracts import (
     validate_trusted_shell_command,
     validate_workspace_writable_paths,
 )
+from vs_sim.api import DISCARD, OutputStream
 from vs_sim.api.testing import FakeProcesses, ProcessScript
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ if TYPE_CHECKING:
     from vs_runtime._run_control import RunControlChannel, RunControlTransition
     from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
-    from vs_sim.api import ProcessSpec, Threads
+    from vs_sim.api import OutputSink, ProcessSpec, Threads
 
 
 class FakeAgentExecutionEnvironment:
@@ -128,8 +129,11 @@ class FakeTrustedEvaluationExecutor:
         """Replace queued benchmark outcomes."""
         self._benchmark_results = list(results)
 
-    async def accuracy(self, *, command_override: str | None = None) -> TrustedAccuracyResult:
-        """Record one call and return the next scripted outcome."""
+    async def accuracy(
+        self, *, command_override: str | None = None, output: OutputSink = DISCARD
+    ) -> TrustedAccuracyResult:
+        """Record one call and return the next scripted outcome; it prints nothing."""
+        del output
         self.accuracy_calls.append(FakeTrustedAccuracyCall(command_override))
         if self._accuracy_results:
             return self._accuracy_results.pop(0)
@@ -140,8 +144,10 @@ class FakeTrustedEvaluationExecutor:
         *,
         command_override: str | None = None,
         required_metrics: frozenset[str] = frozenset(),
+        output: OutputSink = DISCARD,
     ) -> TrustedBenchmarkResult:
-        """Record one call and return the next scripted outcome."""
+        """Record one call and return the next scripted outcome; it prints nothing."""
+        del output
         self.benchmark_calls.append(FakeTrustedBenchmarkCall(command_override, required_metrics))
         if self._benchmark_results:
             return self._benchmark_results.pop(0)
@@ -933,7 +939,9 @@ class FakeEvaluation:
     input, whose ``id`` is ``None``) consume :attr:`root_benchmark_results`
     first, so a test can script the input and candidates independently of how
     their calls interleave. A gate holds the n-th call of one kind (counted
-    from zero across all workspaces) until the test releases it.
+    from zero across all workspaces) until the test releases it. What
+    :attr:`printed` scripts for a kind is written to each call's ``output``
+    before its gate holds it, as a running command prints before it ends.
     """
 
     default_accuracy: AccuracyEvaluation = field(
@@ -953,6 +961,8 @@ class FakeEvaluation:
     benchmark_calls: list[FakeBenchmarkCall] = field(default_factory=list)
     local_validation_calls: list[FakeLocalValidationCall] = field(default_factory=list)
     run_id: str = "test-run"
+    printed: dict[FakeEvaluationKind, tuple[bytes, bytes]] = field(default_factory=dict)
+    """The (stdout, stderr) each accuracy or benchmark call of a kind prints."""
     _gates: dict[tuple[FakeEvaluationKind, int], FakeEvaluationGate] = field(default_factory=dict)
 
     def script_accuracy(self, *results: AccuracyEvaluation | BaseException) -> None:
@@ -981,7 +991,16 @@ class FakeEvaluation:
         self._gates[key] = gate
         return gate
 
-    async def _pass_gate(self, kind: FakeEvaluationKind, call: int, workspace: Workspace) -> None:
+    async def _pass_gate(
+        self,
+        kind: FakeEvaluationKind,
+        call: int,
+        workspace: Workspace,
+        output: OutputSink = DISCARD,
+    ) -> None:
+        stdout, stderr = self.printed.get(kind, (b"", b""))
+        output.write(OutputStream.STDOUT, stdout)
+        output.write(OutputStream.STDERR, stderr)
         gate = self._gates.get((kind, call))
         if gate is not None:
             await gate.hold(workspace)
@@ -991,10 +1010,13 @@ class FakeEvaluation:
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        output: OutputSink = DISCARD,
     ) -> AccuracyEvaluation:
-        """Record the request and return the next scripted result."""
+        """Record the request, print the scripted output, and return the next scripted result."""
         self.accuracy_calls.append(FakeAccuracyCall(workspace, reuse))
-        await self._pass_gate("accuracy", len(self.accuracy_calls) - 1, workspace)
+        # A reused pass runs no command, so it prints nothing.
+        printing = output if reuse is None else DISCARD
+        await self._pass_gate("accuracy", len(self.accuracy_calls) - 1, workspace, printing)
         if reuse is not None:
             if reuse.run_id != self.run_id:
                 message = "accuracy receipt belongs to another run"
@@ -1027,11 +1049,12 @@ class FakeEvaluation:
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        output: OutputSink = DISCARD,
     ) -> BenchmarkEvaluation:
-        """Record the request and return the next scripted result."""
+        """Record the request, print the scripted output, and return the next scripted result."""
         validate_objectives(objectives)
         self.benchmark_calls.append(FakeBenchmarkCall(workspace, objectives))
-        await self._pass_gate("benchmark", len(self.benchmark_calls) - 1, workspace)
+        await self._pass_gate("benchmark", len(self.benchmark_calls) - 1, workspace, output)
         if workspace.id is None and self.root_benchmark_results:
             result = self.root_benchmark_results.pop(0)
         elif self.benchmark_results:

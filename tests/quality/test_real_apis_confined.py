@@ -989,9 +989,9 @@ REAL_API_PENDING: dict[Key, Pending] = {
         "the repair container runs subprocess.run itself; route it through DockerCli",
     ),
     ("libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py", "subprocess"): Pending(
-        8,
+        4,
         Owner.LANE_A,
-        "_run_docker_command goes through DockerCli; the in-container install program is an edge",
+        "type only: the injected tool runner's CompletedProcess and TimeoutExpired",
     ),
     ("libs/vs-sandbox/src/vs_sandbox/fake_docker_command.py", "subprocess"): Pending(
         2, Owner.LANE_A, "type only: result type aliases"

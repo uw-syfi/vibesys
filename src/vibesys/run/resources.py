@@ -50,7 +50,7 @@ from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.gpu_events import CoreGpuContentionEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
-from vibesys.run.logs import open_run_logs
+from vibesys.run.logs import open_run_logs, startup_output_opener
 from vibesys.run.profilers import (
     ProfilerPreflight,
     resolve_run_profiler,
@@ -478,7 +478,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         git = project_resources.git
         # The run's one log store, open until the run's resources close. Its scope is what
         # the run's producers (startup steps, gate stages) are handed.
-        ownership.enter_context(
+        log_scope = ownership.enter_context(
             open_run_logs(
                 project_root,
                 run_id,
@@ -624,6 +624,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     *evaluation_socket_mounts,
                 ),
                 log=logger.lprint,
+                startup_output=startup_output_opener(log_scope),
                 framework_root=PROJECT_ROOT,
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),

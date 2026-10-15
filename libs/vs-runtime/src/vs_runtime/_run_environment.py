@@ -57,12 +57,16 @@ from vs_runtime._container_runtime_policy import (
     attaches_accelerator,
     reject_docker_in_docker,
 )
-from vs_runtime._docker_evaluator_tools import prepare_docker_evaluator_resources
+from vs_runtime._docker_evaluator_tools import (
+    DockerToolBuilder,
+    prepare_docker_evaluator_resources,
+)
 from vs_runtime._environment_startup import (
     EnvironmentStartup,
     EnvironmentStartupSink,
     EnvironmentStartupStage,
     StartupOutputOpener,
+    ToolBuildOutputOpener,
 )
 from vs_runtime._image_features import image_features
 from vs_runtime._model_artifacts import read_model_metadata
@@ -424,6 +428,10 @@ class RunEnvironmentRequest:
     #: registry push, the container start) writes its raw output to, one per
     #: command, closed when the command ends; ``None`` discards the output.
     startup_output: StartupOutputOpener | None = None
+    #: Opens the stream each evaluator tool build (a cache miss of the task's
+    #: declared tools) writes its raw output to, closed when the build ends;
+    #: ``None`` discards the output.
+    tool_build_output: ToolBuildOutputOpener | None = None
 
 
 class _AgentPathSandbox(Protocol):
@@ -1001,9 +1009,12 @@ class DockerEnvironment:
             prepare_docker_evaluator_resources(
                 requirements,
                 request.workspace,
-                backend=request.backend,
-                log_dir=request.log_dir,
-                container_image=container_image,
+                builder=DockerToolBuilder(
+                    backend=request.backend,
+                    log_dir=request.log_dir,
+                    image=container_image,
+                    output=request.tool_build_output,
+                ),
             )
         )
         resolved_cli = _cli_container_env(request)
