@@ -29,7 +29,7 @@ from .types.evaluation import (
 
 if TYPE_CHECKING:
     from .types.evaluation import EvaluationEvent, EvaluationState
-    from .types.kernel import AreaChange, EvaluationContext
+    from .types.kernel import AreaChange, EvaluationContext, RunState
 
 
 type Reducer = Callable[
@@ -82,3 +82,12 @@ def advance_evaluation(
             "events": (*due.events, *change.events, *after.events),
         }
     )
+
+
+def credit_downtime(state: EvaluationState, run: RunState, credit: float) -> EvaluationState:
+    """Every open wait with ``credit`` seconds of host downtime added to its limit.
+
+    The kernel calls this when a new host epoch opens, with the downtime the host log proves,
+    as it moves every open request record's limit (``records.open_host_epoch``).
+    """
+    return _continuations.credit_downtime(state, run, credit)

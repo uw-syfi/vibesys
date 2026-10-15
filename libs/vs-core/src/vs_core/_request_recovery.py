@@ -95,7 +95,14 @@ if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
     from .types.evaluation import EvaluationState
     from .types.kernel import RecordsContext, RunState, Signal
-    from .types.records import RecordsEvent, RecordsState, Request, RequestRecord, TargetObservation
+    from .types.records import (
+        HostEpoch,
+        RecordsEvent,
+        RecordsState,
+        Request,
+        RequestRecord,
+        TargetObservation,
+    )
     from .types.sessions import Invocation, SessionView
     from .types.strategy import Operation
 
@@ -1569,7 +1576,7 @@ def _deadline(
     timed = event.reason == FailureReason.TIMED_OUT
     # A limit counts from the job's start, and a job may wait in its queue only for the
     # queue budget (``_wait_clock``): the bound says when, and which of the two ended it.
-    bound = _wait_clock.record_bound(record, context.evaluation, context.run)
+    bound = _wait_clock.record_bound(record, context.evaluation, context.run, state.hosts)
     reason = (
         FailureReason.QUEUE_BUDGET_SPENT
         if timed and bound.by == WaitEnd.QUEUE_BUDGET
@@ -1861,8 +1868,10 @@ def command_open(record: RequestRecord) -> bool:
     )
 
 
-def _limit_passed(record: RequestRecord, evaluation: EvaluationState, run: RunState) -> bool:
-    return _wait_clock.record_bound(record, evaluation, run).at <= run.now_at
+def _limit_passed(
+    record: RequestRecord, evaluation: EvaluationState, run: RunState, hosts: tuple[HostEpoch, ...]
+) -> bool:
+    return _wait_clock.record_bound(record, evaluation, run, hosts).at <= run.now_at
 
 
 def overdue_reconciliations(
@@ -1877,7 +1886,7 @@ def overdue_reconciliations(
         *(
             ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
             for record in state.records
-            if is_open(record) and _limit_passed(record, evaluation, run)
+            if is_open(record) and _limit_passed(record, evaluation, run, state.hosts)
         ),
         *(
             ReconciliationCommandLapsed(request_id=record.request_id, now_at=now_at)
@@ -1894,7 +1903,7 @@ def next_reconciliation_at(
     limits = (
         (
             record,
-            _wait_clock.record_bound(record, evaluation, run).at
+            _wait_clock.record_bound(record, evaluation, run, state.hosts).at
             if is_open(record)
             else record.until.at,
         )

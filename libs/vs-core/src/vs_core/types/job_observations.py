@@ -45,10 +45,18 @@ class WaitEnd(StrEnum):
 
 
 class JobTimeout(Value):
-    """Frozen progress of one unfinished dependency at its wait deadline."""
+    """Frozen progress of one unfinished dependency when the bound that ended it passed.
+
+    A wait ends a job either with the wait itself (its earliest bound) or alone, when the
+    job's own queue budget runs out while its siblings go on (``QUEUE_BUDGET``).
+    """
 
     resource_id: ResourceId
     progress: JobProgress | None = None
+    by: WaitEnd
+    """The bound that ended this job's part of the wait."""
+    at: Seconds
+    """When that bound passed."""
 
 
 class TimedOut(Value):
@@ -72,6 +80,8 @@ class TimedOut(Value):
         """Reject premature timeout and duplicate unfinished dependencies."""
         if self.reached_at < self.deadline_at:
             raise ContractValidationError("reached_at", "precedes deadline_at")
+        if any(job.at > self.reached_at for job in self.unfinished):
+            raise ContractValidationError("unfinished", "a job's bound follows reached_at")
         ids = tuple(job.resource_id for job in self.unfinished)
         if len(set(ids)) != len(ids):
             raise ContractValidationError("unfinished", "duplicate resource ID")

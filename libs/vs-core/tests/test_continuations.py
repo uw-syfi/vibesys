@@ -1023,7 +1023,8 @@ def test_late_job_changes_cannot_rewrite_frozen_timeout_or_resume(sequence: int)
         deadline_at=10.0,
         reached_at=10.0,
         unfinished=tuple(
-            core.JobTimeout(resource_id=job, progress=None) for job in continuation.jobs
+            core.JobTimeout(resource_id=job, progress=None, by=core.WaitEnd.LIMIT, at=10.0)
+            for job in continuation.jobs
         ),
     )
     continuation = continuation.model_copy(
@@ -1549,7 +1550,11 @@ def test_scope_close_and_timeout_never_substitute_for_dependency_release(
                 "timeout": core.TimedOut(
                     deadline_at=10.0,
                     reached_at=10.0,
-                    unfinished=(core.JobTimeout(resource_id=job.resource_id),),
+                    unfinished=(
+                        core.JobTimeout(
+                            resource_id=job.resource_id, by=core.WaitEnd.LIMIT, at=10.0
+                        ),
+                    ),
                 )
             }
         )
@@ -1656,7 +1661,9 @@ def test_new_suspension_never_accepts_caller_manufactured_authority_or_feedback(
             "timeout": core.TimedOut(
                 deadline_at=10.0,
                 reached_at=10.0,
-                unfinished=(core.JobTimeout(resource_id=owned.resource_id),),
+                unfinished=(
+                    core.JobTimeout(resource_id=owned.resource_id, by=core.WaitEnd.LIMIT, at=10.0),
+                ),
             )
             if timeout
             else None,
@@ -1781,7 +1788,11 @@ def test_feedback_deduplicates_equal_evidence_and_rejects_conflicting_identity(
                 "timeout": core.TimedOut(
                     deadline_at=10.0,
                     reached_at=10.0,
-                    unfinished=(core.JobTimeout(resource_id=first.resource_id),),
+                    unfinished=(
+                        core.JobTimeout(
+                            resource_id=first.resource_id, by=core.WaitEnd.LIMIT, at=10.0
+                        ),
+                    ),
                 ),
             }
         )

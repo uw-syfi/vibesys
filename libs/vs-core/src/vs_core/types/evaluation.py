@@ -36,7 +36,7 @@ from .evaluation_history import (
     EvaluationTerminalFacts,
     RepeatedFailureGuidance,
 )
-from .job_observations import JobProgress, MeasurementFailure, TimedOut
+from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
 from .until import Within
 from .waits import WaitOn
 
@@ -382,6 +382,13 @@ class Continuation(Value):
     deadline_at: Seconds
     phase: ContinuationPhase
     timeout: TimedOut | None = None
+    spent: tuple[JobTimeout, ...] = ()
+    """Jobs whose own queue budget ran out while the wait went on, in the order they ran
+    out: core cancelled each, and the wait goes on with its other jobs. Each is reported
+    unfinished, ``by`` ``QUEUE_BUDGET``, when the wait ends."""
+    downtime_credit: Seconds = 0
+    """Host downtime credited to the wait's limit while it was open, as an open request
+    record's limit is moved past it (``open_host_epoch``): while no host runs nothing waits."""
     park_authority: RequestId | None = None
     reopen_authority: RequestId | None = None
     cancelled_resolutions: tuple[ResourceId, ...] = ()
@@ -404,6 +411,9 @@ class Continuation(Value):
             raise ContractValidationError(
                 "authorization_receipt.timeout", "differs from frozen timeout"
             )
+        spent = tuple(job.resource_id for job in self.spent)
+        if len(set(spent)) != len(spent) or not set(spent) <= set(self.jobs):
+            raise ContractValidationError("spent", "names each of the wait's own jobs at most once")
         return self
 
 

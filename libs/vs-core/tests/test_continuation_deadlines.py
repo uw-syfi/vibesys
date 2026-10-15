@@ -206,7 +206,14 @@ def test_a_wait_freezes_at_its_deadline_on_the_facts_the_job_had_then(
         assert row.timeout == core.TimedOut(
             deadline_at=wait.deadline_at,
             reached_at=reached_at,
-            unfinished=(core.JobTimeout(resource_id=JOB, progress=job.progress),),
+            unfinished=(
+                core.JobTimeout(
+                    resource_id=JOB,
+                    progress=job.progress,
+                    by=core.WaitEnd.LIMIT,
+                    at=wait.deadline_at,
+                ),
+            ),
         )
     assert resumes <= 1
 
@@ -328,7 +335,12 @@ def test_a_wait_times_out_exactly_when_its_job_has_run_its_limit(
         if frozen is None and due and not _settled(before):
             assert row.timeout is not None, (fact, at, now_charged)
             assert row.timeout.unfinished == (
-                core.JobTimeout(resource_id=JOB, progress=before.progress),
+                core.JobTimeout(
+                    resource_id=JOB,
+                    progress=before.progress,
+                    by=row.timeout.by,
+                    at=row.timeout.deadline_at,
+                ),
             )
             assert row.timeout.reached_at == at
             frozen = row.timeout
