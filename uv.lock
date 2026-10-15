@@ -3017,10 +3017,14 @@ version = "0.1.0"
 source = { editable = "libs/vs-async-ops" }
 dependencies = [
     { name = "pydantic" },
+    { name = "vs-sim" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-sim", editable = "libs/vs-sim" },
+]
 
 [[package]]
 name = "vs-bench"

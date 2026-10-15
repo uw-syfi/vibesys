@@ -120,7 +120,8 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
 
     Raises ``RunStopped`` when the operator's stop ended the run, so the session reports
     a stopped run, and ``CoreRunRefusedError`` when composition left an executor role
-    unserved.
+    unserved. Every exit after core starts closes a configured evaluation bridge and
+    releases the run lease, including interruption while the bridge itself starts.
     """
     services = host.services
     shell = CoreRuntime(
@@ -139,15 +140,27 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     config = _loop_config(services.run_id, host.timing.lease_seconds)
     await start_core_awaiting_lease(loop, config)
     bridge = services.agent_evaluation
-    if bridge is not None:
-        bridge.attach(shell, services.clock)
-        await bridge.serve()
+    run_error: BaseException | None = None
     try:
+        if bridge is not None:
+            bridge.attach(shell, services.clock)
+            await bridge.serve()
         outcome = await drive_core(loop, config, stall_notes=_unacknowledged_notes(bridge))
+    except BaseException as error:
+        run_error = error
+        raise
     finally:
         try:
-            if bridge is not None:
-                await bridge.close()
+            try:
+                if bridge is not None:
+                    await bridge.close()
+            except BaseException as cleanup_error:
+                if run_error is None:
+                    raise
+                run_error.add_note(
+                    "Additional error while closing the agent evaluation bridge: "
+                    f"{type(cleanup_error).__name__}: {cleanup_error}"
+                )
         finally:
             # A crashed process cannot reach this line, so its restart waits out the lease
             # (see ``start_core_awaiting_lease``); any return or raise here frees it.

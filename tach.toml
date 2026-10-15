@@ -86,11 +86,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-<<<<<<< HEAD
-depends_on = ["vs_decode.api", "vs_sim.api", "vs_project", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs"]
-=======
-depends_on = ["vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os"]
->>>>>>> origin/main
+depends_on = ["vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs"]
 
 [[modules]]
 path = "headless"
@@ -498,7 +494,7 @@ depends_on = ["vs_async_ops.testing"]
 [[modules]]
 path = "vs_async_ops.coordinator"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.models", "vs_async_ops.ports", "vs_async_ops.settling"]
+depends_on = ["vs_async_ops.models", "vs_async_ops.ports", "vs_async_ops.settling", "vs_sim.api"]
 
 [[modules]]
 path = "vs_async_ops.models"
@@ -565,7 +561,7 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models"]
 [[modules]]
 path = "vs_evaluation.semantic_stage"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluator_protocol"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vs_evaluation.coordinator"
@@ -665,7 +661,7 @@ depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts"
 
 # Durable log streams for humans. Layer `logs`, above every library, so no library can
 # import it. `vs_logs.api` (the writer) is open to the product; `vs_logs.read` only to
-# `server.host_helper_os` (see the [[interfaces]] entries), so nothing else reads logs back.
+# the host helper (`server.host_helper_os`; see the [[interfaces]] entries), so nothing else reads logs back.
 [[modules]]
 path = "vs_logs"
 layer = "logs"
@@ -675,7 +671,7 @@ depends_on = ["vs_decode.api", "vs_sim.api"]
 [[modules]]
 path = "vibesys.run.logs"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["vibesys", "vibesys.run.measurement_events", "vs_logs", "vs_project", "vs_runtime", "vs_sim.api"]
 
 # Test-support simulation of the run lifecycle (store, commits, executors, effects) above vs_sim.
 # Nothing in production depends on it.
@@ -991,10 +987,10 @@ from = ["vs_logs"]
 [[interfaces]]
 expose = ["read", "read\\.[A-Za-z_]+"]
 from = ["vs_logs"]
-visibility = ["server.host_helper_os"]
+visibility = ["server.host_helper", "server.host_helper_os"]
 
 [[interfaces]]
-expose = ["NARRATION_COMMAND", "RUN_LOG_OWNER", "UNAVAILABLE_LIMITS", "open_run_log_store", "open_run_logs"]
+expose = ["NARRATION_COMMAND", "RUN_LOG_OWNER", "TOOL_BUILD_COMMAND", "UNAVAILABLE_LIMITS", "open_run_log_store", "open_run_logs", "stage_output_opener", "startup_output_opener", "tool_build_name", "tool_build_output_opener"]
 from = ["vibesys.run.logs"]
 
 [[interfaces]]

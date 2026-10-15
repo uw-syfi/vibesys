@@ -14,6 +14,8 @@ export type StartRunBridge = StartRunWelcomeBridge;
 export {ShellWordsError, shellWords} from './shell-words.js';
 export {
   awaited,
+  chosenHarness,
+  type Harnesses,
   START_CLOSED,
   type StartAction,
   type StartRequest,

@@ -29,6 +29,7 @@ const CHANNELS: Channels = {
   logs: 'vibesys:welcome:logs',
   releaseLogs: 'vibesys:welcome:release-logs',
   tasks: 'vibesys:welcome:tasks',
+  harnesses: 'vibesys:welcome:harnesses',
   start: 'vibesys:welcome:start',
   cancelStart: 'vibesys:welcome:cancel-start',
   attach: 'vibesys:welcome:attach',
@@ -76,8 +77,9 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     logs: (host, instance, request) => call(CHANNELS.logs, host, instance, request),
     releaseLogs: () => call(CHANNELS.releaseLogs),
     tasks: (host, project) => call(CHANNELS.tasks, host, project),
-    start: (host, project, task, args, start) =>
-      call(CHANNELS.start, host, project, task, args, start),
+    harnesses: host => call(CHANNELS.harnesses, host),
+    start: (host, project, task, args, harness, start) =>
+      call(CHANNELS.start, host, project, task, args, harness, start),
     cancelStart: start => call(CHANNELS.cancelStart, start),
     attach: (host, instance) => call(CHANNELS.attach, host, instance),
     resume: (host, project, run) => call(CHANNELS.resume, host, project, run),

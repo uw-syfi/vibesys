@@ -26,9 +26,12 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 ``LogPipe``, ``LogOffset``, ``LogTail`` and limits
 (``LOGS_READ_MAX_BYTES``, ``LOGS_READ_MIN_BYTES``, ``LOGS_WAIT_MAX_MS``),
 ``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
-``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
-members, ``HelperMessage`` and its members, ``HelperErrorCode``, and a relayed
-channel's end: ``ChannelEndOutcome``, ``ChannelEnd``.
+``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
+``HelperRequest`` (``parse_helper_request``) and its members, ``HelperMessage``
+and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
+``HarnessChoice``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
+``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
+``ChannelEnd``.
 
 The helper's messages follow ``docs/contributing/desktop-connection.md``
 ("Handshake and versioning"): strict within a negotiated version, additive
@@ -608,6 +611,16 @@ class HelperFeature(StrEnum):
     """``instances.inspect``: retained metadata and an optional bounded log tail."""
     LOGS = "logs"
     """``logs.list`` and ``logs.read``: a run's recorded log streams, read in bounded chunks."""
+    HARNESSES = "harnesses"
+    """``harnesses.list`` and ``run.start``'s ``harness``: start a run on a vetted provider and model."""
+
+
+CLI_PROVIDER_FLAG: Final = "--cli-provider"
+"""The run option that names the agent CLI provider; ``run.start`` emits it for ``harness``."""
+MODEL_FLAG: Final = "--model"
+"""The run option that names the agent model; ``run.start`` emits it for ``harness``."""
+UNVETTED_MODEL_FLAG: Final = "--allow-unvetted-model"
+"""The terminal's opt-out from the vetted harness list; ``run.start`` refuses it in ``args``."""
 
 
 RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -704,8 +717,39 @@ class ResumeLatest(BaseModel):
     latest: Literal[True]
 
 
+class HarnessChoice(BaseModel):
+    """One agent CLI provider and one model it runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: str
+    model: str
+
+
+class HarnessOption(BaseModel):
+    """A vetted provider and model pair a run may start with."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: str
+    model: str
+    default: bool
+    """The model a run on ``provider`` uses when nothing names one."""
+
+
+class HarnessesListRequest(_HelperRequest):
+    """The vetted provider and model pairs ``run.start``'s ``harness`` accepts."""
+
+    type: Literal["harnesses.list"] = "harnesses.list"
+
+
 class RunStartRequest(_HelperRequest):
-    """Start a detached run (``vibesys --detach``) in ``project``."""
+    """Start a detached run (``vibesys --detach``) in ``project``.
+
+    ``args`` never carry ``UNVETTED_MODEL_FLAG`` (or an abbreviation of it): a run
+    started through the helper uses only vetted harnesses. With ``harness``, they
+    carry neither ``CLI_PROVIDER_FLAG`` nor ``MODEL_FLAG``, so the pair has one source.
+    """
 
     type: Literal["run.start"] = "run.start"
     project: str
@@ -713,6 +757,9 @@ class RunStartRequest(_HelperRequest):
     args: tuple[str, ...] = ()
     """Further run options, one argument per item; never parsed by a shell."""
     resume: ResumeRun | ResumeLatest | None = None
+    harness: HarnessChoice | None = None
+    """A pair ``harnesses.list`` offered; ``None`` keeps the project's configuration.
+    Sent only after ``hello`` returned ``harnesses``."""
 
 
 class RunStopRequest(_HelperRequest):
@@ -837,8 +884,24 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     PathsCompleteRequest: HelperFeature.PATHS_COMPLETE,
     LogsListRequest: HelperFeature.LOGS,
     LogsReadRequest: HelperFeature.LOGS,
+    HarnessesListRequest: HelperFeature.HARNESSES,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
+
+HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFeature]]] = {
+    RunStartRequest: {"harness": HelperFeature.HARNESSES},
+}
+"""The feature each gated optional field needs when it is set (not ``None``), exported too."""
+
+
+def request_features(request: _HelperRequest) -> tuple[HelperFeature, ...]:
+    """The features ``hello`` must have returned for ``request``: its method's and its set fields'."""
+    method = HELPER_REQUEST_FEATURES.get(type(request))
+    features = [] if method is None else [method]
+    for name, feature in HELPER_FIELD_FEATURES.get(type(request), {}).items():
+        if getattr(request, name) is not None and feature not in features:
+            features.append(feature)
+    return tuple(features)
 
 
 HelperRequest = Annotated[
@@ -855,7 +918,8 @@ HelperRequest = Annotated[
     | PingRequest
     | PathsCompleteRequest
     | LogsListRequest
-    | LogsReadRequest,
+    | LogsReadRequest
+    | HarnessesListRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1132,6 +1196,13 @@ class LogsReadReply(_HelperReply):
     chunk: LogChunk
 
 
+class HarnessesListReply(_HelperReply):
+    """The vetted pairs, grouped by provider with each provider's default first."""
+
+    type: Literal["harnesses.list"] = "harnesses.list"
+    harnesses: tuple[HarnessOption, ...]
+
+
 class HelperErrorCode(StrEnum):
     """Why a request failed; a closed set."""
 
@@ -1173,6 +1244,8 @@ class HelperErrorCode(StrEnum):
     """``logs.list`` or ``logs.read`` named an instance this host recorded no logs for."""
     UNKNOWN_LOG_STREAM = "unknown_log_stream"
     """``logs.read`` named a stream the instance does not have."""
+    UNVETTED_HARNESS = "unvetted_harness"
+    """``run.start``'s ``harness`` is not one ``harnesses.list`` offers; only sent with ``harnesses``."""
     INTERNAL = "internal"
     """The helper failed; ``message`` says how."""
 
@@ -1209,6 +1282,7 @@ HelperReply = (
     | PathsCompleteReply
     | LogsListReply
     | LogsReadReply
+    | HarnessesListReply
 )
 """A request's result; its ``type`` is the request's."""
 

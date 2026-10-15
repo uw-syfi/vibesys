@@ -431,6 +431,29 @@ describe('RunControl over the FakeHelper', () => {
     await w.connection[Symbol.asyncDispose]();
   });
 
+  test('a chosen harness reaches run.start as typed data; no choice sends no harness field', async () => {
+    const w = world();
+    const harness = {provider: 'claude', model: 'claude-a'};
+    expect(await w.runs.start(HOST, '/p', 'spsc', [], null, harness)).toBe('started');
+    expect(await w.runs.start(HOST, '/p', 'spsc', ['--max-rounds', '2'])).toBe('started');
+    const starts = w.link.helper.requests.filter(request => request.type === 'run.start');
+    expect(starts.map(request => ('harness' in request ? request.harness : 'absent'))).toEqual([
+      harness,
+      'absent',
+    ]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a harness the host does not offer fails the start without launching', async () => {
+    const w = world();
+    const harness = {provider: 'claude', model: 'not-vetted'};
+    await expect(w.runs.start(HOST, '/p', 'spsc', [], null, harness)).rejects.toThrow(
+      'vetted models: claude-a',
+    );
+    expect(w.link.helper.host.instances).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
   test('a run whose server ends is shown ended, from the pushed registry', async () => {
     const w = world();
     w.link.helper.publish(record('00000000000a', 'run-a', '/p'));

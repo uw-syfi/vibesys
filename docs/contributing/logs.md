@@ -33,6 +33,28 @@ exception leaves it. `LogStore.adopt(path, owner, command)` lists a file someone
 writes (a Slurm job's output file), read as-is. `follow(source, sink, threads=..., stop=...)`
 copies a growing `ByteSource` (a file in a container or on a cluster) into a sink.
 
+A library never sees a scope or an owner. It takes an opener in its own vocabulary, a
+factory that returns a context manager of an `OutputSink`, calls it once per command or
+stage, and passes the entered sink down per call to the runner that writes it:
+
+| Opener | Called with | Carried by |
+| --- | --- | --- |
+| `vs_runtime` `StartupOutputOpener` | startup stage, command description | `RunEnvironmentRequest.startup_output` |
+| `vs_runtime` `StageOutputOpener` | `StageRun(handle_id, stage_id, purpose, attempt)` | `PollingEvaluationExecutor(stage_output=...)`, through `TryHandles.stage_output` |
+| `vs_runtime` `ToolBuildOutputOpener` | names of the evaluator tools built | `RunEnvironmentRequest.tool_build_output` |
+
+The run's openers live in `vibesys.run.logs`. `stage_output_opener` names a stage
+`GateStage(execution_id, gate, attempt)`: the measurement's handle (the `execution_id` of
+its gate events), the gate `measurement_events.gate_of(purpose, stage_id)` gives (the
+same mapping the gate events use), and the try number. A `RetryingEvaluationExecutor`
+runs try `n` under a new inner handle, so the run shares one `TryHandles` between it and
+the polling executor's opener, which names each run by the outer handle and try. A stage
+that is no gate (profiling) opens no stream. `tool_build_output_opener` names a build
+`ToolBuild(tool_build_name(tools))`: the tools sorted, at most four named, then `+N more`.
+
+Every `CommandRunner.execute` takes `output` and writes each chunk its command prints to
+it as the command runs; the bounded `CommandResult` does not change.
+
 `vibesys.run.logs.open_run_log_store(project_root, run_id, threads=...)` opens a run's
 store in `Project.log_directory_for(root, run_id) / "streams"`. Opening a store closes as
 `abandoned` every stream a crashed writer left open.
@@ -130,4 +152,6 @@ means the chunk reaches the final end. Every byte is read through `ByteSource`.
 | Narration handler and excepthook | built |
 | `NarrationLine` in the generated protocol types | not built (with the client logs lib) |
 | Exit status or signal of a hard death on the tombstone | not built: the detached server is reparented to init, so no vibesys process waits on it and can read its status |
-| Gate stages, tool builds, remote followers (Slurm, SkyPilot, dockerd) | not built |
+| Gate stage and tool build openers in the libraries | built |
+| `vibesys` openers for gate stages and tool builds | built (in-process stages; the host environment's hook-driven tool install still discards) |
+| Remote followers (Slurm, SkyPilot, dockerd) | not built |

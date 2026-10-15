@@ -44,6 +44,7 @@ def execute_as_root(
     command: str,
     *,
     timeout: int | None = None,
+    output: OutputSink = DISCARD,
 ) -> CommandResult:
     """Run *command* as root inside a started container sandbox.
 
@@ -51,13 +52,14 @@ def execute_as_root(
     :class:`CommandRunner` contract leaves out. A sandbox that cannot run
     commands as root (a host sandbox, where "root" would mean the operator's
     machine) fails immediately and by name instead of running the command as
-    the wrong user.
+    the wrong user. The command's output is written to *output* as it runs, as
+    :meth:`CommandRunner.execute` writes it.
     """
     run = getattr(sandbox, "execute_as_root", None)
     if not callable(run):
         message = f"{type(sandbox).__name__} cannot run commands as root"
         raise TypeError(message)
-    return run(command, timeout=timeout)
+    return run(command, timeout=timeout, output=output)
 
 
 def stop_sandbox(sandbox: CommandRunner) -> None:
@@ -130,9 +132,14 @@ class SandboxSession[ViewT]:
 
 @dataclass(frozen=True)
 class BeforeReadyContext:
-    """Resources available while a sandbox is transitioning to ready."""
+    """Resources available while a sandbox is transitioning to ready.
+
+    ``output`` is where a hook's commands write their raw output as they run;
+    a lifecycle-driven start discards it.
+    """
 
     sandbox: CommandRunner
+    output: OutputSink = DISCARD
 
 
 class SandboxLifecycleHooks:

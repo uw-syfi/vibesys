@@ -33,6 +33,7 @@ export interface DesktopDeps {
     | 'cancelInspection'
     | 'cancelInspectionOwner'
     | 'complete'
+    | 'harnesses'
     | 'host'
     | 'inspect'
     | 'logs'
@@ -222,6 +223,8 @@ export class Desktop {
         return null;
       case 'tasks':
         return hosts.tasks(request.host, request.project);
+      case 'harnesses':
+        return hosts.harnesses(request.host);
       case 'complete':
         return hosts.complete(request.host, request.directory);
       case 'attach':
@@ -230,10 +233,14 @@ export class Desktop {
         return null;
       case 'start':
         // The start-run feature owns the run arguments' syntax.
-        return runs.start(request.host, request.project, request.task, shellWords(request.args), {
-          owner: rendererGeneration,
-          sequence: request.start,
-        });
+        return runs.start(
+          request.host,
+          request.project,
+          request.task,
+          shellWords(request.args),
+          {owner: rendererGeneration, sequence: request.start},
+          request.harness,
+        );
       case 'cancel-start':
         runs.cancelStart({owner: rendererGeneration, sequence: request.start});
         return null;

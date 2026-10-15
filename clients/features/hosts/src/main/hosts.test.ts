@@ -256,6 +256,29 @@ describe('Hosts.complete', () => {
   });
 });
 
+describe('Hosts.harnesses', () => {
+  test('returns a typed unsupported outcome without sending harnesses.list', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('harnesses');
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.harnesses(LOCAL)).resolves.toEqual({kind: 'unsupported'});
+    expect(link.helper.requests.filter(request => request.type === 'harnesses.list')).toEqual([]);
+  });
+
+  test("returns the host's vetted pairs, each provider's default marked", async () => {
+    const link = new FakeLink();
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.harnesses(LOCAL)).resolves.toEqual({
+      kind: 'listed',
+      harnesses: [...link.helper.host.harnesses],
+    });
+  });
+});
+
 describe('Hosts checkout changes', () => {
   test('cancelling checkout validation cannot persist or replace a newer operation', async () => {
     const directory = '/settings';

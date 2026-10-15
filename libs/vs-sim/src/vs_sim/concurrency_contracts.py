@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_sim.concurrency import Event, Threads, Worker
-    from vs_sim.network import Connection, Network
+    from vs_sim.network import Connection, DeadlineNetwork
 
 _CASES = 12
 """Seeded cases per property: the same draws every run."""
@@ -444,9 +444,9 @@ class ThreadsContract:
 
 @dataclass(frozen=True)
 class NetworkUnderTest:
-    """A network, the threads it blocks with, and a source of bindable addresses."""
+    """A deadline network, the threads it blocks with, and bindable addresses."""
 
-    network: Network
+    network: DeadlineNetwork
     threads: ThreadsUnderTest
     address: Callable[[str], str]
     """An address this network can bind, for a short name."""

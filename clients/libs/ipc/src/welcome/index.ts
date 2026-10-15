@@ -57,7 +57,8 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.logs]: 3,
   [WELCOME_CHANNELS.releaseLogs]: 0,
   [WELCOME_CHANNELS.tasks]: 2,
-  [WELCOME_CHANNELS.start]: 5,
+  [WELCOME_CHANNELS.harnesses]: 1,
+  [WELCOME_CHANNELS.start]: 6,
   [WELCOME_CHANNELS.cancelStart]: 1,
   [WELCOME_CHANNELS.attach]: 2,
   [WELCOME_CHANNELS.resume]: 3,
@@ -113,7 +114,12 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
 
 export type {HostsWelcomeBridge, WelcomeInspection} from './hosts.js';
 export type {RunControlWelcomeBridge} from './run-control.js';
-export type {StartRunWelcomeBridge} from './start-run.js';
+export type {
+  HarnessChoice,
+  HarnessListing,
+  HarnessOffer,
+  StartRunWelcomeBridge,
+} from './start-run.js';
 export {
   type ChromeState,
   type PathCompletion,

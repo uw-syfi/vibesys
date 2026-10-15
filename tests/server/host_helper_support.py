@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 from server.host_api import (
     Checkout,
     DetachedLaunchFailure,
+    HarnessOption,
     InstanceStatus,
     LiveInstanceRecord,
     LogOffset,
@@ -62,6 +63,12 @@ if TYPE_CHECKING:
 
 HOME = "/home/user"
 VIBESYS_VERSION = "0+test"
+HARNESSES = (
+    HarnessOption(provider="codex", model="gpt-a", default=True),
+    HarnessOption(provider="codex", model="gpt-b", default=False),
+    HarnessOption(provider="claude", model="claude-a", default=True),
+)
+"""The vetted pairs a fake host offers: two providers, each default first."""
 
 
 @dataclass
@@ -301,6 +308,7 @@ def fake_host(
         dialer=network,
         vibesys_version=VIBESYS_VERSION,
         logs=None,
+        harnesses=lambda: HARNESSES,
     )
 
 

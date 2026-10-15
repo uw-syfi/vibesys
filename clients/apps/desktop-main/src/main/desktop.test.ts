@@ -131,6 +131,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
       entries: [],
       truncated: false,
     }),
+    harnesses: async () => ({kind: 'unsupported'}),
     inspect: async (_id, instanceId) => ({
       id: instanceId,
       state: 'ended',
@@ -189,8 +190,18 @@ describe('Desktop welcome start ownership', () => {
   test('passes the exact renderer generation through start, cancel, and synchronous retirement', async () => {
     const w = desktopWorld();
 
+    const harness = {provider: 'claude', model: 'claude-a'};
     await expect(
-      w.ipc.invoke('10:100', WELCOME_CHANNELS.start, 'local', '/project', 'spsc', '--rounds 2', 1),
+      w.ipc.invoke(
+        '10:100',
+        WELCOME_CHANNELS.start,
+        'local',
+        '/project',
+        'spsc',
+        '--rounds 2',
+        harness,
+        1,
+      ),
     ).resolves.toEqual({ok: true, value: 'started'});
     await expect(w.ipc.invoke('10:100', WELCOME_CHANNELS.cancelStart, 1)).resolves.toEqual({
       ok: true,
@@ -198,7 +209,14 @@ describe('Desktop welcome start ownership', () => {
     });
 
     expect(w.starts).toEqual([
-      [{kind: 'local'}, '/project', 'spsc', ['--rounds', '2'], {owner: '10:100', sequence: 1}],
+      [
+        {kind: 'local'},
+        '/project',
+        'spsc',
+        ['--rounds', '2'],
+        {owner: '10:100', sequence: 1},
+        harness,
+      ],
     ]);
     expect(w.cancels).toEqual([[{owner: '10:100', sequence: 1}]]);
 
@@ -211,6 +229,7 @@ describe('Desktop welcome start ownership', () => {
       '/project',
       'spsc',
       '--rounds 3',
+      null,
       1,
     );
     await spin();
@@ -246,6 +265,7 @@ describe('Desktop welcome start ownership', () => {
       '/project',
       'spsc',
       '--rounds 2',
+      null,
       1,
     );
 
@@ -257,6 +277,7 @@ describe('Desktop welcome start ownership', () => {
       '/project',
       'spsc',
       '--rounds 3',
+      null,
       1,
     );
     await retirementStarted.promise;

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from entrypoints.cli.constants import _OUTER_LOOPS
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
+from server.host_api import CLI_PROVIDER_FLAG, MODEL_FLAG, UNVETTED_MODEL_FLAG
 from vibesys.api import (
     KNOWN_COMPUTE_BACKENDS,
     ComputeBackend,
@@ -481,7 +482,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--cli-provider",
+        CLI_PROVIDER_FLAG,
         choices=list(SHIPPED_PROVIDERS),
         default=None,
         help=(
@@ -490,7 +491,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--model",
+        MODEL_FLAG,
         default=None,
         help=(
             "Agent model. Overrides [model].name in agent.toml; when neither names one, "
@@ -498,7 +499,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--allow-unvetted-model",
+        UNVETTED_MODEL_FLAG,
         action="store_true",
         help=(
             "Run a provider and model pair outside VibeSys's vetted harness list. "

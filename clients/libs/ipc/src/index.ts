@@ -28,6 +28,9 @@ export {
 } from './run-logs.js';
 export {
   type ChromeState,
+  type HarnessChoice,
+  type HarnessListing,
+  type HarnessOffer,
   type HostsWelcomeBridge,
   type PathCompletion,
   parseWelcomeRequest,

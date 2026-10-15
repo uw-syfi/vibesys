@@ -1,8 +1,9 @@
 import {describe, expect, test} from 'bun:test';
-import type {StartOutcome, WelcomeResult} from '@vibesys/ipc';
+import type {HarnessListing, HarnessOffer, StartOutcome, WelcomeResult} from '@vibesys/ipc';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
   awaited,
+  chosenHarness,
   START_CLOSED,
   type StartAction,
   type StartRequest,
@@ -15,9 +16,28 @@ import {
 const HOST = {key: 'local', label: 'This Mac'};
 const PROJECTS = ['/p/queue', '/p/kv'];
 const TASKS = ['mpmc', 'mpsc', 'spsc', 'verus-mpmc-open'];
+const HARNESSES: readonly HarnessOffer[] = [
+  {provider: 'codex', model: 'gpt-a', default: true},
+  {provider: 'codex', model: 'gpt-b', default: false},
+  {provider: 'claude', model: 'claude-a', default: true},
+];
+const LISTED: WelcomeResult<HarnessListing> = {
+  ok: true,
+  value: {kind: 'listed', harnesses: HARNESSES},
+};
 
 function fail<T>(error: string): WelcomeResult<T> {
   return {ok: false, error, authNeeded: false};
+}
+
+/** A pair to pick: each listed one, the project default, and ones the host never offered. */
+function randomChoice(random: Seeded): {provider: string; model: string} | null {
+  return random.pick([
+    null,
+    ...HARNESSES.map(({provider, model}) => ({provider, model})),
+    {provider: 'codex', model: 'claude-a'},
+    {provider: 'gemini', model: 'free-text'},
+  ]);
 }
 
 function randomStartAction(random: Seeded, issued: readonly number[]): StartAction {
@@ -29,6 +49,7 @@ function randomStartAction(random: Seeded, issued: readonly number[]): StartActi
     {type: 'args', value: random.pick(['', '--rounds 2'])},
     {type: 'list-tasks'},
     {type: 'pick', task: random.pick([...TASKS, 'unknown'])},
+    {type: 'harness', value: randomChoice(random)},
     {type: 'start'},
     {type: 'run-shown'},
     {
@@ -37,6 +58,16 @@ function randomStartAction(random: Seeded, issued: readonly number[]): StartActi
       result: random.bool()
         ? {ok: true, value: TASKS.slice(0, random.int(TASKS.length + 1))}
         : fail('no project'),
+    },
+    {
+      type: 'harnesses-reply',
+      token,
+      result: random.pick<WelcomeResult<HarnessListing>>([
+        LISTED,
+        {ok: true, value: {kind: 'listed', harnesses: HARNESSES.slice(0, random.int(4))}},
+        {ok: true, value: {kind: 'unsupported'}},
+        fail('the host is unreachable'),
+      ]),
     },
     {
       type: 'start-reply',
@@ -59,6 +90,18 @@ function fold(state: StartState, actions: readonly StartAction[]) {
     requests.push(...next.requests);
   }
   return {state, requests};
+}
+
+/**
+ * A start action asks to start a run exactly when the sheet could start one, with the pair the
+ * sheet shows as chosen (null: the project default), never another.
+ */
+function expectStartRequest(before: StartState, requests: readonly StartRequest[]): void {
+  const started = requests.flatMap(request =>
+    request.kind === 'start' ? [{task: request.task, harness: request.harness}] : [],
+  );
+  const task = startable(before);
+  expect(started).toEqual(task === null ? [] : [{task, harness: chosenHarness(before)}]);
 }
 
 function tokenOf(requests: readonly StartRequest[], kind: StartRequest['kind']): number {
@@ -153,6 +196,90 @@ describe('start sheet', () => {
     if (failed.kind === 'editing') expect(failed.error).toBe('the image build failed');
   });
 
+  test('opening asks the host for its vetted models, and the picked one reaches the start', () => {
+    const opened = fold(START_CLOSED, [{type: 'open', host: HOST, projects: PROJECTS}]);
+    expect(opened.requests.map(request => request.kind)).toEqual(['harnesses', 'tasks']);
+    const picked = fold(opened.state, [
+      {type: 'harnesses-reply', token: tokenOf(opened.requests, 'harnesses'), result: LISTED},
+      {
+        type: 'tasks-reply',
+        token: tokenOf(opened.requests, 'tasks'),
+        result: {ok: true, value: ['spsc']},
+      },
+      {type: 'harness', value: {provider: 'claude', model: 'claude-a'}},
+      {type: 'start'},
+    ]);
+    const [start] = picked.requests.filter(request => request.kind === 'start');
+    expect(start).toMatchObject({task: 'spsc', harness: {provider: 'claude', model: 'claude-a'}});
+  });
+
+  test('the project default, a host without the choice, and an unlisted pair all start with none', () => {
+    const opened = fold(START_CLOSED, [{type: 'open', host: HOST, projects: PROJECTS}]);
+    const harnesses = tokenOf(opened.requests, 'harnesses');
+    const tasks = {
+      type: 'tasks-reply',
+      token: tokenOf(opened.requests, 'tasks'),
+      result: {ok: true, value: ['spsc']},
+    } as const;
+    const cases: readonly (readonly StartAction[])[] = [
+      [
+        {type: 'harnesses-reply', token: harnesses, result: LISTED},
+        {type: 'harness', value: {provider: 'codex', model: 'gpt-b'}},
+        {type: 'harness', value: null},
+      ],
+      [
+        {
+          type: 'harnesses-reply',
+          token: harnesses,
+          result: {ok: true, value: {kind: 'unsupported'}},
+        },
+      ],
+      [
+        {type: 'harnesses-reply', token: harnesses, result: LISTED},
+        {type: 'harness', value: {provider: 'codex', model: 'typed-by-hand'}},
+      ],
+      [],
+    ];
+    for (const actions of cases) {
+      const started = fold(opened.state, [tasks, ...actions, {type: 'start'}]);
+      const [start] = started.requests.filter(request => request.kind === 'start');
+      expect(start).toMatchObject({task: 'spsc', harness: null});
+    }
+  });
+
+  test('regression: a model list from an earlier opening never fills a later sheet', () => {
+    const first = fold(START_CLOSED, [{type: 'open', host: HOST, projects: PROJECTS}]);
+    const stale = tokenOf(first.requests, 'harnesses');
+    const reopened = fold(first.state, [
+      {type: 'close'},
+      {type: 'open', host: {key: 'ssh:gpu', label: 'gpu'}, projects: PROJECTS},
+    ]);
+    const late = startStep(reopened.state, {type: 'harnesses-reply', token: stale, result: LISTED});
+    expect(late.state).toBe(reopened.state);
+    expect(awaited(late.state).harnesses).toBe(tokenOf(reopened.requests, 'harnesses'));
+  });
+
+  test('a failed start shows the form again with the model that was picked', () => {
+    const opened = fold(START_CLOSED, [{type: 'open', host: HOST, projects: PROJECTS}]);
+    const started = fold(opened.state, [
+      {type: 'harnesses-reply', token: tokenOf(opened.requests, 'harnesses'), result: LISTED},
+      {
+        type: 'tasks-reply',
+        token: tokenOf(opened.requests, 'tasks'),
+        result: {ok: true, value: ['spsc']},
+      },
+      {type: 'harness', value: {provider: 'codex', model: 'gpt-b'}},
+      {type: 'start'},
+    ]);
+    const failed = startStep(started.state, {
+      type: 'start-reply',
+      token: tokenOf(started.requests, 'start'),
+      result: fail('model gpt-b is not vetted'),
+    }).state;
+    expect(failed.kind).toBe('editing');
+    expect(chosenHarness(failed)).toEqual({provider: 'codex', model: 'gpt-b'});
+  });
+
   test('model: invariants hold and stale replies are dropped over random sequences', () => {
     checkModel({
       initial: START_CLOSED,
@@ -162,19 +289,14 @@ describe('start sheet', () => {
       awaited,
       reply: action => {
         if (action.type === 'tasks-reply') return {slot: 'tasks', token: action.token};
+        if (action.type === 'harnesses-reply') return {slot: 'harnesses', token: action.token};
         if (action.type === 'start-reply') return {slot: 'start', token: action.token};
         return null;
       },
       invariants: startInvariants,
+      // `startInvariants` holds a chosen pair to the host's list.
       also: (before, action, after, requests) => {
-        // A start action asks to start a run exactly when the sheet could start one.
-        if (action.type === 'start') {
-          const started = requests.flatMap(request =>
-            request.kind === 'start' ? [request.task] : [],
-          );
-          const task = startable(before);
-          expect(started).toEqual(task === null ? [] : [task]);
-        }
+        if (action.type === 'start') expectStartRequest(before, requests);
         // Start is enabled only for a picked task listed for the project shown.
         const task = startable(after);
         if (task === null) return;
