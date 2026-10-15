@@ -3,8 +3,9 @@
 A wait states how long the work may take. The run may have less time left than that,
 which is not malformed: core caps the stored time at the run deadline. A run deadline
 that is not after the run clock has no time left; only then is new work refused, and
-core's own cleanup requests still get their bounded time: each may run to the run
-deadline and for at least ``limits.cleanup_bound`` (see ``cleanup``), never a limit of
+core's own cleanup requests still get their bounded time: while the run goes on each may
+run to the run deadline and for at least ``limits.cleanup_bound``, and once it is
+stopping for exactly that bound (see ``cleanup``), never a limit of
 zero and never a wait without a bound, so a stopped run can always close.
 """
 
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .types.common import RunStatus
 from .types.records import Outbound
 from .types.until import FromDispatch, Until, Within
 
@@ -75,11 +77,14 @@ def time_remains(run: RunState, requested: float) -> bool:
 def cleanup(run: RunState, request: Request) -> Outbound:
     """``request`` as core's own cleanup or inspection, with its own explicit bounded time.
 
-    The request may take until the run deadline, and never less than
-    ``limits.cleanup_bound``: a cleanup issued just before the deadline still gets the
-    full budget instead of the few seconds the run has left. The time is stored as an
-    absolute ``Until``, so the run deadline does not cap it again; the run itself already
-    stopped once its deadline passes.
+    While the run goes on, the request may take until the run deadline, and never less
+    than ``limits.cleanup_bound``: a cleanup issued just before the deadline still gets
+    the full budget. Once the run is stopping (CLOSING, or a result is set) it gets
+    exactly ``cleanup_bound``: the run's remaining time no longer means anything, and a
+    cleanup whose answer is lost must not hold the close for hours. The time is stored as
+    an absolute ``Until``, so the run deadline does not cap it again.
     """
-    at = max(run.deadline_at, run.now_at + run.limits.cleanup_bound)
+    at = run.now_at + run.limits.cleanup_bound
+    if run.status != RunStatus.CLOSING and run.result is None:
+        at = max(run.deadline_at, at)
     return Outbound(request=request, until=Until(at=at))
