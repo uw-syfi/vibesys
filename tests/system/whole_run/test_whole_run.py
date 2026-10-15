@@ -109,14 +109,6 @@ the sandbox remap them anyway, and removing the container removes a result file 
 cleanup was lost."""
 _GATES = frozenset({"accuracy", "benchmark"})
 """Measurement commands whose loss the run reports as a failed gate instead of retrying."""
-_MISBLAMED = frozenset({"accuracy"})
-"""Commands the drawn deaths spare, because a known bug blames their death on the candidate.
-
-The sandbox reports a ``docker exec`` client killed by signal N as exit ``128 + N``, the
-status of a command killed inside the container, so a dead accuracy client reads as the
-revision failing its correctness check. The strict xfail of
-``test_a_killed_measurement_command_is_a_failed_gate`` tracks it; empty this set with
-the fix (SYSTEM-IFACE-PROGRESS, lane A)."""
 _AGENT_IDENTITY_READ = "id -u agent && id -g agent"
 _BENCHMARK_OUTPUT = re.compile(r"run-benchmark --vs-output \S+;")
 """The task's benchmark, as the framed benchmark command runs it."""
@@ -175,8 +167,6 @@ class _Faults:
     """Up to ``_MAX_DEATHS`` client deaths, on distinct commands."""
     link: LinkFault
     """What the network does to the client's first connection."""
-    spared: frozenset[str] = frozenset()
-    """Kinds of command no death hits, whatever its index."""
 
     @classmethod
     def draw(cls, sim: Sim) -> _Faults:
@@ -192,12 +182,10 @@ class _Faults:
             for command in commands
         )
         link = LinkFault.draw(rng, sends=_LATEST_LINK_FAULT, seconds=_LINK_FAULT_S)
-        return cls(deaths=deaths, link=link, spared=_MISBLAMED)
+        return cls(deaths=deaths, link=link)
 
     def death_of(self, command: int, kind: str, earlier: Sequence[_Command]) -> _Death | None:
         """The death of the ``command``-th command, of kind ``kind``, after ``earlier``."""
-        if kind in self.spared:
-            return None
         first_of_kind = all(issued.effect[0] != kind for issued in earlier)
         return next(
             (
@@ -660,23 +648,7 @@ def test_a_killed_container_removal_leaves_no_container(
     assert outcome.daemon.ledger[target].argv[1] == "rm"
 
 
-@pytest.mark.parametrize(
-    "gate",
-    [
-        pytest.param(
-            gate,
-            marks=[
-                pytest.mark.xfail(
-                    strict=True,
-                    reason="a dead docker exec client reads as the candidate's failure",
-                )
-            ]
-            if gate in _MISBLAMED
-            else [],
-        )
-        for gate in sorted(_GATES)
-    ],
-)
+@pytest.mark.parametrize("gate", sorted(_GATES))
 @pytest.mark.parametrize("timing", ["before-effect", "after-effect"])
 def test_a_killed_measurement_command_is_a_failed_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gate: str, timing: str

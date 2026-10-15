@@ -63,6 +63,10 @@ class ProcessStop(StrEnum):
 
     TIMEOUT = "timeout"
     CANCELLED = "cancelled"
+    CLIENT_LOST = "client_lost"
+    """The launched process was the client of a remote command, and a signal this
+    module did not send ended it. The client's death says nothing about the
+    command, which may still be running where it lives, so it is stopped there."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,13 +74,14 @@ class ProcessOutcome:
     """Captured streams and exit status of one finished or stopped command.
 
     ``returncode`` is the shell-convention status: ``128 + N`` for a process
-    killed by signal ``N``, never a negative number. The streams hold
-    everything the command wrote before it exited or was stopped.
+    killed by signal ``N``, never a negative number. It is ``None`` when the
+    command's own status is unknown (:attr:`ProcessStop.CLIENT_LOST`). The
+    streams hold everything the command wrote before it exited or was stopped.
     """
 
     stdout: str
     stderr: str
-    returncode: int
+    returncode: int | None
     stopped: ProcessStop | None = None
     unconfirmed: RemoteProcesses | None = None
     """Set when a stop could not show that the command's remote processes ended."""
@@ -233,6 +238,8 @@ def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the st
             wait = remaining if cancel is None else _min_wait(remaining)
             finished = process.wait(wait)
             if finished is not None:
+                if signal_remote is not None and process.returncode < 0:
+                    return _client_lost(finished, grace_seconds, signal_remote, threads)
                 return ProcessOutcome(*finished, shell_exit_status(process.returncode))
             if cancel is not None and cancel.is_set():
                 stop = ProcessStop.CANCELLED
@@ -270,6 +277,24 @@ def _stop(
         remote = _end_remote(signal_remote, grace_end, threads, killed=killed)
         unconfirmed = None if remote.gone else remote
     return ProcessOutcome(*finished, shell_exit_status(process.returncode), stop, unconfirmed)
+
+
+def _client_lost(
+    finished: tuple[str, str],
+    grace_seconds: float,
+    signal_remote: SignalSender,
+    threads: Threads,
+) -> ProcessOutcome:
+    """Stop a remote command whose client a signal ended, and report no status for it.
+
+    A client relays its remote command's status as an ordinary exit code, so a
+    client ended by a signal is the client's own death (an OOM kill on the host,
+    an operator's ``kill``), not the command's. The command may still run, so it
+    gets ``SIGTERM`` and, after the grace period, ``SIGKILL`` where it lives.
+    """
+    remote = _end_remote(signal_remote, threads.now() + grace_seconds, threads, killed=False)
+    unconfirmed = None if remote.gone else remote
+    return ProcessOutcome(*finished, None, ProcessStop.CLIENT_LOST, unconfirmed)
 
 
 def _end_remote(
