@@ -47,6 +47,11 @@ def linked_worktree_git_paths(workspace: Path) -> tuple[Path, ...]:
     workspace's ``.git``. Any other contents yield an empty tuple, so Git fails
     inside the sandbox rather than the agent choosing a host path to mount.
 
+    A registration the agent forged in a directory it can write passes those checks,
+    so no shared entry may be a symlink: Git never makes one, and the bind would
+    follow it to whatever host path the agent named (``objects -> ~/.ssh``). A
+    symlinked entry yields an empty tuple.
+
     A workspace whose ``.git`` is a directory, a symlink, or missing needs nothing
     extra and yields an empty tuple.
     """
@@ -54,8 +59,10 @@ def linked_worktree_git_paths(workspace: Path) -> tuple[Path, ...]:
     if gitdir is None:
         return ()
     common = gitdir.parent.parent
-    paths = [gitdir, *(common / name for name in _SHARED_ENTRIES if (common / name).exists())]
-    return tuple(paths)
+    shared = [common / name for name in _SHARED_ENTRIES]
+    if any(path.is_symlink() for path in shared):
+        return ()
+    return (gitdir, *(path for path in shared if path.exists()))
 
 
 def _registered_gitdir(workspace: Path) -> Path | None:

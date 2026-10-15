@@ -126,3 +126,46 @@ def test_an_agent_written_pointer_never_chooses_a_host_path_to_bind(
         assert not any(path.is_relative_to(root / "secret") for path in paths)
         assert root not in paths
         assert root / "project" / ".git" / "config" not in paths
+
+
+_SHARED_ENTRIES = ("objects", "refs", "packed-refs", "HEAD", "info", "shallow")
+
+
+def _forged_repository(root: Path, symlinked: frozenset[str]) -> Path:
+    """A self-consistent registration the agent wrote, whose ``symlinked`` entries name secrets.
+
+    Returns the gitdir the agent writes into its ``.git`` file.
+    """
+    common = root / "agent-writable" / "repository"
+    gitdir = common / "worktrees" / "w"
+    gitdir.mkdir(parents=True)
+    (gitdir / "commondir").write_text("../..\n")
+    (gitdir / "gitdir").write_text(f"{root / 'run' / 'workspace' / '.git'}\n")
+    secret = root / "secret"
+    for name in _SHARED_ENTRIES:
+        entry = common / name
+        if name in symlinked:
+            target = secret / ("HEAD" if name in {"HEAD", "packed-refs", "shallow"} else "objects")
+            entry.symlink_to(target)
+        elif name in {"objects", "refs", "info"}:
+            entry.mkdir()
+        else:
+            entry.write_text("ref: refs/heads/main\n")
+    return gitdir
+
+
+@settings(max_examples=examples(pr=12, nightly=300), deadline=None)
+@given(symlinked=st.frozensets(st.sampled_from(_SHARED_ENTRIES), min_size=1))
+def test_a_forged_registration_never_binds_what_its_symlinked_entries_name(
+    *, symlinked: frozenset[str]
+) -> None:
+    """Regression: a forged registration's ``objects -> ~/.ssh`` was bound read-only."""
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        workspace, _ = _layout(root)
+        gitdir = _forged_repository(root, symlinked)
+        (workspace / ".git").write_text(f"gitdir: {gitdir}\n")
+
+        paths = sandbox_api.linked_worktree_git_paths(workspace)
+
+        assert not any(path.resolve().is_relative_to(root / "secret") for path in paths)
