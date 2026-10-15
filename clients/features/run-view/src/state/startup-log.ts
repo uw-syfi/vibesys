@@ -309,7 +309,7 @@ export function startupLogView(
 }
 
 /** The panel's words for a stage. */
-export function startupStageLabel(stage: string): string {
+function startupStageLabel(stage: string): string {
   switch (stage) {
     case 'building_image':
       return 'Building image';

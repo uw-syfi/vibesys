@@ -287,6 +287,20 @@ serves it in bounded chunks. Nothing about logs rides the run's event stream.
   retry on the injected clock), over a `LogTransport` the composition provides on the logs channel.
   A view starts a follower when its stream comes on screen and stops it when it leaves, which aborts
   the read in flight.
+- **The channel's lifetime.** `HostConnection.openLogs()` hands out leases on the host's one logs
+  channel. The first request of any lease opens it once the host is ready (a host whose control
+  `hello` did not negotiate `logs` answers `feature_not_negotiated` and opens nothing), every lease
+  shares it, the next request reopens it if it ended, and releasing the last lease closes it.
+- **From the run page.** The run page reaches logs the way it reaches its run: through the main
+  process, never naming a host or a channel. The run preload's `logs()` sends one request on the
+  `vibesys:logs` IPC channel (`@vibesys/ipc`'s `RunLogsRequest`, parsed strictly by
+  `parseRunLogsRequest`); the main process admits it only from a window's current run page and
+  answers from that window's run binding. The binding takes a logs lease on its first request and
+  releases it with the binding, and supplies the instance id from the record the app attached to: a
+  listing names it, and a read that names another instance is refused. An IPC request cannot be
+  withdrawn, so the page drops an aborted request's late answer; the main process's request ends by
+  its wait bound, or when the binding releases the lease. The page's `RunLogSource` (`@vibesys/logs`)
+  wraps that bridge; a browser page has none and shows no log view.
 
 ### Handshake and versioning
 
