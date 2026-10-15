@@ -1748,24 +1748,6 @@ def _replace_record(state: RecordsState, record: RequestRecord) -> RecordsState:
     )
 
 
-def _answered_open(record: RequestRecord) -> bool:
-    """A record whose executor answered without concluding, so nothing is in flight for it.
-
-    RECONCILING is an Unknown or an unproven acceptance; DISPATCHED with an observation is
-    a retryable failure (never PENDING, which is progress). Both wait for an inspection or a later observation that no
-    live request is going to produce. A DISPATCHED record with no observation may still be
-    executing, so it is not here.
-    """
-    if record.phase == RequestPhase.RECONCILING:
-        return True
-    observation = record.observation
-    return (
-        record.phase == RequestPhase.DISPATCHED
-        and observation is not None
-        and observation.retryable
-    )
-
-
 def _canonical(record: RequestRecord) -> bool:
     return not isinstance(record.request, InspectRequest | CancelOwnedResource | BlockRequest)
 
