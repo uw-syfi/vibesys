@@ -196,6 +196,7 @@ through no path: only `node` entries may import them, and only `desktop-main` an
 | 8 | A sandboxed preload loads only Electron at run time; every workspace import in it is erased | `preload-sandbox` (what the entry's emitted CommonJS still requires); `.dependency-cruiser.mjs` keeps a preload's imports to `@vibesys/ipc` and Electron |
 | 9 | Control state is an XState machine; data folds are plain reducers (see [State](#state)) | `external-dependencies` (`xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); `tools/lint-rules/features-no-hand-rolled-control.grit`, `tools/lint-rules/control-state-no-store-kernel.grit` |
 | 10 | A package's folder matches the layer its manifest declares: `libs/*` is foundation, core, domain, or service; `features/*` is feature; `apps/*` is app; nothing else, except the deprecated `tui` (`DEPRECATED_OUTSIDE_FOLDERS`) | `layer-matches-folder` |
+| 11 | A package marked `"design": "strict"` builds UI only from `@vibesys/ui`; old UI packages are frozen to fixes only (see [Design system enforcement](#design-system-enforcement)) | `strict-no-stylesheets`, `strict-imports`, `strict-lint-coverage`; `tools/lint-rules/strict-*.grit`; `check_frozen_ui.mjs` |
 
 All package-graph rules, and the tables they read, live in one module,
 [`clients/tools/scripts/check_package_graph.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/tools/scripts/check_package_graph.mjs),
@@ -217,7 +218,8 @@ policy, and this document all read that block. An export whose source is a style
 (`@vibesys/ui`'s `./tokens.css`) is a `dom` asset: it has no tsconfig project, and Vite resolves
 it through the same source condition. Unknown keys, layers, and runtimes are rejected by
 name (`declarations`), and the entries must be exactly the `exports` keys
-(`entries-match-exports`).
+(`entries-match-exports`). The block may also carry `"design": "strict"`, the only value the closed
+`design` key takes, which opts the package into the [design system rules](#design-system-enforcement).
 
 **Workspace dependencies** are declared as `workspace:*` in the section the code needs
 (`dependencies` for production code; test code may also use `devDependencies`), point to a lower
@@ -274,6 +276,63 @@ between the two default themes and every role stays defined.
 
 `applyTheme(name, target = document.documentElement)` sets `data-theme`; it takes the element so a
 test can pass a fake. The selectors name `:root`, so `target` only works as the root element.
+
+## Design system enforcement
+
+Desktop screens are built only from `@vibesys/ui`'s public components and tokens. The rule is rolled
+out without touching existing code: new screens go in new, strict packages, and the old UI packages
+are frozen until they are deleted. There is no baseline file; strict or frozen is a property of the
+package.
+
+### Strict packages
+
+A package opts in with a marker in its manifest, which stays the one source of truth for its place
+in the graph:
+
+```json
+"vibesys": {"layer": "feature", "design": "strict", "entries": {"./state": "neutral", "./renderer": "dom"}}
+```
+
+`design` is a closed set (`strict` or absent); `declarations` rejects any other value by name.
+
+| # | Rule | Enforced by |
+| --- | --- | --- |
+| S2 | A strict package ships no stylesheet: no `*.css` export and no `.css`, `.scss`, `.sass`, `.less`, `.styl` or `.pcss` file in the package | `check_package_graph.mjs` rule `strict-no-stylesheets` |
+| S3 | Strict code renders no raw interactive or styled elements: JSX `button`, `a`, `input`, `select`, `textarea`, `label`, `dialog`, `details`, `summary`, `form`, `table`, `svg` and `pre`, and the `style`, `className` and `dangerouslySetInnerHTML` props on any element, are errors. Plain `div` and `span` stay for grouping text inside slots | Grit rule `tools/lint-rules/strict-no-raw-elements.grit` |
+| S4 | Strict code contains no raw colors or lengths: a string or template literal with a hex color, `rgb(`, `rgba(`, `hsl(`, `hsla(`, `oklch(`, `color-mix(`, or a `px`, `rem`, `em`, `vh` or `vw` length is an error | Grit rule `tools/lint-rules/strict-no-raw-values.grit` |
+| S5 | The strict lint rules cover exactly the strict packages: the `includes` of `biome.json`'s strict override (the one loading both rules above) are each strict package's `src/**/*.ts` and `src/**/*.tsx` plus the two test exclusions, so a new strict package cannot escape S3 and S4, and a package cannot be listed without the marker. The override has no `includes` until the first strict package exists | `check_package_graph.mjs` rule `strict-lint-coverage` (the expected globs come from `strictOverrideIncludes`) |
+| S6 | A strict package imports UI only from `@vibesys/ui`'s `.` and `./tokens`, and no old feature package. Its workspace imports are the non-UI libraries in `STRICT_WORKSPACE_IMPORTS` and its third-party ones are `react`, `react-dom` and `xstate` (`STRICT_THIRD_PARTY`; Electron and Node builtins stay confined by `external-dependencies`), in production source and in the manifest's `dependencies`. Test code is exempt. A strict app may also import `@vibesys/ui/tokens.css` and `@vibesys/ui/fonts.css` once, in its entry wiring. Deep imports are already refused by `imports-use-exports` and `.dependency-cruiser.mjs`, feature-to-feature imports by `layer-direction` | `check_package_graph.mjs` rule `strict-imports` |
+| S8 | `@vibesys/ui` itself uses tokens: `strict-no-raw-values.grit` also runs on `libs/ui/src` except the token table (`src/tokens/`) and tests, and `tools/lint-rules/ui-no-raw-css-values.grit` bans raw colors and lengths in the declarations of `libs/ui/src/*.css` except the generated `tokens.css`. Lengths in `@media` conditions are not declarations and stay | the two Grit rules, wired by `biome.json` |
+
+`biome.json` excludes `libs/ui/src/primitives.css` from the stylesheet rule: the old primitives'
+pixel values (`10px`, `5px`, `14px`, ...) have no token to read, and a token would change what they
+draw. The components that replace them delete the file and the exclusion.
+
+Every failure names the file and line (or the manifest key), the rule id and the fix, for example
+"a raw <button> ... Use `<Button>` from `@vibesys/ui`". The rules cannot see through a spread
+(`<Card {...props} />` can carry a `className`); the components take no `className` or `style`
+prop (rule S1, with the component API), which closes that path. Unenforced: whether a screen
+matches its design needs a reader; the checks hold the parts it is built from.
+
+### Frozen UI packages
+
+An old UI package gets fixes only. `FROZEN_UI_PACKAGES` in
+[`clients/tools/scripts/check_frozen_ui.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/tools/scripts/check_frozen_ui.mjs)
+is the one list of them, each with the paths that hold its UI (`src/renderer/` for a feature;
+`src/app/` and `src/styles.css` for `apps/web`; `src/ui/` and `src/welcome.css`, the welcome view,
+for `apps/desktop-renderer`). In `tui_quality`, `pnpm check:frozen-ui --base-ref origin/main`
+compares the change with its merge base with `origin/main`, and in a listed package it refuses:
+
+- a new file under a UI path (new test files are allowed);
+- a name added to the exports of the package's `./renderer` entry, followed through `export *`;
+- a rise, in any UI file, of the count of JSX intrinsic interactive elements (`button`, `a`,
+  `input`, `select`, `textarea`, `label`, `dialog`, `details`, `summary`, `form`) or of raw color
+  literals, so a fix may move or delete such code and not add to it.
+
+The check is a function of two file trees (`frozenUiErrors(base, head)`); the command line only
+builds them, the base from the merge base. A package leaves the list when it is deleted: remove its
+entry in the same change, and the check fails if a listed package no longer exists. The list only
+shrinks.
 
 ## State
 

@@ -3,7 +3,6 @@ import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {dirname, join} from 'node:path';
 import test from 'node:test';
-import {fileURLToPath} from 'node:url';
 import {
   domainWords,
   LAYER_FOLDERS,
@@ -896,9 +895,4 @@ test('a strict package with no Biome configuration is reported', async t => {
   assert.deepEqual(strictRules(packageGraphErrors(root)), [
     'strict-lint-coverage: biome.json: is missing; it holds the strict override',
   ]);
-});
-
-test('the real workspace passes the strict rules', () => {
-  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-  assert.deepEqual(strictRules(packageGraphErrors(root)), []);
 });

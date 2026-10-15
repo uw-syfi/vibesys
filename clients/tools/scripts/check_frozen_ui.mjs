@@ -18,7 +18,7 @@
  * packages: `package.json`, and the `.ts`, `.tsx` and `.css` files. `frozenUiErrors` takes them
  * and knows nothing of Git; the command line builds the trees: the base from `--base-dir`, or from
  * `--base-ref` through its merge base with HEAD (fetching the ref when the checkout is shallow),
- * the head from the working tree.
+ * the head from `--head-dir`, by default the working tree.
  */
 
 import {spawnSync} from 'node:child_process';
@@ -321,13 +321,18 @@ function main() {
   const baseDirectory = option('--base-dir');
   const baseRef = option('--base-ref');
   if ((baseDirectory === undefined) === (baseRef === undefined)) {
-    console.error('usage: check_frozen_ui.mjs (--base-ref <ref> | --base-dir <workspace root>)');
+    console.error(
+      'usage: check_frozen_ui.mjs (--base-ref <ref> | --base-dir <workspace root>) [--head-dir <workspace root>]',
+    );
     return 2;
   }
   const scratch = mkdtempSync(join(tmpdir(), 'vibesys-frozen-ui-'));
   try {
     const baseRoot = baseDirectory ?? extractBase(root, baseRef, scratch);
-    const errors = frozenUiErrors(readTree(resolve(baseRoot)), readTree(root));
+    const errors = frozenUiErrors(
+      readTree(resolve(baseRoot)),
+      readTree(resolve(option('--head-dir') ?? root)),
+    );
     if (errors.length === 0) {
       console.log('The frozen UI packages gained no UI (F1).');
       return 0;

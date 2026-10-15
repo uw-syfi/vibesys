@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {mkdir, mkdtemp, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {dirname, join, resolve} from 'node:path';
+import {dirname, join} from 'node:path';
 import test from 'node:test';
 import {fileURLToPath} from 'node:url';
 import {
@@ -311,18 +311,18 @@ async function writeTree(root, tree) {
 }
 
 test('the command line exits 1 naming the violation, and 0 when there is none', async t => {
-  const root = resolve(dirname(SCRIPT), '..', '..');
-  assert.ok(root.endsWith('clients'));
-  const base = await mkdtemp(join(tmpdir(), 'vibesys-frozen-base-'));
-  t.after(() => rm(base, {recursive: true, force: true}));
-  await writeTree(base, new Map());
-  // The head is the real workspace; the empty base makes every UI file new, so it must refuse.
-  const refused = spawnSync('node', [SCRIPT, '--base-dir', base], {encoding: 'utf8'});
+  const directory = await mkdtemp(join(tmpdir(), 'vibesys-frozen-ui-'));
+  t.after(() => rm(directory, {recursive: true, force: true}));
+  const [base, same, grown] = ['base', 'same', 'grown'].map(name => join(directory, name));
+  const head = baseTree();
+  head.set(`${RENDERER}/fresh.tsx`, CLEAN_VIEW);
+  await writeTree(base, baseTree());
+  await writeTree(same, baseTree());
+  await writeTree(grown, head);
+  const run = (...args) => spawnSync('node', [SCRIPT, ...args], {encoding: 'utf8'});
+  const refused = run('--base-dir', base, '--head-dir', grown);
   assert.equal(refused.status, 1);
-  assert.match(refused.stderr, /frozen-ui: features\/campaign\/src\/renderer\/\S+: a new file/);
-  // The real workspace against itself gains nothing.
-  const same = spawnSync('node', [SCRIPT, '--base-dir', root], {encoding: 'utf8'});
-  assert.equal(same.status, 0, same.stderr);
-  const usage = spawnSync('node', [SCRIPT], {encoding: 'utf8'});
-  assert.equal(usage.status, 2);
+  assert.match(refused.stderr, new RegExp(`frozen-ui: ${RENDERER}/fresh\\.tsx: a new file`));
+  assert.equal(run('--base-dir', base, '--head-dir', same).status, 0);
+  assert.equal(run().status, 2);
 });
