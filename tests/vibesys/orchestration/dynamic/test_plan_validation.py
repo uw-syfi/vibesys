@@ -344,6 +344,14 @@ def test_a_run_that_ranks_evaluations_takes_the_replys_order_of_known_and_planne
     assert check(portfolio(implement_entry("n")), Record(ranks=True)).ranking is None
 
 
+def test_a_ranking_may_name_a_merge_whose_commit_waits_for_its_measurement() -> None:
+    """A merge's commit is queued for its trusted measurement like a candidate, under its ID."""
+    plan = portfolio(implement_entry("n"), order=("m1", "n"))
+    result = check(plan, Record(merges=["m1"], ranks=True))
+    assert result.valid, result.violations
+    assert result.ranking == ("m1", "n")
+
+
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(order=st.lists(st.sampled_from(["a", "n", "z"]), max_size=4).map(tuple))
 def test_a_run_that_picks_the_newest_ignores_any_order_the_reply_gives(
