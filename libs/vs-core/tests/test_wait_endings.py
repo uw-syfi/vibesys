@@ -230,7 +230,7 @@ BUDGETS = st.floats(min_value=1.0, max_value=300.0, allow_nan=False)
 
 
 @given(budget=BUDGETS, left=st.floats(min_value=1.0, max_value=900.0, allow_nan=False))
-def test_cleanup_before_the_run_deadline_keeps_the_time_the_run_has_left(
+def test_cleanup_before_the_run_deadline_gets_the_time_left_and_never_less_than_its_budget(
     budget: float, left: float
 ) -> None:
     state, ref = _past_the_run_deadline(budget)
@@ -240,8 +240,9 @@ def test_cleanup_before_the_run_deadline_keeps_the_time_the_run_has_left(
 
     issued = [r for r in closing.state.records.records if r.phase is core.RequestPhase.PREPARED]
     assert issued
-    # The budget is a floor for a run that is over; a run with time left caps it at its end.
-    assert {r.until.at for r in issued} == {run.deadline_at}
+    # The run deadline does not cut a cleanup issued just before it short of its budget.
+    assert {r.until.at for r in issued} == {max(run.deadline_at, run.now_at + budget)}
+    assert all(r.until.watches == () for r in issued)
 
 
 @given(budget=BUDGETS)

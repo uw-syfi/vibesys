@@ -3,16 +3,16 @@
 A wait states how long the work may take. The run may have less time left than that,
 which is not malformed: core caps the stored time at the run deadline. A run deadline
 that is not after the run clock has no time left; only then is new work refused, and
-core's own cleanup requests still get their bounded time: each carries an explicit
-``Within`` of at least ``limits.cleanup_bound`` (see ``cleanup``), never a limit of zero
-and never a wait without a bound, so a stopped run can always close.
+core's own cleanup requests still get their bounded time: each may run to the run
+deadline and for at least ``limits.cleanup_bound`` (see ``cleanup``), never a limit of
+zero and never a wait without a bound, so a stopped run can always close.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from .types.records import Outbound, within
+from .types.records import Outbound
 from .types.until import FromDispatch, Until, Within
 
 if TYPE_CHECKING:
@@ -75,9 +75,11 @@ def time_remains(run: RunState, requested: float) -> bool:
 def cleanup(run: RunState, request: Request) -> Outbound:
     """``request`` as core's own cleanup or inspection, with its own explicit bounded time.
 
-    While the run has more time left than ``limits.cleanup_bound`` the limit is that time
-    (``resolve_until`` caps it at the run deadline, so a host that restarts mid-cleanup
-    still finds the request waiting). From the run deadline on, nothing is left to
-    count, so the configured cleanup budget is the limit instead of zero.
+    The request may take until the run deadline, and never less than
+    ``limits.cleanup_bound``: a cleanup issued just before the deadline still gets the
+    full budget instead of the few seconds the run has left. The time is stored as an
+    absolute ``Until``, so the run deadline does not cap it again; the run itself already
+    stopped once its deadline passes.
     """
-    return within(request, max(limit_to(run, run.deadline_at), run.limits.cleanup_bound))
+    at = max(run.deadline_at, run.now_at + run.limits.cleanup_bound)
+    return Outbound(request=request, until=Until(at=at))
