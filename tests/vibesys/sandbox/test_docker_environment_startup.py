@@ -8,9 +8,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vibesys.log_owners import LOG_OWNER, StartupStep
 from vibesys.run.environment import open_run_environment
+from vibesys.run.logs import startup_output_opener
 from vs_agent.api.images import ImageBuildProgress, TaskImageBuildError
 from vs_agent.api.testing import FakeDockerBuildRunner, docker_result
+from vs_logs.api import MemoryLogStore, StreamOutcome
+from vs_logs.read import Tail, reader_of
 from vs_runtime.api.infrastructure import (
     DockerEnvironment,
     DockerEnvironmentConfig,
@@ -27,6 +31,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
+    from vibesys.log_owners import LogOwner
+    from vs_logs.read import LogReader, StreamInfo
     from vs_runtime.api.infrastructure import StartupOutputOpener
     from vs_sandbox.api.testing import FakeDockerEngine
     from vs_sim.api import OutputSink
@@ -194,3 +200,48 @@ def test_a_failed_build_closes_its_stream_and_opens_no_other(tmp_path: Path) -> 
     assert build.stage is EnvironmentStartupStage.BUILDING_IMAGE
     assert build.closed
     assert b"npm ERR!" in build.output.stderr
+
+
+def _read_all(reader: LogReader[LogOwner], info: StreamInfo[LogOwner]) -> bytes:
+    return reader.read(info.stream_id, Tail(1 << 16), 1 << 16).data
+
+
+def test_startup_output_reaches_the_run_log_store_under_its_step(tmp_path: Path) -> None:
+    runner = FakeDockerBuildRunner(build_result=docker_result(stderr=_BUILD_OUTPUT))
+    store = MemoryLogStore(LOG_OWNER, threads=SimThreads())
+    engine = daemon_engine(tmp_path, launcher=FakePipedProcessLauncher())
+    engine.pulls_on_run(_PULL)
+
+    _open(
+        tmp_path,
+        runner,
+        [],
+        startup_output=startup_output_opener(store),
+        engine=engine,
+    )
+
+    reader = reader_of(store, LOG_OWNER)
+    build, start = reader.list_streams()
+    assert build.owner == StartupStep(stage=EnvironmentStartupStage.BUILDING_IMAGE)
+    assert start.owner == StartupStep(stage=EnvironmentStartupStage.STARTING_CONTAINER)
+    assert build.command == "docker build agent image on base-image"
+    assert start.command == "docker run"
+    assert (build.outcome, start.outcome) == (StreamOutcome.ENDED, StreamOutcome.ENDED)
+    assert _BUILD_OUTPUT.encode() in _read_all(reader, build)
+    assert _PULL.encode() in _read_all(reader, start)
+
+
+def test_a_failed_build_leaves_a_failed_stream_in_the_run_log_store(tmp_path: Path) -> None:
+    runner = FakeDockerBuildRunner(
+        build_result=docker_result(returncode=1, stderr="#6 [2/3] RUN npm install -g\nnpm ERR!")
+    )
+    store = MemoryLogStore(LOG_OWNER, threads=SimThreads())
+
+    with pytest.raises(TaskImageBuildError, match="npm ERR!"):
+        _open(tmp_path, runner, [], startup_output=startup_output_opener(store))
+
+    reader = reader_of(store, LOG_OWNER)
+    (build,) = reader.list_streams()
+    assert build.owner == StartupStep(stage=EnvironmentStartupStage.BUILDING_IMAGE)
+    assert build.outcome is StreamOutcome.FAILED
+    assert b"npm ERR!" in _read_all(reader, build)

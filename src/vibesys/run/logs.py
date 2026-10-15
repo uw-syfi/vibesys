@@ -10,16 +10,18 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
-from vibesys.log_owners import LOG_OWNER, LogOwner, RunNarration
+from vibesys.log_owners import LOG_OWNER, LogOwner, RunNarration, StartupStep
 from vs_logs.api import FileLogStore, LogLimits, LogScope, MemoryLogStore, StreamOutcome
 from vs_project.api import Project
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+    from contextlib import AbstractContextManager
     from pathlib import Path
 
     from vs_logs.api import NarrationHandler
-    from vs_sim.api import Threads
+    from vs_runtime.api.infrastructure import EnvironmentStartupStage, StartupOutputOpener
+    from vs_sim.api import OutputSink, Threads
 
 RUN_LOG_OWNER = LOG_OWNER
 """The owner adapter a reader of a run's log store decodes owners with."""
@@ -39,6 +41,17 @@ def open_run_log_store(
     """Open the log store in ``run_id``'s log directory, closing streams a crash left open."""
     directory = Project.log_directory_for(project_root, run_id) / _STREAMS_DIRECTORY
     return FileLogStore(directory, LOG_OWNER, threads=threads, limits=limits)
+
+
+def startup_output_opener(scope: LogScope[LogOwner]) -> StartupOutputOpener:
+    """The opener that records each startup command's output as a stream under its step."""
+
+    def open_startup_output(
+        stage: EnvironmentStartupStage, command: str
+    ) -> AbstractContextManager[OutputSink]:
+        return scope.open(StartupStep(stage=stage), command)
+
+    return open_startup_output
 
 
 @contextmanager
