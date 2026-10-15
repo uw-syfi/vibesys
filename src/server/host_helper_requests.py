@@ -77,7 +77,7 @@ from server.host_api import (
     TasksListReply,
     TasksListRequest,
 )
-from server.host_helper_logs import HelperLogs, Withdrawal, list_logs, read_log
+from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_log
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
@@ -439,7 +439,7 @@ def _host_path(text: str, directories: Directories) -> str:
 
 
 def answer(
-    request: HelperRequest, host: HelperHost, withdrawal: Withdrawal
+    request: HelperRequest, host: HelperHost, withdrawal: ReadWithdrawal
 ) -> HelperReply | HelperError:
     """Execute one request (other than ``run.connect``, see :func:`connect`) on the host.
 
@@ -455,7 +455,7 @@ def answer(
 
 
 def _answer(
-    request: HelperRequest, host: HelperHost, withdrawal: Withdrawal
+    request: HelperRequest, host: HelperHost, withdrawal: ReadWithdrawal
 ) -> HelperReply | HelperError:
     request_id = request.request_id
     reply: HelperReply | HelperError
@@ -552,7 +552,7 @@ def _host_read_reply(
     | LogsListRequest
     | LogsReadRequest,
     host: HelperHost,
-    withdrawal: Withdrawal,
+    withdrawal: ReadWithdrawal,
 ) -> HelperReply | HelperError:
     """Answer a request that only reads the channel or the host.
 

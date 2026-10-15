@@ -12,13 +12,13 @@ here, purely, in :func:`cut_chunk`: where a chunk ends (after its last line end
 when more bytes follow, else before a character the window splits), where a tail
 starts (the first line start in it), and how bytes become text (UTF-8, invalid
 bytes replaced). :func:`list_logs` and :func:`read_log` answer the two requests;
-the long poll re-reads every ``POLL_INTERVAL_SECONDS``, waiting on a :class:`Withdrawal`
+the long poll re-reads every ``POLL_INTERVAL_SECONDS``, waiting on a :class:`ReadWithdrawal`
 that ``logs.cancel`` sets, and ends before the request's deadline or once withdrawn.
 
 Light like the rest of the helper: the standard library, Pydantic, and
 ``server.host_api``.
 
-Public surface: ``LogReader``, ``InstanceLogs``, ``Withdrawal``, ``StoredBytes``, ``UnknownInstanceError``,
+Public surface: ``LogReader``, ``InstanceLogs``, ``ReadWithdrawal``, ``StoredBytes``, ``UnknownInstanceError``,
 ``UnknownLogStreamError``, ``RunLocation``, ``run_location``, ``HelperLogs``, ``cut_chunk``, ``clip_pipes``, ``list_logs``,
 ``read_log``, and the limits ``POLL_INTERVAL_SECONDS`` and ``REPLY_MARGIN_MS``.
 """
@@ -118,7 +118,7 @@ class LogReader(Protocol):
         ...
 
 
-class Withdrawal(Protocol):
+class ReadWithdrawal(Protocol):
     """How a waiting read learns it was withdrawn (``logs.cancel``): a flag it waits on.
 
     ``wait`` blocks up to ``timeout`` seconds on the helper's clock and returns early,
@@ -237,7 +237,7 @@ def list_logs(request: LogsListRequest, logs: HelperLogs) -> LogsListReply | Hel
 
 
 def read_log(
-    request: LogsReadRequest, logs: HelperLogs, withdrawal: Withdrawal
+    request: LogsReadRequest, logs: HelperLogs, withdrawal: ReadWithdrawal
 ) -> LogsReadReply | HelperError:
     """Answer ``logs.read``; at the end of an open stream, wait for bytes until the wait ends.
 
