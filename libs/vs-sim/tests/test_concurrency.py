@@ -65,7 +65,7 @@ def test_refusing_threads_consumes_only_the_scripted_starts() -> None:
         with pytest.raises(WorkerStartRefusedError, match="client"):
             threads.spawn(lambda: ran.append("refused"), name="client")
         worker = threads.spawn(lambda: ran.append("started"), name="client")
-        worker.join()
+        join_or_fail(worker)
 
     sim.run(main)
     assert ran == ["started"]
