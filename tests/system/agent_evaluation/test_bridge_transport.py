@@ -645,12 +645,12 @@ def test_a_task_creation_failure_settles_the_published_call(tmp_path: Path) -> N
             event_loop: asyncio.AbstractEventLoop,
             coroutine: Coroutine[Any, Any, Any],
             context: Context | None = None,
-        ) -> asyncio.Task[Any]:
+        ) -> asyncio.Future[Any]:
             if not rejected:
                 rejected.append(coroutine)
                 raise creation_failure
             if original_factory is not None:
-                return original_factory(event_loop, coroutine, context=context)
+                return original_factory(event_loop, coroutine)
             return asyncio.Task(coroutine, loop=event_loop, context=context)
 
         loop.set_task_factory(fail_answer_creation)
