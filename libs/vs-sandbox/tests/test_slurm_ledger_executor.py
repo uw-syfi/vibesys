@@ -32,7 +32,7 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
 )
 from vs_sim.api import yield_now
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, yield_until
 from vs_slurm.api import (
     ClusterCollectOutcome,
     ClusterObservation,
@@ -210,8 +210,11 @@ class _Run:
 
     async def terminal(self, handle_id: str) -> ExecutorObservation:
         """The evaluation's terminal observation, as the core's poll reads it."""
-        polled = await self.executor.poll(handle_id)
-        assert polled.phase is PollPhase.ENDED, polled
+        polled = await yield_until(
+            lambda: self.executor.poll(handle_id),
+            lambda seen: seen.phase is PollPhase.ENDED,
+            "the live Slurm owner to settle its terminal observation",
+        )
         assert polled.terminal is not None
         return polled.terminal
 
@@ -396,10 +399,17 @@ async def test_an_attached_run_observes_a_withdrawal_as_cancelled(tmp_path: Path
     assert world.scheduler.status(operation) is SlurmJobStatus.CANCELLED
     # The run reads the ledger again a third of a lease period after its last renewal.
     world.clock.advance(LEASE_S / 3)
-    assert (await run.terminal("eval-1")).state is EvaluationState.CANCELED
-    observed = await run.executor.inspect("eval-1")
-    assert observed is not None
-    assert observed.state is EvaluationState.CANCELED
+    settled = await run.executor.poll("eval-1")
+    assert settled.phase is PollPhase.ENDED
+    assert settled.terminal is not None
+    assert settled.terminal.state is EvaluationState.CANCELED
+
+    inspected = await run.executor.inspect("eval-1")
+    inspected_only = await run.executor.inspect_only("eval-1")
+    assert inspected is not None
+    assert inspected_only is not None
+    assert inspected.state is EvaluationState.CANCELED
+    assert inspected_only.state is EvaluationState.CANCELED
     await run.executor.close()
 
 

@@ -117,6 +117,16 @@ class _SchedulerView:
     staged: bool = False
 
 
+@dataclass(frozen=True)
+class _SchedulerProjection:
+    """The lifecycle and poll facts derived from one scheduler observation."""
+
+    view: _SchedulerView
+    life: JobLife
+    lifecycle: ExecutorObservation | None
+    active_poll: ExecutorPoll | None
+
+
 def _scheduler_view(life: JobLife, *, canceling: bool = False) -> _SchedulerView:
     """The one mapping from an ordered job life to what the evaluation reports.
 
@@ -448,6 +458,9 @@ class SlurmEvaluationExecutor:
         self._confirmations_left: dict[str, int] = {}
         # Highest stage index reported per evaluation: a running job's stage never goes back.
         self._stage_floor: dict[str, int] = {}
+        # A read-only poll that sees remote terminality wakes the live owner so
+        # that owner, rather than the observer, settles streams and ledger state.
+        self._poll_wakeups: dict[str, asyncio.Event] = {}
         self._ledger = ledger
         self._ledger_candidate = ledger_candidate
         # Set by ``close`` in ledger mode: stopping leaves every job to the ledger.
@@ -513,8 +526,13 @@ class SlurmEvaluationExecutor:
         """Poll known durable work once without resuming collection or cancelling it."""
         validate_cluster_operation_id(handle_id)
         observed = self._lifecycle.observation(handle_id)
-        if observed is not None and is_finished(observed.state):
-            return observed
+        if observed is not None:
+            task = self._tasks.get(handle_id)
+            if is_finished(observed.state) or (task is not None and not task.done()):
+                # A live owner alone may publish terminality after settling its
+                # streams and ledger. ``poll`` owns detailed live scheduler
+                # projections; this lifecycle read stays at the safe publication.
+                return observed
         durable = self._read_evaluation(handle_id)
         if durable is None:
             return None
@@ -540,12 +558,107 @@ class SlurmEvaluationExecutor:
 
         A scheduler-terminal job is collected here, so its terminal observation
         carries every stage result the cluster can still produce, failed stages
-        included. Collection is a read of the cluster's terminal evidence.
+        included. Collection is a read of the cluster's terminal evidence. When
+        this executor has a live owner task, its published lifecycle is the poll:
+        that task alone may expose terminality after its local output and ledger
+        settlement has finished.
         """
         validate_cluster_operation_id(handle_id)
         durable = self._read_evaluation(handle_id)
         if durable is None:
             return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        owned = await self._owned_poll(handle_id, durable)
+        if owned is not None:
+            return owned
+        return await self._poll_durable(handle_id, durable)
+
+    async def _owned_poll(
+        self, handle_id: str, durable: _DurableSlurmEvaluation
+    ) -> ExecutorPoll | None:
+        """Return the owner's last safe poll, or defer an ownerless handle to durability.
+
+        Task completion is the settlement fence. A live task may owe stream and ledger
+        cleanup after an observer sees remote terminality, so no observer exposes that
+        terminality. Once the task ends, its published terminal is authoritative and
+        needs no second cluster collection.
+        """
+        task = self._tasks.get(handle_id)
+        observed = self._lifecycle.observation(handle_id)
+        if task is None or observed is None:
+            return None
+        if task.done():
+            return self._completed_owner_poll(handle_id, observed)
+        return await self._live_owner_poll(handle_id, durable, task, observed)
+
+    async def _live_owner_poll(
+        self,
+        handle_id: str,
+        durable: _DurableSlurmEvaluation,
+        task: asyncio.Task[None],
+        observed: ExecutorObservation,
+    ) -> ExecutorPoll | None:
+        """Inspect a live owner without allowing its observer to settle terminal evidence."""
+        if is_finished(observed.state):
+            return await self._settled_owner_poll(handle_id, task)
+        if durable.handle is None and not durable.dispatch_started:
+            return ExecutorPoll(phase=PollPhase.QUEUED, detail="awaiting local admission")
+        if not await self._ledger_heartbeat(handle_id, durable):
+            return await self._settled_owner_poll(handle_id, task)
+        target = durable.handle if durable.handle is not None else handle_id
+        inspected = await self._in_thread(self._cluster.inspect, target)
+        current = self._lifecycle.observation(handle_id)
+        if task.done():
+            return self._completed_owner_poll(handle_id, current)
+        return await self._live_inspection_poll(handle_id, durable.request, inspected, task)
+
+    async def _live_inspection_poll(
+        self,
+        handle_id: str,
+        request: EvaluationRequest,
+        inspected: ClusterInspectOutcome,
+        task: asyncio.Task[None],
+    ) -> ExecutorPoll | None:
+        """Project one live inspection, waking its owner instead of collecting an end."""
+        if not isinstance(inspected, ClusterObservation):
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=inspected.reason)
+        projected = self._scheduler_projection(handle_id, inspected, request)
+        if projected.active_poll is not None:
+            return projected.active_poll
+        if projected.view.phase is PollPhase.ENDED:
+            return await self._settled_owner_poll(handle_id, task)
+        return ExecutorPoll(phase=PollPhase.UNKNOWN, detail="scheduler state is unknown")
+
+    async def _settled_owner_poll(
+        self, handle_id: str, task: asyncio.Task[None]
+    ) -> ExecutorPoll | None:
+        """Wake and join the live owner before exposing its terminal publication.
+
+        The join is shielded so canceling a read-only poll cannot cancel the task that
+        owns stream and ledger settlement.  If the task ends without a terminal
+        publication, returning ``None`` lets the durable observer reconcile it.
+        """
+        self._wake_owner(handle_id)
+        await asyncio.shield(task)
+        return self._completed_owner_poll(handle_id, self._lifecycle.observation(handle_id))
+
+    def _completed_owner_poll(
+        self, handle_id: str, observed: ExecutorObservation | None
+    ) -> ExecutorPoll | None:
+        """Return a settled owner's terminal, or defer its unresolved durability."""
+        if observed is None or not is_finished(observed.state):
+            return None
+        return ExecutorPoll(
+            phase=PollPhase.ENDED,
+            attempt=self._lives.get(handle_id, INITIAL_LIFE).attempt,
+            terminal=observed,
+        )
+
+    def _wake_owner(self, handle_id: str) -> None:
+        """Wake a live owner's scheduler pause after an observer sees terminality."""
+        self._poll_wakeups.setdefault(handle_id, asyncio.Event()).set()
+
+    async def _poll_durable(self, handle_id: str, durable: _DurableSlurmEvaluation) -> ExecutorPoll:
+        """Read one handle with no live process-local owner from durable and cluster evidence."""
         if durable.submission_rejection is not None:
             return ExecutorPoll(
                 phase=PollPhase.ENDED,
@@ -568,32 +681,22 @@ class SlurmEvaluationExecutor:
 
     async def _poll_cluster(self, handle_id: str, durable: _DurableSlurmEvaluation) -> ExecutorPoll:
         if not await self._ledger_heartbeat(handle_id, durable):
+            # With no live owner, this observer owes no local stream settlement.
+            # Save the withdrawal before exposing it so restart sees the same end.
+            self._end_cancelled(handle_id)
             return ExecutorPoll(phase=PollPhase.ENDED, terminal=_ENDED_BEFORE_DISPATCH)
         target = durable.handle if durable.handle is not None else handle_id
         inspected = await self._in_thread(self._cluster.inspect, target)
         if not isinstance(inspected, ClusterObservation):
             return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=inspected.reason)
-        view, life = self._scheduler_view(handle_id, inspected)
-        match view.phase:
-            case PollPhase.QUEUED:
-                return ExecutorPoll(
-                    phase=PollPhase.QUEUED,
-                    attempt=life.attempt,
-                    pending_reason=inspected.pending_reason,
-                    estimated_start=inspected.estimated_start,
-                )
-            case PollPhase.RUNNING:
-                return ExecutorPoll(
-                    phase=PollPhase.RUNNING,
-                    attempt=life.attempt,
-                    current_stage=self._running_stage(handle_id, durable.request, inspected)
-                    if view.staged
-                    else None,
-                )
-            case PollPhase.ENDED if view.lifecycle is EvaluationState.CANCELED:
+        projected = self._scheduler_projection(handle_id, inspected, durable.request)
+        if projected.active_poll is not None:
+            return projected.active_poll
+        match projected.view.phase:
+            case PollPhase.ENDED if projected.view.lifecycle is EvaluationState.CANCELED:
                 return ExecutorPoll(
                     phase=PollPhase.ENDED,
-                    attempt=life.attempt,
+                    attempt=projected.life.attempt,
                     terminal=ExecutorObservation(state=EvaluationState.CANCELED),
                 )
             case _:
@@ -602,7 +705,7 @@ class SlurmEvaluationExecutor:
                     durable,
                     durable.handle or inspected.handle,
                     inspected,
-                    attempt=life.attempt,
+                    attempt=projected.life.attempt,
                 )
 
     async def _poll_terminal(
@@ -996,10 +1099,12 @@ class SlurmEvaluationExecutor:
         )
 
     async def _ledger_heartbeat(self, handle_id: str, durable: _DurableSlurmEvaluation) -> bool:
-        """Keep a ledger evaluation leased; False once it was withdrawn and has ended here.
+        """Keep a ledger evaluation leased; return False once it was withdrawn.
 
         A ledger the run cannot reach does not fail the evaluation: the lease
         outlasts several missed renewals, and the job's own state still decides.
+        This check never publishes lifecycle state: a live owner must first settle
+        its streams and ledger, while an ownerless observer has no such debt.
         """
         if self._ledger is None or durable.ledger_key is None or durable.handle is None:
             return True
@@ -1012,7 +1117,6 @@ class SlurmEvaluationExecutor:
             )
         except LedgerWithdrawnError:
             _LOG.warning("evaluation %s was withdrawn from the evaluation ledger", handle_id)
-            self._end_cancelled(handle_id)
             return False
         except LedgerError:
             _LOG.exception("could not renew the ledger lease of evaluation %s", handle_id)
@@ -1071,7 +1175,7 @@ class SlurmEvaluationExecutor:
                 # contradict the scheduler and turn a requested stop into a failure.
                 follower.abort()
                 await self._ledger_settle(handle_id, durable, status, None)
-                self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+                self._end_cancelled(handle_id)
                 return
             collected = await self._collect_ended(handle_id, handle)
         except BaseException:
@@ -1245,6 +1349,7 @@ class SlurmEvaluationExecutor:
                 return SlurmJobStatus.CANCELLED
             observed = await self._inspect_cancellation_safe(handle_id, handle)
             if isinstance(observed, ClusterObservation):
+                projected = self._scheduler_projection(handle_id, observed, request)
                 if observed.status.terminal:
                     return observed.status
                 folded = observe_deadlines(
@@ -1257,7 +1362,7 @@ class SlurmEvaluationExecutor:
                 if folded != deadlines:
                     deadlines = folded
                     record = self._save_deadlines(handle_id, record, deadlines)
-                active = self._lifecycle_observation(handle_id, observed, request)
+                active = projected.lifecycle
                 if active is not None:
                     self._publish(handle_id, active)
                     await self._follow(follower, request, active)
@@ -1266,7 +1371,29 @@ class SlurmEvaluationExecutor:
             pause = self._poll_interval
             if until is not None:
                 pause = min(pause, until - self._clock.now())
-            await self._sleeper.sleep(pause)
+            await self._poll_pause(handle_id, pause)
+
+    async def _poll_pause(self, handle_id: str, seconds: float) -> None:
+        """Pause at the configured pace unless a read-only poll asks the owner to settle."""
+        wakeup = self._poll_wakeups.setdefault(handle_id, asyncio.Event())
+        if wakeup.is_set():
+            wakeup.clear()
+            return
+        sleeping = asyncio.create_task(self._sleeper.sleep(seconds))
+        waking = asyncio.create_task(wakeup.wait())
+        try:
+            await asyncio.wait({sleeping, waking}, return_when=asyncio.FIRST_COMPLETED)
+            # A wake asks only to cancel a still-pending pause.  If the sleeper
+            # completed independently, its failure remains part of the owner's
+            # execution outcome even when the wake completed in the same turn.
+            if sleeping.done():
+                await sleeping
+        finally:
+            for waiting in (sleeping, waking):
+                if not waiting.done():
+                    waiting.cancel()
+            await asyncio.gather(sleeping, waking, return_exceptions=True)
+            wakeup.clear()
 
     def _check_deadline(self, deadlines: WaitDeadlines) -> None:
         until = deadlines.active_epoch_s
@@ -1333,15 +1460,34 @@ class SlurmEvaluationExecutor:
         self, handle_id: str, observed: ClusterObservation, request: EvaluationRequest
     ) -> ExecutorObservation | None:
         """The lifecycle observation a scheduler reading implies, if it implies one."""
-        view, _ = self._scheduler_view(handle_id, observed)
-        if view.lifecycle is None:
-            return None
-        return ExecutorObservation(
-            state=view.lifecycle,
-            current_stage=self._running_stage(handle_id, request, observed)
-            if view.staged
-            else None,
+        return self._scheduler_projection(handle_id, observed, request).lifecycle
+
+    def _scheduler_projection(
+        self, handle_id: str, observed: ClusterObservation, request: EvaluationRequest
+    ) -> _SchedulerProjection:
+        """Derive and retain every public fact carried by one scheduler reading."""
+        view, life = self._scheduler_view(handle_id, observed)
+        current_stage = self._running_stage(handle_id, request, observed) if view.staged else None
+        lifecycle = (
+            None
+            if view.lifecycle is None
+            else ExecutorObservation(state=view.lifecycle, current_stage=current_stage)
         )
+        active_poll: ExecutorPoll | None = None
+        if view.phase is PollPhase.QUEUED:
+            active_poll = ExecutorPoll(
+                phase=PollPhase.QUEUED,
+                attempt=life.attempt,
+                pending_reason=observed.pending_reason,
+                estimated_start=observed.estimated_start,
+            )
+        elif view.phase is PollPhase.RUNNING:
+            active_poll = ExecutorPoll(
+                phase=PollPhase.RUNNING,
+                attempt=life.attempt,
+                current_stage=current_stage,
+            )
+        return _SchedulerProjection(view, life, lifecycle, active_poll)
 
     def _reported_stage(self, handle_id: str, request: EvaluationRequest) -> str:
         """The stage already reported for a running evaluation, or the first."""

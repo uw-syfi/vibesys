@@ -603,6 +603,11 @@ async def _boundary_scenarios(
 ) -> dict[str, EvaluationRoleRequest]:
     resource = resource_of(await submit(w, "seed"))
     await settled(w, resource)
+    # This harness compares the number of receipt writes across fresh worlds.
+    # Fence out the executor owner's concurrent terminal publication first, so
+    # the cancel case cannot alternate between a live-job and settled-job path.
+    terminal = await w.stack.executor.poll(resource.root)
+    assert terminal.phase is PollPhase.ENDED
     return {
         "submit": submission("again", candidate=w.stack.snapshot),
         "observe": query(ObserveOwnedJob, "observe", resource),

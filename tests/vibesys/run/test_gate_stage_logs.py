@@ -269,7 +269,8 @@ async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires
         # through the executor's settled state: if it ends without pausing, fail with that.
         settled = asyncio.ensure_future(_execution_ended(executor))
         await arrival(pacing.entered.wait(), settled)  # the task saw the job running, paused
-        polled = await executor.poll(_HANDLE)  # the job has completed; the poll collects it
+        # The job has completed; the poll wakes and joins the task that owns collection.
+        polled = await executor.poll(_HANDLE)
         assert polled.phase is PollPhase.ENDED
         pacing.release.open()
         await settled
