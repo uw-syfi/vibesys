@@ -347,13 +347,12 @@ class _Run:
         if isinstance(work, Measure | Withdraw | StartAttempt):
             label = _label_of(task.path, work.decision_id)
             earlier = self._reattached(task.path, label, work)
+            request = work if earlier is None else earlier.request
             if earlier is not None:
-                pending = Pending(earlier.request)
+                pending = Pending(request)
                 if earlier.closed is not None:  # core settled it already: that is the answer
                     pending.set(earlier.closed)
-            self._awaited[pending.decision] = InFlight(
-                path=task.path, label=label, request=pending.work
-            )
+            self._awaited[pending.decision] = InFlight(path=task.path, label=label, request=request)
             if earlier is not None:
                 self._pendings[pending.decision] = pending
                 task.started.append(pending)

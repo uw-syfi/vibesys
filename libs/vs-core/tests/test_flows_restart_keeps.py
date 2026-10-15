@@ -157,6 +157,7 @@ def test_a_workspace_the_restart_cannot_give_back_settles_by_its_salvage_with_it
     (settle,) = _settles(run, "restart-settle")
     assert settle.request.target == opened  # ty: ignore[unresolved-attribute]
     disposition = settle.request.disposition  # ty: ignore[unresolved-attribute]
+    assert isinstance(disposition, core.Settle)
     assert (disposition.retention, disposition.candidate) == ("wip", REVISION)
     assert run.state.restart_settled == (
         core.RestartSettled(attempt=opened, flow="w/", reason=reason, retention="wip"),
@@ -243,7 +244,8 @@ def test_a_flow_reopens_only_a_workspace_the_restart_kept_for_it() -> None:
     async def stranger(ctx: core.Flow, job: Job) -> int:
         ctx.checkpoint(job)
         async with ctx.workspaces.reopen(elsewhere) as ws:
-            return -1 if isinstance(ws, core.NotReopened) else 1
+            reopened = not isinstance(ws, core.NotReopened)
+        return 1 if reopened else -1
 
     run = FlowRun.start(parent(stranger), Config())
     assert run.driver.published(run.state, Gave) == Gave(result=-1)
@@ -294,7 +296,7 @@ def test_a_hold_persisted_as_a_bare_attempt_is_read_and_settled_as_before() -> N
     }
     live = core.FlowState.model_fields["live"].annotation
     assert live is not None
-    flow = live.model_fields["flows"].annotation.__args__[0]  # ty: ignore[unresolved-attribute]
+    flow = live.model_fields["flows"].annotation.__args__[0]
     read = flow.model_validate_json(json.dumps(legacy))
     (held,) = read.holds
     assert (held.attempt, held.carried, held.salvage) == (attempt, False, None)
