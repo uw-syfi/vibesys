@@ -437,6 +437,10 @@ page. Wiring an actual multi-window user path needs a UX decision first (whether
 opens a fresh window, or only when the current one already shows a different run, and how the
 welcome view's window relates to run windows) and is tracked by #2615.
 
+The campaign workspace UI these run pages can render, and the live telemetry stream it folds, are
+designed in [campaign-workspace-ui.md](../design/campaign-workspace-ui.md) and
+[live-campaign-streaming.md](../design/live-campaign-streaming.md).
+
 ## App lifecycle
 
 `AppLifecycle` is the one owner of process-wide state:
