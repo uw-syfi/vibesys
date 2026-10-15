@@ -28,7 +28,7 @@ import type {RunLogSource} from '@vibesys/logs';
 import type {RunStore, WebSession} from '@vibesys/run-session';
 import {type CoreState, hasRunEnded} from '@vibesys/run-state';
 import type {Store} from '@vibesys/store';
-import {defaultScheduleTimeout} from '@vibesys/transport';
+import type {ScheduleTimeout} from '@vibesys/transport';
 import {Button, Dialog} from '@vibesys/ui';
 import {type JSX, type ReactNode, useEffect, useState, useSyncExternalStore} from 'react';
 import {bootstrapGateway, fetchCampaignFixture} from '../platform/backend.js';
@@ -280,6 +280,11 @@ export function createLiveApp(
   );
 }
 
+/** The browser's timers, for the startup log panel's retries. */
+const BROWSER_SCHEDULE: ScheduleTimeout = (callback, delayMs) => {
+  const timer = setTimeout(callback, delayMs);
+  return () => clearTimeout(timer);
+};
 const NO_SUBSCRIPTION = (): (() => void) => NOTHING;
 const NO_VIEW = (): StartupLogView | null => null;
 
@@ -295,7 +300,7 @@ function useStartupLog(
   const [store, setStore] = useState<StartupLogStore | null>(null);
   useEffect(() => {
     if (logs === null) return;
-    const created = createStartupLogStore(logs, defaultScheduleTimeout);
+    const created = createStartupLogStore(logs, BROWSER_SCHEDULE);
     setStore(created);
     return () => {
       created.close();
