@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import Literal
 
@@ -61,10 +62,8 @@ def _released_after(
         sandbox.start()
         try:
             if act == "stop":
-                try:
+                with suppress(RuntimeError, OSError, subprocess.TimeoutExpired):
                     sandbox.stop()
-                except (RuntimeError, OSError, subprocess.TimeoutExpired):
-                    pass
             else:
                 _cleanup_containers()
             removals = sum(1 for argv in docker.argvs if argv[:2] == ("docker", "rm"))
