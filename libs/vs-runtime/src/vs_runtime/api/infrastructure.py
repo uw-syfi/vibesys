@@ -266,6 +266,13 @@ from vs_runtime._workspace_runtime import (
     WorkspaceEvaluationSpec,
     WorkspaceRuntime,
 )
+from vs_runtime._workspace_tree import (
+    EntryKind,
+    NotRegularFileError,
+    WorkspacePathError,
+    WorkspaceTree,
+    open_workspace_tree,
+)
 from vs_runtime._workspaces import (
     OwnedWorkspaces,
     RuntimeWorkspace,
@@ -451,6 +458,7 @@ __all__ = [
     "DockerEnvironmentFacts",
     "DockerInDockerUnsupportedError",
     "DurableEventJournal",
+    "EntryKind",
     "EnvironmentStartup",
     "EnvironmentStartupSink",
     "EnvironmentStartupStage",
@@ -495,6 +503,7 @@ __all__ = [
     "ModelVolumeProvisioner",
     "NativeCpuProfilerKind",
     "NativeCpuProfilerPreflight",
+    "NotRegularFileError",
     "OwnedWorkspaces",
     "ParallelCandidateObstacle",
     "PreparedModelArtifacts",
@@ -570,6 +579,7 @@ __all__ = [
     "ValidationRecipe",
     "WaitFor",
     "WorkspaceEvaluationSpec",
+    "WorkspacePathError",
     "WorkspaceResource",
     "WorkspaceResourceEvent",
     "WorkspaceResourceEventSink",
@@ -578,6 +588,7 @@ __all__ = [
     "WorkspaceRestoreFailed",
     "WorkspaceRuntime",
     "WorkspaceSourceValue",
+    "WorkspaceTree",
     "bounded_stop",
     "build_run_environment",
     "build_skill_catalog",
@@ -617,6 +628,7 @@ __all__ = [
     "open_run_environment_resources",
     "open_run_host",
     "open_workspace_environment_resources",
+    "open_workspace_tree",
     "parse_profile_command",
     "preflight_native_cpu_profiler",
     "prepare_docker_evaluator_resources",

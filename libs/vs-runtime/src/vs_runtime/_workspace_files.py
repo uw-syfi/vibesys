@@ -1,27 +1,33 @@
 """Files in an agent's workspace: what the agent wrote, read only as validated models.
 
-The agent owns its workspace: every file there may hold anything, and any of them may be a
-symlink out of it. This module is the one place the runtime reads such a file or writes one
-for the agent. A read is contained in the workspace, bounded in size, parsed by pydantic's
-depth-bounded JSON parser and validated strictly; it returns the model or a typed
-``WorkspaceFileProblem`` naming the file and the offending key path, never a half-read
-value. Nothing read here is trusted: a result the runtime itself produced lives in a
-runtime-owned store outside the workspace, and no trust decision reads the workspace.
+The agent owns its workspace: every file there may hold anything, and any file or directory
+may become a symlink out of it at any moment. This module is the one place the runtime reads
+such a file or writes one for the agent, always through ``_workspace_tree``'s walk from a
+descriptor of the workspace root, which refuses symlinks and ``..``. A read is bounded in
+size, parsed by pydantic's depth-bounded JSON parser and validated strictly; it returns the
+model or a typed ``WorkspaceFileProblem`` naming the file and the offending key path, never
+a half-read value. Nothing read here is trusted: a result the runtime itself produced lives
+in a runtime-owned store outside the workspace, and no trust decision reads the workspace.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
-import stat
 from dataclasses import dataclass
 from enum import StrEnum
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
-from vs_decode.api import Unreadable, read_json
-from vs_project.api import atomic_write_bytes
+from vs_decode.api import Unreadable, decode_json
+from vs_runtime._workspace_tree import (
+    EntryKind,
+    WorkspacePathError,
+    WorkspaceTree,
+    open_workspace_tree,
+    relative_parts,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -60,13 +66,6 @@ class WorkspaceFileProblem:
     """The failing key path and reason, without echoing the file's contents."""
 
 
-def contained_path(workspace: Path, relative: str) -> Path | None:
-    """The resolved path of ``relative`` inside ``workspace``, or ``None`` if it escapes."""
-    root = workspace.resolve()
-    path = (workspace / relative).resolve()
-    return path if path.is_relative_to(root) else None
-
-
 def read_agent_model[ModelT: BaseModel](
     workspace: Path,
     relative: str,
@@ -78,10 +77,10 @@ def read_agent_model[ModelT: BaseModel](
 
     ``model`` must forbid unknown keys at every depth (``vs_decode`` refuses it otherwise).
     """
-    path = _contained(workspace, relative)
-    if isinstance(path, WorkspaceFileProblem):
-        return path
-    decoded = read_json(path, model, max_bytes=max_bytes, follow_symlinks=False)
+    data = _read(workspace, relative, max_bytes)
+    if isinstance(data, WorkspaceFileProblem):
+        return data
+    decoded = decode_json(data, model, source=relative, max_bytes=max_bytes)
     return _problem(relative, decoded) if isinstance(decoded, Unreadable) else decoded
 
 
@@ -95,27 +94,30 @@ def read_agent_json(
 
     For a format whose caller validates the shape itself to give its own messages.
     """
-    path = _contained(workspace, relative)
-    if isinstance(path, WorkspaceFileProblem):
-        return path
-    decoded = read_json(path, _JSON_VALUE, max_bytes=max_bytes, follow_symlinks=False)
+    data = _read(workspace, relative, max_bytes)
+    if isinstance(data, WorkspaceFileProblem):
+        return data
+    decoded = decode_json(data, _JSON_VALUE, source=relative, max_bytes=max_bytes)
     return _problem(relative, decoded) if isinstance(decoded, Unreadable) else decoded
 
 
-def _contained(workspace: Path, relative: str) -> Path | WorkspaceFileProblem:
-    """The resolved path of ``relative`` inside the workspace, or the problem that it escapes.
+def _read(workspace: Path, relative: str, max_bytes: int) -> bytes | WorkspaceFileProblem:
+    """At most ``max_bytes + 1`` bytes of the agent's regular file, or why there are none.
 
-    Its readers pass ``follow_symlinks=False`` to ``read_json``, which checks the file on
-    the descriptor it opened: a directory or a FIFO there is not readable rather than
-    missing (and never blocks the host), and a symlink the agent swaps in for the file after
-    this check is refused instead of followed out of the workspace.
+    A directory or a FIFO there is not readable rather than missing, and never blocks.
     """
-    path = contained_path(workspace, relative)
-    if path is None:
+    try:
+        with open_workspace_tree(workspace) as tree:
+            return tree.read_bytes(relative, max_bytes=max_bytes)
+    except WorkspacePathError as error:
         return WorkspaceFileProblem(
-            WorkspaceFileProblemKind.ESCAPES, relative, "escapes the workspace"
+            WorkspaceFileProblemKind.ESCAPES, relative, f"escapes the workspace: {error}"
         )
-    return path
+    except FileNotFoundError:
+        return WorkspaceFileProblem(WorkspaceFileProblemKind.MISSING, relative, "does not exist")
+    except OSError as error:
+        reason = error.strerror or type(error).__name__
+        return WorkspaceFileProblem(WorkspaceFileProblemKind.NOT_READABLE, relative, reason)
 
 
 def _problem(relative: str, unreadable: Unreadable) -> WorkspaceFileProblem:
@@ -127,34 +129,39 @@ def _problem(relative: str, unreadable: Unreadable) -> WorkspaceFileProblem:
 def write_for_agent(workspace: Path, relative: str, contents: bytes) -> None:
     """Atomically write ``contents`` at ``relative`` for the agent to read.
 
-    Raises ``ValueError`` when the destination escapes the workspace.
+    Raises ``WorkspacePathError`` (a ``ValueError``) when the destination is absolute,
+    holds ``..`` or passes through a symlink.
     """
-    path = contained_path(workspace, relative)
-    if path is None:
-        message = f"{relative} escapes the workspace"
-        raise ValueError(message)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_bytes(path, contents)
+    with open_workspace_tree(workspace) as tree:
+        tree.write_bytes(relative, contents)
 
 
 def file_fingerprint(workspace: Path, relative: str) -> str | None:
     """A SHA-256 of the regular file at ``relative``, or ``None`` if there is none.
 
     The file is hashed in fixed-size chunks, so its size costs time, not memory. A path
-    that resolves outside ``workspace`` (through a symlink the agent planted, say), or
-    whose last component becomes a symlink before it is opened, has no fingerprint.
+    that escapes ``workspace`` or passes through a symlink has no fingerprint.
     """
-    path = contained_path(workspace, relative)
-    if path is None:
+    digest = hashlib.sha256()
+    try:
+        with open_workspace_tree(workspace) as tree, tree.open_file(relative) as stream:
+            while chunk := stream.read(_FINGERPRINT_CHUNK_BYTES):
+                digest.update(chunk)
+    except (OSError, WorkspacePathError):
         return None
-    descriptor = _open_regular_file(path)
-    if descriptor is None:
-        return None
-    with os.fdopen(descriptor, "rb") as stream:
-        digest = hashlib.sha256()
-        while chunk := stream.read(_FINGERPRINT_CHUNK_BYTES):
-            digest.update(chunk)
     return digest.hexdigest()
+
+
+def entry_kind(workspace: Path, relative: str) -> EntryKind | None:
+    """What ``relative`` names without following a symlink; ``None`` if nothing is there.
+
+    A path that escapes ``workspace`` or passes through a symlink names nothing in it.
+    """
+    try:
+        with open_workspace_tree(workspace) as tree:
+            return tree.kind(relative)
+    except WorkspacePathError:
+        return None
 
 
 def hash_inputs(
@@ -167,60 +174,57 @@ def hash_inputs(
     """The SHA-256 of the names and bytes of the files under ``relative_paths``.
 
     A directory contributes every regular file below it. Raises ``ValueError`` for an input
-    that is missing, a symlink, outside the workspace, or past the file and byte limits.
+    that is missing, a symlink or below one, outside the workspace, or past the file and
+    byte limits.
     """
     digest = hashlib.sha256()
-    root = workspace.resolve()
     total_files = 0
     total_bytes = 0
-    for relative in sorted(relative_paths):
-        unresolved = workspace / relative
-        if unresolved.is_symlink():
-            message = f"validation input must not be a symlink: {relative}"
-            raise ValueError(message)
-        path = unresolved.resolve()
-        if not path.is_relative_to(root):
-            message = f"validation input escapes workspace: {relative}"
-            raise ValueError(message)
-        if not path.exists():
-            message = f"validation input does not exist: {relative}"
-            raise ValueError(message)
-        digest.update(relative.encode())
-        digest.update(b"\0dir\0" if path.is_dir() else b"\0file\0")
-        entries = [path]
-        if path.is_dir():
-            entries = sorted(candidate for candidate in path.rglob("*") if candidate.is_file())
-        for entry in entries:
-            if entry.is_symlink():
-                message = f"validation input must not be a symlink: {relative}"
-                raise ValueError(message)
-            total_files += 1
-            if total_files > max_files:
-                raise ValueError(_over_limit(max_files, max_bytes))
-            digest.update(entry.relative_to(root).as_posix().encode())
-            digest.update(b"\0")
-            hashed = _hash_file(entry, digest.update, max_bytes - total_bytes)
-            if hashed is None:
-                raise ValueError(_over_limit(max_files, max_bytes))
-            total_bytes += hashed
-            digest.update(b"\0")
+    with open_workspace_tree(workspace) as tree:
+        for relative in sorted(relative_paths):
+            kind = _input_kind(tree, relative)
+            digest.update(relative.encode())
+            digest.update(b"\0dir\0" if kind is EntryKind.DIRECTORY else b"\0file\0")
+            entries = (
+                _files_below(tree, relative)
+                if kind is EntryKind.DIRECTORY
+                else (PurePosixPath(*relative_parts(relative)).as_posix(),)
+            )
+            for entry in entries:
+                total_files += 1
+                if total_files > max_files:
+                    raise ValueError(_over_limit(max_files, max_bytes))
+                digest.update(entry.encode())
+                digest.update(b"\0")
+                hashed = _hash_file(tree, entry, digest.update, max_bytes - total_bytes)
+                if hashed is None:
+                    raise ValueError(_over_limit(max_files, max_bytes))
+                total_bytes += hashed
+                digest.update(b"\0")
     return digest.hexdigest()
 
 
-def _open_regular_file(path: Path) -> int | None:
-    """A descriptor for the regular file at ``path``, or ``None`` if there is none.
-
-    Opened without following a last-component symlink and without blocking, and checked
-    on the descriptor, so a FIFO or symlink swapped in after a caller's check is refused.
-    """
+def _input_kind(tree: WorkspaceTree, relative: str) -> EntryKind:
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
-    except OSError:
-        return None
-    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-        os.close(descriptor)
-        return None
-    return descriptor
+        kind = tree.kind(relative)
+    except WorkspacePathError as error:
+        message = f"validation input escapes workspace: {error}"
+        raise ValueError(message) from error
+    if kind is None:
+        message = f"validation input does not exist: {relative}"
+        raise ValueError(message)
+    if kind is EntryKind.SYMLINK:
+        message = f"validation input must not be a symlink: {relative}"
+        raise ValueError(message)
+    return kind
+
+
+def _files_below(tree: WorkspaceTree, relative: str) -> tuple[str, ...]:
+    try:
+        return tree.files_below(relative)
+    except WorkspacePathError as error:
+        message = f"validation input must not be a symlink: {error}"
+        raise ValueError(message) from error
 
 
 def _over_limit(max_files: int, max_bytes: int) -> str:
@@ -230,25 +234,27 @@ def _over_limit(max_files: int, max_bytes: int) -> str:
     )
 
 
-def _hash_file(path: Path, update: Callable[[bytes], None], budget: int) -> int | None:
-    """Feed the regular file at ``path`` to ``update``; its size, or ``None`` past ``budget``.
+def _hash_file(
+    tree: WorkspaceTree, relative: str, update: Callable[[bytes], None], budget: int
+) -> int | None:
+    """Feed the regular file at ``relative`` to ``update``; its size, or ``None`` past ``budget``.
 
     The size is counted from the bytes read off the open file, not from an earlier
     ``stat``, so a file that grows after it is listed cannot pass the limit, and at most
-    ``budget + 1`` bytes are read. Raises ``ValueError`` when ``path`` cannot be opened or
-    is not a regular file once opened (a FIFO would block the read).
+    ``budget + 1`` bytes are read. Raises ``ValueError`` when ``relative`` cannot be opened
+    or is not a regular file once opened (a FIFO would block the read).
     """
-    descriptor = _open_regular_file(path)
-    if descriptor is None:
-        message = f"validation input is not a readable regular file: {path.name}"
-        raise ValueError(message)
-    with os.fdopen(descriptor, "rb", buffering=0) as stream:
-        read = 0
-        while chunk := stream.read(min(_FINGERPRINT_CHUNK_BYTES, budget - read + 1)):
-            read += len(chunk)
-            if read > budget:
-                return None
-            update(chunk)
+    try:
+        with tree.open_file(relative) as stream:
+            read = 0
+            while chunk := stream.read(min(_FINGERPRINT_CHUNK_BYTES, budget - read + 1)):
+                read += len(chunk)
+                if read > budget:
+                    return None
+                update(chunk)
+    except (OSError, WorkspacePathError) as error:
+        message = f"validation input is not a readable regular file: {relative}"
+        raise ValueError(message) from error
     return read
 
 
@@ -256,7 +262,7 @@ __all__ = [
     "MAX_AGENT_DOCUMENT_BYTES",
     "WorkspaceFileProblem",
     "WorkspaceFileProblemKind",
-    "contained_path",
+    "entry_kind",
     "file_fingerprint",
     "hash_inputs",
     "read_agent_json",

@@ -1589,6 +1589,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
 
 def _write_runtime_document(log_dir: Path, presentation: str) -> Path:
     """Write the runtime environment document the agent's container mounts read-only."""
+    log_dir.mkdir(parents=True, exist_ok=True)
     write_for_agent(log_dir, _RUNTIME_DOCUMENT_NAME, presentation.encode("utf-8"))
     return log_dir / _RUNTIME_DOCUMENT_NAME
 

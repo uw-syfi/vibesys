@@ -15,9 +15,10 @@ from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     create_trusted_evaluation_executor,
 )
-from vs_runtime._workspace_files import file_fingerprint
+from vs_runtime._workspace_files import entry_kind, file_fingerprint
 from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
+from vs_runtime._workspace_tree import EntryKind
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
@@ -371,12 +372,11 @@ class RuntimeWorkspaceResource:
         modified: list[str] = []
         removed: list[str] = []
         for entry in entries:
-            target = self.path / entry.path
             match entry.kind:
                 case BaselineEntryKind.DIRECTORY:
-                    gone = not target.is_dir()
+                    gone = entry_kind(self.path, entry.path) is not EntryKind.DIRECTORY
                 case BaselineEntryKind.UNFINGERPRINTED:
-                    gone = not target.exists(follow_symlinks=False)
+                    gone = entry_kind(self.path, entry.path) is None
                 case BaselineEntryKind.FILE:
                     fingerprint = file_fingerprint(self.path, entry.path)
                     gone = fingerprint is None
@@ -406,7 +406,7 @@ class RuntimeWorkspaceResource:
         return self._project.git.trusted_input_changes()
 
     def is_directory(self, path: str) -> bool:
-        return (self.path / path).is_dir()
+        return entry_kind(self.path, path) is EntryKind.DIRECTORY
 
     def execute(self, command: str, timeout_seconds: int | None) -> CommandExecutionResult:
         return self._environment.session.sandbox.execute(command, timeout=timeout_seconds)

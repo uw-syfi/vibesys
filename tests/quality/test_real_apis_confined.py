@@ -800,6 +800,10 @@ REAL_API_EDGES: dict[Key, str] = {
         )
         for rule in ("signal", "socket", "threading")
     },
+    ("libs/vs-runtime/src/vs_runtime/_workspace_tree.py", "fs_sync"): (
+        "syncs the directory descriptor a file was renamed in; vs_project's path-based "
+        "directory sync would resolve the agent's tree again"
+    ),
     ("libs/vs-sandbox/src/vs_sandbox/landlock.py", "process"): (
         f"{_SEPARATE_PROGRAM}: the confinement launcher execs the confined command"
     ),
@@ -1057,9 +1061,9 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "libs/vs-runtime/src/vs_runtime/_receipt_store.py": (EdgeKind.STORE, "evaluation receipts"),
     "libs/vs-runtime/src/vs_runtime/_skills.py": (EdgeKind.PACKAGED_RESOURCE, "skill trees"),
     "libs/vs-runtime/src/vs_runtime/_slot_meter.py": (EdgeKind.STORE, "the slot usage meter"),
-    "libs/vs-runtime/src/vs_runtime/_workspace_files.py": (
+    "libs/vs-runtime/src/vs_runtime/_workspace_tree.py": (
         EdgeKind.AGENT_WORKSPACE,
-        "bounded, contained reads and writes of agent files",
+        "every host read or write of an agent-chosen path, walked by descriptor",
     ),
     "libs/vs-runtime/src/vs_runtime/api/operation_fixtures.py": (
         EdgeKind.FAKE,
