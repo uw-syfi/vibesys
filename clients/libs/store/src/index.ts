@@ -39,7 +39,7 @@ export interface Store<S, A> {
  * `notify` visits every subscription present when that delivery began exactly once: unsubscribing
  * one during delivery affects only later notifications, while a new subscription waits for the
  * next notification. A reentrant notification takes its own snapshot and completes before the
- * interrupted notification resumes.
+ * interrupted notification continues.
  *
  * Every eligible subscriber is called. One failure is rethrown by identity after delivery; more
  * than one is reported as an `AggregateError` in delivery order.
