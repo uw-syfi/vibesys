@@ -301,6 +301,20 @@ serves it in bounded chunks. Nothing about logs rides the run's event stream.
   withdrawn, so the page drops an aborted request's late answer; the main process's request ends by
   its wait bound, or when the binding releases the lease. The page's `RunLogSource` (`@vibesys/logs`)
   wraps that bridge; a browser page has none and shows no log view.
+- **From the Inspect sheet.** The welcome view's Inspect sheet shows any run's logs, live or ended
+  (ended rows have Inspect too: the store outlives the run). It names its host and instance, as the
+  welcome view does, on the welcome channel `vibesys:welcome:logs` (a listing, or a read that must
+  name that instance), answered by the hosts feature's main-process `Hosts.logs`. `Hosts` keeps one
+  connection lease and one logs lease per renderer document, on one host at a time: the first
+  request takes them, asking about another host swaps them, and closing the sheet
+  (`vibesys:welcome:release-logs`), leaving the welcome view, or the document going away releases
+  them. The sheet lists the streams grouped by owner kind and follows only the one on screen;
+  narration streams render as records by level with their traceback, raw streams as monospace with
+  stderr marked (`foldChunk` keeps each line's pipe runs).
+- **Not `server.log`.** `server.log` is the detached server's raw stdout and stderr, for a person at
+  a terminal; no UI feature depends on it. `instances.inspect`'s `include_log` (a tail of it) is
+  deprecated: the app no longer sends it, and refuses a reply that carries a tail. The helper keeps
+  answering it for older clients and removes it at helper protocol version 2.
 
 ### Handshake and versioning
 
@@ -651,7 +665,7 @@ Phases 2, 3, and 6 do not depend on 4 or 5 and may proceed in parallel after pha
 | Host helper and its contract (phase 4) | built: every method, `host-helper.schema.json` and its TypeScript types, the `helper-*` conformance scenarios and runner (in process and over stdio), the import-closure and start-up guards; `entrypoints.stdio_bridge` deleted in phase 5 |
 | Connection manager (phase 5) | built: `ConnectionManager` and `HostConnection` (an XState machine, shell with disposal scopes), the bootstrap, typed channels with one strict validator, run channels, watch-pushed listings, path completion, the HostConnection contract suite over the `FakeHelper` and the real helper; not built: the Playwright journey job, a second master past `MaxSessions`, and checkout completion on a host with no checkout yet (it needs a helper) |
 | Screen stores and app lifecycle (phase 6) | built (#1839) |
-| Logs feature | built: `logs.list` and `logs.read` over the run's `vs_logs` store, the `helper-logs-*` scenarios (in process), and `@vibesys/logs` (fold and follow machine); not built: the connection manager's logs channel and the run-view and Inspect panels (live-log-visibility PR 4b), and the logs scenarios over stdio against the real helper |
+| Logs feature | built: `logs.list` and `logs.read` over the run's `vs_logs` store, the `helper-logs-*` scenarios (in process), and `@vibesys/logs` (fold and follow machine); the connection manager's logs channel, the run view's startup log panel, and the Inspect sheet's log viewer; not built: gate logs in the run view's round cards, and the logs scenarios over stdio against the real helper |
 
 ## Decisions and alternatives
 

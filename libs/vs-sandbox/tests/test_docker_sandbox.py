@@ -115,7 +115,7 @@ def _assert_container_stopped(sandbox: DockerSandbox) -> None:
 
 
 def _read_sandbox_metadata(workspace: Path) -> dict[str, object]:
-    metadata_path = workspace / ".docker_metadata.json"
+    metadata_path = workspace.parent / "docker.metadata.json"
     return json.loads(metadata_path.read_text())
 
 
@@ -945,6 +945,7 @@ class TestEnvVars:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image="pytorch:latest",
             env={"ANTHROPIC_API_KEY": "sk-secret-key", "PYTHONPATH": "/opt/vibesys"},
             threads=SimThreads(),
@@ -954,7 +955,7 @@ class TestEnvVars:
 
         sandbox.start(output=DISCARD)
 
-        metadata_text = (workspace / ".docker_metadata.json").read_text()
+        metadata_text = (workspace.parent / "docker.metadata.json").read_text()
         assert "sk-secret-key" not in metadata_text
         assert json.loads(metadata_text)["env"] == {"PYTHONPATH": "/opt/vibesys"}
 
@@ -987,6 +988,7 @@ class TestDevicePassthrough:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image="public.ecr.aws/neuron/pytorch-inference-neuronx:latest",
             gpus=None,  # Neuron uses --device, not --gpus
             devices=["/dev/neuron0", "/dev/neuron1"],
@@ -1015,6 +1017,7 @@ class TestDevicePassthrough:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image="rocm/pytorch:latest",
             gpus=None,
             devices=["/dev/kfd", "/dev/dri/renderD128"],
@@ -1070,6 +1073,7 @@ class TestEntrypointOverride:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image=image,
             gpus=None,
             entrypoint="",  # clear the DLC's baked-in model-server entrypoint,
@@ -1107,6 +1111,7 @@ class TestShmSize:
         sandbox = DockerSandbox(
             docker=docker,
             host_workspace=str(workspace),
+            log_path=workspace.parent / "docker.log",
             image="img",
             shm_size="16g",
             threads=SimThreads(),

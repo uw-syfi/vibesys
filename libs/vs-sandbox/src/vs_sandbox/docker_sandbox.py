@@ -59,7 +59,7 @@ _live_containers: dict[str, DockerCli] = {}
 # Credentials reach the container as ``-e NAME=VALUE`` arguments on
 # ``docker run``, and every sink that records a command or the env dict is
 # durable and readable: the command log lives beside the run's other logs, the
-# metadata file is written into the bind-mounted workspace the agent edits, and
+# metadata file sits beside the command log, and
 # startup errors are surfaced to the caller.  Endpoint variables such as
 # ``*_BASE_URL`` stay visible because they are diagnostics, not secrets.
 _SECRET_ENV_NAME_PATTERN = re.compile(
@@ -466,6 +466,12 @@ class DockerSandbox(WorkspaceSandbox):
         self._cached_container_path: str | None = None
         self._container_id: str | None = None
         self._logger = self._setup_logger(log_path)
+        # VibeSys-owned bookkeeping lives beside the command log, never in the
+        # workspace: the workspace is the agent's project, and a file there is
+        # swept into every candidate snapshot commit.
+        self._metadata_path = (
+            None if log_path is None else Path(log_path).with_suffix(".metadata.json")
+        )
         self._agent_uid = agent_uid if agent_uid is not None else os.getuid()
         self._agent_gid = agent_gid if agent_gid is not None else os.getgid()
         self._auth_files: list[tuple[str, str]] = list(auth_files or [])
@@ -680,7 +686,7 @@ class DockerSandbox(WorkspaceSandbox):
             "shm_size": self._shm_size,
             "bind_mounts": [[host, container, ro] for host, container, ro in self._bind_mounts],
             # Credentials are omitted rather than masked: the metadata file is
-            # written into the agent-visible workspace, and a masked value
+            # durable and readable, and a masked value
             # would rebuild a broken container that looks authenticated.
             "env": _non_secret_env(self._env),
             "symlink_commands": [],
@@ -862,15 +868,15 @@ class DockerSandbox(WorkspaceSandbox):
         return _remove_container(self._docker, container_id, timeout_seconds=10, log=self._log_cmd)
 
     def _save_metadata(self) -> None:
-        """Write metadata to the host workspace (best-effort)."""
-        try:
-            metadata_path = Path(self._host_workspace) / ".docker_metadata.json"
-            atomic_write_bytes(metadata_path, json.dumps(self._metadata, indent=2).encode())
-        except OSError:
-            pass  # Non-fatal: workspace dir may not exist in tests
+        """Write metadata beside the command log, outside the workspace (best-effort)."""
+        if self._metadata_path is None:
+            return
+        # Non-fatal: the log directory may not exist in tests.
+        with suppress(OSError):
+            atomic_write_bytes(self._metadata_path, json.dumps(self._metadata, indent=2).encode())
 
     def save_symlink_commands(self, symlink_commands: list[str]) -> None:
-        """Update the metadata file with symlink commands for vibesys-shell."""
+        """Update the metadata file with symlink commands for the run."""
         self._metadata["symlink_commands"] = symlink_commands
         self._save_metadata()
 

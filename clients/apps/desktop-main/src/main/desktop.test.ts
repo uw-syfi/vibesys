@@ -140,7 +140,9 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
       control_socket_path: '/tmp/control.sock',
       server_log_path: '/tmp/server.log',
     }),
+    logs: async () => ({ok: true, instanceId: '000000000001', streams: []}),
     recent: async () => undefined,
+    releaseLogs: () => undefined,
     retireInspectionOwner: owner => {
       events.push(`retire-inspection:${owner}`);
     },

@@ -16,8 +16,8 @@ import type {
   CompletionState,
   HostAction,
   HostState,
-  InspectorAction,
-  InspectorState,
+  InspectorSheetAction,
+  InspectorSheetState,
   PickerAction,
   PickerState,
 } from '@vibesys/feature-hosts/state';
@@ -46,7 +46,7 @@ export interface WelcomeStores {
   readonly start: Store<StartState, StartAction>;
   readonly picker: Store<PickerState, PickerAction>;
   readonly completion: Store<CompletionState, CompletionAction>;
-  readonly inspector: Store<InspectorState, InspectorAction>;
+  readonly inspector: Store<InspectorSheetState, InspectorSheetAction>;
 }
 
 type WelcomePush =
@@ -54,6 +54,12 @@ type WelcomePush =
   | ({readonly kind: 'recent'} & WelcomeEvent<readonly RecentRun[]>)
   | ({readonly kind: 'listing'} & WelcomeEvent<HostListing>)
   | ({readonly kind: 'show-host'} & WelcomeEvent<HostKey>);
+
+/** The window's timers, for the delays the stores' machines wait on (log retries). */
+const WINDOW_SCHEDULE: Parameters<typeof createInspectorStore>[2] = (callback, delayMs) => {
+  const timer = setTimeout(callback, delayMs);
+  return () => clearTimeout(timer);
+};
 
 /** Build the stores over `bridge`, showing `firstHost`'s panel. `confirm` asks before a resume. */
 function createWelcomeStores(
@@ -68,7 +74,7 @@ function createWelcomeStores(
   const start = createStartStore(bridge);
   const picker = createPickerStore(bridge, key => host.dispatch({type: 'show', host: key}));
   const completion = createCompletionStore(bridge);
-  const inspector = createInspectorStore(bridge, copy);
+  const inspector = createInspectorStore(bridge, copy, WINDOW_SCHEDULE);
   host.dispatch({type: 'show', host: firstHost});
   return {welcome, lists, host, start, picker, completion, inspector};
 }

@@ -1,4 +1,7 @@
-/** Pure control state and presentation decisions for the detached-run inspector sheet. */
+/**
+ * Pure control state and presentation decisions for the detached-run inspector sheet: the run's
+ * retained identity. Its logs are `inspector-logs.ts`; the sheet never reads `server.log`.
+ */
 import type {HostKey} from '@vibesys/hosts';
 import type {WelcomeInspection, WelcomeResult} from '@vibesys/ipc';
 import {unprovided} from '@vibesys/machine';
@@ -24,8 +27,6 @@ type InspectorLoad =
 export interface InspectorState {
   readonly next: number;
   readonly target: InspectorTarget | null;
-  /** Once requested, refresh continues returning one coherent observation with diagnostics. */
-  readonly includeLog: boolean;
   readonly load: InspectorLoad;
   readonly notice: {readonly text: string; readonly error: boolean} | null;
   readonly copying: number | null;
@@ -34,7 +35,6 @@ export interface InspectorState {
 export const INSPECTOR_CLOSED: InspectorState = {
   next: 1,
   target: null,
-  includeLog: false,
   load: {kind: 'idle'},
   notice: null,
   copying: null,
@@ -43,7 +43,6 @@ export const INSPECTOR_CLOSED: InspectorState = {
 export type InspectorAction =
   | {readonly type: 'open'; readonly target: InspectorTarget}
   | {readonly type: 'close'}
-  | {readonly type: 'load-log'}
   | {readonly type: 'refresh'}
   | {readonly type: 'copy'; readonly label: string; readonly value: string};
 
@@ -51,7 +50,6 @@ export interface InspectorInspect {
   readonly token: number;
   readonly host: HostKey;
   readonly instance: string;
-  readonly includeLog: boolean;
 }
 
 export interface InspectorCopy {
@@ -66,16 +64,14 @@ interface Context {
   readonly copy: InspectorCopy | null;
 }
 
-function beginLoad(view: InspectorState, includeLog: boolean): Partial<Context> {
+function beginLoad(view: InspectorState): Partial<Context> {
   const target = view.target;
   if (target === null) return {};
   const token = view.next;
-  const logs = view.includeLog || includeLog;
   return {
     view: {
       ...view,
       next: token + 1,
-      includeLog: logs,
       load: {kind: 'loading', token},
       notice: null,
       copying: null,
@@ -84,7 +80,6 @@ function beginLoad(view: InspectorState, includeLog: boolean): Partial<Context> 
       token,
       host: target.host,
       instance: target.instanceId,
-      includeLog: logs,
     },
     copy: null,
   };
@@ -116,17 +111,13 @@ export const inspectorMachine = setup({
       target: '.loading',
       reenter: true,
       actions: assign(({context, event}) =>
-        beginLoad(
-          {
-            ...context.view,
-            target: event.target,
-            includeLog: false,
-            load: {kind: 'idle'},
-            notice: null,
-            copying: null,
-          },
-          false,
-        ),
+        beginLoad({
+          ...context.view,
+          target: event.target,
+          load: {kind: 'idle'},
+          notice: null,
+          copying: null,
+        }),
       ),
     },
     close: {
@@ -137,17 +128,11 @@ export const inspectorMachine = setup({
         copy: null,
       })),
     },
-    'load-log': {
-      guard: 'hasTarget',
-      target: '.loading',
-      reenter: true,
-      actions: assign(({context}) => beginLoad(context.view, true)),
-    },
     refresh: {
       guard: 'hasTarget',
       target: '.loading',
       reenter: true,
-      actions: assign(({context}) => beginLoad(context.view, context.view.includeLog)),
+      actions: assign(({context}) => beginLoad(context.view)),
     },
     copy: {
       guard: 'canCopy',

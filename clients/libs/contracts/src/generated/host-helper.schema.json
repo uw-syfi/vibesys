@@ -910,7 +910,7 @@
     },
     "InstancesInspectRequest": {
       "additionalProperties": false,
-      "description": "Inspect one detached server without starting another host process.",
+      "description": "Inspect one detached server without starting another host process.\n\n``include_log`` is deprecated: it asks for a tail of ``server.log``, the detached\nserver's raw output, which is for a person at a terminal. No client UI may depend on\nit; a run's logs come from its log store through ``logs.list`` and ``logs.read``. The\nhelper keeps answering it so older clients keep working, and removes it at the next\nhelper protocol version (2).",
       "properties": {
         "request_id": {
           "maxLength": 128,

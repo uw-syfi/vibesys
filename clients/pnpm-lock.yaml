@@ -357,6 +357,9 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/logs':
+        specifier: workspace:*
+        version: link:../../libs/logs
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine

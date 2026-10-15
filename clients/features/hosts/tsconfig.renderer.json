@@ -22,13 +22,13 @@
   ],
   "references": [
     {
-      "path": "./tsconfig.state.json"
-    },
-    {
       "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {
       "path": "../../libs/ipc/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/logs/tsconfig.lib.json"
     },
     {
       "path": "../../libs/machine/tsconfig.lib.json"
@@ -38,6 +38,9 @@
     },
     {
       "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "./tsconfig.state.json"
     }
   ]
 }

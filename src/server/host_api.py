@@ -659,7 +659,14 @@ class InstancesListRequest(_HelperRequest):
 
 
 class InstancesInspectRequest(_HelperRequest):
-    """Inspect one detached server without starting another host process."""
+    """Inspect one detached server without starting another host process.
+
+    ``include_log`` is deprecated: it asks for a tail of ``server.log``, the detached
+    server's raw output, which is for a person at a terminal. No client UI may depend on
+    it; a run's logs come from its log store through ``logs.list`` and ``logs.read``. The
+    helper keeps answering it so older clients keep working, and removes it at the next
+    helper protocol version (2).
+    """
 
     type: Literal["instances.inspect"] = "instances.inspect"
     instance_id: InstanceId

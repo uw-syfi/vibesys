@@ -3,6 +3,7 @@
 import copy
 import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from server.api.schema import (
 from server.events import EventData
 from server.host_api import HelperFeature
 from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
+from vs_logs.api import NarrationLevel, NarrationLine
 
 SCHEMA_PATH = Path("clients/libs/contracts/src/generated/protocol.schema.json")
 HOST_HELPER_SCHEMA_PATH = Path("clients/libs/contracts/src/generated/host-helper.schema.json")
@@ -84,6 +86,28 @@ def _definition(document: dict[str, Any], ref: str) -> dict[str, Any]:
 
 def test_committed_protocol_schema_matches_python_contract() -> None:
     assert _committed_schema() == protocol_json_schema()
+
+
+@given(
+    level=st.sampled_from(list(NarrationLevel)),
+    message=st.text(max_size=20),
+    traceback=st.none() | st.text(max_size=20),
+)
+def test_committed_schema_accepts_every_narration_line_the_run_writes(
+    level: NarrationLevel, message: str, traceback: str | None
+) -> None:
+    """A log view decodes narration with the generated type: every written line must fit it."""
+    document = _committed_schema()
+    line = NarrationLine(
+        at=datetime(2026, 10, 15, tzinfo=UTC),
+        level=level,
+        logger="vibesys.run",
+        thread="MainThread",
+        message=message,
+        traceback=traceback,
+    )
+    schema = {**_definition(document, "#/$defs/NarrationLine"), "$defs": document["$defs"]}
+    Draft202012Validator(schema).validate(json.loads(line.model_dump_json()))
 
 
 def test_committed_host_helper_schema_matches_python_contract() -> None:

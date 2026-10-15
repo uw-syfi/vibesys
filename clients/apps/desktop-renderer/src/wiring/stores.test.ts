@@ -100,6 +100,12 @@ class FakeWelcomeBridge implements WelcomeBridge {
     this.inspectionReplies.push(reply);
     return reply.promise;
   };
+  /** Logs are not this suite's subject: every run has none. */
+  logs = async () => ({
+    ok: true as const,
+    value: {ok: true as const, instanceId: '0123456789ab', streams: []},
+  });
+  releaseLogs = async () => ({ok: true as const, value: null});
   onChrome = (listener: (event: WelcomeEvent<ChromeState>) => void) => {
     this.#chrome.push(listener);
   };

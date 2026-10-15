@@ -85,9 +85,14 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.signIn(key), {kind: 'sign-in', host}],
     [bridge => bridge.complete(key, directory), {kind: 'complete', host, directory}],
     [
-      bridge => bridge.inspect(key, instance, true, token),
-      {kind: 'inspect', host, instance, includeLog: true, inspection: token},
+      bridge => bridge.inspect(key, instance, token),
+      {kind: 'inspect', host, instance, inspection: token},
     ],
+    [
+      bridge => bridge.logs(key, instance, {kind: 'list'}),
+      {kind: 'logs', host, instance, request: {kind: 'list'}},
+    ],
+    [bridge => bridge.releaseLogs(), {kind: 'release-logs'}],
     [bridge => bridge.tasks(key, path), {kind: 'tasks', host, project: path}],
     [bridge => bridge.harnesses(key), {kind: 'harnesses', host}],
     [

@@ -795,6 +795,15 @@ export type Kind48 = "slurm_job";
 export type ExecutionId3 = string;
 export type JobId = string;
 export type Kind49 = "run_narration";
+export type At = string;
+/**
+ * A line's severity: the standard ``logging`` level at or below the record's.
+ */
+export type NarrationLevel = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "CRITICAL";
+export type Logger = string;
+export type Thread = string;
+export type Message2 = string;
+export type Traceback = string | null;
 
 /**
  * Root schema document for the public server protocol.
@@ -806,6 +815,7 @@ export interface ProtocolDocument {
   snapshot: RunSnapshot;
   server_message: ServerMessage;
   log_owner: LogOwner;
+  narration_line: NarrationLine;
 }
 /**
  * Request pausing after the active agent call.
@@ -2047,4 +2057,15 @@ export interface SlurmJob {
  */
 export interface RunNarration {
   kind: Kind49;
+}
+/**
+ * One narration record, as one JSON line of a narration stream.
+ */
+export interface NarrationLine {
+  at: At;
+  level: NarrationLevel;
+  logger: Logger;
+  thread: Thread;
+  message: Message2;
+  traceback?: Traceback;
 }

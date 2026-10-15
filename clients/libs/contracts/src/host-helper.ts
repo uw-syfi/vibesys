@@ -40,6 +40,8 @@ export type {
   LiveInstanceRecord,
   LogChunk,
   LogOffset,
+  LogPipe,
+  LogPipeSpan,
   LogStream,
   LogsListReply,
   LogsListRequest,
@@ -68,9 +70,6 @@ const MESSAGE = properties['message'] as Schema;
 const CHANNEL_END = properties['channel_end'] as Schema;
 const REQUEST = properties['request'] as Schema;
 const definitions = hostHelperSchema['$defs'] as Record<string, Schema>;
-const logTail = definitions['AvailableLogTail'] as Schema;
-const logProperties = logTail['properties'] as Record<string, Schema>;
-const logText = logProperties['text'] as Schema;
 const featureByRequest = hostHelperSchema['x-vibesys-feature-by-request'] as Readonly<
   Partial<Record<Request['type'], HelperFeature>>
 >;
@@ -110,9 +109,6 @@ export function helperFeaturesForRequest(request: {
   }
   return [...features];
 }
-
-/** Maximum UTF-8 bytes in an available instance log tail, generated from Python's contract. */
-export const INSTANCE_LOG_TAIL_BYTES = logText['x-vibesys-max-utf8-bytes'] as number;
 
 const logsRead = definitions['LogsReadRequest'] as Schema;
 const logsReadProperties = logsRead['properties'] as Record<string, Schema>;

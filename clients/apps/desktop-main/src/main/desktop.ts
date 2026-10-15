@@ -36,7 +36,9 @@ export interface DesktopDeps {
     | 'harnesses'
     | 'host'
     | 'inspect'
+    | 'logs'
     | 'recent'
+    | 'releaseLogs'
     | 'retireInspectionOwner'
     | 'retireOwner'
     | 'setCheckout'
@@ -249,10 +251,15 @@ export class Desktop {
         await runs.stop(request.host, request.instance, request.force);
         return null;
       case 'inspect':
-        return hosts.inspect(request.host, request.instance, request.includeLog, {
+        return hosts.inspect(request.host, request.instance, {
           owner: rendererGeneration,
           sequence: request.inspection,
         });
+      case 'logs':
+        return hosts.logs(request.host, request.instance, request.request, rendererGeneration);
+      case 'release-logs':
+        hosts.releaseLogs(rendererGeneration);
+        return null;
       case 'show-run':
       case 'show-welcome':
         this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');

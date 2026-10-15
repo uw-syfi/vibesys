@@ -1,8 +1,8 @@
 /**
  * The hosts the welcome view offers: which hosts there are, each host's checkout (checked by
  * starting its helper before it is saved), its tasks and directory completions, and its runs as
- * the helper pushes them (`instances.watch`) to the view. Every host action goes through the
- * host's one connection; nothing here retries or polls.
+ * the helper pushes them (`instances.watch`) to the view, and the inspector's run logs. Every host
+ * action goes through the host's one connection; nothing here retries or polls.
  */
 import {
   type ConnectionLease,
@@ -10,6 +10,7 @@ import {
   connectionStatus,
   HelperRequestError,
   type HostConnection,
+  type LogsLease,
 } from '@vibesys/connection';
 import type {PathsCompleteReply} from '@vibesys/contracts/host-helper';
 import {
@@ -24,7 +25,8 @@ import {
   inspectionReply,
   validHostPath,
 } from '@vibesys/hosts';
-import type {HarnessListing, PathCompletion, WelcomeInspection} from '@vibesys/ipc';
+import type {HarnessListing, PathCompletion, RunLogsRequest, WelcomeInspection} from '@vibesys/ipc';
+import type {LogListOutcome, LogReadOutcome} from '@vibesys/logs';
 import {
   rememberInstance,
   type SettingsStore,
@@ -73,6 +75,8 @@ export class Hosts {
   readonly #watched = new Map<HostKey, WatchedHost>();
   /** Checkout validations that still own permission to persist, by renderer-document operation. */
   readonly #checkoutChanges = new Map<string, CheckoutChange>();
+  /** The logs channel each renderer document's inspector holds, on one host at a time. */
+  readonly #logs = new Map<string, InspectorLogs>();
   /** Latest inspection lease admitted for each renderer document. */
   readonly #inspectionChanges = new Map<string, InspectionLease>();
   /** Renderer documents whose outstanding inspection writes have been revoked. */
@@ -267,7 +271,6 @@ export class Hosts {
   async inspect(
     id: HostId,
     instanceId: string,
-    includeLog: boolean,
     change: InspectionChangeId,
   ): Promise<WelcomeInspection> {
     const current = this.#claimInspection(change);
@@ -277,7 +280,6 @@ export class Hosts {
       const reply = await lease.connection.request({
         type: 'instances.inspect',
         instance_id: instanceId,
-        include_log: includeLog,
       });
       inspection = inspectionReply(instanceId, reply.inspection);
     } catch (error) {
@@ -308,10 +310,62 @@ export class Hosts {
     return inspection;
   }
 
+  /**
+   * Answer one logs request from `owner`'s inspector about `instanceId` on `id`, over the host's
+   * logs channel (`docs/contributing/desktop-connection.md`, "Logs"). The first request takes a
+   * connection lease and a logs lease, which `owner` keeps while it asks about that host; asking
+   * about another host, `releaseLogs`, or the owner going away lets them go. The parser already
+   * held a read to `instanceId`.
+   */
+  async logs(
+    id: HostId,
+    instanceId: string,
+    request: RunLogsRequest,
+    owner: string,
+  ): Promise<LogListOutcome | LogReadOutcome> {
+    if (this.#retiredInspectionOwners.has(owner)) {
+      throw new Error('the inspection owner was retired');
+    }
+    const key = hostKey(id);
+    let held = this.#logs.get(owner);
+    if (held?.host !== key) {
+      if (held !== undefined) this.releaseLogs(owner);
+      held = new InspectorLogs(key, this.connection(id));
+      this.#logs.set(owner, held);
+    }
+    let logs: LogsLease;
+    try {
+      logs = await held.lease();
+    } catch (error) {
+      // A hold that could not connect is not kept: the next request tries again.
+      if (this.#logs.get(owner) === held) this.#logs.delete(owner);
+      throw error;
+    }
+    if (request.kind === 'list') return logs.list(instanceId);
+    return logs.read(request.read);
+  }
+
+  /** Let `owner`'s logs channel go; the channel closes once no other holder uses it. */
+  releaseLogs(owner: string): void {
+    const held = this.#logs.get(owner);
+    if (held === undefined) return;
+    this.#logs.delete(owner);
+    void held
+      .release()
+      .catch(error =>
+        this.#deps.log(
+          `could not release the logs of ${hostLabel(hostFromKey(held.host))}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
+      );
+  }
+
   /** Revoke every outstanding inspection write owned by a renderer document that went away. */
   retireInspectionOwner(owner: string): void {
     this.#inspectionChanges.delete(owner);
     this.#retiredInspectionOwners.add(owner);
+    this.releaseLogs(owner);
   }
 
   /** Revoke one pending inspection, without preventing a later inspection from this document. */
@@ -322,10 +376,11 @@ export class Hosts {
     }
   }
 
-  /** Revoke this document's current inspection when Chrome leaves the welcome surface. */
+  /** Revoke this document's current inspection, and its logs, when Chrome leaves the welcome surface. */
   cancelInspectionOwner(owner: string): void {
     const lease = this.#inspectionChanges.get(owner);
     if (lease !== undefined) this.#inspectionChanges.set(owner, {...lease, active: false});
+    this.releaseLogs(owner);
   }
 
   #claimInspection(change: InspectionChangeId): () => boolean {
@@ -483,6 +538,36 @@ export class Hosts {
     // Refresh advanced the generation that fences older reads. Fill every other member of the
     // current union so a concurrent recent-host reconciliation cannot leave one unwatched.
     await this.#reconcile(generation);
+  }
+}
+
+/** One inspector's hold on a host's logs channel: its connection lease, then its logs lease. */
+class InspectorLogs {
+  readonly host: HostKey;
+  readonly #held: Promise<{readonly connection: ConnectionLease; readonly logs: LogsLease}>;
+
+  constructor(host: HostKey, connection: Promise<ConnectionLease>) {
+    this.host = host;
+    this.#held = connection.then(lease => ({connection: lease, logs: lease.connection.openLogs()}));
+  }
+
+  async lease(): Promise<LogsLease> {
+    return (await this.#held).logs;
+  }
+
+  /** Release the logs lease, then the connection; a hold that never connected has nothing to free. */
+  async release(): Promise<void> {
+    let held: {readonly connection: ConnectionLease; readonly logs: LogsLease};
+    try {
+      held = await this.#held;
+    } catch {
+      return;
+    }
+    try {
+      await held.logs[Symbol.asyncDispose]();
+    } finally {
+      await held.connection[Symbol.asyncDispose]();
+    }
   }
 }
 

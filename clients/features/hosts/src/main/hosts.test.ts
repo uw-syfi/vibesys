@@ -762,9 +762,9 @@ describe('Hosts inspection changes', () => {
     });
     const held = link.helper.deferNext('instances.inspect');
 
-    const first = hosts.inspect(LOCAL, firstInstance, false, {owner: '10:100', sequence: 1});
+    const first = hosts.inspect(LOCAL, firstInstance, {owner: '10:100', sequence: 1});
     await held.received;
-    await hosts.inspect(LOCAL, secondInstance, false, {owner: '10:100', sequence: 2});
+    await hosts.inspect(LOCAL, secondInstance, {owner: '10:100', sequence: 2});
     held.release();
     await first;
 
@@ -811,16 +811,16 @@ describe('Hosts inspection changes', () => {
     });
     const held = link.helper.deferNext('instances.inspect');
 
-    const inspecting = hosts.inspect(LOCAL, instance, false, {owner: '10:100', sequence: 1});
+    const inspecting = hosts.inspect(LOCAL, instance, {owner: '10:100', sequence: 1});
     await held.received;
     hosts.retireInspectionOwner('10:100');
     held.release();
     await inspecting;
 
     expect((await settings.recent()).runs[0]?.instanceId).toBeNull();
-    await expect(
-      hosts.inspect(LOCAL, instance, false, {owner: '10:100', sequence: 2}),
-    ).rejects.toThrow('inspection owner was retired');
+    await expect(hosts.inspect(LOCAL, instance, {owner: '10:100', sequence: 2})).rejects.toThrow(
+      'inspection owner was retired',
+    );
   });
 
   test('closing an inspector revokes only its pending locator write', async () => {
@@ -864,14 +864,99 @@ describe('Hosts inspection changes', () => {
     const held = link.helper.deferNext('instances.inspect');
     const change = {owner: '10:100', sequence: 1};
 
-    const inspecting = hosts.inspect(LOCAL, instance, false, change);
+    const inspecting = hosts.inspect(LOCAL, instance, change);
     await held.received;
     hosts.cancelInspection(change);
     held.release();
     await inspecting;
 
     expect((await settings.recent()).runs[0]?.instanceId).toBeNull();
-    await hosts.inspect(LOCAL, instance, false, {owner: change.owner, sequence: 2});
+    await hosts.inspect(LOCAL, instance, {owner: change.owner, sequence: 2});
     expect((await settings.recent()).runs[0]?.instanceId).toBe(instance);
   });
+
+  test('an inspection asks the helper for no server log', async () => {
+    const link = new FakeLink();
+    const instance = '000000000001';
+    link.helper.publish(record(instance, 'run-1'));
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = inspectorHosts(manager);
+
+    await hosts.inspect(LOCAL, instance, {owner: '10:100', sequence: 1});
+
+    const inspections = link.helper.requests.filter(
+      request => request.type === 'instances.inspect',
+    );
+    expect(inspections).toHaveLength(1);
+    expect(inspections[0]).not.toHaveProperty('include_log');
+  });
+
+  test("the inspector lists and reads a run's logs over one logs channel, released on close", async () => {
+    const link = new FakeLink();
+    const instance = '000000000001';
+    link.helper.publish(record(instance, 'run-1'));
+    link.helper.logStore.open(instance, '000001', {kind: 'run_narration'}, 'vibesys run');
+    link.helper.logStore.write(instance, '000001', new TextEncoder().encode('hello\n'));
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = inspectorHosts(manager);
+
+    const listed = await hosts.logs(LOCAL, instance, {kind: 'list'}, '10:100');
+    const read = await hosts.logs(
+      LOCAL,
+      instance,
+      {
+        kind: 'read',
+        read: {
+          instance_id: instance,
+          stream_id: '000001',
+          start: {tail_bytes: 1024},
+          max_bytes: 4096,
+          wait_ms: 0,
+        },
+      },
+      '10:100',
+    );
+
+    expect(listed.ok && 'streams' in listed && listed.streams.map(stream => stream.id)).toEqual([
+      '000001',
+    ]);
+    expect(read.ok && 'chunk' in read && read.chunk.data).toBe('hello\n');
+    // The control channel, then the one logs channel both requests shared.
+    expect(link.helper.spawned).toBe(2);
+    const logsChannel = link.helper.channels[1];
+    if (logsChannel === undefined) throw new Error('a logs channel was expected');
+
+    hosts.releaseLogs('10:100');
+    await logsChannel.process.exit;
+    expect(link.helper.exited).toBeGreaterThanOrEqual(1);
+  });
 });
+
+function inspectorHosts(manager: ConnectionManager): Hosts {
+  return new Hosts({
+    manager,
+    settings: new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem: new FakeSettingsFilesystem(),
+      log: () => {},
+    }),
+    localCheckout: '/bundled',
+    sshConfigPath: '/missing',
+    log: () => {},
+    push: () => {},
+    retire: () => {},
+  });
+}

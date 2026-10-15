@@ -50,7 +50,7 @@ function ok(value) {
   return {ok: true, value};
 }
 
-function inspection(host, instance, includeLog) {
+function inspection(host, instance) {
   const facts = HOSTS[host];
   const controlSocketPath = `/runtime/runs/${instance}/control.sock`;
   const serverLogPath = `/runtime/runs/${instance}/server.log`;
@@ -76,13 +76,69 @@ function inspection(host, instance, includeLog) {
     },
     control_socket_path: controlSocketPath,
     server_log_path: serverLogPath,
-    log: includeLog
-      ? {
-          state: 'available',
-          text: `${facts.hostname}: retained diagnostics`,
-          truncated: true,
-        }
-      : null,
+    log: null,
+  };
+}
+
+const NARRATION = [
+  {
+    at: '2026-10-15T12:00:00Z',
+    level: 'INFO',
+    logger: 'vibesys.run',
+    thread: 'MainThread',
+    message: 'round 1 started',
+    traceback: null,
+  },
+  {
+    at: '2026-10-15T12:00:05Z',
+    level: 'ERROR',
+    logger: 'vibesys.gate',
+    thread: 'MainThread',
+    message: 'gate crashed',
+    traceback: 'Traceback (most recent call last):\nValueError: boom',
+  },
+]
+  .map(line => `${JSON.stringify(line)}\n`)
+  .join('');
+
+function logsAnswer(instance, request) {
+  if (request.kind === 'list') {
+    return {
+      ok: true,
+      instanceId: instance,
+      streams: [
+        {
+          id: '000001',
+          owner: {kind: 'startup_step', stage: 'building_image'},
+          command: 'docker build',
+          retained_start: 0,
+          size: 6,
+          outcome: 'ended',
+        },
+        {
+          id: '000002',
+          owner: {kind: 'run_narration'},
+          command: 'vibesys run',
+          retained_start: 0,
+          size: NARRATION.length,
+          outcome: 'ended',
+        },
+      ],
+    };
+  }
+  const data = request.read.stream_id === '000002' ? NARRATION : 'step 1\n';
+  const size = new TextEncoder().encode(data).length;
+  return {
+    ok: true,
+    chunk: {
+      offset: 0,
+      data,
+      next_offset: size,
+      eof: true,
+      closed: true,
+      truncated_before: false,
+      pipes: [{offset: 0, length: size, pipe: 'stdout'}],
+    },
   };
 }
 
@@ -150,10 +206,13 @@ Object.defineProperty(window, 'vibesysWelcome', {
     showWelcome: async () => ok(null),
     retry: async () => ok(null),
     stop: async () => ok(null),
-    inspect: async (host, instance, includeLog, inspectionToken) => {
-      control.inspectionCalls.push({host, instance, includeLog, inspectionToken});
-      return ok(inspection(host, instance, includeLog));
+    inspect: async (...args) => {
+      const [host, instance, inspectionToken] = args;
+      control.inspectionCalls.push({host, instance, inspectionToken, arguments: args.length});
+      return ok(inspection(host, instance));
     },
+    logs: async (_host, instance, request) => ok(logsAnswer(instance, request)),
+    releaseLogs: async () => ok(null),
     onChrome: listener => {
       control.emitChrome = value => {
         chrome = value;
