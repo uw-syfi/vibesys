@@ -6,7 +6,7 @@ on it is a pure function of that slice; the prompt it builds is a typed value, n
 
 import hashlib
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from vibesys.candidates.api import Baseline, failure, reading
@@ -14,12 +14,12 @@ from vibesys.metrics import reading_of
 from vibesys.orchestration.dynamic.models import ProfileOffer
 from vibesys.orchestration.dynamic.search import _briefs as briefs
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._main import MergeOptions
 from vibesys.orchestration.dynamic.search._parents import ParentOption, ParentSnapshot, options
 from vibesys.orchestration.dynamic.search._plan import PlanLedger
 from vibesys.orchestration.dynamic.search._prompts import (
     BuildableRow,
     HistoryRow,
-    MergeableRow,
     PlannerCorrection,
     PlannerPrompt,
     ProfileHistoryRow,
@@ -209,7 +209,8 @@ class PlanWorld:
     main_measurement: MainMeasurement | None = None
     merges: tuple[MergeRecord, ...] = ()
     """Every finished merge, oldest first."""
-    mergeable: tuple[MergeableRow, ...] = ()
+    merge_options: MergeOptions = field(default_factory=MergeOptions)
+    """Which candidates a merge may name now; its rows are the prompt's mergeable list."""
 
     @property
     def active(self) -> int:
@@ -250,6 +251,7 @@ class PlanWorld:
             profile_ids=frozenset(profiles),
             merge_ids=frozenset(merges | running_merges),
             merging=bool(running_merges),
+            merge_options=self.merge_options,
         )
 
     def prompt(
@@ -302,7 +304,7 @@ class PlanWorld:
                 (item.plan.work_id for item in self.running if item.plan.kind is WorkKind.MERGE),
                 None,
             ),
-            mergeable=self.mergeable,
+            mergeable=self.merge_options.rows,
             merges=self.merges,
             problem=problem,
         )

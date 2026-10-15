@@ -179,7 +179,6 @@ MAIN_MEASUREMENTS = st.builds(
     benchmark_passed=st.none() | st.booleans(),
     metrics=METRICS,
     previous=METRICS,
-    regressed=st.booleans(),
 )
 MERGEABLE = st.builds(
     dict, hypothesis_id=tokens("hid"), revision=REVISIONS, metric=st.none() | METRIC
@@ -196,7 +195,9 @@ MERGES = st.builds(
     revision=st.none() | REVISIONS,
     accuracy_passed=st.none() | st.booleans(),
     metrics=METRICS,
-    failure=st.none() | st.just({"kind": "merge-unsound"}),
+    main_metrics=METRICS,
+    main_benchmark_passed=st.none() | st.booleans(),
+    failure=st.none() | st.sampled_from(({"kind": "merge-unsound"}, {"kind": "merge-regressed"})),
 )
 
 

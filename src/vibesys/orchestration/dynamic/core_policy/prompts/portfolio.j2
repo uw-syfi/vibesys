@@ -22,9 +22,6 @@ only at the revision in its history row (read them with git show REVISION:PATH).
 {% if main_measurement %}
 
 Main's latest trusted measurement (merge `{{ main_measurement.merge_id }}`): accuracy passed: {{ main_measurement.accuracy_passed }}, benchmark passed: {{ main_measurement.benchmark_passed }}{% for m in main_measurement.metrics %}; {{ metric(m) }}{% endfor %}.
-{% if main_measurement.regressed %}
-Main regressed with that merge: it measures worse than main before it{% for m in main_measurement.previous %} ({{ metric(m) }}){% endfor %}{% if main_measurement.benchmark_passed == false %}, or fails the benchmark it passed{% endif %}. Decide whether to fix main with another merge or to build on a specific candidate instead.
-{% endif %}
 {% endif %}
 {% if baseline %}
 
@@ -88,8 +85,10 @@ To combine candidates, choose a merge workstream: {{ reply.kind }} "merge", a ne
 the order to apply them), {{ reply.instructions }} (how to combine them, and how to resolve
 conflicts), and {{ reply.watch_for }} (what the merger must check or be careful of). A new merger
 session applies them on a checkout of main and runs the tests; when its commit passes the
-trusted accuracy check, main moves to it and its measurement is reported here. A merger that
-cannot follow the instructions refuses and main stays where it is. Only one merge runs at a
+trusted accuracy check and measures no worse than main (a headline metric no worse, and no
+benchmark check main passed now failing), main moves to it and its measurement is reported here.
+A merge may name only candidates listed as mergeable below. A merger that cannot follow the
+instructions refuses and main stays where it is. Only one merge runs at a
 time{% if merge_running %}, and merge `{{ merge_running }}` is running now: schedule no other
 merge until it finishes{% endif %}. A hypothesis that continues after main moved rebases onto
 main first.
@@ -110,6 +109,9 @@ Merges so far, oldest first:
 
 {% if item.reason %}
   Why the merger refused: {{ item.reason }}
+{% endif %}
+{% if item.failure and item.failure.kind.value == 'merge-regressed' %}
+  Main regressed with that merge, so main did not move: main measured{% for m in item.main_metrics %} {{ metric(m) }}{% else %} no headline metric{% endfor %}, benchmark passed: {{ item.main_benchmark_passed }}. Decide whether to fix the merge with another one or to build on a specific candidate instead.
 {% endif %}
 {% if item.failure %}
   Why it ended: {{ failure_text(item.failure) }}

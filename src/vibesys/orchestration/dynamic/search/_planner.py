@@ -252,9 +252,9 @@ def _schedulable(held: PlanCheck, world: PlanWorld) -> bool:
         or (item.parent_hypothesis_id, item.parent_revision) in offered
         for item in held.accepted
     )
-    latest = {item.snapshot.hypothesis_id for item in world.offered if item.latest_verified}
+    options = ledger.merge_options
     merges = [item for item in held.accepted if item.kind is WorkKind.MERGE]
     mergeable = not (merges and ledger.merging) and all(
-        set(item.candidates) <= latest for item in merges
+        options.mergeable(candidate) for item in merges for candidate in item.candidates
     )
     return len(held.accepted) <= world.capacity and fresh and parents and mergeable

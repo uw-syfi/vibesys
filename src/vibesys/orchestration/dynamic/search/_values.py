@@ -174,6 +174,9 @@ class FailureKind(StrEnum):
     """The merger could not follow the merge instructions and stopped; its reply says why."""
     MERGE_UNSOUND = "merge-unsound"
     """The merged commit did not pass the trusted accuracy check, so main did not move to it."""
+    MERGE_REGRESSED = "merge-regressed"
+    """The merged commit measured worse than main, or failed a benchmark check main passed, so
+    main did not move to it."""
 
 
 _FIELDS: dict[FailureKind, tuple[frozenset[str], frozenset[str]]] = {
@@ -313,12 +316,13 @@ class MergeOutcome(StrEnum):
     """How a merge workstream ended. Closed."""
 
     MERGED = "merged"
-    """The merged commit passed the trusted accuracy check and main advanced to it."""
+    """The merged commit passed the trusted accuracy check, measured no worse than main, and main
+    advanced to it."""
     REFUSED = "refused"
     """The merger could not follow the instructions and stopped: main is unchanged."""
     FAILED = "failed"
-    """The merge ended without a sound commit (a lost turn, a stop, a failed check): main is
-    unchanged; ``failure`` says why."""
+    """The merge ended without a sound commit (a lost turn, a stop, a failed check, a regression):
+    main is unchanged; ``failure`` says why."""
 
 
 class MergeRecord(Value):
@@ -340,6 +344,10 @@ class MergeRecord(Value):
     benchmark_passed: bool | None = None
     metrics: tuple[MetricRow, ...] = ()
     """What the trusted measurement of the commit read; empty when it was not measured."""
+    main_metrics: tuple[MetricRow, ...] = ()
+    """Main's headline the commit was compared with; empty when it was not compared."""
+    main_benchmark_passed: bool | None = None
+    """Whether main passed its benchmark check when the commit was compared with it."""
     failure: Failure | None = None
     """Why a failed merge ended."""
 
@@ -355,8 +363,6 @@ class MainMeasurement(Value):
     metrics: tuple[MetricRow, ...] = ()
     previous: tuple[MetricRow, ...] = ()
     """What main measured before this merge (the input's measurement before the first merge)."""
-    regressed: bool = False
-    """Main measures worse than before the merge, or fails the benchmark check it passed."""
 
 
 # -- what the planner is told about a reply that cannot be scheduled -------------------------------
@@ -388,6 +394,10 @@ class ViolationCode(StrEnum):
     MERGE_ID_USED = "merge-id-used"
     MERGE_IN_FLIGHT = "merge-in-flight"
     MERGE_CANDIDATE_REPEATED = "merge-candidate-repeated"
+    MERGE_CANDIDATE_IS_MAIN = "merge-candidate-is-main"
+    MERGE_CANDIDATE_MERGED = "merge-candidate-merged"
+    MERGE_CANDIDATE_NOT_BETTER = "merge-candidate-not-better"
+    MERGE_UNCHECKABLE = "merge-uncheckable"
 
 
 class Alternative(Value):

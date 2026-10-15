@@ -51,6 +51,14 @@ merge ID {{ quoted(item.subject) }} was already used; choose a new ID
 another merge is running or scheduled; schedule one merge at a time, after the running one finishes
 {%- elif item.code.value == 'merge-candidate-repeated' -%}
 {{ quoted(item.subject) }} is listed twice in this merge; list each candidate once
+{%- elif item.code.value == 'merge-candidate-is-main' -%}
+{{ quoted(item.subject) }} is a merged main, already part of main; merge only candidates listed as mergeable
+{%- elif item.code.value == 'merge-candidate-merged' -%}
+the latest candidate of {{ quoted(item.subject) }} is already merged into main; merge only candidates listed as mergeable
+{%- elif item.code.value == 'merge-candidate-not-better' -%}
+the latest candidate of {{ quoted(item.subject) }} does not beat main's latest measurement; merge only candidates listed as mergeable
+{%- elif item.code.value == 'merge-uncheckable' -%}
+this task has no trusted accuracy check, so a merged commit could never become main; schedule no merge
 {%- elif item.code.value == 'expectation-unknown' -%}
 {{ quoted(item.subject) }} is not a workstream of this reply; name only workstreams this reply schedules
 {%- else -%}

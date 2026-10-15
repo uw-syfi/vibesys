@@ -104,7 +104,7 @@ _KINDS = {
 _REGISTRY = REGISTRY
 PLANNER_LABEL = "orchestrator"
 INPUT_THROUGHPUT = 50.0
-_CANDIDATE_THROUGHPUT = 100.0
+CANDIDATE_THROUGHPUT = 100.0
 
 
 def handoff_path(call: int) -> str:
@@ -135,6 +135,8 @@ class World(TypedDict, total=False):
 
     throughputs: dict[str, float]
     """The benchmark throughput of a candidate, by its revision's id; the default is 100."""
+    failing_benchmarks: set[str]
+    """The revision ids of candidates whose benchmark check fails."""
     verified: bool
     """Whether a parent revision still reproduces its retained content."""
     baseline: Literal["measured", "failed-workload", "no-evidence", "lost"]
@@ -145,6 +147,10 @@ class World(TypedDict, total=False):
     """The planner merges the mergeable candidates whenever no merge runs."""
     merger_answers: list[int]
     """How the merger answers its turns, in order (merged, merged, refused, failed); then any."""
+    merge_picks: list[int]
+    """Where each merge the planner asks for starts in the buildable hypotheses, the mergeable
+    ones first, taking two in turn: a merge may name one the prompt did not list as mergeable.
+    Once these run out, the planner merges the first two mergeable ones."""
 
 
 @dataclass
@@ -170,11 +176,15 @@ class Host:
     """For a kind of wait (its label), how many times core still refuses it."""
     refusal_code: RejectionCode = RejectionCode.BUDGET
     throughputs: dict[str, float] = field(default_factory=dict)
+    failing_benchmarks: set[str] = field(default_factory=set)
     verified: bool = True
     baseline: Literal["measured", "failed-workload", "no-evidence", "lost"] = "measured"
     handoff_writes_open: bool = False
     merging: bool = False
     merger_answers: list[int] = field(default_factory=list)
+    merge_picks: list[int] = field(default_factory=list)
+    unlisted_merges: int = 0
+    """The merges asked for that named a candidate the prompt did not list as mergeable."""
     merger_sessions: dict[str, set[str]] = field(default_factory=dict)
     """The sessions the merger turns ran in, by merge ID."""
     _merges: int = 0
@@ -290,14 +300,23 @@ class Host:
                 self.run.lose(asked)
 
     def _merge_entries(self, asked: Asked) -> list[dict[str, object]]:
-        """A merge of what is mergeable now, when the host merges and no merge runs."""
+        """A merge, when the host merges and no merge runs, of what ``merge_picks`` chooses."""
         context = asked.context
         assert isinstance(context, PlannerPrompt | PlannerCorrection)
-        if not self.merging or not context.mergeable or context.merge_running is not None:
+        if not self.merging or context.merge_running is not None:
+            return []
+        listed = [row.hypothesis_id for row in context.mergeable]
+        pool = list(dict.fromkeys([*listed, *(row.hypothesis_id for row in context.buildable)]))
+        if self.merge_picks and pool:
+            start = self.merge_picks.pop(0)
+            chosen = list(dict.fromkeys(pool[(start + n) % len(pool)] for n in range(2)))
+        else:
+            chosen = listed[:2]
+        if not chosen:
             return []
         self._merges += 1
-        ids = dict.fromkeys(row.hypothesis_id for row in context.mergeable)
-        return [merge(f"m{self._merges}", *list(ids)[:2])]
+        self.unlisted_merges += int(not set(chosen) <= set(listed))
+        return [merge(f"m{self._merges}", *chosen)]
 
     def _merger(self, asked: Asked, variant: int) -> None:
         request = asked.request
@@ -405,7 +424,9 @@ class Host:
                     workload_digest=plan.workload_digest,
                     environment_digest=plan.environment_digest,
                     provenance="trusted",
-                    status=self._status_of(stage.stage_id, is_input=is_input),
+                    status=ObservationStatus.FAILED
+                    if self._benchmark_fails(stage.stage_id, candidate, is_input=is_input)
+                    else self._status_of(stage.stage_id, is_input=is_input),
                 )
                 for index, stage in enumerate(plan.stages)
             )
@@ -417,6 +438,11 @@ class Host:
             status=ObservationStatus.FAILED if failed else ObservationStatus.SUCCEEDED,
         )
         self.run.answer(asked, MeasurementFinished(decision=asked.decision, result=result))
+
+    def _benchmark_fails(self, stage: str, candidate: RevisionRef, *, is_input: bool) -> bool:
+        """Whether the benchmark of a candidate the world was told fails it does."""
+        failing = candidate.revision_id.root in self.failing_benchmarks
+        return not is_input and failing and stage == "benchmark"
 
     def _status_of(self, stage: str, *, is_input: bool) -> ObservationStatus:
         broken = is_input and self.baseline == "failed-workload" and stage == "benchmark"
@@ -452,7 +478,7 @@ class Host:
             value = (
                 INPUT_THROUGHPUT
                 if ref.purpose == "baseline"
-                else self.throughputs.get(ref.candidate.revision_id.root, _CANDIDATE_THROUGHPUT)
+                else self.throughputs.get(ref.candidate.revision_id.root, CANDIDATE_THROUGHPUT)
             )
             metrics = (MetricRow(name="throughput", value=value, direction="max", unit="tokens/s"),)
         return EvidenceReading(

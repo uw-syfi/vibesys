@@ -1,8 +1,8 @@
 """The run's main revision: where new work starts, and what merges move it.
 
 Main starts at the run's input. Only a merge workstream moves it: when the merger's commit
-passed the trusted accuracy check, main becomes that commit; a refusal, a failed check or a lost
-merge leaves it where it was. Each move bumps main's generation, which tells the search that a
+passed the trusted accuracy check and measures no worse than main, main becomes that commit; a
+refusal, a failed check, a regression or a lost merge leaves it where it was. Each move bumps main's generation, which tells the search that a
 hypothesis started on an older main should rebase. `MainLine` is folded by the run record from
 finished merge workstreams and read by planning; like the record, it is rebuilt by replay.
 """
@@ -20,8 +20,36 @@ from vibesys.orchestration.dynamic.search._values import (
     MainMeasurement,
     MergeOutcome,
     MergeRecord,
+    ViolationCode,
 )
 from vs_core.api.search import EvidenceKind, RevisionRef, TaskTerms
+
+
+def checkable(terms: TaskTerms) -> bool:
+    """Whether the task has a trusted accuracy check, without which main can never move."""
+    return terms.accuracy_stage is not None and terms.accuracy_stage in terms.measured
+
+
+@dataclass(frozen=True)
+class MergeOptions:
+    """Which candidates a merge may name now, as `MainLine.options` decides for prompt and checks.
+
+    ``rows`` are the mergeable candidates the planner is shown; ``barred`` names, for each other
+    latest verified candidate, the rule it breaks. A hypothesis in neither is not buildable.
+    """
+
+    checkable: bool = False
+    """Whether the task can check a merge at all (see `checkable`)."""
+    rows: tuple[MergeableRow, ...] = ()
+    barred: tuple[tuple[str, ViolationCode], ...] = ()
+
+    def bar(self, hypothesis_id: str) -> ViolationCode | None:
+        """The rule ``hypothesis_id``'s latest verified candidate breaks as a merge candidate."""
+        return dict(self.barred).get(hypothesis_id)
+
+    def mergeable(self, hypothesis_id: str) -> bool:
+        """Whether a merge may name ``hypothesis_id`` now."""
+        return any(row.hypothesis_id == hypothesis_id for row in self.rows)
 
 
 @dataclass
@@ -55,30 +83,39 @@ class MainLine:
         seen = candidates.reading(self.baseline)
         return None if seen is None else seen.benchmark_passed
 
-    def mergeable(
+    def options(
         self, offered: tuple[ParentOption, ...], terms: TaskTerms, merge_ids: frozenset[str]
-    ) -> tuple[MergeableRow, ...]:
-        """The latest buildable candidates that pass accuracy and beat main's latest measurement.
+    ) -> MergeOptions:
+        """Which candidates a merge may name now: the one rule the prompt and validation share.
 
-        A candidate a merge already brought into main, and a merged main itself, are not listed.
+        Only the latest verified candidate of a hypothesis is judged; an older revision is not a
+        merge candidate at all. Every offered candidate already passed the trusted accuracy check. On a task without a trusted accuracy check nothing is mergeable,
+        since main could never move.
         """
+        if not checkable(terms):
+            return MergeOptions(checkable=False)
         space = candidates.space_of(terms)
         main = candidates.measurement(self.headline())
-        rows = []
+        rows: list[MergeableRow] = []
+        barred: list[tuple[str, ViolationCode]] = []
         for item in offered:
+            if not item.latest_verified:
+                continue
             snapshot = item.snapshot
             benchmark = snapshot.benchmark
             headline = None if benchmark is None else benchmark.headline()
             key = (snapshot.hypothesis_id, snapshot.revision.revision_id.root)
-            if (
-                not item.latest_verified
-                or snapshot.hypothesis_id in merge_ids
-                or key in self.merged
-                or not snapshot.accuracy.passed
-                or not candidates.improves_on(
-                    candidates.measurement(headline), main, space=space, when_input_unmeasured=True
-                )
+            bar: ViolationCode | None = None
+            if snapshot.hypothesis_id in merge_ids:
+                bar = ViolationCode.MERGE_CANDIDATE_IS_MAIN
+            elif key in self.merged:
+                bar = ViolationCode.MERGE_CANDIDATE_MERGED
+            elif not candidates.improves_on(
+                candidates.measurement(headline), main, space=space, when_input_unmeasured=True
             ):
+                bar = ViolationCode.MERGE_CANDIDATE_NOT_BETTER
+            if bar is not None:
+                barred.append((snapshot.hypothesis_id, bar))
                 continue
             rows.append(
                 MergeableRow(
@@ -87,29 +124,48 @@ class MainLine:
                     metric=headline,
                 )
             )
-        return tuple(rows)
+        return MergeOptions(checkable=True, rows=tuple(rows), barred=tuple(barred))
 
     def finished(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord:
-        """Fold a finished merge workstream: move main when its commit is sound, record it."""
+        """Fold a finished merge workstream: move main when its commit is sound, record it.
+
+        Main moves only to a retained commit that passed the trusted accuracy check, whose
+        headline metric is not worse than main's and that fails no benchmark check main passed.
+        A commit that passed accuracy but measures worse is recorded as regressed and main stays.
+        """
         start = done.start
         report = done.merge
         accuracy = reading_of(done.evidence.readings, EvidenceKind.CORRECTNESS)
         benchmark = reading_of(done.evidence.readings, EvidenceKind.BENCHMARK)
         settlement = done.settlement
-        sound = (
+        accuracy_passed = None if accuracy is None else accuracy.passed
+        benchmark_passed = None if benchmark is None else benchmark.passed
+        metrics = () if benchmark is None else benchmark.metrics
+        main = self.headline()
+        committed = (
             report is not None
             and report.outcome is MergeOutcome.MERGED
             and done.failure is None
             and settlement is not None
             and settlement.retention == "candidate"
             and settlement.candidate is not None
+            and accuracy_passed is True
         )
-        outcome = MergeOutcome.MERGED if sound else MergeOutcome.FAILED
+        regressed = committed and self._regresses(
+            main, metrics, benchmark_passed=benchmark_passed, terms=terms
+        )
+        sound = committed and not regressed
         failure = done.failure
         if report is not None and report.outcome is MergeOutcome.REFUSED:
             outcome = MergeOutcome.REFUSED
-        elif not sound and failure is None:
-            failure = Failure(kind=FailureKind.MERGE_UNSOUND)
+        elif sound:
+            outcome, failure = MergeOutcome.MERGED, None
+        else:
+            outcome = MergeOutcome.FAILED
+            if regressed:
+                failure = Failure(kind=FailureKind.MERGE_REGRESSED)
+            elif failure is None:
+                failure = Failure(kind=FailureKind.MERGE_UNSOUND)
         record = MergeRecord(
             merge_id=start.plan.work_id,
             sequence=start.sequence,
@@ -119,14 +175,16 @@ class MainLine:
             summary="" if report is None else report.summary,
             reason="" if report is None else report.reason,
             revision=None if report is None else report.revision,
-            accuracy_passed=None if accuracy is None else accuracy.passed,
-            benchmark_passed=None if benchmark is None else benchmark.passed,
-            metrics=() if benchmark is None else benchmark.metrics,
-            failure=None if outcome is MergeOutcome.MERGED else failure,
+            accuracy_passed=accuracy_passed,
+            benchmark_passed=benchmark_passed,
+            metrics=metrics,
+            main_metrics=() if main is None or not committed else (main,),
+            main_benchmark_passed=self._benchmark_passed() if committed else None,
+            failure=failure,
         )
         self.merges.append(record)
         if sound and settlement is not None and settlement.candidate is not None:
-            self._advance(record, settlement.candidate, terms)
+            self._advance(record, settlement.candidate)
             if settlement.eligible:
                 self.rounds.append(
                     candidates.EligibleRound(
@@ -139,25 +197,34 @@ class MainLine:
                 )
         return record
 
-    def _advance(self, record: MergeRecord, revision: RevisionRef, terms: TaskTerms) -> None:
-        """Move main to a sound merged commit, and say whether it measures worse than before."""
-        previous = self.headline()
-        new = record.metrics[0] if record.metrics else None
-        worse = previous is not None and candidates.improves_on(
-            candidates.measurement(previous),
+    def _regresses(
+        self,
+        main: MetricRow | None,
+        metrics: tuple[MetricRow, ...],
+        *,
+        benchmark_passed: bool | None,
+        terms: TaskTerms,
+    ) -> bool:
+        """Whether a commit measures worse than main beyond noise, or fails a check main passed."""
+        new = metrics[0] if metrics else None
+        worse = main is not None and candidates.improves_on(
+            candidates.measurement(main),
             candidates.measurement(new),
             space=candidates.space_of(terms),
             when_input_unmeasured=False,
         )
-        lost_check = record.benchmark_passed is False and self._benchmark_passed() is True
+        lost_check = benchmark_passed is not True and self._benchmark_passed() is True
+        return worse or lost_check
+
+    def _advance(self, record: MergeRecord, revision: RevisionRef) -> None:
+        """Move main to a sound merged commit."""
         self.measurement = MainMeasurement(
             revision=revision,
             merge_id=record.merge_id,
             accuracy_passed=record.accuracy_passed,
             benchmark_passed=record.benchmark_passed,
             metrics=record.metrics,
-            previous=() if previous is None else (previous,),
-            regressed=worse or lost_check,
+            previous=record.main_metrics,
         )
         self.revision = revision
         self.generation += 1

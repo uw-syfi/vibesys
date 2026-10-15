@@ -604,9 +604,7 @@ def core_policy_context() -> dict[str, object]:
         ),
         # The run's main and its merges (`MergePrompt` and the planner's main fields).
         "main_revision": revision,
-        "main_measurement": MainMeasurement(
-            revision=revision, merge_id="m1", accuracy_passed=True, regressed=True
-        ),
+        "main_measurement": MainMeasurement(revision=revision, merge_id="m1", accuracy_passed=True),
         "merge_running": "m2",
         "mergeable": (MergeableRow(hypothesis_id="h1", revision=revision),),
         "merges": (

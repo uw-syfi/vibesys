@@ -5,7 +5,7 @@ correction can quote it from a template. Validation never raises: it splits a po
 entries that may be scheduled and the violations that explain the rest.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
@@ -18,6 +18,7 @@ from vibesys.orchestration.dynamic.models import (
     WorkstreamPlan,
     planned_id,
 )
+from vibesys.orchestration.dynamic.search._main import MergeOptions
 from vibesys.orchestration.dynamic.search._parents import ParentOption
 from vibesys.orchestration.dynamic.search._values import (
     Alternative,
@@ -75,7 +76,8 @@ class PlanLedger:
     """What validation reads of the search: hypotheses, what is running and which IDs are taken.
 
     ``merge_ids`` are the IDs merges were scheduled under; ``merging`` says a merge is running or
-    accepted and not yet started, so another one would start from a main about to move.
+    accepted and not yet started, so another one would start from a main about to move;
+    ``merge_options`` says which candidates a merge may name, by the rule the prompt lists them by.
     """
 
     hypotheses: tuple[HypothesisRecord, ...]
@@ -83,6 +85,7 @@ class PlanLedger:
     profile_ids: frozenset[str]
     merge_ids: frozenset[str] = frozenset()
     merging: bool = False
+    merge_options: MergeOptions = field(default_factory=MergeOptions)
 
     def hypothesis(self, identifier: str) -> HypothesisRecord | None:
         """The record of a hypothesis ID, if one exists."""
@@ -232,13 +235,20 @@ def _merge_violation(
     *,
     merging: bool,
 ) -> PlanViolation | None:
-    """A merge needs a new ID, no other merge under way, and distinct buildable candidates."""
+    """A merge needs a new ID, no other merge under way, and distinct mergeable candidates.
+
+    A candidate is mergeable by the rule `MergeOptions` holds, which also lists them in the
+    planning prompt, so a merge the prompt does not offer is never scheduled.
+    """
     path: tuple[str | int, ...] = ("workstreams", position)
     used = {item.hypothesis_id for item in ledger.hypotheses} | ledger.profile_ids
     if plan.merge_id in used | ledger.merge_ids:
         return PlanViolation(
             path=(*path, "merge_id"), code=ViolationCode.MERGE_ID_USED, subject=plan.merge_id
         )
+    options = ledger.merge_options
+    if not options.checkable:
+        return PlanViolation(path=(*path, "kind"), code=ViolationCode.MERGE_UNCHECKABLE)
     if merging:
         return PlanViolation(path=(*path, "kind"), code=ViolationCode.MERGE_IN_FLIGHT)
     seen: set[str] = set()
@@ -249,12 +259,14 @@ def _merge_violation(
                 path=field, code=ViolationCode.MERGE_CANDIDATE_REPEATED, subject=candidate
             )
         seen.add(candidate)
-        if not any(
+        if options.mergeable(candidate):
+            continue
+        code = options.bar(candidate)
+        if code is None or not any(
             item.snapshot.hypothesis_id == candidate and item.latest_verified for item in offered
         ):
-            return PlanViolation(
-                path=field, code=ViolationCode.PARENT_NOT_BUILDABLE, subject=candidate
-            )
+            code = ViolationCode.PARENT_NOT_BUILDABLE
+        return PlanViolation(path=field, code=code, subject=candidate)
     return None
 
 

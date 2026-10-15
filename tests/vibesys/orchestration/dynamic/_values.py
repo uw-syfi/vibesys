@@ -273,11 +273,14 @@ def portfolio(
 
 
 @st.composite
-def planner_entries(draw: st.DrawFn) -> WorkstreamPlan | ProfileDecision:
-    """An implement or profile entry over a small ID space, with parents drawn from it too."""
+def planner_entries(draw: st.DrawFn) -> WorkstreamPlan | ProfileDecision | MergePlan:
+    """An implement, profile or merge entry over a small ID space, with parents drawn from it too."""
     identifier = draw(IDS)
-    if draw(st.booleans()):
+    kind = draw(st.sampled_from(["implement", "profile", "merge"]))
+    if kind == "profile":
         return profile_entry(identifier, target_hypothesis_id=draw(st.none() | IDS))
+    if kind == "merge":
+        return merge_entry(identifier, *draw(st.lists(IDS, min_size=1, max_size=3)))
     return implement_entry(
         identifier,
         continue_hypothesis=draw(st.booleans()),
@@ -342,6 +345,15 @@ def finished_profile(identifier: str, sequence: int) -> FinishedWork:
     return FinishedWork(
         sequence=sequence,
         plan=WorkPlan(kind=WorkKind.PROFILE, work_id=identifier, question="q"),
+        parent=BASE,
+    )
+
+
+def finished_merge(identifier: str, sequence: int) -> FinishedWork:
+    """A merge workstream that ended."""
+    return FinishedWork(
+        sequence=sequence,
+        plan=WorkPlan(kind=WorkKind.MERGE, work_id=identifier, candidates=("a",)),
         parent=BASE,
     )
 

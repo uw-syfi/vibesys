@@ -213,7 +213,7 @@ class RunRecord:
             main=self.main.revision,
             main_measurement=self.main.measurement,
             merges=tuple(self.main.merges),
-            mergeable=self.main.mergeable(offered, self.terms, self._merge_ids()),
+            merge_options=self.main.options(offered, self.terms, self._merge_ids()),
             offer=ProfileOffer(
                 fields=tuple(ProfileField(item) for item in self.terms.profile_fields)
             )

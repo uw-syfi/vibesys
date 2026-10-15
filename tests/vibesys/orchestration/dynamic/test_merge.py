@@ -2,8 +2,8 @@
 
 Main starts at the run's input. A merge workstream has a new merger session merge candidates on
 a checkout of main; its commit is measured with the trusted evaluations, and main moves to it
-when it passes accuracy. A refusal, a failed turn or a commit that fails accuracy leaves main
-where it was. These tests play the search under a fake host, live and with restarts: generated
+when it passes accuracy and measures no worse than main. A refusal, a failed turn, a commit that
+fails accuracy or one that regresses leaves main where it was. These tests play the search under a fake host, live and with restarts: generated
 stories in which the planner merges whatever is mergeable, and named stories for each outcome.
 """
 
@@ -14,7 +14,15 @@ from typing import Unpack
 
 from hypothesis import event, given, note, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, Host, World, begin, config
+from tests.vibesys.orchestration.dynamic._host import (
+    CANDIDATE_THROUGHPUT,
+    INPUT_THROUGHPUT,
+    PLANNER_LABEL,
+    Host,
+    World,
+    begin,
+    config,
+)
 from tests.vibesys.orchestration.dynamic._replies import implement, merge, merged, plan_reply
 from tests.vibesys.orchestration.dynamic._slots import (
     implement_and_judge,
@@ -29,6 +37,7 @@ from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import MergeResult
 from vibesys.orchestration.dynamic.search.api import (
+    FailureKind,
     ImplementPrompt,
     MergeOutcome,
     MergePrompt,
@@ -55,6 +64,8 @@ MODES = across_restarts
 class MainWatch:
     """What the stories saw of main as the search published its record."""
 
+    throughputs: dict[str, float]
+    """The throughput the host measures for a candidate, by revision id (else the default)."""
     mains: list[RevisionRef] = field(default_factory=list)
     """Main at each publication, in order; the first is the run's input."""
     seen: set[int] = field(default_factory=set)
@@ -75,6 +86,7 @@ class MainWatch:
         assert moves <= len(merged_)
         others = [item for item in record.merges if item.outcome is not MergeOutcome.MERGED]
         assert all(item.revision not in self.mains for item in others if item.revision)
+        self._merges_kept_the_rule(record)
         for running in record.running:
             if running.sequence in self.seen:
                 continue
@@ -88,6 +100,33 @@ class MainWatch:
             if fresh:
                 # Scheduled in this turn of the root or the one before: main then or now.
                 assert running.parent in {before, record.main}, (running, before, record.main)
+
+    def _merges_kept_the_rule(self, record: RunSnapshot) -> None:
+        """Each merge named only mergeable candidates, and only a sound one moved main.
+
+        The rule is restated from the host's own numbers, not read from the search: a candidate
+        is no merged main, was not merged before, and measures above main; a merge that merged
+        passed accuracy and measures no lower than main before it.
+        """
+        merge_ids = {item.merge_id for item in record.merges} | {
+            item.plan.work_id for item in record.running if item.plan.kind is WorkKind.MERGE
+        }
+        main = INPUT_THROUGHPUT
+        merged: set[tuple[str, str]] = set()
+        for item in sorted(record.merges, key=lambda merge_: merge_.sequence):
+            for source in item.candidates:
+                root = source.revision.revision_id.root
+                assert source.hypothesis_id not in merge_ids, item
+                assert (source.hypothesis_id, root) not in merged, item
+                assert self.throughputs.get(root, CANDIDATE_THROUGHPUT) > main, (item, main)
+            if item.outcome is not MergeOutcome.MERGED:
+                continue
+            assert item.accuracy_passed is True, item
+            assert item.benchmark_passed is True, item
+            assert item.metrics, item
+            assert item.metrics[0].value >= main, (item, main)
+            main = item.metrics[0].value
+            merged |= {(s.hypothesis_id, s.revision.revision_id.root) for s in item.candidates}
 
 
 @MODES
@@ -105,6 +144,9 @@ class MainWatch:
                 st.sampled_from([f"c{n}" for n in range(1, 12)]), st.floats(10, 200), max_size=11
             ),
             "merger_answers": st.lists(st.integers(0, 3), max_size=4),
+            # Where each merge starts among the buildable hypotheses: it may name one that is
+            # not mergeable, which validation must refuse.
+            "merge_picks": st.lists(st.integers(0, 5), max_size=4),
         }
     ),
 )
@@ -121,7 +163,7 @@ def test_main_moves_only_through_a_merge_that_merged_and_new_work_starts_from_it
         restarting=restarting,
         **world,
     )
-    watch = MainWatch()
+    watch = MainWatch(throughputs=dict(world.get("throughputs", {})))
     try:
         play(host, story, check=lambda: watch.check(host.record))
     finally:
@@ -130,6 +172,7 @@ def test_main_moves_only_through_a_merge_that_merged_and_new_work_starts_from_it
     record = host.record
     outcomes = sorted({item.outcome.value for item in record.merges}) if record else []
     event(f"merge outcomes: {outcomes}")
+    event(f"asked for a merge of an unlisted candidate: {host.unlisted_merges > 0}")
     # Each merge ran in its own new session: no session served two merges.
     sessions = [session for found in host.merger_sessions.values() for session in found]
     assert len(sessions) == len(set(sessions)), host.merger_sessions
@@ -216,7 +259,7 @@ def test_a_merge_that_merged_moves_main_and_the_next_workstream_starts_from_it(
     assert after.main_revision == main
     assert after.main_measurement is not None
     assert after.main_measurement.merge_id == "m1"
-    assert not after.main_measurement.regressed
+    assert [row.value for row in after.main_measurement.previous] == [50.0]
     assert after.mergeable == ()  # h1 is in main now, and nothing else beats it
     (record,) = after.merges
     assert record.outcome is MergeOutcome.MERGED
@@ -264,21 +307,45 @@ def test_a_merge_whose_turn_failed_leaves_main_unchanged(*, restarting: bool) ->
 
 
 @MODES
-def test_a_merged_commit_that_measures_worse_moves_main_and_is_reported_as_a_regression(
+def test_a_merged_commit_that_measures_worse_leaves_main_and_is_reported_as_a_regression(
     *, restarting: bool
 ) -> None:
     host = _first_candidate(restarting=restarting, throughputs={"c1": 300.0, "c2": 20.0})
     before = _plan(host, merge("m1", "h1"))
     _merge(host, merged(), "c2")
     after = _plan(host, implement("h2"))
-    assert after.main_revision == RevisionRef.of_git_commit("c2") != before.main_revision
-    measured = after.main_measurement
-    assert measured is not None
-    assert measured.accuracy_passed
-    assert measured.regressed  # 20 is worse than main before the merge (the input's 50)
-    assert [row.value for row in measured.previous] == [50.0]
+    assert after.main_revision == before.main_revision == before.base_revision
+    assert after.main_measurement is None
+    (record,) = after.merges
+    assert record.outcome is MergeOutcome.FAILED
+    assert record.failure is not None
+    assert record.failure.kind is FailureKind.MERGE_REGRESSED
+    assert record.accuracy_passed
+    assert [row.value for row in record.metrics] == [20.0]
+    assert [row.value for row in record.main_metrics] == [50.0]  # the input's, main then
+    assert [row.hypothesis_id for row in after.mergeable] == ["h1"]  # not merged: still offered
     text = " ".join(render(PromptTemplate.PORTFOLIO, after).split())
-    assert "Main regressed with that merge" in text
+    assert "Main regressed with that merge, so main did not move" in text
+    _start(host)
+    started = turn_about(host, "implementer", "h2").context
+    assert isinstance(started, ImplementPrompt)
+    assert started.parent_revision == before.base_revision
+
+
+@MODES
+def test_a_merged_commit_that_fails_a_benchmark_check_main_passed_leaves_main(
+    *, restarting: bool
+) -> None:
+    host = _first_candidate(restarting=restarting, failing_benchmarks={"c2"})
+    _plan(host, merge("m1", "h1"))
+    _merge(host, merged(), "c2")
+    after = _plan(host, implement("h2"))
+    assert after.main_revision == after.base_revision
+    (record,) = after.merges
+    assert record.failure is not None
+    assert record.failure.kind is FailureKind.MERGE_REGRESSED
+    assert record.benchmark_passed is not True
+    assert record.main_benchmark_passed is True
 
 
 @MODES

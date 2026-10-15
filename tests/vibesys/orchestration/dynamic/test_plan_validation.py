@@ -9,10 +9,14 @@ accepted fits the record, and the accepted entries alone always make a valid pla
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from tests.vibesys.orchestration.dynamic._host import TERMS
 from tests.vibesys.orchestration.dynamic._values import (
+    BASE,
+    finished_merge,
     finished_profile,
     hypothesis_record,
     implement_entry,
@@ -26,6 +30,7 @@ from tests.vibesys.orchestration.dynamic._values import (
 )
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
+from vibesys.metrics import MetricRow
 from vibesys.orchestration.dynamic.models import (
     PlannerHypothesisUpdate,
     PortfolioPlan,
@@ -34,6 +39,7 @@ from vibesys.orchestration.dynamic.models import (
 )
 from vibesys.orchestration.dynamic.search.api import (
     HypothesisRecord,
+    MainMeasurement,
     ParentSnapshot,
     PlanCheck,
     ViolationCode,
@@ -42,6 +48,9 @@ from vibesys.orchestration.dynamic.search.api import (
     validate,
 )
 from vs_sim.api.testing import examples
+
+if TYPE_CHECKING:
+    from vs_core.api.search import TaskTerms
 
 CAPACITY = 4
 
@@ -55,11 +64,18 @@ class Record:
     profiles: list[str] = field(default_factory=list)
     parents: list[ParentSnapshot] = field(default_factory=list)
     offer: ProfileOffer | None = None
+    merges: list[str] = field(default_factory=list)
+    """The IDs of finished merges; a parent named by one is a merged main."""
+    merged: list[tuple[str, str]] = field(default_factory=list)
+    """The (hypothesis, revision) candidates a merge brought into main."""
+    main_value: float | None = None
+    """Main's measured headline throughput; None leaves main at the input, which has none."""
+    terms: TaskTerms = TERMS
 
 
 def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> PlanCheck:
     """Validate ``plan`` against a run record set up as ``record`` says."""
-    run = run_record()
+    run = run_record(terms=record.terms)
     for item in record.hypotheses:
         run.hypotheses[item.hypothesis_id] = item
     run.accepted.extend(
@@ -69,6 +85,13 @@ def check(plan: PortfolioPlan, record: Record, capacity: int = CAPACITY) -> Plan
     run.finished_work.extend(
         finished_profile(identifier, index) for index, identifier in enumerate(record.profiles, 90)
     )
+    run.finished_work.extend(
+        finished_merge(identifier, index) for index, identifier in enumerate(record.merges, 80)
+    )
+    run.main.merged = set(record.merged)
+    if record.main_value is not None:
+        row = MetricRow(name="throughput", value=record.main_value, direction="max")
+        run.main.measurement = MainMeasurement(revision=BASE, merge_id="m0", metrics=(row,))
     run.parents = tuple(record.parents)
     world = run.world()
     return validate(plan, world.ledger, run.offered(), capacity=capacity, offer=record.offer)
@@ -92,6 +115,7 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
         "a", HypothesisOutcome.INCONCLUSIVE, strategy=HypothesisStrategy.ABANDONED
     )
     parented = Record(parents=[GOOD_PARENT])
+    unchecked = TERMS.model_copy(update={"accuracy_stage": None})
     unsupported = ProfileOffer(fields=())
     return {
         ViolationCode.OVER_CAPACITY: (
@@ -204,6 +228,26 @@ def _scenarios() -> dict[ViolationCode, Scenario]:
             parented,
             "workstreams.0.candidates.1",
         ),
+        ViolationCode.MERGE_CANDIDATE_IS_MAIN: (
+            portfolio(merge_entry("m2", "m1")),
+            Record(parents=[snapshot("m1", 1, value=10.0)], merges=["m1"]),
+            "workstreams.0.candidates.0",
+        ),
+        ViolationCode.MERGE_CANDIDATE_MERGED: (
+            portfolio(merge_entry("m", "b")),
+            Record(parents=[GOOD_PARENT], merged=[("b", "b-r1")]),
+            "workstreams.0.candidates.0",
+        ),
+        ViolationCode.MERGE_CANDIDATE_NOT_BETTER: (
+            portfolio(merge_entry("m", "b")),
+            Record(parents=[GOOD_PARENT], main_value=10.0),
+            "workstreams.0.candidates.0",
+        ),
+        ViolationCode.MERGE_UNCHECKABLE: (
+            portfolio(merge_entry("m", "b")),
+            Record(parents=[GOOD_PARENT], terms=unchecked),
+            "workstreams.0.kind",
+        ),
         ViolationCode.EXPECTATION_UNKNOWN: (
             portfolio(implement_entry("n"), expected=("n", "z")),
             Record(),
@@ -276,7 +320,44 @@ def records(draw: st.DrawFn) -> Record:
         for n in range(1, draw(st.integers(0, 3)) + 1)
     ]
     offer = draw(st.none() | st.just(ProfileOffer(fields=tuple(ProfileField))))
-    return Record(hypotheses, running, profiles, parents, offer)
+    left = [item for item in spare if item not in profiles]
+    merges = draw(st.lists(st.sampled_from(left), unique=True, max_size=2)) if left else []
+    revisions = [(item.hypothesis_id, item.revision.revision_id.root) for item in parents]
+    merged = draw(st.lists(st.sampled_from(revisions), unique=True)) if revisions else []
+    return Record(
+        hypotheses,
+        running,
+        profiles,
+        parents,
+        offer,
+        merges=merges,
+        merged=merged,
+        main_value=draw(st.none() | st.sampled_from([1.0, 5.0, 9.0])),
+        terms=draw(st.sampled_from([TERMS, TERMS.model_copy(update={"accuracy_stage": None})])),
+    )
+
+
+def _mergeable(record: Record) -> set[str]:
+    """The hypotheses a merge may name, by the rule restated independently of the search.
+
+    A candidate is a hypothesis's latest offered revision; it is mergeable when the task has an
+    accuracy check, it is no merged main, it was not merged, and it beats main's throughput.
+    """
+    if record.terms.accuracy_stage is None:
+        return set()
+    latest: dict[str, ParentSnapshot] = {}
+    for item in record.parents:
+        known = latest.get(item.hypothesis_id)
+        if known is None or item.submission_index > known.submission_index:
+            latest[item.hypothesis_id] = item
+    found = set()
+    for identifier, item in latest.items():
+        value = item.benchmark.metrics[0].value if item.benchmark else None
+        better = record.main_value is None or (value is not None and value > record.main_value)
+        merged = (identifier, item.revision.revision_id.root) in record.merged
+        if identifier not in record.merges and not merged and better:
+            found.add(identifier)
+    return found
 
 
 def _entry_positions(result: PlanCheck) -> set[int]:
@@ -298,7 +379,10 @@ def test_what_is_accepted_fits_the_record_and_alone_makes_a_valid_plan(
     accepted = [item.work_id for item in result.accepted]
     assert len(accepted) == len(set(accepted)) <= capacity
     known = {item.hypothesis_id: item for item in record.hypotheses}
+    mergeable = _mergeable(record)
     for item in result.accepted:
+        if item.kind is WorkKind.MERGE:
+            assert set(item.candidates) <= mergeable, (item.candidates, mergeable)
         if item.kind is WorkKind.PROFILE:
             assert record.offer is not None
             assert item.work_id not in known

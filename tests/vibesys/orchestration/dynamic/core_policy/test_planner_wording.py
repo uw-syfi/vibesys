@@ -162,7 +162,12 @@ def violation_facts(
             }
         case ViolationCode.PROFILE_FIELDS_UNSUPPORTED:
             named |= {"fields": (f"{word}f",), "supplied": (f"{word}g",)}
-        case ViolationCode.CONTINUATION_HAS_PARENT | ViolationCode.PROFILE_NOT_OFFERED:
+        case (
+            ViolationCode.CONTINUATION_HAS_PARENT
+            | ViolationCode.PROFILE_NOT_OFFERED
+            | ViolationCode.MERGE_IN_FLIGHT
+            | ViolationCode.MERGE_UNCHECKABLE
+        ):
             pass
         case _:
             named["subject"] = f"{word}s"
@@ -180,7 +185,12 @@ def facts_named(code: ViolationCode, word: str) -> list[str]:
             return [f"'{word}v'", f"'{word}s'", f"('{word}h', '{word}r')"]
         case ViolationCode.PROFILE_FIELDS_UNSUPPORTED:
             return [f"{word}f", f"{word}g"]
-        case ViolationCode.CONTINUATION_HAS_PARENT | ViolationCode.PROFILE_NOT_OFFERED:
+        case (
+            ViolationCode.CONTINUATION_HAS_PARENT
+            | ViolationCode.PROFILE_NOT_OFFERED
+            | ViolationCode.MERGE_IN_FLIGHT
+            | ViolationCode.MERGE_UNCHECKABLE
+        ):
             return []
         case _:
             return [f"'{word}s'"]
