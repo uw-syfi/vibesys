@@ -32,6 +32,7 @@ import sys
 
 # lint-waiver: LW-007062 [TC003]; Pydantic resolves this dataclass field annotation at runtime
 from collections.abc import Mapping  # noqa: TC003
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from enum import StrEnum
 from functools import partial
@@ -61,6 +62,7 @@ from vs_runtime._environment_startup import (
     EnvironmentStartup,
     EnvironmentStartupSink,
     EnvironmentStartupStage,
+    StartupOutputOpener,
 )
 from vs_runtime._image_features import image_features
 from vs_runtime._model_artifacts import read_model_metadata
@@ -125,7 +127,7 @@ from vs_sandbox.api.symlink_mounts import (
     find_mount_root,
     symlink_lifecycle_hooks,
 )
-from vs_sim.api import CloseOnce, ReleaseStack
+from vs_sim.api import DISCARD, CloseOnce, ReleaseStack
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
@@ -139,6 +141,7 @@ container path, so this constant and the resource declaration are the single
 source of truth an environment consults."""
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from contextlib import AbstractContextManager
 
     from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
     from vs_evaluation.api import ProfileField
@@ -148,10 +151,11 @@ if TYPE_CHECKING:
         CommandRunner,
         ComputeBackendImpl,
         DockerCli,
+        FeatureRef,
         WorkspaceSandbox,
     )
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, OutputSink
 
 
 @dataclass(frozen=True)
@@ -416,6 +420,10 @@ class RunEnvironmentRequest:
     #: Where a container environment reports its startup stages and image
     #: build progress while it opens; ``None`` reports nothing.
     startup: EnvironmentStartupSink | None = None
+    #: Opens the stream each startup command (the agent image build, its
+    #: registry push, the container start) writes its raw output to, one per
+    #: command, closed when the command ends; ``None`` discards the output.
+    startup_output: StartupOutputOpener | None = None
 
 
 class _AgentPathSandbox(Protocol):
@@ -792,6 +800,32 @@ def _image_build_progress(request: RunEnvironmentRequest) -> BuildProgressSink |
     return partial(_report_startup, request, EnvironmentStartupStage.BUILDING_IMAGE)
 
 
+_CONTAINER_START_COMMAND = "docker run"
+_AGENT_IMAGE_PUSH_COMMAND = "docker push agent image"
+
+
+def _agent_image_build_command(base_image: str) -> str:
+    """Describe the agent image build on *base_image* for its output stream."""
+    return f"docker build agent image on {base_image}"
+
+
+def _startup_output(
+    request: RunEnvironmentRequest, stage: EnvironmentStartupStage, command: str
+) -> AbstractContextManager[OutputSink]:
+    """Open the stream *command*'s output is written to, or discard it when none is asked for."""
+    if request.startup_output is None:
+        return nullcontext(DISCARD)
+    return request.startup_output(stage, command)
+
+
+def _starting_container(request: RunEnvironmentRequest) -> AbstractContextManager[OutputSink]:
+    """Report that the container starts, and open the stream its ``docker run`` writes to."""
+    _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
+    return _startup_output(
+        request, EnvironmentStartupStage.STARTING_CONTAINER, _CONTAINER_START_COMMAND
+    )
+
+
 class _OrphanReaper(Protocol):
     """End the agent processes and containers a dead run host left behind."""
 
@@ -893,20 +927,19 @@ class DockerEnvironment:
     ) -> RunEnvironmentSession:
         """Start the Docker sandbox and resolve candidate-facing paths."""
         sandbox = self.build_editor(request)
-        return SandboxSession.start(
-            sandbox=sandbox,
-            view=RunEnvironmentView(
-                paths=_isolated_paths(
-                    request,
-                    cast("_AgentPathSandbox", sandbox),
-                    evaluator_tools_root=SANDBOX_EVALUATOR_TOOLS_ROOT,
-                ),
-                prompt_notes=presentation.prompt_notes,
-                isolated=True,
-                cli_sandboxed=True,
-                env_kind="docker",
+        view = RunEnvironmentView(
+            paths=_isolated_paths(
+                request,
+                cast("_AgentPathSandbox", sandbox),
+                evaluator_tools_root=SANDBOX_EVALUATOR_TOOLS_ROOT,
             ),
+            prompt_notes=presentation.prompt_notes,
+            isolated=True,
+            cli_sandboxed=True,
+            env_kind="docker",
         )
+        with _starting_container(request) as output:
+            return SandboxSession.start(sandbox=sandbox, view=view, output=output)
 
     def build_editor(
         self,
@@ -917,7 +950,8 @@ class DockerEnvironment:
 
         Every environment whose agent runs in Docker opens its editor here, so
         the image, the CLI credentials, and the mounts come from one place.
-        *extras* is what an environment adds to the plain Docker editor.
+        *extras* is what an environment adds to the plain Docker editor. The
+        caller starts it inside :func:`_starting_container`.
         """
         extras = extras or EditorExtras()
         image_helpers = import_module("vs_agent.api.images")
@@ -940,18 +974,24 @@ class DockerEnvironment:
         # The task image, when a task has a Dockerfile, is built by the
         # headless entrypoint and arrives here as the backend image; only the
         # agent layer is applied on top of it.
-        container_image = image_helpers.agent_image(
-            _docker_backend_image(request),
-            features=image_features(toolchains),
-            command_runner=self.config.build_runner,
-            timeout=(
-                image_helpers.DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS
-                if self.config.image_build_timeout_seconds is None
-                else self.config.image_build_timeout_seconds
-            ),
-            on_progress=_image_build_progress(request),
-            clock=request.clock,
-        )
+        base_image = _docker_backend_image(request)
+        on_progress = _image_build_progress(request)
+        with _startup_output(
+            request, EnvironmentStartupStage.BUILDING_IMAGE, _agent_image_build_command(base_image)
+        ) as output:
+            container_image = image_helpers.agent_image(
+                base_image,
+                features=image_features(toolchains),
+                command_runner=self.config.build_runner,
+                timeout=(
+                    image_helpers.DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS
+                    if self.config.image_build_timeout_seconds is None
+                    else self.config.image_build_timeout_seconds
+                ),
+                on_progress=on_progress,
+                output=output,
+                clock=request.clock,
+            )
         workspace_root = _workspace_root(request, same_path=extras.same_path_workspace)
         resources, docker_symlinks = _container_mount_plan(
             request, same_path=extras.same_path_workspace
@@ -1003,7 +1043,6 @@ class DockerEnvironment:
             attach_accelerator=attach_accelerator,
             run_id=request.run_id,
         )
-        _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
         log(f"[docker] starting container with image {container_image}")
         return sandbox
 
@@ -1222,17 +1261,9 @@ class SkyPilotEnvironment(DockerEnvironment):
         try:
             bridge.start()
 
-            image_helpers = import_module("vs_agent.api.images")
-
-            container_image = image_helpers.agent_image(
-                _docker_backend_image(request),
-                features=image_features(evaluator_agent_toolchains(requirements)),
-                on_progress=_image_build_progress(request),
-                clock=request.clock,
-            )
-            container_image = _ensure_pushed_for_remote_backend(
-                container_image,
-                ensure_pushed=image_helpers.ensure_pushed,
+            container_image = _build_and_push_agent_image(
+                request,
+                image_features(evaluator_agent_toolchains(requirements)),
                 backend_label="SkyPilot",
             )
 
@@ -1271,8 +1302,8 @@ class SkyPilotEnvironment(DockerEnvironment):
                 attach_accelerator=False,
                 run_id=request.run_id,
             )
-            _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
-            start_sandbox(sandbox)
+            with _starting_container(request) as output:
+                start_sandbox(sandbox, output=output)
         except Exception:
             bridge.close()
             raise
@@ -1397,20 +1428,10 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         self._ensure_model_volume(request)
         self._ensure_draft_volume(request)
 
-        image_helpers = import_module("vs_agent.api.images")
-
         requirements = request.evaluator_requirements
-        container_image = image_helpers.agent_image(
-            _docker_backend_image(request),
-            features=image_features(
-                evaluator_agent_toolchains(requirements), _MODAL_EDITOR_PIP_EXTRAS
-            ),
-            on_progress=_image_build_progress(request),
-            clock=request.clock,
-        )
-        container_image = _ensure_pushed_for_remote_backend(
-            container_image,
-            ensure_pushed=image_helpers.ensure_pushed,
+        container_image = _build_and_push_agent_image(
+            request,
+            image_features(evaluator_agent_toolchains(requirements), _MODAL_EDITOR_PIP_EXTRAS),
             backend_label="Modal",
         )
 
@@ -1504,38 +1525,39 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                 runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
             ),
         )
-        _report_startup(request, EnvironmentStartupStage.STARTING_CONTAINER)
-        return SandboxSession.start(
-            sandbox=sandbox,
-            view=RunEnvironmentView(
-                paths=AgentPaths(
-                    objective=(
-                        agent_path_sandbox.agent_path(objective_document)
-                        if objective_document is not None
-                        else "OBJECTIVE.md"
+        with _starting_container(request) as output:
+            return SandboxSession.start(
+                sandbox=sandbox,
+                output=output,
+                view=RunEnvironmentView(
+                    paths=AgentPaths(
+                        objective=(
+                            agent_path_sandbox.agent_path(objective_document)
+                            if objective_document is not None
+                            else "OBJECTIVE.md"
+                        ),
+                        accuracy_command=_prefix_command(
+                            evaluator_prefix,
+                            evaluation.accuracy_command,
+                        ),
+                        benchmark_command=_prefix_command(
+                            evaluator_prefix,
+                            evaluation.benchmark_command,
+                        ),
+                        profiler_support=(
+                            request.profiler_support_name if request.profiler_support_path else None
+                        ),
                     ),
-                    accuracy_command=_prefix_command(
-                        evaluator_prefix,
-                        evaluation.accuracy_command,
-                    ),
-                    benchmark_command=_prefix_command(
-                        evaluator_prefix,
-                        evaluation.benchmark_command,
-                    ),
-                    profiler_support=(
-                        request.profiler_support_name if request.profiler_support_path else None
-                    ),
+                    prompt_notes=presentation.prompt_notes,
+                    isolated=True,
+                    cli_sandboxed=True,
+                    host_device_reselect=False,
+                    env_kind="modal",
+                    profile_execution="remote",
+                    deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
+                    framework_setup_timeout_seconds=setup_timeout_seconds,
                 ),
-                prompt_notes=presentation.prompt_notes,
-                isolated=True,
-                cli_sandboxed=True,
-                host_device_reselect=False,
-                env_kind="modal",
-                profile_execution="remote",
-                deployment_release_env_var="VIBESYS_RELEASE_MODAL_DEPLOYMENT",
-                framework_setup_timeout_seconds=setup_timeout_seconds,
-            ),
-        )
+            )
 
     def _ensure_model_volume(self, request: RunEnvironmentRequest) -> None:
         if self.model_volume or request.ref_dir is None:
@@ -1874,6 +1896,34 @@ def _cli_provider_env_and_auth_files(
 ) -> tuple[dict[str, str], list[tuple[str, str]]]:
     """Return the container env and staged auth copies for a CLI provider, if any."""
     return cli_provider_env_and_auth_files(request.agent_backend, request.cli_provider)
+
+
+def _build_and_push_agent_image(
+    request: RunEnvironmentRequest, features: tuple[FeatureRef, ...], *, backend_label: str
+) -> str:
+    """Build the agent image on the backend's base and push it for a remote Docker daemon.
+
+    The build and the push each write to a stream of their own, both under the
+    image-building stage. Returns the pullable digest reference.
+    """
+    image_helpers = import_module("vs_agent.api.images")
+    base_image = _docker_backend_image(request)
+    on_progress = _image_build_progress(request)
+    building = EnvironmentStartupStage.BUILDING_IMAGE
+    with _startup_output(request, building, _agent_image_build_command(base_image)) as output:
+        image_id = image_helpers.agent_image(
+            base_image,
+            features=features,
+            on_progress=on_progress,
+            output=output,
+            clock=request.clock,
+        )
+    with _startup_output(request, building, _AGENT_IMAGE_PUSH_COMMAND) as output:
+        return _ensure_pushed_for_remote_backend(
+            image_id,
+            ensure_pushed=partial(image_helpers.ensure_pushed, output=output),
+            backend_label=backend_label,
+        )
 
 
 def _ensure_pushed_for_remote_backend(

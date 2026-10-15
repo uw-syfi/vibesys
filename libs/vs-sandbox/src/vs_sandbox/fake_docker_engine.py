@@ -305,6 +305,7 @@ class FakeDockerEngine:
         self._signal_requests_unreadable = 0
         self._runs_lost_after_creating: list[bool] = []
         self._removals_lost = 0
+        self._pull_progress = ""
 
     def containers(self) -> tuple[FakeContainer, ...]:
         """Every container the daemon still holds, stopped ones included."""
@@ -329,6 +330,10 @@ class FakeDockerEngine:
         gave up waiting). The daemon has created the container either way.
         """
         self._runs_lost_after_creating = list(outcomes)
+
+    def pulls_on_run(self, progress: str) -> None:
+        """Make every later ``docker run`` print *progress* to stderr, as pulling its image does."""
+        self._pull_progress = progress
 
     def removals_lost(self, count: int) -> None:
         """Fault: the next *count* ``docker rm`` clients die by ``SIGKILL`` before the daemon acts.
@@ -465,7 +470,7 @@ class FakeDockerEngine:
             if self._runs_lost_after_creating.pop(0):
                 raise subprocess.TimeoutExpired(arguments, 0)
             return subprocess.CompletedProcess(arguments, 130, "", "")
-        return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", "")
+        return subprocess.CompletedProcess(arguments, 0, f"{identifier}\n", self._pull_progress)
 
     def _end(self, arguments: tuple[str, ...]) -> subprocess.CompletedProcess[str]:
         if arguments[1] == "rm" and self._removals_lost:
