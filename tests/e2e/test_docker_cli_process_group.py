@@ -22,7 +22,7 @@ from vs_sim.api import (
     SubprocessPipedProcessLauncher,
     UnixNetwork,
 )
-from vs_slurm.api import SlurmConfig, SlurmSshTransport
+from vs_slurm.api import SlurmConfig, SlurmSshTransport, slurm_transport_broker_policy
 
 if TYPE_CHECKING:
     import pytest
@@ -61,7 +61,9 @@ def test_slurm_broker_preserves_stdin_environment_cwd_and_complete_streams(
         transport_timeout_seconds=30,
     )
     broker = SlurmProcessBroker(
-        config, tmp_path / "broker.sock", local_roots=(tmp_path,), processes=OsProcesses()
+        slurm_transport_broker_policy(config, local_roots=(tmp_path,)),
+        tmp_path / "broker.sock",
+        processes=OsProcesses(),
     )
     broker.start()
     try:

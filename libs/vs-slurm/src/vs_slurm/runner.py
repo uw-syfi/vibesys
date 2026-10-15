@@ -38,6 +38,15 @@ from .config import (
     SlurmSshTransport,
     shell_join_with_port,
 )
+from .connector_protocol import (
+    MAX_CONNECTOR_RESPONSE_BYTES,
+    SlurmConnectorExecRequest,
+    SlurmConnectorGetRequest,
+    SlurmConnectorPutRequest,
+    SlurmConnectorRequest,
+    SlurmConnectorResponse,
+    SlurmConnectorSyncToRequest,
+)
 from .remote_operations import (
     RemoteOperationClaim,
     RemoteOperationEvidence,
@@ -1355,18 +1364,6 @@ class SlurmJobRunner:
         return match.group(1)
 
 
-_MAX_REPLY = 256 * 1024 * 1024  # bytes a connector may print for one request
-
-
-class _ConnectorResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    version: int
-    returncode: int
-    stdout: str
-    stderr: str
-
-
 class _Transport(Protocol):
     def exec(self, command: str) -> _TransportResponse: ...
 
@@ -1570,7 +1567,9 @@ class _ConnectorTransport(_ProcessTransport):
         self._config = config
 
     def exec(self, command: str) -> _TransportResponse:
-        return self._request({"version": 1, "operation": "exec", "command": command}, "exec")
+        return self._request(
+            SlurmConnectorExecRequest(version=1, operation="exec", command=command), "exec"
+        )
 
     def sync_to(
         self,
@@ -1581,53 +1580,54 @@ class _ConnectorTransport(_ProcessTransport):
         excludes: Sequence[str],
     ) -> None:
         self._request(
-            {
-                "version": 1,
-                "operation": "sync_to",
-                "local_dir": str(local),
-                "remote_dir": remote.as_posix(),
-                "delete": delete,
-                "excludes": list(excludes),
-            },
+            SlurmConnectorSyncToRequest(
+                version=1,
+                operation="sync_to",
+                local_dir=str(local.resolve()),
+                remote_dir=remote.as_posix(),
+                delete=delete,
+                excludes=tuple(excludes),
+            ),
             "sync_to",
         )
 
     def put(self, local: Path, remote: PurePosixPath) -> None:
         self._request(
-            {
-                "version": 1,
-                "operation": "put",
-                "local_path": str(local),
-                "remote_path": remote.as_posix(),
-            },
+            SlurmConnectorPutRequest(
+                version=1,
+                operation="put",
+                local_path=str(local.resolve()),
+                remote_path=remote.as_posix(),
+            ),
             "put",
         )
 
     def get(self, remote: PurePosixPath, local: Path, *, kind: Literal["file", "tree"]) -> None:
         self._request(
-            {
-                "version": 1,
-                "operation": "get",
-                "remote_path": remote.as_posix(),
-                "local_path": str(local),
-                "kind": kind,
-            },
+            SlurmConnectorGetRequest(
+                version=1,
+                operation="get",
+                remote_path=remote.as_posix(),
+                local_path=str(local.resolve()),
+                kind=kind,
+            ),
             "get",
         )
 
-    def _request(self, request: dict[str, object], operation: str) -> _TransportResponse:
+    def _request(self, request: SlurmConnectorRequest, operation: str) -> _TransportResponse:
         result = self._run(
             self._config.command,
             operation=operation,
-            stdin=json.dumps(request, separators=(",", ":")),
+            stdin=request.model_dump_json(),
         )
         source = f"connector {operation} response"
         response = decode_json(
-            result.stdout, _ConnectorResponse, source=source, max_bytes=_MAX_REPLY
+            result.stdout,
+            SlurmConnectorResponse,
+            source=source,
+            max_bytes=MAX_CONNECTOR_RESPONSE_BYTES,
         )
         if isinstance(response, Unreadable):
-            raise SlurmError.invalid_connector_response(operation)
-        if response.version != 1:
             raise SlurmError.invalid_connector_response(operation)
         if response.returncode != 0:
             raise SlurmError.transport_failed(operation, response.returncode)

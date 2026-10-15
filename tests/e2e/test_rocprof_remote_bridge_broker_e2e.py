@@ -16,18 +16,17 @@ import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import pytest
 from resources.profilers.rocprof.remote_bridge import RemoteCaptureBridge
 
 from vs_sandbox.api.slurm import SlurmCapturePlan, SlurmProcessBroker, write_slurm_capture_plan
 from vs_sim.api import MonotonicClock, OsProcesses
 from vs_sim.api.testing import HANG_GUARD_S, start_thread
-from vs_slurm.api import SlurmError, load_slurm_config
+from vs_slurm.api import SlurmError, load_slurm_config, slurm_transport_broker_policy
 from vs_slurm.fake_connector import JOB_ID, SUBMITTED_FILE, recorded_commands
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-    import pytest
 
 
 def _cancel() -> threading.Event:
@@ -51,8 +50,9 @@ class _Lifecycle:
     timeout_s: float = 30.0
 
 
+@pytest.mark.parametrize("transport", ["ssh", "connector"])
 def test_a_brokered_capture_from_a_candidate_workspace_reaches_the_scheduler(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, transport: str
 ) -> None:
     """Regression: every brokered capture failed before sbatch.
 
@@ -66,6 +66,15 @@ def test_a_brokered_capture_from_a_candidate_workspace_reaches_the_scheduler(
     program = f'["{sys.executable}", "-m", "vs_slurm.fake_connector", "{cluster}"]'
     program_tail = program.removesuffix("]")
     config_path = tmp_path / "slurm.toml"
+    transport_table = (
+        f"""kind = "ssh"
+host = "cluster"
+ssh_command = {program_tail}, "ssh"]
+rsync_command = {program_tail}, "rsync"]"""
+        if transport == "ssh"
+        else f"""kind = "connector"
+command = {program}"""
+    )
     config_path.write_text(
         f"""[slurm]
 name = "test-cluster"
@@ -73,10 +82,7 @@ remote_workspace_root = "/remote/runs"
 poll_interval_seconds = 0.01
 
 [slurm.transport]
-kind = "ssh"
-host = "cluster"
-ssh_command = {program_tail}, "ssh"]
-rsync_command = {program_tail}, "rsync"]
+{transport_table}
 
 [vibesys]
 remote_python = "/remote/venv/bin/python"
@@ -86,10 +92,10 @@ remote_python = "/remote/venv/bin/python"
     worktrees = tmp_path / "worktrees"
     workspace = worktrees / "candidate" / "workspace"
     workspace.mkdir(parents=True)
+    config = load_slurm_config(config_path)
     broker = SlurmProcessBroker(
-        load_slurm_config(config_path),
+        slurm_transport_broker_policy(config, local_roots=(worktrees, tmp_path / "cluster-state")),
         tmp_path / "broker.sock",
-        local_roots=(worktrees, tmp_path / "cluster-state"),
         processes=OsProcesses(),
     )
     broker.start()

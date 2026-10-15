@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import secrets
-import shlex
 import socketserver
 import threading
-from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, cast
 
 from vs_decode.api import Unreadable, decode_json
@@ -25,54 +23,15 @@ from vs_sim.api import (
     ProcessSpec,
     ProcessTimedOut,
 )
-from vs_slurm.api import SlurmConfig, SlurmSshTransport
+from vs_slurm.api import SlurmTransportBrokerPolicy, SlurmTransportRequestError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from pathlib import Path
 
     from vs_sim.api import Processes
 
-_SSH_SUFFIX_LENGTH = 3
-_RSYNC_OPERAND_COUNT = 2
-
-
-class SlurmProcessBrokerError(PermissionError):
-    """A caller requested transport access outside the configured destination."""
-
-    @classmethod
-    def invalid_capability(cls) -> SlurmProcessBrokerError:
-        """Reject an unknown broker capability."""
-        return cls("invalid Slurm transport capability")
-
-    @classmethod
-    def unauthorized_destination(cls) -> SlurmProcessBrokerError:
-        """Reject a destination other than the configured Slurm host."""
-        return cls("Slurm transport request has an unauthorized destination")
-
-    @classmethod
-    def unauthorized_executable(cls) -> SlurmProcessBrokerError:
-        """Reject a program outside the configured transport commands."""
-        return cls("Slurm transport executable is not authorized")
-
-    @classmethod
-    def malformed_rsync(cls) -> SlurmProcessBrokerError:
-        """Reject an rsync invocation outside the generated command shape."""
-        return cls("Slurm rsync request is malformed")
-
-    @classmethod
-    def unauthorized_options(cls) -> SlurmProcessBrokerError:
-        """Reject rsync options outside the staging contract."""
-        return cls("Slurm rsync options are not authorized")
-
-    @classmethod
-    def remote_path_denied(cls) -> SlurmProcessBrokerError:
-        """Reject remote paths outside the configured run namespace."""
-        return cls("Slurm rsync path is outside the configured namespace")
-
-    @classmethod
-    def local_path_denied(cls) -> SlurmProcessBrokerError:
-        """Reject host paths outside the declared run roots."""
-        return cls("Slurm rsync path is outside the run-owned roots")
+# Kept as the public broker spelling; authorization is owned by vs-slurm's transport policy.
+SlurmProcessBrokerError = SlurmTransportRequestError
 
 
 class _BrokerServer(socketserver.ThreadingUnixStreamServer):
@@ -114,29 +73,25 @@ def _parse_call(frame: bytes) -> ProcessCall:
 
 
 class SlurmProcessBroker:
-    """Execute one configured SSH transport without sharing host credentials."""
+    """Execute one policy-authorized Slurm transport without sharing host credentials."""
 
     def __init__(
         self,
-        config: SlurmConfig,
+        policy: SlurmTransportBrokerPolicy,
         socket_path: Path,
         *,
-        local_roots: Sequence[Path],
         processes: Processes,
     ) -> None:
-        """Bind the operator config, private socket, and allowed local roots.
+        """Bind the transport policy and private socket.
 
         ``processes`` runs each validated transport program with the host's credentials.
         """
-        transport = config.transport
-        if not isinstance(transport, SlurmSshTransport):
-            message = "Slurm process broker requires the SSH transport"
+        if not policy.available:
+            message = policy.unavailable_reason or "Slurm transport cannot be brokered"
             raise TypeError(message)
-        self._config = config
-        self._transport = transport
+        self._policy = policy
         self.socket_path = socket_path
         self.token = secrets.token_urlsafe(32)
-        self._local_roots = tuple(path.resolve() for path in local_roots)
         self._processes = processes
         self._server: _BrokerServer | None = None
         self._thread: threading.Thread | None = None
@@ -185,14 +140,15 @@ class SlurmProcessBroker:
     def execute(self, call: ProcessCall) -> ProcessReply:
         """Validate one request, then execute it with the host credential environment."""
         if not secrets.compare_digest(call.token, self.token):
-            raise SlurmProcessBrokerError.invalid_capability()
-        self._validate_argv(call.argv)
-        timeout = min(call.timeout, float(self._config.transport_timeout_seconds))
+            raise SlurmTransportRequestError.invalid_capability()
+        spec = ProcessSpec(call.argv, input=b"" if call.stdin is None else call.stdin.encode())
+        self._policy.authorize(spec)
+        timeout = min(call.timeout, self._policy.timeout_seconds)
         # As in vs_slurm's own transport, the program runs in its own process group:
         # Ctrl-C aimed at the run's terminal cannot kill an in-flight sbatch (its job
         # id would be lost) or the scancel a stopping gate requests.
         run = self._processes.run(
-            ProcessSpec(call.argv, input=b"" if call.stdin is None else call.stdin.encode()),
+            spec,
             timeout=timeout,
         )
         match run:
@@ -201,63 +157,14 @@ class SlurmProcessBroker:
                     returncode=returncode, stdout=stdout.decode(), stderr=stderr.decode()
                 )
             case ProcessTimedOut():
-                message = f"{call.argv[0]} timed out after {timeout:g} seconds"
+                message = f"Slurm transport timed out after {timeout:g} seconds"
                 raise TimeoutError(message)
             case ProcessGroupUnreaped(detail=detail):
-                message = f"{call.argv[0]} timed out after {timeout:g} seconds; {detail}"
+                message = f"Slurm transport timed out after {timeout:g} seconds; {detail}"
                 raise TimeoutError(message)
             case ProcessOutputTooLarge(limit=limit, stream=stream):
-                message = f"{call.argv[0]} wrote more than {limit} bytes to {stream}"
+                message = f"Slurm transport wrote more than {limit} bytes to {stream}"
                 raise OSError(message)
-
-    def _validate_argv(self, argv: tuple[str, ...]) -> None:
-        ssh = self._transport.ssh_command
-        rsync = self._transport.rsync_command
-        if argv[: len(ssh)] == ssh:
-            suffix = argv[len(ssh) :]
-            if len(suffix) != _SSH_SUFFIX_LENGTH or suffix[:2] != (
-                "--",
-                self._transport.host,
-            ):
-                raise SlurmProcessBrokerError.unauthorized_destination()
-            return
-        if argv[: len(rsync)] != rsync:
-            raise SlurmProcessBrokerError.unauthorized_executable()
-        self._validate_rsync(argv[len(rsync) :])
-
-    def _validate_rsync(self, argv: tuple[str, ...]) -> None:
-        try:
-            separator = argv.index("--")
-        except ValueError as error:
-            raise SlurmProcessBrokerError.malformed_rsync() from error
-        options = argv[:separator]
-        operands = argv[separator + 1 :]
-        expected_shell = shlex.join(self._transport.ssh_command)
-        if len(operands) != _RSYNC_OPERAND_COUNT or not options or options[0] != "-a":
-            raise SlurmProcessBrokerError.malformed_rsync()
-        index = 1
-        if index < len(options) and options[index] == "--delete":
-            index += 1
-        while index < len(options) and options[index].startswith("--exclude="):
-            index += 1
-        if options[index:] != ("-e", expected_shell):
-            raise SlurmProcessBrokerError.unauthorized_options()
-        remote_indexes = [
-            position
-            for position, operand in enumerate(operands)
-            if operand.startswith(f"{self._transport.host}:")
-        ]
-        if len(remote_indexes) != 1:
-            raise SlurmProcessBrokerError.unauthorized_destination()
-        remote_index = remote_indexes[0]
-        remote = operands[remote_index].split(":", 1)[1].rstrip("/")
-        allowed_remote = PurePosixPath(self._config.remote_workspace_root) / self._config.name
-        remote_path = PurePosixPath(remote)
-        if remote_path != allowed_remote and allowed_remote not in remote_path.parents:
-            raise SlurmProcessBrokerError.remote_path_denied()
-        local = Path(operands[1 - remote_index].rstrip("/")).resolve()
-        if not any(local == root or root in local.parents for root in self._local_roots):
-            raise SlurmProcessBrokerError.local_path_denied()
 
 
 __all__ = ["SlurmProcessBroker", "SlurmProcessBrokerError"]

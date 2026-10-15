@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from typing import TYPE_CHECKING
@@ -11,7 +12,13 @@ import pytest
 from vs_sandbox.api.slurm import BrokeredProcesses, SlurmProcessBroker
 from vs_sim.api import OsProcesses, ProcessOutcome, ProcessSpec, UnixNetwork
 from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
-from vs_slurm.api import SlurmConfig, SlurmSshTransport
+from vs_slurm.api import (
+    SlurmConfig,
+    SlurmConnectorTransport,
+    SlurmLocalTransport,
+    SlurmSshTransport,
+    slurm_transport_broker_policy,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,9 +42,37 @@ def _brokered(
     return run
 
 
+_CONNECTOR_COMMAND = ("site-connector", "--configured")
+
+
+def _connector_config() -> SlurmConfig:
+    return SlurmConfig(
+        name="cluster",
+        remote_workspace_root="/remote/vibesys",
+        transport=SlurmConnectorTransport(kind="connector", command=_CONNECTOR_COMMAND),
+        transport_timeout_seconds=5,
+    )
+
+
+def _connector_request(**updates: object) -> bytes:
+    request: dict[str, object] = {
+        "version": 1,
+        "operation": "exec",
+        "command": "hostname",
+    }
+    for key, value in updates.items():
+        if value is None:
+            request.pop(key, None)
+        else:
+            request[key] = value
+    return json.dumps(request).encode()
+
+
 def test_broker_executes_only_the_configured_destination(tmp_path: Path) -> None:
     broker = SlurmProcessBroker(
-        _config(), tmp_path / "broker.sock", local_roots=(tmp_path,), processes=OsProcesses()
+        slurm_transport_broker_policy(_config(), local_roots=(tmp_path,)),
+        tmp_path / "broker.sock",
+        processes=OsProcesses(),
     )
     broker.start()
     try:
@@ -63,7 +98,9 @@ def test_broker_rejects_rsync_paths_outside_run_roots(tmp_path: Path) -> None:
         }
     )
     broker = SlurmProcessBroker(
-        config, tmp_path / "unused.sock", local_roots=(tmp_path,), processes=OsProcesses()
+        slurm_transport_broker_policy(config, local_roots=(tmp_path,)),
+        tmp_path / "unused.sock",
+        processes=OsProcesses(),
     )
     broker.start()
     try:
@@ -94,7 +131,9 @@ def test_a_brokered_process_is_outside_the_callers_process_group(tmp_path: Path)
         transport_timeout_seconds=30,
     )
     broker = SlurmProcessBroker(
-        config, tmp_path / "broker.sock", local_roots=(tmp_path,), processes=OsProcesses()
+        slurm_transport_broker_policy(config, local_roots=(tmp_path,)),
+        tmp_path / "broker.sock",
+        processes=OsProcesses(),
     )
     broker.start()
     try:
@@ -116,7 +155,9 @@ def test_a_broker_timeout_is_refused_after_the_transport_timeout(tmp_path: Path)
         pass_time=clock.advance,
     )
     broker = SlurmProcessBroker(
-        _config(), tmp_path / "broker.sock", local_roots=(tmp_path,), processes=processes
+        slurm_transport_broker_policy(_config(), local_roots=(tmp_path,)),
+        tmp_path / "broker.sock",
+        processes=processes,
     )
     broker.start()
     try:
@@ -129,3 +170,95 @@ def test_a_broker_timeout_is_refused_after_the_transport_timeout(tmp_path: Path)
     assert processes.ran == [
         ProcessSpec(("/usr/bin/printf", "--", "cluster", "hostname"), input=b"transport input")
     ]
+
+
+def test_connector_broker_runs_only_the_exact_configured_command(tmp_path: Path) -> None:
+    processes = FakeProcesses(
+        lambda _spec: ProcessScript(stdout=b'{"version":1}'),
+        pass_time=ManualClock().advance,
+    )
+    config = _connector_config()
+    broker = SlurmProcessBroker(
+        slurm_transport_broker_policy(config, local_roots=(tmp_path,)),
+        tmp_path / "broker.sock",
+        processes=processes,
+    )
+    broker.start()
+    request = _connector_request()
+    try:
+        result = _brokered(broker, _CONNECTOR_COMMAND, request)
+        with pytest.raises(PermissionError, match="executable is not authorized"):
+            _brokered(broker, ("site-connector", "--other"), request)
+    finally:
+        broker.close()
+
+    assert result.stdout == b'{"version":1}'
+    assert processes.ran == [ProcessSpec(_CONNECTOR_COMMAND, input=request)]
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        (_connector_request(unexpected="sensitive-value"), "malformed"),
+        (_connector_request(operation="remove"), "malformed"),
+        (_connector_request(version=2), "malformed"),
+        (b"not-json", "malformed"),
+        (
+            _connector_request(
+                operation="put",
+                local_path="/etc/passwd",
+                remote_path="/remote/vibesys/cluster/input",
+                command=None,
+            ),
+            "run-owned roots",
+        ),
+        (
+            _connector_request(
+                operation="get",
+                remote_path="/other-cluster/output",
+                local_path="/outside/output",
+                kind="file",
+                command=None,
+            ),
+            "remote namespace",
+        ),
+    ],
+)
+def test_connector_broker_rejects_invalid_contracts_and_paths_before_execution(
+    tmp_path: Path, payload: bytes, message: str
+) -> None:
+    processes = FakeProcesses(lambda _spec: ProcessScript(), pass_time=ManualClock().advance)
+    config = _connector_config()
+    broker = SlurmProcessBroker(
+        slurm_transport_broker_policy(config, local_roots=(tmp_path,)),
+        tmp_path / "broker.sock",
+        processes=processes,
+    )
+    broker.start()
+    try:
+        with pytest.raises(PermissionError, match=message) as raised:
+            _brokered(broker, _CONNECTOR_COMMAND, payload)
+    finally:
+        broker.close()
+
+    assert "sensitive-value" not in str(raised.value)
+    assert processes.ran == []
+
+
+def test_local_transport_explicitly_has_no_safe_broker_capability(tmp_path: Path) -> None:
+    config = SlurmConfig(
+        name="cluster",
+        remote_workspace_root="/shared/vibesys",
+        transport=SlurmLocalTransport(kind="local"),
+    )
+    policy = slurm_transport_broker_policy(config, local_roots=(tmp_path,))
+
+    assert not policy.available
+    assert policy.unavailable_reason is not None
+    assert "operator shell on the host" in policy.unavailable_reason
+    with pytest.raises(TypeError, match="cannot be safely exposed"):
+        SlurmProcessBroker(
+            policy,
+            tmp_path / "broker.sock",
+            processes=FakeProcesses(lambda _spec: ProcessScript(), pass_time=ManualClock().advance),
+        )

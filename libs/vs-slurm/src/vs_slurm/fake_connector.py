@@ -60,9 +60,15 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict, Unpack
 
+from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_sim.api import ProcessOutcome
 
 from . import fake_shell
+from .connector_protocol import (
+    MAX_CONNECTOR_REQUEST_BYTES,
+    SLURM_CONNECTOR_REQUEST,
+    SlurmConnectorResponse,
+)
 from .scheduler_read import split_framed
 
 if TYPE_CHECKING:
@@ -398,13 +404,26 @@ def handle(state: Path, request: dict[str, object]) -> dict[str, object]:
     A framed scheduler query (`scheduler_read`) is answered like the bare query,
     with the end line after its output when it succeeds, as a remote shell does.
     """
+    # ``request`` is the decoded JSON document in in-process tests; validate it
+    # with JSON semantics too (JSON arrays are the wire form of tuple fields).
+    validated = decode_json(
+        json.dumps(request),
+        SLURM_CONNECTOR_REQUEST,
+        source="Fake connector request",
+        max_bytes=MAX_CONNECTOR_REQUEST_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if isinstance(validated, Unreadable):
+        raise TypeError(str(validated))
+    request = validated.model_dump(mode="python")
     query, end = split_framed(str(request.get("command", "")))
     if not end:
-        return _handle(state, request)
+        response = _handle(state, request)
+        return SlurmConnectorResponse.model_validate(response).model_dump(mode="python")
     response = _handle(state, {**request, "command": query})
     if response["returncode"] == 0:
         response = {**response, "stdout": str(response["stdout"]) + end}
-    return response
+    return SlurmConnectorResponse.model_validate(response).model_dump(mode="python")
 
 
 def _handle(state: Path, request: dict[str, object]) -> dict[str, object]:
@@ -574,13 +593,23 @@ class FakeConnector:
         del timeout
         if not spec.input:
             raise ValueError(_STDIN_REQUIRED)
-        request = json.loads(spec.input)
+        decoded = decode_json(
+            spec.input,
+            SLURM_CONNECTOR_REQUEST,
+            source="Fake connector request",
+            max_bytes=MAX_CONNECTOR_REQUEST_BYTES,
+            options=ValidationOptions(strict=True),
+        )
+        if isinstance(decoded, Unreadable):
+            raise TypeError(str(decoded))
+        request = decoded.model_dump(mode="python")
         response = (
             self._answer(request)
             if self._intercept is None
             else self._intercept(request, self._answer)
         )
-        return ProcessOutcome(0, json.dumps(response).encode(), b"")
+        validated = SlurmConnectorResponse.model_validate(response, strict=True)
+        return ProcessOutcome(0, validated.model_dump_json().encode(), b"")
 
     def _answer(self, request: dict[str, object]) -> dict[str, object]:
         query, end = split_framed(str(request.get("command", "")))
@@ -735,7 +764,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     program = arguments[1:2]
     if program in (["ssh"], ["shell"]):
         # ssh [options] -- HOST COMMAND, or the local transport's SHELL COMMAND
-        response = handle(state, {"operation": "exec", "command": arguments[-1]})
+        response = handle(state, {"version": 1, "operation": "exec", "command": arguments[-1]})
         sys.stdout.write(str(response["stdout"]))
         sys.stderr.write(str(response["stderr"]))
         return int(str(response["returncode"]))
@@ -744,7 +773,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.write(json.dumps({"operation": "rsync", "argv": arguments[2:]}) + "\n")
         _rsync(state, arguments[2:])
         return 0
-    sys.stdout.write(json.dumps(handle(state, json.loads(sys.stdin.read()))))
+    request = decode_json(
+        sys.stdin.read(),
+        SLURM_CONNECTOR_REQUEST,
+        source="connector stdin",
+        max_bytes=MAX_CONNECTOR_REQUEST_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if isinstance(request, Unreadable):
+        return 2
+    sys.stdout.write(json.dumps(handle(state, request.model_dump(mode="python"))))
     return 0
 
 
