@@ -644,7 +644,7 @@ depends_on = []
 [[modules]]
 path = "vs_sim.api"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
+depends_on = ["vs_sim.blocking", "vs_sim.clock", "vs_sim.concurrency", "vs_sim.loopback_http", "vs_sim.network", "vs_sim.os_platform", "vs_sim.probes", "vs_sim.processes", "vs_sim.randomness", "vs_sim.release", "vs_sim.signal_relay", "vs_sim.signals", "vs_sim.streaming", "vs_sim.sync", "vs_sim.yields"]
 
 [[modules]]
 path = "vs_sim.api.testing"
@@ -690,6 +690,11 @@ depends_on = []
 
 [[modules]]
 path = "vs_sim.streaming"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_sim.release"
 layer = "prompts_and_lower_libs"
 depends_on = []
 

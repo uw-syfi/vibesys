@@ -56,6 +56,7 @@ if TYPE_CHECKING:
         run_foreground,
     )
     from vs_sim.randomness import RandomSource, SeededRandom, SystemRandomSource, derive_seed
+    from vs_sim.release import AsyncCloseOnce, CloseOnce, Released
     from vs_sim.signal_relay import (
         MainThreadWake,
         SignalMainThreadWake,
@@ -126,6 +127,9 @@ _MODULES: dict[str, str] = {
     "SeededRandom": "vs_sim.randomness",
     "SystemRandomSource": "vs_sim.randomness",
     "derive_seed": "vs_sim.randomness",
+    "AsyncCloseOnce": "vs_sim.release",
+    "CloseOnce": "vs_sim.release",
+    "Released": "vs_sim.release",
     "LoopSignalSource": "vs_sim.signals",
     "MainThreadWake": "vs_sim.signal_relay",
     "SignalMainThreadWake": "vs_sim.signal_relay",
@@ -162,9 +166,11 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "AsyncCloseOnce",
     "DEFAULT_MAX_OUTPUT_BYTES",
     "BlockingRunner",
     "Clock",
+    "CloseOnce",
     "CommandProbe",
     "Condition",
     "Connection",
@@ -202,6 +208,7 @@ __all__ = [
     "ProcessTimeoutError",
     "Processes",
     "RandomSource",
+    "Released",
     "RunningProcess",
     "SeededRandom",
     "SignalMainThreadWake",
