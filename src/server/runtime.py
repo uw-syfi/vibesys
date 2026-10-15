@@ -62,7 +62,7 @@ from server.transport.discovery import (
 from server.transport.discovery import (
     WebPortState as WebPortState,  # noqa: PLC0414  # lint-waiver: LW-102905 [PLC0414]; re-export port classification through the runtime composition boundary for operator entrypoints
 )
-from server.transport.subscriptions import SubscriptionTracker
+from server.transport.subscriptions import DeliveryWatermark, SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS as WEBSOCKET_CLOSE_TIMEOUT_SECONDS,  # noqa: PLC0414  # lint-waiver: LW-107301 [PLC0414]; expose the transport's canonical close bound through the runtime boundary so launchers can outlast it without restating it
@@ -403,7 +403,12 @@ class ServerRuntime:
         shared tracker closes subscription admission atomically with this
         wait, so a reconnect cannot arrive outside the drained set.
         """
-        transport.wait_until_delivered(self.api.latest_sequence, DETACHED_DRAIN_TIMEOUT_SECONDS)
+        with self.condition:
+            watermark = DeliveryWatermark(
+                store_id=self.journal.store_id_locked(),
+                sequence=self.journal.latest_sequence_locked(),
+            )
+        transport.wait_until_delivered(watermark, DETACHED_DRAIN_TIMEOUT_SECONDS)
 
     def shutdown(self) -> None:
         """Request a clean shutdown of a detached or read-only server."""
