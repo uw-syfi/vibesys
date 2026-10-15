@@ -391,10 +391,15 @@ _FAILURE_HEADLINES = {
 def describe_failure(failure: RunFailure) -> str:
     """One line saying why a run failed: the cause, what was kept, the counts, then its account.
 
-    Candidates can be kept yet not adopted, so the line says "no result to keep" only
-    when none was kept.
+    Candidates can be kept yet not adopted, and a strategy may report failure after asking core
+    to adopt its best partial result, so the line reports the adoption fact explicitly.
     """
-    kept = "with no result to keep" if failure.candidates_kept == 0 else "with no candidate adopted"
+    if failure.adopted_candidate is not None:
+        kept = f"after adopting candidate {failure.adopted_candidate}"
+    elif failure.candidates_kept == 0:
+        kept = "with no result to keep"
+    else:
+        kept = "with no candidate adopted"
     counts = (
         f"{failure.workstreams_started} of {failure.workstream_budget} workstreams started, "
         f"{failure.candidates_kept} candidates kept"

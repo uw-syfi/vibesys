@@ -376,13 +376,14 @@ export type Total = number | null;
 export type Label = string;
 export type Kind11 = "run_failed";
 /**
- * Why a run ended without a result the operator can keep.
+ * Why a run failed to meet its goal, whether or not it preserved a partial result.
  */
 export type RunFailureKind = "budget_exhausted" | "deadline" | "no_result";
 export type Reason = string;
 export type WorkstreamsStarted = number;
 export type WorkstreamBudget = number;
 export type CandidatesKept = number;
+export type AdoptedCandidate = string | null;
 export type Kind12 = "run_interrupted";
 export type Reason1 = string;
 export type Signal = string | null;
@@ -1256,7 +1257,7 @@ export interface StartupProgress {
   label?: Label;
 }
 /**
- * Why a run ended without a result to keep, with the counts behind it.
+ * Why a run failed, what partial result it preserved, and the counts behind it.
  */
 export interface RunFailedData {
   kind: Kind11;
@@ -1268,6 +1269,9 @@ export interface RunFailedData {
  * ``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts
  * attempts core admitted, against the ``workstream_budget`` the run was allowed.
  * ``candidates_kept`` counts settled candidates eligible for adoption.
+ * ``adopted_candidate`` names the verified candidate revision core adopted even though the
+ * strategy still reported a failed outcome. Its None default preserves replay of failure events
+ * recorded before the adoption fact was added to the event contract.
  */
 export interface RunFailure {
   kind: RunFailureKind;
@@ -1275,6 +1279,7 @@ export interface RunFailure {
   workstreams_started: WorkstreamsStarted;
   workstream_budget: WorkstreamBudget;
   candidates_kept: CandidatesKept;
+  adopted_candidate?: AdoptedCandidate;
 }
 /**
  * Reason and optional signal for an interrupted run.

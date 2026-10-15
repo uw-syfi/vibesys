@@ -1655,7 +1655,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RunFailedData": {
       "additionalProperties": false,
-      "description": "Why a run ended without a result to keep, with the counts behind it.",
+      "description": "Why a run failed, what partial result it preserved, and the counts behind it.",
       "properties": {
         "kind": {
           "const": "run_failed",
@@ -1676,7 +1676,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RunFailure": {
       "additionalProperties": false,
-      "description": "What a failed run did and why it stopped, as data; frontends choose the wording.\n\n``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts\nattempts core admitted, against the ``workstream_budget`` the run was allowed.\n``candidates_kept`` counts settled candidates eligible for adoption.",
+      "description": "What a failed run did and why it stopped, as data; frontends choose the wording.\n\n``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts\nattempts core admitted, against the ``workstream_budget`` the run was allowed.\n``candidates_kept`` counts settled candidates eligible for adoption.\n``adopted_candidate`` names the verified candidate revision core adopted even though the\nstrategy still reported a failed outcome. Its None default preserves replay of failure events\nrecorded before the adoption fact was added to the event contract.",
       "properties": {
         "kind": {
           "$ref": "#/$defs/RunFailureKind"
@@ -1699,6 +1699,20 @@ const runEventSchema: Record<string, unknown> = {
           "minimum": 0,
           "title": "Candidates Kept",
           "type": "integer"
+        },
+        "adopted_candidate": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^\\S+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Adopted Candidate"
         }
       },
       "required": [
@@ -1712,7 +1726,7 @@ const runEventSchema: Record<string, unknown> = {
       "type": "object"
     },
     "RunFailureKind": {
-      "description": "Why a run ended without a result the operator can keep.",
+      "description": "Why a run failed to meet its goal, whether or not it preserved a partial result.",
       "enum": [
         "budget_exhausted",
         "deadline",

@@ -189,18 +189,19 @@ def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatu
         return RunStatus.FAILED
     if _ended_by(result, EndReason.STOPPED):
         raise RunStopped
-    kept = _ended_by(result, EndReason.DEADLINE) and _adopted_retained_candidate(shell)
+    kept = _ended_by(result, EndReason.DEADLINE) and _adopted_candidate(shell) is not None
     return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
 
 
 def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFailure:
     """Why a failed run stopped, read from the result and the counts core kept.
 
-    A run ends in failure with nothing to keep when its time ran out, when every
-    workstream it was allowed had run, or when its strategy gave up earlier. A run that
-    recorded no result at all (an unfinished record) is reported as ``NO_RESULT`` with a
-    fixed reason. ``BUDGET_EXHAUSTED`` is inferred from the counts (``started >= budget``),
-    so a strategy that gives up on its last permitted workstream is labelled the same.
+    A failed strategy may still ask core to adopt its best partial candidate. Otherwise it
+    ends with nothing to keep when its time ran out, when every allowed workstream ran, or
+    when its strategy gave up earlier. A run that recorded no result at all (an unfinished
+    record) is reported as ``NO_RESULT`` with a fixed reason. ``BUDGET_EXHAUSTED`` is inferred
+    from the counts (``started >= budget``), so a strategy that gives up on its last permitted
+    workstream is labelled the same.
     """
     core = shell.record.envelope.core
     started = len(core.attempts.attempts)
@@ -223,17 +224,20 @@ def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFail
         workstreams_started=started,
         workstream_budget=budget,
         candidates_kept=sum(1 for item in core.settlement.settlements if item.eligible),
+        adopted_candidate=_adopted_candidate(shell),
     )
 
 
-def _adopted_retained_candidate(shell: CoreRuntime) -> bool:
-    """Whether core verified the adoption of a retained candidate."""
+def _adopted_candidate(shell: CoreRuntime) -> str | None:
+    """The verified retained candidate's stable revision identity, if core adopted one."""
     adoption = shell.record.envelope.core.settlement.adoption
-    return (
-        adoption is not None
-        and adoption.verified
-        and isinstance(adoption.selection, RetainedCandidate)
-    )
+    if (
+        adoption is None
+        or not adoption.verified
+        or not isinstance(adoption.selection, RetainedCandidate)
+    ):
+        return None
+    return adoption.selection.revision.revision_id.root
 
 
 __all__ = [

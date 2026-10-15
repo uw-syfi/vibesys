@@ -217,14 +217,15 @@ class RunStartupProgressData(EventPayload):
 
 
 class RunFailureKind(StrEnum):
-    """Why a run ended without a result the operator can keep."""
+    """Why a run failed to meet its goal, whether or not it preserved a partial result."""
 
     BUDGET_EXHAUSTED = "budget_exhausted"
-    """Every workstream the run was allowed to start ran, and none produced a result."""
+    """Every workstream the run was allowed to start ran without completing the goal."""
     DEADLINE = "deadline"
     """The run's time limit ended it before any candidate was adopted."""
     NO_RESULT = "no_result"
-    """The strategy ended the run with nothing to keep while workstream budget remained."""
+    """Core recorded no terminal strategy result, or the strategy failed before exhausting its
+    workstream budget."""
 
 
 class RunFailure(BaseModel):
@@ -233,6 +234,9 @@ class RunFailure(BaseModel):
     ``reason`` is the strategy's own account of the stop. ``workstreams_started`` counts
     attempts core admitted, against the ``workstream_budget`` the run was allowed.
     ``candidates_kept`` counts settled candidates eligible for adoption.
+    ``adopted_candidate`` names the verified candidate revision core adopted even though the
+    strategy still reported a failed outcome. Its None default preserves replay of failure events
+    recorded before the adoption fact was added to the event contract.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -242,10 +246,24 @@ class RunFailure(BaseModel):
     workstreams_started: int = Field(ge=0)
     workstream_budget: int = Field(ge=0)
     candidates_kept: int = Field(ge=0)
+    adopted_candidate: str | None = Field(default=None, min_length=1, pattern=r"^\S+$")
+
+    @model_validator(mode="after")
+    def adoption_matches_failure(self) -> RunFailure:
+        """Reject adoption facts that cannot describe a failed run."""
+        if self.adopted_candidate is None:
+            return self
+        if self.candidates_kept == 0:
+            message = "adopted_candidate requires at least one candidate in candidates_kept"
+            raise ValueError(message)
+        if self.kind is RunFailureKind.DEADLINE:
+            message = "a deadline failure cannot carry adopted_candidate"
+            raise ValueError(message)
+        return self
 
 
 class RunFailedData(EventPayload):
-    """Why a run ended without a result to keep, with the counts behind it."""
+    """Why a run failed, what partial result it preserved, and the counts behind it."""
 
     kind: Literal["run_failed"] = "run_failed"
     failure: RunFailure
