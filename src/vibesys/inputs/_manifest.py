@@ -416,7 +416,7 @@ def render_input_manifest(manifest: InputManifest) -> str:
     _append_workspace_sources(lines, manifest)
     _append_evaluator(lines, manifest)
     if manifest.plan is not None:
-        lines += render_plan(manifest.plan)
+        lines.extend(render_plan(manifest.plan))
     return "\n".join(lines) + "\n"
 
 
