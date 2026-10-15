@@ -200,7 +200,7 @@ def _create_context(
     request = RunRequest(
         project_root=project,
         orchestration=descriptor,
-        config=options.get("config") or Config.model_validate({"model": {"name": "gpt-test"}}),
+        config=options.get("config") or Config.model_validate({"model": {"name": "gpt-5.5"}}),
         input_bundle=bundle,
         objective=options.get("objective", "Make the queue faster.\n"),
         exp_name=exp_name,
@@ -1086,7 +1086,7 @@ def test_cli_backend_accepts_active_profiler_configuration(
         configuration=configuration,
         config=Config.model_validate(
             {
-                "model": {"name": "gpt-test"},
+                "model": {"name": "gpt-5.5"},
                 "agent": {"backend": "cli", "cli_provider": "codex"},
             }
         ),

@@ -490,6 +490,22 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "Agent model. Overrides [model].name in agent.toml; when neither names one, "
+            "the CLI provider's default model. Must be a vetted model of the provider."
+        ),
+    )
+    parser.add_argument(
+        "--allow-unvetted-model",
+        action="store_true",
+        help=(
+            "Run a provider and model pair outside VibeSys's vetted harness list. "
+            "Runs started from the desktop app cannot opt out."
+        ),
+    )
+    parser.add_argument(
         "--backend",
         type=ComputeBackend,
         choices=list(ComputeBackend),

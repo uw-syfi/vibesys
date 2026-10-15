@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.metadata
 import importlib.util
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -15,6 +16,9 @@ from vs_agent.api import (
     DEFAULT_CLI_PROVIDER,
     AgentBackend,
     AgentSpec,
+    UnvettedHarnessError,
+    check_harness,
+    default_model,
 )
 from vs_runtime.api.infrastructure import (
     ModelArtifactRequest,
@@ -25,7 +29,7 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import HostResource, HostResourceAccess
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterator, Mapping
 
     from vibesys.config import Config
     from vs_runtime.api import AgentRole
@@ -87,25 +91,43 @@ def _vibesys_runtime_host_resources() -> tuple[HostResource, ...]:
     )
 
 
+def resolve_model(config: Config, provider: str, model: str | None = None) -> str:
+    """The run's agent model: ``model``, else ``[model].name``, else ``provider``'s default.
+
+    Raises :class:`UnvettedHarnessError` when none of them names one, which
+    happens only for a provider with no vetted model.
+    """
+    resolved = model or config.model.name or default_model(provider)
+    if resolved is None:
+        raise UnvettedHarnessError(provider, None)
+    return resolved
+
+
+def resolve_provider(config: Config, provider: str | None = None) -> str:
+    """The run's CLI provider: ``provider``, else ``[agent].cli_provider``, else the default."""
+    return provider or config.agent.cli_provider or DEFAULT_CLI_PROVIDER
+
+
 def agent_spec_from_config(
     config: Config,
     *,
     backend: AgentBackend | str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    allow_unvetted_model: bool = False,
 ) -> AgentSpec:
     """Bind application config and explicit overrides into one agent spec."""
     agent_cfg = config.agent
     resolved_backend = AgentBackend(backend or agent_cfg.backend or AgentBackend.CLI)
-
-    resolved_provider = provider or agent_cfg.cli_provider or DEFAULT_CLI_PROVIDER
+    resolved_provider = resolve_provider(config, provider)
     return AgentSpec(
         backend=resolved_backend,
         provider=resolved_provider,
-        model=model if model is not None else config.model.name,
+        model=resolve_model(config, resolved_provider, model),
         reasoning_effort=config.thinking.level,
         cli_timeout=agent_cfg.cli_timeout,
         env_passthrough=agent_cfg.env_passthrough,
+        allow_unvetted_model=allow_unvetted_model,
     )
 
 
@@ -115,12 +137,15 @@ def resolve_agent_specs(
     *,
     backend: AgentBackend | str | None = None,
     provider: str | None = None,
+    allow_unvetted_model: bool = False,
 ) -> Mapping[str, AgentSpec]:
     """Resolve one immutable execution spec per plugin-declared role.
 
     Authored role entries are sparse overrides. Every authored key must name a
     role in the selected plugin; every declared role is returned, inheriting
-    the global model and reasoning defaults when no override is present.
+    the global model and reasoning defaults when no override is present. A
+    model outside the vetted harnesses is rejected naming the key that chose
+    it, unless ``allow_unvetted_model``.
     """
     declared = {role.id for role in roles}
     unknown = sorted(config.agent.roles.keys() - declared)
@@ -135,25 +160,54 @@ def resolve_agent_specs(
                 ),
             )
         )
+    with _unvetted_harness_named("model.name (or --model)"):
+        default_spec = agent_spec_from_config(
+            config,
+            backend=backend,
+            provider=provider,
+            allow_unvetted_model=allow_unvetted_model,
+        )
+    fallback = config.agent.quota
+    if (
+        fallback.fallback_provider is not None
+        and fallback.fallback_model is not None
+        and not allow_unvetted_model
+    ):
+        with _unvetted_harness_named("agent.quota.fallback_model"):
+            check_harness(fallback.fallback_provider, fallback.fallback_model)
     resolved: dict[str, AgentSpec] = {}
-    default_spec = agent_spec_from_config(
-        config,
-        backend=backend,
-        provider=provider,
-    )
     for role in roles:
         override = config.agent.roles.get(role.id)
-        resolved[role.id] = replace(
-            default_spec,
-            model=(
-                override.model
-                if override is not None and override.model is not None
-                else default_spec.model
-            ),
-            reasoning_effort=(
-                override.reasoning_effort
-                if override is not None and override.reasoning_effort is not None
-                else default_spec.reasoning_effort
-            ),
-        )
+        with _unvetted_harness_named(f"agent.roles.{role.id}.model"):
+            resolved[role.id] = replace(
+                default_spec,
+                model=(
+                    override.model
+                    if override is not None and override.model is not None
+                    else default_spec.model
+                ),
+                reasoning_effort=(
+                    override.reasoning_effort
+                    if override is not None and override.reasoning_effort is not None
+                    else default_spec.reasoning_effort
+                ),
+            )
     return MappingProxyType(resolved)
+
+
+@contextmanager
+def _unvetted_harness_named(key: str) -> Iterator[None]:
+    """Report an unvetted harness as a configuration error naming ``key``."""
+    try:
+        yield
+    except UnvettedHarnessError as error:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="agent_harness_unvetted",
+                stage="agent_configuration_validation",
+                message=(
+                    f"{key}: {error}. Choose a vetted model, or pass "
+                    "--allow-unvetted-model at the terminal to run it anyway"
+                ),
+            )
+        ) from error
