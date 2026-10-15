@@ -6,7 +6,7 @@
 
 import type {WelcomeInspection} from '@vibesys/ipc';
 import {decodeNarrationLine, type LogLine, pipeSegments} from '@vibesys/logs';
-import {Button, Dialog} from '@vibesys/ui';
+import {Button, Dialog} from '@vibesys/ui/legacy';
 import type {JSX, ReactNode} from 'react';
 import {inspectionFields} from '../../state/inspector.js';
 import {

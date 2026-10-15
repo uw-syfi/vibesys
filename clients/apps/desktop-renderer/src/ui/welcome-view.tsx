@@ -25,7 +25,7 @@ import {type ProjectField, StartSheet} from '@vibesys/feature-start-run/renderer
 import type {StartAction, StartState} from '@vibesys/feature-start-run/state';
 import type {HostKey, HostRun} from '@vibesys/hosts';
 import {type RecentRun, stopKey, suggestProjects} from '@vibesys/runs';
-import {Button} from '@vibesys/ui';
+import {Button} from '@vibesys/ui/legacy';
 import type {JSX, ReactNode} from 'react';
 import {WORDMARK} from './welcome-banner.js';
 

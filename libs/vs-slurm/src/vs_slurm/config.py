@@ -14,6 +14,14 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 PORT_PLACEHOLDER = "VIBESYS_DYNAMIC_PORT"
+# After the service's process group gets SIGKILL, the longest the job script waits for
+# the group to go before it exits anyway (a process stuck in the kernel ignores SIGKILL).
+SERVICE_KILL_REAP_SECONDS = 5
+# Slurm's default KillWait, the time between the SIGTERM and the SIGKILL Slurm sends a job
+# it ends. The service's whole teardown (grace, then the reap above) stays 5 s under it, so
+# the job script, not Slurm, always ends the service; a step Slurm cannot kill drains the node.
+_SLURM_DEFAULT_KILL_WAIT_SECONDS = 30
+_SERVICE_STOP_GRACE_MAX_SECONDS = _SLURM_DEFAULT_KILL_WAIT_SECONDS - SERVICE_KILL_REAP_SECONDS - 5
 _PORT_EXPANSION = '"${PORT}"'
 
 
@@ -207,6 +215,10 @@ class SlurmConfig(BaseModel):
     queue_timeout_seconds: Annotated[int, Field(gt=0)] | None = None
     transport_timeout_seconds: Annotated[int, Field(gt=0)] = 110
     evaluation_capacity: Annotated[int, Field(gt=0)] = 1
+    # When a job ends, its service's process group gets SIGTERM, then SIGKILL this long later.
+    service_stop_grace_seconds: Annotated[int, Field(gt=0, le=_SERVICE_STOP_GRACE_MAX_SECONDS)] = (
+        _SERVICE_STOP_GRACE_MAX_SECONDS
+    )
 
     @field_validator("name")
     @classmethod
@@ -230,6 +242,16 @@ class SlurmConfig(BaseModel):
     def _validate_arrays(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         if any(not argument for argument in value):
             message = "command and argument arrays must contain non-empty strings"
+            raise ValueError(message)
+        return value
+
+    @field_validator("sbatch_arguments")
+    @classmethod
+    def _no_requeue(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if "--requeue" in value:
+            message = (
+                "--requeue is not allowed: VibeSys retries jobs itself and submits --no-requeue"
+            )
             raise ValueError(message)
         return value
 

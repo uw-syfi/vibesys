@@ -5,7 +5,7 @@
  */
 
 import type {HostKey} from '@vibesys/hosts';
-import {Combobox} from '@vibesys/ui';
+import {Combobox} from '@vibesys/ui/legacy';
 import type {InputHTMLAttributes, JSX} from 'react';
 import {
   type CompletionAction,

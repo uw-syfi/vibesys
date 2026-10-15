@@ -229,3 +229,26 @@ def test_read_only_paths_reject_a_repeated_path() -> None:
 def test_there_is_no_writable_counterpart_to_read_only_paths() -> None:
     with pytest.raises(ValueError, match="writable_paths"):
         AgentGpuConfig.model_validate({**_LIMITS, "writable_paths": ["/opt/venv"]})
+
+
+def test_without_a_cap_the_number_of_concurrent_jobs_is_unlimited() -> None:
+    assert AgentGpuConfig.model_validate(_LIMITS).max_concurrent_jobs is None
+
+
+@given(cap=st.integers(1, 10_000))
+def test_a_positive_concurrent_job_cap_is_accepted(cap: int) -> None:
+    config = AgentGpuConfig.model_validate({**_LIMITS, "max_concurrent_jobs": cap})
+
+    assert config.max_concurrent_jobs == cap
+
+
+@given(cap=st.integers(max_value=0))
+def test_a_concurrent_job_cap_below_one_is_rejected_by_name(cap: int) -> None:
+    with pytest.raises(ValueError, match=r"max_concurrent_jobs\n.*greater than 0"):
+        AgentGpuConfig.model_validate({**_LIMITS, "max_concurrent_jobs": cap})
+
+
+@pytest.mark.parametrize("cap", [True, 2.0, "2", [2]])
+def test_a_concurrent_job_cap_that_is_not_an_integer_is_rejected_by_name(cap: object) -> None:
+    with pytest.raises(ValueError, match=r"max_concurrent_jobs\n.*(valid integer|int)"):
+        AgentGpuConfig.model_validate({**_LIMITS, "max_concurrent_jobs": cap})

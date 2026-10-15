@@ -1271,6 +1271,8 @@ class HelperErrorCode(StrEnum):
     """``logs.list`` or ``logs.read`` named an instance this host recorded no logs for."""
     UNKNOWN_LOG_STREAM = "unknown_log_stream"
     """``logs.read`` named a stream the instance does not have."""
+    LOG_STORE_CORRUPT = "log_store_corrupt"
+    """``logs.list`` or ``logs.read`` found the run's log index corrupt; asking again does not help."""
     UNVETTED_HARNESS = "unvetted_harness"
     """``run.start``'s ``harness`` is not one ``harnesses.list`` offers; only sent with ``harnesses``."""
     INTERNAL = "internal"

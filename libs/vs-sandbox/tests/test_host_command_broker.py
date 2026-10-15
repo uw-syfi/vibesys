@@ -27,6 +27,7 @@ from vs_sandbox.api.slurm import (
     HOST_COMMAND_CLIENT,
     AgentGpuConfig,
     BrokerTransport,
+    CappedGpuLauncher,
     GpuCommand,
     GpuCommands,
     GpuJobRequest,
@@ -42,6 +43,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     from pathlib import Path
 
+    from vs_sandbox.api.slurm import GpuLauncher
     from vs_sim.api import Connection, Event, Threads
     from vs_sim.api.testing import Sim
 
@@ -74,6 +76,32 @@ class _RecordingLauncher:
         if self._block and cancel.wait(HANG_GUARD_S):
             self.cancelled.set()
         return 5
+
+
+class _ReturnSignallingLauncher:
+    """Wraps a launcher and sets one event per command once its ``run`` has returned."""
+
+    def __init__(self, inner: GpuLauncher, threads: Threads) -> None:
+        self._inner = inner
+        self._threads = threads
+        self._returned: dict[str, Event] = {}
+
+    def returned(self, name: str) -> Event:
+        """The event set when the command whose last argument is *name* has returned."""
+        return self._returned.setdefault(name, self._threads.event())
+
+    def run(
+        self,
+        request: GpuJobRequest,
+        command: GpuCommand,
+        *,
+        write: Callable[[bytes], None],
+        cancel: Event,
+    ) -> int:
+        try:
+            return self._inner.run(request, command, write=write, cancel=cancel)
+        finally:
+            self.returned(command.argv[-1]).set()
 
 
 class _PrefixConfinement:
@@ -390,6 +418,46 @@ class TestGpuOperation:
             return cancelled
 
         assert _simulate(sim, program)
+
+    def test_an_agent_that_kills_a_command_waiting_for_the_cap_never_has_it_submitted(
+        self, sim: Sim, tmp_path: Path, workspace: Path
+    ) -> None:
+        """With a cap of one, a second command waits; closing it while it waits leaves the line."""
+
+        def program(net: _Network) -> tuple[list[str], str]:
+            launcher = _RecordingLauncher(net.threads, block=True)
+            capped = _ReturnSignallingLauncher(
+                CappedGpuLauncher(launcher, 1, net.threads), net.threads
+            )
+            gpu = GpuCommands(_config(), _PrefixConfinement(), {}, launcher=capped)
+            with _serving(net, tmp_path, workspace, gpu=gpu) as broker:
+                first = _send_request(
+                    net, broker, _gpu_call(broker, str(workspace), argv=["first"])
+                )
+                _read_frame(first)  # submitted, and holding the run's only slot
+                waiting = _send_request(
+                    net, broker, _gpu_call(broker, str(workspace), argv=["second"])
+                )
+                notice = base64.b64decode(_read_frame(waiting)["output"]).decode()
+                waiting.close()  # the agent kills its command while it waits
+                # The broker sees the hangup on its own thread. Free the slot only once
+                # the cancelled request has left the line: a slot that frees first may
+                # be handed to it before its cancel is seen, which no cap can prevent.
+                assert capped.returned("second").wait(HANG_GUARD_S)
+                first.close()  # the slot frees
+                third = _send_request(
+                    net, broker, _gpu_call(broker, str(workspace), argv=["third"])
+                )
+                # It may wait until the first job has wound down, then it is submitted.
+                while base64.b64decode(_read_frame(third)["output"]) != b"started\n":
+                    pass
+                third.close()
+            return [command.argv[-1] for command in launcher.commands], notice
+
+        submitted, notice = _simulate(sim, program)
+
+        assert submitted == ["first", "third"]
+        assert notice.startswith("[vibesys-gpu] waiting: 1 of this run's GPU jobs are active")
 
     def test_an_operation_the_run_does_not_offer_is_refused_by_name(
         self, sim: Sim, tmp_path: Path, workspace: Path

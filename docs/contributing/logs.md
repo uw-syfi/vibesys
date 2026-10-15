@@ -29,9 +29,22 @@ with scope.open(StartupStep(stage=EnvironmentStartupStage.BUILDING_IMAGE), "dock
 ```
 
 The stream is an `OutputSink`; leaving the block closes it `ended`, or `failed` when an
-exception leaves it. `LogStore.adopt(path, owner, command)` lists a file someone else
-writes (a Slurm job's output file), read as-is. `follow(source, sink, threads=..., stop=...)`
-copies a growing `ByteSource` (a file in a container or on a cluster) into a sink.
+exception leaves it.
+
+A log failure never hurts the work being logged. Writing to a stream and closing it never
+raise, as the `OutputSink` contract says, so a drain thread never dies and a producer never
+fails on a full disk:
+
+- A write the store cannot complete (an `OSError`, such as a short write to a full disk)
+  degrades the stream: its later bytes are dropped, the store says so once through the
+  `warn` it was built with, and the stream's close record says `degraded`.
+- A write after close is dropped silently.
+- An index record the store cannot append is dropped after the store cuts the torn line it
+  left, so the next record starts a line. A stream whose `opened` record was dropped takes
+  writes and keeps nothing. The index's first failure is warned once.
+- Opening a store cuts a torn last index line before it appends, so a short write never
+  corrupts the index for later opens. A reader ignores a torn last line of the index or of
+  a stream's pipe marks.
 
 A library never sees a scope or an owner. It takes an opener in its own vocabulary, a
 factory that returns a context manager of an `OutputSink`, calls it once per command or
@@ -63,22 +76,24 @@ own transport: one framed remote command per call (`od` for the bytes, `ls -lni`
 for inode and size, both POSIX), at most `MAX_REMOTE_READ_BYTES` (256 KiB) a read, so its hex
 form stays under the transport's 1 MiB stream cap. `Cluster.stage_output(handle, index,
 stream)` names a stage's file. `vs_sandbox`'s `StageOutputFollower` is the pump: a
-library cannot import `vs_logs.follow`, and the executor already polls the scheduler, so
+library cannot import `vs_logs`, and the executor already polls the scheduler, so
 each poll that finds a stage running opens its stream and copies at most four reads per
 file, with no second loop. When the job is collected, the rest comes from the collected
 stage files (no extra remote reads), and each stream ends `ended` when its stage ran to
 an exit status, `failed` when it did not, was cancelled, or its file shrank or was
 replaced. A stage that ran between two polls opens its stream then, or at settle.
 
-`vibesys.run.logs.open_run_log_store(project_root, run_id, threads=...)` opens a run's
-store in `Project.log_directory_for(root, run_id) / "streams"`. Opening a store closes as
-`abandoned` every stream a crashed writer left open.
+`vibesys.run.logs.open_run_log_store(project_root, run_id, threads=..., warn=...)` opens a
+run's store in `Project.log_streams_directory_for(root, run_id)`, the one place that path is
+built (the host helper reads it there too). Opening a store closes as `abandoned` every
+stream a crashed writer left open.
 
 A run opens its store in one place: run assembly (`vibesys.run.resources`) enters
 `vibesys.run.logs.open_run_logs` on the run's ownership stack, and hands the
 `LogScope[LogOwner]` it yields to the run's producers. If the store cannot be opened,
-the run goes on: a warning goes to stderr, and producers write to a bounded in-memory
-store nobody reads.
+or its index holds a complete record that does not decode (`CorruptLogError`), the run
+goes on: a warning goes to stderr, and producers write to a bounded in-memory store nobody
+reads. A store that fails later warns on stderr through the same `warn`.
 
 ## Narration
 
@@ -120,7 +135,7 @@ What the stream does not hold:
 
 ```
 streams/
-  index.jsonl                      opened {stream_id, owner, command, adopted_path} and closed {stream_id, outcome}
+  index.jsonl                      opened {stream_id, owner, command} and closed {stream_id, outcome, degraded?}
   000001/
     00000000000000000000.seg       raw bytes from offset 0
     00000000000016777216.seg       raw bytes from offset 16777216
@@ -132,10 +147,9 @@ offset of their first byte; only the newest grows. The cap (`LogLimits.max_bytes
 by default) drops the oldest whole segments, so the earliest retained offset only moves
 forward and every retained byte keeps its offset. A pipe mark is written before the bytes
 it labels. Index and pipe marks are append-only JSON lines; a reader ignores a trailing
-line without its newline. Sizes are not stored: they are the segments' sizes.
-
-Store-owned and adopted streams share the format: an adopted file is one segment at
-offset 0 with no pipe marks.
+line without its newline. Sizes are not stored: they are the segments' sizes. A closed
+record carries `degraded: true` only when the store lost some of the stream's bytes, and
+an opened record from an older store may carry `adopted_path: null`, which is ignored.
 
 ## Reading
 
@@ -143,7 +157,11 @@ offset 0 with no pipe marks.
 `list_streams()` and `read(stream_id, FromOffset(n) | Tail(n), max_bytes)`. A `LogChunk`
 carries the bytes, the pipe spans, `truncated_before` (asked-for bytes were evicted),
 `eof` and `closed`. The close state is read before the bytes, so `closed` with `eof`
-means the chunk reaches the final end. Every byte is read through `ByteSource`.
+means the chunk reaches the final end. Every byte is read through `ByteSource`. A
+`StreamInfo` says `degraded` when the store lost some of the stream's bytes; the wire's
+`logs.list` does not carry it yet. A listing or read raises `CorruptLogError` when the
+index holds a complete record that does not decode; the host helper answers that with
+`log_store_corrupt`, which the client does not retry on its own.
 
 ## Enforcement
 
@@ -155,6 +173,7 @@ means the chunk reaches the final end. Every byte is read through `ByteSource`.
 | Unknown owner keys and kinds are rejected | `extra="forbid"` and the discriminated union, `tests/vibesys/run/test_run_logs.py` |
 | Our own processes' output is never parsed for facts | Not lintable: a parse at a foreign tool's call site looks the same. Review. |
 | Every store implementation behaves alike | `vs_logs.api.testing.LogStoreContract` against `FileLogStore` and `MemoryLogStore` |
+| A log failure never fails or stalls the work | `LogStream` catches every volume error; `libs/vs-logs/tests/test_store_failures.py` (a `MemoryVolume` that fills up) and `tests/vibesys/run/test_log_failures.py` (a local command, a cancel), plus the image build and Slurm cases beside their producers |
 | Every runner call chooses where its output goes | The type checker: `output: OutputSink` has no default on `Processes.run`, `StreamingCommand.run`, `DockerCli.run`, `DockerBuildRunner.run`, `CommandRunner.execute` and `start`. `DISCARD` is the explicit opt-out for a probe whose output is parsed or only shown in an error. |
 
 ## Status
@@ -162,7 +181,7 @@ means the chunk reaches the final end. Every byte is read through `ByteSource`.
 | Part | Status |
 | --- | --- |
 | `vs_sim` sinks and `ByteSource` | built |
-| `vs_logs` store, scope, reader, follow; `LogOwner` and its TypeScript | built |
+| `vs_logs` store, scope, reader; `LogOwner` and its TypeScript | built |
 | Startup producers (image build, container start) | built |
 | Host helper `logs` feature and the client logs lib | built |
 | Narration handler and excepthook | built |
@@ -176,6 +195,9 @@ means the chunk reaches the final end. Every byte is read through `ByteSource`.
 
 Known gaps:
 
+- Owners for agent invocations and Slurm jobs are removed until something writes them (a
+  Slurm stage writes under its `GateStage`).
+- `degraded` is on the index and `StreamInfo`, not yet on the wire's `logs.list`.
 - The CLI `build_task_image` is unlogged.
 - `DockerSandbox` restart discards its output.
 - `job.log` and the in-container dockerd log are not followed.

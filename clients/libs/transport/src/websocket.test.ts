@@ -43,6 +43,12 @@ class FakeSocket implements WebSocketLike {
     this.onmessage?.({data: JSON.stringify(message)});
   }
 
+  /** Snapshot a message callback the runtime queued before its handler was cleared. */
+  queueResponse(message: unknown): () => void {
+    const pending = this.onmessage;
+    return () => pending?.({data: JSON.stringify(message)});
+  }
+
   receive(data: unknown): void {
     this.onmessage?.({data});
   }
@@ -397,6 +403,168 @@ describe('WebSocketTransport', () => {
     expect(disconnects[0]).toMatchObject({kind: 'parse'});
     expect(socket.closeCalls).toBe(1);
     await transport.close();
+  });
+
+  it('contains both subscription observers and joins retirement before terminal failure', async () => {
+    const socket = new DelayedCloseSocket();
+    const clock = new FakeClock();
+    const messageFailure = new Error('message observer failed');
+    const disconnectFailure = new Error('disconnect observer failed');
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: clock.schedule,
+      webSocket: () => {
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    });
+    let reentrantClose: Promise<void> | undefined;
+    const subscription = transport.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') throw messageFailure;
+      },
+      () => {
+        reentrantClose = transport.close();
+        throw disconnectFailure;
+      },
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+
+    let escaped: unknown;
+    try {
+      socket.respond({type: 'event_batch', events: [], history_after_sequence: 0});
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    expect(socket.closeCalls).toBe(1);
+    expect(socket.readyState).toBe(2);
+    expect(clock.pendingDelays()).toEqual([50]);
+    if (reentrantClose === undefined) throw new Error('The disconnect observer did not close');
+    expect(transport.close()).toBe(reentrantClose);
+    let settled = false;
+    void reentrantClose.catch(() => {
+      settled = true;
+    });
+    await tick();
+    expect(settled).toBe(false);
+
+    socket.finishClose();
+    const failure = await reentrantClose.catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([messageFailure, disconnectFailure]);
+    await expect(transport.close()).rejects.toBe(failure);
+    expect(socket.closeCalls).toBe(1);
+    expect(clock.pending).toBe(0);
+  });
+
+  it('suppresses a subscription message callback queued before terminal close', async () => {
+    const socket = new FakeSocket();
+    const transport = transportFor(socket);
+    const delivered: EventBatchMessage[] = [];
+    const subscription = transport.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') delivered.push(message);
+      },
+      () => undefined,
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+    const deliverQueued = socket.queueResponse({
+      type: 'event_batch',
+      events: [],
+      history_after_sequence: 0,
+    });
+
+    const closing = transport.close();
+    let escaped: unknown;
+    try {
+      deliverQueued();
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    expect(delivered).toEqual([]);
+    expect(socket.closeCalls).toBe(1);
+    await closing;
+  });
+
+  it('contains a disconnect observer and preserves its failure by identity', async () => {
+    const socket = new FakeSocket();
+    const observerFailure = new Error('disconnect observer failed');
+    const transport = transportFor(socket);
+    const subscription = transport.subscribe(
+      0,
+      () => {},
+      () => {
+        throw observerFailure;
+      },
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+
+    let escaped: unknown;
+    try {
+      socket.drop();
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    await expect(transport.close()).rejects.toBe(observerFailure);
+    expect(socket.closeCalls).toBe(0);
+  });
+
+  it('retires on message observer failure without relabeling valid peer data', async () => {
+    const socket = new FakeSocket();
+    const observerFailure = new Error('message observer failed');
+    const disconnects: Error[] = [];
+    const transport = transportFor(socket);
+    const subscription = transport.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') throw observerFailure;
+      },
+      error => disconnects.push(error),
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+
+    socket.respond({type: 'event_batch', events: [], history_after_sequence: 0});
+
+    expect(disconnects).toEqual([observerFailure]);
+    expect(disconnects[0]).not.toBeInstanceOf(BackendClientError);
+    expect(socket.closeCalls).toBe(1);
+    await expect(transport.close()).rejects.toBe(observerFailure);
   });
 
   it('closes a corrupted control socket before redialing', async () => {
@@ -981,6 +1149,164 @@ describe('WebSocketTransport', () => {
     expect(socket.closeCalls).toBe(1);
     expect(signal.listenerCount).toBe(0);
     expect(scheduler.pending).toBe(0);
+  });
+
+  it('settles a dedicated socket before exposing a control observer failure', async () => {
+    const controlSocket = new FakeSocket();
+    const chatSocket = new DelayedCloseSocket();
+    const sockets: FakeSocket[] = [controlSocket, chatSocket];
+    const scheduler = new FakeClock();
+    const observerError = new Error('control observer failed');
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: scheduler.schedule,
+      onConnectionState: state => {
+        if (state.status === 'connected') throw observerError;
+      },
+      webSocket: () => {
+        const socket = sockets.shift();
+        if (socket === undefined) throw new Error('The test opened an unexpected socket');
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    });
+    const snapshot = transport.request({type: 'query.snapshot'});
+    await tick();
+    controlSocket.answerAll();
+    await expect(snapshot).resolves.toMatchObject({ok: true});
+
+    const chat = rejection(transport.request({type: 'query.chat', text: 'still running'}));
+    await tick();
+    expect(chatSocket.frames()[0]?.['type']).toBe('query.chat');
+
+    const closing = transport.close();
+    const pending = {};
+    let closeOutcome: unknown = pending;
+    void closing.then(
+      () => {
+        closeOutcome = undefined;
+      },
+      error => {
+        closeOutcome = error;
+      },
+    );
+    await tick();
+
+    expect(await chat).toMatchObject({kind: 'disconnected'});
+    expect(closeOutcome).toBe(pending);
+    expect(chatSocket.readyState).toBe(2);
+    expect(scheduler.pendingDelays()).toEqual([50]);
+
+    chatSocket.finishClose();
+    await expect(closing).rejects.toBe(observerError);
+    expect(scheduler.pendingDelays()).toEqual([]);
+    expect(chatSocket.readyState).toBe(3);
+  });
+
+  it('settles every bounded close owner before exposing structural failures', async () => {
+    const controlSocket = new FakeSocket();
+    const chatSocket = new DelayedCloseSocket();
+    const sockets: FakeSocket[] = [controlSocket, chatSocket];
+    const clock = new FakeClock();
+    const observerError = new Error('control observer failed');
+    const schedulerError = new Error('close deadline registration failed');
+    let schedules = 0;
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: (callback, delayMs) => {
+        schedules += 1;
+        if (schedules === 4) throw schedulerError;
+        return clock.schedule(callback, delayMs);
+      },
+      onConnectionState: state => {
+        if (state.status === 'connected') throw observerError;
+      },
+      webSocket: () => {
+        const socket = sockets.shift();
+        if (socket === undefined) throw new Error('The test opened an unexpected socket');
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    });
+    const snapshot = transport.request({type: 'query.snapshot'});
+    await tick();
+    controlSocket.answerAll();
+    await expect(snapshot).resolves.toMatchObject({ok: true});
+
+    const chat = rejection(transport.request({type: 'query.chat', text: 'still running'}));
+    await tick();
+    const closing = transport.close();
+    const pending = {};
+    let closeOutcome: unknown = pending;
+    void closing.then(
+      () => {
+        closeOutcome = undefined;
+      },
+      error => {
+        closeOutcome = error;
+      },
+    );
+    await tick();
+
+    expect(await chat).toMatchObject({kind: 'disconnected'});
+    expect(closeOutcome).toBe(pending);
+    expect(controlSocket.closeCalls).toBe(1);
+    expect(chatSocket.closeCalls).toBe(1);
+    expect(clock.pendingDelays()).toEqual([50]);
+
+    chatSocket.finishClose();
+    const error = await closing.then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([observerError, schedulerError]);
+    expect(clock.pendingDelays()).toEqual([]);
+  });
+
+  it('retains a completed dedicated retirement failure for terminal close', async () => {
+    const controlSocket = new FakeSocket();
+    const chatSocket = new FakeSocket();
+    const sockets: FakeSocket[] = [controlSocket, chatSocket];
+    const clock = new FakeClock();
+    const observerError = new Error('control observer failed');
+    const schedulerError = new Error('chat close deadline registration failed');
+    let schedules = 0;
+    const transport = new WebSocketTransport(URL, {
+      scheduleTimeout: (callback, delayMs) => {
+        schedules += 1;
+        if (schedules === 4) throw schedulerError;
+        return clock.schedule(callback, delayMs);
+      },
+      onConnectionState: state => {
+        if (state.status === 'connected') throw observerError;
+      },
+      webSocket: () => {
+        const socket = sockets.shift();
+        if (socket === undefined) throw new Error('The test opened an unexpected socket');
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    });
+    const snapshot = transport.request({type: 'query.snapshot'});
+    await tick();
+    controlSocket.answerAll();
+    await expect(snapshot).resolves.toMatchObject({ok: true});
+
+    const chat = transport.request({type: 'query.chat', text: 'answer before retiring'});
+    await tick();
+    chatSocket.answerAll({chat: {question: 'q', answer: 'done', effect: 'none'}});
+    await expect(chat).resolves.toMatchObject({ok: true});
+    await tick();
+    expect(chatSocket.closeCalls).toBe(1);
+
+    const error = await transport.close().then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(AggregateError);
+    expect((error as AggregateError).errors).toEqual([observerError, schedulerError]);
+    expect(controlSocket.closeCalls).toBe(1);
   });
 
   it('keeps a dedicated socket owned while its handshake is handed to the request', async () => {

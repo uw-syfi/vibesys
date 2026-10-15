@@ -7,7 +7,6 @@ A test module subclasses :class:`LogStoreContract` as ``Test<Variant>`` and impl
 from __future__ import annotations
 
 import contextlib
-import itertools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -15,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from vs_logs._core import FromOffset, LogLimits, Tail
 from vs_logs._reader import LogChunk, LogReader
-from vs_logs._records import StreamOutcome
+from vs_logs._records import INDEX_NAME, StreamOutcome
 from vs_sim.api import OutputStream, SeededRandom
 
 if TYPE_CHECKING:
@@ -45,10 +44,11 @@ class LogStoreUnderTest:
     reader: LogReader[ContractOwner]
     reopen: Callable[[], LogStore[ContractOwner]]
     """A new store instance over the same files, as a restarted writer opens it."""
-    append_external: Callable[[str], Callable[[bytes], None]]
-    """For a name, a function that appends to that file as its own writer does."""
-    external_path: Callable[[str], str]
-    """The path to adopt for a name passed to ``append_external``."""
+
+
+def no_warning(message: str) -> None:
+    """The ``warn`` of a store whose volume never fails: a warning fails the test."""
+    raise AssertionError(message)
 
 
 def read_everything(reader: LogReader[ContractOwner], stream_id: str, max_bytes: int) -> LogChunk:
@@ -163,12 +163,15 @@ class LogStoreContract:
         }
         assert subject.reader.read(ended.stream_id, FromOffset(0), 8).closed
 
-    def test_writing_after_close_is_refused(self) -> None:
-        """A closed stream takes no more bytes."""
+    def test_writing_after_close_is_dropped(self) -> None:
+        """A closed stream takes no more bytes, and the late writer never sees an error."""
         subject = self.store_under_test(LogLimits())
         with subject.store.open(ContractOwner(name="done"), "cmd") as stream:
-            pass
-        assert _refused(lambda: stream.write(OutputStream.STDOUT, b"late"))
+            stream.write(OutputStream.STDOUT, b"kept")
+        stream.write(OutputStream.STDOUT, b"late")
+        stream.close(StreamOutcome.FAILED)
+        (info,) = subject.reader.list_streams()
+        assert (info.size, info.outcome, info.degraded) == (4, StreamOutcome.ENDED, False)
 
     def test_a_reopened_store_abandons_open_streams_and_numbers_on(self) -> None:
         """A restarted writer closes what its predecessor left open and never reuses an id."""
@@ -183,20 +186,25 @@ class LogStoreContract:
         assert len({left_open.stream_id, fresh.stream_id}) == 2
         assert subject.reader.read(left_open.stream_id, Tail(100), 100).data == b"partial"
 
-    def test_an_adopted_file_is_read_as_it_grows(self) -> None:
-        """A file someone else writes is listed and read as-is, before and after it exists."""
-        subject = self.store_under_test(LogLimits())
-        path = subject.external_path("job.log")
-        adopted = subject.store.adopt(path, ContractOwner(name="job"), "sbatch")
-        assert subject.reader.read(adopted.stream_id, FromOffset(0), 8).data == b""
-        grow = subject.append_external("job.log")
-        for piece in itertools.repeat(b"line\n", 3):
-            grow(piece)
-        chunk = subject.reader.read(adopted.stream_id, FromOffset(5), 100)
-        assert (chunk.offset, chunk.data, chunk.closed) == (5, b"line\nline\n", False)
-        adopted.close(StreamOutcome.ENDED)
-        (info,) = subject.reader.list_streams()
-        assert (info.adopted, info.size, info.outcome) == (True, 15, StreamOutcome.ENDED)
+    def test_a_torn_last_index_line_is_cut_when_the_store_reopens(self) -> None:
+        """A short index write (a full disk) never corrupts the records written after it."""
+        for seed in range(_CASES):
+            rng = SeededRandom(seed)
+            subject = self.store_under_test(LogLimits())
+            with subject.store.open(ContractOwner(name="before"), "cmd") as before:
+                before.write(OutputStream.STDOUT, b"x")
+            left_open = subject.store.open(ContractOwner(name="crashed"), "cmd")
+            torn = b'{"kind":"opened","stream_id":"000003","owner":{"name":"lost"}}\n'
+            subject.store.volume.append(INDEX_NAME, torn[: rng.randint(1, len(torn) - 1)])
+            with subject.reopen().open(ContractOwner(name="after"), "cmd") as after:
+                after.write(OutputStream.STDERR, b"y")
+            listed = [(info.owner.name, info.outcome) for info in subject.reader.list_streams()]
+            assert listed == [
+                ("before", StreamOutcome.ENDED),
+                ("crashed", StreamOutcome.ABANDONED),
+                ("after", StreamOutcome.ENDED),
+            ], seed
+            assert len({before.stream_id, left_open.stream_id, after.stream_id}) == 3, seed
 
 
 class _ExpectedError(Exception):
@@ -207,12 +215,3 @@ def _fail_inside(stream: LogStream) -> None:
     """Leave ``stream``'s block by an exception, as failing work does."""
     with stream:
         raise _ExpectedError
-
-
-def _refused(action: Callable[[], None]) -> bool:
-    """Whether ``action`` raised ``RuntimeError``, the refusal of a programming error."""
-    try:
-        action()
-    except RuntimeError:
-        return True
-    return False

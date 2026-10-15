@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import TYPE_CHECKING, Any, Self, overload
+from typing import TYPE_CHECKING, Any, Self, Unpack, overload
 
 from vs_core._registry import ContractError
 from vs_core.types.common import Capabilities, Limits, RevisionRef, Seconds, TaskTerms, Value
@@ -27,6 +27,7 @@ from ._sources import (
     Task,
     Timer,
 )
+from ._spans import AttemptOutcome
 from ._winner import INPUT, Input, Kept
 from ._workspaces import Workspaces
 
@@ -35,7 +36,9 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from ._labels import LabelFields, SpanKind
     from ._run import _Run
+    from ._spans import SpanId
 
 
 class Clock:
@@ -164,15 +167,35 @@ class Flow:
         self, attempt: Callable[[Tries[R]], Awaitable[V | Again[R]]], policy: RetryPolicy
     ) -> V | GaveUp[R]:
         """Repeat ``attempt`` until it gives a value, at most ``policy.max_tries`` times."""
+        trace, span = self._run.trace, self._kit.task.span_id
         reasons: list[R] = []
         for number in range(1, policy.max_tries + 1):
+            trace.attempt_started(span, number, policy.max_tries)
             outcome = await attempt(Tries(number=number, reasons=tuple(reasons)))
             if not isinstance(outcome, Again):
+                trace.attempt_ended(span, AttemptOutcome.DONE, None)
                 return outcome
             reasons.append(outcome.reason)
+            last = number == policy.max_tries
+            ending = AttemptOutcome.GAVE_UP if last else AttemptOutcome.AGAIN
+            trace.attempt_ended(span, ending, str(outcome.reason))
             if policy.backoff is not None and number < policy.max_tries:
                 await self.timer(self._kit.now() + policy.backoff.delay(number - 1))
         return GaveUp(reasons=tuple(reasons))
+
+    @property
+    def span(self) -> SpanId:
+        """This flow's span in the run trace: what another span's link names it by."""
+        return self._kit.task.span_id
+
+    def label(self, kind: SpanKind, **fields: Unpack[LabelFields]) -> None:
+        """Label this flow's span as ``kind`` (declared at ``@search``).
+
+        ``fields`` (``title``, ``links``, ``attrs``, ``verdict``, ``reason``) replace those
+        they name; the rest keep their values. An undeclared kind, attribute, relation or
+        verdict, or a link to a span the run has not recorded, is a ``ContractError``.
+        """
+        self._run.label(self.span, kind, fields)
 
     def checkpoint(self, snapshot: object) -> None:
         """Record ``snapshot``: where a code change may resume this flow (see ``flow``)."""
@@ -264,7 +287,7 @@ class Group[T](Source[T | TaskStopped]):
         """
         if self.free <= 0:
             raise ContractError(("group", "start"), "the group is full: read `free` first")
-        return self._run.begin_task(self._owner.path, self, key, (fn, args))
+        return self._run.begin_task(self._owner.task, self, key, (fn, args))
 
     async def __aenter__(self) -> Self:
         """Enter the scope."""

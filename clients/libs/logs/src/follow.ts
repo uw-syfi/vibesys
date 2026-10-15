@@ -48,13 +48,14 @@ export type LogReadOutcome =
   | {readonly ok: false; readonly failure: LogReadFailure};
 
 /**
- * Failures a retry cannot fix: the store has no such instance or stream, the helper does not offer
- * logs, or it refused the request as malformed. Anything else (a deadline, a busy or dropped
+ * Failures a retry cannot fix: the store has no such instance or stream or cannot be read, the
+ * helper does not offer logs, or it refused the request as malformed. Anything else (a deadline, a busy or dropped
  * channel, a helper fault) is transient.
  */
 const PERMANENT: ReadonlySet<LogReadFailureCode> = new Set<LogReadFailureCode>([
   'unknown_instance',
   'unknown_log_stream',
+  'log_store_corrupt',
   'feature_not_negotiated',
   'invalid_request',
   'handshake_required',

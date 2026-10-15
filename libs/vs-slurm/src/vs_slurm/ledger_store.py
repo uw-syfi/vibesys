@@ -1,0 +1,240 @@
+"""The evaluation ledger on the cluster's shared filesystem, reached through the job transport."""
+
+from __future__ import annotations
+
+import os
+import re
+import shlex
+import tempfile
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING
+
+from vs_sim.api import ProcessTimeoutError
+
+from .ledger import (
+    LedgerEntry,
+    LedgerError,
+    LedgerLease,
+    LedgerRecord,
+    UnreadableLease,
+    check_transition,
+    decode_lease,
+    decode_record,
+    encode,
+    validate_holder,
+    validate_key,
+    validate_project,
+)
+from .runner import SlurmError, _make_transport
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Mapping
+
+    from vs_sim.api import Processes
+
+    from .config import SlurmConfig
+
+_LEDGER_DIRECTORY = "ledger"
+_END = "VS-LEDGER-END"
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+_REVISION = re.compile(r"attempt-(?P<attempt>[0-9]+)\.(?P<revision>[0-9]+)\.json")
+
+
+class RemoteEvaluationLedger:
+    """The ledger of one project, stored next to the jobs it names.
+
+    It reaches the cluster through the same transport as the jobs (the operator's
+    configuration and ``processes``) and lives under the operator's staging root,
+    outside any agent's mounts. Every write is an atomic rename (a lease) or
+    create-only link (a record revision) of a complete file, so a reader never
+    sees a partial document and a record revision is never overwritten.
+    """
+
+    def __init__(
+        self,
+        config: SlurmConfig,
+        *,
+        project: str,
+        processes: Processes,
+        scratch_root: Path | None = None,
+        host_environment: Callable[[], Mapping[str, str]] | None = None,
+    ) -> None:
+        """Bind the project's ledger directory on the cluster."""
+        self._transport = _make_transport(
+            config,
+            processes=processes,
+            host_environment=host_environment or (lambda: os.environ),
+        )
+        self._root = (
+            PurePosixPath(config.remote_workspace_root)
+            / config.name
+            / _LEDGER_DIRECTORY
+            / validate_project(project)
+        )
+        self._scratch_root = scratch_root
+
+    def read(self, key: str) -> LedgerEntry | None:
+        """The request's current attempt and its leases, in one remote command.
+
+        A document that vanishes between the listing and the read (a released
+        lease) is absent, never malformed: each file is read in one ``cat`` whose
+        failure skips it. A lease that is there but cannot be decoded is reported
+        in ``unreadable_leases``, with its file's modification time; it never
+        fails the read. A time ``date -r`` cannot read is infinite: the lease holds.
+        """
+        directory = self._key_directory(key)
+        quoted = shlex.quote(directory.as_posix())
+        listing = (
+            f"for f in {quoted}/attempt-*.json {quoted}/leases/*.json; do "
+            f'if d=$(cat -- "$f" 2>/dev/null); then '
+            f'm=$(date -r "$f" +%s 2>/dev/null) || m=inf; '
+            f'printf "%s %s %s\\n" "$m" "$f" "$d"; fi; done; '
+            f"printf '%s\\n' {_END}"
+        )
+        lines = self._exec(listing).splitlines()
+        if not lines or lines[-1] != _END:
+            raise LedgerError.malformed_reply("read")
+        revisions: list[tuple[int, int, LedgerRecord]] = []
+        leases: list[LedgerLease] = []
+        unreadable: list[UnreadableLease] = []
+        for line in lines[:-1]:
+            written, _, rest = line.partition(" ")
+            path, _, document = rest.partition(" ")
+            name = PurePosixPath(path)
+            if name.parent.name == "leases":
+                try:
+                    leases.append(decode_lease(document, path=path))
+                except LedgerError:
+                    unreadable.append(UnreadableLease(name.stem, _written_at(written)))
+                continue
+            numbered = _REVISION.fullmatch(name.name)
+            if numbered is None:
+                raise LedgerError.malformed_reply("read")
+            record = decode_record(document, path=path)
+            attempt, revision = int(numbered["attempt"]), int(numbered["revision"])
+            if record.key != key or record.attempt != attempt:
+                raise LedgerError.unreadable(path, "the record names another key or attempt")
+            revisions.append((attempt, revision, record))
+        if not revisions:
+            return None
+        latest: dict[int, tuple[int, LedgerRecord]] = {}
+        for attempt, revision, record in revisions:
+            if attempt not in latest or revision > latest[attempt][0]:
+                latest[attempt] = (revision, record)
+        *earlier, (revision, current) = (latest[attempt] for attempt in sorted(latest))
+        return LedgerEntry(
+            current,
+            tuple(sorted(leases, key=lambda lease: lease.holder)),
+            revision,
+            tuple(sorted(unreadable, key=lambda lease: lease.holder)),
+            tuple(record for _, record in earlier),
+        )
+
+    def claim(self, record: LedgerRecord) -> LedgerRecord:
+        """Create the record's attempt unless one exists; return the stored attempt."""
+        path = self._revision_path(record, 0)
+        outcome = self._publish(path, encode(record), create_only=True)
+        if outcome == "CREATED":
+            return record
+        entry = self.read(record.key)
+        stored = None if entry is None else entry.record
+        if stored is None or stored.attempt < record.attempt:
+            raise LedgerError.claim_unreadable(record.key)
+        return stored
+
+    def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
+        """Write ``record`` as the next revision of ``current``; False if another writer won."""
+        check_transition(current.record, record)
+        path = self._revision_path(record, current.revision + 1)
+        return self._publish(path, encode(record), create_only=True) == "CREATED"
+
+    def renew(self, key: str, lease: LedgerLease) -> None:
+        """Write this holder's lease; only this holder ever writes its file."""
+        path = self._key_directory(key) / "leases" / f"{validate_holder(lease.holder)}.json"
+        self._publish(path, encode(lease), create_only=False)
+
+    def release(self, key: str, holder: str) -> None:
+        """Drop this holder's lease, so only the others' and the grace period keep the job."""
+        path = self._key_directory(key) / "leases" / f"{validate_holder(holder)}.json"
+        self._exec(f"rm -f {shlex.quote(path.as_posix())}")
+
+    def operator_file_sha256(self, path: str) -> str | None:
+        """The SHA-256 of a file on the cluster's filesystem, or None when there is no such file."""
+        quoted = shlex.quote(PurePosixPath(path).as_posix())
+        lines = self._exec(
+            f"if test -f {quoted}; then sha256sum < {quoted}; else printf '%s\\n' ABSENT; fi; "
+            f"printf '%s\\n' {_END}"
+        ).splitlines()
+        match lines:
+            case ["ABSENT", end] if end == _END:
+                return None
+            case [reply, end] if end == _END:
+                digest = reply.split(" ", 1)[0]
+            case _:
+                raise LedgerError.malformed_reply("sha256sum")
+        if _SHA256.fullmatch(digest) is None:
+            raise LedgerError.malformed_reply("sha256sum")
+        return digest
+
+    def list_keys(self) -> tuple[str, ...]:
+        """Every request the project's ledger holds."""
+        quoted = shlex.quote(self._root.as_posix())
+        lines = self._exec(
+            f"if test -d {quoted}; then ls -1 {quoted}; fi; printf '%s\\n' {_END}"
+        ).splitlines()
+        if not lines or lines[-1] != _END:
+            raise LedgerError.malformed_reply("listing")
+        found = []
+        for name in lines[:-1]:
+            try:
+                found.append(validate_key(name.strip()))
+            except LedgerError:
+                continue  # a stray entry is not a request
+        return tuple(sorted(found))
+
+    def _key_directory(self, key: str) -> PurePosixPath:
+        return self._root / validate_key(key)
+
+    def _revision_path(self, record: LedgerRecord, revision: int) -> PurePosixPath:
+        return self._key_directory(record.key) / f"attempt-{record.attempt}.{revision}.json"
+
+    def _publish(self, path: PurePosixPath, content: str, *, create_only: bool) -> str:
+        with tempfile.TemporaryDirectory(prefix="vs-ledger-", dir=self._scratch_root) as temporary:
+            local = Path(temporary) / "document"
+            local.write_text(content, encoding="utf-8")
+            pending = path.with_name(f"{path.name}.pending.{Path(temporary).name}")
+            directory = shlex.quote(path.parent.as_posix())
+            self._exec(f"mkdir -p {directory}")
+            try:
+                self._transport.put(local, pending)
+            except (OSError, SlurmError, ProcessTimeoutError) as error:
+                raise LedgerError.transport(error) from error
+            source = shlex.quote(pending.as_posix())
+            target = shlex.quote(path.as_posix())
+            publish = (
+                f"if ln {source} {target} 2>/dev/null; then rm {source}; printf CREATED; "
+                f"else rm {source}; printf EXISTS; fi"
+                if create_only
+                else f"mv {source} {target} && printf CREATED"
+            )
+            outcome = self._exec(f"{publish}; sync {directory}").strip()
+        if outcome not in {"CREATED", "EXISTS"}:
+            raise LedgerError.malformed_reply("publish")
+        return outcome
+
+    def _exec(self, command: str) -> str:
+        try:
+            return self._transport.exec(command).stdout
+        except (OSError, SlurmError, ProcessTimeoutError, UnicodeError) as error:
+            raise LedgerError.transport(error) from error
+
+
+def _written_at(field: str) -> float:
+    """A file's modification time as ``date -r`` printed it; a reply that is not one is malformed."""
+    try:
+        return float(field)
+    except ValueError:
+        raise LedgerError.malformed_reply("read") from None
+
+
+__all__ = ["RemoteEvaluationLedger"]

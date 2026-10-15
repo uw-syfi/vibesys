@@ -6,17 +6,19 @@ A ROCm profiling toolkit is available at `rocprof_profiler/analyze_rocprof.py`, 
    Pre-warm (CRITICAL: first-time AITER/Triton kernel resolution and any
    TunableOp search take minutes and will otherwise dominate the capture):
    ```
-   <declared server command, with single-process settings applied> > /tmp/prewarm.log 2>&1 &
+   {% include "shared/profilers/_stop_process_group.j2" %}
+   setsid <declared server command, with single-process settings applied> > /tmp/prewarm.log 2>&1 &
    PID=$!
    for i in $(seq 1 120); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
    curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
      -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
-   kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
+   stop_group $PID
    ```
 
 2. Profile under a representative benchmark load (pick the load level closest to saturation from your earlier runs). If the server is tensor-parallel, profile the worker process that actually issues HIP kernels, not the API-server/driver process (a driver-only capture reads as idle by construction):
    ```
-   rocprofv3 --kernel-trace --memory-copy-trace --stats --output-format csv \
+   {% include "shared/profilers/_stop_process_group.j2" %}
+   setsid rocprofv3 --kernel-trace --memory-copy-trace --stats --output-format csv \
      -d /tmp/profile -o capture \
      -- <declared server command, with single-process settings applied> &
    ROCPROF_PID=$!
@@ -24,7 +26,6 @@ A ROCm profiling toolkit is available at `rocprof_profiler/analyze_rocprof.py`, 
    curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
      -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 300
    {% if benchmark_command is defined and benchmark_command %}{{ benchmark_command }}{% else %}<manifest benchmark command>{% endif %} --url http://localhost:8077 --rate <chosen_rate> --duration 10 --max-tokens 64
-   kill -INT $ROCPROF_PID 2>/dev/null
    # rocprofv3 only flushes its trace buffers on a clean process exit: a hard
    # kill (or a server whose forked worker doesn't exit cleanly on an external
    # kill of the parent) silently loses the trace even though the run otherwise
@@ -33,8 +34,7 @@ A ROCm profiling toolkit is available at `rocprof_profiler/analyze_rocprof.py`, 
    # a generous bounded wait: the post-exit flush to disk can itself take
    # minutes on a large capture, scaling with the amount traced (see
    # --hip-runtime-trace below), not with how long the run took.
-   for i in $(seq 1 60); do kill -0 $ROCPROF_PID 2>/dev/null || break; sleep 5; done
-   wait $ROCPROF_PID 2>/dev/null
+   stop_group $ROCPROF_PID INT 300
    ```
    Use `--output-format csv` only: adding `json` duplicates every CSV's
    content inside one JSON blob and can reach GB scale at serving-workload row

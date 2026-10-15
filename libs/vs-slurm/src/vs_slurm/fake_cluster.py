@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from vs_sim.api.testing import FakeByteSource
 
-from .cluster import job_handle, payload_digest
+from .cluster import collection_locator, job_handle, payload_digest
 from .cluster_types import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -36,13 +36,13 @@ from .runner import (
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
-    SlurmBatchStageHandle,
     SlurmBatchStageResult,
     SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobStatus,
     _safe_relative_path,
+    batch_stage_handles,
 )
 from .scheduler_states import (
     Completing,
@@ -585,7 +585,9 @@ class FakeCluster:
                 job_id=observation.job_id,
                 reason="job is not terminal",
             )
-        self._collect_artifacts(job, status=observation.status)
+        self._collect_artifacts(
+            job, collection_locator(target, job.handle), status=observation.status
+        )
         result = job.result
         code = result.job_exit_code if isinstance(result, SlurmBatchResult) else result.exit_code
         if code == 0 and observation.status in {SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}:
@@ -636,12 +638,14 @@ class FakeCluster:
         """What the test wrote to stage ``index``'s output file, read through a live source."""
         return _StageOutput(self._outputs, (handle.job.invocation_id, index, stream))
 
-    def _collect_artifacts(self, job: _Job, *, status: SlurmJobStatus) -> None:
+    def _collect_artifacts(
+        self, job: _Job, locator: ClusterHandle | None, *, status: SlurmJobStatus
+    ) -> None:
         contents = self._scripts[job.operation_id].artifact_contents or {}
         result = job.result
-        if isinstance(result, SlurmBatchResult) and isinstance(job.handle, SlurmBatchHandle):
+        if isinstance(result, SlurmBatchResult) and isinstance(locator, SlurmBatchHandle):
             stages = []
-            handles = {stage.name: stage for stage in job.handle.stages}
+            handles = {stage.name: stage for stage in locator.stages}
             for stage in result.stages:
                 declared = handles.get(stage.name)
                 if type(stage.exit_code) is not int or stage.exit_code != 0 or declared is None:
@@ -765,24 +769,7 @@ class FakeCluster:
             job=job,
             submission_seconds=0.0,
             stop_on_failure=request.stop_on_failure,
-            stages=tuple(
-                SlurmBatchStageHandle(
-                    name=stage.name,
-                    file_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=a.remote_path, local_path=a.local_path, kind="file"
-                        )
-                        for a in stage.file_artifacts
-                    ),
-                    tree_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=a.remote_path, local_path=a.local_path, kind="tree"
-                        )
-                        for a in stage.tree_artifacts
-                    ),
-                )
-                for stage in request.stages
-            ),
+            stages=batch_stage_handles(request),
         )
 
     @staticmethod

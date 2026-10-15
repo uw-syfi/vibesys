@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from vs_core.types.common import Seconds
 
     from ._kit import Kit
+    from ._labels import Label
 
 type Outcome = Literal["succeeded", "failed", "cancelled", "blocked"]
 
@@ -146,9 +147,12 @@ class Workspaces:
         )
 
     async def verify(
-        self, revision: RevisionRef, *, within: Seconds
+        self, revision: RevisionRef, *, within: Seconds, label: Label | None = None
     ) -> ParentVerification | Failed:
-        """Whether ``revision`` still reproduces its retained, evaluated content."""
+        """Whether ``revision`` still reproduces its retained, evaluated content.
+
+        ``label`` labels the verification's span.
+        """
         operations = self._kit.run.wiring.operations
         if operations is None:
             message = "this search was registered without operations"
@@ -158,7 +162,7 @@ class Workspaces:
             scope=THIS_RUN,
             request=operations.verify(parent=revision),  # ty: ignore[missing-argument]
         )
-        event = await self._kit.wait(request, Within(limit=within))
+        event = await self._kit.wait(request, Within(limit=within), label)
         if isinstance(event, Failed):
             return event
         outcome = getattr(getattr(event, "result", None), "outcome", None)

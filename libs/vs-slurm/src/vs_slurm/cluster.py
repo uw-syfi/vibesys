@@ -174,6 +174,36 @@ def replace_job_id(handle: ClusterHandle, job_id: str) -> ClusterHandle:
     return handle.model_copy(update={"job": job}) if isinstance(handle, SlurmBatchHandle) else job
 
 
+def _remote_layout(handle: SlurmBatchHandle) -> object:
+    return tuple(
+        (
+            stage.name,
+            tuple(
+                (item.remote_path, item.kind, item.collect_on_failure)
+                for item in (*stage.file_artifacts, *stage.tree_artifacts)
+            ),
+        )
+        for stage in handle.stages
+    )
+
+
+def collection_locator(
+    target: ClusterTarget, recorded: ClusterHandle | None
+) -> ClusterHandle | None:
+    """The job's recorded handle, with its artifacts landing where the caller's handle says.
+
+    A run that attaches to a job another run submitted (#2757) holds a handle
+    whose artifacts land in its own workspace, while the cluster's record names
+    the submitter's. The caller's paths apply only when its handle declares the
+    same stages and remote artifacts; the remote side always comes from the record.
+    """
+    if not isinstance(target, SlurmBatchHandle) or not isinstance(recorded, SlurmBatchHandle):
+        return recorded
+    if _remote_layout(target) != _remote_layout(recorded):
+        return recorded
+    return recorded.model_copy(update={"stages": target.stages})
+
+
 class SlurmCluster:
     """Persist intent, submit once, and reconcile ambiguous scheduler acceptance.
 
@@ -486,13 +516,14 @@ class SlurmCluster:
                 job_id=observed.job_id,
                 reason="job is not terminal",
             )
-        if observed.handle is None:
+        locator = collection_locator(target, observed.handle)
+        if locator is None:
             return ClusterUnknown(
                 operation_id=observed.operation_id,
                 job_id=observed.job_id,
                 reason="collection locator unavailable",
             )
-        return self._collect_terminal(observed, observed.handle)
+        return self._collect_terminal(observed, locator)
 
     def stage_output(
         self, handle: SlurmBatchHandle, index: int, stream: OutputStream

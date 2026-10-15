@@ -6,7 +6,7 @@
  */
 
 import type {HostKey} from '@vibesys/hosts';
-import {Button, Dialog} from '@vibesys/ui';
+import {Button, Dialog} from '@vibesys/ui/legacy';
 import type {InputHTMLAttributes, JSX, ReactNode} from 'react';
 import {
   chosenHarness,

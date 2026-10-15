@@ -339,6 +339,7 @@ export type HelperErrorCode =
   | "connect_failed"
   | "unknown_instance"
   | "unknown_log_stream"
+  | "log_store_corrupt"
   | "unvetted_harness"
   | "internal";
 export type Message3 = string;
