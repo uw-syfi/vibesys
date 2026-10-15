@@ -76,7 +76,7 @@ if TYPE_CHECKING:
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
-    from vs_sim.api import BlockingRunner, Network, ReleaseStack, SleepingClock
+    from vs_sim.api import BlockingRunner, Network, ReleaseStack
 
 
 type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
@@ -388,7 +388,10 @@ class _ProductHostFactory:
         )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
         executor = self._semantic_executor(
-            self.integration, resources, workspaces, namespace, self.timing.clock
+            resources,
+            workspaces,
+            namespace,
+            ledger_identity=(project.project.state.load_project().project_id, project.state.run_id),
         )
         configuration = partial(self._agent_configuration, resources)
         return build_core_services(
@@ -484,18 +487,19 @@ class _ProductHostFactory:
             ),
         )
 
-    @staticmethod
     def _semantic_executor(
-        integration: LocalRunIntegration,
+        self,
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
-        clock: SleepingClock,
+        *,
+        ledger_identity: tuple[str, str],
     ) -> SlurmSemanticEvaluationExecutor | None:
         """Build the cluster's semantic execution adapter when the environment reports one."""
         cluster = resources.environment_resources.view.cluster_evaluation
         if cluster is None:
             return None
+        clock = self.timing.clock
         return SlurmSemanticEvaluationExecutor(
             cluster.settings.config,
             cluster.settings.policy,
@@ -506,7 +510,8 @@ class _ProductHostFactory:
             namespace.external_directory() / "slurm-provider-handles",
             clock=clock,
             sleeper=clock,
-            processes=integration.system.slurm_processes,
+            processes=self.integration.system.slurm_processes,
+            ledger_identity=ledger_identity,
         )
 
     async def stop_new_work(self) -> None:
@@ -515,7 +520,8 @@ class _ProductHostFactory:
         Every core measurement, an agent's included, is a job of the run's evaluation
         executor. Core refuses new submissions once the stop is committed, and the executor
         cancels the jobs still on the cluster when ``close_core_services`` closes it as the
-        run exits (``tests/system/agent_evaluation/test_stops_on_stop.py``). The legacy
+        run exits (with the operator's evaluation ledger, #2757, it detaches instead and
+        leaves them to the ledger) (``tests/system/agent_evaluation/test_stops_on_stop.py``). The legacy
         evaluation service this hook once cancelled was never installed on a core run.
         """
 

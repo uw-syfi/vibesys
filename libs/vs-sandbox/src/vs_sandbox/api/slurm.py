@@ -58,6 +58,7 @@ from vs_sandbox.slurm_ledger import (
     LedgerAttachError,
     LedgerWithdrawnError,
     SlurmLedgerAttachment,
+    open_ledger_attachment,
 )
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
@@ -144,6 +145,7 @@ __all__ = [
     "load_slurm_gpu_alias_settings",
     "load_slurm_operator_settings",
     "load_slurm_policy",
+    "open_ledger_attachment",
     "profile_capture_descriptor",
     "read_slurm_capture_plan",
     "render_slurm_operator_toml",

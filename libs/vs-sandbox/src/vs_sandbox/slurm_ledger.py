@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, assert_never
 
+from vs_sandbox.slurm_wiring import make_evaluation_ledger
 from vs_slurm.api import (
     BATCH_RESULT_LAYOUT,
     AttachJob,
@@ -44,7 +45,9 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
-    from vs_sim.api import Clock
+    from pathlib import Path
+
+    from vs_sim.api import Clock, Processes
     from vs_slurm.api import (
         Cluster,
         EvaluationLedger,
@@ -272,6 +275,25 @@ class SlurmLedgerAttachment:
         return Attached(record.key, record.operation_id, handle)
 
 
+def open_ledger_attachment(  # noqa: PLR0913  # lint-waiver: LW-275701 [PLR0913]; each argument is an independent operator setting, identity or injected port of the one ledger connection; a carrier type would only rename this signature.
+    config: SlurmConfig,
+    policy: LedgerPolicy,
+    *,
+    project: str,
+    holder: str,
+    clock: Clock,
+    processes: Processes,
+    state_root: Path,
+) -> SlurmLedgerAttachment:
+    """Attach run ``holder`` to the ledger of ``project`` on the configured cluster."""
+    ledger = make_evaluation_ledger(
+        config, project=project, state_root=state_root, processes=processes
+    )
+    return SlurmLedgerAttachment(
+        ledger=ledger, config=config, project=project, holder=holder, policy=policy, clock=clock
+    )
+
+
 __all__ = [
     "AttachOutcome",
     "AttachPending",
@@ -279,4 +301,5 @@ __all__ = [
     "LedgerAttachError",
     "LedgerWithdrawnError",
     "SlurmLedgerAttachment",
+    "open_ledger_attachment",
 ]

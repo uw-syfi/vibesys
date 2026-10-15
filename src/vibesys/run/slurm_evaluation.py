@@ -36,6 +36,7 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
         processes: Processes | None = None,
+        ledger_identity: tuple[str, str] | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state."""
         super().__init__(
@@ -52,6 +53,7 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
             admission=admission,
             cluster=cluster,
             processes=processes,
+            ledger_identity=ledger_identity,
         )
 
 
