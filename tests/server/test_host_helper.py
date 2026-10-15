@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import ValidationError
 from tests.server.host_helper_support import (
     HOME,
     VIBESYS_VERSION,
@@ -32,10 +33,12 @@ from tests.server.host_helper_support import (
 )
 
 from server.host_api import (
+    COMPENSATION_FAILURE_EXIT_STATUS,
     HELPER_PROTOCOL_VERSIONS,
     PATHS_COMPLETE_CAP,
     ChannelEnd,
     ChannelEndOutcome,
+    CompensationFailureKind,
     DetachedLaunchFailure,
     HelloRequest,
     HelperError,
@@ -46,6 +49,7 @@ from server.host_api import (
     InstancesChanged,
     InstancesInspectReply,
     InstancesInspectRequest,
+    InstanceStopResult,
     LiveInstanceRecord,
     PathsCompleteReply,
     PathsCompleteRequest,
@@ -54,9 +58,11 @@ from server.host_api import (
     ResumeRun,
     RunConnectReply,
     RunPhase,
+    RunStartCompensationFailure,
     RunStartReply,
     RunStartRequest,
     RunStatus,
+    StopOutcome,
     parse_helper_request,
 )
 from server.host_helper import (
@@ -98,12 +104,20 @@ from server.host_helper_requests import (
 from server.registry import FakeInstanceStore, LiveRegistry, StopEffects
 from server.relay import EXIT_STATUS
 from vs_decode.api import Unreadable
-from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, SimNetwork, SimThreads, examples
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    FakeProcessSignaller,
+    RefusingThreads,
+    SimNetwork,
+    SimThreads,
+    examples,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from vs_sim.api import Event, Listener
+    from server.registry import StopRequester
+    from vs_sim.api import Event, Listener, ProcessSignaller, Threads
 
 ALL_FEATURES = tuple(feature.value for feature in HelperFeature)
 
@@ -506,7 +520,7 @@ def test_a_late_successful_start_owns_its_slot_until_compensation_finishes() -> 
     )
 
     assert outputs == (StopStartedRun("start", started.id),)
-    assert state.compensating == frozenset({"start"})
+    assert state.compensating == {"start": started.id}
     state, outputs = step(
         state,
         Received(_line(_request("ping", "overflow")), 1.0),
@@ -516,7 +530,8 @@ def test_a_late_successful_start_owns_its_slot_until_compensation_finishes() -> 
     assert isinstance(outputs[0].message, HelperError)
     assert outputs[0].message.code is HelperErrorCode.CHANNEL_BUSY
 
-    state, outputs = step(state, CompensationFinished("start"), "v")
+    stopped = InstanceStopResult(id=started.id, outcome=StopOutcome.STOPPED)
+    state, outputs = step(state, CompensationFinished("start", stopped), "v")
     assert outputs == ()
     _, outputs = step(
         state,
@@ -880,6 +895,100 @@ class _GatedStoppingRequester:
         return True
 
 
+@dataclass(frozen=True)
+class _RaisingStopRequester:
+    """A stop boundary that fails before it can acknowledge the request."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        message = "control stop failed"
+        raise OSError(message)
+
+
+@dataclass(frozen=True)
+class _ExitingStopRequester:
+    """A stop boundary whose worker exits outside the Exception hierarchy."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        raise SystemExit
+
+
+class _UnprintableStopError(BaseException):
+    """A boundary failure whose diagnostic formatter also fails."""
+
+    def __str__(self) -> str:
+        raise RuntimeError
+
+
+@dataclass(frozen=True)
+class _UnprintableStopRequester:
+    """A stop boundary that raises a failure unsafe to interpolate."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        raise _UnprintableStopError
+
+
+@dataclass(frozen=True)
+class _RejectingStopRequester:
+    """A control socket that does not acknowledge the stop request."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        return False
+
+
+@dataclass(frozen=True)
+class _AcknowledgingStopRequester:
+    """A server that accepts a stop but remains live past the bounded wait."""
+
+    def request_stop(self, socket_path: str) -> bool:
+        del socket_path
+        return True
+
+
+@dataclass(frozen=True)
+class _UnsupportedProcessSignaller:
+    """A host that cannot signal by a stable process identity."""
+
+    def exists(self, pid: int) -> bool:
+        del pid
+        return True
+
+    def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
+        del pid, current
+        raise NotImplementedError("stable process signalling is unavailable")
+
+
+def _failed_compensation_components(
+    scenario: str,
+    threads: SimThreads,
+    started: LiveInstanceRecord,
+    release: Callable[[], None],
+) -> tuple[StopRequester, ProcessSignaller, Threads]:
+    """Select the deterministic boundary failure for one compensation scenario."""
+    requester: StopRequester = _RejectingStopRequester()
+    signaller: ProcessSignaller = FakeProcessSignaller(set())
+    channel_threads: Threads = threads
+    if scenario == "stop_raises":
+        requester = _RaisingStopRequester()
+    elif scenario == "stop_base_exception":
+        requester = _ExitingStopRequester()
+    elif scenario == "unprintable_stop_exception":
+        requester = _UnprintableStopRequester()
+    elif scenario == "still_running":
+        signaller = FakeProcessSignaller({started.pid})
+    elif scenario == "stopping":
+        requester = _AcknowledgingStopRequester()
+    elif scenario == "unsupported":
+        signaller = _UnsupportedProcessSignaller()
+    else:
+        requester = _StoppingRequester(release)
+        channel_threads = RefusingThreads(threads, {"helper-stop-started": 1})
+    return requester, signaller, channel_threads
+
+
 @dataclass
 class _RejectRunStartOutput:
     """Writes ordinary replies to the client but rejects a successful start reply."""
@@ -1003,6 +1112,151 @@ def test_an_undeliverable_successful_start_is_stopped_before_channel_exit(
     assert still_live is None
 
 
+@pytest.mark.parametrize(
+    ("scenario", "expected_kind", "expected_outcome"),
+    [
+        ("stop_raises", CompensationFailureKind.STOP_FAILED, None),
+        ("stop_base_exception", CompensationFailureKind.STOP_FAILED, None),
+        ("unprintable_stop_exception", CompensationFailureKind.STOP_FAILED, None),
+        ("still_running", CompensationFailureKind.STOP_UNCONFIRMED, StopOutcome.STILL_RUNNING),
+        ("stopping", CompensationFailureKind.STOP_UNCONFIRMED, StopOutcome.STOPPING),
+        ("unsupported", CompensationFailureKind.STOP_UNCONFIRMED, StopOutcome.UNSUPPORTED),
+        ("worker_refused", CompensationFailureKind.WORKER_START_REFUSED, None),
+    ],
+)
+@pytest.mark.parametrize("seed", range(4))
+def test_failed_undeliverable_start_compensation_reports_the_live_instance(
+    scenario: str,
+    expected_kind: CompensationFailureKind,
+    expected_outcome: StopOutcome | None,
+    seed: int,
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path / f"{scenario}-{seed}")
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    started = record("0123456789ab", project_root=str(project))
+    hold = store.hold(started.id)
+
+    def launch(_project: Path, _arguments: tuple[str, ...]) -> LiveInstanceRecord:
+        hold.publish(started)
+        return started
+
+    requester, signaller, channel_threads = _failed_compensation_components(
+        scenario, threads, started, hold.release
+    )
+
+    host = replace(
+        fake_host(threads, network, store=store, launcher=FakeRunLauncher(launch)),
+        stop_effects=StopEffects(
+            requester=requester,
+            signaller=signaller,
+            clock=threads,
+            pause=threads.sleep,
+        ),
+    )
+
+    def main() -> tuple[int | None, bytes, int, LiveInstanceRecord | None]:
+        client = ChannelClient(threads)
+        output = _RejectRunStartOutput(client)
+        errors = ByteBuffer()
+
+        def run() -> None:
+            client.status = serve_channel(
+                host=host,
+                source=client,
+                output=output,
+                errors=errors,
+                threads=channel_threads,
+            )
+
+        worker = threads.spawn(run, name="helper")
+        client.send(_hello())
+        client.receive()
+        client.send(_request("run.start", "s", project=str(project)))
+        worker.join(HANG_GUARD_S)
+        assert not worker.is_alive()
+        return client.status, bytes(errors.data), output.rejected, host.registry.find(started.id)
+
+    status, error_bytes, rejected, still_live = threads.run(main)
+    lines = error_bytes.splitlines()
+    assert len(lines) == 1
+    failure = RunStartCompensationFailure.model_validate_json(lines[0])
+    assert status == COMPENSATION_FAILURE_EXIT_STATUS
+    assert rejected == 1
+    assert failure.request_id == "s"
+    assert failure.instance_id == started.id
+    assert failure.kind is expected_kind
+    assert (failure.stop_result.outcome if failure.stop_result is not None else None) is (
+        expected_outcome
+    )
+    if scenario == "unprintable_stop_exception":
+        assert failure.root.detail == "_UnprintableStopError"
+    assert still_live == started
+    assert threads.errors == []
+
+
+_UNCONFIRMED_STOP_RESULT: dict[str, Any] = {
+    "version": 1,
+    "id": "0123456789ab",
+    "outcome": "still_running",
+    "route": "signal",
+}
+_UNCONFIRMED_COMPENSATION: dict[str, Any] = {
+    "type": "run.start_compensation_failed",
+    "exit_status": COMPENSATION_FAILURE_EXIT_STATUS,
+    "request_id": "s",
+    "kind": "stop_unconfirmed",
+    "detail": "the stop remains in progress",
+    "stop_result": _UNCONFIRMED_STOP_RESULT,
+}
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {key: value for key, value in _UNCONFIRMED_COMPENSATION.items() if key != "stop_result"},
+        {**_UNCONFIRMED_COMPENSATION, "instance_id": "ffffffffffff"},
+        {
+            **_UNCONFIRMED_COMPENSATION,
+            "stop_result": {
+                **_UNCONFIRMED_STOP_RESULT,
+                "outcome": "stopped",
+            },
+        },
+        {
+            **_UNCONFIRMED_COMPENSATION,
+            "stop_result": {
+                **_UNCONFIRMED_STOP_RESULT,
+                "outcome": "not_running",
+            },
+        },
+        {
+            "type": "run.start_compensation_failed",
+            "exit_status": COMPENSATION_FAILURE_EXIT_STATUS,
+            "request_id": "s",
+            "instance_id": "0123456789ab",
+            "kind": "stop_failed",
+            "detail": "stop raised",
+            "stop_result": _UNCONFIRMED_STOP_RESULT,
+        },
+    ],
+    ids=[
+        "unconfirmed-without-result",
+        "duplicate-mismatched-instance",
+        "stopped-is-terminal",
+        "not-running-is-terminal",
+        "failed-stop-with-result",
+    ],
+)
+def test_compensation_failure_contract_rejects_incoherent_evidence(
+    document: dict[str, Any],
+) -> None:
+    with pytest.raises(ValidationError):
+        RunStartCompensationFailure.model_validate(document)
+
+
 def test_a_late_successful_start_owns_compensation_until_input_can_close() -> None:
     state, _ = step(ChannelState(), Received(_line(_hello()), 0.0), "v")
     state, _ = step(state, Answered("h", PingReply(request_id="h")), "v")
@@ -1017,10 +1271,36 @@ def test_a_late_successful_start_owns_compensation_until_input_can_close() -> No
     state, outputs = step(state, Answered("s", RunStartReply(request_id="s", launch=started)), "v")
 
     assert outputs == (StopStartedRun("s", started.id),)
-    assert state.compensating == frozenset({"s"})
-    state, outputs = step(state, CompensationFinished("s"), "v")
+    assert state.compensating == {"s": started.id}
+    stopped = InstanceStopResult(id=started.id, outcome=StopOutcome.STOPPED)
+    state, outputs = step(state, CompensationFinished("s", stopped), "v")
     assert outputs == (Close(),)
     assert not state.starting
+
+
+@pytest.mark.parametrize("outcome", list(StopOutcome))
+def test_compensation_releases_ownership_only_for_a_terminal_stop_result(
+    outcome: StopOutcome,
+) -> None:
+    instance_id = "0123456789ab"
+    state = ChannelState(
+        compensating={"s": instance_id},
+        input_ended=True,
+    )
+    result = InstanceStopResult(id=instance_id, outcome=outcome)
+
+    state, outputs = step(state, CompensationFinished("s", result), "v")
+
+    assert state.compensating == {}
+    assert outputs == (Close(),)
+    if outcome in {StopOutcome.STOPPED, StopOutcome.NOT_RUNNING}:
+        assert state.compensation_failures == ()
+    else:
+        (failure,) = state.compensation_failures
+        assert failure.instance_id == instance_id
+        assert failure.kind is CompensationFailureKind.STOP_UNCONFIRMED
+        assert failure.stop_result is not None
+        assert failure.stop_result.model_dump() == result.model_dump()
 
 
 def test_a_run_channel_stays_busy_until_an_expired_start_is_compensated() -> None:

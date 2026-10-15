@@ -31,7 +31,9 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
 ``HarnessChoice``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
 ``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
-``ChannelEnd``.
+``ChannelEnd``. An undeliverable successful start whose compensating stop cannot
+be proved terminal reports ``RunStartCompensationFailure`` on the helper's
+diagnostic stream.
 
 The helper's messages follow ``docs/contributing/desktop-connection.md``
 ("Handshake and versioning"): strict within a negotiated version, additive
@@ -55,6 +57,7 @@ from pydantic import (
     JsonValue,
     NonNegativeInt,
     PositiveInt,
+    RootModel,
     StringConstraints,
     TypeAdapter,
     ValidationError,
@@ -1295,6 +1298,126 @@ _MESSAGE: TypeAdapter[HelperMessage] = TypeAdapter(HelperMessage)
 def parse_helper_message(line: bytes) -> HelperMessage | Unreadable:
     """Parse one helper message line strictly, as a client does, or say what is wrong."""
     return decode_json(line, _MESSAGE, source="message", max_bytes=HELPER_LINE_MAX_BYTES)
+
+
+COMPENSATION_FAILURE_EXIT_STATUS: Final = 12
+"""The helper could not prove cleanup of a successful start the client never received."""
+COMPENSATION_FAILURE_TYPE: Final = "run.start_compensation_failed"
+"""The discriminant of a failed compensating-stop diagnostic."""
+COMPENSATION_FAILURE_DETAIL_CHARACTERS: Final = 2000
+"""The most diagnostic characters retained from a failed compensating stop."""
+
+
+class CompensationFailureKind(StrEnum):
+    """Why cleanup of an undisclosed successful start could not be proved complete."""
+
+    WORKER_START_REFUSED = "worker_start_refused"
+    """The helper could not start the worker that owns the compensating stop."""
+    STOP_FAILED = "stop_failed"
+    """The registry stop operation raised before returning a typed result."""
+    STOP_UNCONFIRMED = "stop_unconfirmed"
+    """The registry returned a typed result that does not prove terminal cleanup."""
+
+
+class _RunStartCompensationFailureFields(BaseModel):
+    """Fields shared by every failed compensating-stop diagnostic."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["run.start_compensation_failed"]
+    exit_status: Literal[12]
+    request_id: RequestId
+    detail: Annotated[
+        str, StringConstraints(min_length=1, max_length=COMPENSATION_FAILURE_DETAIL_CHARACTERS)
+    ]
+
+
+class WorkerStartRefusedCompensationFailure(_RunStartCompensationFailureFields):
+    """The helper could not start the worker that owns the compensating stop."""
+
+    kind: Literal[CompensationFailureKind.WORKER_START_REFUSED]
+    instance_id: InstanceId
+
+
+class StopFailedCompensationFailure(_RunStartCompensationFailureFields):
+    """The registry stop raised before returning typed evidence."""
+
+    kind: Literal[CompensationFailureKind.STOP_FAILED]
+    instance_id: InstanceId
+
+
+class UnconfirmedInstanceStopResult(InstanceStopResult):
+    """A complete stop result whose outcome does not prove terminal cleanup."""
+
+    outcome: Literal[
+        StopOutcome.STOPPING,
+        StopOutcome.STILL_RUNNING,
+        StopOutcome.UNSUPPORTED,
+    ]
+
+
+class StopUnconfirmedCompensationFailure(_RunStartCompensationFailureFields):
+    """The registry returned a typed result that does not prove terminal cleanup.
+
+    The stop result is the one source of the instance identity in this variant,
+    so a serialized report cannot carry two identities that disagree.
+    """
+
+    kind: Literal[CompensationFailureKind.STOP_UNCONFIRMED]
+    stop_result: UnconfirmedInstanceStopResult
+
+
+type RunStartCompensationEvidence = Annotated[
+    WorkerStartRefusedCompensationFailure
+    | StopFailedCompensationFailure
+    | StopUnconfirmedCompensationFailure,
+    Field(discriminator="kind"),
+]
+
+
+class RunStartCompensationFailure(RootModel[RunStartCompensationEvidence]):
+    """One strict stderr line preserving an undisclosed instance cleanup failure.
+
+    A successful ``run.start`` reply could not reach the client, so only this
+    diagnostic can tell an operator which live instance may need recovery. The
+    discriminated variants make result presence and nonterminal outcomes part of
+    the generated schema rather than Python-only validation.
+    """
+
+    root: RunStartCompensationEvidence
+
+    @property
+    def request_id(self) -> str:
+        """The start request whose successful reply was undisclosed."""
+        return self.root.request_id
+
+    @property
+    def instance_id(self) -> str:
+        """The undisclosed instance an operator may need to recover."""
+        if isinstance(self.root, StopUnconfirmedCompensationFailure):
+            return self.root.stop_result.id
+        return self.root.instance_id
+
+    @property
+    def kind(self) -> CompensationFailureKind:
+        """Why terminal cleanup could not be proved."""
+        return self.root.kind
+
+    @property
+    def stop_result(self) -> UnconfirmedInstanceStopResult | None:
+        """The complete nonterminal stop result, when the stop returned one."""
+        if isinstance(self.root, StopUnconfirmedCompensationFailure):
+            return self.root.stop_result
+        return None
+
+    @property
+    def exit_status(self) -> Literal[12]:
+        """The process status paired with this diagnostic."""
+        return self.root.exit_status
+
+    def line(self) -> str:
+        """The report as one newline-terminated JSON line."""
+        return self.model_dump_json() + "\n"
 
 
 class ChannelEndOutcome(StrEnum):

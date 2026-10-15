@@ -354,6 +354,36 @@ export type ChannelEndOutcome =
   | "server_unresponsive";
 export type ExitStatus = number;
 export type Detail = string;
+/**
+ * One strict stderr line preserving an undisclosed instance cleanup failure.
+ *
+ * A successful ``run.start`` reply could not reach the client, so only this
+ * diagnostic can tell an operator which live instance may need recovery. The
+ * discriminated variants make result presence and nonterminal outcomes part of
+ * the generated schema rather than Python-only validation.
+ */
+export type RunStartCompensationFailure =
+  WorkerStartRefusedCompensationFailure | StopFailedCompensationFailure | StopUnconfirmedCompensationFailure;
+export type Type32 = "run.start_compensation_failed";
+export type ExitStatus1 = 12;
+export type RequestId31 = string;
+export type Detail1 = string;
+export type Kind = "worker_start_refused";
+export type InstanceId6 = string;
+export type Type33 = "run.start_compensation_failed";
+export type ExitStatus2 = 12;
+export type RequestId32 = string;
+export type Detail2 = string;
+export type Kind1 = "stop_failed";
+export type InstanceId7 = string;
+export type Type34 = "run.start_compensation_failed";
+export type ExitStatus3 = 12;
+export type RequestId33 = string;
+export type Detail3 = string;
+export type Kind2 = "stop_unconfirmed";
+export type Version8 = 1;
+export type Id6 = string;
+export type Outcome1 = "stopping" | "still_running" | "unsupported";
 
 /**
  * Root schema document for the host helper: what a client sends and what it receives.
@@ -362,6 +392,7 @@ export interface HostHelperDocument {
   request: Request;
   message: Message;
   channel_end: ChannelEnd;
+  compensation_failure: RunStartCompensationFailure;
 }
 /**
  * The first message on every channel: which versions and features the client speaks.
@@ -951,4 +982,49 @@ export interface ChannelEnd {
   outcome: ChannelEndOutcome;
   exit_status: ExitStatus;
   detail: Detail;
+}
+/**
+ * The helper could not start the worker that owns the compensating stop.
+ */
+export interface WorkerStartRefusedCompensationFailure {
+  type: Type32;
+  exit_status: ExitStatus1;
+  request_id: RequestId31;
+  detail: Detail1;
+  kind: Kind;
+  instance_id: InstanceId6;
+}
+/**
+ * The registry stop raised before returning typed evidence.
+ */
+export interface StopFailedCompensationFailure {
+  type: Type33;
+  exit_status: ExitStatus2;
+  request_id: RequestId32;
+  detail: Detail2;
+  kind: Kind1;
+  instance_id: InstanceId7;
+}
+/**
+ * The registry returned a typed result that does not prove terminal cleanup.
+ *
+ * The stop result is the one source of the instance identity in this variant,
+ * so a serialized report cannot carry two identities that disagree.
+ */
+export interface StopUnconfirmedCompensationFailure {
+  type: Type34;
+  exit_status: ExitStatus3;
+  request_id: RequestId33;
+  detail: Detail3;
+  kind: Kind2;
+  stop_result: UnconfirmedInstanceStopResult;
+}
+/**
+ * A complete stop result whose outcome does not prove terminal cleanup.
+ */
+export interface UnconfirmedInstanceStopResult {
+  version?: Version8;
+  id: Id6;
+  outcome: Outcome1;
+  route?: StopRoute | null;
 }
