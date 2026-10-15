@@ -24,7 +24,7 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeIs
+from typing import TYPE_CHECKING
 
 import pytest
 from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source
@@ -90,8 +90,8 @@ def _effects(nodes: list[ast.AST]) -> list[ast.Call]:
     return [n for n in nodes if isinstance(n, ast.Call) and EFFECT.search(_callee(n))]
 
 
-def _is_latch(node: ast.AST) -> TypeIs[ast.Assign]:
-    if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+def _is_latch(node: ast.Assign) -> bool:
+    if len(node.targets) != 1:
         return False
     target = node.targets[0]
     return (
@@ -184,7 +184,9 @@ def early_releases(source: str) -> list[int]:
             lines.extend(
                 latch.lineno
                 for latch in own
-                if _is_latch(latch) and any(call.lineno > latch.lineno for call in effects)
+                if isinstance(latch, ast.Assign)
+                and _is_latch(latch)
+                and any(call.lineno > latch.lineno for call in effects)
             )
         elif isinstance(node, ast.Try) and node.finalbody:
             body = [n for statement in node.body for n in (statement, *_own_nodes(statement))]
