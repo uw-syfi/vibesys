@@ -18,13 +18,13 @@ from vs_sandbox.slurm_broker_protocol import (
     BrokerRefused,
     ProcessCall,
 )
-from vs_sim.api import ProcessOutcome, ProcessTimedOut
+from vs_sim.api import DISCARD, ProcessOutcome, ProcessTimedOut, forward_output
 from vs_slurm.api import MAX_TRANSPORT_STREAM_BYTES
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sim.api import Connection, Network, ProcessRun, ProcessSpec
+    from vs_sim.api import Connection, Network, OutputSink, ProcessRun, ProcessSpec
 
 _RECV_BYTES = 65_536
 
@@ -66,8 +66,13 @@ class BrokeredProcesses:
     token: str = field(repr=False)
     network: Network
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
-        """Ask the broker to run ``spec.argv`` with ``spec.input`` as its stdin."""
+    def run(
+        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
+    ) -> ProcessRun:
+        """Ask the broker to run ``spec.argv`` with ``spec.input`` as its stdin.
+
+        The broker replies once the program ended, so ``output`` gets its streams then.
+        """
         if timeout is None:
             message = "a brokered Slurm transport call needs a timeout"
             raise ValueError(message)
@@ -99,8 +104,11 @@ class BrokeredProcesses:
             raise BrokerReplyError.malformed(reply)
         if isinstance(reply, BrokerRefused):
             raise PermissionError(reply.error)
-        return ProcessOutcome(
-            reply.result.returncode, reply.result.stdout.encode(), reply.result.stderr.encode()
+        return forward_output(
+            ProcessOutcome(
+                reply.result.returncode, reply.result.stdout.encode(), reply.result.stderr.encode()
+            ),
+            output,
         )
 
 
