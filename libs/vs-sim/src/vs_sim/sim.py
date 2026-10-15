@@ -17,8 +17,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Sequence
 
     from vs_sim.processes import Processes
-    from vs_sim.sim_network import LinkFault
     from vs_sim.signals import ProcessSignaller
+    from vs_sim.sim_network import LinkFault
     from vs_sim.trace import EventTrace
 
 type WorldFactory = Callable[[Sim], object]

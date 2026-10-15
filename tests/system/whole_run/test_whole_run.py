@@ -8,12 +8,14 @@ virtual clock: the server's transport and journal, the run's event loop (``run_a
 blocking calls and its leases. No real thread, socket, process or wall clock is used; the
 project and the run's state live under a temporary directory.
 
-Each seed draws two faults: one ``docker`` child process dies by a signal (any command of the
-run, any of three signals, or none), and the client's connection drops after a drawn number of
-messages, after which it reconnects and resumes from its cursor. Whatever the seed, the run
-reaches a defined end (it succeeds, or fails with the dead process named), the client is told
-that end exactly once, every container the run created is removed, the run's host lease is
-free again, and the server leaves no socket behind.
+Each seed draws faults of two kinds: up to two ``docker`` child processes die by a signal
+(any command of the run, any of three signals), and the client's first connection to the
+server meets a network fault (``LinkFault``: a drop from either side, a reset, a one-way
+partition that heals or breaks the connection after a bound, or delayed delivery) before a
+drawn send. A client whose connection broke reconnects and resumes from its cursor. Whatever
+the seed, the run reaches a defined end (it succeeds, or fails with the dead process named),
+the client is told that end exactly once, every container the run created is removed, the
+run's host lease is free again, and the server leaves no socket behind.
 
 Replay a seed with ``--sim-seed=N``; the nightly depth sweeps ``_NIGHTLY_SEEDS``.
 """
@@ -60,8 +62,12 @@ from vs_sim.api.testing import (
     HANG_GUARD_S,
     FakeProcesses,
     FakeProcessSignaller,
+    FiredFault,
+    LinkFault,
+    LinkFaultKind,
     ProcessScript,
     Sim,
+    SimNetwork,
     SimThreads,
 )
 
@@ -80,9 +86,13 @@ _RUN_LIMIT_S = 3600.0
 _DOCKER_COMMANDS = 16
 """More than a run issues, so some deaths hit no command."""
 _MAX_DEATHS = 2
-_LATEST_DROP = 12
-"""The last message after which the client may drop; a run that ends sooner drops it just
-before its terminal event."""
+_LATEST_LINK_FAULT = 5
+"""The last send on the client's first connection the network fault may come before; every
+run sends more than this on it."""
+_LINK_FAULT_S = 10.0
+"""The longest a partition holds, or delivery is delayed, in virtual seconds."""
+_MAX_CONNECTIONS = 4
+"""Only the first connection meets a fault, so a client needs at most two to reach the end."""
 _RETRY_NOT_NEEDED = frozenset({"stop", "read"})
 """Commands a run may lose without issuing them again: every ``stop`` is followed by an
 ``rm -f``, whose effect the ledger does check, and a lost read of the agent user's ids
@@ -91,6 +101,8 @@ _AGENT_IDENTITY_READ = "id -u agent && id -g agent"
 _SIGNALS = (Signals.SIGKILL, Signals.SIGSEGV, Signals.SIGTERM)
 _TERMINAL = frozenset({"run_finished", "run_failed", "run_interrupted", "configuration_failed"})
 _NIGHTLY_SEEDS = range(64)
+_NO_LINK_FAULT = LinkFault(LinkFaultKind.DELAY, seconds=0.0)
+"""A fault that changes nothing, for cases that test only the ``docker`` deaths."""
 
 
 @search(_PLUGIN_ID, config=SkeletonConfig, operations=OPERATIONS, roles=(IMPLEMENTER_ROLE,))
@@ -125,8 +137,8 @@ class _Faults:
 
     deaths: tuple[_Death, ...]
     """Up to ``_MAX_DEATHS`` client deaths, on distinct commands."""
-    drop_after: int
-    """Messages the client reads before its connection drops."""
+    link: LinkFault
+    """What the network does to the client's first connection."""
 
     @classmethod
     def draw(cls, sim: Sim) -> _Faults:
@@ -141,7 +153,8 @@ class _Faults:
             )
             for command in commands
         )
-        return cls(deaths=deaths, drop_after=rng.randint(1, _LATEST_DROP))
+        link = LinkFault.draw(rng, sends=_LATEST_LINK_FAULT, seconds=_LINK_FAULT_S)
+        return cls(deaths=deaths, link=link)
 
     def death_of(self, command: int) -> _Death | None:
         return next((death for death in self.deaths if death.command == command), None)
@@ -301,7 +314,7 @@ def _reaper(run_id: str, *, docker: DockerCli, log: Callable[[str], None]) -> tu
 
 @dataclass
 class _Client:
-    """A frontend that subscribes, loses its connection once, and resumes from its cursor.
+    """A frontend that subscribes and, when its connection breaks, resumes from its cursor.
 
     The server drains the clients attached when its run ends, then closes. A client that
     is between connections then cannot resubscribe, so, like a frontend reopening a
@@ -310,51 +323,44 @@ class _Client:
 
     network: Network
     socket_path: Path
-    drop_after: int
     events: list[dict[str, Any]] = field(default_factory=list)
-    drops: int = 0
+    connections: int = 0
     cursor: int = 0
     store: str = ""
-    read: int = 0
     read_from_log: bool = False
 
     def follow(self, runtime: ServerRuntime) -> None:
         assert runtime.transport_listening.wait(HANG_GUARD_S)
-        while True:
+        while not self.ended:
+            assert self.connections < _MAX_CONNECTIONS, self
             try:
-                ended = self._read_until_drop()
-            except ConnectionError:
+                connection = self.network.connect(str(self.socket_path), HANG_GUARD_S)
+            except ConnectionRefusedError:
                 return  # the server closed between connections: read_log takes over
-            if ended or self.drops > 0:
-                return  # the end, or the server hung up before it: read_log takes over
-            self.drops += 1
+            self.connections += 1
+            try:
+                self._read_until_end(connection)
+            except ConnectionError:
+                pass  # the connection broke: resume from the cursor
+            finally:
+                connection.close()
 
-    def _read_until_drop(self) -> bool:
-        """Subscribe from the cursor and fold batches until the end or the drawn drop."""
-        connection = self.network.connect(str(self.socket_path), HANG_GUARD_S)
-        try:
-            request = SubscribeRequest(
-                timestamp=REQUEST_TIME, after_sequence=self.cursor, store_id=self.store
-            )
-            connection.send(request.model_dump_json().encode() + b"\n")
-            for message in _messages(connection):
-                self.read += 1
-                if self.drops == 0 and (self.read >= self.drop_after or _is_terminal(message)):
-                    # The connection drops before this message is folded: at the drawn
-                    # point, or at the latest just before the end, so every seed drops once.
-                    return False
-                if message["type"] == "event_batch":
-                    if message.get("store_id", "") != self.store:
-                        # A new store supersedes what this client folded.
-                        self.events.clear()
-                    self.store = message.get("store_id", "")
-                    self.events.extend(message["events"])
-                    self.cursor = max(self.cursor, message["through_sequence"])
-                if self.ended:
-                    return True
-            return False
-        finally:
-            connection.close()
+    def _read_until_end(self, connection: Connection) -> None:
+        """Subscribe from the cursor and fold batches until the end or the stream's end."""
+        request = SubscribeRequest(
+            timestamp=REQUEST_TIME, after_sequence=self.cursor, store_id=self.store
+        )
+        connection.send(request.model_dump_json().encode() + b"\n")
+        for message in _messages(connection):
+            if message["type"] == "event_batch":
+                if message.get("store_id", "") != self.store:
+                    # A new store supersedes what this client folded.
+                    self.events.clear()
+                self.store = message.get("store_id", "")
+                self.events.extend(message["events"])
+                self.cursor = max(self.cursor, message["through_sequence"])
+            if self.ended:
+                return
 
     def read_log(self, runtime: ServerRuntime) -> None:
         """After the server closed, fold what the run logged past this client's cursor."""
@@ -367,12 +373,6 @@ class _Client:
     @property
     def ended(self) -> bool:
         return any(event["type"] in _TERMINAL for event in self.events)
-
-
-def _is_terminal(message: dict[str, Any]) -> bool:
-    return message["type"] == "event_batch" and any(
-        event["type"] in _TERMINAL for event in message["events"]
-    )
 
 
 def _messages(connection: Connection) -> Iterator[dict[str, Any]]:
@@ -392,6 +392,7 @@ class _Outcome:
     result: RunResult | None
     error: BaseException | None
     client: _Client
+    link_faults: tuple[FiredFault, ...]
     daemon: _Daemon
     socket_path: Path
     root: Path
@@ -425,7 +426,10 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults) -> _Outcome:
             threads,
             processes=FakeProcesses(_no_git_remote, pass_time=threads.sleep),
             signaller=FakeProcessSignaller(set()),
+            network_faults=(faults.link,),
         )
+        network = platform.network
+        assert isinstance(network, SimNetwork)
         runs = default_runs(
             LaunchSettings(
                 timing=RunTiming(platform.clock, _LEASE_S, threads),
@@ -446,7 +450,7 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults) -> _Outcome:
             socket_path=socket_path,
             platform=platform,
         )
-        client = _Client(platform.network, socket_path, faults.drop_after)
+        client = _Client(network, socket_path)
         follower = threads.spawn(lambda: client.follow(runtime), name="client", daemon=False)
         result: RunResult | None = None
         error: BaseException | None = None
@@ -459,7 +463,7 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults) -> _Outcome:
         follower.join(HANG_GUARD_S)
         assert not follower.is_alive(), "the client never saw the connection end"
         client.read_log(runtime)
-        return _Outcome(result, error, client, daemon, socket_path, root)
+        return _Outcome(result, error, client, network.fired, daemon, socket_path, root)
 
     return threads.run(main)
 
@@ -480,8 +484,8 @@ def _assert_invariants(outcome: _Outcome, sim: Sim, faults: _Faults) -> None:
     else:
         # A success is earned: every killed command that never took effect was issued again.
         assert outcome.daemon.unretried() == [], context
-    # The client lost its connection once and was still told that end exactly once.
-    assert outcome.client.drops == 1, context
+    # The client's connection met its fault, and the client was still told that end exactly once.
+    assert [fired.fault for fired in outcome.link_faults] == [faults.link], context
     terminal = [event["type"] for event in outcome.client.events if event["type"] in _TERMINAL]
     assert len(terminal) == 1, (context, terminal)
     assert (terminal[0] == "run_finished") == succeeded, (context, terminal)
@@ -500,7 +504,7 @@ def _check(tmp_path: Path, sim: Sim, faults: _Faults | None = None) -> _Outcome:
     return outcome
 
 
-def test_a_whole_run_ends_and_releases_everything_despite_a_dead_process_and_a_dropped_client(
+def test_a_whole_run_ends_and_releases_everything_despite_dead_processes_and_a_network_fault(
     sim: Sim, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # The agent container receives the provider credential, so the run needs one to open.
@@ -529,10 +533,12 @@ def test_a_killed_container_removal_leaves_no_container(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     (tmp_path / "clean").mkdir()
     (tmp_path / "killed").mkdir()
-    clean = _check(tmp_path / "clean", Sim(seed=0), _Faults(deaths=(), drop_after=1))
+    clean = _check(tmp_path / "clean", Sim(seed=0), _Faults(deaths=(), link=_NO_LINK_FAULT))
     removals = [i for i, command in enumerate(clean.daemon.ledger) if command.argv[1] == "rm"]
     assert len(removals) >= 2, clean.daemon.ledger
     target = removals[0] if which == "first" else removals[-1]
     death = _Death(command=target, signal=Signals.SIGKILL, after_effect=timing == "after-effect")
-    outcome = _check(tmp_path / "killed", Sim(seed=0), _Faults(deaths=(death,), drop_after=1))
+    outcome = _check(
+        tmp_path / "killed", Sim(seed=0), _Faults(deaths=(death,), link=_NO_LINK_FAULT)
+    )
     assert outcome.daemon.ledger[target].argv[1] == "rm"

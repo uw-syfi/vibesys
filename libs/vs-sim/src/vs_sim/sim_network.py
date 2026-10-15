@@ -48,8 +48,8 @@ class LinkFaultKind(StrEnum):
     """A one-way partition that heals: bytes sent toward ``end`` are held for ``seconds``,
     then delivered in order."""
     BLACKHOLE = "blackhole"
-    """A one-way partition that does not heal: bytes sent toward ``end`` vanish, and
-    ``seconds`` later the connection breaks, so every call on either end raises
+    """A one-way partition that does not heal: bytes sent toward ``end`` vanish (still
+    holding the sender's buffer, as unacknowledged bytes do), and ``seconds`` later the connection breaks, so every call on either end raises
     ``ConnectionAbortedError`` (``ETIMEDOUT``), as a stream whose retransmissions ran out."""
     DELAY = "delay"
     """Each chunk sent toward ``end`` from then on arrives ``seconds`` after it was sent."""
@@ -109,6 +109,8 @@ class _Pipe:
         self.held_until: float | None = None
         self.delay = 0.0
         self.vanishes = False
+        self.lost = 0
+        """Bytes sent into a blackhole: they hold the sender's buffer, as unacknowledged bytes do."""
 
     def settle(self, now: float) -> None:
         """Deliver every in-flight chunk whose time has come."""
@@ -117,6 +119,7 @@ class _Pipe:
 
     def carry(self, data: bytes, now: float) -> None:
         if self.vanishes:
+            self.lost += len(data)
             return
         ready = now + self.delay
         if self.held_until is not None:
@@ -129,7 +132,7 @@ class _Pipe:
             self.in_flight.append((ready, data))
 
     def unread(self) -> int:
-        return len(self.data) + sum(len(chunk) for _, chunk in self.in_flight)
+        return self.lost + len(self.data) + sum(len(chunk) for _, chunk in self.in_flight)
 
     def at_eof(self) -> bool:
         return self.writer_closed and not self.data and not self.in_flight
@@ -322,9 +325,9 @@ class SimNetwork:
             pipe = link.toward[fault.end]
             if fault.kind is LinkFaultKind.DROP:
                 link.aborted.add(fault.end)
-                link.toward[End.ACCEPTOR if fault.end is End.DIALER else End.DIALER].writer_closed = (
-                    True
-                )
+                link.toward[
+                    End.ACCEPTOR if fault.end is End.DIALER else End.DIALER
+                ].writer_closed = True
                 pipe.reader_closed = True
             elif fault.kind is LinkFaultKind.RESET:
                 link.reset = True

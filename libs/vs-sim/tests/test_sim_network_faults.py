@@ -45,27 +45,31 @@ class _Side:
     at: float = 0.0
 
 
+def _receive(
+    threads: SimThreads, connection: Connection, side: _Side, buffer: bytearray
+) -> bytes | None:
+    """The next whole line, recorded on ``side``; ``None`` at the end of the stream."""
+    while b"\n" not in buffer:
+        chunk = connection.recv(64)
+        if not chunk:
+            side.eof = True
+            return None
+        buffer += chunk
+    line, _, rest = bytes(buffer).partition(b"\n")
+    buffer[:] = rest
+    side.arrived[line] = threads.now()
+    return line
+
+
 def _exchange(threads: SimThreads, network: SimNetwork) -> tuple[_Side, _Side]:
     dialer, acceptor = _Side(), _Side()
     listener = network.listen("echo")
-
-    def receive(connection: Connection, side: _Side, buffer: bytearray) -> bytes | None:
-        while b"\n" not in buffer:
-            chunk = connection.recv(64)
-            if not chunk:
-                side.eof = True
-                return None
-            buffer += chunk
-        line, _, rest = bytes(buffer).partition(b"\n")
-        buffer[:] = rest
-        side.arrived[line] = threads.now()
-        return line
 
     def serve() -> None:
         connection = listener.accept()
         buffer = bytearray()
         try:
-            while (line := receive(connection, acceptor, buffer)) is not None:
+            while (line := _receive(threads, connection, acceptor, buffer)) is not None:
                 echo = b"echo " + line
                 acceptor.sent[echo] = threads.now()
                 connection.send(echo + b"\n")
@@ -83,7 +87,7 @@ def _exchange(threads: SimThreads, network: SimNetwork) -> tuple[_Side, _Side]:
                 dialer.sent[line] = threads.now()
                 connection.send(line + b"\n")
                 threads.sleep(0.25)
-                if receive(connection, dialer, buffer) is None:
+                if _receive(threads, connection, dialer, buffer) is None:
                     break
         except OSError as error:
             dialer.ended = error
@@ -98,9 +102,11 @@ def _exchange(threads: SimThreads, network: SimNetwork) -> tuple[_Side, _Side]:
     return dialer, acceptor
 
 
-def _run(fault: LinkFault, schedule: int) -> tuple[SimNetwork, _Side, _Side]:
+def _run(
+    fault: LinkFault, schedule: int, buffer_bytes: int | None = None
+) -> tuple[SimNetwork, _Side, _Side]:
     threads = SimThreads(VirtualClock(), schedule_seed=schedule)
-    network = SimNetwork(threads, faults=(fault,))
+    network = SimNetwork(threads, buffer_bytes=buffer_bytes, faults=(fault,))
     dialer, acceptor = threads.run(lambda: _exchange(threads, network))
     return network, dialer, acceptor
 
@@ -114,19 +120,21 @@ FAULTS = st.builds(
 )
 
 
-@given(fault=FAULTS, schedule=st.integers(0, 2**16))
+BUFFERS = st.sampled_from([None, 8])
+"""Unbounded, or smaller than one echo, so a send waits for the reader."""
+
+
+@given(fault=FAULTS, schedule=st.integers(0, 2**16), buffer_bytes=BUFFERS)
 def test_every_link_fault_ends_both_ends_in_its_defined_state(
-    fault: LinkFault, schedule: int
+    fault: LinkFault, schedule: int, buffer_bytes: int | None
 ) -> None:
-    network, dialer, acceptor = _run(fault, schedule)
+    network, dialer, acceptor = _run(fault, schedule, buffer_bytes)
     [fired] = network.fired
     assert fired.fault == fault
     sides = {End.DIALER: dialer, End.ACCEPTOR: acceptor}
     toward = sides[fault.end]
     sender = sides[End.ACCEPTOR if fault.end is End.DIALER else End.DIALER]
-    intact = all(
-        line in dialer.arrived for line in (b"echo line %d" % i for i in range(_LINES))
-    )
+    intact = all(line in dialer.arrived for line in (b"echo line %d" % i for i in range(_LINES)))
     if fault.kind is LinkFaultKind.DROP:
         assert isinstance(toward.ended, ConnectionAbortedError), toward
         assert sender.ended is None or isinstance(sender.ended, BrokenPipeError), sender
