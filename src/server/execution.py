@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -39,7 +38,7 @@ if TYPE_CHECKING:
 
     from server.events import ChatThreadId
     from server.journal import WireJournal
-    from vs_sim.api import Clock, Condition
+    from vs_sim.api import Clock, Condition, Threads
 
 
 @dataclass(frozen=True)
@@ -81,6 +80,23 @@ class ActiveAgentExecution(BaseModel):
     model: str | None = None
 
 
+@dataclass
+class _PresentationScope:
+    """The agent presentation the calling thread's events are attributed to."""
+
+    agent_kind: str | None = None
+    round_label: str | None = None
+    invocation_id: str | None = None
+    chat_thread_id: ChatThreadId | None = None
+
+
+@dataclass
+class _LegacyScope:
+    """The execution a legacy caller on this thread bound without passing its id."""
+
+    execution_id: str | None = None
+
+
 class ExecutionTracker:
     """Own live execution identity, activity, and lifecycle event emission."""
 
@@ -90,8 +106,12 @@ class ExecutionTracker:
         journal: WireJournal,
         *,
         clock: Clock,
+        threads: Threads,
     ) -> None:
-        """Track executions over the shared server condition; ``clock`` counts epoch seconds."""
+        """Track executions over the shared server condition; ``clock`` counts epoch seconds.
+
+        ``threads`` holds each thread's presentation and legacy execution scope.
+        """
         self._clock = clock
         self._condition = condition
         self._journal = journal
@@ -102,8 +122,8 @@ class ExecutionTracker:
         self._emitted_lifecycle_ids: set[str] = set()
         self._current_kind: str | None = None
         self._current_round: str | None = None
-        self._presentation_local = threading.local()
-        self._legacy_local = threading.local()
+        self._presentation_local = threads.local(_PresentationScope)
+        self._legacy_local = threads.local(_LegacyScope)
 
     @property
     def current_round(self) -> str | None:
@@ -148,10 +168,10 @@ class ExecutionTracker:
         invocation_id: str | None = None,
     ) -> None:
         """Record one presentation event and reduce its activity state."""
-        scoped_kind = getattr(self._presentation_local, "agent_kind", None)
-        scoped_round = getattr(self._presentation_local, "round_label", None)
-        scoped_invocation = getattr(self._presentation_local, "invocation_id", None)
-        scoped_chat_thread = getattr(self._presentation_local, "chat_thread_id", None)
+        scoped_kind = self._presentation_local.get().agent_kind
+        scoped_round = self._presentation_local.get().round_label
+        scoped_invocation = self._presentation_local.get().invocation_id
+        scoped_chat_thread = self._presentation_local.get().chat_thread_id
         execution_id = invocation_id or scoped_invocation
         if execution_id is not None:
             activity = self._activity_for_presentation(event_type, data, execution_id)
@@ -432,16 +452,16 @@ class ExecutionTracker:
 
     def remember_legacy(self, execution_id: str) -> None:
         """Remember an execution for the prompt-only compatibility boundary."""
-        self._legacy_local.execution_id = execution_id
+        self._legacy_local.get().execution_id = execution_id
 
     def resolve_legacy(self, execution_id: str | None) -> str | None:
         """Resolve an explicit or thread-local compatibility execution id."""
-        return execution_id or getattr(self._legacy_local, "execution_id", None)
+        return execution_id or self._legacy_local.get().execution_id
 
     def clear_legacy(self, execution_id: str) -> None:
         """Clear the matching thread-local compatibility execution id."""
-        if getattr(self._legacy_local, "execution_id", None) == execution_id:
-            self._legacy_local.execution_id = None
+        if self._legacy_local.get().execution_id == execution_id:
+            self._legacy_local.get().execution_id = None
 
     @contextmanager
     def presentation_scope(
@@ -460,23 +480,23 @@ class ExecutionTracker:
         chat, which is how the terminal ``chat`` answer identifies that thread.
         """
         previous = (
-            getattr(self._presentation_local, "agent_kind", None),
-            getattr(self._presentation_local, "round_label", None),
-            getattr(self._presentation_local, "invocation_id", None),
-            getattr(self._presentation_local, "chat_thread_id", None),
+            self._presentation_local.get().agent_kind,
+            self._presentation_local.get().round_label,
+            self._presentation_local.get().invocation_id,
+            self._presentation_local.get().chat_thread_id,
         )
-        self._presentation_local.agent_kind = agent_kind
-        self._presentation_local.round_label = round_label
-        self._presentation_local.invocation_id = invocation_id
-        self._presentation_local.chat_thread_id = chat_thread_id
+        self._presentation_local.get().agent_kind = agent_kind
+        self._presentation_local.get().round_label = round_label
+        self._presentation_local.get().invocation_id = invocation_id
+        self._presentation_local.get().chat_thread_id = chat_thread_id
         try:
             yield
         finally:
             (
-                self._presentation_local.agent_kind,
-                self._presentation_local.round_label,
-                self._presentation_local.invocation_id,
-                self._presentation_local.chat_thread_id,
+                self._presentation_local.get().agent_kind,
+                self._presentation_local.get().round_label,
+                self._presentation_local.get().invocation_id,
+                self._presentation_local.get().chat_thread_id,
             ) = previous
 
     def _discard_locked(self, execution_id: str) -> None:

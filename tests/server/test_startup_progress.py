@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -20,6 +21,7 @@ from vibesys.events import (
 )
 from vibesys.events import RunStartupProgressData as CoreRunStartupProgressData
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
+from vs_sim.api import Platform
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -87,7 +89,7 @@ def test_the_record_observer_is_told_each_startup_fact(tmp_path: Path) -> None:
         socket_path=tmp_path / "control.sock",
         detach=True,
         observer=Observer(),
-        clock=ManualClock(),
+        platform=replace(Platform.real(), clock=ManualClock()),
     )
     runtime.controller.attach(tmp_path, run_id="run-1")
     for data in (_BUILDING, _STARTING_CONTAINER):
@@ -139,7 +141,7 @@ def test_a_pause_resumed_during_the_image_build_keeps_the_run_starting(tmp_path:
         socket_path=tmp_path / "control.sock",
         detach=True,
         observer=Observer(),
-        clock=ManualClock(),
+        platform=replace(Platform.real(), clock=ManualClock()),
     )
     runtime.controller.attach(tmp_path, run_id="run-1")
     runtime.integration.project_event(_startup_event(_BUILDING))

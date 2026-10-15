@@ -15,12 +15,10 @@ from tests.server.support import build_server_parts
 from entrypoints.server import main
 from server.runtime import WebPortInspector, WebPortState
 from server.transport.websocket import WebSocketBindError, WebSocketGateway
-from vs_sim.api import MonotonicClock
+from vs_sim.api import MonotonicClock, OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
-    import threading
-
     from vs_sim.api import Event
 
 
@@ -71,10 +69,10 @@ class _ListenCollision:
     def __init__(self) -> None:
         self.blocker: socket.socket | None = None
 
-    def wait_for_ready(self, ready: threading.Event) -> bool:
+    def wait_for_ready(self, ready: Event) -> bool:
         return ready.wait(HANG_GUARD_S)
 
-    def wait_before_serve(self, stop: threading.Event) -> None:
+    def wait_before_serve(self, stop: Event) -> None:
         del stop
 
     def wait_before_listener_start(self, stop: Event, bound_port: int) -> None:
@@ -86,7 +84,7 @@ class _ListenCollision:
         blocker.listen()
         self.blocker = blocker
 
-    def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
+    def wait_before_publication(self, stop: Event, bound_port: int) -> None:
         del stop, bound_port
 
     def close(self) -> None:
@@ -99,7 +97,13 @@ def test_gateway_reports_a_collision_that_occurs_when_the_bound_socket_listens(
 ) -> None:
     parts = build_server_parts(tmp_path / "logs")
     startup = _ListenCollision()
-    gateway = WebSocketGateway(parts.api, startup=startup, clock=MonotonicClock())
+    gateway = WebSocketGateway(
+        parts.api,
+        startup=startup,
+        clock=MonotonicClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    )
 
     try:
         with pytest.raises(WebSocketBindError) as failure:

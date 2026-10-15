@@ -16,6 +16,7 @@ import server.events as events_module
 from server.event_index import event_index_path, load_event_index
 from server.events import EventStore, EventType, RunEvent, make_event
 from server.journal import WireJournal
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
@@ -92,7 +93,7 @@ def test_cold_attach_never_reads_the_complete_file_at_once(
 
     monkeypatch.setattr(Path, "read_bytes", reject_read_bytes)
 
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
 
     assert len(store.event_headers()) == 1_499
     assert store.last_sequence == 1_499
@@ -104,12 +105,12 @@ def test_event_headers_expose_recorded_run_identity_without_parsing_the_prefix(
     path = tmp_path / "events.jsonl"
     _write(path, list(range(1, 1_500)))
 
-    store = EventStore(path, run_id="ignored")
+    store = EventStore(path, run_id="ignored", threads=OsThreads())
 
     assert {header.run_id for header in store.event_headers()} == {"persisted-run"}
     assert store.parsed_record_count == 1_024
 
-    warm = EventStore(path, run_id="ignored", read_only=True)
+    warm = EventStore(path, run_id="ignored", read_only=True, threads=OsThreads())
     assert {header.run_id for header in warm.event_headers()} == {"persisted-run"}
     assert warm.parsed_record_count == 1_024
 
@@ -175,7 +176,7 @@ def test_a_valid_record_rejected_by_the_header_scan_is_validated_in_place(
 
     monkeypatch.setattr(Path, "read_bytes", reject_read_bytes)
 
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
 
     assert [(event.sequence, event.text) for event in store.read()] == [(1, "coerced")]
     assert load_event_index(path) is not None
@@ -186,7 +187,7 @@ def test_warm_attach_uses_the_validated_sidecar_without_scanning_jsonl(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, list(range(1, 1_500)))
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     index_path = event_index_path(path)
     original_index = index_path.read_bytes()
 
@@ -195,7 +196,7 @@ def test_warm_attach_uses_the_validated_sidecar_without_scanning_jsonl(
 
     monkeypatch.setattr(events_module, "_scan_header_fields", reject_header_scan)
 
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
 
     assert store.last_sequence == 1_499
     assert index_path.read_bytes() == original_index
@@ -224,13 +225,13 @@ def test_grown_source_scans_only_the_suffix_and_extends_the_index(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, list(range(1, 51)))
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     indexed_boundary = path.stat().st_size
     _append(path, 51, "appended-a")
     _append(path, 52, "appended-b")
     scanned = _count_header_scans(monkeypatch)
 
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
 
     assert scanned[0] == 2
     assert store.last_sequence == 52
@@ -243,7 +244,7 @@ def test_grown_source_scans_only_the_suffix_and_extends_the_index(
 
     # The rewritten sidecar is reusable as is: nothing is scanned a third time.
     scanned[0] = 0
-    third = EventStore(path, run_id="third")
+    third = EventStore(path, run_id="third", threads=OsThreads())
     assert scanned[0] == 0
     assert third.last_sequence == 52
 
@@ -253,7 +254,7 @@ def test_prefix_edit_with_growth_is_rejected_and_rebuilt(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3, 4])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     content = path.read_bytes()
     edited = content.replace(b"event-0", b"edited0")  # head of the indexed region
     assert len(edited) == len(content)
@@ -262,7 +263,7 @@ def test_prefix_edit_with_growth_is_rejected_and_rebuilt(
 
     assert load_event_index(path) is None
     scanned = _count_header_scans(monkeypatch)
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
 
     assert scanned[0] == 5
     assert next(iter(store.read())).text == "edited0"
@@ -271,7 +272,7 @@ def test_prefix_edit_with_growth_is_rejected_and_rebuilt(
 def test_edit_near_the_boundary_with_growth_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     content = path.read_bytes()
     path.write_bytes(content.replace(b"event-2", b"edited2"))
     _append(path, 4, "appended")
@@ -282,7 +283,7 @@ def test_edit_near_the_boundary_with_growth_is_rejected(tmp_path: Path) -> None:
 def test_interior_edit_with_growth_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, list(range(1, 3_000)))
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     assert path.stat().st_size > 8 * 64 * 1024
     boundary = path.stat().st_size
     with path.open("r+b") as stream:
@@ -296,7 +297,7 @@ def test_interior_edit_with_growth_is_rejected(tmp_path: Path) -> None:
 def test_unsampled_historical_edit_with_growth_rebuilds_public_headers(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, list(range(1, 12_001)))
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     lines = path.read_bytes().splitlines(keepends=True)
     original = b'"run_id":"persisted-run"'
     replacement = b'"run_id":"mutated---run"'
@@ -308,7 +309,7 @@ def test_unsampled_historical_edit_with_growth_rebuilds_public_headers(tmp_path:
         assert stream.write(replacement) == len(replacement)
     _append(path, 12_001, "appended")
 
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
     header = next(item for item in store.event_headers() if item.sequence == 1_001)
     event = store.read_sequences([1_001])[0]
 
@@ -319,7 +320,7 @@ def test_unsampled_historical_edit_with_growth_rebuilds_public_headers(tmp_path:
 def test_different_file_at_the_same_path_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     replacement = tmp_path / "replacement.jsonl"
     replacement.write_bytes(path.read_bytes())
     _append(replacement, 4, "appended")
@@ -331,7 +332,7 @@ def test_different_file_at_the_same_path_is_rejected(tmp_path: Path) -> None:
 def test_source_shrunk_by_a_partial_tail_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     with path.open("r+b") as stream:
         stream.truncate(path.stat().st_size - 1)
 
@@ -341,19 +342,21 @@ def test_source_shrunk_by_a_partial_tail_is_rejected(tmp_path: Path) -> None:
 def test_partial_sidecar_is_rejected_even_when_the_source_grew(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     index_path = event_index_path(path)
     index_path.write_bytes(index_path.read_bytes()[:-20])
     _append(path, 4, "appended")
 
     assert load_event_index(path) is None
-    assert [event.sequence for event in EventStore(path, run_id="second").read()] == [1, 2, 3, 4]
+    assert [
+        event.sequence for event in EventStore(path, run_id="second", threads=OsThreads()).read()
+    ] == [1, 2, 3, 4]
 
 
 def test_sidecar_of_another_version_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
 
     def bump(header: dict[str, object], _records: list[list[object]]) -> None:
         header["version"] = 1
@@ -414,7 +417,7 @@ def test_source_change_during_scan_does_not_publish_an_index(
 
     monkeypatch.setattr(events_module, "_scan_header_fields", change_during_scan)
 
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
 
     assert store.last_sequence in {2, 3}
     assert not event_index_path(path).exists()
@@ -425,7 +428,7 @@ def test_source_change_while_loading_sidecar_rejects_the_cache(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     # lint-waiver: LW-010038 [SLF001]; this hook deterministically mutates the source after sidecar validation to cover the cache race.
     validate_footer = event_index_module._valid_footer  # noqa: SLF001
     changed = False
@@ -441,7 +444,9 @@ def test_source_change_while_loading_sidecar_rejects_the_cache(
 
     monkeypatch.setattr(event_index_module, "_valid_footer", change_after_validation)
 
-    assert [event.text for event in EventStore(path, run_id="second").read()] == [
+    assert [
+        event.text for event in EventStore(path, run_id="second", threads=OsThreads()).read()
+    ] == [
         "event-0",
         "event-1",
         "concurrent",
@@ -453,7 +458,7 @@ def test_boundary_fingerprint_rejects_same_size_source_overwrite(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     index_path = event_index_path(path)
     original_stat = path.stat()
     content = path.read_text()
@@ -483,7 +488,7 @@ def test_boundary_fingerprint_rejects_same_size_source_overwrite(
 
     monkeypatch.setattr(events_module, "_scan_header_fields", count_header_scans)
 
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
 
     assert scanned == 3
     assert store.read()[-1].text == "edited2"
@@ -492,10 +497,10 @@ def test_boundary_fingerprint_rejects_same_size_source_overwrite(
 def test_source_truncated_below_the_cached_boundary_is_rebuilt(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     _write(path, [1, 2])
 
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
 
     assert [event.sequence for event in store.read()] == [1, 2]
     loaded = load_event_index(path)
@@ -507,11 +512,11 @@ def test_source_truncated_below_the_cached_boundary_is_rebuilt(tmp_path: Path) -
 def test_corrupt_or_truncated_sidecar_is_rebuilt(tmp_path: Path, corruption: bytes) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2, 3])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     index_path = event_index_path(path)
     index_path.write_bytes(corruption)
 
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
 
     assert [event.sequence for event in store.read()] == [1, 2, 3]
     assert load_event_index(path) is not None
@@ -520,7 +525,7 @@ def test_corrupt_or_truncated_sidecar_is_rebuilt(tmp_path: Path, corruption: byt
 def test_unknown_cached_event_type_is_rebuilt_from_jsonl(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     index_path = event_index_path(path)
 
     def replace_type(_header: dict[str, object], records: list[list[object]]) -> None:
@@ -528,7 +533,7 @@ def test_unknown_cached_event_type_is_rebuilt_from_jsonl(tmp_path: Path) -> None
 
     _rewrite_sidecar(index_path, replace_type)
 
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
 
     assert [event.type for event in store.read()] == [EventType.OUTPUT, EventType.OUTPUT]
     assert load_event_index(path) is not None
@@ -537,13 +542,15 @@ def test_unknown_cached_event_type_is_rebuilt_from_jsonl(tmp_path: Path) -> None
 def test_non_ascii_sidecar_checksum_is_a_cache_miss(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     index_path = event_index_path(path)
     lines = index_path.read_bytes().splitlines(keepends=True)
     lines[-1] = (json.dumps({"sha256": "é" * 64}) + "\n").encode()
     index_path.write_bytes(b"".join(lines))
 
-    assert [event.sequence for event in EventStore(path, run_id="second").read()] == [1, 2]
+    assert [
+        event.sequence for event in EventStore(path, run_id="second", threads=OsThreads()).read()
+    ] == [1, 2]
     assert load_event_index(path) is not None
 
 
@@ -552,7 +559,7 @@ def test_valid_unterminated_record_stays_outside_the_safe_cache_boundary(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2], terminate=False)
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     loaded = load_event_index(path)
     assert loaded is not None
     assert len(loaded.records) == 1
@@ -565,11 +572,13 @@ def test_valid_unterminated_record_stays_outside_the_safe_cache_boundary(
         return scan_header(line)
 
     monkeypatch.setattr(events_module, "_scan_header_fields", count_header_scans)
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
 
     assert scanned == 1
     store.append(make_event(EventType.OUTPUT, "third", timestamp=datetime(2026, 1, 1, tzinfo=UTC)))
-    assert [event.text for event in EventStore(path, run_id="third").read()] == [
+    assert [
+        event.text for event in EventStore(path, run_id="third", threads=OsThreads()).read()
+    ] == [
         "event-0",
         "event-1",
         "third",
@@ -581,15 +590,17 @@ def test_malformed_tail_stays_repairable_after_warm_attach(tmp_path: Path) -> No
     _write(path, [1])
     with path.open("a", encoding="utf-8") as stream:
         stream.write('{"protocol_version":1')
-    first = EventStore(path, run_id="first")
+    first = EventStore(path, run_id="first", threads=OsThreads())
     assert [event.text for event in first.read()] == ["event-0"]
 
-    second = EventStore(path, run_id="second")
+    second = EventStore(path, run_id="second", threads=OsThreads())
     second.append(
         make_event(EventType.OUTPUT, "after repair", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
     )
 
-    assert [event.text for event in EventStore(path, run_id="third").read()] == [
+    assert [
+        event.text for event in EventStore(path, run_id="third", threads=OsThreads()).read()
+    ] == [
         "event-0",
         "after repair",
     ]
@@ -599,14 +610,18 @@ def test_legacy_sequence_repair_survives_cache_reuse_and_rebuild(tmp_path: Path)
     path = tmp_path / "events.jsonl"
     _write(path, [2, 1, 3])
 
-    assert [event.sequence for event in EventStore(path, run_id="first").read()] == [2, 3, 4]
-    warm = EventStore(path, run_id="second")
+    assert [
+        event.sequence for event in EventStore(path, run_id="first", threads=OsThreads()).read()
+    ] == [2, 3, 4]
+    warm = EventStore(path, run_id="second", threads=OsThreads())
     assert [event.sequence for event in warm.read()] == [2, 3, 4]
     warm.append(
         make_event(EventType.OUTPUT, "appended", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
     )
 
-    assert [event.sequence for event in EventStore(path, run_id="third").read()] == [2, 3, 4, 5]
+    assert [
+        event.sequence for event in EventStore(path, run_id="third", threads=OsThreads()).read()
+    ] == [2, 3, 4, 5]
 
 
 def test_sidecar_write_failure_never_fails_attach_or_leaves_a_temporary(
@@ -620,7 +635,7 @@ def test_sidecar_write_failure_never_fails_attach_or_leaves_a_temporary(
 
     monkeypatch.setattr(event_index_module.os, "replace", fail_replace)
 
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
 
     assert [event.sequence for event in store.read()] == [1, 2]
     assert not event_index_path(path).exists()
@@ -645,7 +660,10 @@ def test_temporary_cleanup_failure_does_not_mask_a_sidecar_write_failure(
     monkeypatch.setattr(event_index_module.os, "replace", fail_replace)
     monkeypatch.setattr(Path, "unlink", fail_temporary_unlink)
 
-    assert [event.sequence for event in EventStore(path, run_id="active-run").read()] == [1]
+    assert [
+        event.sequence
+        for event in EventStore(path, run_id="active-run", threads=OsThreads()).read()
+    ] == [1]
 
 
 def test_failed_replacement_preserves_an_existing_sidecar(
@@ -653,7 +671,7 @@ def test_failed_replacement_preserves_an_existing_sidecar(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     index_path = event_index_path(path)
     original = index_path.read_bytes()
     stat = path.stat()
@@ -664,7 +682,7 @@ def test_failed_replacement_preserves_an_existing_sidecar(
 
     monkeypatch.setattr(event_index_module.os, "replace", fail_replace)
 
-    store = EventStore(path, run_id="second")
+    store = EventStore(path, run_id="second", threads=OsThreads())
 
     assert [event.sequence for event in store.read()] == [1, 2]
     assert index_path.read_bytes() == original
@@ -676,7 +694,7 @@ def test_unreadable_sidecar_is_only_a_cache_miss(
 ) -> None:
     path = tmp_path / "events.jsonl"
     _write(path, [1, 2])
-    EventStore(path, run_id="first")
+    EventStore(path, run_id="first", threads=OsThreads())
     index_path = event_index_path(path)
     real_open = Path.open
 
@@ -687,4 +705,6 @@ def test_unreadable_sidecar_is_only_a_cache_miss(
 
     monkeypatch.setattr(Path, "open", deny_index_read)
 
-    assert [event.sequence for event in EventStore(path, run_id="second").read()] == [1, 2]
+    assert [
+        event.sequence for event in EventStore(path, run_id="second", threads=OsThreads()).read()
+    ] == [1, 2]

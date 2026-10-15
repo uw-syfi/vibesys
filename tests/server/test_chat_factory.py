@@ -19,6 +19,7 @@ from server.chat.prompts import (
     experiment_chat_system_prompt,
 )
 from server.run_attachment import AgentSelection, RunAttachment
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -154,6 +155,7 @@ def test_factory_restores_instruction_shaped_history_only_as_user_data(tmp_path:
         build_agent=build_chat_agent,
         fallback=lambda _question: "recorded summary",
         clock=ManualClock(),
+        threads=OsThreads(),
     )
     try:
         factory.start()
@@ -192,6 +194,7 @@ def test_factory_creates_transcript_directory_without_exposing_it_to_the_agent(
         build_agent=build_chat_agent,
         fallback=lambda _question: "recorded summary",
         clock=ManualClock(),
+        threads=OsThreads(),
     )
     try:
         factory.start()
@@ -225,6 +228,7 @@ def test_factory_does_not_expose_a_replaced_namespace_to_an_agent(
         build_agent=build_chat_agent,
         fallback=lambda _question: "recorded summary",
         clock=ManualClock(),
+        threads=OsThreads(),
     )
     try:
         factory.start()

@@ -5,8 +5,6 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sim.api import OsThreads
-
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
@@ -94,12 +92,9 @@ class SubscriptionTracker:
     whether any client has ever subscribed, and never resets.
     """
 
-    def __init__(
-        self, settle: SettleWindow | None = None, *, threads: Threads | None = None
-    ) -> None:
+    def __init__(self, settle: SettleWindow | None = None, *, threads: Threads) -> None:
         """Initialize subscription lifetime tracking and its condition lock."""
         self._settle = settle or ThreadingSettleWindow()
-        threads = threads or OsThreads()
         self._ever_subscribed = threads.event()
         self._condition = threads.condition()
         self._active = 0

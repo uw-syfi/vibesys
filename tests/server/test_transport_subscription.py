@@ -36,7 +36,7 @@ from server.events import (
 )
 from server.journal import _BOOTSTRAP_SPINE_TYPES
 from server.transport.unix_jsonl import UnixJsonlServer
-from vs_sim.api import Connection, OsThreads
+from vs_sim.api import Connection, OsThreads, UnixNetwork
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     SimNetwork,
@@ -178,7 +178,12 @@ def _subscribed_client(
 @contextmanager
 def _live_subscription(api: RunApi, request: SubscribeRequest) -> Generator[Callable[[], dict]]:
     socket_path = Path(tempfile.gettempdir()) / f"vibesys-test-{uuid.uuid4().hex}.sock"
-    with UnixJsonlServer(socket_path, api), _subscribed_client(socket_path, request) as read:
+    with (
+        UnixJsonlServer(
+            socket_path, api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+        ),
+        _subscribed_client(socket_path, request) as read,
+    ):
         yield read
 
 
@@ -816,7 +821,9 @@ def test_late_attach_does_not_parse_skipped_history(
     count = 8_000
     log_dir = _write_log(tmp_path / "logs", _round_log(count))
     parts = build_server_parts(tmp_path / "server")
-    attach_only = EventStore(log_dir / "run-events.jsonl", run_id="persisted-run")
+    attach_only = EventStore(
+        log_dir / "run-events.jsonl", run_id="persisted-run", threads=OsThreads()
+    )
 
     with _live_subscription(
         parts.api, SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=40)
@@ -855,7 +862,9 @@ def test_disconnect_wait_blocks_until_last_subscriber_closes(
     socket_path = socket_dir / "server.sock"
     request = SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0)
 
-    with UnixJsonlServer(socket_path, parts.api) as server:
+    with UnixJsonlServer(
+        socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+    ) as server:
         with _subscribed_client(socket_path, request) as read:
             assert read()["type"] == "subscribed"
         parts.journal.publish_output("stdout", "wake the first handler")
@@ -913,7 +922,9 @@ def test_an_idle_stream_paces_itself_through_the_injected_threads(tmp_path: Path
     request = SubscribeRequest(timestamp=REQUEST_TIME, after_sequence=0, tail=None)
 
     with (
-        UnixJsonlServer(socket_path, parts.api, threads=threads),
+        UnixJsonlServer(
+            socket_path, parts.api, threads=threads, subscriptions=None, network=UnixNetwork()
+        ),
         _subscribed_client(socket_path, request) as read,
     ):
         read()
@@ -962,7 +973,9 @@ def test_a_store_swap_mid_stream_replays_the_new_store_from_its_start(
             tail=tail,
             store_id=first_store if request_store == "named" else "",
         )
-        with UnixJsonlServer(root / "control.sock", parts.api, threads=threads, network=network):
+        with UnixJsonlServer(
+            root / "control.sock", parts.api, threads=threads, network=network, subscriptions=None
+        ):
             client = network.connect(str(root / "control.sock"))
             client.send(request.model_dump_json().encode() + b"\n")
             read = _sim_lines(client)
@@ -1022,7 +1035,11 @@ def test_terminal_drain_refuses_a_late_unix_subscription(
         network = SimNetwork(threads)
         request = SubscribeRequest(timestamp=REQUEST_TIME, client_id="late-unix")
         with UnixJsonlServer(
-            root / "control.sock", parts.api, threads=threads, network=network
+            root / "control.sock",
+            parts.api,
+            subscriptions=None,
+            threads=threads,
+            network=network,
         ) as server:
             assert server.wait_until_delivered(parts.api.latest_sequence, 0.0)
             client = network.connect(str(root / "control.sock"))

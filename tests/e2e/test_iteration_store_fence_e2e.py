@@ -13,6 +13,7 @@ from tests.server.support import REQUEST_TIME, build_server_parts
 from server.api.protocol import IterationQuery, SubscribeRequest
 from server.events import EventType, RunEvent, RunStartedData
 from server.transport.unix_jsonl import UnixJsonlServer
+from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -67,7 +68,12 @@ def test_iteration_query_follows_the_subscribed_store_across_control_sockets(
     parts = build_server_parts(tmp_path / "server")
     socket_path = tmp_path / "server.sock"
 
-    with UnixJsonlServer(socket_path, parts.api), _subscribed(socket_path) as read:
+    with (
+        UnixJsonlServer(
+            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+        ),
+        _subscribed(socket_path) as read,
+    ):
         assert read()["type"] == "subscribed"
         bootstrap = read()
         original_store = bootstrap["store_id"]

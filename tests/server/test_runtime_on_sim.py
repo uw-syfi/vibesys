@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -26,8 +26,15 @@ from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads, examples
+from vs_sim.api import OsThreads, Platform
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    ManualClock,
+    SimBlockingRunner,
+    SimNetwork,
+    SimThreads,
+    examples,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -137,9 +144,13 @@ def test_a_subscriber_reads_the_event_that_ends_the_run_before_the_server_closes
             runs=production_runs(),
             socket_path=socket_path,
             detach=ending.detach,
-            threads=threads,
-            network=network,
-            clock=ManualClock(),
+            platform=replace(
+                Platform.real(),
+                clock=ManualClock(),
+                threads=threads,
+                network=network,
+                blocking=SimBlockingRunner(threads),
+            ),
         )
         seen: list[list[str]] = []
         read = threads.event()
@@ -233,9 +244,13 @@ def _runtime(socket_path: Path, threads: SimThreads, network: SimNetwork) -> Ser
         run_id="run-1",
         runs=production_runs(),
         socket_path=socket_path,
-        threads=threads,
-        network=network,
-        clock=ManualClock(),
+        platform=replace(
+            Platform.real(),
+            clock=ManualClock(),
+            threads=threads,
+            network=network,
+            blocking=SimBlockingRunner(threads),
+        ),
     )
 
 

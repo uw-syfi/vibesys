@@ -52,7 +52,7 @@ from server.control_envelope import CommandAck
 from server.events import EventType, RunEvent
 from vibesys.api import IterationUnavailable, RunRecordReadError
 from vibesys.api.hypothesis import agent_projection
-from vs_sim.api import OsThreads, utc_datetime
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -271,10 +271,9 @@ class RunApi:
         clock: Clock,
         project_scope: str | None = None,
         tui_defaults: Callable[[], InteractiveSetupDefaults] | None = None,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Initialize the API with the components that own each request surface."""
-        threads = threads or OsThreads()
         self._condition = condition
         self._controller = controller
         self._executions = executions

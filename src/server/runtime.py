@@ -69,7 +69,6 @@ from server.transport.websocket import (
     browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
 )
 from vibesys.api import ConfigurationError, RunStopped
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -79,7 +78,7 @@ if TYPE_CHECKING:
     from server.host_api import RunStatus
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunHandle, RunRequest, RunResult, Runs, RunSession
-    from vs_sim.api import Clock, Network, Threads
+    from vs_sim.api import Platform
 
 
 _RunValueT = TypeVar("_RunValueT")
@@ -172,24 +171,24 @@ class ServerRuntime:
         detach: bool = False,
         read_only_log: Path | None = None,
         observer: ServerLifecycleObserver | None = None,
-        threads: Threads | None = None,
-        network: Network | None = None,
-        clock: Clock,
+        platform: Platform,
     ) -> None:
         """Compose all server components around one shared condition.
 
-        ``clock`` counts seconds since the epoch; it stamps every journaled event
-        and execution start.
+        ``platform`` is the process's time, threads, blocking runner and sockets: its
+        clock counts seconds since the epoch and stamps every journaled event and
+        execution start; its threads make every lock, condition, event and worker
+        thread the server creates; its network binds the Unix control socket and its
+        blocking runner runs the web gateway's synchronous requests.
 
         ``run_id`` names the run every journaled event belongs to, from the
         first; only a read-only reopen (``read_only_log``) takes it from the
-        recorded events instead. ``threads`` supplies every lock, condition,
-        event and worker thread the server creates; it defaults to the
-        operating system's. ``network`` binds the Unix control socket; it
-        defaults to the operating system's Unix sockets.
+        recorded events instead.
         """
-        self.threads = threads or OsThreads()
-        self.network = network
+        clock = platform.clock
+        self.platform = platform
+        self.threads = platform.threads
+        self.network = platform.network
         self.runs = runs
         self.socket_path = socket_path
         self.web = web
@@ -208,7 +207,9 @@ class ServerRuntime:
         self.condition = self.threads.condition(self.threads.rlock())
         self._clock = clock
         self.journal = WireJournal(self.condition, clock=clock, threads=self.threads)
-        self.executions = ExecutionTracker(self.condition, self.journal, clock=clock)
+        self.executions = ExecutionTracker(
+            self.condition, self.journal, clock=clock, threads=self.threads
+        )
         self.controller = RunController(self.condition, self.journal, self.executions)
         if read_only_log is not None:
             self._attach_journal = partial(self.controller.attach_read_only, read_only_log)
@@ -235,6 +236,7 @@ class ServerRuntime:
             self.journal,
             self.chat,
             clock=clock,
+            threads=self.threads,
         )
         self.chat.set_fallback_answer(RunInspector(self.integration).answer)
         self.controls = RunControlSlot(self.condition)
@@ -313,7 +315,11 @@ class ServerRuntime:
             with ExitStack() as transports:
                 transport = transports.enter_context(
                     UnixJsonlServer(
-                        self.socket_path, self.api, subscriptions, self.threads, self.network
+                        self.socket_path,
+                        self.api,
+                        threads=self.threads,
+                        network=self.network,
+                        subscriptions=subscriptions,
                     )
                 )
                 # Registered after the transport, so it runs before the
@@ -336,6 +342,8 @@ class ServerRuntime:
                             subscriptions=subscriptions,
                             instance_path=self.instance_path,
                             clock=self._clock,
+                            threads=self.threads,
+                            request_runner=self.platform.blocking,
                         )
                     )
                     if self.web

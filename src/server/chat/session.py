@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Protocol
 
 from server.chat.manager import ChatAnswer
 from server.execution import AgentExecutionRequest
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -55,10 +54,10 @@ class ExperimentChatDependencies:
     provider: str
     model: str
     fallback: Callable[[str], str]
+    #: Where the turn lock comes from.
+    threads: Threads
     #: Bounded complete records restored through the non-privileged user channel.
     transcript_history: str = ""
-    #: Where the turn lock comes from; ``None`` is the operating system's threads.
-    threads: Threads | None = None
 
 
 class ExperimentChatSession:
@@ -80,7 +79,7 @@ class ExperimentChatSession:
         self._model = dependencies.model
         self._fallback = dependencies.fallback
         self._resources = resources
-        self._lock = (dependencies.threads or OsThreads()).lock()
+        self._lock = dependencies.threads.lock()
 
     def ask(self, question: str) -> ChatAnswer:
         """Invoke the chat agent and persist its answer."""

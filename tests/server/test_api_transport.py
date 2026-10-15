@@ -26,7 +26,7 @@ from server.transport.unix_jsonl import (
     UnixJsonlServer,
     validate_socket_path,
 )
-from vs_sim.api import Connection
+from vs_sim.api import Connection, OsThreads, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 
 type _Dial = Callable[[], Connection]
@@ -48,7 +48,9 @@ def _served[T](
         network = SimNetwork(threads)
         try:
             prepare(parts)
-            server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+            server = UnixJsonlServer(
+                socket_path, parts.api, threads=threads, network=network, subscriptions=None
+            )
             server.start()
             try:
                 return body(parts, lambda: network.connect(str(socket_path), HANG_GUARD_S))
@@ -274,7 +276,9 @@ def test_transport_rejects_overlong_path_before_binding(tmp_path: Path) -> None:
 
     try:
         with pytest.raises(SocketPathTooLongError) as failure:
-            UnixJsonlServer(path, parts.api).start()
+            UnixJsonlServer(
+                path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+            ).start()
 
         assert failure.value.path == path
         assert str(MAX_SOCKET_PATH_BYTES) in str(failure.value)

@@ -23,6 +23,7 @@ from server.chat.manager import ChatAnswer, ChatThreadHandle
 from server.chat.options import ChatRunSettings
 from server.events import ChatThreadCreatedData, EventType, make_event
 from server.run_attachment import AgentSelection, RunAttachment
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
@@ -378,6 +379,7 @@ def _factory_for_test(
         build_agent=build_agent,
         fallback=lambda _question: "fallback",
         clock=ManualClock(),
+        threads=OsThreads(),
     )
 
 

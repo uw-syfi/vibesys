@@ -14,6 +14,7 @@ import os
 import shutil
 import tempfile
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -44,7 +45,7 @@ from server.registry import (
 from server.runtime import ServerRuntime
 from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
-from vs_sim.api import OsThreads, SystemClock, UnixNetwork
+from vs_sim.api import OsThreads, Platform, SystemClock, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -155,7 +156,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         runs=production_runs(),
         socket_path=socket_path,
         detach=True,
-        clock=SystemClock(),
+        platform=replace(Platform.real(), clock=SystemClock()),
     )
     integration = LocalRunIntegration(
         clock=SystemClock(),

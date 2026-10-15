@@ -34,7 +34,7 @@ from server.events import (
     make_event,
 )
 from server.journal import _canonical_execution_events
-from vs_sim.api import Threads
+from vs_sim.api import OsThreads, Threads
 
 _TIMESTAMP = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -173,8 +173,8 @@ def _generated_events(
 
 def _assert_matches_eager_store(path: Path) -> None:
     """Assert the lazy store is byte-identical to the eager one, everywhere."""
-    eager = _EagerEventStore(path, run_id="reference")
-    lazy = EventStore(path, run_id="reference")
+    eager = _EagerEventStore(path, run_id="reference", threads=OsThreads())
+    lazy = EventStore(path, run_id="reference", threads=OsThreads())
 
     assert lazy.last_sequence == eager.last_sequence
     assert _dump(lazy.read()) == _dump(eager.read())
@@ -232,7 +232,7 @@ def test_lazy_store_preserves_the_original_log_bytes(tmp_path: Path) -> None:
     )
     original = path.read_bytes()
 
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
     store.read()
 
     assert path.read_bytes() == original
@@ -246,9 +246,9 @@ def test_a_corrupt_record_before_the_tail_still_raises_from_construction(tmp_pat
     path.write_text("\n".join(lines) + "\n")
 
     with pytest.raises(ValidationError):
-        EventStore(path, run_id="active-run")
+        EventStore(path, run_id="active-run", threads=OsThreads())
     with pytest.raises(ValidationError):
-        _EagerEventStore(path, run_id="reference")
+        _EagerEventStore(path, run_id="reference", threads=OsThreads())
 
 
 def test_a_corrupt_final_record_is_ignored_and_repaired_by_append(tmp_path: Path) -> None:
@@ -258,13 +258,15 @@ def test_a_corrupt_final_record_is_ignored_and_repaired_by_append(tmp_path: Path
         "".join(event.model_dump_json() + "\n" for event in events) + '{"protocol_version":1'
     )
 
-    store = EventStore(path, run_id="active-run")
-    assert _dump(store.read()) == _dump(_EagerEventStore(path, run_id="reference").read())
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
+    assert _dump(store.read()) == _dump(
+        _EagerEventStore(path, run_id="reference", threads=OsThreads()).read()
+    )
 
     appended = store.append(
         make_event(EventType.OUTPUT, "after repair", timestamp=datetime(2026, 1, 1, tzinfo=UTC))
     )
-    reopened = EventStore(path, run_id="reopened-run")
+    reopened = EventStore(path, run_id="reopened-run", threads=OsThreads())
 
     assert [event.text for event in reopened.read(appended.sequence - 1)] == ["after repair"]
     assert len(reopened.read()) == len(events) + 1
@@ -286,8 +288,8 @@ def test_lazy_store_matches_eager_store_for_a_valid_unterminated_tail(tmp_path: 
     appended = make_event(
         EventType.OUTPUT, "after repair", timestamp=datetime(2026, 1, 1, tzinfo=UTC)
     )
-    EventStore(lazy_path, run_id="reference").append(appended)
-    _EagerEventStore(eager_path, run_id="reference").append(appended)
+    EventStore(lazy_path, run_id="reference", threads=OsThreads()).append(appended)
+    _EagerEventStore(eager_path, run_id="reference", threads=OsThreads()).append(appended)
 
     assert lazy_path.read_bytes() == eager_path.read_bytes()
     # The repair terminates the final record instead of concatenating onto it.
@@ -309,9 +311,9 @@ def test_lazy_store_matches_eager_store_for_a_complete_invalid_tail(tmp_path: Pa
     original = path.read_bytes()
 
     with pytest.raises(ValueError, match="complete final record") as lazy_error:
-        EventStore(path, run_id="active-run")
+        EventStore(path, run_id="active-run", threads=OsThreads())
     with pytest.raises(ValueError, match="complete final record") as eager_error:
-        _EagerEventStore(path, run_id="reference")
+        _EagerEventStore(path, run_id="reference", threads=OsThreads())
 
     assert str(lazy_error.value) == str(eager_error.value)
     assert path.read_bytes() == original
@@ -324,9 +326,9 @@ def test_lazy_store_matches_eager_store_for_a_concatenated_tail(tmp_path: Path) 
     original = path.read_bytes()
 
     with pytest.raises(ValueError, match="complete final record") as lazy_error:
-        EventStore(path, run_id="active-run")
+        EventStore(path, run_id="active-run", threads=OsThreads())
     with pytest.raises(ValueError, match="complete final record") as eager_error:
-        _EagerEventStore(path, run_id="reference")
+        _EagerEventStore(path, run_id="reference", threads=OsThreads())
 
     assert str(lazy_error.value) == str(eager_error.value)
     assert path.read_bytes() == original
@@ -337,7 +339,7 @@ def test_a_bounded_read_only_parses_the_records_it_returns(tmp_path: Path) -> No
     count = 6 * _EAGER_TAIL_RECORDS
     _write_events(path, _generated_events(seed=17, count=count))
 
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
     after_construction = store.parsed_record_count
     assert after_construction == _EAGER_TAIL_RECORDS
 
@@ -350,7 +352,7 @@ def test_a_bounded_read_only_parses_the_records_it_returns(tmp_path: Path) -> No
 def test_repeated_bounded_reads_reuse_the_cached_parse(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(path, _generated_events(seed=19, count=4 * _EAGER_TAIL_RECORDS))
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
 
     first = store.read(200, 400)
     parsed = store.parsed_record_count
@@ -364,7 +366,7 @@ def test_repeated_bounded_reads_reuse_the_cached_parse(tmp_path: Path) -> None:
 def test_read_sequences_parses_only_the_named_records(tmp_path: Path) -> None:
     path = tmp_path / "events.jsonl"
     _write_events(path, _generated_events(seed=23, count=4 * _EAGER_TAIL_RECORDS))
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
     parsed = store.parsed_record_count
 
     events = store.read_sequences([5, 900, 2_000, 10**9])
@@ -377,13 +379,13 @@ def test_headers_describe_every_record_without_parsing_it(tmp_path: Path) -> Non
     path = tmp_path / "events.jsonl"
     events = _generated_events(seed=29, count=3 * _EAGER_TAIL_RECORDS, legacy_sequences=True)
     _write_events(path, events)
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
     parsed = store.parsed_record_count
 
     headers = store.event_headers()
 
     assert store.parsed_record_count == parsed
-    reference = _EagerEventStore(path, run_id="reference").read()
+    reference = _EagerEventStore(path, run_id="reference", threads=OsThreads()).read()
     assert [header.sequence for header in headers] == [event.sequence for event in reference]
     assert [header.type for header in headers] == [event.type for event in reference]
     assert [header.execution_id for header in headers] == [
@@ -406,7 +408,7 @@ def test_attaching_to_a_large_log_does_not_parse_the_whole_log(
     event_store = journal_module.EventStore
 
     def track_store(
-        path: Path, run_id: str, *, read_only: bool = False, threads: Threads | None = None
+        path: Path, run_id: str, *, read_only: bool = False, threads: Threads
     ) -> EventStore:
         store = event_store(path, run_id, read_only=read_only, threads=threads)
         created_stores.append(store)
@@ -435,7 +437,7 @@ def test_attach_indexes_legacy_lifecycle_identity_without_parsing_history(tmp_pa
     parts = build_server_parts(log_dir)
     attached = parts.journal.read_history()
 
-    reference = _EagerEventStore(path, run_id="reference").read()
+    reference = _EagerEventStore(path, run_id="reference", threads=OsThreads()).read()
     expected = _canonical_execution_events(reference)
     # Attaching appends its own SERVER_STARTED event on a fresh journal.
     assert _dump(attached[: len(expected)]) == _dump(expected)
@@ -452,7 +454,7 @@ def test_run_started_payload_is_readable_without_forcing_the_history(tmp_path: P
         data=RunStartedData(outer_loop="single-agent", input="objective"),
     )
     _write_events(path, events)
-    store = EventStore(path, run_id="active-run")
+    store = EventStore(path, run_id="active-run", threads=OsThreads())
     parsed = store.parsed_record_count
 
     started = store.read_sequences(

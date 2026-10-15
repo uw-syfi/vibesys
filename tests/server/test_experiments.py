@@ -54,6 +54,7 @@ from vibesys.hypothesis.state import (
 from vibesys.hypothesis.transitions import reproject_run_evidence
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoreRecord
 from vs_project.api.testing import run_execution_record
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
@@ -478,7 +479,7 @@ def test_projection_orders_hypotheses_by_started_round() -> None:
 
 
 def test_revisioned_projection_returns_only_changed_entries() -> None:
-    projection = ExperimentProjection()
+    projection = ExperimentProjection(threads=OsThreads())
     initial = HypothesisState(
         experiment_revision=1,
         hypotheses=[
@@ -517,7 +518,7 @@ def test_revisioned_projection_returns_only_changed_entries() -> None:
 
 
 def test_revisioned_projection_combines_remove_then_recreate_in_order() -> None:
-    projection = ExperimentProjection()
+    projection = ExperimentProjection(threads=OsThreads())
     original = HypothesisState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
@@ -549,7 +550,7 @@ def test_revisioned_projection_combines_remove_then_recreate_in_order() -> None:
 
 
 def test_revisioned_projection_resets_for_a_history_gap_or_run_change() -> None:
-    projection = ExperimentProjection(history_limit=1)
+    projection = ExperimentProjection(history_limit=1, threads=OsThreads())
     first = HypothesisState(
         experiment_revision=1,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=1)],
@@ -576,7 +577,7 @@ def test_revisioned_projection_resets_for_a_history_gap_or_run_change() -> None:
 
 
 def test_legacy_invalidation_forces_a_full_snapshot_at_the_same_revision() -> None:
-    projection = ExperimentProjection()
+    projection = ExperimentProjection(threads=OsThreads())
     old = HypothesisState(hypotheses=[_hypothesis("H-01", 1)])
     original = projection.replace("run", "projection", _view(old))
     stale_cursor = ExperimentCursor(
@@ -604,7 +605,7 @@ def test_legacy_invalidation_forces_a_full_snapshot_at_the_same_revision() -> No
 
 
 def test_equal_revision_authoritative_snapshot_starts_a_new_cursor_chain() -> None:
-    projection = ExperimentProjection()
+    projection = ExperimentProjection(threads=OsThreads())
     old = HypothesisState(
         experiment_revision=4,
         hypotheses=[_hypothesis("H-01", 1, last_experiment_revision=4)],
@@ -628,7 +629,7 @@ def test_equal_revision_authoritative_snapshot_starts_a_new_cursor_chain() -> No
 
 
 def test_invalidation_during_a_cold_load_rejects_the_stale_snapshot() -> None:
-    projection = ExperimentProjection()
+    projection = ExperimentProjection(threads=OsThreads())
     token = projection.query("run", "projection", None)
     assert isinstance(token, ExperimentLoadToken)
 

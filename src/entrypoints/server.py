@@ -56,6 +56,7 @@ from vs_project.api import Project
 from vs_sim.api import (
     OsProcesses,
     OsThreads,
+    Platform,
     SignalMainThreadWake,
     Signals,
     SystemClock,
@@ -1062,6 +1063,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
         run_id = None if request is None else request.resolved_run_id
         project_root = None if request is None else request.resolved_project_root
         server_runtime = import_module("server.runtime").ServerRuntime
+        platform = Platform.real()
         if web:
             runtime = server_runtime(
                 socket_path=control_socket,
@@ -1077,7 +1079,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 instance_path=instance_path,
                 detach=detach,
                 read_only_log=read_only_log,
-                clock=SystemClock(),
+                platform=platform,
             )
         else:
             runtime = server_runtime(
@@ -1088,9 +1090,9 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 tui_defaults=_tui_defaults_from_argv(arguments),
                 detach=detach,
                 observer=observer,
-                clock=SystemClock(),
+                platform=platform,
             )
-        threads = OsThreads()
+        threads = platform.threads
         with _termination_signal(
             runtime, WakeupFdSignalRelay(threads), SignalMainThreadWake(), threads
         ):

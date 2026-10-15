@@ -23,7 +23,7 @@ from server.chat.transcript import FileChatTranscriptStore
 from server.events import ChatThreadCreatedData, ChatThreadId
 from server.run_attachment import AgentSelection, RunAttachment
 from vibesys.api import AuxiliaryAgentLaunch
-from vs_sim.api import OsThreads, utc_datetime
+from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -100,11 +100,11 @@ class ExperimentChatFactory:
         attachment: RunAttachment,
         build_agent: ChatAgentBuilder,
         fallback: Callable[[str], str],
-        threads: Threads | None = None,
+        threads: Threads,
         clock: Clock,
     ) -> None:
         """Configure session construction and resource ownership for one run."""
-        self._threads = threads or OsThreads()
+        self._threads = threads
         self._clock = clock
         self._manager = manager
         self._controller = controller

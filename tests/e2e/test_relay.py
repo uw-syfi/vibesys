@@ -36,6 +36,7 @@ from server.host_api import (
 from server.registry import FileInstanceStore, instance_root
 from server.relay import EXIT_STATUS
 from server.transport.unix_jsonl import UnixJsonlServer
+from vs_sim.api import OsThreads, UnixNetwork
 from vs_sim.api.testing import swept
 
 if TYPE_CHECKING:
@@ -157,7 +158,12 @@ class _BridgeConnection:
 def _bridged(
     env: Mapping[str, str], parts: ServerParts, socket_path: Path
 ) -> Iterator[_BridgeConnection]:
-    with _registered(env, socket_path), UnixJsonlServer(socket_path, parts.api):
+    with (
+        _registered(env, socket_path),
+        UnixJsonlServer(
+            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+        ),
+    ):
         connection = _BridgeConnection(env)
         assert connection.connected["type"] == "run.connect"
         try:

@@ -121,15 +121,12 @@
 {"path": "src/entrypoints/server.py", "rule": "subprocess", "count": 5}
 {"path": "src/entrypoints/web.py", "rule": "process", "count": 1}
 {"path": "src/entrypoints/web.py", "rule": "socket_io", "count": 1}
-{"path": "src/server/chat/manager.py", "rule": "threading", "count": 1}
 {"path": "src/server/event_index.py", "rule": "fs_sync", "count": 2}
-{"path": "src/server/execution.py", "rule": "threading", "count": 2}
 {"path": "src/server/registry.py", "rule": "fs_sync", "count": 2}
 {"path": "src/server/transport/discovery.py", "rule": "process", "count": 1}
 {"path": "src/server/transport/discovery.py", "rule": "socket_io", "count": 1}
 {"path": "src/server/transport/websocket.py", "rule": "executor", "count": 1}
 {"path": "src/server/transport/websocket.py", "rule": "socket_io", "count": 1}
-{"path": "src/server/transport/websocket.py", "rule": "threading", "count": 19}
 {"path": "tests/architecture/test_delegated_merge.py", "rule": "subprocess", "count": 13}
 {"path": "tests/architecture/test_ordered_map_evaluator.py", "rule": "subprocess", "count": 10}
 {"path": "tests/architecture/test_prompt_resource_contract.py", "rule": "process", "count": 1}
@@ -197,7 +194,7 @@
 {"path": "tests/server/test_websocket_transport.py", "rule": "executor", "count": 2}
 {"path": "tests/server/test_websocket_transport.py", "rule": "socket", "count": 9}
 {"path": "tests/server/test_websocket_transport.py", "rule": "socket_io", "count": 21}
-{"path": "tests/server/test_websocket_transport.py", "rule": "threading", "count": 11}
+{"path": "tests/server/test_websocket_transport.py", "rule": "threading", "count": 8}
 {"path": "tests/support/__init__.py", "rule": "subprocess", "count": 5}
 {"path": "tests/vibesys/loops/profiler_process_world.py", "rule": "subprocess", "count": 1}
 {"path": "tests/vibesys/loops/profiler_torch_fixtures.py", "rule": "process", "count": 1}

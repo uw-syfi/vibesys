@@ -53,7 +53,6 @@ from vibesys.api import (
 from vibesys.api import (
     JsonResultPayload as _JsonResultPayload,
 )
-from vs_sim.api import OsThreads
 
 CommandResultPayload = _CommandResultPayload
 JsonResultPayload = _JsonResultPayload
@@ -982,7 +981,7 @@ class EventStore:
     """
 
     def __init__(
-        self, path: Path, run_id: str, *, read_only: bool = False, threads: Threads | None = None
+        self, path: Path, run_id: str, *, read_only: bool = False, threads: Threads
     ) -> None:
         """Open an indexed event file, optionally without cache writes."""
         self.path = path
@@ -995,7 +994,6 @@ class EventStore:
         # Neither ``path`` nor ``run_id`` can serve: a retired store can be
         # reopened at the same path, and ``run_id`` is reassigned in place.
         self.store_id = uuid.uuid4().hex
-        threads = threads or OsThreads()
         self._lock = threads.rlock()
         self._changed = threads.condition(self._lock)
         self._parsed_records = 0

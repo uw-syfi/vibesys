@@ -29,7 +29,7 @@ from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import OsThreads, Platform, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import FakeSignalSource, ManualClock
 
 if TYPE_CHECKING:
@@ -185,7 +185,10 @@ def test_headless_entry_prints_one_run_failed_line_with_the_typed_reason(
 def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> None:
     runs = _runs()
     runtime = ServerRuntime(
-        run_id="run-1", socket_path=tmp_path / "control.sock", runs=runs, clock=ManualClock()
+        run_id="run-1",
+        socket_path=tmp_path / "control.sock",
+        runs=runs,
+        platform=replace(Platform.real(), clock=ManualClock()),
     )
     try:
         result = runtime.drive(_request(tmp_path / "project"))
@@ -227,7 +230,10 @@ def test_server_retains_chat_after_run_result_and_releases_it_on_close(tmp_path:
     clients: list[FakeAgentClient] = []
     runs = _runs(clients)
     runtime = ServerRuntime(
-        run_id="run-1", socket_path=tmp_path / "control.sock", runs=runs, clock=ManualClock()
+        run_id="run-1",
+        socket_path=tmp_path / "control.sock",
+        runs=runs,
+        platform=replace(Platform.real(), clock=ManualClock()),
     )
     try:
         runtime.drive(_request(tmp_path / "project"))

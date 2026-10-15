@@ -148,9 +148,7 @@ def _read_only_run_id(headers: list[EventHeader], explicit: str | None) -> str:
 class WireJournal:
     """Own event serialization, replay compatibility, and failure identity."""
 
-    def __init__(
-        self, condition: Condition, *, clock: Clock, threads: Threads | None = None
-    ) -> None:
+    def __init__(self, condition: Condition, *, clock: Clock, threads: Threads) -> None:
         """Journal over the shared server condition, stamping events by epoch ``clock``."""
         self._condition = condition
         self._clock = clock

@@ -22,6 +22,7 @@ from websockets.sync.client import ClientConnection, connect
 from server.transport.subscriptions import SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import WebSocketGateway, WebSocketLimits
+from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -113,7 +114,9 @@ def _running_connection(
     limits: WebSocketLimits | None = None,
 ) -> Generator[ScenarioConnection]:
     if transport == "unix":
-        with UnixJsonlServer(socket_path, parts.api):
+        with UnixJsonlServer(
+            socket_path, parts.api, subscriptions=None, threads=OsThreads(), network=UnixNetwork()
+        ):
             connection = _UnixConnection(socket_path)
             try:
                 yield connection
@@ -122,7 +125,11 @@ def _running_connection(
         return
     assert transport == "websocket", f"unknown transport: {transport}"
     with WebSocketGateway(
-        parts.api, limits=limits or WebSocketLimits(), clock=ManualClock()
+        parts.api,
+        limits=limits or WebSocketLimits(),
+        clock=ManualClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
     ) as gateway:
         connection = _WebSocketConnection(gateway)
         try:
@@ -398,14 +405,22 @@ def test_dual_transport_subscriptions_have_independent_floors_and_teardown(
     scenario = load_scenario(scenario_name)
     parts = _parts_with_history(tmp_path)
     settle = FakeSettleWindow()
-    tracker = SubscriptionTracker(settle)
+    tracker = SubscriptionTracker(settle, threads=OsThreads())
     socket_path = socket_dir / "dual.sock"
     waiter, settled = _disconnect_waiter(tracker)
 
     try:
         with (
-            UnixJsonlServer(socket_path, parts.api, tracker),
-            WebSocketGateway(parts.api, subscriptions=tracker, clock=ManualClock()) as gateway,
+            UnixJsonlServer(
+                socket_path, parts.api, tracker, threads=OsThreads(), network=UnixNetwork()
+            ),
+            WebSocketGateway(
+                parts.api,
+                subscriptions=tracker,
+                clock=ManualClock(),
+                threads=OsThreads(),
+                request_runner=ThreadBlockingRunner(),
+            ) as gateway,
         ):
             connections: dict[str, ScenarioConnection] = {
                 "terminal": _UnixConnection(socket_path),

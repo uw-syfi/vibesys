@@ -217,7 +217,9 @@ def test_a_client_that_hangs_up_before_its_answer_ends_only_its_own_session(
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
-        with UnixJsonlServer(socket_path, parts.api, threads=threads, network=network):
+        with UnixJsonlServer(
+            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+        ):
             gone = network.connect(str(socket_path))
             gone.send(_frame("query.snapshot"))
             gone.close()
@@ -326,7 +328,9 @@ def test_close_drains_a_started_request_before_returning(tmp_path: Path) -> None
             return ChatAnswer(text="finished", invocation_id="chat-1")
 
         parts.chat.install_default_handler(answer)
-        server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+        server = UnixJsonlServer(
+            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+        )
         server.start()
         client = network.connect(str(socket_path))
         client.send(
@@ -360,7 +364,9 @@ def test_close_called_by_requests_does_not_cross_join_their_workers(tmp_path: Pa
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
-        server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+        server = UnixJsonlServer(
+            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+        )
         arrived: list[str] = []
         all_entered = threads.event()
         returns: list[str] = []
@@ -448,7 +454,9 @@ def test_a_frame_nested_past_the_recursion_limit_is_rejected_and_the_session_goe
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
-        with UnixJsonlServer(socket_path, parts.api, threads=threads, network=network):
+        with UnixJsonlServer(
+            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+        ):
             client = network.connect(str(socket_path))
             client.send(b"[" * 100_000 + b"\n" + _frame("query.snapshot"))
             rejection = Response.model_validate_json(_read_line(client))
@@ -483,7 +491,9 @@ def test_a_request_line_past_the_bound_is_rejected_and_the_session_goes_on(
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
         network = SimNetwork(threads)
-        with UnixJsonlServer(socket_path, parts.api, threads=threads, network=network):
+        with UnixJsonlServer(
+            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+        ):
             client = network.connect(str(socket_path))
             _send(client, oversized + _frame("query.snapshot"), tuple(sorted(cuts)))
             rejection = Response.model_validate_json(_read_line(client))
@@ -618,7 +628,9 @@ def test_a_transient_accept_failure_is_logged_and_retried_not_treated_as_a_close
 
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
-        with UnixJsonlServer(socket_path, parts.api, threads=threads, network=network):
+        with UnixJsonlServer(
+            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+        ):
             client = network.connect(str(socket_path))
             client.send(_frame("query.snapshot"))
             reply = Response.model_validate_json(_read_line(client))
@@ -651,7 +663,9 @@ def test_closing_the_server_ends_the_accept_loop_even_through_an_emfile_shaped_o
 
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
-        server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+        server = UnixJsonlServer(
+            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+        )
         server.start()
         server.close()
         assert isinstance(network.listener, _RelabeledErrorListener)
@@ -671,7 +685,9 @@ def test_close_drains_accept_when_listener_close_does_not_interrupt_it(tmp_path:
 
     def main() -> None:
         parts = build_server_parts(None, threads=threads)
-        server = UnixJsonlServer(socket_path, parts.api, threads=threads, network=network)
+        server = UnixJsonlServer(
+            socket_path, parts.api, threads=threads, network=network, subscriptions=None
+        )
         server.start()
         server.close()
         assert isinstance(network.listener, _DeferredCloseListener)

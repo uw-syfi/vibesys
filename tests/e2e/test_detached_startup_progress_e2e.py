@@ -13,6 +13,7 @@ import os
 import shutil
 import tempfile
 import threading
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -48,7 +49,7 @@ from vibesys.events import (
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.images import TaskImageBuildError
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
-from vs_sim.api import OsThreads, SystemClock
+from vs_sim.api import OsThreads, Platform, SystemClock
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -122,7 +123,7 @@ def _serve(
                     socket_path=socket_path,
                     detach=True,
                     observer=publisher,
-                    clock=clock,
+                    platform=replace(Platform.real(), clock=clock),
                 )
                 integration.events.subscribe(runtime.integration.project_event)
                 try:

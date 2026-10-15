@@ -213,7 +213,7 @@ def build_server_parts(
     clock = ManualClock()
     condition = threads.condition(threads.rlock())
     journal = WireJournal(condition, threads=threads, clock=clock)
-    executions = ExecutionTracker(condition, journal, clock=clock)
+    executions = ExecutionTracker(condition, journal, clock=clock, threads=threads)
     controller = RunController(condition, journal, executions)
     chat = ChatManager(
         condition,
@@ -224,7 +224,7 @@ def build_server_parts(
     journal.add_listener(chat.apply_replayed_event, replay_filter=chat.replay_filter)
     if chat_agent_builder is None:
         integration = RunIntegrationAdapter(
-            controller, executions, journal, chat, clock=ManualClock()
+            controller, executions, journal, chat, clock=ManualClock(), threads=threads
         )
     else:
         integration = RunIntegrationAdapter(
@@ -234,6 +234,7 @@ def build_server_parts(
             chat,
             chat_agent_builder=chat_agent_builder,
             clock=ManualClock(),
+            threads=threads,
         )
     chat.set_fallback_answer(RunInspector(integration).answer)
     core_events = CoreEventJournal(clock=clock, threads=OsThreads())

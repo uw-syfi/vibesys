@@ -10,9 +10,8 @@ import mimetypes
 import os
 import posixpath
 import secrets
-import threading
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import partial
 from http import HTTPStatus
 from http.cookies import CookieError, SimpleCookie
@@ -44,7 +43,6 @@ from server.transport.subscriptions import (
     SubscriptionTracker,
 )
 from vs_async_ops.api import finish
-from vs_sim.api import ThreadBlockingRunner
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -54,7 +52,7 @@ if TYPE_CHECKING:
     from websockets.http11 import Response as HttpResponse
 
     from server.api.service import RunApi, SubscriptionBootstrap
-    from vs_sim.api import BlockingRunner, Clock, Event
+    from vs_sim.api import BlockingRunner, Clock, Event, Lock, Threads, Worker
 
 _LOG = logging.getLogger(__name__)
 
@@ -175,27 +173,27 @@ class _WriteDeadlineError(RuntimeError):
 class StartupSynchronization(Protocol):
     """Coordinate gateway startup without coupling lifecycle tests to a clock."""
 
-    def wait_for_ready(self, ready: threading.Event) -> bool:
+    def wait_for_ready(self, ready: Event) -> bool:
         """Wait for a successful startup, returning false when it is abandoned."""
 
-    def wait_before_serve(self, stop: threading.Event) -> None:
+    def wait_before_serve(self, stop: Event) -> None:
         """Run immediately before the event loop begins serving."""
 
     def wait_before_listener_start(self, stop: Event, bound_port: int) -> None:
         """Run after bind and before the socket begins listening."""
 
-    def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
+    def wait_before_publication(self, stop: Event, bound_port: int) -> None:
         """Run after listener start, before the attempt becomes externally usable."""
 
 
 class _DefaultStartupSynchronization:
     """Production startup synchronization, including the gateway's wait bound."""
 
-    def wait_for_ready(self, ready: threading.Event) -> bool:
+    def wait_for_ready(self, ready: Event) -> bool:
         """Wait at most the gateway's declared startup bound."""
         return ready.wait(timeout=10)
 
-    def wait_before_serve(self, stop: threading.Event) -> None:
+    def wait_before_serve(self, stop: Event) -> None:
         """Begin serving without an additional startup barrier."""
         del stop
 
@@ -203,7 +201,7 @@ class _DefaultStartupSynchronization:
         """Begin listening immediately after bind."""
         del stop, bound_port
 
-    def wait_before_publication(self, stop: threading.Event, bound_port: int) -> None:
+    def wait_before_publication(self, stop: Event, bound_port: int) -> None:
         """Publish the listener without an additional startup barrier."""
         del stop, bound_port
 
@@ -216,10 +214,11 @@ class _GatewayAttempt:
     """All mutable resources for one independently stoppable gateway attempt."""
 
     claim: WebInstanceClaim | None
-    stop: threading.Event = field(default_factory=threading.Event)
-    ready: threading.Event = field(default_factory=threading.Event)
-    lock: threading.Lock = field(default_factory=threading.Lock)
-    thread: threading.Thread | None = None
+    stop: Event
+    ready: Event
+    lock: Lock
+    published: Event
+    thread: Worker | None = None
     loop: asyncio.AbstractEventLoop | None = None
     instance_record: WebInstanceRecord | None = None
     startup_error: BaseException | None = None
@@ -228,7 +227,6 @@ class _GatewayAttempt:
     retired: bool = False
     startup_server: asyncio.Server | None = None
     staged_instance_path: Path | None = None
-    published: threading.Event = field(default_factory=threading.Event)
 
 
 @dataclass(frozen=True)
@@ -344,10 +342,12 @@ class WebSocketGateway:
         limits: WebSocketLimits | None = None,
         startup: StartupSynchronization | None = None,
         clock: Clock,
-        request_runner: BlockingRunner | None = None,
+        threads: Threads,
+        request_runner: BlockingRunner,
     ) -> None:
         """Create a loopback gateway around a shared run API.
 
+        ``threads`` makes the gateway's locks, events and event-loop thread;
         ``request_runner`` owns synchronous API work outside the gateway event
         loop. Raises `ValueError`, naming the offending value,
         when `allowed_origins` holds anything a browser cannot send as an
@@ -363,7 +363,8 @@ class WebSocketGateway:
         # invalidate copied launch URLs without disconnecting an attached page
         # or breaking that page's later control and subscription sockets.
         self._browser_session_key = secrets.token_bytes(32)
-        self._credential_lock = threading.Lock()
+        self._threads = threads
+        self._credential_lock = threads.lock()
         self.instance_path = instance_path
         self.project_root = project_root or Path.cwd()
         # Parsed here because this is the one boundary declared origins enter
@@ -373,13 +374,11 @@ class WebSocketGateway:
         self.allowed_origins = frozenset(browser_origin(origin) for origin in allowed_origins)
         self.limits = limits or WebSocketLimits()
         self._startup = startup or _DEFAULT_STARTUP_SYNCHRONIZATION
-        self.subscriptions = subscriptions or SubscriptionTracker()
-        self._start_lock = threading.Lock()
-        self._lifecycle_lock = threading.Lock()
+        self.subscriptions = subscriptions or SubscriptionTracker(threads=threads)
+        self._start_lock = threads.lock()
+        self._lifecycle_lock = threads.lock()
         self._clock = clock
-        self._request_runner = (
-            request_runner if request_runner is not None else ThreadBlockingRunner()
-        )
+        self._request_runner = request_runner
         self._attempt: _GatewayAttempt | None = None
 
     @property
@@ -481,15 +480,17 @@ class WebSocketGateway:
                     claim = WebInstanceClaim(self.instance_path)
                     if not claim.try_acquire():
                         raise RuntimeError("Another VibeSys web gateway owns this project")  # noqa: TRY003  # lint-waiver: LW-101033 [TRY003]; reject a duplicate project-local web gateway
-                attempt = _GatewayAttempt(claim)
-                attempt.thread = threading.Thread(
-                    target=self._run,
-                    args=(attempt,),
-                    name="vibesys-server-websocket",
-                    daemon=True,
+                attempt = _GatewayAttempt(
+                    claim,
+                    stop=self._threads.event(),
+                    ready=self._threads.event(),
+                    lock=self._threads.lock(),
+                    published=self._threads.event(),
+                )
+                attempt.thread = self._threads.spawn(
+                    partial(self._run, attempt), name="vibesys-server-websocket"
                 )
                 self._attempt = attempt
-                attempt.thread.start()
             startup_timed_out = not self._startup.wait_for_ready(attempt.ready)
             startup_error = attempt.startup_error
             if startup_timed_out:

@@ -10,10 +10,14 @@ from tests.server.support import REQUEST_TIME, Task, build_server_parts
 from server.api.protocol import ChatQuery, Response
 from server.chat.manager import ChatAnswer
 from server.events import EventType
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import SimThreads, wait_or_fail
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+
+    from vs_sim.api import ThreadLocal
 
 
 def test_chat_response_excludes_concurrent_run_events(tmp_path: Path) -> None:
@@ -69,8 +73,33 @@ def test_unknown_thread_chat_response_has_no_events(tmp_path: Path) -> None:
     assert response.events == []
 
 
+class _OneThreadLocals(OsThreads):
+    """OS threads whose per-thread values this single-threaded test can read back.
+
+    The test runs every request on its own thread, so one value per ``local`` is that
+    thread's; keeping it lets the test inspect what a request left behind.
+    """
+
+    def __init__(self) -> None:
+        self.values: list[object] = []
+
+    def local[T](self, initial: Callable[[], T]) -> ThreadLocal[T]:
+        value = initial()
+        self.values.append(value)
+        return _FixedLocal(value)
+
+
+class _FixedLocal[T]:
+    def __init__(self, value: T) -> None:
+        self._value = value
+
+    def get(self) -> T:
+        return self._value
+
+
 def test_chat_event_capture_is_cleared_after_handler_error(tmp_path: Path) -> None:
-    parts = build_server_parts(tmp_path)
+    threads = _OneThreadLocals()
+    parts = build_server_parts(tmp_path, threads=threads)
 
     def fail(_question: str) -> ChatAnswer:
         raise RuntimeError
@@ -79,8 +108,9 @@ def test_chat_event_capture_is_cleared_after_handler_error(tmp_path: Path) -> No
     with pytest.raises(RuntimeError):
         parts.chat.chat_with_event("will fail")
 
-    # lint-waiver: LW-010045 [SLF001]; the thread-local response stack has no public depth accessor, so inspect it to detect a request frame retained after failure.
-    assert parts.chat._chat_response_local.captures == []  # noqa: SLF001
+    # The failed request's capture frame is gone from the thread's response stack.
+    stacks = [value.captures for value in threads.values if hasattr(value, "captures")]
+    assert stacks == [[]]
 
 
 def test_nested_chat_captures_keep_each_terminal_event_separate(tmp_path: Path) -> None:

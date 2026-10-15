@@ -21,7 +21,6 @@ from server.transport.subscriptions import (
     SubscriptionAdmissionClosedError,
     SubscriptionTracker,
 )
-from vs_sim.api import OsThreads, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -362,21 +361,20 @@ class UnixJsonlServer:
         self,
         path: Path,
         api: RunApi,
-        subscriptions: SubscriptionTracker | None = None,
-        threads: Threads | None = None,
-        network: Network | None = None,
+        subscriptions: SubscriptionTracker | None,
+        threads: Threads,
+        network: Network,
     ) -> None:
         """Create a Unix server, optionally sharing subscription accounting.
 
         ``threads`` runs the accept loop and each client, and paces idle
-        streams; ``network`` binds the socket. Both default to the operating
-        system's.
+        streams; ``network`` binds the socket.
         """
         self.path = path
         self.api = api
-        self._threads = threads or OsThreads()
-        self._subscriptions = subscriptions or SubscriptionTracker()
-        self._network = network or UnixNetwork()
+        self._threads = threads
+        self._subscriptions = subscriptions or SubscriptionTracker(threads=threads)
+        self._network = network
         self._listener: Listener | None = None
         self._acceptor: Worker | None = None
         self._guard = self._threads.lock()

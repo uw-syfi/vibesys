@@ -14,7 +14,7 @@ from websockets.asyncio.client import connect
 from server.api.protocol import EventBatchMessage, SubscribeRequest
 from server.events import MAX_SERIALIZED_RUN_EVENT_BYTES, EventType, OutputData, make_event
 from server.transport.websocket import WebSocketGateway
-from vs_sim.api import MonotonicClock
+from vs_sim.api import MonotonicClock, OsThreads, ThreadBlockingRunner
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -74,7 +74,12 @@ def test_one_event_past_the_peer_frame_cap_arrives_cut_and_the_socket_stays_open
             second = EventBatchMessage.model_validate_json(await _next_frame(websocket))
             return first_frame, first, second
 
-    with WebSocketGateway(parts.api, clock=MonotonicClock()) as gateway:
+    with WebSocketGateway(
+        parts.api,
+        clock=MonotonicClock(),
+        threads=OsThreads(),
+        request_runner=ThreadBlockingRunner(),
+    ) as gateway:
         first_frame, first, second = asyncio.run(receive(gateway))
     parts.close()
 
