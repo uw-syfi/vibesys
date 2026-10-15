@@ -414,6 +414,26 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 - **Data from watches.** Host panels and Recent statuses fold `instances.watch` pushes; there is no
   manual refresh path to forget.
 
+## Multiple run windows
+
+Each `AppWindow` holds one `#run` view and binds to at most one run at a time (`openRunPage`
+always replaces whatever the window showed before). `RunControl` and `RunIpcRegistry` key every
+binding, navigation claim, and IPC admission by `run_id` rather than by one shared slot
+(`clients/features/run-control/src/main/run-control.ts`, `clients/apps/desktop-main/src/main/
+run-ipc.ts`), so two independent `AppWindow`s attached to two different runs cannot cross-detach or
+cross-admit each other's connection: a window's close detaches only the binding for the run it
+showed, and a window's IPC connect is admitted only for the run its own current page named. A
+Playwright spec (`clients/apps/desktop-main/e2e/two-windows.spec.ts`) constructs two `AppWindow`s
+directly against a fixture host connection and asserts no cross-run bleed on attach, content, or
+close.
+
+This keying is the safety prerequisite for concurrent windows, not the feature itself: the app does
+not yet construct more than one `AppWindow`. `index.ts`'s `openWindow()` creates exactly one at
+startup, and every run attach, start, or resume targets that same window, replacing its current run
+page. Wiring an actual multi-window user path needs a UX decision first (whether attaching always
+opens a fresh window, or only when the current one already shows a different run, and how the
+welcome view's window relates to run windows) and is tracked by #2615.
+
 ## App lifecycle
 
 `AppLifecycle` is the one owner of process-wide state:

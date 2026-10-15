@@ -41,6 +41,28 @@ fixture fetching and the campaign stream.
 The branch's focused Radix components and Tailwind styles remain confined to the
 campaign feature. Existing shared UI components serve the gateway and conversation.
 
+## Live backend wiring
+
+`Live` (`clients/apps/web/src/app/compose.tsx`) renders a `run`/`campaign` toggle over the same
+session a run page already attaches to, for both the browser's and the desktop's live page
+(`createLiveApp`, unchanged). The campaign view's store is `createLiveCampaignStore` fed by
+`webSessionCampaignStream(session)` (`clients/features/campaign/src/state/live-campaign-stream.ts`),
+which reads `session.store`'s already-folded `CoreState` and projects it into the same closed frame
+union the preview stream emits (`campaign-init`, `agent-upsert`, `workstream-upsert`, `measurement`,
+`tokens`, `status`). It subscribes to `session.store`, not the run connection's own transport,
+because that transport is documented single-subscriber; `session.store` already supports the run
+page's own subscription plus this one.
+
+This is a client-local projection, not a new backend contract: `webSessionCampaignStream` folds
+`CoreState.workstreams` (itself folded from the new `WORKSTREAM_FINISHED` and
+`TURN_USAGE_RECORDED` wire events) into campaign frames in the browser. The frame types and the
+fold that applies them (`campaign-fold.ts`'s contiguous-sequence, absorbing-completed contract)
+are unchanged from the preview; only the producer is new. The projection is honest about what it
+cannot derive from the run protocol today: `objective`, `benchmarkVersions`, and `trajectories` are
+empty, `firstSequence` is the constant `1`, and a workstream's running cost is captured internally
+but not surfaced on any frame field. See [live-campaign-streaming.md](live-campaign-streaming.md)
+for why this remains a preview contract rather than #1761's backend-owned one.
+
 ## Compatibility decisions
 
 The old `clients/web`, `backend-client`, and `core-state` packages are not restored.

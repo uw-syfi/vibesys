@@ -36,6 +36,28 @@ rather than deriving plausible-looking totals from workstream order or sequence
 span. The `tokens` frame remains in the preview contract so an authoritative
 producer can supply cumulative per-workstream usage when that data exists.
 
+## Live session-derived stream
+
+A third source joins the committed-fixture replay and the dev-only fixture/SSE preview above:
+`webSessionCampaignStream` (`clients/features/campaign/src/state/live-campaign-stream.ts`) projects
+a real run's already-folded `CoreState` into the same frame union, live, in both the browser and
+desktop apps' `Live` page (`clients/apps/web/src/app/compose.tsx`) — not behind the `campaign-live`
+dev gate, and not a Vite plugin. `compose.tsx`'s `campaignChrome` distinguishes the three by the
+label a caller passes: `'Preview'` for the committed-fixture replay, `'Stream preview'` for the
+dev-only SSE path above, and no label for this live session-derived stream.
+
+The data it folds comes from two wire events added for this purpose, `WORKSTREAM_FINISHED` and
+`TURN_USAGE_RECORDED` (`src/vibesys/events/`), joined to a workstream via `round_label` since
+neither event payload carries its own workstream identity. This closes the gap this preview
+contract could not close before: the committed campaign record (and therefore `framesFromRecord`)
+carries no token usage at all, so replay never emitted `tokens` frames. The live stream can, from
+real per-turn usage, but still cannot derive `objective`, `benchmarkVersions`, or `trajectories`
+from the run protocol as it exists today — those fields stay empty on every frame this producer
+emits. This is still a local, frontend-owned projection: the frame types are not a new backend API,
+and a producer-side digest chain, persistence, or replay semantics for this live path do not exist.
+The real answer for a backend-owned, versioned contract generated into TypeScript is tracked by
+#1761; this stream is a step toward the data it would carry, not an implementation of it.
+
 ## Backend path
 
 The campaign frame types remain a local preview contract. A production campaign
