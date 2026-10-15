@@ -4,7 +4,8 @@
  * "Logs").
  *
  * `closed` until `open` names a run; then `open` is two regions. `list` asks for the run's streams
- * on entry and on `refresh`, retrying a transient failure after a delay; `follow` invokes one
+ * on entry and on `refresh`, retrying a transient failure after a delay (one a retry cannot fix,
+ * such as an unreadable store, waits in `unreadable` for `refresh`); `follow` invokes one
  * `logFollowMachine` for the stream on screen: the user's pick, else the run's narration, else the
  * newest. `close`, or opening another run, leaves `open`, which stops the listing and the follower
  * (its read in flight aborts), so nothing is fetched for a stream that is not shown. The operations
@@ -19,6 +20,7 @@ import {
   type LogReadFailure,
   type LogView,
   logFollowMachine,
+  logReadRetryable,
   logsUnsupported,
   logViewComplete,
   logViewRecords,
@@ -28,32 +30,15 @@ import {assign, raise, type SnapshotFrom, sendTo, setup} from 'xstate';
 import {INSPECTOR_CLOSED, type InspectorAction, type InspectorState} from './inspector.js';
 
 /** What the streams are grouped by on screen, in this order. */
-export type LogGroup =
-  | 'narration'
-  | 'startup'
-  | 'gates'
-  | 'invocations'
-  | 'tools'
-  | 'slurm'
-  | 'other';
+export type LogGroup = 'narration' | 'startup' | 'gates' | 'tools' | 'other';
 
-const GROUP_ORDER: readonly LogGroup[] = [
-  'narration',
-  'startup',
-  'gates',
-  'invocations',
-  'tools',
-  'slurm',
-  'other',
-];
+const GROUP_ORDER: readonly LogGroup[] = ['narration', 'startup', 'gates', 'tools', 'other'];
 
 const GROUP_LABELS: Readonly<Record<LogGroup, string>> = {
   narration: 'Run narration',
   startup: 'Startup',
   gates: 'Gates',
-  invocations: 'Agent invocations',
   tools: 'Tool builds',
-  slurm: 'Slurm jobs',
   other: 'Other',
 };
 
@@ -102,15 +87,8 @@ function described(owner: LogStream['owner']): {readonly group: LogGroup; readon
         typeof attempt === 'number' ? `Gate ${gate} (attempt ${attempt})` : `Gate ${gate}`;
       return {group: 'gates', label: execution === null ? base : `${base}, ${execution}`};
     }
-    case 'agent_invocation':
-      return {
-        group: 'invocations',
-        label: `Agent invocation ${field('invocation_id') ?? ''}`.trim(),
-      };
     case 'tool_build':
       return {group: 'tools', label: `Tool build / ${field('name') ?? 'unknown tool'}`};
-    case 'slurm_job':
-      return {group: 'slurm', label: `Slurm job ${field('job_id') ?? ''}`.trim()};
     default:
       return {group: 'other', label: words(text(owner['kind']) ?? 'unknown owner')};
   }
@@ -200,6 +178,10 @@ export const inspectorLogsMachine = setup({
       return output !== undefined && !output.ok && logsUnsupported(output.failure);
     },
     failed: ({event}) => listed(event)?.ok === false,
+    permanent: ({event}) => {
+      const output = listed(event);
+      return output !== undefined && !output.ok && !logReadRetryable(output.failure);
+    },
     hasShown: ({context}) => context.target !== null && shownStream(context) !== null,
     moved: ({context}) => shownStream(context) !== context.followed,
   },
@@ -277,6 +259,7 @@ export const inspectorLogsMachine = setup({
                 input: ({context}) => context.target as InspectorLogsTarget,
                 onDone: [
                   {guard: 'unsupported', target: 'unsupported', actions: 'listFailed'},
+                  {guard: 'permanent', target: 'unreadable', actions: 'listFailed'},
                   {guard: 'failed', target: 'failed', actions: 'listFailed'},
                   {target: 'loaded', actions: ['listed', 'retarget']},
                 ],
@@ -288,6 +271,7 @@ export const inspectorLogsMachine = setup({
               on: {refresh: 'loading'},
               after: {retryList: 'loading'},
             },
+            unreadable: {on: {refresh: 'loading'}},
             unsupported: {},
           },
         },
@@ -370,7 +354,8 @@ function listingOf(snapshot: InspectorLogsSnapshot): InspectorLogsView['listing'
   for (const state of ['unsupported', 'failed', 'loaded'] as const) {
     if (snapshot.matches({open: {list: state}})) return state;
   }
-  return 'loading';
+  // A failure a retry cannot fix shows as failed; the notice leaves out "retrying".
+  return snapshot.matches({open: {list: 'unreadable'}}) ? 'failed' : 'loading';
 }
 
 /** The logs section's view of `snapshot`, with the follower's state when one runs. */
@@ -403,8 +388,11 @@ export function inspectorLogsNotice(view: InspectorLogsView): string | null {
   switch (view.listing) {
     case 'unsupported':
       return "This host's VibeSys does not serve logs; update it there to see this run's logs.";
-    case 'failed':
-      return `Could not list this run's logs (${view.listFailure?.message ?? 'unknown error'}); retrying.`;
+    case 'failed': {
+      const reason = view.listFailure?.message ?? 'unknown error';
+      const retrying = view.listFailure === null || logReadRetryable(view.listFailure);
+      return `Could not list this run's logs (${reason})${retrying ? '; retrying' : ''}.`;
+    }
     case 'loading':
       if (view.shown === null) return 'Looking for logs…';
       break;

@@ -825,10 +825,16 @@ class RuntimeSessionRequests:
         except AccessSettlementError as error:
             # The baseline was refused, so no provider call began: ask again, do not inspect.
             return _retryable(str(error), binding.resource_id)
-        outcome = await self._judged_outcome(access_key, bkey, binding, dispatch, call)
-        if isinstance(outcome, _Facts):
-            return outcome
-        return await self._finish(outcome, bkey, binding, dispatch, turn.output_schema)
+        try:
+            outcome = await self._judged_outcome(access_key, bkey, binding, dispatch, call)
+            if isinstance(outcome, _Facts):
+                return outcome
+            return await self._finish(outcome, bkey, binding, dispatch, turn.output_schema)
+        finally:
+            # ``begin`` acquired live ownership. Every later exit ends it here; an
+            # unsettled durable receipt becomes the workspace fence, while successful
+            # settlement has already removed that fence.
+            self.settlement.fence(access_key)
 
     async def _judged_outcome(
         self,
@@ -849,13 +855,10 @@ class RuntimeSessionRequests:
                 return _unknown(str(error), binding.resource_id)
             return _rejected(_WITHDRAWN, binding.resource_id)
         except InvocationConflictError as error:
-            self.settlement.fence(access_key)
             return _rejected(f"invocation conflicts with its journal: {error}", binding.resource_id)
         except SessionConfigurationError as error:
-            self.settlement.fence(access_key)
             return _rejected(f"session configuration refused: {error}", binding.resource_id)
         except (SessionPersistenceError, SessionResumeError) as error:
-            self.settlement.fence(access_key)
             return _unknown(f"dispatch state is unreadable: {error}", binding.resource_id)
 
     async def _outcome(
@@ -929,7 +932,6 @@ class RuntimeSessionRequests:
         facts = self._translate(outcome, binding, dispatch.schema, ref)
         key = AccessKey(binding=bkey, invocation=dispatch.invocation)
         if not isinstance(outcome, (Completed, InvalidResponse)):
-            self.settlement.fence(key)
             return facts
         try:
             violation = await self.settlement.settle(key)

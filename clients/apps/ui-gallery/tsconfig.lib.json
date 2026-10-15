@@ -1,0 +1,16 @@
+{
+  // The gallery page: DOM and Vite's client types only. Vite bundles it (`vite.config.ts`).
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/lib.tsbuildinfo"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"],
+  "references": [{"path": "../../libs/ui/tsconfig.lib.json"}]
+}

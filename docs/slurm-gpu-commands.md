@@ -104,7 +104,20 @@ srun_arguments = []         # extra site arguments, for example ["--account=lab"
 # Host paths the agent's GPU jobs may read besides the workspace and the system
 # directories, for example the Python environment with torch. Read-only always.
 read_only_paths = ["/home/operator/venvs/torch"]
+# At most this many of the run's GPU jobs, across all of its agents, are submitted
+# to Slurm at once. Omit it for no cap.
+max_concurrent_jobs = 2
 ```
+
+`max_concurrent_jobs` keeps one run from monopolizing a shared partition: without
+it, several agents can keep jobs queued or running back to back, and on a shared
+node that steady stream can keep other users' whole-node jobs from ever starting.
+A command past the cap waits on the submit host, first come, first served, and is
+submitted when one of the run's jobs ends. While it waits, the agent sees one line
+such as `[vibesys-gpu] waiting: 2 of this run's GPU jobs are active (cap 2), 1
+queued ahead; ...`. Its `--time` limit starts when it is submitted, not while it
+waits, and an agent that stops the command while it waits leaves the line without
+a job ever being submitted. The value must be a positive integer.
 
 `read_only_paths` entries must be absolute, normalized paths (no `..`, `.`,
 repeated or trailing slashes, and not `/`), must exist on the submit host when

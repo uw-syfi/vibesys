@@ -1,6 +1,6 @@
 /** The replay page's "Live gateway URL" form. Presentational: the form's store drives it. */
 
-import {Button} from '@vibesys/ui';
+import {Button} from '@vibesys/ui/legacy';
 import type {JSX} from 'react';
 import type {GatewayConnectAction, GatewayConnectState} from '../state/gateway-connect.js';
 

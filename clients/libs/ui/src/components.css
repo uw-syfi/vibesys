@@ -1,0 +1,632 @@
+/*
+ * The styles of the design system's components (the `.` entry). Every value is a token variable
+ * from `tokens.css`; no color or length is written here. Import after `tokens.css` and `fonts.css`.
+ * Class names are `vs-` prefixed so they never meet the legacy primitives' global selectors.
+ */
+
+/* --- shared ------------------------------------------------------------------------------------ */
+
+/* The document a `Page` fills: no default margin, the theme's background. */
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.vs-page,
+.vs-page *,
+.vs-flex,
+.vs-split,
+.vs-grid,
+.vs-card,
+.vs-banner,
+.vs-field,
+.vs-button,
+.vs-segmented,
+.vs-toggle,
+.vs-path-input {
+  box-sizing: border-box;
+}
+
+.vs-button:focus-visible,
+.vs-segment:has(:focus-visible),
+.vs-input:focus-visible,
+.vs-checkbox:focus-visible,
+.vs-switch:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+
+.vs-help {
+  margin: 0;
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  color: var(--muted);
+}
+.vs-help[data-tone="err"] {
+  color: var(--err);
+}
+
+/* --- layout ------------------------------------------------------------------------------------ */
+
+.vs-page {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-6) var(--space-8);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-page-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: 100%;
+  max-width: var(--content);
+}
+.vs-page-content[data-width="wide"] {
+  max-width: var(--content-wide);
+}
+.vs-page-content[data-width="narrow"] {
+  max-width: var(--content-narrow);
+}
+
+.vs-flex {
+  display: flex;
+  min-width: 0;
+}
+.vs-flex[data-direction="column"] {
+  flex-direction: column;
+}
+.vs-flex[data-wrap] {
+  flex-wrap: wrap;
+}
+.vs-flex[data-grow] {
+  flex: 1 1 0;
+}
+.vs-flex[data-align="start"] {
+  align-items: flex-start;
+}
+.vs-flex[data-align="center"] {
+  align-items: center;
+}
+.vs-flex[data-align="end"] {
+  align-items: flex-end;
+}
+.vs-flex[data-align="stretch"] {
+  align-items: stretch;
+}
+.vs-flex[data-align="baseline"] {
+  align-items: baseline;
+}
+.vs-flex[data-justify="start"] {
+  justify-content: flex-start;
+}
+.vs-flex[data-justify="center"] {
+  justify-content: center;
+}
+.vs-flex[data-justify="end"] {
+  justify-content: flex-end;
+}
+.vs-flex[data-justify="between"] {
+  justify-content: space-between;
+}
+
+.vs-split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.vs-split-main {
+  flex: 999 1 var(--column-main);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.vs-split-aside {
+  flex: 1 1 var(--column-aside);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.vs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--grid-min)), 1fr));
+}
+.vs-grid[data-min="field"] {
+  --grid-min: var(--column-field);
+}
+.vs-grid[data-min="tile"] {
+  --grid-min: var(--column-tile);
+}
+.vs-grid[data-min="swatch"] {
+  --grid-min: var(--column-swatch);
+}
+
+/* --- text -------------------------------------------------------------------------------------- */
+
+.vs-text {
+  margin: 0;
+  text-transform: var(--text-transform);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.vs-text[data-tone="muted"] {
+  color: var(--muted);
+}
+.vs-text[data-tone="ok"] {
+  color: var(--ok);
+}
+.vs-text[data-tone="warn"] {
+  color: var(--warn);
+}
+.vs-text[data-tone="err"] {
+  color: var(--err);
+}
+
+.vs-wordmark {
+  container-type: inline-size;
+  min-width: 0;
+}
+/* A mono glyph is 0.6 of the font size wide, so the art fits when the size is the width / (0.6 * columns). */
+.vs-wordmark-art {
+  margin: 0;
+  font-family: var(--text-display-family);
+  font-weight: var(--text-display-weight);
+  font-size: min(var(--text-display-size), calc(100cqi / (0.6 * var(--wordmark-columns))));
+  line-height: calc(var(--text-display-line) / var(--text-display-size));
+  white-space: pre;
+  overflow: hidden;
+  background: linear-gradient(100deg, var(--text) 15%, var(--accent) 58%, var(--muted) 96%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.vs-icon {
+  flex: none;
+  width: var(--icon);
+  height: var(--icon);
+}
+
+/* --- button ------------------------------------------------------------------------------------ */
+
+.vs-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-height: var(--control);
+  margin: 0;
+  padding: 0 var(--space-5);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--text-body-strong-family);
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  font-weight: var(--text-body-strong-weight);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--easing),
+    color var(--duration-fast) var(--easing);
+}
+.vs-button:hover {
+  background: var(--panel-2);
+}
+.vs-button[data-size="sm"] {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-4);
+}
+.vs-button[data-full] {
+  width: 100%;
+}
+.vs-button[aria-label] {
+  padding: 0;
+  min-width: var(--control);
+}
+.vs-button[aria-label][data-size="sm"] {
+  min-width: var(--control-sm);
+}
+.vs-button[data-variant="primary"] {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+.vs-button[data-variant="primary"]:hover {
+  background: var(--text);
+  opacity: 0.88;
+}
+.vs-button[data-variant="quiet"] {
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 var(--space-3);
+}
+.vs-button[data-variant="quiet"]:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+.vs-button[data-variant="danger"] {
+  color: var(--err);
+  border-color: var(--chip-err-border);
+}
+.vs-button[data-variant="danger"]:hover {
+  background: var(--chip-err-bg);
+}
+.vs-button[aria-disabled="true"] {
+  cursor: not-allowed;
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--muted);
+}
+.vs-button[aria-disabled="true"][data-variant="quiet"] {
+  background: transparent;
+  border-color: transparent;
+}
+.vs-button-disabled {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+.vs-button-disabled[data-full] {
+  display: flex;
+  width: 100%;
+}
+
+/* --- segmented control ------------------------------------------------------------------------- */
+
+.vs-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.vs-segment {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--control);
+  margin: 0;
+  padding: 0 var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--muted);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  font-weight: var(--text-body-weight);
+  cursor: pointer;
+  position: relative;
+}
+/* The native radio covers its segment, unseen: it takes the presses, the focus and the arrow keys. */
+.vs-segment-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.vs-segment:hover {
+  color: var(--text);
+}
+.vs-segmented[data-size="sm"] .vs-segment {
+  min-height: var(--control-sm);
+  padding: 0 var(--space-4);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+.vs-segment:has(:checked) {
+  border-color: var(--text);
+  color: var(--text);
+  font-weight: var(--text-body-strong-weight);
+}
+
+/* --- field and inputs -------------------------------------------------------------------------- */
+
+.vs-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-field-label {
+  font-family: var(--text-body-strong-family);
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  font-weight: var(--text-body-strong-weight);
+  color: var(--text);
+  margin-bottom: var(--space-1);
+}
+.vs-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: var(--control);
+  margin: 0;
+  padding: 0 var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  font-weight: var(--text-body-weight);
+}
+.vs-input::placeholder {
+  color: var(--muted);
+}
+.vs-input[data-mono] {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+}
+.vs-input[readonly] {
+  background: var(--panel-2);
+}
+.vs-input[aria-invalid="true"] {
+  border-color: var(--err);
+}
+
+.vs-select {
+  position: relative;
+  display: block;
+  color: var(--muted);
+}
+.vs-select .vs-input {
+  appearance: none;
+  padding-right: var(--space-7);
+  cursor: pointer;
+}
+.vs-select-chevron {
+  position: absolute;
+  top: 50%;
+  right: var(--space-4);
+  display: flex;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.vs-path-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.vs-completions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.vs-completion {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-completion:hover {
+  background: var(--panel-2);
+}
+.vs-completion[aria-selected="true"] {
+  background: var(--selection);
+}
+.vs-completion-value {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  color: var(--text);
+}
+.vs-completion-detail {
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  line-height: var(--text-section-line);
+  color: var(--muted);
+}
+
+/* --- checkbox and switch ----------------------------------------------------------------------- */
+
+.vs-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.vs-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-height: var(--row);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  cursor: pointer;
+}
+.vs-toggle-label:has(:disabled) {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.vs-checkbox {
+  flex: none;
+  width: var(--check);
+  height: var(--check);
+  margin: 0;
+  accent-color: var(--accent);
+}
+.vs-switch {
+  position: relative;
+  flex: none;
+  appearance: none;
+  width: calc(var(--check) * 2);
+  height: var(--check);
+  margin: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--panel-2);
+  cursor: inherit;
+  transition: background-color var(--duration-fast) var(--easing);
+}
+.vs-switch::before {
+  content: "";
+  position: absolute;
+  top: var(--space-1);
+  left: var(--space-1);
+  width: calc(var(--check) - 2 * var(--space-1) - 2 * var(--hairline));
+  height: calc(var(--check) - 2 * var(--space-1) - 2 * var(--hairline));
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  transition: transform var(--duration-fast) var(--easing);
+}
+.vs-switch:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.vs-switch:checked::before {
+  background: var(--bg);
+  transform: translateX(var(--check));
+}
+.vs-switch:disabled,
+.vs-checkbox:disabled {
+  opacity: 0.5;
+}
+
+/* --- chip and status dot ----------------------------------------------------------------------- */
+
+.vs-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-full);
+  color: var(--muted);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  font-weight: var(--text-caption-weight);
+  white-space: nowrap;
+}
+.vs-chip[data-tone="live"] {
+  color: var(--accent);
+  border-color: var(--chip-accent-border);
+  background: var(--chip-accent-bg);
+}
+.vs-chip[data-tone="ok"] {
+  color: var(--ok);
+  border-color: var(--chip-ok-border);
+  background: var(--chip-ok-bg);
+}
+.vs-chip[data-tone="warn"] {
+  color: var(--warn);
+  border-color: var(--chip-warn-border);
+  background: var(--chip-warn-bg);
+}
+.vs-chip[data-tone="err"] {
+  color: var(--err);
+  border-color: var(--chip-err-border);
+  background: var(--chip-err-bg);
+}
+
+.vs-dot {
+  display: inline-block;
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+.vs-dot[data-tone="live"] {
+  background: var(--accent);
+  box-shadow: 0 0 0 var(--dot-ring) var(--chip-accent-border);
+}
+.vs-dot[data-tone="ok"] {
+  background: var(--ok);
+}
+.vs-dot[data-tone="warn"] {
+  background: var(--warn);
+}
+.vs-dot[data-tone="err"] {
+  background: var(--err);
+}
+
+/* --- card and banner --------------------------------------------------------------------------- */
+
+.vs-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+}
+.vs-card[data-flush] {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+.vs-card-title {
+  margin: 0;
+  display: flex;
+}
+.vs-card[data-flush] .vs-card-title {
+  padding: var(--space-4) var(--space-5);
+}
+
+.vs-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+}
+.vs-banner[data-tone="ok"] {
+  border-color: var(--chip-ok-border);
+  background: var(--banner-ok-bg);
+}
+.vs-banner[data-tone="warn"] {
+  border-color: var(--chip-warn-border);
+  background: var(--banner-warn-bg);
+}
+.vs-banner[data-tone="err"] {
+  border-color: var(--chip-err-border);
+  background: var(--banner-err-bg);
+}
+.vs-banner-text {
+  display: flex;
+  flex: 1 1 var(--column-field);
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}

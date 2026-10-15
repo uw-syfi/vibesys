@@ -18,6 +18,13 @@
   ],
   "exclude": [
     "src/**/*.test.ts",
-    "src/**/*.test.tsx"
+    "src/**/*.test.tsx",
+    "src/tokens/**",
+    "src/legacy/**"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.tokens.json"
+    }
   ]
 }

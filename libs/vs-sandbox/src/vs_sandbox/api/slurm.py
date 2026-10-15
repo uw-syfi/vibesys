@@ -17,6 +17,7 @@ from vs_sandbox.agent_gpu import (
     GpuLauncher,
     choose_partition,
 )
+from vs_sandbox.agent_gpu_cap import CANCELLED_BEFORE_SUBMISSION, CappedGpuLauncher
 from vs_sandbox.host_command_broker import (
     BrokerTransport,
     GpuCommands,
@@ -50,6 +51,15 @@ from vs_sandbox.slurm_gpu_alias import (
     SlurmGpuAliasError,
     load_slurm_gpu_alias_settings,
     translate_slurm_gpu,
+)
+from vs_sandbox.slurm_ledger import (
+    Attached,
+    AttachOutcome,
+    AttachPending,
+    LedgerAttachError,
+    LedgerWithdrawnError,
+    SlurmLedgerAttachment,
+    open_ledger_attachment,
 )
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
@@ -86,6 +96,7 @@ from vs_sandbox.slurm_stage_output import SlurmStageOutputOpener
 HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
 
 __all__ = [
+    "CANCELLED_BEFORE_SUBMISSION",
     "COMMAND_BROKER_SOCKET_ENV",
     "COMMAND_BROKER_TOKEN_ENV",
     "GPU_ACTIVE_FRACTION_METRIC",
@@ -97,9 +108,13 @@ __all__ = [
     "AgentGpuConfig",
     "AgentGpuLauncher",
     "AgentGpuRequestError",
+    "AttachOutcome",
+    "AttachPending",
+    "Attached",
     "BrokerReplyError",
     "BrokerTransport",
     "BrokeredProcesses",
+    "CappedGpuLauncher",
     "GpuCommand",
     "GpuCommands",
     "GpuJobRequest",
@@ -109,6 +124,8 @@ __all__ = [
     "HostCommandBrokerError",
     "HostJobConfinement",
     "JobConfinement",
+    "LedgerAttachError",
+    "LedgerWithdrawnError",
     "ProfileCaptureDescriptor",
     "ProfileStats",
     "ReadOnlyPathLinkError",
@@ -122,6 +139,7 @@ __all__ = [
     "SlurmExecutionMetadata",
     "SlurmExecutionPolicy",
     "SlurmGpuAliasError",
+    "SlurmLedgerAttachment",
     "SlurmOperatorSettings",
     "SlurmOutcomeUnknownError",
     "SlurmPolicyError",
@@ -138,6 +156,7 @@ __all__ = [
     "load_slurm_gpu_alias_settings",
     "load_slurm_operator_settings",
     "load_slurm_policy",
+    "open_ledger_attachment",
     "profile_capture_descriptor",
     "queue_status_from_snapshot",
     "read_slurm_capture_plan",

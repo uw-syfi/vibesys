@@ -23,7 +23,7 @@ def plan_reply(
 
 
 def _entry_id(entry: dict[str, object]) -> str:
-    return str(entry.get("hypothesis_id", entry.get("profile_id", "unknown")))
+    return str(entry.get("hypothesis_id", entry.get("profile_id", entry.get("merge_id", "?"))))
 
 
 def expectation(identifier: str, **extra: object) -> dict[str, object]:
@@ -60,6 +60,25 @@ def profile(identifier: str, **extra: object) -> dict[str, object]:
         "decision_impact": "Optimize the dominant component next.",
         **extra,
     }
+
+
+def merge(identifier: str, *candidates: str, **extra: object) -> dict[str, object]:
+    """One merge entry of a plan: the hypotheses whose latest candidates to merge into main."""
+    return {
+        "kind": "merge",
+        "merge_id": identifier,
+        "candidates": list(candidates),
+        "instructions": f"apply {', '.join(candidates)} in order",
+        "watch_for": "both touch the scheduler",
+        **extra,
+    }
+
+
+def merged(outcome: str = "merged", reason: str = "") -> str:
+    """A merger result reply."""
+    return json.dumps(
+        {"outcome": outcome, "summary": "merged in order", "tests": "pytest: ok", "reason": reason}
+    )
 
 
 def implemented(outcome: str = "supported", summary: str = "done", **extra: object) -> str:

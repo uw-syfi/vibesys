@@ -82,6 +82,13 @@ class AgentGpuConfig(BaseModel):
     ``read_only_paths``: extra absolute host paths, such as the operator's
     Python environment, that it may read and never write. Without them an
     interpreter or dependency outside the workspace is invisible to the job.
+
+    ``max_concurrent_jobs`` caps how many of the run's agent GPU jobs, across
+    all of its agents, are submitted to the scheduler at once (``None``: no
+    cap). A request past the cap waits on the submit host, first come first
+    served, and is submitted when one of the run's jobs ends; its ``--time``
+    limit starts at submission. The cap keeps one run from monopolizing a
+    shared partition with a steady stream of short jobs.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -93,6 +100,7 @@ class AgentGpuConfig(BaseModel):
     windows_command: tuple[str, ...] | None = None
     srun_arguments: tuple[str, ...] = ()
     read_only_paths: tuple[str, ...] = ()
+    max_concurrent_jobs: Annotated[int, Field(gt=0)] | None = None
     job_name_prefix: Annotated[str, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")] = (
         "vibesys-gpu"
     )

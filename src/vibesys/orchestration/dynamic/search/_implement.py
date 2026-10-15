@@ -106,7 +106,7 @@ async def implementer_turn(
     ``baseline`` is the input's measurement as known when the turn is asked (None while it has
     not landed); the prompt says it is pending, or why it failed.
     """
-    prompt = implement_prompt(w.plan, w.parent, w.prior, blockers, baseline=baseline)
+    prompt = implement_prompt(w, blockers, baseline=baseline)
     match await implementer.turn(prompt):
         case TurnFinished(reply=ImplementerResult() as reply, checkpoint=checkpoint):
             return _candidate_of(w, work, reply, checkpoint)

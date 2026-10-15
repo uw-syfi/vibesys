@@ -6,7 +6,7 @@ on it is a pure function of that slice; the prompt it builds is a typed value, n
 
 import hashlib
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from vibesys.candidates.api import Baseline, failure, reading
@@ -14,6 +14,7 @@ from vibesys.metrics import reading_of
 from vibesys.orchestration.dynamic.models import ProfileOffer
 from vibesys.orchestration.dynamic.search import _briefs as briefs
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._main import MergeOptions
 from vibesys.orchestration.dynamic.search._parents import ParentOption, ParentSnapshot, options
 from vibesys.orchestration.dynamic.search._plan import PlanLedger
 from vibesys.orchestration.dynamic.search._prompts import (
@@ -30,6 +31,8 @@ from vibesys.orchestration.dynamic.search._prompts import (
 from vibesys.orchestration.dynamic.search._values import (
     FinishedWork,
     HypothesisRecord,
+    MainMeasurement,
+    MergeRecord,
     PlanProblem,
     WorkKind,
     WorkPlan,
@@ -223,6 +226,13 @@ class PlanWorld:
     done and they hold none of the planner's slots (`RunRecord.parked`)."""
     evaluations: EvaluationQueueView | None = None
     input_overdue: InputOverdueView | None = None
+    main: RevisionRef | None = None
+    """The run's main revision; None means the input."""
+    main_measurement: MainMeasurement | None = None
+    merges: tuple[MergeRecord, ...] = ()
+    """Every finished merge, oldest first."""
+    merge_options: MergeOptions = field(default_factory=MergeOptions)
+    """Which candidates a merge may name now; its rows are the prompt's mergeable list."""
 
     @property
     def working(self) -> tuple[RunningWork, ...]:
@@ -270,6 +280,10 @@ class PlanWorld:
         profiles |= {
             item.plan.work_id for item in self.running if item.plan.kind is WorkKind.PROFILE
         }
+        merges = {item.plan.work_id for item in self.finished if item.plan.kind is WorkKind.MERGE}
+        running_merges = {
+            item.plan.work_id for item in self.running if item.plan.kind is WorkKind.MERGE
+        }
         return PlanLedger(
             hypotheses=self.hypotheses,
             running=frozenset(item.plan.work_id for item in self.working),
@@ -277,6 +291,9 @@ class PlanWorld:
             repairable=self.repairable,
             submitted=self._waiting_ids(),
             ranks=self.config.pick == "ranked",
+            merge_ids=frozenset(merges | running_merges),
+            merging=bool(running_merges),
+            merge_options=self.merge_options,
         )
 
     def _waiting_ids(self) -> frozenset[str]:
@@ -338,6 +355,14 @@ class PlanWorld:
             handoff_paths=self.handoffs,
             evaluations=self.evaluations,
             input_overdue=self.input_overdue,
+            main_revision=self.main or self.base,
+            main_measurement=self.main_measurement,
+            merge_running=next(
+                (item.plan.work_id for item in self.running if item.plan.kind is WorkKind.MERGE),
+                None,
+            ),
+            mergeable=self.merge_options.rows,
+            merges=self.merges,
             problem=problem,
         )
         if again is None:

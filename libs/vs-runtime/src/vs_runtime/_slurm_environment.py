@@ -76,9 +76,10 @@ if TYPE_CHECKING:
 
     from vs_agent.api.images import DockerBuildRunner
     from vs_project.api import RunResourceRequest
+    from vs_runtime._environment_system import EnvironmentSystem
     from vs_runtime._run_environment import _OrphanReaper
     from vs_sandbox.api import DockerCli
-    from vs_sandbox.api.slurm import JobConfinement
+    from vs_sandbox.api.slurm import GpuLauncher, JobConfinement
 
 _REMOTE_PROFILER_IDS = frozenset({"auto", "none", "rocprof"})
 _NO_PROFILER_IDS = frozenset({"auto", "none"})
@@ -197,6 +198,13 @@ class _AgentGpuMode:
     #: The ``PATH`` a job inherits (the host's), and where the CUDA tools live besides it.
     job_path: str = field(default_factory=lambda: os.environ.get("PATH", ""))
     toolkit_patterns: tuple[str, ...] = TOOLKIT_BIN_PATTERNS
+    #: Each run's one launcher per host system, keyed by the run id and the
+    #: system's identity (it holds Fakes that are not hashable) and kept with the
+    #: system so the key stays its own. Every session's broker submits through it, so ``max_concurrent_jobs``
+    #: caps the run, not each session.
+    launchers: dict[tuple[str, int], tuple[EnvironmentSystem, GpuLauncher]] = field(
+        default_factory=dict, compare=False, repr=False
+    )
     gpu_client = AGENT_GPU_LAUNCHER
     remote_capture = False
     materialize_local_model_weights = True
@@ -243,12 +251,21 @@ class _AgentGpuMode:
             config,
             workspace=request.workspace,
             project_path_policy=request.project_path_policy,
-            launcher=agent_gpu_launcher(config, self.shell_command, request.system),
+            launcher=self._launcher(config, request),
             confinement=confinement,
         )
 
     def editor_env(self, launcher: Path) -> dict[str, str]:
         return agent_gpu_env(launcher)
+
+    def _launcher(self, config: AgentGpuConfig, request: RunEnvironmentRequest) -> GpuLauncher:
+        # Sessions may open concurrently: ``setdefault`` is one atomic dictionary
+        # operation, so every session gets the same launcher even if two built one.
+        # *config* is the run's (its job name prefix carries the run), so the key
+        # carries the run too: two runs never share a launcher, nor a cap.
+        system = request.system
+        built = (system, agent_gpu_launcher(config, self.shell_command, system))
+        return self.launchers.setdefault((request.run_id, id(system)), built)[1]
 
 
 #: The profilers whose directories the agent is told when a job's PATH lacks them.

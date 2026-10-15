@@ -1421,6 +1421,14 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.PACKAGED_RESOURCE,
         "the digest of its own source",
     ),
+    "libs/vs-slurm/src/vs_slurm/ledger.py": (
+        EdgeKind.GENERATOR,
+        "content-addresses the workspace an evaluation request submits",
+    ),
+    "libs/vs-slurm/src/vs_slurm/ledger_store.py": (
+        EdgeKind.STORE,
+        "the evaluation ledger on the cluster, published through a local scratch file",
+    ),
     "libs/vs-slurm/src/vs_slurm/remote_operations.py": (
         EdgeKind.TRANSFER,
         "file transfer adapter to the cluster",
@@ -1438,6 +1446,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/entrypoints/cli/inputs.py": (
         EdgeKind.INPUT_LOADER,
         "task inputs named on the command line",
+    ),
+    "src/entrypoints/evals.py": (
+        EdgeKind.TRANSFER,
+        "the scratch directory the ledger and cluster transports stage through",
     ),
     "src/entrypoints/example_catalog.py": (EdgeKind.PACKAGED_RESOURCE, "the example catalog"),
     "src/entrypoints/examples.py": (

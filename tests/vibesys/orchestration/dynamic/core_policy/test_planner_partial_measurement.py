@@ -29,6 +29,7 @@ _MINIMAL_PLAN: dict[str, object] = {
     "remaining": 1,
     "base_revision": revision("rev-a1"),
     "base_accuracy_passed": True,
+    "main_revision": revision("rev-a1"),
     "offer_snapshot": "snap",
 }
 _VALUES = st.floats(min_value=0.001, max_value=1e6, allow_nan=False, allow_infinity=False)

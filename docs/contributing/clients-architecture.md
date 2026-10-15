@@ -38,7 +38,7 @@ read whole, and the build model below keeps a graph of thirty packages as fast a
 ```text
 clients/
   libs/contracts/   @vibesys/contracts        generated message types + the one runtime validator
-  libs/ui/          @vibesys/ui               domain-free React primitives + design tokens
+  libs/ui/          @vibesys/ui               the design system: domain-free components + design tokens
   libs/store/       @vibesys/store            domain-free reducer kernel + fold model-test kit
   libs/machine/     @vibesys/machine          domain-free machine glue + machine model-test kit
                                                                                  -> store
@@ -65,6 +65,8 @@ clients/
   apps/desktop-renderer  @vibesys/app-desktop-renderer  composition only (Electron renderer)
   apps/web               @vibesys/app-web               composition only (browser, and the
                                                         desktop shell's run page)
+  apps/ui-gallery        @vibesys/app-ui-gallery        development only, never shipped: every
+                                                        component in every theme, screenshot-tested
   tui/              @vibesys/tui              deprecated terminal UI; stays at the root until it is deleted
   tools/            scripts/ (checkers, scaffold), lint-rules/ (Biome plugins), and the shared
                     tsconfig.base.json, tsconfig.architecture.json, knip.config.ts
@@ -196,6 +198,7 @@ through no path: only `node` entries may import them, and only `desktop-main` an
 | 8 | A sandboxed preload loads only Electron at run time; every workspace import in it is erased | `preload-sandbox` (what the entry's emitted CommonJS still requires); `.dependency-cruiser.mjs` keeps a preload's imports to `@vibesys/ipc` and Electron |
 | 9 | Control state is an XState machine; data folds are plain reducers (see [State](#state)) | `external-dependencies` (`xstate` only in features' `./state` and `./renderer` and `MACHINE_PACKAGES`); `tools/lint-rules/features-no-hand-rolled-control.grit`, `tools/lint-rules/control-state-no-store-kernel.grit` |
 | 10 | A package's folder matches the layer its manifest declares: `libs/*` is foundation, core, domain, or service; `features/*` is feature; `apps/*` is app; nothing else, except the deprecated `tui` (`DEPRECATED_OUTSIDE_FOLDERS`) | `layer-matches-folder` |
+| 11 | A package marked `"design": "strict"` builds UI only from `@vibesys/ui`; old UI packages are frozen to fixes only (see [Design system enforcement](#design-system-enforcement)) | `strict-no-stylesheets`, `strict-imports`, `strict-lint-coverage`; `tools/lint-rules/strict-*.grit`; `check_frozen_ui.mjs` |
 
 All package-graph rules, and the tables they read, live in one module,
 [`clients/tools/scripts/check_package_graph.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/tools/scripts/check_package_graph.mjs),
@@ -217,7 +220,8 @@ policy, and this document all read that block. An export whose source is a style
 (`@vibesys/ui`'s `./tokens.css`) is a `dom` asset: it has no tsconfig project, and Vite resolves
 it through the same source condition. Unknown keys, layers, and runtimes are rejected by
 name (`declarations`), and the entries must be exactly the `exports` keys
-(`entries-match-exports`).
+(`entries-match-exports`). The block may also carry `"design": "strict"`, the only value the closed
+`design` key takes, which opts the package into the [design system rules](#design-system-enforcement).
 
 **Workspace dependencies** are declared as `workspace:*` in the section the code needs
 (`dependencies` for production code; test code may also use `devDependencies`), point to a lower
@@ -245,6 +249,153 @@ used, and used only where its runtime allows.
 lets it skip the per-entry project rules; every other rule applies to it. It is deprecated and keeps
 its exemption until it is deleted. The table only shrinks: `desktop` left it when its main process
 was composed from packages (`apps/desktop-main`, phase 8 of #1878).
+
+## Design tokens and themes
+
+`@vibesys/ui` publishes its design tokens as typed data and as CSS. One table is the source of
+truth for each fact; everything else is derived from it.
+
+| Entry | Runtime | Contents |
+| --- | --- | --- |
+| `.` | `dom` | The components (see [Components](#components)), `applyTheme`, and the token types (`ThemeName`, `ColorRole`, `SpaceToken`, `TextStyle`, ...). |
+| `./legacy` | `dom` | Today's `Button`, `Combobox`, `Dialog` and `StatusChip`, which take `className` and raw HTML attributes. Frozen: only the frozen views import it, and it is deleted with them. |
+| `./tokens` | `neutral` | `THEMES`, `DEFAULT_THEMES`, `SPACE`, `TYPE`, `SIZE`, `RADIUS`, `ELEVATION`, `MOTION`, `CONTRAST_PAIRS`, `contrastRatio`, and `renderTokensCss`. No DOM, so tests and tools import it. |
+| `./tokens.css` | `dom` asset | Generated from `./tokens`; never edited by hand. |
+| `./components.css` | `dom` asset | The components' styles, hand-written from token variables only. |
+| `./fonts.css` | `dom` asset | `@font-face` for Schibsted Grotesk and JetBrains Mono (weights 400, 500, 600) from the woff2 files in `src/fonts/`, with their SIL OFL texts. Nothing is fetched at runtime. |
+
+A theme is `{mode, colors}` where `colors` is a `Record<ColorRole, Hex>`, so a missing role is a
+compile error. The six themes are `paper`, `mist`, `sand` (light) and `ink`, `midnight`,
+`terminal` (dark); `DEFAULT_THEMES` names `paper` and `ink`. `ThemeName` is the `data-theme` value.
+
+`src/tokens.css` is written by `pnpm --dir clients/libs/ui generate:tokens` from the tables and
+`src/primitives.css` (the hand-written styles of the primitives, appended verbatim). It has the
+scales and derived values (`color-mix` fills for selection, chips and banners) on `:root`, one
+`:root[data-theme="<name>"]` block per theme, the zeroing of every motion duration under
+`prefers-reduced-motion: reduce`, and aliases for the variable names the stylesheet had before the
+roles (`LEGACY_ALIASES`), which stay until their consumers move. The defaults sit on a bare
+`:root` (paper, and ink under `prefers-color-scheme: dark`) and the named blocks override them, so a
+`data-theme` outside `ThemeName` (another app sets its own names) or none at all follows the OS
+between the two default themes and every role stays defined.
+
+`applyTheme(name, target = document.documentElement)` sets `data-theme`; it takes the element so a
+test can pass a fake. The selectors name `:root`, so `target` only works as the root element.
+
+## Design system enforcement
+
+Desktop screens are built only from `@vibesys/ui`'s public components and tokens. The rule is rolled
+out without touching existing code: new screens go in new, strict packages, and the old UI packages
+are frozen until they are deleted. There is no baseline file; strict or frozen is a property of the
+package.
+
+### Strict packages
+
+A package opts in with a marker in its manifest, which stays the one source of truth for its place
+in the graph:
+
+```json
+"vibesys": {"layer": "feature", "design": "strict", "entries": {"./state": "neutral", "./renderer": "dom"}}
+```
+
+`design` is a closed set (`strict` or absent); `declarations` rejects any other value by name.
+
+| # | Rule | Enforced by |
+| --- | --- | --- |
+| S2 | A strict package ships no stylesheet: no `*.css` export and no `.css`, `.scss`, `.sass`, `.less`, `.styl` or `.pcss` file in the package | `check_package_graph.mjs` rule `strict-no-stylesheets` |
+| S3 | Strict code renders no raw interactive or styled elements: JSX `button`, `a`, `input`, `select`, `textarea`, `label`, `dialog`, `details`, `summary`, `form`, `table`, `svg` and `pre`, and the `style`, `className` and `dangerouslySetInnerHTML` props on any element, are errors. Plain `div` and `span` stay for grouping text inside slots | Grit rule `tools/lint-rules/strict-no-raw-elements.grit` |
+| S4 | Strict code contains no raw colors or lengths: a string or template literal with a hex color, `rgb(`, `rgba(`, `hsl(`, `hsla(`, `oklch(`, `color-mix(`, or a `px`, `rem`, `em`, `vh` or `vw` length is an error | Grit rule `tools/lint-rules/strict-no-raw-values.grit` |
+| S5 | The strict lint rules cover exactly the strict packages: the `includes` of `biome.json`'s strict override (the one loading both rules above) are each strict package's `src/**/*.ts` and `src/**/*.tsx` plus the two test exclusions, so a new strict package cannot escape S3 and S4, and a package cannot be listed without the marker. The override has no `includes` until the first strict package exists | `check_package_graph.mjs` rule `strict-lint-coverage` (the expected globs come from `strictOverrideIncludes`) |
+| S6 | A strict package imports UI only from `@vibesys/ui`'s `.` and `./tokens`, and no old feature package. Its workspace imports are the non-UI libraries in `STRICT_WORKSPACE_IMPORTS` and its third-party ones are `react`, `react-dom` and `xstate` (`STRICT_THIRD_PARTY`; Electron and Node builtins stay confined by `external-dependencies`), in production source and in the manifest's `dependencies`. Test code is exempt. A strict app may also import `@vibesys/ui/tokens.css`, `@vibesys/ui/fonts.css` and `@vibesys/ui/components.css` once, in its entry wiring. Deep imports are already refused by `imports-use-exports` and `.dependency-cruiser.mjs`, feature-to-feature imports by `layer-direction` | `check_package_graph.mjs` rule `strict-imports` |
+| S8 | `@vibesys/ui` itself uses tokens: `strict-no-raw-values.grit` also runs on `libs/ui/src` except the token table (`src/tokens/`) and tests, and `tools/lint-rules/ui-no-raw-css-values.grit` bans raw colors and lengths in the declarations of `libs/ui/src/*.css` except the generated `tokens.css`. Lengths in `@media` conditions are not declarations and stay | the two Grit rules, wired by `biome.json` |
+
+`biome.json` excludes `libs/ui/src/primitives.css` from the stylesheet rule: the old primitives'
+pixel values (`10px`, `5px`, `14px`, ...) have no token to read, and a token would change what they
+draw. The components that replace them delete the file and the exclusion.
+
+Every failure names the file and line (or the manifest key), the rule id and the fix, for example
+"a raw `<button>` ... Use `<Button>` from `@vibesys/ui`". The rules cannot see through a spread
+(`<Card {...props} />` can carry a `className`); the components take no `className` or `style`
+prop (rule S1, with the component API), which closes that path. Unenforced: whether a screen
+matches its design needs a reader; the checks hold the parts it is built from.
+
+### Frozen UI packages
+
+An old UI package gets fixes only. `FROZEN_UI_PACKAGES` in
+[`clients/tools/scripts/check_frozen_ui.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/tools/scripts/check_frozen_ui.mjs)
+is the one list of them, each with the paths that hold its UI (`src/renderer/` for a feature;
+`src/app/` and `src/styles.css` for `apps/web`; `src/ui/` and `src/welcome.css`, the welcome view,
+for `apps/desktop-renderer`). In `tui_quality`, `pnpm check:frozen-ui --base-ref origin/main`
+compares the change with its merge base with `origin/main`, and in a listed package it refuses:
+
+- a new file under a UI path (new test files are allowed);
+- a name added to the exports of the package's `./renderer` entry, followed through `export *`;
+- a rise, in any UI file, of the count of JSX intrinsic interactive elements (`button`, `a`,
+  `input`, `select`, `textarea`, `label`, `dialog`, `details`, `summary`, `form`) or of raw color
+  literals, so a fix may move or delete such code and not add to it.
+
+The check is a function of two file trees (`frozenUiErrors(base, head)`); the command line only
+builds them, the base from the merge base. A package leaves the list when it is deleted: remove its
+entry in the same change, and the check fails if a listed package no longer exists. The list only
+shrinks.
+
+## Components
+
+The redesigned screens are built only from the components of `@vibesys/ui`'s `.` entry, with no
+CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components.css` once.
+
+- **Props are data and callbacks.** Variants are token names or small closed unions (`gap:
+  SpaceToken`, `style: TextStyle`, `tone: StatusTone`); no component accepts `className` or
+  `style`, so a raw value cannot reach one (rule S1 of #2827, held by the types).
+- **Styles use tokens only.** `src/components.css` reads token variables (`--space-3`,
+  `--control`, `--radius-lg`, `--text-body-size`, ...) and writes no color or length (rule S8);
+  its classes are `vs-` prefixed so they never meet the legacy primitives' global selectors.
+- **Accessible by type.** `StatusDot` requires `label`; `Button` requires visible `text` or an
+  icon with `label` (its `aria-label`). Status is never color alone: a `live` dot differs from
+  `ok` by a ring. A disabled `Button`, `Checkbox` or `Switch` takes `disabledReason`, shown as
+  help text it is described by. The focus ring (2 px `accent`, 1 px offset) is drawn here only.
+- **Fields wire their control.** `TextInput`, `PathInput` and `Select` render only inside a
+  `Field`, which gives them their label, help and error; outside one they throw.
+
+| Component | Props |
+| --- | --- |
+| `Page` | `width?: 'content' \| 'wide' \| 'narrow'`; the scrolling `<main>` with the page gutter |
+| `Stack`, `Row` | `gap?: SpaceToken`, `align?`, `justify?: 'start' \| 'center' \| 'end' \| 'between'`, `wrap?`, `grow?` |
+| `Split` | `main`, `aside`, `gap?`; the aside wraps under the main column when narrow |
+| `Grid` | `min: 'field' \| 'tile' \| 'swatch'`, `gap?`; auto-fit columns |
+| `Text` | `style?: TextStyle`, `tone?: 'default' \| 'muted' \| 'ok' \| 'warn' \| 'err'`, `as?` (element), `id?` |
+| `Wordmark` | `art` (the caller's ASCII art), `label`; scaled to fit its width |
+| `Icon` | `name: IconName` (closed set, `ICON_NAMES`), `label?` (decorative without one) |
+| `Button` | `text` or `icon` + `label`; one of `press`, `href` (renders `<a>`) or `submit`; `variant?: 'primary' \| 'secondary' \| 'quiet' \| 'danger'`, `size?: 'sm' \| 'md'`, `full?`, `disabledReason?`, `expanded?` |
+| `SegmentedControl` | `label`, `options: {value, label}[]`, `value`, `change`, `size?`; native radios, so one tab stop and arrow keys |
+| `Select` | `value`, `options: {value, label, disabledReason?}[]`, `change`, `mono?` |
+| `Field` | `label`, `help?`, `error?`, one control as children |
+| `TextInput` | `value`, `change?`, `placeholder?`, `mono?`, `readOnly?` |
+| `PathInput` | `value`, `change`, `completions: {value, detail?}[]`, `placeholder?`; the ARIA combobox pattern |
+| `Checkbox`, `Switch` | `label`, `checked`, `change`, `disabledReason?` |
+| `Chip` | `label`, `tone?: StatusTone`, `dot?` |
+| `StatusDot` | `tone: 'neutral' \| 'live' \| 'ok' \| 'warn' \| 'err'`, `label` |
+| `Card` | `section?` (a titled region), `flush?` |
+| `Banner` | `title`, `tone?: 'neutral' \| 'ok' \| 'warn' \| 'err'`, `body?`, `actions?` |
+
+### The gallery and its screenshots
+
+`apps/ui-gallery` renders every state of every component, one page per theme (`?theme=<name>`),
+with fixed content: no clock, randomness or network, and the bundled fonts. Its registry is typed
+over the entry's component exports, and `test_gallery_covers_every_public_component` fails a
+component with no gallery entry. Run it with `pnpm --filter @vibesys/app-ui-gallery dev`.
+
+Its Playwright suite (in the `tui_e2e` group) loads each theme once, fails on any axe violation,
+and compares each component's screenshot against `e2e/__screenshots__/<theme>-<Component>.png`
+under reduced motion at a fixed 1280 by 900 viewport. The baselines are Chromium on Linux, the
+`tui_e2e` job's browser and OS, so they are written in Playwright's Linux image, never on macOS:
+
+```bash
+pnpm --filter @vibesys/app-ui-gallery update:screenshots   # rewrite the baselines (needs Docker)
+pnpm --filter @vibesys/app-ui-gallery test:e2e:linux       # compare against them locally
+```
+
+When the job fails on a screenshot, it uploads the actual and the diff as the
+`ui-gallery-test-results` artifact.
 
 ## State
 
@@ -430,7 +581,7 @@ names a missing or extra one.
 | Package | Layer | Status | Item that creates or moves it |
 | --- | --- | --- | --- |
 | `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
-| `@vibesys/ui` | foundation | exists: `Button`, `Combobox`, `Dialog`, `StatusChip` (`.`, `dom`) and the design tokens (`./tokens.css`); the desktop and web features render them | domain packages (phase 5 of #1878) |
+| `@vibesys/ui` | foundation | exists: the batch 1 components (`.`, `dom`; see [Components](#components)), today's primitives (`./legacy`) and the design tokens (`./tokens`, `./tokens.css`, `./fonts.css`, and the components' `./components.css`; see [Design tokens and themes](#design-tokens-and-themes)); the desktop and web features render the legacy primitives | domain packages (phase 5 of #1878) |
 | `@vibesys/store` | foundation | exists: `Step`, `Reducer`, `only`, `createStore` (`.`) and the fold model-test kit (`./testing`: `checkModel`, `Seeded`, `SEEDS`); domain-free | domain split (#1949) |
 | `@vibesys/run-state` | core | exists: the run event fold (`.`), with `./rounds`, `./performance`, and `./transcript` projections; depends on `contracts` only | domain split (#1949) |
 | `@vibesys/core-state` | core | deleted: split into `store` and `run-state` | domain split (#1949) |
@@ -449,6 +600,7 @@ names a missing or extra one.
 | `@vibesys/feature-hosts`, `@vibesys/feature-start-run`, `@vibesys/feature-run-control`, `@vibesys/feature-recent-runs` | feature | exist, renderer side (`./state`, `./renderer`): the host panel, checkout form, sign-in, "Connect to host", and path completion; the "Start a run" sheet; the title strip, stop, force stop, resume, and the banner; Recent. Each feature's effects call only the slice of `@vibesys/ipc`'s welcome bridge its `./state` declares. `feature-hosts` and `feature-run-control` also publish their main-process controllers (`./main`: `Hosts`; `RunControl` with its relay and stop flow) | desktop renderer (phase 7 of #1878); `./main` with the main-process split (phase 8) |
 | `apps/web` | app | exists: composition only, on the per-entry layout (one `dom` entry, no exports): the browser entry and boot decision, the desktop shell's run page (`desktop-main.tsx` and the bridge transport), the one backend adapter, storage and lifecycle. Its run connection (`connectRun`) is `@vibesys/run-session`'s and the run page's styles are the features' own (`./styles.css`). The desktop run page still moves to `apps/desktop-renderer`: what remains is the page lifecycle (`platform/lifecycle.ts`) and the live run page's composition (`createLiveApp`), which both apps would use, the bridge transport (`desktop-shell.ts`), and a second Vite page in that app's build, which `apps/desktop-main`'s `copy-ui.mjs` then copies | feature packages (phase 6 of #1878) |
 | `apps/desktop-renderer` | app | exists: composition only (one `dom` entry, no exports): the welcome view's entry, its stores wired to the welcome preload's bridge, and the view composed from the desktop features | desktop renderer (phase 7 of #1878) |
+| `apps/ui-gallery` | app | exists: development only, never shipped (one `dom` entry, no exports): the component gallery and its screenshot and axe suite (see [The gallery and its screenshots](#the-gallery-and-its-screenshots)) | none |
 | `apps/desktop-main` | app | exists: composition only (Electron main, `.`, `node`): the lifecycle, page confinement, the window, launch arguments, and the welcome requests routed to the features' `./main` controllers; and the two sandboxed preloads (`./preload-run`, `./preload-welcome`, `preload`). Its build copies the two page bundles into `dist/ui` | desktop main process (phase 8 of #1878) |
 | `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |
 | `@vibesys/desktop` | app | deleted: emptied into `connection`, `settings`, the features' `./main`, and `apps/desktop-main` | desktop main process (phase 8 of #1878) |

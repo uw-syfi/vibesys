@@ -18,7 +18,7 @@ import {WELCOME_INITIAL} from '@vibesys/feature-run-control/state';
 import {START_CLOSED, type StartAction, startStep} from '@vibesys/feature-start-run/state';
 import type {HostListing} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
-import {Dialog} from '@vibesys/ui';
+import {Dialog} from '@vibesys/ui/legacy';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import type {Root} from 'react-dom/client';
