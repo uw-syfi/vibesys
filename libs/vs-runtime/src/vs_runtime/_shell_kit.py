@@ -73,8 +73,7 @@ from vs_runtime.api.core import (
     start_core,
 )
 from vs_runtime.api.infrastructure import RunStopped, create_run_control_channel
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import VirtualClock, run_virtual
+from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -562,7 +561,7 @@ def scripted_host[C](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a re
         options.attach(shell, clock)
     controls = (
         RunControlBridge(
-            create_run_control_channel(_IgnoredTransitions(), OsThreads()),
+            create_run_control_channel(_IgnoredTransitions(), SimThreads()),
             _NoSteer(),
         )
         if options.controlled
