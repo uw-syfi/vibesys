@@ -191,8 +191,8 @@ _TURN_REASONS = frozenset(
 class Failed(Value):
     """A request ended without a result. Every field is typed; nothing is free text.
 
-    Each reason carries its own fields, and only those: ``TIMED_OUT`` the ``limit_at`` (the
-    run-clock time of the limit that passed), ``WORKSPACE_CLOSED`` / ``OWNER_GONE`` the
+    Each reason carries its own fields, and only those: ``TIMED_OUT`` and
+    ``QUEUE_BUDGET_SPENT`` the ``limit_at`` (the run-clock time of the bound that passed), ``WORKSPACE_CLOSED`` / ``OWNER_GONE`` the
     ``watch`` that fired, ``REFUSED`` the ``cause`` core gave, ``INVALID_REPLY`` the reply
     ``errors``.
 
