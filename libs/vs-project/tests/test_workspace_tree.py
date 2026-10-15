@@ -13,6 +13,7 @@ from hypothesis import strategies as st
 from vs_project.api.workspace_tree import (
     EntryKind,
     NotRegularFileError,
+    TreeLimitError,
     WorkspacePathError,
     open_workspace_tree,
 )
@@ -278,3 +279,31 @@ def test_planted_temporary_names_never_block_a_write(tmp_path: Path) -> None:
 
     assert (workspace / "notes.txt").read_bytes() == b"agent\n"
     assert outside.read_text() == "host\n"
+
+
+@settings(max_examples=examples(pr=15, nightly=300), deadline=None)
+@given(
+    files=st.integers(min_value=0, max_value=6),
+    directories=st.integers(min_value=0, max_value=6),
+    limit=st.integers(min_value=0, max_value=7),
+)
+def test_a_limited_listing_is_the_full_listing_or_refused_past_the_limit(
+    *, files: int, directories: int, limit: int
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        workspace = Path(directory)
+        nested = workspace / "inputs"
+        nested.mkdir()
+        for number in range(directories):
+            nested = nested / f"d{number}"
+            nested.mkdir()
+        for number in range(files):
+            (nested / f"f{number}").write_bytes(b"")
+
+        with open_workspace_tree(workspace) as tree:
+            full = tree.files_below("inputs")
+            if max(files, directories) > limit:
+                with pytest.raises(TreeLimitError):
+                    tree.files_below("inputs", limit=limit)
+            else:
+                assert tree.files_below("inputs", limit=limit) == full

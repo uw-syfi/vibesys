@@ -41,6 +41,10 @@ _TEMPORARY_ATTEMPTS = 64
 _READ_CHUNK_BYTES = 1024 * 1024
 
 
+class TreeLimitError(ValueError):
+    """A walk found more entries than its caller allowed."""
+
+
 class WorkspacePathError(ValueError):
     """A relative path that is absolute, holds ``..``, or passes through a symlink."""
 
@@ -156,14 +160,17 @@ class WorkspaceTree:
                 effects=_DirectoryAtomicWrite(parent, parts[-1]),
             )
 
-    def files_below(self, relative: str) -> tuple[str, ...]:
+    def files_below(self, relative: str, *, limit: int | None = None) -> tuple[str, ...]:
         """The regular files below the directory ``relative``, sorted by components.
 
         Each is named relative to the tree root. Raises ``WorkspacePathError`` for a
-        symlink found below it; other entries (FIFOs, sockets) are skipped.
+        symlink found below it; other entries (FIFOs, sockets) are skipped. With a
+        ``limit``, raises ``TreeLimitError`` as soon as the walk finds more than
+        ``limit`` files or more than ``limit`` directories, without listing the rest.
         """
         pending = [relative_parts(relative)]
         files: list[tuple[str, ...]] = []
+        directories = 0
         while pending:
             parts = pending.pop()
             with self._directory(parts, create=False) as directory, os.scandir(directory) as it:
@@ -174,8 +181,12 @@ class WorkspaceTree:
                         raise WorkspacePathError(message)
                     if entry.is_dir(follow_symlinks=False):
                         pending.append(child)
+                        directories += 1
                     elif entry.is_file(follow_symlinks=False):
                         files.append(child)
+                    if limit is not None and max(len(files), directories) > limit:
+                        message = f"{relative} holds more than {limit} files or directories"
+                        raise TreeLimitError(message)
         return tuple(PurePosixPath(*parts).as_posix() for parts in sorted(files))
 
     def make_directories(self, relative: str) -> None:
