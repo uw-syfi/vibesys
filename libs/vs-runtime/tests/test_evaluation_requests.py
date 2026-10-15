@@ -65,8 +65,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import examples, swept
+from vs_sim.api.testing import SimThreads, examples, swept
 from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -149,7 +148,7 @@ class World:
             project.state.state_store_namespace("run"),
             None if crash_at is None else 2 * crash_at,
         )
-        store = ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
+        store = ReceiptStore(cast("StateNamespace", faulting), threads=SimThreads())
         return MeasurementRequests(self.stack.executor, store, self.observer), faulting
 
 
@@ -800,13 +799,13 @@ type PollScript = Callable[[int, ExecutorPoll], ExecutorPoll]
 
 def _requests_over(w: World, polls: _ScriptedPolls) -> MeasurementRequests:
     project = Project.open(w.base / "project")
-    store = ReceiptStore(project.state.state_store_namespace("run"), threads=OsThreads())
+    store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
     return MeasurementRequests(polls, store)
 
 
 def _sealed(w: World, request: RequestBase) -> bool:
     project = Project.open(w.base / "project")
-    store = ReceiptStore(project.state.state_store_namespace("run"), threads=OsThreads())
+    store = ReceiptStore(project.state.state_store_namespace("run"), threads=SimThreads())
     assert request.request_id is not None
     return isinstance(store.history(request.request_id.root), SealedExecution)
 

@@ -24,8 +24,7 @@ from vs_runtime.api.infrastructure import (
     open_managed_conversation,
 )
 from vs_sandbox.api import HostResource, ProjectPathPolicy
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from vs_sandbox.api import CommandRunner
@@ -86,7 +85,7 @@ def _spec() -> ManagedConversationSpec:
 
 
 def test_same_object_continues_context_and_close_releases_resources_in_reverse() -> None:
-    client = FakeAgentClient(session_reuse=True, threads=OsThreads()).enqueue_text(
+    client = FakeAgentClient(session_reuse=True, threads=SimThreads()).enqueue_text(
         "chat", "one", "two"
     )
     close_order: list[str] = []
@@ -97,7 +96,7 @@ def test_same_object_continues_context_and_close_releases_resources_in_reverse()
             _CloseRecord("environment", close_order),
             _CloseRecord("client", close_order),
         ),
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
 
     assert conversation.turn("first", invocation_id="execution-1") == "one"
@@ -120,9 +119,9 @@ def test_same_object_continues_context_and_close_releases_resources_in_reverse()
 
 
 def test_replaced_context_reasks_with_full_rules() -> None:
-    client = _ReplacingFakeAgentClient(session_reuse=True, threads=OsThreads())
+    client = _ReplacingFakeAgentClient(session_reuse=True, threads=SimThreads())
     client.enqueue_text("chat", "established", "unsafe", "safe")
-    conversation = create_managed_conversation(client, _spec(), resources=(), threads=OsThreads())
+    conversation = create_managed_conversation(client, _spec(), resources=(), threads=SimThreads())
 
     assert conversation.turn("establish context") == "established"
     assert conversation.turn("inspect") == "safe"
@@ -135,7 +134,7 @@ def test_replaced_context_reasks_with_full_rules() -> None:
 
 def test_closed_conversation_rejects_new_turns() -> None:
     conversation = create_managed_conversation(
-        FakeAgentClient(threads=OsThreads()), _spec(), resources=(), threads=OsThreads()
+        FakeAgentClient(threads=SimThreads()), _spec(), resources=(), threads=SimThreads()
     )
     conversation.close()
 
@@ -143,14 +142,14 @@ def test_closed_conversation_rejects_new_turns() -> None:
         conversation.turn("inspect")
     with pytest.raises(ValueError, match="must not be empty"):
         create_managed_conversation(
-            FakeAgentClient(threads=OsThreads()), _spec(), resources=(), threads=OsThreads()
+            FakeAgentClient(threads=SimThreads()), _spec(), resources=(), threads=SimThreads()
         ).turn("  ")
 
 
 def test_new_conversation_with_same_member_starts_fresh() -> None:
-    client = FakeAgentClient(session_reuse=True, threads=OsThreads())
-    first = create_managed_conversation(client, _spec(), resources=(), threads=OsThreads())
-    second = create_managed_conversation(client, _spec(), resources=(), threads=OsThreads())
+    client = FakeAgentClient(session_reuse=True, threads=SimThreads())
+    first = create_managed_conversation(client, _spec(), resources=(), threads=SimThreads())
+    second = create_managed_conversation(client, _spec(), resources=(), threads=SimThreads())
 
     first.turn("one")
     first.turn("two")
@@ -178,10 +177,10 @@ def test_construction_failure_leaves_resources_with_caller() -> None:
 
     with pytest.raises(ValueError, match="role"):
         create_managed_conversation(
-            FakeAgentClient(threads=OsThreads()),
+            FakeAgentClient(threads=SimThreads()),
             invalid,
             resources=(resource,),
-            threads=OsThreads(),
+            threads=SimThreads(),
         )
 
     assert close_order == []
@@ -194,7 +193,9 @@ def test_open_conversation_builds_client_and_owns_environment(tmp_path: Path) ->
         host_resources=(HostResource(tmp_path / "base"),),
     )
     additional = HostResource(tmp_path / "evidence")
-    client = FakeAgentClient(session_reuse=True, threads=OsThreads()).enqueue_text("chat", "answer")
+    client = FakeAgentClient(session_reuse=True, threads=SimThreads()).enqueue_text(
+        "chat", "answer"
+    )
     observed: list[dict[str, object]] = []
 
     def build_client(**kwargs: object) -> FakeAgentClient:
@@ -210,7 +211,7 @@ def test_open_conversation_builds_client_and_owns_environment(tmp_path: Path) ->
         additional_host_resources=(additional,),
         client_factory=build_client,
         clock=ManualClock(),
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
 
     assert conversation.turn("inspect") == "answer"
@@ -240,7 +241,7 @@ def test_open_conversation_preserves_construction_error_when_cleanup_fails(
             agent_events=NULL_AGENT_EVENT_SINK,
             client_factory=fail_client,
             clock=ManualClock(),
-            threads=OsThreads(),
+            threads=SimThreads(),
         )
 
     assert environment.close_count == 1

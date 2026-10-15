@@ -27,8 +27,7 @@ from vs_runtime.api.core import (
     StillCreatingError,
     Unrecorded,
 )
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import SimThreads, examples
 
 _KEYS = (FenceKey(FenceKind.INVOCATION, "s/i1"), FenceKey(FenceKind.ATTEMPT_WORKSPACE, "a1:0"))
 _REQUESTS = ("dispatch-a", "dispatch-b", "cancel-r")
@@ -66,7 +65,7 @@ def test_enter_and_close_answer_as_the_model_does_and_nothing_held_stays_true(
         for operation, index, request, epoch in operations:
             # A new store each time: the answer comes from disk, as on a restarted host.
             fences, key, model = (
-                EffectFences(ReceiptStore(namespace, threads=OsThreads())),
+                EffectFences(ReceiptStore(namespace, threads=SimThreads())),
                 _KEYS[index],
                 models[index],
             )
@@ -125,7 +124,7 @@ def test_a_proof_copied_or_meant_for_another_fence_proves_nothing() -> None:
         fences = EffectFences(
             ReceiptStore(
                 Project.open(Path(directory)).state.state_store_namespace("run"),
-                threads=OsThreads(),
+                threads=SimThreads(),
             )
         )
         closed, other = _KEYS
@@ -157,7 +156,7 @@ def test_evidence_clears_only_the_fence_it_is_about() -> None:
         fences = EffectFences(
             ReceiptStore(
                 Project.open(Path(directory)).state.state_store_namespace("run"),
-                threads=OsThreads(),
+                threads=SimThreads(),
             )
         )
         closed, other = _KEYS
@@ -184,7 +183,7 @@ def test_a_found_record_is_returned_instead_of_evidence() -> None:
         fences = EffectFences(
             ReceiptStore(
                 Project.open(Path(directory)).state.state_store_namespace("run"),
-                threads=OsThreads(),
+                threads=SimThreads(),
             )
         )
         key = _KEYS[0]

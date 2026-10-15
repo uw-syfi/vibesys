@@ -1063,9 +1063,9 @@ class FakeStopTimer:
     """
 
     def __init__(self, threads: Threads) -> None:
-        """Start with no recorded or pending waits; ``threads`` makes the lock waits share."""
+        """Start with no recorded or pending waits; ``threads`` makes the lock."""
         self.delays: list[float] = []
-        self._condition = threads.condition()
+        self._lock = threads.lock()
         self._pending: list[tuple[asyncio.AbstractEventLoop, asyncio.Future[None]]] = []
 
     async def __call__(self, seconds: float) -> None:
@@ -1073,25 +1073,19 @@ class FakeStopTimer:
         loop = asyncio.get_running_loop()
         waiter: asyncio.Future[None] = loop.create_future()
         entry = (loop, waiter)
-        with self._condition:
+        with self._lock:
             self.delays.append(seconds)
             self._pending.append(entry)
-            self._condition.notify_all()
         try:
             await waiter
         finally:
-            with self._condition:
+            with self._lock:
                 if entry in self._pending:
                     self._pending.remove(entry)
 
-    def wait_armed(self, timeout: float) -> bool:
-        """Block until a wait is pending; *timeout* is a deadlock guard."""
-        with self._condition:
-            return self._condition.wait_for(lambda: bool(self._pending), timeout)
-
     def expire(self) -> None:
         """End every pending wait, as if its delay had elapsed."""
-        with self._condition:
+        with self._lock:
             pending, self._pending = self._pending, []
         for loop, waiter in pending:
             loop.call_soon_threadsafe(_resolve, waiter)

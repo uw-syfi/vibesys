@@ -39,8 +39,7 @@ from vs_runtime.api.infrastructure import (
     install_capacity_gate,
 )
 from vs_runtime.api.testing import FakeCapacityTimer, FakeRunControlEventSink
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 ROLE = "worker"
 START = 1_000_000.0
@@ -100,8 +99,9 @@ class _Run:
             self.control.request_stop(StopMode.DRAIN)
 
     def play(self, client: FakeAgentClient, prompts: tuple[str, ...]) -> list[str]:
+        threads = SimThreads()
         control = create_run_control_channel(
-            FakeRunControlEventSink(on_transition=self._on_transition), threads=OsThreads()
+            FakeRunControlEventSink(on_transition=self._on_transition), threads=threads
         )
         self.control = control
         if self.policy.action is QuotaAction.WAIT and not self.production_timer:
@@ -112,19 +112,21 @@ class _Run:
             client,
             control=control,
             events=self.sink,
-            handling=CapacityHandling(self.policy, ProviderFallback(None, OsThreads()), self.timer),
+            handling=CapacityHandling(self.policy, ProviderFallback(None, threads), self.timer),
             clock=self.clock,
         )
-        return [
-            client.invoke_text(
-                kind=ROLE,
-                workspace=Path(),
-                system_prompt="Work.",
-                user_prompt=prompt,
-                round_label="round",
-            )
-            for prompt in prompts
-        ]
+        return threads.run(
+            lambda: [
+                client.invoke_text(
+                    kind=ROLE,
+                    workspace=Path(),
+                    system_prompt="Work.",
+                    user_prompt=prompt,
+                    round_label="round",
+                )
+                for prompt in prompts
+            ]
+        )
 
 
 def _quota(
@@ -134,7 +136,7 @@ def _quota(
 
 
 def _client(stops: int, error: AgentQuotaError) -> FakeAgentClient:
-    return FakeAgentClient(threads=OsThreads()).fail(ROLE, error, times=stops)
+    return FakeAgentClient(threads=SimThreads()).fail(ROLE, error, times=stops)
 
 
 def _prompts(client: FakeAgentClient) -> list[str]:

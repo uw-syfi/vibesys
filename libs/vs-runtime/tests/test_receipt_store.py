@@ -26,8 +26,7 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
 from vs_runtime.api.operation_fixtures import SCOPE
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import Gate, examples
+from vs_sim.api.testing import Gate, SimThreads, examples
 
 if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionContext
@@ -146,7 +145,7 @@ async def scheduled_run(
 def store_at(root: Path) -> ReceiptStore:
     (root / "project").mkdir(exist_ok=True)
     return ReceiptStore(
-        Project.open(root / "project").state.state_store_namespace("run"), threads=OsThreads()
+        Project.open(root / "project").state.state_store_namespace("run"), threads=SimThreads()
     )
 
 

@@ -6,7 +6,6 @@ import asyncio
 import hashlib
 import itertools
 import shutil
-import threading
 import weakref
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
@@ -93,8 +92,16 @@ from vs_runtime.api.observation_contracts import assert_core_accepts
 from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock, examples, swept, wait_or_fail, wait_until_started
+from vs_sim.api.testing import (
+    InlineBlockingRunner,
+    ManualClock,
+    Sim,
+    SimBlockingRunner,
+    SimThreads,
+    examples,
+    swept,
+    wait_or_fail,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterator
@@ -109,6 +116,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import ExecutionLease
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration, WorkspaceResourceProvider
     from vs_sandbox.api import CommandRunner
+    from vs_sim.api import BlockingRunner, Event
 
 # Each example builds real workspaces. A pull request draws a sample; the nightly depth
 # (`--depth=nightly`) searches deeper.
@@ -154,13 +162,14 @@ class _Env:
     project: Project
     run_id: str
     factory: WorkspaceResourceProvider
+    blocking: BlockingRunner
     hosts: list[RuntimeWorkspaces] = field(default_factory=list)
 
     def start_host(self) -> RuntimeWorkspaces:
         """Start another host over the same disk state, as after a process restart."""
         runtime = create_workspace_runtime(
             workspace_resources=self.factory,
-            blocking=BlockingOperations(runner=ThreadBlockingRunner()),
+            blocking=BlockingOperations(runner=self.blocking),
             validation_passes=MemoryValidationPasses(),
         )
         self.hosts.append(runtime.workspaces)
@@ -170,7 +179,7 @@ class _Env:
     def store(self) -> ReceiptStore:
         """A store over the run's durable receipts (a new one models a restart)."""
         return ReceiptStore(
-            self.project.state.local_namespace(self.run_id, "receipts"), threads=OsThreads()
+            self.project.state.local_namespace(self.run_id, "receipts"), threads=SimThreads()
         )
 
 
@@ -189,6 +198,7 @@ def _unexpected_client(**_kwargs: object) -> AgentClientProtocol:
 def _env(
     tmp_path: Path,
     wrap: Callable[[WorkspaceResourceFactory], WorkspaceResourceProvider] = lambda f: f,
+    blocking: BlockingRunner | None = None,
 ) -> Iterator[_Env]:
     root = tmp_path / "project"
     root.mkdir()
@@ -246,10 +256,15 @@ def _env(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
-                threads=OsThreads(),
-                blocking=ThreadBlockingRunner(),
+                threads=SimThreads(),
+                blocking=InlineBlockingRunner(),
             )
-            env = _Env(project.project, "workspace-requests", wrap(factory))
+            env = _Env(
+                project.project,
+                "workspace-requests",
+                wrap(factory),
+                blocking=blocking or InlineBlockingRunner(),
+            )
             env.start_host()
             try:
                 yield env
@@ -309,7 +324,7 @@ def _executor(
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
     return RuntimeWorkspaceRequests(
-        workspaces, chosen, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+        workspaces, chosen, SettledRunInvocations(), blocking=InlineBlockingRunner()
     ), chosen
 
 
@@ -445,7 +460,7 @@ class _FailingStore(ReceiptStore):
     """A real store whose chosen writes fail, as when a host dies at that point."""
 
     def __init__(self, namespace: StateNamespace) -> None:
-        super().__init__(namespace, OsThreads())
+        super().__init__(namespace, SimThreads())
         self.fail_done = False
         self.fail_release_mark = False
         self.fail_bind = False
@@ -687,7 +702,7 @@ def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> N
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         store = _ENVS[workspaces].store()
         running = RuntimeWorkspaceRequests(
-            workspaces, store, RunningRunInvocations(), blocking=ThreadBlockingRunner()
+            workspaces, store, RunningRunInvocations(), blocking=InlineBlockingRunner()
         )
         request = SnapshotAndRetainRun(
             request_id=_rid("run-snap-wait"),
@@ -708,7 +723,7 @@ def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> N
         assert waiting.observation.revision is None
         assert _commits(workspaces) == commits
         settled = RuntimeWorkspaceRequests(
-            workspaces, store, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+            workspaces, store, SettledRunInvocations(), blocking=InlineBlockingRunner()
         )
         done = await _run(settled, request)
         assert done.observation.observation.status is ObservationStatus.SUCCEEDED
@@ -1397,8 +1412,8 @@ class _FaultyResources:
         self._inner = inner
         self.fail_creates = 0
         self.fail_closes = 0
-        self.close_entered = threading.Event()
-        self.release_close: threading.Event | None = None
+        self.hold_close: tuple[Event, Event] | None = None
+        """When set, a close sets the first event and waits for the second."""
 
     @property
     def root(self) -> WorkspaceResource:
@@ -1438,9 +1453,10 @@ class _FaultyResource:
             self._owner.fail_closes -= 1
             message = "worktree removal failed"
             raise OSError(message)
-        if self._owner.release_close is not None:
-            self._owner.close_entered.set()
-            wait_or_fail(self._owner.release_close, "the held close release")
+        if self._owner.hold_close is not None:
+            entered, release = self._owner.hold_close
+            entered.set()
+            wait_or_fail(release, "the held close release")
         self._resource.close()
 
 
@@ -1625,8 +1641,9 @@ def test_f13_a_transient_create_failure_is_retried_not_stored(tmp_path: Path) ->
         asyncio.run(exercise())
 
 
-def test_f12_a_slow_discard_does_not_block_another_attempt(tmp_path: Path) -> None:
-    with _env(tmp_path, _faulty) as env:
+def test_f12_a_slow_discard_does_not_block_another_attempt(tmp_path: Path, sim: Sim) -> None:
+    threads = sim.threads()
+    with _env(tmp_path, _faulty, blocking=SimBlockingRunner(threads)) as env:
 
         async def exercise() -> None:
             workspaces = env.hosts[0]
@@ -1634,28 +1651,25 @@ def test_f12_a_slow_discard_does_not_block_another_attempt(tmp_path: Path) -> No
             a, b = _attempt("a"), _attempt("b")
             await _ensure_at(executor, workspaces, a, "ea")
             await _ensure_at(executor, workspaces, b, "eb")
-            release = threading.Event()
             faults = _faults(env)
-            faults.release_close = release
+            entered, release = threads.event(), threads.event()
+            faults.hold_close = (entered, release)
             slow = asyncio.create_task(
                 _run(executor, DiscardWorkspace(**_common(a, "da"), attempt=a))
             )
-            await wait_until_started(faults.close_entered, slow)
-            try:
-                base = revision_ref(workspaces.root.revision or "")
-                other = await asyncio.wait_for(
-                    _run(
-                        executor,
-                        RestoreRevision(**_common(b, "rb"), attempt=b, revision=base),
-                    ),
-                    timeout=60,
-                )
-                assert _status(other) is ObservationStatus.SUCCEEDED
-            finally:
-                release.set()
+            await SimBlockingRunner(threads).run(entered.wait)
+            base = revision_ref(workspaces.root.revision or "")
+            other = await _run(
+                executor, RestoreRevision(**_common(b, "rb"), attempt=b, revision=base)
+            )
+            assert _status(other) is ObservationStatus.SUCCEEDED
+            release.set()
             assert _status(await slow) is ObservationStatus.SUCCEEDED
+            # The hosts' blocking work runs on the simulated threads, so they close here.
+            await workspaces.close()
+            env.hosts.clear()
 
-        asyncio.run(exercise())
+        sim.run(exercise(), threads=threads)
 
 
 def test_corrupt_receipts_yield_unknown_not_an_exception(tmp_path: Path) -> None:

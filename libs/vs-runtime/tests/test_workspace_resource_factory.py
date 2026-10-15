@@ -36,8 +36,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeAgentExecutionEnvironment, unconfined_host_environment
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from typing import TextIO
@@ -153,8 +152,8 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
         skill_selection=NULL_SKILL_SELECTION,
         host_resources=(),
         events=events.append,
-        threads=OsThreads(),
-        blocking=ThreadBlockingRunner(),
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
     )
     revision = factory.root.revision
     assert revision is not None
@@ -217,8 +216,8 @@ def test_root_agent_scope_uses_injected_environment_opener(tmp_path: Path) -> No
         host_resources=(),
         events=lambda _event: None,
         root_agent_environment_opener=open_agent,
-        threads=OsThreads(),
-        blocking=ThreadBlockingRunner(),
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
     )
     configuration = AgentExecutionConfiguration("worker", AgentSpec(backend=AgentBackend.STUB))
 
@@ -280,8 +279,8 @@ def test_candidate_environment_uses_the_runs_verified_objective(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
-                threads=OsThreads(),
-                blocking=ThreadBlockingRunner(),
+                threads=SimThreads(),
+                blocking=InlineBlockingRunner(),
             )
             revision = (
                 project.git.trusted_input_baseline
@@ -345,8 +344,8 @@ def test_a_baseline_never_fingerprints_a_file_outside_the_workspace(tmp_path: Pa
         skill_selection=NULL_SKILL_SELECTION,
         host_resources=(),
         events=lambda _event: None,
-        threads=OsThreads(),
-        blocking=ThreadBlockingRunner(),
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
     )
 
     os.mkfifo(root / "pipe")

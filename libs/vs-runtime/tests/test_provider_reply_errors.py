@@ -29,8 +29,7 @@ from vs_core.api import ObservationStatus, ReplyErrorCode
 from vs_project.api import Project
 from vs_runtime.api import AgentId
 from vs_runtime.api.core import ExecutionResult, ReceiptStore
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock, examples
+from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 
 class Named(BaseModel):
@@ -48,7 +47,7 @@ async def _turn(host: SessionHost, base: Path) -> ExecutionResult:
     """Bind the session of ``host`` and dispatch one turn of it, on a store of its own."""
     (base / "project").mkdir()
     store = ReceiptStore(
-        Project.open(base / "project").state.state_store_namespace("run"), threads=OsThreads()
+        Project.open(base / "project").state.state_store_namespace("run"), threads=SimThreads()
     )
     await host.run(ensure_request(), store)
     return await host.run(dispatch_request(), store)
@@ -97,9 +96,9 @@ def test_a_provider_that_gave_up_on_the_schema_hands_core_its_last_errors_whole(
         host = open_host(Path(raw))
         script = FakeTurnScript((AgentOutputSchemaError(reason),))
         host.client = AgentClient(
-            FakeProvider(script=script, threads=OsThreads()),
+            FakeProvider(script=script, threads=SimThreads()),
             clock=ManualClock(),
-            threads=OsThreads(),
+            threads=SimThreads(),
         )
         errors = _failed_with_errors(_dispatch(host))
 

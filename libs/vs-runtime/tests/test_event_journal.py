@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
+from functools import partial
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, ClassVar, Self, cast
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_runtime.api.infrastructure import DurableEventJournal, EventCodec
-from vs_sim.api import OsThreads
+from vs_sim.api.testing import HANG_GUARD_S, SimThreads
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -181,8 +183,12 @@ class _FaultPath(Path):
         return super().read_bytes()
 
 
-def _journal(codec: EventCodec[_Event] | None = None) -> DurableEventJournal[_Event]:
-    return DurableEventJournal(codec or _Codec(), filename="events.jsonl", threads=OsThreads())
+def _journal(
+    codec: EventCodec[_Event] | None = None, threads: SimThreads | None = None
+) -> DurableEventJournal[_Event]:
+    return DurableEventJournal(
+        codec or _Codec(), filename="events.jsonl", threads=threads or SimThreads()
+    )
 
 
 def test_journal_flushes_pending_events_and_continues_sequence(tmp_path: Path) -> None:
@@ -433,20 +439,39 @@ def test_journal_separates_valid_final_record_without_newline(tmp_path: Path) ->
 
 
 def test_wait_reads_available_events_and_supports_nonblocking_poll(tmp_path: Path) -> None:
-    journal = _journal()
+    threads = SimThreads()
+    journal = _journal(threads=threads)
     journal.attach(tmp_path, "run-1")
     journal.record(_Event("started"))
 
-    assert [event.kind for event in journal.wait(0)] == ["started"]
-    assert journal.wait(1, timeout=0) == []
+    def poll() -> None:
+        assert [event.kind for event in journal.wait(0)] == ["started"]
+        assert journal.wait(1, timeout=0) == []
+
+    threads.run(poll)
 
 
-def test_concurrent_records_receive_one_contiguous_sequence(tmp_path: Path) -> None:
-    journal = _journal()
-    journal.attach(tmp_path, "run-1")
+@given(schedule_seed=st.integers(min_value=0, max_value=2**32 - 1))
+def test_concurrent_records_receive_one_contiguous_sequence(
+    tmp_path_factory: pytest.TempPathFactory, schedule_seed: int
+) -> None:
+    threads = SimThreads(schedule_seed=schedule_seed)
+    journal = _journal(threads=threads)
+    journal.attach(tmp_path_factory.mktemp("journal"), "run-1")
+    recorded: list[_Event] = []
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        recorded = list(executor.map(lambda index: journal.record(_Event(str(index))), range(64)))
+    def writer(first: int) -> None:
+        recorded.extend(journal.record(_Event(str(index))) for index in range(first, 64, 8))
+
+    def record_from_eight_threads() -> None:
+        workers = [
+            threads.spawn(partial(writer, first), name=f"writer-{first}", daemon=False)
+            for first in range(8)
+        ]
+        for worker in workers:
+            worker.join(HANG_GUARD_S)
+
+    threads.run(record_from_eight_threads)
 
     assert sorted(event.sequence for event in recorded) == list(range(1, 65))
     assert [event.sequence for event in journal.read()] == list(range(1, 65))

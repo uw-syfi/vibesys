@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-import threading
 from collections import deque
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
@@ -29,8 +28,14 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
 from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import wait_or_fail, wait_until_started
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import (
+    InlineBlockingRunner,
+    Sim,
+    SimBlockingRunner,
+    SimThreads,
+    wait_or_fail,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -68,8 +73,8 @@ def _executor(
         sandbox=sandbox,
         git=cast("GitTracker", git or _Git()),
         model_requests=model_requests,
-        threads=OsThreads(),
-        blocking=ThreadBlockingRunner(),
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
     )
 
 
@@ -491,11 +496,25 @@ def test_model_request_failure_prevents_trusted_command(tmp_path: Path) -> None:
     assert sandbox.calls == []
 
 
+def _accuracy_on_threads(
+    tmp_path: Path, sandbox: CommandRunner, threads: SimThreads
+) -> TrustedEvaluationExecutor:
+    """An accuracy-only executor whose blocking commands run on simulated ``threads``."""
+    return create_trusted_evaluation_executor(
+        TrustedEvaluationPlan(accuracy_command="check"),
+        workspace=tmp_path,
+        sandbox=sandbox,
+        git=cast("GitTracker", _Git()),
+        threads=threads,
+        blocking=SimBlockingRunner(threads),
+    )
+
+
 class _BlockingSandbox:
-    def __init__(self) -> None:
-        self.started = threading.Event()
-        self.release = threading.Event()
-        self.completed = threading.Event()
+    def __init__(self, threads: SimThreads) -> None:
+        self.started = threads.event()
+        self.release = threads.event()
+        self.completed = threads.event()
         self.calls: list[str] = []
 
     @property
@@ -518,30 +537,28 @@ class _BlockingSandbox:
         return CommandResult(output="", exit_code=0)
 
 
-def test_cancellation_drains_owned_accuracy_execution(tmp_path: Path) -> None:
+def test_cancellation_drains_owned_accuracy_execution(tmp_path: Path, sim: Sim) -> None:
+    threads = sim.threads()
+    sandbox = _BlockingSandbox(threads)
+    executor = _accuracy_on_threads(tmp_path, sandbox, threads)
+
     async def scenario() -> None:
-        sandbox = _BlockingSandbox()
-        executor = _executor(
-            tmp_path,
-            TrustedEvaluationPlan(accuracy_command="check"),
-            sandbox,
-        )
         operation = asyncio.create_task(executor.accuracy())
-        await wait_until_started(sandbox.started, operation)
+        await SimBlockingRunner(threads).run(sandbox.started.wait)
         operation.cancel()
         sandbox.release.set()
         with pytest.raises(asyncio.CancelledError):
             await operation
         assert sandbox.completed.is_set()
 
-    asyncio.run(scenario())
+    sim.run(scenario(), threads=threads)
 
 
 class _CancellableSandbox(_BlockingSandbox):
     """A command that runs until its cancel event stops it, as a real runner's does."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, threads: SimThreads) -> None:
+        super().__init__(threads)
         self.stopped_by_cancel = False
 
     def execute(
@@ -561,22 +578,20 @@ class _CancellableSandbox(_BlockingSandbox):
         return CommandResult(output="", exit_code=130)
 
 
-def test_cancelling_an_evaluation_stops_its_running_command(tmp_path: Path) -> None:
+def test_cancelling_an_evaluation_stops_its_running_command(tmp_path: Path, sim: Sim) -> None:
+    threads = sim.threads()
+    sandbox = _CancellableSandbox(threads)
+    executor = _accuracy_on_threads(tmp_path, sandbox, threads)
+
     async def scenario() -> None:
-        sandbox = _CancellableSandbox()
-        executor = _executor(
-            tmp_path,
-            TrustedEvaluationPlan(accuracy_command="check"),
-            sandbox,
-        )
         operation = asyncio.create_task(executor.accuracy())
-        await wait_until_started(sandbox.started, operation)
+        await SimBlockingRunner(threads).run(sandbox.started.wait)
         operation.cancel()
         with pytest.raises(asyncio.CancelledError):
             await operation
         assert sandbox.stopped_by_cancel
 
-    asyncio.run(scenario())
+    sim.run(scenario(), threads=threads)
 
 
 @pytest.mark.parametrize("model", [TrustedAccuracyResult, TrustedBenchmarkResult])

@@ -13,8 +13,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from vs_runtime.api import SlotLease, SlotMeter, SlotMeterError
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import SimThreads, examples
 
 
 class _Clock:
@@ -45,7 +44,7 @@ def test_arbitrary_lease_sequences_match_occupancy_and_reload_is_idempotent(
     with TemporaryDirectory() as directory:
         path = Path(directory) / "meter.jsonl"
         clock = _Clock()
-        meter = SlotMeter(path, clock=clock, threads=OsThreads())
+        meter = SlotMeter(path, clock=clock, threads=SimThreads())
         expected: dict[str, tuple[float, float, bool]] = {}
         for operation, identity, advance in operations:
             clock.seconds += advance
@@ -53,7 +52,7 @@ def test_arbitrary_lease_sequences_match_occupancy_and_reload_is_idempotent(
             previous = expected.get(lease_id)
             before = path.read_bytes() if path.exists() else b""
             if operation == "reload":
-                meter = SlotMeter(path, clock=clock, threads=OsThreads())
+                meter = SlotMeter(path, clock=clock, threads=SimThreads())
             elif operation == "open":
                 if previous is not None:
                     with pytest.raises(SlotMeterError, match="already exists"):
@@ -80,22 +79,22 @@ def test_arbitrary_lease_sequences_match_occupancy_and_reload_is_idempotent(
             expected_minutes = math.fsum((end - start) / 60 for start, end, _ in expected.values())
             assert meter.charged_minutes == expected_minutes
             assert all(lease.charged_minutes >= 0 for lease in projections)
-            first_reload = SlotMeter(path, clock=clock, threads=OsThreads())
-            second_reload = SlotMeter(path, clock=clock, threads=OsThreads())
+            first_reload = SlotMeter(path, clock=clock, threads=SimThreads())
+            second_reload = SlotMeter(path, clock=clock, threads=SimThreads())
             assert first_reload.leases() == second_reload.leases() == projections
             assert first_reload.charged_minutes == second_reload.charged_minutes == expected_minutes
 
 
 def test_crash_between_heartbeats_charges_only_last_durable_heartbeat(tmp_path: Path) -> None:
     clock = _Clock()
-    meter = SlotMeter(tmp_path / "meter.jsonl", clock=clock, threads=OsThreads())
+    meter = SlotMeter(tmp_path / "meter.jsonl", clock=clock, threads=SimThreads())
     clock.seconds = 60
     meter.open("a")
     clock.seconds = 120
     meter.heartbeat("a")
     clock.seconds = 179
 
-    resumed = SlotMeter(tmp_path / "meter.jsonl", clock=clock, threads=OsThreads())
+    resumed = SlotMeter(tmp_path / "meter.jsonl", clock=clock, threads=SimThreads())
     assert resumed.charged_minutes == 1
     assert resumed.close("a").charged_minutes == pytest.approx(119 / 60)
 
@@ -105,7 +104,7 @@ def test_crash_during_append_recovers_only_incomplete_final_json(prefix_length: 
     with TemporaryDirectory() as directory:
         path = Path(directory) / "meter.jsonl"
         clock = _Clock()
-        meter = SlotMeter(path, clock=clock, threads=OsThreads())
+        meter = SlotMeter(path, clock=clock, threads=SimThreads())
         meter.open("a")
         clock.seconds = 60
         meter.heartbeat("a")
@@ -114,12 +113,12 @@ def test_crash_during_append_recovers_only_incomplete_final_json(prefix_length: 
         with path.open("ab") as stream:
             stream.write(interrupted[: min(prefix_length, len(interrupted) - 1)])
 
-        resumed = SlotMeter(path, clock=clock, threads=OsThreads())
+        resumed = SlotMeter(path, clock=clock, threads=SimThreads())
         assert path.read_bytes() == valid
         assert resumed.charged_minutes == 1
         clock.seconds = 180
         assert resumed.close("a").charged_minutes == 3
-        assert SlotMeter(path, clock=clock, threads=OsThreads()).charged_minutes == 3
+        assert SlotMeter(path, clock=clock, threads=SimThreads()).charged_minutes == 3
 
 
 @pytest.mark.parametrize("terminated", [False, True])
@@ -130,7 +129,7 @@ def test_valid_final_record_without_newline_is_retained(
     contents = b'{"kind":"open","lease_id":"a","at_s":0.0}'
     path.write_bytes(contents + (b"\n" if terminated else b""))
     clock = _Clock()
-    meter = SlotMeter(path, clock=clock, threads=OsThreads())
+    meter = SlotMeter(path, clock=clock, threads=SimThreads())
     assert len(meter.leases()) == 1
     assert path.read_bytes() == contents + b"\n"
     clock.seconds = 120
@@ -150,7 +149,7 @@ def test_unknown_ledger_keys_are_rejected_even_in_unterminated_tail(
         contents += b"\n" if terminated else b""
         path.write_bytes(contents)
         with pytest.raises(SlotMeterError, match="Extra inputs are not permitted"):
-            SlotMeter(path, clock=_Clock(), threads=OsThreads())
+            SlotMeter(path, clock=_Clock(), threads=SimThreads())
         assert path.read_bytes() == contents
 
 
@@ -167,7 +166,7 @@ def test_complete_invalid_records_raise_without_rewriting(tmp_path: Path, conten
     path = tmp_path / "meter.jsonl"
     path.write_bytes(contents)
     with pytest.raises(SlotMeterError, match="record 1"):
-        SlotMeter(path, clock=_Clock(), threads=OsThreads())
+        SlotMeter(path, clock=_Clock(), threads=SimThreads())
     assert path.read_bytes() == contents
 
 
@@ -175,7 +174,7 @@ def test_complete_invalid_records_raise_without_rewriting(tmp_path: Path, conten
 def test_invalid_clock_value_does_not_change_ledger(tmp_path: Path, invalid_time: float) -> None:
     clock = _Clock()
     path = tmp_path / "meter.jsonl"
-    meter = SlotMeter(path, clock=clock, threads=OsThreads())
+    meter = SlotMeter(path, clock=clock, threads=SimThreads())
     meter.open("a")
     before = path.read_bytes()
     clock.seconds = invalid_time
@@ -187,14 +186,14 @@ def test_invalid_clock_value_does_not_change_ledger(tmp_path: Path, invalid_time
 def test_backwards_clock_is_rejected_across_leases_and_reload(tmp_path: Path) -> None:
     clock = _Clock()
     path = tmp_path / "meter.jsonl"
-    meter = SlotMeter(path, clock=clock, threads=OsThreads())
+    meter = SlotMeter(path, clock=clock, threads=SimThreads())
     meter.open("a")
     clock.seconds = 120
     meter.open("b")
     before = path.read_bytes()
     clock.seconds = 60
     with pytest.raises(SlotMeterError, match="at_s moved backwards"):
-        SlotMeter(path, clock=clock, threads=OsThreads()).close("a")
+        SlotMeter(path, clock=clock, threads=SimThreads()).close("a")
     assert path.read_bytes() == before
 
 
@@ -206,9 +205,9 @@ def test_projection_rejects_negative_occupancy() -> None:
 def test_new_nested_ledger_directory_is_persisted_and_reloadable(tmp_path: Path) -> None:
     path = tmp_path / "new" / "nested" / "ledger.jsonl"
     clock = _Clock()
-    meter = SlotMeter(path, clock=clock, threads=OsThreads())
+    meter = SlotMeter(path, clock=clock, threads=SimThreads())
     meter.open("a")
     clock.seconds = 120
     meter.close("a")
     assert path.is_file()
-    assert SlotMeter(path, clock=clock, threads=OsThreads()).charged_minutes == 2
+    assert SlotMeter(path, clock=clock, threads=SimThreads()).charged_minutes == 2

@@ -25,15 +25,17 @@ from vs_runtime.api.testing import (
     FakeStopTimer,
     FakeWorkspace,
 )
-from vs_sim.api import OsThreads, yield_now
-from vs_sim.api.testing import arrival
+from vs_sim.api import yield_now
+from vs_sim.api.testing import SimThreads, arrival, yield_until
 
 _GRACE_S = 60.0
 
 
 async def _until_armed(timer: FakeStopTimer) -> None:
-    # A deadlock guard: the grace wait is armed within a few loop iterations.
-    assert await asyncio.to_thread(timer.wait_armed, 30.0)
+    async def delays() -> list[float]:
+        return timer.delays
+
+    await yield_until(delays, bool, "the grace wait to arm")
 
 
 class _StopWork:
@@ -51,8 +53,8 @@ class _StopWork:
 
 @pytest.mark.asyncio
 async def test_a_stop_that_outlives_the_grace_cancels_the_block_as_a_landed_stop() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
-    timer = FakeStopTimer(threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    timer = FakeStopTimer(threads=SimThreads())
     on_stop = _StopWork()
     turn_cancelled = asyncio.Event()
 
@@ -81,8 +83,8 @@ async def test_a_stop_that_outlives_the_grace_cancels_the_block_as_a_landed_stop
 
 @pytest.mark.asyncio
 async def test_a_block_that_ends_within_the_grace_is_not_cancelled() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
-    timer = FakeStopTimer(threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    timer = FakeStopTimer(threads=SimThreads())
     finish = asyncio.Event()
 
     async def run() -> str:
@@ -101,8 +103,8 @@ async def test_a_block_that_ends_within_the_grace_is_not_cancelled() -> None:
 
 @pytest.mark.asyncio
 async def test_a_resume_within_the_grace_disarms_the_cancellation() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
-    timer = FakeStopTimer(threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    timer = FakeStopTimer(threads=SimThreads())
     finish = asyncio.Event()
 
     async def run() -> str:
@@ -126,9 +128,9 @@ async def test_a_resume_within_the_grace_disarms_the_cancellation() -> None:
 
 @pytest.mark.asyncio
 async def test_a_stop_pending_at_entry_is_bounded_and_a_cleanup_failure_is_kept() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     channel.request_stop(StopMode.DRAIN)
-    timer = FakeStopTimer(threads=OsThreads())
+    timer = FakeStopTimer(threads=SimThreads())
     on_stop = _StopWork(RuntimeError("scancel failed"))
 
     async def run() -> None:
@@ -147,8 +149,8 @@ async def test_a_stop_pending_at_entry_is_bounded_and_a_cleanup_failure_is_kept(
 
 @pytest.mark.asyncio
 async def test_a_cleanup_failure_is_raised_when_the_block_ends_on_its_own() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
-    timer = FakeStopTimer(threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    timer = FakeStopTimer(threads=SimThreads())
 
     async def run() -> None:
         async with bounded_stop(
@@ -166,11 +168,14 @@ async def test_a_cleanup_failure_is_raised_when_the_block_ends_on_its_own() -> N
 
 @pytest.mark.asyncio
 async def test_an_outside_cancellation_stays_a_cancellation() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
 
     async def run() -> None:
         async with bounded_stop(
-            channel, grace_s=_GRACE_S, on_stop=_StopWork(), timer=FakeStopTimer(threads=OsThreads())
+            channel,
+            grace_s=_GRACE_S,
+            on_stop=_StopWork(),
+            timer=FakeStopTimer(threads=SimThreads()),
         ):
             await asyncio.Event().wait()
 
@@ -183,11 +188,11 @@ async def test_an_outside_cancellation_stays_a_cancellation() -> None:
 
 @given(st.one_of(st.floats(max_value=0.0), st.just(math.inf), st.just(math.nan)))
 def test_a_grace_that_is_not_positive_and_finite_is_rejected(grace_s: float) -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
 
     async def enter() -> None:
         async with bounded_stop(
-            channel, grace_s=grace_s, on_stop=_StopWork(), timer=FakeStopTimer(threads=OsThreads())
+            channel, grace_s=grace_s, on_stop=_StopWork(), timer=FakeStopTimer(threads=SimThreads())
         ):
             pass
 
@@ -196,7 +201,7 @@ def test_a_grace_that_is_not_positive_and_finite_is_rejected(grace_s: float) -> 
 
 
 def test_stop_listeners_see_each_request_until_unsubscribed() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     seen: list[bool] = []
     unsubscribe = channel.on_stop_requested(lambda: seen.append(channel.stop_requested()))
 
@@ -214,7 +219,7 @@ def test_stop_listeners_see_each_request_until_unsubscribed() -> None:
 
 @pytest.mark.asyncio
 async def test_gated_evaluation_refuses_new_work_after_a_stop() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     inner = FakeEvaluation()
     evaluation = stop_gated_evaluation(inner, channel)
     workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
@@ -237,7 +242,7 @@ async def test_gated_evaluation_refuses_new_work_after_a_stop() -> None:
 
 @pytest.mark.asyncio
 async def test_gated_evaluation_cancels_a_running_evaluation_at_the_stop() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     inner = FakeEvaluation()
     gate = inner.gate("benchmark", 0)
     evaluation = stop_gated_evaluation(inner, channel)
@@ -255,7 +260,7 @@ async def test_gated_evaluation_cancels_a_running_evaluation_at_the_stop() -> No
 
 @pytest.mark.asyncio
 async def test_gated_evaluation_returns_a_result_that_finishes_before_any_stop() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     inner = FakeEvaluation()
     evaluation = stop_gated_evaluation(inner, channel)
     workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
@@ -276,7 +281,7 @@ def _evaluation_members() -> list[str]:
 @pytest.mark.parametrize("member", _evaluation_members())
 def test_gated_evaluation_offers_every_evaluation_member(member: str) -> None:
     """A member added to Evaluation later must reach the gated wrapper too (#1227 queue)."""
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     evaluation = stop_gated_evaluation(FakeEvaluation(), channel)
 
     assert callable(getattr(evaluation, member, None)), member
@@ -290,8 +295,8 @@ async def test_a_block_that_ends_during_on_stop_does_not_abort_the_stop_cleanup(
     body then leaves with RunStopped, bounded_stop cancels its watcher, and that
     cancellation reaches the executor's submission, so the job's identity is lost.
     """
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
-    timer = FakeStopTimer(threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    timer = FakeStopTimer(threads=SimThreads())
     cleanup_started = asyncio.Event()
     external_work_settled = asyncio.Event()
     outcome: list[str] = []
@@ -323,7 +328,7 @@ async def test_a_block_that_ends_during_on_stop_does_not_abort_the_stop_cleanup(
 
 @pytest.mark.asyncio
 async def test_a_stop_cleanup_that_fails_after_the_block_ended_is_still_raised() -> None:
-    channel = create_run_control_channel(FakeRunControlEventSink(), threads=OsThreads())
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     cleanup_started = asyncio.Event()
     block_ended = asyncio.Event()
 
@@ -335,7 +340,7 @@ async def test_a_stop_cleanup_that_fails_after_the_block_ended_is_still_raised()
 
     async def run() -> None:
         async with bounded_stop(
-            channel, grace_s=_GRACE_S, on_stop=on_stop, timer=FakeStopTimer(threads=OsThreads())
+            channel, grace_s=_GRACE_S, on_stop=on_stop, timer=FakeStopTimer(threads=SimThreads())
         ):
             await cleanup_started.wait()
             block_ended.set()
