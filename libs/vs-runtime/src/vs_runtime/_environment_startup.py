@@ -56,3 +56,17 @@ failed, or been interrupted, on every path; after exit nothing more is written.
 The stream carries output only: what happened is reported through the
 ``startup`` sink and the environment's typed errors.
 """
+
+
+type ToolBuildOutputOpener = Callable[[tuple[str, ...]], AbstractContextManager[OutputSink]]
+"""Opens the stream one evaluator tool build writes its raw output to.
+
+Called once for each build an opening environment runs, with the names of the
+evaluator tools it builds (a build makes every tool its cache lacks, in one
+builder). The environment writes the stdout and stderr chunks of the build's
+commands (the builder's start, its root setup, the tool installer) to the
+entered sink while they run, and exits the context when the build has ended,
+on every path; after exit nothing more is written. A cache hit builds nothing
+and opens no stream. The stream carries output only: a failed build raises
+the environment's typed error.
+"""

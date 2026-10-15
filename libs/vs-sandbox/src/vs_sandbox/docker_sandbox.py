@@ -1007,6 +1007,7 @@ class DockerSandbox(WorkspaceSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
         """Execute *command* as root inside the started container.
 
@@ -1014,7 +1015,7 @@ class DockerSandbox(WorkspaceSandbox):
         user is not root, so a step that needs root (installing system
         packages) uses this instead.
         """
-        return self._execute(command, timeout=timeout, cancel=cancel, user="root", output=DISCARD)
+        return self._execute(command, timeout=timeout, cancel=cancel, user="root", output=output)
 
     def execute(
         self,

@@ -9,7 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 
@@ -38,7 +38,7 @@ _HANDLE = "handle-1"
 _TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.CANCELED})
 _ACCURACY = StageRun(_HANDLE, "accuracy")
 _BENCHMARK = StageRun(_HANDLE, "benchmark")
-_PRINTED = {
+_PRINTED: dict[Literal["accuracy", "benchmark"], tuple[bytes, bytes]] = {
     "accuracy": (b"checking 1/3\nchecking 2/3\n", b"warning: slow\n"),
     "benchmark": (b"warmup\nrps=41\n", b""),
 }

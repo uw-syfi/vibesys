@@ -193,10 +193,12 @@ class FakeLifecycleRunner(FakeCommandRunner):
         if self.start_error is not None:
             raise self.start_error
 
-    def execute_as_root(self, command: str, *, timeout: int | None = None) -> CommandResult:
+    def execute_as_root(
+        self, command: str, *, timeout: int | None = None, output: OutputSink = DISCARD
+    ) -> CommandResult:
         """Run *command* like :meth:`execute` and record it as a root execution."""
         before = len(self.calls)
-        result = self.execute(command, timeout=timeout)
+        result = self.execute(command, timeout=timeout, output=output)
         for index in range(before, len(self.calls)):
             self.calls[index] = replace(self.calls[index], as_root=True)
         return result
