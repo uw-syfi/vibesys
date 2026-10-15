@@ -42,7 +42,7 @@ export {
   StreamReconciler,
   type StreamReconcilerOptions,
 } from './stream-reconciler.js';
-export {closeStreamAndTransport} from './stream-shutdown.js';
+export {closeStreamAndTransport, settleAll} from './stream-shutdown.js';
 export {
   type ControlTransport,
   type EventSubscription,

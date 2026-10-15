@@ -462,7 +462,7 @@ describe('ControlChannel', () => {
     expect(channel.connected).toBe(false);
   });
 
-  it('close settles every owner when a connection observer rejects the dial', async () => {
+  it('close settles every owner and preserves a reentrant observer failure', async () => {
     const closeStarted = deferred();
     const connectionCloseCalled = deferred();
     const releaseConnectionClose = deferred();
@@ -517,21 +517,153 @@ describe('ControlChannel', () => {
         closeSettled = true;
       },
     );
-    // Drain the fixed promise chain through the rejected dial completion. The
+    // Drain the fixed promise chain through the in-flight dial completion. The
     // gated retirement is still an owned resource, so neither outcome is legal.
     for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
     expect(connectionCloseCalls).toBe(1);
     expect(closeSettled).toBe(false);
 
     releaseConnectionClose.resolve();
-    // Dial ownership precedes retirement ownership, so the observer failure is
-    // stable even though the later connection retirement also rejects.
-    await expect(firstClose).rejects.toBe(observerError);
-    await expect(repeatedClose).rejects.toBe(observerError);
-    await expect(channel.close()).rejects.toBe(observerError);
+    // Observer delivery is the transition's first failure, followed by the
+    // later retirement failure; repeated close callers share that exact result.
+    const failure = await firstClose.catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect(failure).toMatchObject({
+      message: 'could not close every control channel owner',
+      errors: [observerError, retirementError],
+    });
+    await expect(repeatedClose).rejects.toBe(failure);
+    await expect(channel.close()).rejects.toBe(failure);
     await expect(request).rejects.toMatchObject({kind: 'disconnected'});
     expect(channel.connected).toBe(false);
   });
+
+  it('keeps retry ownership when the connection observer throws at retry start', async () => {
+    const connector = new FakeConnector(['rejects', 'answers']);
+    const scheduler = new FakeClock();
+    const observerError = new Error('connection observer failed');
+    let observerFailures = 0;
+    const channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [10],
+      scheduleTimeout: scheduler.schedule,
+      onConnectionState: state => {
+        if (state.status !== 'disconnected' || !state.retrying || observerFailures > 0) return;
+        observerFailures += 1;
+        throw observerError;
+      },
+    });
+    const held = channel.request({type: 'query.snapshot'});
+    void held.catch(() => undefined);
+
+    await scheduler.waitUntilScheduled(10);
+    scheduler.runNext();
+    channel.reconnect();
+    const later = channel.request({type: 'query.snapshot'});
+    void later.catch(() => undefined);
+
+    // `open` records the attempt before its first await, so this assertion is
+    // synchronous with the retry callback. It fails by value if the observer
+    // strands `#dialing`, rather than waiting on the requests it wedged.
+    const attempts = [...connector.opened];
+    if (attempts.length === 1) {
+      await channel.close().catch(() => undefined);
+    }
+    expect(attempts).toEqual(['rejects', 'answers']);
+    await expect(held).resolves.toMatchObject({ok: true});
+    await expect(later).resolves.toMatchObject({ok: true});
+    await expect(channel.close()).rejects.toBe(observerError);
+  });
+
+  it('keeps a successfully installed connection routable after an observer failure', async () => {
+    const connector = new FakeConnector(['answers']);
+    const observerError = new Error('connected observer failed');
+    let observerFailures = 0;
+    const channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [],
+      onConnectionState: state => {
+        if (state.status !== 'connected' || observerFailures > 0) return;
+        observerFailures += 1;
+        throw observerError;
+      },
+    });
+
+    await expect(channel.request({type: 'query.snapshot'})).resolves.toMatchObject({ok: true});
+    await expect(channel.request({type: 'query.snapshot'})).resolves.toMatchObject({ok: true});
+    expect(channel.connected).toBe(true);
+    await expect(channel.close()).rejects.toBe(observerError);
+  });
+
+  it('keeps a failed dial retryable after an observer failure', async () => {
+    const connector = new FakeConnector(['rejects', 'answers']);
+    const scheduler = new FakeClock();
+    const observerError = new Error('failed-dial observer failed');
+    let observerFailures = 0;
+    const channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [10],
+      scheduleTimeout: scheduler.schedule,
+      onConnectionState: state => {
+        if (state.status !== 'disconnected' || state.retrying || observerFailures > 0) return;
+        observerFailures += 1;
+        throw observerError;
+      },
+    });
+
+    const request = channel.request({type: 'query.snapshot'});
+    await scheduler.waitUntilScheduled(10);
+    scheduler.runNext();
+
+    await expect(request).resolves.toMatchObject({ok: true});
+    expect(connector.opened).toEqual(['rejects', 'answers']);
+    expect(channel.connected).toBe(true);
+    await expect(channel.close()).rejects.toBe(observerError);
+  });
+
+  for (const report of ['drop', 'fault'] as const) {
+    it(`keeps ${report} recovery owned when its observer reconnects and throws`, async () => {
+      const connector = new FakeConnector(['answers']);
+      const observerError = new Error(`${report} observer failed`);
+      let observerFailures = 0;
+      let handlers: ControlConnectionHandlers | undefined;
+      let channel: ControlChannel;
+      channel = new ControlChannel(connector, {
+        clientId: 'test-client',
+        reconnectDelaysMs: [10],
+        onConnectionState: state => {
+          if (state.status !== 'disconnected' || observerFailures > 0) return;
+          observerFailures += 1;
+          channel.reconnect();
+          throw observerError;
+        },
+      });
+      channel.adopt(bound => {
+        handlers = bound;
+        return {send: () => undefined, close: async () => undefined};
+      });
+
+      const error = new BackendClientError(
+        report === 'drop' ? 'disconnected' : 'parse',
+        `${report} ended the connection`,
+      );
+      const boundHandlers = handlers;
+      if (boundHandlers === undefined) throw new Error('The adopted connection has no handlers');
+      let escaped: unknown;
+      try {
+        if (report === 'drop') boundHandlers.onDrop(error);
+        else boundHandlers.onFault(error);
+      } catch (reason) {
+        escaped = reason;
+      }
+
+      await expect(channel.request({type: 'query.snapshot'})).resolves.toMatchObject({ok: true});
+      expect(escaped).toBeUndefined();
+      expect(connector.opened).toEqual(['answers']);
+      expect(channel.connected).toBe(true);
+      await expect(channel.close()).rejects.toBe(observerError);
+    });
+  }
 
   it('does not open a connection after a state callback closes the channel', async () => {
     const connector = new FakeConnector(['answers']);

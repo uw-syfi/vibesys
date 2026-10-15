@@ -8,6 +8,7 @@ import type {AbortSignalLike, ControlChannelState} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import {type ClientClock, ServerClient, type ServerClientOptions} from './client.js';
 import {expect} from './test-support/expect.js';
+import {FakeClientNetwork} from './testing/index.js';
 
 /** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
 function traceState(state: ControlChannelState): string {
@@ -379,6 +380,70 @@ describe('ServerClient', () => {
       await client.close();
       await close(server);
     }
+  });
+
+  it('settles a retiring dedicated socket before exposing a control observer failure', async () => {
+    const network = new FakeClientNetwork();
+    const clock = new FakeClock();
+    const observerError = new Error('control observer failed');
+    const connecting = ServerClient.connect('/run/server.sock', {
+      network,
+      clock,
+      closeGraceMs: 50,
+      reconnectDelaysMs: [],
+      onConnectionState: state => {
+        if (state.status === 'disconnected') throw observerError;
+      },
+    });
+    const controlSocket = network.connections[0];
+    if (controlSocket === undefined) throw new Error('The control dial did not open a socket');
+    controlSocket.connect();
+    const client = await connecting;
+
+    controlSocket.fail(new Error('control connection failed'));
+    await controlSocket.whenListenersReleased();
+    const chat = client.request({type: 'query.chat', text: 'still running'});
+    const chatSocket = network.connections[1];
+    if (chatSocket === undefined) throw new Error('The chat did not open a dedicated socket');
+    chatSocket.holdGracefulEnd();
+    chatSocket.connect();
+    const frame = chatSocket.writes[0];
+    if (frame === undefined) throw new Error('The chat request was not written');
+    const request = JSON.parse(frame) as {readonly request_id: string};
+    chatSocket.receive(
+      `${JSON.stringify({
+        protocol_version: 1,
+        request_id: request.request_id,
+        timestamp: '2026-01-01T00:00:00Z',
+        ok: true,
+        chat: {question: 'still running', answer: 'done', effect: 'none'},
+        events: [],
+      })}\n`,
+    );
+    await expect(chat).resolves.toMatchObject({ok: true});
+    expect(clock.pendingDelays()).toEqual([50]);
+
+    const closing = client.close();
+    const pending = {};
+    let closeOutcome: unknown = pending;
+    void closing.then(
+      () => {
+        closeOutcome = undefined;
+      },
+      error => {
+        closeOutcome = error;
+      },
+    );
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+    expect(closeOutcome).toBe(pending);
+    expect(chatSocket.closed).toBe(false);
+    expect(clock.pendingDelays()).toEqual([50]);
+
+    clock.runPending();
+    await expect(closing).rejects.toBe(observerError);
+    expect(chatSocket.closed).toBe(true);
+    expect(clock.pendingDelays()).toEqual([]);
   });
 
   it('shares one retirement when a subscription and client close race', async () => {
