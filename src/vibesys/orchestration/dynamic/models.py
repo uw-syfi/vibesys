@@ -213,8 +213,9 @@ MAX_MERGE_CANDIDATES = 8
 class MergePlan(BaseModel):
     """Merge buildable candidates into the run's main revision, in the order given.
 
-    A merge agent applies them on a checkout of main, resolves conflicts and runs the CPU-level
-    tests; on success main advances to its commit and is then measured. It may not redesign:
+    A merge agent applies them on a checkout of main, resolves conflicts and runs the project's
+    fast tests; its commit is then measured and becomes main when it passes the trusted accuracy
+    check and measures no worse than main. It may not redesign:
     when the instructions cannot be followed it stops and says why.
     """
 
@@ -601,14 +602,14 @@ class MergeResult(RevisionReply):
 
     outcome: MergeOutcomeKind = Field(
         description=(
-            "merged when every candidate is merged as instructed and the CPU-level tests pass; "
-            "refused when the instructions cannot be followed without redesigning."
+            "merged when every candidate is merged as instructed and the project's fast tests "
+            "pass; refused when the instructions cannot be followed without redesigning."
         )
     )
     summary: str = Field(min_length=1, description="What you merged, in order, and how.")
     tests: str = Field(
         min_length=1,
-        description="The CPU-level tests you ran on the merged tree, and their result.",
+        description="The project's fast tests you ran on the merged tree, and their result.",
     )
     reason: str = Field(
         default="",

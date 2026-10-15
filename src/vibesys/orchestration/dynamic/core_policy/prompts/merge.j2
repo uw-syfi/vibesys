@@ -20,9 +20,9 @@ What to check or be careful of:
 {{ watch_for }}
 
 Resolve conflicts so each candidate's change survives as the instructions say. Then run
-the CPU-level tests and fix what the merge broke, without redesigning any candidate. The
+the project's fast tests and fix what the merge broke, without redesigning any candidate. The
 framework measures your commit with the trusted evaluations; main moves to it only when it
-passes the trusted accuracy check.
+passes the trusted accuracy check and measures no worse than main.
 
 If an instruction cannot be followed without redesigning a candidate, stop: answer with
 {{ reply.outcome }} "refused" and say in {{ reply.reason }} which instruction and why. Main stays as it
