@@ -58,6 +58,7 @@ from vs_sandbox.api.slurm import (
     SlurmExecutionMetadata,
     SlurmStagePayload,
     SlurmTargetLifecycle,
+    open_ledger_attachment,
     profile_capture_descriptor,
     require_profile_fields,
     split_profile_stats,
@@ -70,7 +71,11 @@ if TYPE_CHECKING:
 
     from vs_runtime._measurement_progress import StageOutputOpener
     from vs_runtime.contracts import CandidateWorkspace, Workspaces
-    from vs_sandbox.api.slurm import SlurmExecutionPolicy, SlurmStageOutputOpener
+    from vs_sandbox.api.slurm import (
+        SlurmExecutionPolicy,
+        SlurmLedgerAttachment,
+        SlurmStageOutputOpener,
+    )
     from vs_sim.api import Clock, OutputSink, Processes, Sleeper
     from vs_slurm.api import Cluster, SlurmConfig
 
@@ -130,12 +135,19 @@ class SemanticSlurmEvaluationExecutor:
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
         processes: Processes | None = None,
+        ledger: SlurmLedgerAttachment | None = None,
+        ledger_identity: tuple[str, str] | None = None,
         stage_output: StageOutputOpener | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state.
 
         ``clock`` times job deadlines; ``sleeper`` paces the polls of running jobs. Each
         executor uses ``cluster``, or reaches the configured cluster by starting ``processes``.
+
+        When the operator's policy enables the evaluation ledger (#2757), evaluations
+        go through ``ledger``, or through the project's ledger on the configured
+        cluster, which ``ledger_identity`` (the project id and the run id) names.
+
         ``stage_output`` opens each stage's stream, which the stage's output on the cluster
         reaches at each poll while the job runs and in full when it settles.
         """
@@ -155,6 +167,7 @@ class SemanticSlurmEvaluationExecutor:
         self._stage_output = stage_output
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
+        self._ledger = ledger if ledger is not None else self._open_ledger(ledger_identity)
         self._availability = self._make_executor(workspaces.root.path)
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
@@ -296,10 +309,33 @@ class SemanticSlurmEvaluationExecutor:
             if existing is not None:
                 return existing
             workspace = await self._workspaces.create_candidate(record.snapshot)
-            executor = self._make_executor(workspace.path, self._stage_streams(record.request))
+            executor = self._make_executor(
+                workspace.path,
+                self._stage_streams(record.request),
+                candidate=record.snapshot,
+            )
             execution = _Execution(workspace, executor)
             self._executions[handle_id] = execution
             return execution
+
+    def _open_ledger(self, identity: tuple[str, str] | None) -> SlurmLedgerAttachment | None:
+        """The run's attachment to its project's ledger, if the operator enabled one."""
+        policy = self._policy.ledger
+        if policy is None:
+            return None
+        if identity is None or self._processes is None:
+            message = "the evaluation ledger needs the project and run identity and a transport"
+            raise ValueError(message)
+        project, run = identity
+        return open_ledger_attachment(
+            self._config,
+            policy,
+            project=project,
+            holder=run,
+            clock=self._clock,
+            processes=self._processes,
+            state_root=self._handle_root / "ledger",
+        )
 
     def _stage_streams(self, request: EvaluationRequest) -> SlurmStageOutputOpener | None:
         """The provider's per-stage opener, naming each stage as its progress reports do."""
@@ -320,6 +356,8 @@ class SemanticSlurmEvaluationExecutor:
         self,
         workspace: Path,
         stage_output: SlurmStageOutputOpener | None = None,
+        *,
+        candidate: str | None = None,
     ) -> SlurmEvaluationExecutor:
         return SlurmEvaluationExecutor(
             self._config,
@@ -334,6 +372,8 @@ class SemanticSlurmEvaluationExecutor:
             admission=self._admission,
             cluster=self._cluster,
             processes=self._processes,
+            ledger=self._ledger,
+            ledger_candidate=candidate,
             stage_output=stage_output,
         )
 

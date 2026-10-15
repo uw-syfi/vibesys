@@ -401,7 +401,13 @@ class _ProductHostFactory:
         # its command prints it, a Slurm stage's as each scheduler poll reads it.
         tries = TryHandles()
         stage_output = tries.stage_output(resources.stage_output)
-        executor = self._semantic_executor(resources, workspaces, namespace, stage_output)
+        executor = self._semantic_executor(
+            resources,
+            workspaces,
+            namespace,
+            stage_output,
+            ledger_identity=(project.project.state.load_project().project_id, project.state.run_id),
+        )
         tool_context = _tool_context(
             resources,
             self._serve_queue_status(resources, _slurm_handle_root(namespace), ownership),
@@ -539,11 +545,14 @@ class _ProductHostFactory:
         workspaces: Workspaces,
         namespace: StateNamespace,
         stage_output: StageOutputOpener,
+        *,
+        ledger_identity: tuple[str, str],
     ) -> SlurmSemanticEvaluationExecutor | None:
         """Build the cluster's semantic execution adapter when the environment reports one."""
         cluster = resources.environment_resources.view.cluster_evaluation
         if cluster is None:
             return None
+        clock = self.timing.clock
         return SlurmSemanticEvaluationExecutor(
             cluster.settings.config,
             cluster.settings.policy,
@@ -552,9 +561,10 @@ class _ProductHostFactory:
             workspaces,
             namespace,
             _slurm_handle_root(namespace),
-            clock=self.timing.clock,
-            sleeper=self.timing.clock,
+            clock=clock,
+            sleeper=clock,
             processes=self.integration.system.slurm_processes,
+            ledger_identity=ledger_identity,
             stage_output=stage_output,
         )
 
@@ -564,7 +574,8 @@ class _ProductHostFactory:
         Every core measurement, an agent's included, is a job of the run's evaluation
         executor. Core refuses new submissions once the stop is committed, and the executor
         cancels the jobs still on the cluster when ``close_core_services`` closes it as the
-        run exits (``tests/system/agent_evaluation/test_stops_on_stop.py``). The legacy
+        run exits (with the operator's evaluation ledger, #2757, it detaches instead and
+        leaves them to the ledger) (``tests/system/agent_evaluation/test_stops_on_stop.py``). The legacy
         evaluation service this hook once cancelled was never installed on a core run.
         """
 

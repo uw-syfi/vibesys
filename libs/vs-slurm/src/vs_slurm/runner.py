@@ -78,6 +78,9 @@ _JOB_ID = re.compile(r"^Submitted batch job ([0-9]+)\r?\n", re.MULTILINE)
 # The allocation's own exit status when its server never answered the readiness probe
 # (it exited or hung while starting), so no stage ran. The job script writes it.
 SERVICE_NOT_READY_EXIT_CODE = 70
+# A stage's exit status when its time limit stopped it: ``timeout(1)`` exits 124 after
+# its TERM, and 137 when the stage outlived the TERM and ``--kill-after`` killed it.
+STAGE_TIMEOUT_EXIT_CODES = frozenset({124, 137})
 _MAX_PROCESS_EXIT_CODE = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
 _SERVICE_LOG_TAIL = "service-log-tail.txt"
@@ -609,28 +612,7 @@ class SlurmJobRunner:
         )
         return SlurmBatchHandle(
             job=job,
-            stages=tuple(
-                SlurmBatchStageHandle(
-                    name=stage.name,
-                    file_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=item.remote_path,
-                            local_path=item.local_path,
-                            kind="file",
-                        )
-                        for item in stage.file_artifacts
-                    ),
-                    tree_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=item.remote_path,
-                            local_path=item.local_path,
-                            kind="tree",
-                        )
-                        for item in stage.tree_artifacts
-                    ),
-                )
-                for stage in stages
-            ),
+            stages=batch_stage_handles(request),
             submission_seconds=max(0.0, self._clock.now() - started),
             stop_on_failure=request.stop_on_failure,
         )
@@ -962,7 +944,7 @@ class SlurmJobRunner:
         invocation = _safe_component(operation_id)
         base = PurePosixPath(self._config.remote_workspace_root) / self._config.name / invocation
         if isinstance(request, SlurmBatchRequest):
-            stages = _validate_batch_request(request)
+            _validate_batch_request(request)
             job = self.recover_handle(
                 SlurmJobRequest(
                     workspace=request.workspace,
@@ -980,27 +962,7 @@ class SlurmJobRunner:
                 job=job,
                 submission_seconds=0.0,
                 stop_on_failure=request.stop_on_failure,
-                stages=tuple(
-                    SlurmBatchStageHandle(
-                        name=stage.name,
-                        file_artifacts=tuple(
-                            SlurmArtifactTarget(
-                                remote_path=a.remote_path,
-                                local_path=a.local_path,
-                                kind="file",
-                                collect_on_failure=a.collect_on_failure,
-                            )
-                            for a in stage.file_artifacts
-                        ),
-                        tree_artifacts=tuple(
-                            SlurmArtifactTarget(
-                                remote_path=a.remote_path, local_path=a.local_path, kind="tree"
-                            )
-                            for a in stage.tree_artifacts
-                        ),
-                    )
-                    for stage in stages
-                ),
+                stages=batch_stage_handles(request),
             )
         _validate_request(request)
         return SlurmJobHandle(
@@ -1550,6 +1512,29 @@ def _validate_request(
         for item in request.tree_artifacts
     ]
     return source, support, files, trees
+
+
+def batch_stage_handles(request: SlurmBatchRequest) -> tuple[SlurmBatchStageHandle, ...]:
+    """Each stage's artifact targets as the request declares them: remote paths to local ones."""
+    return tuple(
+        SlurmBatchStageHandle(
+            name=stage.name,
+            file_artifacts=tuple(
+                SlurmArtifactTarget(
+                    remote_path=a.remote_path,
+                    local_path=a.local_path,
+                    kind="file",
+                    collect_on_failure=a.collect_on_failure,
+                )
+                for a in stage.file_artifacts
+            ),
+            tree_artifacts=tuple(
+                SlurmArtifactTarget(remote_path=a.remote_path, local_path=a.local_path, kind="tree")
+                for a in stage.tree_artifacts
+            ),
+        )
+        for stage in _validate_batch_request(request)
+    )
 
 
 def _validate_support(support_trees: Mapping[str, Path] | None) -> list[tuple[PurePosixPath, Path]]:

@@ -57,6 +57,7 @@
       "@vibesys/store/testing": ["libs/store/src/testing/index.ts"],
       "@vibesys/transport": ["libs/transport/src/index.ts"],
       "@vibesys/transport-node": ["libs/transport-node/src/index.ts"],
+      "@vibesys/transport-node/testing": ["libs/transport-node/src/testing/index.ts"],
       "@vibesys/transport/testing": ["libs/transport/src/testing/index.ts"],
       "@vibesys/transport/websocket": ["libs/transport/src/websocket.ts"],
       "@vibesys/ui": ["libs/ui/src/index.ts"],

@@ -43,11 +43,11 @@ import sys
 import tomllib
 from dataclasses import dataclass, field
 from functools import partial
+from importlib import import_module
 from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
-from entrypoints import examples, instances, tasks
 from vs_sim.api import (
     InheritedStdioLauncher,
     LoopSignalSource,
@@ -590,13 +590,17 @@ def _run_source_tui(
     )
 
 
-#: Host commands that run in this process. Each module imports only light
-#: contracts, so the command answers in the interpreter's startup time instead
-#: of paying for the engine twice (here and in a child).
-_LIGHT_COMMANDS: dict[str, Callable[[list[str]], int]] = {
-    "example": examples.main,
-    "instances": instances.main,
-    "tasks": tasks.main,
+#: Host commands that run in this process, by the module whose ``main`` runs each.
+#: Each module imports only light contracts, so the command answers in the
+#: interpreter's startup time instead of paying for the engine twice (here and in a
+#: child). A command's module loads only when that command runs: the host helper and
+#: the detached run import this launcher, and must not pay for every command's
+#: implementation (``evals`` alone loads about 85 modules of the Slurm ledger).
+_LIGHT_COMMANDS: dict[str, str] = {
+    "evals": "entrypoints.evals",
+    "example": "entrypoints.examples",
+    "instances": "entrypoints.instances",
+    "tasks": "entrypoints.tasks",
 }
 
 
@@ -621,7 +625,8 @@ def main(argv: list[str] | None = None, host: LauncherHost | None = None) -> int
 
     light = _LIGHT_COMMANDS.get(args[0]) if args else None
     if light is not None:
-        return light(args[1:])
+        command: Callable[[list[str]], int] = import_module(light).main
+        return command(args[1:])
 
     # Anchored before any doctor check, staleness check, or rebuild, so the
     # frontend's boot trace reports wall time since the user actually ran the

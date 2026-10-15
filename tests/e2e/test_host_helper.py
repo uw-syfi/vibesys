@@ -163,6 +163,9 @@ def test_hello_loads_no_engine_and_reports_its_start_up_time(
     assert {"secrets", "hmac"}.isdisjoint(loaded)
     # Logs cost nothing until a client reads one: vs_logs loads on the first logs request.
     assert [name for name in loaded if name.split(".")[0] == "vs_logs"] == []
+    # The launcher's light commands load on dispatch: hello pays for none of them, so the
+    # ``evals`` command's Slurm ledger (about 85 modules) stays out of the helper.
+    assert [name for name in loaded if name.split(".")[0] == "vs_slurm"] == []
 
 
 def test_run_connect_makes_the_channel_a_relay_to_the_run(

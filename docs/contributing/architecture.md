@@ -146,6 +146,7 @@ graph TD
     entrypoints --> vs_runtime
     entrypoints --> vs_sandbox
     entrypoints --> vs_sim
+    entrypoints --> vs_slurm
     headless --> vibesys
     launch --> vibesys
     launch --> vs_agent

@@ -21,12 +21,14 @@ from vs_evaluation.api import (
     ExecutorObservation,
     is_finished,
 )
-from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
+from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmLedgerAttachment, SlurmStagePayload
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitOutcome,
     FakeCluster,
+    FakeEvaluationLedger,
+    LedgerPolicy,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmBatchStageResult,
@@ -45,6 +47,7 @@ RUN_LIMIT_S = 4 * 3600  # the live run's job_timeout_seconds
 POLL_S = 60.0
 # Only guards a hang: every evaluation here ends on the virtual clock.
 _BOUND_S = 60.0
+PROJECT = "demo-0123456789ab"
 
 
 def _config(**update: object) -> SlurmConfig:
@@ -114,11 +117,19 @@ def _request() -> EvaluationRequest:
 
 
 def _executor(
-    tmp_path: Path, clock: ManualClock, scheduler: _Scheduler, config: SlurmConfig
+    tmp_path: Path, clock: ManualClock, scheduler: _Scheduler, config: SlurmConfig, *, ledger: bool
 ) -> SlurmEvaluationExecutor:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
     (workspace / "bench.py").write_text("print('bench')", encoding="utf-8")
+    attachment = SlurmLedgerAttachment(
+        ledger=FakeEvaluationLedger(project=PROJECT),
+        config=config,
+        project=PROJECT,
+        holder="run-1",
+        policy=LedgerPolicy(),
+        clock=clock,
+    )
     return SlurmEvaluationExecutor(
         config,
         workspace=workspace,
@@ -129,6 +140,8 @@ def _executor(
         cluster=scheduler,
         clock=clock,
         sleeper=clock,
+        ledger=attachment if ledger else None,
+        ledger_candidate="0f3c9e1" if ledger else None,
     )
 
 
@@ -141,6 +154,7 @@ async def _finished(executor: SlurmEvaluationExecutor, handle_id: str) -> Execut
         await executor.wait_for_change(handle_id, timeout_s=_BOUND_S)
 
 
+@pytest.mark.parametrize("ledger", [False, True], ids=["direct", "ledger"])
 @pytest.mark.parametrize(
     "queue_s",
     # The live failure (3 h 56 min), a start just before and just after the old
@@ -148,12 +162,12 @@ async def _finished(executor: SlurmEvaluationExecutor, handle_id: str) -> Execut
     [0.0, 14_160.0, RUN_LIMIT_S - POLL_S / 2, RUN_LIMIT_S + POLL_S / 2, 3.0 * RUN_LIMIT_S],
 )
 async def test_a_job_that_starts_late_still_gets_its_whole_run_budget(
-    tmp_path: Path, queue_s: float
+    tmp_path: Path, queue_s: float, *, ledger: bool
 ) -> None:
     clock = ManualClock(1_000.0)
     # Runs for most of its budget: past any deadline counted from submission.
     scheduler = _Scheduler(clock, queue_s=queue_s, run_s=RUN_LIMIT_S - 2 * POLL_S)
-    executor = _executor(tmp_path, clock, scheduler, _config())
+    executor = _executor(tmp_path, clock, scheduler, _config(), ledger=ledger)
 
     await executor.submit(_request(), handle_id="eval-1")
     observed = await _finished(executor, "eval-1")
@@ -168,7 +182,7 @@ async def test_a_job_that_runs_past_its_run_budget_fails_and_is_cancelled(
 ) -> None:
     clock = ManualClock(1_000.0)
     scheduler = _Scheduler(clock, queue_s=14_160.0, run_s=2.0 * RUN_LIMIT_S)
-    executor = _executor(tmp_path, clock, scheduler, _config())
+    executor = _executor(tmp_path, clock, scheduler, _config(), ledger=False)
 
     await executor.submit(_request(), handle_id="eval-1")
     observed = await _finished(executor, "eval-1")
@@ -186,7 +200,7 @@ async def test_queue_wait_is_bounded_only_by_the_queue_timeout(tmp_path: Path) -
     clock = ManualClock(1_000.0)
     scheduler = _Scheduler(clock, queue_s=10.0 * RUN_LIMIT_S, run_s=60.0)
     config = _config(queue_timeout_seconds=6 * 3600)
-    executor = _executor(tmp_path, clock, scheduler, config)
+    executor = _executor(tmp_path, clock, scheduler, config, ledger=False)
 
     await executor.submit(_request(), handle_id="eval-1")
     observed = await _finished(executor, "eval-1")

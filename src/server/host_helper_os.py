@@ -37,6 +37,7 @@ from server.host_api import (
     TaskSummary,
 )
 from server.host_helper_logs import (
+    LogStoreCorruptError,
     RunLocation,
     StoredBytes,
     UnknownInstanceError,
@@ -306,16 +307,28 @@ class StoreLogReader:
         # lint-waiver: LW-640282 [PLC0415]; logs cost the helper nothing until a client reads one.
         # > The same deferral as in `read`: `hello` must not load vs_logs.read, and an import
         # > tach can see keeps its visibility rule enforced.
-        from vs_logs.read import open_log_directory  # noqa: PLC0415
+        from vs_logs.read import CorruptLogError, open_log_directory  # noqa: PLC0415
 
-        return _StoreInstanceLogs(open_log_directory(self._directory_for(location), _OWNER))
+        reader = open_log_directory(self._directory_for(location), _OWNER)
+        return _StoreInstanceLogs(reader, CorruptLogError)
 
 
 class _StoreInstanceLogs:
-    """One run's ``vs_logs`` store, opened: each read sees what was written since."""
+    """One run's ``vs_logs`` store, opened: each read sees what was written since.
 
-    def __init__(self, reader: StoreReader[LogOwner]) -> None:
+    An index that does not decode (``corrupt``, ``vs_logs.read.CorruptLogError`` passed in
+    so this module still loads none of ``vs_logs``) is ``LogStoreCorruptError``.
+    """
+
+    def __init__(self, reader: StoreReader[LogOwner], corrupt: type[Exception]) -> None:
         self._reader = reader
+        self._corrupt = corrupt
+
+    def _using[T](self, use: Callable[[StoreReader[LogOwner]], T]) -> T:
+        try:
+            return use(self._reader)
+        except self._corrupt as error:
+            raise LogStoreCorruptError(str(error)) from error
 
     def streams(self) -> tuple[LogStream, ...]:
         """The instance's streams, oldest first; none when its run recorded no logs."""
@@ -328,7 +341,7 @@ class _StoreInstanceLogs:
                 size=info.size,
                 outcome=None if info.outcome is None else LogStreamOutcome(info.outcome.value),
             )
-            for info in self._reader.list_streams()
+            for info in self._using(lambda reader: reader.list_streams())
         )
 
     def read(self, stream_id: str, start: LogOffset | LogTail, max_bytes: int) -> StoredBytes:
@@ -339,12 +352,11 @@ class _StoreInstanceLogs:
         # > the import from tach, which keeps vs_logs.read visible to the host helper only.
         from vs_logs.read import FromOffset, Tail, UnknownStreamError  # noqa: PLC0415
 
-        reader = self._reader
         origin = (
             FromOffset(start.offset) if isinstance(start, LogOffset) else Tail(start.tail_bytes)
         )
         try:
-            chunk = reader.read(stream_id, origin, max_bytes)
+            chunk = self._using(lambda reader: reader.read(stream_id, origin, max_bytes))
         except UnknownStreamError as error:
             raise UnknownLogStreamError(stream_id) from error
         return StoredBytes(
