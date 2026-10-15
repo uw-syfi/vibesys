@@ -77,6 +77,7 @@ from vs_evaluation.semantic_stage import (
     EvidenceResultIdentity,
     SemanticEvaluationStage,
     evidence_identity,
+    same_work,
 )
 from vs_evaluation.state_namespace import (
     EvaluationStateNamespace,
@@ -146,6 +147,7 @@ __all__ = [
     "is_finished",
     "join_observation",
     "loop_evaluation_deadline",
+    "same_work",
     "stable_handle_id",
     "state_rank",
 ]

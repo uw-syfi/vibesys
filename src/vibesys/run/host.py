@@ -26,7 +26,7 @@ from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profile
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
-from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor
+from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -393,6 +393,9 @@ class _ProductHostFactory:
             self.integration, resources, workspaces, namespace, self.timing.clock
         )
         configuration = partial(self._agent_configuration, resources)
+        # Each in-process stage's output goes to the run's log store under its gate,
+        # named by the measurement's handle and try, as its gate events name it.
+        tries = TryHandles()
         return build_core_services(
             policy,
             CoreResources(
@@ -404,11 +407,17 @@ class _ProductHostFactory:
                 evaluation=RetryingEvaluationExecutor(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces, clock=self.timing.clock),
+                    else PollingEvaluationExecutor(
+                        evaluation,
+                        workspaces,
+                        clock=self.timing.clock,
+                        stage_output=tries.stage_output(resources.stage_output),
+                    ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
                         project.state.run_id, "core-evaluation-tries"
                     ),
+                    tries=tries,
                 ),
                 environment=self._core_environment(resources),
                 roles=self._offered_roles(resources),

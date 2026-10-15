@@ -556,7 +556,7 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models"]
 [[modules]]
 path = "vs_evaluation.semantic_stage"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluator_protocol"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vs_evaluation.coordinator"
@@ -666,7 +666,7 @@ depends_on = ["vs_decode.api", "vs_sim.api"]
 [[modules]]
 path = "vibesys.run.logs"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["vibesys", "vibesys.run.measurement_events", "vs_logs", "vs_project", "vs_sim.api"]
 
 # Test-support simulation of the run lifecycle (store, commits, executors, effects) above vs_sim.
 # Nothing in production depends on it.
@@ -985,7 +985,7 @@ from = ["vs_logs"]
 visibility = ["server.host_helper"]
 
 [[interfaces]]
-expose = ["NARRATION_COMMAND", "RUN_LOG_OWNER", "UNAVAILABLE_LIMITS", "open_run_log_store", "open_run_logs"]
+expose = ["NARRATION_COMMAND", "RUN_LOG_OWNER", "TOOL_BUILD_COMMAND", "UNAVAILABLE_LIMITS", "open_run_log_store", "open_run_logs", "stage_output_opener", "startup_output_opener", "tool_build_name", "tool_build_output_opener"]
 from = ["vibesys.run.logs"]
 
 [[interfaces]]
