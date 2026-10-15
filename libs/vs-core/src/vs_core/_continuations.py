@@ -264,11 +264,9 @@ def wait_deadline(state: EvaluationState, wait: Continuation) -> float | None:
     unfinished = tuple(job for job in _jobs(state, wait) if not _settled(job))
     if any(queued(job) for job in unfinished):
         return None
-    limits = tuple(submission_deadline(state, job) for job in unfinished)
-    earliest = min((limit for limit in limits if limit is not None), default=None)
-    if earliest is None or len(limits) != sum(limit is not None for limit in limits):
-        return wait.deadline_at
-    return max(wait.deadline_at, earliest)
+    limits = (submission_deadline(state, job) for job in unfinished)
+    earliest = min((wait.deadline_at if at is None else at for at in limits), default=None)
+    return wait.deadline_at if earliest is None else max(wait.deadline_at, earliest)
 
 
 def bounded_wait(run: RunState, wait: Continuation) -> Continuation:

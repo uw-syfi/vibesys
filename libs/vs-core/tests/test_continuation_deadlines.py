@@ -337,3 +337,67 @@ def test_a_wait_charges_its_limit_from_the_job_start_never_its_queue(
             cancels_owed = 0 if isinstance(fact, Ended) else 1
         assert row.timeout == frozen, (fact, at, deadline)
     assert terminations == cancels_owed
+
+
+interleaved = st.lists(
+    st.one_of(
+        seconds(QUEUED_GAP).map(
+            lambda after: Poll(after=after, status=core.ObservationStatus.PENDING, queued=True)
+        ),
+        st.builds(Started, after=seconds(RUNNING_GAP)),
+        st.builds(Tick, after=seconds(QUEUED_GAP)),
+    ),
+    max_size=8,
+)
+
+
+@settings(max_examples=examples(pr=60, nightly=1000))
+# Requeued: it runs, goes back to the queue past its limit, then runs again.
+@example(
+    first_queued=False,
+    facts=[
+        Started(after=20.0),
+        Poll(after=20.0, status=core.ObservationStatus.PENDING, queued=True),
+        Tick(after=150.0),
+        Started(after=1.0),
+        Tick(after=10.0),
+    ],
+    end=None,
+)
+@given(first_queued=st.booleans(), facts=interleaved, end=ends)
+def test_a_wait_times_out_exactly_when_its_job_has_run_its_limit(
+    *, first_queued: bool, facts: list[Poll | Started | Tick], end: Ended | None
+) -> None:
+    """Any interleaving of queued and running facts, clock ticks, requeues and an end.
+
+    Time is charged from the call, except from a fact saying the job is queued to the job's
+    next fact. The wait times out at the first event at which the charged time reaches the
+    limit, while the job runs and has not ended; never while the job is queued.
+    """
+    state, _, submit = waiting(queued=first_queued)
+    sequence = 1
+    at = state.run.now_at
+    charged = at  # The call was at 0; the job's first fact at ``at``.
+    job_queued = first_queued
+    frozen: core.TimedOut | None = None
+    for fact in [*facts, *(() if end is None else (end,))]:
+        at += fact.after
+        if not job_queued:
+            charged += fact.after
+        before = _job(state)
+        if not isinstance(fact, Tick):
+            sequence += 1
+            job_queued = isinstance(fact, Poll)
+        result = core.step(state, _lifecycle_event(fact, submit, sequence, at))
+        state = result.state
+        (row,) = state.evaluation.continuations
+        if frozen is None and charged >= LIMIT and not _settled(before):
+            assert row.timeout is not None, (fact, at, charged)
+            assert row.timeout.unfinished == (
+                core.JobTimeout(resource_id=JOB, progress=before.progress),
+            )
+            assert row.timeout.reached_at == at
+            frozen = row.timeout
+        assert row.timeout == frozen, (fact, at, charged)
+        if _settled(_job(state)):
+            break
