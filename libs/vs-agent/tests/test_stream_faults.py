@@ -23,7 +23,7 @@ from hypothesis import strategies as st
 
 from vs_agent.api.testing import FaultyExecutor, FaultyTransport, StreamPeers, stream_peers
 from vs_faults.api import Boundary, ConversationFault, FaultPlan, FaultRule, ProcessFault
-from vs_sim.api import OsThreads
+from vs_sim.api.testing import SimThreads
 
 PROVIDERS = tuple(agentshim.stream_provider_names())
 TURN_BUDGET_S = 5.0
@@ -42,7 +42,7 @@ def _agent(
         FakeExecutor([], peers=peers.build),
         plan,
         on_container_replaced=peers.forget_conversations,
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
     agent = agentshim.Agent(
         provider,
@@ -151,7 +151,7 @@ def test_a_conversation_fault_is_the_error_the_session_expects_and_never_replays
         ids=SequentialIds(),
     ).transport
     faulty = FaultyTransport(
-        transport, _plan(Boundary.CONVERSATION_TURN, at, fault), threads=OsThreads()
+        transport, _plan(Boundary.CONVERSATION_TURN, at, fault), threads=SimThreads()
     )
     agent = agentshim.Agent(
         faulty,

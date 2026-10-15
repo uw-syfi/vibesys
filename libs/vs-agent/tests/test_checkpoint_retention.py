@@ -34,8 +34,7 @@ from vs_agent.api.testing import (
     scripted_turn,
 )
 from vs_prompts.api import TemplateRenderer
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 def _spec(workspace: Path, role: str = "implementer") -> AgentSessionSpec:
@@ -72,13 +71,15 @@ def test_journaled_turn_sequence_preserves_resume_proof(
                 usage=TokenUsage(input_tokens=20_000_000 if heavy else 1),
             )
         )
-        launcher = fake_agentshim_launcher(provider="codex", executor=executor, threads=OsThreads())
+        launcher = fake_agentshim_launcher(
+            provider="codex", executor=executor, threads=SimThreads()
+        )
         key = AgentSessionKey(SessionScope.MEMBER, f"{role}:worker")
         ledger = FakeAgentInvocationStore()
         with AgentClient(
-            launcher, provider="codex", clock=ManualClock(), threads=OsThreads()
+            launcher, provider="codex", clock=ManualClock(), threads=SimThreads()
         ) as client:
-            sessions = ClientAgentSessions(client, ledger, threads=OsThreads())
+            sessions = ClientAgentSessions(client, ledger, threads=SimThreads())
             spec = _spec(workspace, role)
             sessions.bind(key, spec, AgentTurnRequest(message="", label="resume"))
             for number in range(preceding + 1):
@@ -117,7 +118,7 @@ def test_journaled_later_start_never_replays_after_provider_refuses_resume(
             scripted_turn(provider, text="must not replay", session_id="thread-2"),
         ]
     )
-    launcher = fake_agentshim_launcher(provider=provider, executor=executor, threads=OsThreads())
+    launcher = fake_agentshim_launcher(provider=provider, executor=executor, threads=SimThreads())
     key = AgentSessionKey(SessionScope.MEMBER, "implementer:worker")
     spec = AgentSessionSpec(
         role="implementer",
@@ -127,9 +128,9 @@ def test_journaled_later_start_never_replays_after_provider_refuses_resume(
     )
     ledger = FakeAgentInvocationStore()
     with AgentClient(
-        launcher, provider=provider, clock=ManualClock(), threads=OsThreads()
+        launcher, provider=provider, clock=ManualClock(), threads=SimThreads()
     ) as client:
-        sessions = ClientAgentSessions(client, ledger, threads=OsThreads())
+        sessions = ClientAgentSessions(client, ledger, threads=SimThreads())
         first = sessions.start(key, spec, AgentTurnRequest(message="work", invocation_id="first"))
         assert isinstance(first, Completed)
         failed = sessions.start(key, spec, AgentTurnRequest(message="more", invocation_id="later"))
@@ -145,15 +146,15 @@ def test_journaled_later_start_never_replays_after_provider_refuses_resume(
 
 def test_journaled_initial_turn_without_provider_identity_stays_unresolved(tmp_path: Path) -> None:
     executor = FakeExecutor(scripted_turn("codex", text="waiting"))
-    launcher = fake_agentshim_launcher(provider="codex", executor=executor, threads=OsThreads())
+    launcher = fake_agentshim_launcher(provider="codex", executor=executor, threads=SimThreads())
     key = AgentSessionKey(SessionScope.MEMBER, "implementer:worker")
     spec = _spec(tmp_path)
     turn = AgentTurnRequest(message="work", invocation_id="first")
     ledger = FakeAgentInvocationStore()
     with AgentClient(
-        launcher, provider="codex", clock=ManualClock(), threads=OsThreads()
+        launcher, provider="codex", clock=ManualClock(), threads=SimThreads()
     ) as client:
-        sessions = ClientAgentSessions(client, ledger, threads=OsThreads())
+        sessions = ClientAgentSessions(client, ledger, threads=SimThreads())
         outcome = sessions.start(key, spec, turn)
         assert isinstance(outcome, Unknown)
         assert sessions.start(key, spec, turn) == outcome
@@ -167,15 +168,15 @@ def test_journaled_later_start_refuses_replaced_provider_identity(tmp_path: Path
             scripted_turn("codex", text="unexpected replacement", session_id="thread-2"),
         ]
     )
-    launcher = fake_agentshim_launcher(provider="codex", executor=executor, threads=OsThreads())
+    launcher = fake_agentshim_launcher(provider="codex", executor=executor, threads=SimThreads())
     key = AgentSessionKey(SessionScope.MEMBER, "implementer:worker")
     spec = _spec(tmp_path)
     turn = AgentTurnRequest(message="more", invocation_id="later")
     ledger = FakeAgentInvocationStore()
     with AgentClient(
-        launcher, provider="codex", clock=ManualClock(), threads=OsThreads()
+        launcher, provider="codex", clock=ManualClock(), threads=SimThreads()
     ) as client:
-        sessions = ClientAgentSessions(client, ledger, threads=OsThreads())
+        sessions = ClientAgentSessions(client, ledger, threads=SimThreads())
         first = sessions.start(key, spec, AgentTurnRequest(message="work", invocation_id="first"))
         assert isinstance(first, Completed)
         outcome = sessions.start(key, spec, turn)
@@ -192,13 +193,13 @@ def test_session_renewal_threshold_survives_a_strict_turn(
 ) -> None:
     launcher = (
         FakeProvider(
-            script=FakeTurnScript(answers=("done",), reset_after_turn=2), threads=OsThreads()
+            script=FakeTurnScript(answers=("done",), reset_after_turn=2), threads=SimThreads()
         )
         if implementation == "fake"
         else fake_agentshim_launcher(
             provider="codex",
             executor=FakeExecutor(scripted_turn("codex", text="done", session_id="thread-1")),
-            threads=OsThreads(),
+            threads=SimThreads(),
         )
     )
     session = launcher.launch(_spec(tmp_path))
@@ -226,17 +227,17 @@ def test_later_start_refuses_lost_checkpoint_after_reconstruction(
     first_provider = FakeProvider(
         script=FakeTurnScript(answers=("waiting", AgentOutputSchemaError("invalid reply"))),
         on_turn=calls.append,
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
     with AgentClient(
-        first_provider, provider="codex", clock=ManualClock(), threads=OsThreads()
+        first_provider, provider="codex", clock=ManualClock(), threads=SimThreads()
     ) as client:
-        first = ClientAgentSessions(client, ledger, threads=OsThreads()).start(
+        first = ClientAgentSessions(client, ledger, threads=SimThreads()).start(
             key, spec, AgentTurnRequest(message="work", invocation_id="first")
         )
         assert isinstance(first, Completed)
         if schema_rejected:
-            first = ClientAgentSessions(client, ledger, threads=OsThreads()).start(
+            first = ClientAgentSessions(client, ledger, threads=SimThreads()).start(
                 key, spec, AgentTurnRequest(message="more", invocation_id="invalid")
             )
             assert isinstance(first, InvalidResponse)
@@ -244,12 +245,12 @@ def test_later_start_refuses_lost_checkpoint_after_reconstruction(
     # The inert default checkpoint store deliberately models lost persisted
     # provider state after the journal has acknowledged accepted work.
     with AgentClient(
-        FakeProvider(answer="must not replay", on_turn=calls.append, threads=OsThreads()),
+        FakeProvider(answer="must not replay", on_turn=calls.append, threads=SimThreads()),
         provider="codex",
         clock=ManualClock(),
-        threads=OsThreads(),
+        threads=SimThreads(),
     ) as client:
-        recovered = ClientAgentSessions(client, ledger, threads=OsThreads())
+        recovered = ClientAgentSessions(client, ledger, threads=SimThreads())
         with pytest.raises(SessionResumeError, match="acknowledged provider checkpoint is missing"):
             recovered.start(key, spec, AgentTurnRequest(message="more", invocation_id="later"))
         assert len(calls) == 1 + int(schema_rejected)
@@ -262,12 +263,12 @@ def test_later_start_refuses_changed_configuration_before_dispatch(tmp_path: Pat
     spec = _spec(tmp_path)
     ledger = FakeAgentInvocationStore()
     with AgentClient(
-        FakeProvider(answer="waiting", on_turn=calls.append, threads=OsThreads()),
+        FakeProvider(answer="waiting", on_turn=calls.append, threads=SimThreads()),
         provider="codex",
         clock=ManualClock(),
-        threads=OsThreads(),
+        threads=SimThreads(),
     ) as client:
-        sessions = ClientAgentSessions(client, ledger, threads=OsThreads())
+        sessions = ClientAgentSessions(client, ledger, threads=SimThreads())
         first = sessions.start(key, spec, AgentTurnRequest(message="work", invocation_id="first"))
         assert isinstance(first, Completed)
         changed = AgentSessionSpec(

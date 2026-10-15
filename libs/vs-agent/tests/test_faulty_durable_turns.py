@@ -29,7 +29,7 @@ from vs_agent.api.testing import (
     FaultyAgentClient,
 )
 from vs_faults.api import AgentFault, Boundary, FaultPlan, FaultRule
-from vs_sim.api import OsThreads
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,7 +52,7 @@ def _inner() -> FakeAgentClient:
             tool_servers=True, session_reuse=True, provider_session_resume=True
         ),
         session_reuse=True,
-        threads=OsThreads(),
+        threads=SimThreads(),
     ).set_response(_KIND, _ANSWER)
 
 
@@ -61,7 +61,7 @@ def _durable_turn(client: FakeAgentClient | FaultyAgentClient, workspace: Path) 
         role=_KIND, provider="fake", workspace=workspace, policy=AgentExecutionPolicy()
     )
     turn = AgentTurnRequest(message="Implement `H-01`.", output_schema=_Reply, invocation_id="i-1")
-    sessions = FakeAgentSessions(client, threads=OsThreads())
+    sessions = FakeAgentSessions(client, threads=SimThreads())
     sessions.bind(_KEY, spec, turn)
     return sessions.start(_KEY, spec, turn)
 
@@ -69,7 +69,7 @@ def _durable_turn(client: FakeAgentClient | FaultyAgentClient, workspace: Path) 
 def test_an_empty_plan_passes_a_durable_turn_through(tmp_path: Path) -> None:
     unwrapped = _durable_turn(_inner(), tmp_path / "a")
     wrapped = _durable_turn(
-        FaultyAgentClient(_inner(), FaultPlan(seed=0), threads=OsThreads()), tmp_path / "b"
+        FaultyAgentClient(_inner(), FaultPlan(seed=0), threads=SimThreads()), tmp_path / "b"
     )
 
     assert isinstance(unwrapped, Completed)
@@ -80,7 +80,7 @@ def test_an_empty_plan_passes_a_durable_turn_through(tmp_path: Path) -> None:
 @pytest.mark.parametrize("fault", list(AgentFault))
 def test_an_agent_fault_fires_on_a_durable_turn(tmp_path: Path, fault: AgentFault) -> None:
     rule = FaultRule(boundary=Boundary.AGENT_TURN, target=_KIND, at=1, fault=fault)
-    client = FaultyAgentClient(_inner(), FaultPlan(seed=7, rules=(rule,)), threads=OsThreads())
+    client = FaultyAgentClient(_inner(), FaultPlan(seed=7, rules=(rule,)), threads=SimThreads())
 
     _durable_turn(client, tmp_path)
 
@@ -96,7 +96,7 @@ def test_a_steer_reaches_the_inner_client_during_a_faulted_turn(
     plan = FaultPlan(
         seed=0, rules=(FaultRule(boundary=Boundary.AGENT_TURN, fault=AgentFault.CRASH, at=1),)
     )
-    wrapped = FaultyAgentClient(inner, plan, threads=OsThreads())
+    wrapped = FaultyAgentClient(inner, plan, threads=SimThreads())
     answers: list[SteerOutcome] = []
     inner.on_invoke(
         lambda _call: answers.append(wrapped.steer("go left", on_rejected=lambda: None))
@@ -120,6 +120,6 @@ def test_a_steer_is_unsupported_when_the_inner_client_takes_none() -> None:
     class _NoSteer:
         """A client without the optional steering capability."""
 
-    wrapped = FaultyAgentClient(cast("Any", _NoSteer()), FaultPlan(seed=0), threads=OsThreads())
+    wrapped = FaultyAgentClient(cast("Any", _NoSteer()), FaultPlan(seed=0), threads=SimThreads())
 
     assert wrapped.steer("x", on_rejected=lambda: None) is SteerOutcome.UNSUPPORTED

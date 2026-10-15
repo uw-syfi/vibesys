@@ -33,7 +33,7 @@ from vs_agent.api import (
     MCPServerSpec,
 )
 from vs_sandbox.api.testing import FakeDockerConfinement
-from vs_sim.api import OsThreads
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -73,7 +73,7 @@ def _run_turns(
             transient_retry_delays=(),
             clock=FakeClock(),
             ids=SequentialIds(),
-            threads=OsThreads(),
+            threads=SimThreads(),
         )
         session = launcher.launch(
             AgentSessionSpec(

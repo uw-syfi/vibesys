@@ -22,8 +22,7 @@ from hypothesis import strategies as st
 from vs_agent.api import AgentExecutionPolicy, AgentSessionSpec, AgentTurnRequest
 from vs_agent.api.testing import fake_stream_launcher
 from vs_sandbox.api.testing import FakeDockerConfinement
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import SimThreads, examples
 
 if TYPE_CHECKING:
     from vs_sandbox.api import DockerSandbox
@@ -59,7 +58,7 @@ def test_each_turn_execs_in_the_container_of_its_workspace(candidates: int) -> N
         executor=executor,
         sandboxes={"implementer": cast("DockerSandbox", root)},
         workspace_sandboxes=lambda path: cast("DockerSandbox | None", owned.get(path)),
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
 
     expected = [root.container_id, *(sandbox.container_id for sandbox in owned.values())]

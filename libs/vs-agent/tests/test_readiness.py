@@ -40,8 +40,7 @@ from vs_agent.client import AgentDiagnosticLog
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 PROVIDERS = ("claude", "codex", "gemini", "opencode")
 ROLES = ("planner", "implementer", "judge")
@@ -81,7 +80,7 @@ def _launcher(provider: str, fake: FakeExecutor, home: Path) -> ConfinedSessionL
         executor_factory=lambda: fake,
         launcher_env=lambda: _env_of(home),
         clock=FakeClock(),
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
 
 
@@ -155,7 +154,7 @@ def _client(provider: str, fake: FakeExecutor, home: Path) -> tuple[AgentClient,
         diagnostic_log=AgentDiagnosticLog(log),
         check_readiness=True,
         clock=ManualClock(),
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
     return client, log
 
@@ -256,10 +255,10 @@ def test_a_failure_is_not_remembered_so_a_fixed_environment_is_rechecked(
         executor_factory=lambda: current[0],
         launcher_env=lambda: _env_of(home),
         clock=FakeClock(),
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
     client = AgentClient(
-        launcher, provider=provider, check_readiness=True, clock=ManualClock(), threads=OsThreads()
+        launcher, provider=provider, check_readiness=True, clock=ManualClock(), threads=SimThreads()
     )
 
     with pytest.raises(ProviderNotReadyError):

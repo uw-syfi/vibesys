@@ -25,8 +25,7 @@ from vs_agent.api import (
     reply_breach,
 )
 from vs_agent.api.testing import FakeAgentClient, FakeProvider, assistant_text
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock, examples
+from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -52,7 +51,7 @@ def _executors(chunks: list[str]) -> dict[str, AgentClient | FakeAgentClient]:
     """The production client over a scripted provider, and the Fake, both told the same reply."""
     fake = FakeAgentClient(
         capabilities=AgentCapabilities(provider_session_resume=True, session_reuse=True),
-        threads=OsThreads(),
+        threads=SimThreads(),
     )
     fake.set_text("worker", "".join(chunks))
     fake.stream_output("worker", chunks)
@@ -61,10 +60,10 @@ def _executors(chunks: list[str]) -> dict[str, AgentClient | FakeAgentClient]:
             FakeProvider(
                 answer="".join(chunks),
                 turn=[assistant_text(c) for c in chunks],
-                threads=OsThreads(),
+                threads=SimThreads(),
             ),
             clock=ManualClock(),
-            threads=OsThreads(),
+            threads=SimThreads(),
         ),
         "fake": fake,
     }
