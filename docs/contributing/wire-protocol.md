@@ -336,7 +336,7 @@ socket read reaches end of stream, after relaying that frame.
 | --- | --- | --- |
 | `write_deadline_seconds` | 40s | How long one write toward either the server or stdout may make no progress |
 | `connect_timeout_seconds` | 5s | How long connecting to the socket may take |
-| `read_deadline_seconds` | 12h | How long the socket may send nothing before the relay ends |
+| `read_deadline_seconds` | 7d | How long the socket may send nothing before the relay ends |
 
 The write deadline is the hop's answer to the Unix path having none. A half-open ssh hop (a slept
 laptop, a partition) stops draining the channel; once ssh's window and the pipe fill, the relay's
@@ -350,10 +350,14 @@ The server-facing hop (the Unix socket) has no such liveness: `AF_UNIX` has no k
 wedged server that neither sends nor closes would hang the relay forever without its own bound. The
 read deadline is that bound, checked only against the socket's read (not stdin's, which ssh already
 reaps): after `read_deadline_seconds` of nothing read from the socket, the relay exits with
-`server_unresponsive`. The default is generous (12h) because a provider capacity pause can leave
-the socket legitimately silent for as long as the run waits for the operator or for a provider's
-reported rate-limit window to reset (commonly five hours); tearing down a relay that outlives that
-only ends one viewer's connection, not the run itself.
+`server_unresponsive`. A provider capacity pause can leave the socket legitimately silent for
+*unbounded* time: `[agent.quota]`'s shipped default policy (`pause`) waits for the operator with no
+bound at all, and the self-resuming policies wait without a bound too unless `wait_seconds` is set
+(`vibesys.config.QuotaCfg`). No finite deadline is "longer than every legitimate wait" the way the
+write deadline is, so this one instead draws the line at a week: long enough that an operator who
+left a run paused past it is unlikely to still be waiting on this particular connection, short
+enough to eventually recover a genuinely wedged server. Tearing down a relay that outlives it only
+ends one viewer's connection, not the run itself.
 
 ## The conformance corpus
 

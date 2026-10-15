@@ -88,7 +88,7 @@ class BridgeLimits:
     """
     connect_timeout_seconds: float = 5.0
     """How long connecting to the control socket may take."""
-    read_deadline_seconds: float | None = 12 * 60 * 60.0
+    read_deadline_seconds: float | None = 7 * 24 * 60 * 60.0
     """How long the control socket may send nothing before the relay ends. ``None`` disables it.
 
     Only the server peer's read is checked: the client peer is the ssh exec channel's
@@ -98,12 +98,13 @@ class BridgeLimits:
     without closing wedges this relay forever without this deadline.
 
     A provider capacity pause can legitimately leave the control socket silent for as
-    long as the run waits: the unattended policy either waits for the operator (no bound)
-    or resumes itself once a provider-reported window elapses, commonly five hours
-    (``vs_agent.AgentRateLimit``, which also allows a weekly window), polling every
-    ``agent.quota.retry_seconds`` (default 300s) when the provider gave no window. Twelve
-    hours gives over 2x headroom on the common five-hour window while staying well short
-    of a week, so a run idling past it just means its desktop window reconnects; the
+    long as the run waits: ``[agent.quota]``'s shipped default policy (``pause``, see
+    ``vibesys.config.QuotaCfg``) waits for the operator with no bound at all, and even
+    the self-resuming policies (``wait``/``fallback``) wait without a bound unless
+    ``wait_seconds`` is set. So no finite deadline here can be "longer than every
+    legitimate wait" the way a write deadline can; this one instead draws the line at a
+    duration an operator is unlikely to leave a run paused past without checking on it
+    (a week), so a run idling past it just means its desktop window reconnects; the
     underlying run is untouched, since closing one relayed connection only ends that
     connection, not the run (``src/server/relay.py`` module docstring).
     """
