@@ -39,6 +39,7 @@ from .config import (
     SlurmSshTransport,
     shell_join_with_port,
 )
+from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
 from .remote_operations import (
     RemoteOperationClaim,
     RemoteOperationEvidence,
@@ -1221,6 +1222,10 @@ class SlurmJobRunner:
         if refined != INITIAL_LIFE or queue_failure is None:
             return _queue_reading(refined, queue)
         raise queue_failure
+
+    def read_queue(self) -> QueueSnapshot:
+        """One read-only query (see ``queue_view``); raises ``SlurmError`` or ``QueueViewError``."""
+        return parse_queue_snapshot(self._read_scheduler(queue_snapshot_command()))
 
     def _queue_state(self, job_id: str) -> str:
         """The queue's line for the job."""

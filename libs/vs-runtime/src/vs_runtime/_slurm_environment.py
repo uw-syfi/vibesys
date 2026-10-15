@@ -197,11 +197,11 @@ class _AgentGpuMode:
     #: The ``PATH`` a job inherits (the host's), and where the CUDA tools live besides it.
     job_path: str = field(default_factory=lambda: os.environ.get("PATH", ""))
     toolkit_patterns: tuple[str, ...] = TOOLKIT_BIN_PATTERNS
-    #: The run's one launcher per host system, keyed by the system's identity (it
-    #: holds Fakes that are not hashable) and kept with the system so the key stays
-    #: its own. Every session's broker submits through it, so ``max_concurrent_jobs``
+    #: Each run's one launcher per host system, keyed by the run id and the
+    #: system's identity (it holds Fakes that are not hashable) and kept with the
+    #: system so the key stays its own. Every session's broker submits through it, so ``max_concurrent_jobs``
     #: caps the run, not each session.
-    launchers: dict[int, tuple[EnvironmentSystem, GpuLauncher]] = field(
+    launchers: dict[tuple[str, int], tuple[EnvironmentSystem, GpuLauncher]] = field(
         default_factory=dict, compare=False, repr=False
     )
     gpu_client = AGENT_GPU_LAUNCHER
@@ -243,22 +243,28 @@ class _AgentGpuMode:
     def gpu_commands(
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
     ) -> GpuCommands:
+        # The launcher names each job, so it takes the run's configuration too: the
+        # queue status tells this run's jobs apart by the run's job name prefix.
+        config = self.config.for_run(request.run_id)
         return agent_gpu_commands(
-            self.config,
+            config,
             workspace=request.workspace,
             project_path_policy=request.project_path_policy,
-            launcher=self._launcher(request.system),
+            launcher=self._launcher(config, request),
             confinement=confinement,
         )
 
     def editor_env(self, launcher: Path) -> dict[str, str]:
         return agent_gpu_env(launcher)
 
-    def _launcher(self, system: EnvironmentSystem) -> GpuLauncher:
+    def _launcher(self, config: AgentGpuConfig, request: RunEnvironmentRequest) -> GpuLauncher:
         # Sessions may open concurrently: ``setdefault`` is one atomic dictionary
         # operation, so every session gets the same launcher even if two built one.
-        built = (system, agent_gpu_launcher(self.config, self.shell_command, system))
-        return self.launchers.setdefault(id(system), built)[1]
+        # *config* is the run's (its job name prefix carries the run), so the key
+        # carries the run too: two runs never share a launcher, nor a cap.
+        system = request.system
+        built = (system, agent_gpu_launcher(config, self.shell_command, system))
+        return self.launchers.setdefault((request.run_id, id(system)), built)[1]
 
 
 #: The profilers whose directories the agent is told when a job's PATH lacks them.

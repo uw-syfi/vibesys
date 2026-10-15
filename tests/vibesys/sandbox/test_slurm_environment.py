@@ -36,7 +36,11 @@ from vs_runtime.api.testing import (
     daemon_engine,
 )
 from vs_sandbox.api import DockerSandbox, SandboxKind
-from vs_sandbox.api.slurm import SlurmPolicyError, load_slurm_operator_settings
+from vs_sandbox.api.slurm import (
+    AgentGpuConfig,
+    SlurmPolicyError,
+    load_slurm_operator_settings,
+)
 from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
 from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
@@ -262,6 +266,13 @@ def test_a_gpu_command_from_the_container_runs_in_a_slurm_job_within_the_operato
         recorded = (tmp_path / "srun.log").read_text(encoding="utf-8")
         assert "--gres=gpu:3" in recorded
         assert "--time=45" in recorded
+        # The job carries the run's own prefix, which the queue status counts it by.
+        run_prefix = (
+            AgentGpuConfig(partitions=("main",), max_gpus=4, max_time_minutes=90)
+            .for_run("run-1")
+            .job_name_prefix
+        )
+        assert f"--job-name={run_prefix}-" in recorded
         # A request above the operator's limits never reaches srun.
         assert "too-many" not in recorded
         assert "too-long" not in recorded

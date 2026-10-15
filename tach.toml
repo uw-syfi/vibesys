@@ -354,12 +354,17 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_identity", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp", "vs_sim.api"]
+depends_on = ["vibesys", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_socket", "vibesys.run.queue_status", "vibesys.run.evaluation_identity", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_socket"
 layer = "orchestration_host"
 depends_on = ["vs_project", "vs_sandbox"]
+
+[[modules]]
+path = "vibesys.run.queue_status"
+layer = "orchestration_host"
+depends_on = ["vs_evaluation.api.queue_status", "vs_runtime", "vs_sandbox", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.core_services"
@@ -426,7 +431,7 @@ depends_on = ["vibesys", "vs_prompts", "vs_core"]
 [[modules]]
 path = "vs_sandbox"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_decode.api", "vs_evaluation", "vs_evaluation.api", "vs_project", "vs_slurm", "vs_sandbox.slurm_wiring", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_evaluation", "vs_evaluation.api", "vs_evaluation.api.queue_status", "vs_project", "vs_slurm", "vs_sandbox.slurm_wiring", "vs_sim.api"]
 
 [[modules]]
 path = "vs_runtime"
@@ -526,7 +531,36 @@ depends_on = ["vs_evaluation.agent_core_mcp", "vs_evaluation.agent_wire"]
 [[modules]]
 path = "vs_evaluation.api.testing"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.started_operation", "vs_evaluation.testing"]
+depends_on = ["vs_evaluation.queue_status_contracts", "vs_evaluation.started_operation", "vs_evaluation.testing"]
+
+[[modules]]
+path = "vs_evaluation.api.queue_status"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.queue_status", "vs_evaluation.queue_status_mcp", "vs_evaluation.queue_status_wire"]
+
+[[modules]]
+# The read-only queue status interface, its readings and the readers needing no backend.
+path = "vs_evaluation.queue_status"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_sim.api"]
+
+[[modules]]
+# Host service and agent-side client of the queue status socket.
+path = "vs_evaluation.queue_status_wire"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_decode.api", "vs_evaluation.queue_status", "vs_sim.api"]
+
+[[modules]]
+# The read-only queue status agent tool server, on the shared vs_mcp layer.
+path = "vs_evaluation.queue_status_mcp"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_evaluation.queue_status", "vs_evaluation.queue_status_wire", "vs_mcp", "vs_sim.api"]
+
+[[modules]]
+# The queue status Fake and the contract suite every reader passes.
+path = "vs_evaluation.queue_status_contracts"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_decode.api", "vs_evaluation.queue_status", "vs_evaluation.queue_status_wire"]
 
 [[modules]]
 path = "vs_evaluation.agent_evidence"
@@ -1071,7 +1105,7 @@ from = ["vs_evaluation.state_namespace"]
 [[modules]]
 path = "launch"
 visibility = ["entrypoints", "tests", "scripts"]
-depends_on = ["vibesys.api", "vibesys.api.catalog", "vibesys.api.wiring", "vibesys.api.store", "vibesys.api.contracts", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_github", "vs_project", "vs_runtime", "vs_runtime.api.wiring", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
+depends_on = ["vibesys.api", "vibesys.api.catalog", "vibesys.api.wiring", "vibesys.api.store", "vibesys.api.contracts", "vs_agent", "vs_evaluation.api", "vs_evaluation.api.queue_status", "vs_evaluation.api.tools", "vs_github", "vs_project", "vs_runtime", "vs_runtime.api.wiring", "vs_sandbox", "vs_mcp", "vs_slurm", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.api.runs"
@@ -1362,7 +1396,7 @@ depends_on = ["vs_prompts", "vs_runtime"]
 
 [[interfaces]]
 from = ["vibesys.core_roles"]
-expose = ["CONTINUATION", "CONTINUING_READER", "EVALUATION_TOOL", "MEASURING", "MEASURING_READER", "MEASURING_WRITER", "READER", "RoleKind", "core_role"]
+expose = ["CONTINUATION", "CONTINUING_READER", "EVALUATION_TOOL", "MEASURING", "MEASURING_READER", "MEASURING_WRITER", "QUEUE_STATUS_TOOL", "READER", "RoleKind", "core_role", "reading_queue_status"]
 
 [[modules]]
 # The agent roles of a core dynamic run: host wiring (vs_runtime values, template file

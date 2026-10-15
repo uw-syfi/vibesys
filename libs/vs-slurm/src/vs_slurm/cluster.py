@@ -142,6 +142,29 @@ def job_handle(handle: ClusterHandle) -> SlurmJobHandle:
     return handle.job if isinstance(handle, SlurmBatchHandle) else handle
 
 
+def recorded_job_ids(state_root: Path) -> frozenset[str]:
+    """The scheduler job ids of the operations a ``SlurmCluster`` recorded under ``state_root``.
+
+    These are the jobs this cluster's owner submitted, whatever else the same user has
+    queued. An operation not yet given a scheduler job contributes nothing; a missing
+    directory means none was recorded. Reads only: it takes no lock and writes nothing.
+    """
+    if not state_root.is_dir():
+        return frozenset()
+    ids: set[str] = set()
+    for raw in OperationStore(state_root).records():
+        try:
+            record = Operation.model_validate_json(raw)
+        except ValidationError:
+            continue  # a record another version wrote; it names no job this reader can trust
+        if record.handle is None:
+            continue
+        job_id = job_handle(record.handle).job_id
+        if job_id.isdigit() and int(job_id) > 0:
+            ids.add(job_id)
+    return frozenset(ids)
+
+
 def replace_job_id(handle: ClusterHandle, job_id: str) -> ClusterHandle:
     """Attach reconciled scheduler identity to a prepared locator."""
     job = job_handle(handle).model_copy(update={"job_id": job_id})

@@ -63,6 +63,7 @@ from vs_slurm.api import (
     SlurmTreeArtifact,
     Unknown,
     advance_with_notice,
+    recorded_job_ids,
     validate_cluster_operation_id,
 )
 
@@ -80,6 +81,7 @@ if TYPE_CHECKING:
     )
 
 _UNRESOLVED_JOB_ID = "0"  # the placeholder id of a submission whose acceptance is unresolved
+_CLUSTER_STATE = "cluster"  # under the handle root: the cluster's operation records
 _LOG = logging.getLogger(__name__)
 
 
@@ -314,6 +316,15 @@ class _DurableSlurmEvaluation(BaseModel):
         return self
 
 
+def evaluation_job_ids(handle_root: Path) -> frozenset[str]:
+    """The scheduler job ids of the evaluations an executor over ``handle_root`` submitted.
+
+    Reads the records the executor's own cluster keeps, so it never names another run's
+    job; it only reads them, so it is safe beside a running executor.
+    """
+    return recorded_job_ids(handle_root / _CLUSTER_STATE)
+
+
 class SlurmEvaluationExecutor:
     """Run ordered stages in one recoverable Slurm allocation."""
 
@@ -346,7 +357,7 @@ class SlurmEvaluationExecutor:
                 message = "a Slurm executor needs a cluster or the processes that reach one"
                 raise ValueError(message)
             cluster = make_cluster(
-                config, state_root=handle_root / "cluster", processes=processes, clock=clock
+                config, state_root=handle_root / _CLUSTER_STATE, processes=processes, clock=clock
             )
         self._cluster = cluster
         self._sleeper = sleeper
