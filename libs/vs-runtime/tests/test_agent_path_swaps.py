@@ -45,6 +45,7 @@ _FILESYSTEM_EVENTS = frozenset(
     {"open", "os.mkdir", "os.rename", "os.scandir", "os.listdir", "tempfile.mkstemp"}
 )
 _MAX_POSITIONS = 24
+_MODEL_MANIFEST = ".vibesys/models.json"
 
 
 @dataclass
@@ -183,16 +184,17 @@ def test_no_swap_position_in_the_report_write_leads_it_out_of_the_workspace(
 
 
 def _manifest_read_with_swap(root: Path, position: int) -> tuple[bool, tuple[str, ...]]:
-    """Reconcile with ``.vibesys`` swapped at ``position``; fired, and the models requested."""
+    """Reconcile with the manifest's directory swapped at ``position``; fired, models requested."""
     workspace = root / "workspace"
-    (workspace / ".vibesys").mkdir(parents=True)
-    (workspace / ".vibesys" / "models.json").write_text(json.dumps([{"id": "org/agent"}]))
+    manifest = workspace / _MODEL_MANIFEST
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps([{"id": "org/agent"}]))
     outside = root / "outside"
     outside.mkdir()
     (outside / "models.json").write_text(json.dumps([{"id": "org/host-secret"}]))
     provisioner = FakeModelVolumeProvisioner()
     reconciler = create_model_request_reconciler(provisioner=provisioner, environment={})
-    _SWAP.arm(_swap_for_symlink(workspace / ".vibesys", outside), position)
+    _SWAP.arm(_swap_for_symlink(manifest.parent, outside), position)
     try:
         reconciler.reconcile(workspace, log=lambda _line: None)
     except ModelRequestError:
