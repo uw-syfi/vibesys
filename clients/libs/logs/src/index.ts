@@ -30,8 +30,12 @@ export {
   DEFAULT_LOG_VIEW_BOUNDS,
   emptyLogView,
   foldChunk,
+  type LogLine,
   type LogView,
   type LogViewBounds,
   logViewComplete,
   logViewLines,
+  logViewRecords,
+  type PipeRun,
+  pipeSegments,
 } from './view.js';

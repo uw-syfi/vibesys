@@ -37,6 +37,8 @@ export type {
   LiveInstanceRecord,
   LogChunk,
   LogOffset,
+  LogPipe,
+  LogPipeSpan,
   LogStream,
   LogsListReply,
   LogsListRequest,
