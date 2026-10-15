@@ -17,7 +17,7 @@ Light like the rest of the helper: the standard library, Pydantic, and
 ``server.host_api``.
 
 Public surface: ``LogReader``, ``StoredBytes``, ``UnknownInstanceError``,
-``UnknownLogStreamError``, ``RunLocation``, ``run_location``, ``HelperLogs``, ``cut_chunk``, ``clip_pipes``, ``list_logs``,
+``UnknownLogStreamError``, ``LogStoreCorruptError``, ``RunLocation``, ``run_location``, ``HelperLogs``, ``cut_chunk``, ``clip_pipes``, ``list_logs``,
 ``read_log``, and the limits ``POLL_INTERVAL_SECONDS`` and ``REPLY_MARGIN_MS``.
 """
 
@@ -67,6 +67,10 @@ class UnknownLogStreamError(Exception):
     """The instance has no stream with this id."""
 
 
+class LogStoreCorruptError(Exception):
+    """The instance's log store holds a record that does not decode; reading again fails again."""
+
+
 @dataclass(frozen=True)
 class StoredBytes:
     """Raw bytes ``[offset, offset + len(data))`` of a stream, as the store holds them now."""
@@ -93,8 +97,9 @@ class LogReader(Protocol):
     bytes at that offset when it is at or past the end; from ``LogTail`` it starts
     ``min(tail_bytes, max_bytes)`` before the end, or at the oldest byte held
     (``truncated_before`` again). ``pipes`` covers the bytes returned. Both raise
-    ``UnknownInstanceError`` for an instance with no logs, and ``read`` raises
-    ``UnknownLogStreamError`` for a stream the instance does not have.
+    ``UnknownInstanceError`` for an instance with no logs, and ``LogStoreCorruptError``
+    for a store whose index does not decode; ``read`` raises ``UnknownLogStreamError``
+    for a stream the instance does not have.
     """
 
     def streams(self, instance_id: str) -> tuple[LogStream, ...]:
@@ -213,6 +218,8 @@ def list_logs(request: LogsListRequest, logs: HelperLogs) -> LogsListReply | Hel
         streams = logs.reader.streams(request.instance_id)
     except UnknownInstanceError:
         return _unknown_instance(request.request_id, request.instance_id)
+    except LogStoreCorruptError as error:
+        return _corrupt(request.request_id, error)
     return LogsListReply(request_id=request.request_id, streams=streams)
 
 
@@ -232,6 +239,8 @@ def read_log(request: LogsReadRequest, logs: HelperLogs) -> LogsReadReply | Help
             )
         except UnknownInstanceError:
             return _unknown_instance(request.request_id, request.instance_id)
+        except LogStoreCorruptError as error:
+            return _corrupt(request.request_id, error)
         except UnknownLogStreamError:
             message = f"instance {request.instance_id} has no log stream {request.stream_id!r}"
             return HelperError(
@@ -252,4 +261,12 @@ def _unknown_instance(request_id: str, instance_id: str) -> HelperError:
         request_id=request_id,
         code=HelperErrorCode.UNKNOWN_INSTANCE,
         message=f"this host recorded no logs for instance {instance_id}",
+    )
+
+
+def _corrupt(request_id: str, error: LogStoreCorruptError) -> HelperError:
+    return HelperError(
+        request_id=request_id,
+        code=HelperErrorCode.LOG_STORE_CORRUPT,
+        message=f"this run's log store cannot be read: {error}",
     )

@@ -37,6 +37,7 @@ from server.host_api import (
     TaskSummary,
 )
 from server.host_helper_logs import (
+    LogStoreCorruptError,
     RunLocation,
     StoredBytes,
     UnknownInstanceError,
@@ -309,7 +310,7 @@ class StoreLogReader:
                 size=info.size,
                 outcome=None if info.outcome is None else LogStreamOutcome(info.outcome.value),
             )
-            for info in self._reader(instance_id).list_streams()
+            for info in self._using(instance_id, lambda reader: reader.list_streams())
         )
 
     def read(
@@ -322,12 +323,13 @@ class StoreLogReader:
         # > the import from tach, which keeps vs_logs.read visible to the host helper only.
         from vs_logs.read import FromOffset, Tail, UnknownStreamError  # noqa: PLC0415
 
-        reader = self._reader(instance_id)
         origin = (
             FromOffset(start.offset) if isinstance(start, LogOffset) else Tail(start.tail_bytes)
         )
         try:
-            chunk = reader.read(stream_id, origin, max_bytes)
+            chunk = self._using(
+                instance_id, lambda reader: reader.read(stream_id, origin, max_bytes)
+            )
         except UnknownStreamError as error:
             raise UnknownLogStreamError(stream_id) from error
         return StoredBytes(
@@ -343,13 +345,17 @@ class StoreLogReader:
             closed=chunk.closed,
         )
 
-    def _reader(self, instance_id: str) -> StoreReader[LogOwner]:
+    def _using[T](self, instance_id: str, use: Callable[[StoreReader[LogOwner]], T]) -> T:
+        """``use`` the instance's store, reporting an index that does not decode as corrupt."""
         location = self._locate(instance_id)
         if location is None:
             raise UnknownInstanceError(instance_id)
         # lint-waiver: LW-640282 [PLC0415]; logs cost the helper nothing until a client reads one.
         # > The same deferral as in `read`: `hello` must not load vs_logs.read, and an import
         # > tach can see keeps its visibility rule enforced.
-        from vs_logs.read import open_log_directory  # noqa: PLC0415
+        from vs_logs.read import CorruptLogError, open_log_directory  # noqa: PLC0415
 
-        return open_log_directory(self._directory_for(location), _OWNER)
+        try:
+            return use(open_log_directory(self._directory_for(location), _OWNER))
+        except CorruptLogError as error:
+            raise LogStoreCorruptError(str(error)) from error
