@@ -113,7 +113,7 @@ def loop_threads() -> SimThreads:
         loop.adopt(SimThreads(loop.clock, schedule_seed=loop.schedule_seed, trace=loop.trace))
     if not isinstance(loop.driver, SimThreads):
         message = f"the virtual loop is driven by {type(loop.driver).__name__}, not SimThreads"
-        raise RuntimeError(message)  # noqa: TRY004  # LW-163811 [TRY004]; a missing precondition of the call, not a bad argument type.
+        raise RuntimeError(message)  # noqa: TRY004  # LW-163851 [TRY004]; a missing precondition of the call, not a bad argument type.
     return loop.driver
 
 
