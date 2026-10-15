@@ -1967,10 +1967,6 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
     "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": {
         "FakeCommandRunner:default_factory=OsThreads": Owner.PURITY,
     },
-    "libs/vs-sandbox/src/vs_sandbox/gpu_monitor.py": {
-        "NvidiaSmiTelemetry.__init__:SubprocessProbe()": Owner.CONFINEMENT,
-        "GpuContentionMonitor.__init__:NvidiaSmiTelemetry()": Owner.CONFINEMENT,
-    },
     "libs/vs-sandbox/src/vs_sandbox/host_command_broker.py": {
         "BrokerTransport:default_factory=UnixNetwork": Owner.PURITY,
         "BrokerTransport:default_factory=OsThreads": Owner.PURITY,
