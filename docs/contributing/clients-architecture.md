@@ -246,6 +246,35 @@ lets it skip the per-entry project rules; every other rule applies to it. It is 
 its exemption until it is deleted. The table only shrinks: `desktop` left it when its main process
 was composed from packages (`apps/desktop-main`, phase 8 of #1878).
 
+## Design tokens and themes
+
+`@vibesys/ui` publishes its design tokens as typed data and as CSS. One table is the source of
+truth for each fact; everything else is derived from it.
+
+| Entry | Runtime | Contents |
+| --- | --- | --- |
+| `.` | `dom` | The components, `applyTheme`, and the token types (`ThemeName`, `ColorRole`, `SpaceToken`, `TextStyle`, ...). |
+| `./tokens` | `neutral` | `THEMES`, `DEFAULT_THEMES`, `SPACE`, `TYPE`, `SIZE`, `RADIUS`, `ELEVATION`, `MOTION`, `CONTRAST_PAIRS`, `contrastRatio`, and `renderTokensCss`. No DOM, so tests and tools import it. |
+| `./tokens.css` | `dom` asset | Generated from `./tokens`; never edited by hand. |
+| `./fonts.css` | `dom` asset | `@font-face` for Schibsted Grotesk and JetBrains Mono (weights 400, 500, 600) from the woff2 files in `src/fonts/`, with their SIL OFL texts. Nothing is fetched at runtime. |
+
+A theme is `{mode, colors}` where `colors` is a `Record<ColorRole, Hex>`, so a missing role is a
+compile error. The six themes are `paper`, `mist`, `sand` (light) and `ink`, `midnight`,
+`terminal` (dark); `DEFAULT_THEMES` names `paper` and `ink`. `ThemeName` is the `data-theme` value.
+
+`src/tokens.css` is written by `pnpm --dir clients/libs/ui generate:tokens` from the tables and
+`src/primitives.css` (the hand-written styles of the primitives, appended verbatim). It has the
+scales and derived values (`color-mix` fills for selection, chips and banners) on `:root`, one
+`:root[data-theme="<name>"]` block per theme, the zeroing of every motion duration under
+`prefers-reduced-motion: reduce`, and aliases for the variable names the stylesheet had before the
+roles (`LEGACY_ALIASES`), which stay until their consumers move. The defaults sit on a bare
+`:root` (paper, and ink under `prefers-color-scheme: dark`) and the named blocks override them, so a
+`data-theme` outside `ThemeName` (another app sets its own names) or none at all follows the OS
+between the two default themes and every role stays defined.
+
+`applyTheme(name, target = document.documentElement)` sets `data-theme`; it takes the element so a
+test can pass a fake. The selectors name `:root`, so `target` only works as the root element.
+
 ## State
 
 Client state comes in two kinds, and each has one form.
@@ -430,7 +459,7 @@ names a missing or extra one.
 | Package | Layer | Status | Item that creates or moves it |
 | --- | --- | --- | --- |
 | `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
-| `@vibesys/ui` | foundation | exists: `Button`, `Combobox`, `Dialog`, `StatusChip` (`.`, `dom`) and the design tokens (`./tokens.css`); the desktop and web features render them | domain packages (phase 5 of #1878) |
+| `@vibesys/ui` | foundation | exists: `Button`, `Combobox`, `Dialog`, `StatusChip` (`.`, `dom`) and the design tokens (`./tokens`, `./tokens.css`, `./fonts.css`; see [Design tokens and themes](#design-tokens-and-themes)); the desktop and web features render them | domain packages (phase 5 of #1878) |
 | `@vibesys/store` | foundation | exists: `Step`, `Reducer`, `only`, `createStore` (`.`) and the fold model-test kit (`./testing`: `checkModel`, `Seeded`, `SEEDS`); domain-free | domain split (#1949) |
 | `@vibesys/run-state` | core | exists: the run event fold (`.`), with `./rounds`, `./performance`, and `./transcript` projections; depends on `contracts` only | domain split (#1949) |
 | `@vibesys/core-state` | core | deleted: split into `store` and `run-state` | domain split (#1949) |

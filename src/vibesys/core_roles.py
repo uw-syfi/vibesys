@@ -25,6 +25,7 @@ __all__ = [
     "MEASURING_WRITER",
     "QUEUE_STATUS_TOOL",
     "READER",
+    "WRITER",
     "RoleKind",
     "core_role",
     "reading_queue_status",
@@ -60,6 +61,8 @@ READER = RoleKind(WorkspaceAccess.READ_ONLY, frozenset())
 CONTINUING_READER = RoleKind(WorkspaceAccess.READ_ONLY, CONTINUATION)
 # A reader that may also submit a measurement of the workspace it reads.
 MEASURING_READER = RoleKind(WorkspaceAccess.READ_ONLY, MEASURING, (EVALUATION_TOOL,))
+# A writer that answers once and commits what it wrote, measuring nothing itself.
+WRITER = RoleKind(WorkspaceAccess.READ_WRITE, frozenset())
 # A writer that may also submit a measurement of the workspace it writes.
 MEASURING_WRITER = RoleKind(WorkspaceAccess.READ_WRITE, MEASURING, (EVALUATION_TOOL,))
 

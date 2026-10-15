@@ -13,11 +13,16 @@ workstream counts once, whether it starts a hypothesis or continues one.
 Assign work only where it can succeed: never assign edits to read-only inputs, and
 never plan work that needs target hardware outside trusted evaluation.
 
-Base revision (the run's input; a new workstream that names no parent starts from it): `{{ rev(base_revision) }}`
+Base revision (the run's input): `{{ rev(base_revision) }}`
 Exact base accuracy PASS status: {{ base_accuracy_passed }} (null means unknown).
+Main revision (a new workstream that names no parent starts from it): {% if main_revision == base_revision %}the base revision; no merge has moved it yet{% else %}`{{ rev(main_revision) }}`{% endif %}.
 Immutable parent offer {{ offer_snapshot }}.
 Your workspace holds the run's input, not candidate work: a workstream's files exist
 only at the revision in its history row (read them with git show REVISION:PATH).
+{% if main_measurement %}
+
+Main's latest trusted measurement (merge `{{ main_measurement.merge_id }}`): accuracy passed: {{ main_measurement.accuracy_passed }}, benchmark passed: {{ main_measurement.benchmark_passed }}{% for m in main_measurement.metrics %}; {{ metric(m) }}{% endfor %}.
+{% endif %}
 {% if baseline %}
 
 Input baseline (the root before any change, trusted benchmark):
@@ -51,7 +56,7 @@ Buildable candidates, pinned to exact retained, accuracy-verified revisions:
 observed value within a matching comparison, not a passing metric or adoption
 authority. Compare values only within matching quantity, unit and direction.
 For a new implementation sibling, set {{ reply.parent_hypothesis_id }} and {{ reply.parent_revision }} to
-one exact offered pair. A null {{ reply.parent_hypothesis_id }} with no revision selects the base
+one exact offered pair. A null {{ reply.parent_hypothesis_id }} with no revision selects the main
 revision. An invalid selection requires correction and never silently starts from base.
 Each sibling has its own workspace and session.
 {% endif %}
@@ -75,6 +80,45 @@ end without a candidate settles as failed, and its history row says why: do not 
 same task again, narrow it to a first step that fits one turn.
 
 Fill every free slot: a slot left free idles until a running workstream finishes.
+
+To combine candidates, choose a merge workstream: {{ reply.kind }} "merge", a new {{ reply.merge_id }},
+{{ reply.candidates }} (hypothesis IDs whose latest verified candidates to merge into main, in
+the order to apply them), {{ reply.instructions }} (how to combine them, and how to resolve
+conflicts), and {{ reply.watch_for }} (what the merger must check or be careful of). A new merger
+session applies them on a checkout of main and runs the tests; when its commit passes the
+trusted accuracy check and measures no worse than main (a headline metric no worse, and no
+benchmark check main passed now failing), main moves to it and its measurement is reported here.
+A merge may name only candidates listed as mergeable below. A merger that cannot follow the
+instructions refuses and main stays where it is. Only one merge runs at a
+time{% if merge_running %}, and merge `{{ merge_running }}` is running now: schedule no other
+merge until it finishes{% endif %}. A hypothesis that continues after main moved rebases onto
+main first.
+{% if mergeable %}
+Mergeable candidates (passed accuracy and beat main's latest measurement):
+{% for row in mergeable %}
+- hypothesis `{{ row.hypothesis_id }}`, revision `{{ rev(row.revision) }}`{% if row.metric %}; {{ metric(row.metric) }}{% endif %}
+
+{% endfor %}
+{% else %}
+No candidate is mergeable now: none passed accuracy and beat main's latest measurement.
+{% endif %}
+{% if merges %}
+
+Merges so far, oldest first:
+{% for item in merges %}
+- merge `{{ item.merge_id }}` #{{ item.sequence }} of {% for source in item.candidates %}`{{ source.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %} onto `{{ rev(item.base) }}`: {{ item.outcome.value }}{% if item.revision %}, commit `{{ rev(item.revision) }}`{% endif %}{% if item.accuracy_passed is not none %}, accuracy passed: {{ item.accuracy_passed }}{% endif %}{% for m in item.metrics %}; {{ metric(m) }}{% endfor %}{% if item.summary %}: {{ item.summary }}{% endif %}
+
+{% if item.reason %}
+  Why the merger refused: {{ item.reason }}
+{% endif %}
+{% if item.failure and item.failure.kind.value == 'merge-regressed' %}
+  Main regressed with that merge, so main did not move: main measured{% for m in item.main_metrics %} {{ metric(m) }}{% else %} no headline metric{% endfor %}, benchmark passed: {{ item.main_benchmark_passed }}. Decide whether to fix the merge with another one or to build on a specific candidate instead.
+{% endif %}
+{% if item.failure %}
+  Why it ended: {{ failure_text(item.failure) }}
+{% endif %}
+{% endfor %}
+{% endif %}
 {% if profiling %}
 For measurement-only work, choose a profile workstream: {{ reply.kind }} "profile", a new
 {{ reply.profile_id }}, {{ reply.target_hypothesis_id }} (a listed buildable candidate, or null for the base

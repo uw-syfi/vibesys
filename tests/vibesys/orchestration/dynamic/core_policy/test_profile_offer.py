@@ -39,6 +39,7 @@ def _prompt(fields: tuple[ProfileField, ...], *, profiling: bool = True) -> Plan
         remaining=2,
         base_revision=revision("base"),
         base_accuracy_passed=True,
+        main_revision=revision("base"),
         offer_snapshot="snapshot",
         profiling=profiling,
         profile_fields=tuple(field.value for field in fields),

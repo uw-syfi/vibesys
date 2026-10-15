@@ -3,7 +3,18 @@
  * in, events out: no I/O, no effect hooks, and no word of any one product's domain, so the desktop
  * views and the web page compose the same pieces.
  */
+export {applyTheme, type ThemeTarget} from './apply-theme.js';
 export {Button, type ButtonVariant} from './button.js';
 export {Combobox} from './combobox.js';
 export {Dialog} from './dialog.js';
 export {StatusChip, type Tone} from './status-chip.js';
+export type {
+  ColorRole,
+  ElevationLevel,
+  RadiusToken,
+  SizeToken,
+  SpaceToken,
+  TextStyle,
+  ThemeMode,
+  ThemeName,
+} from './tokens/index.js';

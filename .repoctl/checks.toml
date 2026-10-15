@@ -93,6 +93,7 @@ commands = [
   ["pnpm", "check:knip"],
   ["pnpm", "--dir", "libs/contracts", "generate:protocol"],
   ["git", "diff", "--exit-code", "--", "libs/contracts/src/generated/"],
+  ["pnpm", "--dir", "libs/ui", "check:tokens"],
   ["pnpm", "check:clients"],
 ]
 

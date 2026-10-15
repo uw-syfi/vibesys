@@ -23,6 +23,7 @@ import {
   registerAbort,
   type ScheduleTimeout,
   type SubscribeOptions,
+  settleAll,
   subscribeRequest,
 } from '@vibesys/transport';
 import {
@@ -57,7 +58,11 @@ export interface ServerClientOptions {
    * Observe control-channel connectivity: `disconnected` once when a live
    * channel drops, `connected` when a redial recovers it. Not called on the
    * first successful connect (the channel is connected by default). Lets a
-   * frontend disable the controls a dropped channel cannot carry.
+   * frontend disable the controls a dropped channel cannot carry. A thrown
+   * observer error never interrupts connection ownership; `close()` reports it
+   * after every acquired bounded close owner settles. If acquiring that bound
+   * fails, the client starts a best-effort physical close before exposing the
+   * structural error.
    */
   onConnectionState?: (state: ControlChannelState) => void;
   /** Clock and scheduler seam used by every transport deadline and retry. */
@@ -394,6 +399,8 @@ export class ServerClient {
    * owed an answer (in flight or held for resend), and ends each live socket
    * gracefully, destroying it if it does not close within the grace window,
    * so an unresponsive server cannot hang shutdown.
+   * Observer and socket failures are exposed only after every owner settles;
+   * several failures retain stable control-then-socket order.
    */
   close(): Promise<void> {
     if (this.#closing !== null) return this.#closing;
@@ -417,11 +424,10 @@ export class ServerClient {
     // peer's FIN. Snapshot them only after every active owner has settled, so
     // this terminal close joins all teardown that can start synchronously.
     const retiring = new Set([...secondaryRetirements, ...this.#retiringSockets.values()]);
-    return Promise.all([
-      channelClosed,
-      ...openingControls.map(dial => dial.close()),
-      ...retiring,
-    ]).then(() => undefined);
+    return settleAll(
+      [channelClosed, ...openingControls.map(dial => dial.close()), ...retiring],
+      'could not close every server client connection',
+    );
   }
 
   /** Begin or join the one bounded graceful retirement for a socket. */

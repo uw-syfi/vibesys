@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import TypeAdapter
 
+from vs_core._registry import ContractError
+
 from ._sources import First, Pending, Signal, StopSource, Task
 
 if TYPE_CHECKING:
@@ -16,6 +18,7 @@ if TYPE_CHECKING:
     from vs_core.types.common import AttemptRef
 
     from ._flow import Group
+    from ._spans import SpanId
 
 UNBOUNDED = 1_000_000
 """``Group.free`` of a group without a limit."""
@@ -79,3 +82,12 @@ class _Task:
     handle: Task[Any] = field(default_factory=lambda: Task("root"))
     started: list[Pending] = field(default_factory=list)
     signals: list[Signal] = field(default_factory=list)
+    span: SpanId | None = None
+    """The task's span in the run trace, from the moment it starts."""
+
+    @property
+    def span_id(self) -> SpanId:
+        """The task's span; a task has one from the moment it starts."""
+        if self.span is None:
+            raise ContractError(("flow",), "a task has its span once it starts")
+        return self.span

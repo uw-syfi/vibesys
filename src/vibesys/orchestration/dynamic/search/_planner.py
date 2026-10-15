@@ -27,7 +27,12 @@ from vibesys.orchestration.dynamic.search._run_state import (
     RunRecord,
     Scheduled,
 )
-from vibesys.orchestration.dynamic.search._values import PlanProblem, ProblemKind
+from vibesys.orchestration.dynamic.search._values import (
+    MergeRecord,
+    PlanProblem,
+    ProblemKind,
+    WorkKind,
+)
 from vs_core.api.search import (
     Again,
     Failed,
@@ -105,10 +110,12 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
                 return outcome
             case Reply() as reply:
                 if (outcome := _judge(call, reply)) is not None:
-                    return await _handed_off(ctx, call.number, outcome)
+                    return await _handed_off(ctx, call.number, outcome, run.world().merges)
 
 
-async def _handed_off(ctx: Flow, number: int, outcome: PlanOutcome) -> PlanOutcome:
+async def _handed_off(
+    ctx: Flow, number: int, outcome: PlanOutcome, merges: tuple[MergeRecord, ...]
+) -> PlanOutcome:
     """A scheduled plan with its handoff file written; a call that planned nothing writes none.
 
     A write whose wait timed out or was lost may have landed, so it is sent again (the write is
@@ -118,7 +125,7 @@ async def _handed_off(ctx: Flow, number: int, outcome: PlanOutcome) -> PlanOutco
     """
     if not isinstance(outcome, Scheduled):
         return outcome
-    request = handoff_request(number, outcome.check)
+    request = handoff_request(number, outcome.check, merges)
 
     async def write(tries: Tries[Failed]) -> BaseModel | Failed | Again[Failed]:
         del tries
@@ -249,6 +256,7 @@ def _schedulable(held: PlanCheck, world: PlanWorld) -> bool:
     """
     ledger = world.ledger
     taken = {item.hypothesis_id for item in ledger.hypotheses} | ledger.running | ledger.profile_ids
+    taken |= ledger.merge_ids
     offered = {
         (item.snapshot.hypothesis_id, item.snapshot.revision.revision_id.root)
         for item in world.offered
@@ -260,4 +268,9 @@ def _schedulable(held: PlanCheck, world: PlanWorld) -> bool:
         or (item.parent_hypothesis_id, item.parent_revision) in offered
         for item in held.accepted
     )
-    return len(held.accepted) <= world.capacity and fresh and parents
+    options = ledger.merge_options
+    merges = [item for item in held.accepted if item.kind is WorkKind.MERGE]
+    mergeable = not (merges and ledger.merging) and all(
+        options.mergeable(candidate) for item in merges for candidate in item.candidates
+    )
+    return len(held.accepted) <= world.capacity and fresh and parents and mergeable

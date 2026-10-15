@@ -59,7 +59,13 @@
   },
   "overrides": [
     {
-      "includes": ["**/ui/**/*.ts", "**/ui/**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
+      "includes": [
+        "**/ui/**/*.ts",
+        "**/ui/**/*.tsx",
+        "!**/*.test.ts",
+        "!**/*.test.tsx",
+        "!libs/ui/scripts/**"
+      ],
       "plugins": [
         "./tools/lint-rules/ui-no-io-calls.grit",
         "./tools/lint-rules/ui-no-effect-hooks.grit",

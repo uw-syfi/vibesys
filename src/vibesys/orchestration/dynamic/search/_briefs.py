@@ -14,6 +14,7 @@ from vibesys.candidates.api import failure
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
+    MergePrompt,
     ProfilePrompt,
     ReviewPrompt,
 )
@@ -21,7 +22,8 @@ from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
 
 if TYPE_CHECKING:
     from vibesys.candidates.api import Baseline, ReviewEvaluation
-    from vibesys.orchestration.dynamic.search._values import RoundRecord, WorkPlan
+    from vibesys.orchestration.dynamic.search._outcomes import WorkstreamStart
+    from vibesys.orchestration.dynamic.search._values import MergeSource, WorkPlan
     from vs_core.api.search import RevisionRef
 
 CUT = " [cut]"
@@ -64,20 +66,17 @@ def _shown(blocker: Blocker) -> Blocker:
 
 
 def implement_prompt(
-    plan: WorkPlan,
-    parent: RevisionRef,
-    prior: RoundRecord | None,
-    blockers: tuple[Blocker, ...],
-    *,
-    baseline: Baseline | None,
+    w: WorkstreamStart, blockers: tuple[Blocker, ...], *, baseline: Baseline | None
 ) -> ImplementPrompt:
-    """One isolated implementation request for a scheduled workstream.
+    """One isolated implementation request for the scheduled workstream ``w``.
 
-    ``prior`` is the previous round of the same hypothesis, when this workstream continues it;
+    ``w.prior`` is the previous round of the same hypothesis, when this workstream continues it;
     ``blockers`` are the turns of this workstream that ended without a measurable candidate;
     ``baseline`` is the input's measurement as known now: None while it has not landed, and an
     unmeasurable one is shown with why it failed.
+    ``w.rebase_onto`` is the run's main when it advanced past this hypothesis's work.
     """
+    plan, parent, prior = w.plan, w.parent, w.prior
     latest = blockers[-1] if blockers else None
     stuck = next(
         (item for item in reversed(blockers) if item.kind is not BlockerKind.REJECTED), None
@@ -103,6 +102,7 @@ def implement_prompt(
         prior_failure_fence=fence(prior_tail),
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),
+        rebase_onto=w.rebase_onto,
     )
 
 
@@ -128,4 +128,17 @@ def profile_prompt(plan: WorkPlan, target: RevisionRef) -> ProfilePrompt:
     """Measurement-only request against the frozen target revision."""
     return ProfilePrompt(
         question=plan.question, required_fields=plan.required_fields, target=target
+    )
+
+
+def merge_prompt(
+    plan: WorkPlan, main: RevisionRef, candidates: tuple[MergeSource, ...]
+) -> MergePrompt:
+    """One merge of the scheduled candidates into ``main``, as the planner instructed it."""
+    return MergePrompt(
+        merge_id=plan.work_id,
+        main_revision=main,
+        candidates=candidates,
+        instructions=plan.instructions,
+        watch_for=plan.watch_for,
     )

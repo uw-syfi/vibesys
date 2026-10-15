@@ -7,7 +7,9 @@
     "layer": "foundation",
     "entries": {
       ".": "dom",
-      "./tokens.css": "dom"
+      "./tokens": "neutral",
+      "./tokens.css": "dom",
+      "./fonts.css": "dom"
     }
   },
   "exports": {
@@ -16,19 +18,32 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./tokens": {
+      "@vibesys/source": "./src/tokens/index.ts",
+      "types": "./dist/tokens/index.d.ts",
+      "default": "./dist/tokens/index.js"
+    },
     "./tokens.css": {
       "@vibesys/source": "./src/tokens.css",
       "default": "./src/tokens.css"
+    },
+    "./fonts.css": {
+      "@vibesys/source": "./src/fonts.css",
+      "default": "./src/fonts.css"
     }
   },
   "files": [
     "dist",
     "!dist/.*.tsbuildinfo",
-    "src/tokens.css"
+    "src/tokens.css",
+    "src/fonts.css",
+    "src/fonts"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json",
+    "build": "tsc -b tsconfig.lib.json tsconfig.tokens.json",
     "check": "tsc -b",
+    "generate:tokens": "bun scripts/tokens-css.ts generate",
+    "check:tokens": "bun scripts/tokens-css.ts check",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },
   "dependencies": {

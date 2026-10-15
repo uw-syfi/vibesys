@@ -14,7 +14,14 @@ from pydantic import Field
 from vibesys.candidates.api import InputFailure, ReviewEvaluation
 from vibesys.metrics import MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search import _roles as roles
-from vibesys.orchestration.dynamic.search._values import Blocker, Failure, PlanProblem
+from vibesys.orchestration.dynamic.search._values import (
+    Blocker,
+    Failure,
+    MainMeasurement,
+    MergeRecord,
+    MergeSource,
+    PlanProblem,
+)
 from vs_core.api.search import (
     Correction,
     EvidenceId,
@@ -34,6 +41,7 @@ class PromptTemplate(StrEnum):
     REVIEW = "review"
     PROFILE_REQUEST = "profile_request"
     OUTLINE = "outline"
+    MERGE = "merge"
 
 
 class EvidenceCitation(Value):
@@ -57,6 +65,14 @@ class BuildableRow(Value):
     best_partial: bool
     metric: MetricRow | None = None
     partial: PartialRow | None = None
+
+
+class MergeableRow(Value):
+    """A buildable candidate that passes accuracy and beats main's latest measurement."""
+
+    hypothesis_id: str
+    revision: RevisionRef
+    metric: MetricRow | None = None
 
 
 class HistoryRow(Value):
@@ -131,6 +147,15 @@ class _Planning(RolePromptContext):
     base_revision: RevisionRef
     base_accuracy_passed: bool | None
     offer_snapshot: str
+    main_revision: RevisionRef
+    """The run's main: where a new workstream that names no parent starts."""
+    main_measurement: MainMeasurement | None = None
+    """The latest trusted measurement of a merged main; None while main is the input."""
+    merge_running: str | None = None
+    """The merge under way, if one is: main moves when it finishes."""
+    mergeable: tuple[MergeableRow, ...] = ()
+    merges: tuple[MergeRecord, ...] = ()
+    """Every finished merge, oldest first."""
     buildable: tuple[BuildableRow, ...] = ()
     history: tuple[WorkstreamHistoryRow, ...] = ()
     older_ids: tuple[str, ...] = ()
@@ -188,6 +213,8 @@ class ImplementPrompt(RolePromptContext):
     """The input's own measurement had not landed when the turn was asked."""
     input_failure: InputFailure | None = None
     """Why the input's own measurement failed, when it had when the turn was asked."""
+    rebase_onto: RevisionRef | None = None
+    """The run's main, when it advanced past this hypothesis's work: rebase onto it first."""
 
 
 class ReviewPrompt(RolePromptContext):
@@ -227,13 +254,27 @@ class OutlinePrompt(RolePromptContext):
     """The plan's documents, as paths relative to the task directory."""
 
 
+class MergePrompt(RolePromptContext):
+    """One merge of candidates into the run's main revision, on a checkout of main."""
+
+    reply_schema: ClassVar[SchemaRef | None] = roles.MERGER.reply_schema
+
+    template: Literal[PromptTemplate.MERGE] = PromptTemplate.MERGE
+    merge_id: str
+    main_revision: RevisionRef
+    candidates: tuple[MergeSource, ...]
+    instructions: str
+    watch_for: str
+
+
 type PromptContext = Annotated[
     PlannerPrompt
     | PlannerCorrection
     | ImplementPrompt
     | ReviewPrompt
     | ProfilePrompt
-    | OutlinePrompt,
+    | OutlinePrompt
+    | MergePrompt,
     Field(discriminator="template"),
 ]
 """The union the render operation carries; the exchanges core starts are core's own contexts."""

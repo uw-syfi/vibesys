@@ -29,6 +29,7 @@ export class FakeClientSocket implements ClientSocket {
   readonly #listenerFailures: Map<ClientSocketListenerKind, ListenerFailure>;
   #closed = false;
   #connected = false;
+  #holdGracefulEnd = false;
 
   constructor(
     path: string,
@@ -85,6 +86,11 @@ export class FakeClientSocket implements ClientSocket {
     this.#close();
   }
 
+  /** Keep a graceful client end pending until the peer ends or the client destroys the socket. */
+  holdGracefulEnd(): void {
+    this.#holdGracefulEnd = true;
+  }
+
   setTextMode(): void {}
 
   send(text: string, onComplete?: (error?: Error | null) => void): void {
@@ -97,7 +103,7 @@ export class FakeClientSocket implements ClientSocket {
   }
 
   end(): void {
-    this.#close();
+    if (!this.#holdGracefulEnd) this.#close();
   }
 
   destroy(): void {
