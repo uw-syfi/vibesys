@@ -106,17 +106,13 @@ function reducedMotion(): string {
 
 function themeBlocks(): string[] {
   const names = Object.keys(THEMES) as ThemeName[];
-  const selector = (name: ThemeName): string =>
-    name === DEFAULT_THEMES.light
-      ? `:root[data-theme="${name}"], :root:not([data-theme])`
-      : `:root[data-theme="${name}"]`;
   return [
-    ...names.map(name => block(selector(name), themeDeclarations(name))),
-    // Without `applyTheme`, the page follows the OS between the two default themes.
-    media(
-      'prefers-color-scheme: dark',
-      block(':root:not([data-theme])', themeDeclarations(DEFAULT_THEMES.dark)),
-    ),
+    // The defaults sit on a bare `:root`, whatever `data-theme` holds (another app sets it to names
+    // of its own), and follow the OS between the two default themes. A named block below is more
+    // specific, so it overrides them.
+    block(':root', themeDeclarations(DEFAULT_THEMES.light)),
+    media('prefers-color-scheme: dark', block(':root', themeDeclarations(DEFAULT_THEMES.dark))),
+    ...names.map(name => block(`:root[data-theme="${name}"]`, themeDeclarations(name))),
   ];
 }
 

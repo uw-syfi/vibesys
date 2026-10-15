@@ -1,19 +1,21 @@
 import {describe, expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {
+  LEGACY_ALIASES,
+  renderTokensCss,
+  TOKENS_CSS_COMMAND,
+  TOKENS_CSS_PATH,
+  tokensCssDrift,
+} from './css.js';
+import {
   COLOR_ROLES,
   CONTRAST_PAIRS,
   contrastRatio,
   DEFAULT_THEMES,
-  LEGACY_ALIASES,
   MOTION,
-  renderTokensCss,
   THEMES,
   type ThemeMode,
   type ThemeName,
-  TOKENS_CSS_COMMAND,
-  TOKENS_CSS_PATH,
-  tokensCssDrift,
 } from './index.js';
 
 const THEME_NAMES = Object.keys(THEMES) as ThemeName[];
@@ -111,10 +113,11 @@ describe('renderTokensCss', () => {
     }
   });
 
-  test('without a theme follows the OS between the default themes', () => {
-    expect(blockOf(DEFAULT_THEMES.light)).toContain(':root:not([data-theme])');
+  test('puts the defaults on a bare :root, light, then dark under the OS preference', () => {
+    expect(css).toContain(`:root {\n  color-scheme: light;\n  --bg: ${THEMES.paper.colors.bg};`);
     const dark = css.slice(css.indexOf('@media (prefers-color-scheme: dark)'));
-    expect(dark).toContain(`--bg: ${THEMES[DEFAULT_THEMES.dark].colors.bg};`);
+    expect(dark).toContain(`:root {\n    color-scheme: dark;\n    --bg: ${THEMES.ink.colors.bg};`);
+    expect(css).not.toContain(':not([data-theme])');
   });
 
   test('derives fills from the roles with color-mix, never from literals', () => {
@@ -183,6 +186,76 @@ describe('tokensCssDrift', () => {
       const message = tokensCssDrift(edited, primitives);
       expect(message).toContain(TOKENS_CSS_PATH);
       expect(message).toContain(TOKENS_CSS_COMMAND);
+    }
+  });
+});
+
+interface Rule {
+  readonly dark: boolean;
+  readonly attribute: string | null;
+  readonly declarations: ReadonlyMap<string, string>;
+}
+
+/** The rules of `css` that set a declaration on `:root`, with the data-theme each one requires. */
+function rootRules(css: string): Rule[] {
+  const rules: Rule[] = [];
+  for (const [, media, selector = '', body = ''] of css.matchAll(
+    /(?:@media \(prefers-color-scheme: (dark)\) \{\s*)?(:root(?:\[data-theme="[a-z]+"\])?) \{([^}]*)\}/g,
+  )) {
+    const attribute = /\[data-theme="([a-z]+)"\]/.exec(selector)?.[1] ?? null;
+    const declarations = new Map(
+      [...body.matchAll(/(--[\w-]+|color-scheme): ([^;]+);/g)].map(m => [m[1] ?? '', m[2] ?? '']),
+    );
+    rules.push({dark: media === 'dark', attribute, declarations});
+  }
+  return rules;
+}
+
+describe('the cascade of renderTokensCss', () => {
+  const rules = rootRules(renderTokensCss(''));
+
+  /** The value of each role on `:root` for a data-theme and an OS preference: the cascade. */
+  function resolve(dataTheme: string | null, osDark: boolean): Map<string, string> {
+    const applies = rules.filter(
+      rule => (!rule.dark || osDark) && (rule.attribute === null || rule.attribute === dataTheme),
+    );
+    // Specificity first (a named block beats a bare :root), then source order.
+    const ordered = [...applies].sort(
+      (a, b) => Number(a.attribute !== null) - Number(b.attribute !== null),
+    );
+    return new Map(ordered.flatMap(rule => [...rule.declarations]));
+  }
+
+  test('defines every role for any data-theme outside ThemeName, following the OS', () => {
+    const unknown = [
+      null,
+      '',
+      'dark',
+      'light',
+      'catppuccin-mocha',
+      'solarized-light',
+      'PAPER',
+      'x',
+    ];
+    for (const dataTheme of unknown) {
+      expect(dataTheme === null || !(dataTheme in THEMES)).toBe(true);
+      for (const osDark of [false, true]) {
+        const resolved = resolve(dataTheme, osDark);
+        const expected = THEMES[osDark ? DEFAULT_THEMES.dark : DEFAULT_THEMES.light];
+        for (const role of COLOR_ROLES)
+          expect(resolved.get(`--${role}`)).toBe(expected.colors[role]);
+      }
+    }
+  });
+
+  test('lets a named theme win over the OS preference', () => {
+    for (const name of THEME_NAMES) {
+      for (const osDark of [false, true]) {
+        const resolved = resolve(name, osDark);
+        for (const role of COLOR_ROLES) {
+          expect(resolved.get(`--${role}`)).toBe(THEMES[name].colors[role]);
+        }
+      }
     }
   });
 });

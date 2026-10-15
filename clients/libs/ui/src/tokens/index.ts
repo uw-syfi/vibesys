@@ -1,7 +1,8 @@
 /**
  * The design tokens as typed data: the themes, the scales (space, type, size, radius, elevation,
- * motion), the contrast floors every theme meets, and the generator of `tokens.css`. Plain data
- * and pure functions with no DOM, so tests, the generator and the settings feature read them.
+ * motion) and the contrast floors every theme meets. Plain data and pure functions with no DOM,
+ * so tests, the generator and the settings feature read them. The generator itself (`css.ts`) is
+ * internal to this package: only `scripts/tokens-css.ts` and the tests import it.
  */
 export {
   CONTRAST_PAIRS,
@@ -11,13 +12,6 @@ export {
   relativeLuminance,
   TEXT_FLOOR,
 } from './contrast.js';
-export {
-  LEGACY_ALIASES,
-  renderTokensCss,
-  TOKENS_CSS_COMMAND,
-  TOKENS_CSS_PATH,
-  tokensCssDrift,
-} from './css.js';
 export {
   type DurationToken,
   ELEVATION,

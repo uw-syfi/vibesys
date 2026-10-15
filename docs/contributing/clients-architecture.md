@@ -267,11 +267,13 @@ compile error. The six themes are `paper`, `mist`, `sand` (light) and `ink`, `mi
 scales and derived values (`color-mix` fills for selection, chips and banners) on `:root`, one
 `:root[data-theme="<name>"]` block per theme, the zeroing of every motion duration under
 `prefers-reduced-motion: reduce`, and aliases for the variable names the stylesheet had before the
-roles (`LEGACY_ALIASES`), which stay until their consumers move. With no `data-theme` the page
-follows `prefers-color-scheme` between the two default themes.
+roles (`LEGACY_ALIASES`), which stay until their consumers move. The defaults sit on a bare
+`:root` (paper, and ink under `prefers-color-scheme: dark`) and the named blocks override them, so a
+`data-theme` outside `ThemeName` (another app sets its own names) or none at all follows the OS
+between the two default themes and every role stays defined.
 
 `applyTheme(name, target = document.documentElement)` sets `data-theme`; it takes the element so a
-test can pass a fake.
+test can pass a fake. The selectors name `:root`, so `target` only works as the root element.
 
 ## State
 

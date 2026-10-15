@@ -68,6 +68,7 @@ export const CONTRAST_PAIRS: readonly ContrastPair[] = [
   ...pairs(['log-text'], ['log-bg'], TEXT_FLOOR, 'log text'),
   ...pairs(['bg'], ['text'], TEXT_FLOOR, 'the primary button, which inverts text and bg'),
   ...pairs(['accent'], SURFACES, GRAPHIC_FLOOR, 'focus ring and selection'),
-  ...pairs([...STATUS, 'muted'], ['panel'], GRAPHIC_FLOOR, 'status dots'),
-  ...pairs([...STATUS, 'accent'], ['panel'], GRAPHIC_FLOOR, 'chart marks'),
+  ...pairs(['bg'], ['accent'], TEXT_FLOOR, 'the transitional button.primary (bg text on accent)'),
+  ...pairs([...STATUS, 'muted'], SURFACES, GRAPHIC_FLOOR, 'status dots'),
+  ...pairs([...STATUS, 'accent'], SURFACES, GRAPHIC_FLOOR, 'chart marks'),
 ];
