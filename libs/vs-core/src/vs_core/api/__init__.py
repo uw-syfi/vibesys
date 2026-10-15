@@ -166,6 +166,7 @@ from vs_core.flows import (
     Source,
     Span,
     SpanAttempt,
+    SpanChange,
     SpanFailure,
     SpanId,
     SpanKind,
@@ -191,6 +192,7 @@ from vs_core.flows import (
     minutes,
     reply_errors,
     resource,
+    span_changes,
 )
 from vs_core.records import advance_record, recover
 from vs_core.scheduling import schedule
@@ -1196,6 +1198,7 @@ __all__ = [
     "Source",
     "Span",
     "SpanAttempt",
+    "SpanChange",
     "SpanFailure",
     "SpanId",
     "SpanKind",
@@ -1337,6 +1340,7 @@ __all__ = [
     "settle",
     "settlement_view",
     "share_unchanged",
+    "span_changes",
     "step",
     "subjects",
     "suspension_refusal",

@@ -228,3 +228,24 @@ def test_a_turn_is_labelled_when_issued(*, restarting: bool) -> None:
     assert root_span.label is None  # only what a flow labels carries a label
     play(run)
     assert run.finished is not None
+
+
+@settings(max_examples=examples(pr=4, nightly=60), deadline=None)
+@given(programs=PROGRAMS)
+def test_folding_the_span_changes_of_every_step_gives_the_trace(
+    programs: list[list[core.LabelFields]],
+) -> None:
+    run = FlowRun.start(search_of(root_of(programs)), Config())
+    folded: dict[core.SpanId, core.Span] = {}
+    before: core.RunTrace | None = None
+    for _ in range(20):
+        after = run.trace()
+        for change, span in core.span_changes(before, after):
+            assert (change is core.SpanChange.STARTED) == (span.id not in folded)
+            assert (change is core.SpanChange.ENDED) <= span.ended
+            folded[span.id] = span
+        assert tuple(folded.values()) == after.spans
+        if run.finished is not None:
+            break
+        before = after
+        run.reply(run.expect_turn("go"), Plan(n=1))

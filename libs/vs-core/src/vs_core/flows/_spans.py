@@ -159,3 +159,32 @@ class RunTrace(Value):
     def span(self, span_id: SpanId) -> Span | None:
         """The span ``span_id``, or None."""
         return next((s for s in self.spans if s.id == span_id), None)
+
+
+class SpanChange(StrEnum):
+    """How a span changed between two traces: what a reader of span events is told. Closed."""
+
+    STARTED = "started"
+    UPDATED = "updated"
+    ENDED = "ended"
+
+
+def span_changes(before: RunTrace | None, after: RunTrace) -> tuple[tuple[SpanChange, Span], ...]:
+    """The changes from ``before`` to ``after``, each with the whole span as it now is.
+
+    A new span is ``started`` (and ``ended`` too when it ended within the same step); a span
+    that ends is ``ended``; any other change is ``updated``. Folding the changes in order by span
+    id onto ``before`` gives ``after``.
+    """
+    known = {} if before is None else {span.id: span for span in before.spans}
+    found: list[tuple[SpanChange, Span]] = []
+    for span in after.spans:
+        was = known.get(span.id)
+        if was is None:
+            found.append((SpanChange.STARTED, span))
+            if span.ended:
+                found.append((SpanChange.ENDED, span))
+        elif was != span:
+            ended = span.ended and not was.ended
+            found.append((SpanChange.ENDED if ended else SpanChange.UPDATED, span))
+    return tuple(found)
