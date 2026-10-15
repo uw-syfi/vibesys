@@ -25,6 +25,8 @@ from vibesys.metrics import MetricRow
 from vibesys.orchestration.dynamic.core_policy.api import project_run_snapshot
 from vibesys.orchestration.dynamic.search.api import (
     AgentName,
+    Blocker,
+    BlockerKind,
     Failure,
     FailureKind,
     FinishedWork,
@@ -51,6 +53,7 @@ from vs_core.api import (
     FlowState,
     HostFence,
     HostId,
+    RejectionCode,
     RevisionRef,
     RunEnvelope,
 )
@@ -249,6 +252,57 @@ def test_a_workstream_status_follows_how_it_ended(snapshot: RunSnapshot) -> None
         assert status[f"workstream:{item.plan.work_id}"] is expected
         if record is not None:
             assert status[record.attempt.root] is expected
+
+
+def _single_round_snapshot(failure: Failure) -> RunSnapshot:
+    plan = WorkPlan(kind=WorkKind.IMPLEMENT, work_id="w1")
+    return RunSnapshot(
+        baseline=NotConfigured(),
+        hypotheses=(
+            HypothesisRecord(
+                hypothesis_id="w1",
+                title="",
+                hypothesis="claim",
+                first_sequence=1,
+                rounds=(
+                    RoundRecord(sequence=1, attempt=AttemptId(root="attempt-1"), failure=failure),
+                ),
+            ),
+        ),
+        finished=(FinishedWork(sequence=1, plan=plan, parent=_PARENT, failure=failure),),
+        running=(),
+        leading=None,
+    )
+
+
+def test_a_failures_text_reflects_its_own_kind_not_only_no_trusted_evidence() -> None:
+    """``last_error.text`` carries a typed reason's label or the implementer's own prose.
+
+    Regression: ``_round_failure_summary`` used to read only ``Failure.output``, which is
+    non-empty for exactly one of nineteen kinds (``NO_TRUSTED_EVIDENCE``) — every other kind's
+    real diagnostic (a rejection cause, a blocker's summary, ...) was silently dropped as "".
+    """
+    cases = (
+        (Failure(kind=FailureKind.REFUSED, cause=RejectionCode.BUDGET), "budget"),
+        (
+            Failure(
+                kind=FailureKind.TURN_LIMIT,
+                turns=3,
+                limit=3,
+                blocker=Blocker(
+                    kind=BlockerKind.FAILED,
+                    summary="the implementer repeated an earlier turn",
+                    next_step="try a smaller change",
+                ),
+            ),
+            "the implementer repeated an earlier turn",
+        ),
+    )
+    for failure, expected in cases:
+        result = project_run_snapshot(_single_round_snapshot(failure), experiment_revision=1)
+        last_error = result.rounds[0].last_error
+        assert last_error is not None
+        assert expected in last_error.text
 
 
 @settings(max_examples=examples(pr=10, nightly=60), deadline=None)
