@@ -274,6 +274,7 @@
 {"path": "tests/entrypoints/test_launch_selection.py", "rule": "real_impl", "count": 12}
 {"path": "tests/entrypoints/test_launcher.py", "rule": "real_impl", "count": 2}
 {"path": "tests/entrypoints/test_legacy_resume.py", "rule": "real_impl", "count": 1}
+{"path": "tests/entrypoints/test_server.py", "rule": "real_impl", "count": 2}
 {"path": "tests/examples/test_differential_dataflow_example.py", "rule": "real_impl", "count": 1}
 {"path": "tests/quality/test_check_stale_revert.py", "rule": "real_impl", "count": 1}
 {"path": "tests/quality/test_contract_sot.py", "rule": "real_impl", "count": 1}
@@ -290,8 +291,8 @@
 {"path": "tests/server/test_execution_tracker.py", "rule": "real_impl", "count": 2}
 {"path": "tests/server/test_experiments.py", "rule": "real_impl", "count": 6}
 {"path": "tests/server/test_lazy_event_store.py", "rule": "real_impl", "count": 21}
-{"path": "tests/server/test_runtime.py", "rule": "real_impl", "count": 19}
-{"path": "tests/server/test_runtime_on_sim.py", "rule": "real_impl", "count": 8}
+{"path": "tests/server/test_runtime.py", "rule": "real_impl", "count": 17}
+{"path": "tests/server/test_runtime_on_sim.py", "rule": "real_impl", "count": 6}
 {"path": "tests/server/test_startup_progress.py", "rule": "real_impl", "count": 4}
 {"path": "tests/server/test_transport_subscription.py", "rule": "real_impl", "count": 7}
 {"path": "tests/server/test_websocket_transport.py", "rule": "real_impl", "count": 70}

@@ -14,7 +14,6 @@ import os
 import shutil
 import tempfile
 import threading
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -159,7 +158,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         runs=production_runs(),
         socket_path=socket_path,
         detach=True,
-        platform=replace(Platform.real(), clock=SystemClock()),
+        platform=Platform.real(),
     )
     integration = LocalRunIntegration(
         clock=SystemClock(),

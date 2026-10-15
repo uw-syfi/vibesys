@@ -30,7 +30,7 @@ from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, Platform, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakeSignalSource, ManualClock
+from vs_sim.api.testing import FakeSignalSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -188,7 +188,7 @@ def test_server_entry_starts_launch_run_and_projects_events(tmp_path: Path) -> N
         run_id="run-1",
         socket_path=tmp_path / "control.sock",
         runs=runs,
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=Platform.real(),
     )
     try:
         result = runtime.drive(_request(tmp_path / "project"))
@@ -233,7 +233,7 @@ def test_server_retains_chat_after_run_result_and_releases_it_on_close(tmp_path:
         run_id="run-1",
         socket_path=tmp_path / "control.sock",
         runs=runs,
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=Platform.real(),
     )
     try:
         runtime.drive(_request(tmp_path / "project"))

@@ -13,7 +13,6 @@ import os
 import shutil
 import tempfile
 import threading
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -124,7 +123,7 @@ def _serve(
                     socket_path=socket_path,
                     detach=True,
                     observer=publisher,
-                    platform=replace(Platform.real(), clock=clock),
+                    platform=Platform.real(),
                 )
                 integration.events.subscribe(runtime.integration.project_event)
                 try:

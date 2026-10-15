@@ -230,6 +230,7 @@ REAL_IMPLEMENTATIONS: dict[str, str] = _names(
     "entrypoints.production.production_runs",
     "entrypoints.production.production_timing",
     "entrypoints.production.production_web_discovery",
+    "entrypoints.server.real_gateway_effects",
     "tests.support.real_git.REAL_PROCESSES",
     "tests.support.real_git.REAL_GIT",
 )

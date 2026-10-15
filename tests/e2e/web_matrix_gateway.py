@@ -7,13 +7,12 @@ import os
 import signal
 import sys
 import threading
-from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from entrypoints.production import production_runs
 from server.runtime import ServerRuntime
-from vs_sim.api import Platform, SystemClock
+from vs_sim.api import Platform
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -51,7 +50,7 @@ def main() -> int:
         web_assets=arguments.web_assets,
         instance_path=arguments.store_directory / "web-gateway.json",
         detach=True,
-        platform=replace(Platform.real(), clock=SystemClock()),
+        platform=Platform.real(),
     )
 
     def request_stop(_signal: int, _frame: FrameType | None) -> None:

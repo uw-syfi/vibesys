@@ -8,7 +8,6 @@ import socket
 import subprocess
 import sys
 import threading
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,7 +25,7 @@ from server.transport.discovery import (
 )
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vs_sim.api import Platform
-from vs_sim.api.testing import FakeProcessSignaller, ManualClock, stop_process
+from vs_sim.api.testing import FakeProcessSignaller, stop_process
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -69,7 +68,7 @@ def test_detached_runtime_runs_without_a_subscriber_and_exits_when_the_run_ends(
         socket_path=socket_path,
         detach=True,
         observer=Observer(),
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=Platform.real(),
     )
     started = threading.Event()
     finish = runtime.threads.event()
@@ -148,7 +147,7 @@ def test_detached_runtime_unwinds_callback_failures_without_shutdown(
         runs=production_runs(),
         socket_path=tmp_path / "control.sock",
         detach=True,
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=Platform.real(),
     )
     failure = failure_factory()
     completed = threading.Event()

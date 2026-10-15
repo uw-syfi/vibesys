@@ -10,14 +10,13 @@ import threading
 from collections.abc import Callable, Generator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, redirect_stdout
-from dataclasses import replace
 from http.client import HTTPConnection
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from tests.server.support import REQUEST_TIME
+from tests.server.support import REQUEST_TIME, sim_platform
 from tests.support.real_git import NO_GITHUB, REAL_GIT, REAL_PROCESSES
 from websockets.sync.client import connect
 
@@ -43,7 +42,7 @@ from vibesys.run.integration import LocalRunIntegration
 from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import RunControlChannel
 from vs_sim.api import OsThreads, Platform
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from websockets.typing import Origin
@@ -232,7 +231,7 @@ def test_runtime_explicitly_composes_server_components(tmp_path: Path) -> None:
         run_id="run-1",
         runs=production_runs(),
         socket_path=tmp_path / "control.sock",
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=sim_platform(SimThreads()),
     )
 
     assert isinstance(runtime.journal, WireJournal)
@@ -253,7 +252,7 @@ def test_runtime_snapshots_namespace_client_state_by_project(tmp_path: Path) -> 
         project_root=project_root,
         runs=production_runs(),
         socket_path=tmp_path / "control.sock",
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=sim_platform(SimThreads()),
     )
 
     response = runtime.api.execute(SnapshotQuery(timestamp=REQUEST_TIME))
@@ -298,7 +297,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         socket_path=tmp_path / "control.sock",
         detach=True,
         observer=Observer(),
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=Platform.real(),
     )
 
     def run() -> bool:
@@ -363,7 +362,7 @@ def test_startup_rejects_commands_that_require_an_active_session(
         socket_path=tmp_path / "control.sock",
         detach=True,
         observer=observer,
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=Platform.real(),
     )
 
     assert runtime.run(lambda: "ran") == "ran"
@@ -396,7 +395,7 @@ def test_a_web_only_subscriber_decides_a_web_runs_whole_lifetime(tmp_path: Path)
         socket_path=socket_path,
         web=True,
         instance_path=instance_path,
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=Platform.real(),
     )
     printed = _PrintedLines()
     received: list[dict] = []
@@ -459,7 +458,7 @@ def test_the_web_gateway_receives_its_assets_origins_and_instance_path(tmp_path:
         web_origins=(declared_origin,),
         instance_path=instance_path,
         detach=True,
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=Platform.real(),
     )
     printed = _PrintedLines()
     observed: dict[str, Any] = {}
@@ -523,7 +522,7 @@ def test_the_runtime_composes_no_web_gateway_unless_web_is_requested(tmp_path: P
         web_origins=("http://vibesys.test:4173",),
         instance_path=instance_path,
         detach=True,
-        platform=replace(Platform.real(), clock=ManualClock()),
+        platform=Platform.real(),
     )
     printed = _PrintedLines()
     observed: dict[str, Any] = {}
@@ -575,7 +574,7 @@ def test_the_web_gateway_binds_the_configured_port(tmp_path: Path) -> None:
             web_port=held.getsockname()[1],
             instance_path=instance_path,
             detach=True,
-            platform=replace(Platform.real(), clock=ManualClock()),
+            platform=Platform.real(),
         )
         with redirect_stdout(printed), pytest.raises(RuntimeError) as raised:
             # The callback is unreachable while the launch fails, and requests

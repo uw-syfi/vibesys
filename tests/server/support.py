@@ -30,8 +30,15 @@ from vs_runtime.api.infrastructure import (
     RunControlTransition,
     create_run_control_channel,
 )
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api import OsThreads, Platform
+from vs_sim.api.testing import (
+    FakeProcesses,
+    FakeProcessSignaller,
+    ManualClock,
+    SimBlockingRunner,
+    SimNetwork,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -42,7 +49,8 @@ if TYPE_CHECKING:
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunRecord, RunView
     from vs_project.api import Project
-    from vs_sim.api import Condition, Threads, Worker
+    from vs_sim.api import Condition, Network, ProcessSpec, Threads, Worker
+    from vs_sim.api.testing import ProcessScript
 
 REQUEST_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 """The stamp a test gives a request or response it builds."""
@@ -403,3 +411,24 @@ def run_at_paused_boundary(parts: ServerParts, work: Callable[[], None]) -> thre
     finally:
         unsubscribe()
     return thread
+
+
+def _no_process(spec: ProcessSpec) -> ProcessScript:
+    message = f"a server test started no process, but {spec.argv!r} ran"
+    raise AssertionError(message)
+
+
+def sim_platform(threads: SimThreads, *, network: Network | None = None) -> Platform:
+    """A wholly simulated ``Platform`` on ``threads``: no part of it is real.
+
+    Its clock is a ``ManualClock`` (event stamps only), blocking calls and sockets run on
+    ``threads``, no process may start, and no process ID is live.
+    """
+    return Platform(
+        clock=ManualClock(),
+        threads=threads,
+        blocking=SimBlockingRunner(threads),
+        processes=FakeProcesses(_no_process, threads.sleep),
+        network=SimNetwork(threads) if network is None else network,
+        signaller=FakeProcessSignaller(set()),
+    )
