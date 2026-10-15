@@ -22,11 +22,12 @@ from vs_sandbox.container_runtime import (
 )
 from vs_sandbox.docker_cli import EXEC_MARKER_ENV, SIGNAL_EXEC_SCRIPT
 from vs_sandbox.process_execution import shell_exit_status
+from vs_sim.api import DISCARD, OutputStream
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
-    from vs_sim.api import PipedProcess, PipedProcessLauncher
+    from vs_sim.api import OutputSink, PipedProcess, PipedProcessLauncher
 
 # The container program's parent, standing in for the ``docker exec`` client.
 # It starts the program in a session of its own (the daemon's side), records
@@ -362,10 +363,17 @@ class FakeDockerEngine:
         self._signal_requests_unreadable = count
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink = DISCARD
     ) -> subprocess.CompletedProcess[str]:
-        """Run one ``docker`` subcommand to completion."""
-        arguments = tuple(argv)
+        """Run one ``docker`` subcommand to completion, writing what it printed to *output*."""
+        result = self._answer(tuple(argv), timeout_seconds)
+        output.write(OutputStream.STDOUT, result.stdout.encode())
+        output.write(OutputStream.STDERR, result.stderr.encode())
+        return result
+
+    def _answer(
+        self, arguments: tuple[str, ...], timeout_seconds: float
+    ) -> subprocess.CompletedProcess[str]:
         self.calls.append(arguments)
         match arguments[1]:
             case "run":

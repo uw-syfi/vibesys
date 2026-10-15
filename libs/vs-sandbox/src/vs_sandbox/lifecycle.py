@@ -12,28 +12,31 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_sim.api import CloseOnce, ReleaseStack
+from vs_sim.api import DISCARD, CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_sandbox.execution import CommandResult, CommandRunner
-    from vs_sim.api import Released
+    from vs_sim.api import OutputSink, Released
 
 
-def start_sandbox(sandbox: CommandRunner) -> None:
+def start_sandbox(sandbox: CommandRunner, *, output: OutputSink = DISCARD) -> None:
     """Start a sandbox that owns an execution environment.
 
     The base :class:`CommandRunner` contract intentionally has no lifecycle because
     host sandboxes have nothing to start. Callers that requested a container
     sandbox use this adapter and receive an immediate, named failure if the
     backend returned a sandbox without the required capability.
+
+    The sandbox's ``start(*, output)`` writes the output of the commands that
+    start its environment (``docker run``, an image pull) to *output* as they run.
     """
     start = getattr(sandbox, "start", None)
     if not callable(start):
         message = f"{type(sandbox).__name__} has no execution environment to start"
         raise TypeError(message)
-    start()
+    start(output=output)
 
 
 def execute_as_root(
@@ -95,9 +98,15 @@ class SandboxSession[ViewT]:
         return cls(sandbox, view, stop_on_close=False)
 
     @classmethod
-    def start(cls, sandbox: CommandRunner, view: ViewT) -> SandboxSession[ViewT]:
-        """Start a sandbox and own its cleanup for the session lifetime."""
-        start_sandbox(sandbox)
+    def start(
+        cls, sandbox: CommandRunner, view: ViewT, *, output: OutputSink = DISCARD
+    ) -> SandboxSession[ViewT]:
+        """Start a sandbox and own its cleanup for the session lifetime.
+
+        *output* receives what the sandbox's start commands write, as
+        :func:`start_sandbox` describes.
+        """
+        start_sandbox(sandbox, output=output)
         return cls(sandbox, view, stop_on_close=True)
 
     def __enter__(self) -> SandboxSession[ViewT]:

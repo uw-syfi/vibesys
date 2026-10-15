@@ -34,6 +34,7 @@ from vs_sandbox.docker_sandbox import (
 )
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
 from vs_sim.api import (
+    Capture,
     NotReleasedError,
     OsThreads,
     ProcessTimeoutError,
@@ -117,7 +118,29 @@ def _read_sandbox_metadata(workspace: Path) -> dict[str, object]:
     return json.loads(metadata_path.read_text())
 
 
+_PULL_PROGRESS = (
+    "Unable to find image 'nvcr.io/nvidia/pytorch:25.04-py3' locally\n"
+    "25.04-py3: Pulling from nvidia/pytorch\n"
+    "a1b2c3d4e5f6: Pulling fs layer\n"
+    "a1b2c3d4e5f6: Downloading  12.5MB/1.2GB\n"
+)
+
+
 class TestStart:
+    def test_start_writes_what_docker_run_prints_to_the_output(
+        self, sandbox: DockerSandbox, docker: ScriptedDockerCli
+    ) -> None:
+        docker.on(("docker", "run"), docker_result(stdout="abc123\n", stderr=_PULL_PROGRESS))
+        docker.always(docker_result(stdout="abc123\n"))
+        output = Capture(limit=1 << 16)
+
+        sandbox.start(output=output)
+
+        # Only `docker run` writes here; the setup commands after it keep their own output.
+        assert output.stderr == _PULL_PROGRESS.encode()
+        assert output.stdout == b"abc123\n"
+        assert sandbox.container_id == "abc123"
+
     def test_start_runs_docker_run_with_correct_args(
         self,
         sandbox: DockerSandbox,
