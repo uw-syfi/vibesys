@@ -172,8 +172,13 @@ class Trace:
 
     # -- operations --------------------------------------------------------------------------
 
-    def operation_started(self, parent: SpanId, decision: DecisionId, name: str) -> None:
-        """The flow ``parent`` issued ``decision``; it runs until answered or abandoned."""
+    def operation_started(
+        self, parent: SpanId, decision: DecisionId, name: str, invocation: str | None = None
+    ) -> None:
+        """The flow ``parent`` issued ``decision``; it runs until answered or abandoned.
+
+        ``invocation`` is the agent invocation a turn runs as.
+        """
         span_id = operation_span(decision)
         self._spans[span_id] = Span(
             id=span_id,
@@ -182,6 +187,7 @@ class Trace:
             name=name,
             status=SpanStatus.RUNNING,
             started_at=self.at,
+            invocation=invocation,
         )
 
     def operation_answered(self, decision: DecisionId, event: Event) -> None:

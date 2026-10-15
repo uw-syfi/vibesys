@@ -30,6 +30,7 @@ from vs_core.types.strategy import (
     Finish,
     Operation,
     ProposeWinner,
+    RequestTurn,
     Settle,
     Wait,
     WakeAt,
@@ -310,6 +311,11 @@ class _Run:
                 self.trace.run_ended(self._tasks[0].span_id, result)
             case Operation(request=request):
                 self.trace.operation_started(task.span_id, pending.decision, request.kind)
+            case RequestTurn(turn=turn) as work:
+                invocation = turn.invocation_id.root
+                self.trace.operation_started(
+                    task.span_id, pending.decision, _label(work), invocation
+                )
             case work:
                 self.trace.operation_started(task.span_id, pending.decision, _label(work))
         if label is not None:

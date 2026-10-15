@@ -81,6 +81,7 @@ def test_spans_are_timed_by_the_run_clock_of_the_step_that_recorded_them(
     assert [s.started_at for s in turns] == issued[: len(gaps)]
     assert [s.ended_at for s in turns] == answered
     assert all(s.status is core.SpanStatus.DONE for s in turns)
+    assert len({s.invocation for s in turns if s.invocation}) == len(turns)  # each its own
     assert run.finished is not None
     assert_trace_ended(run.trace())
     assert span_of(run, "flow:#1").ended_at == answered[-1]

@@ -142,6 +142,9 @@ class Span(Value):
     ended_at: Seconds | None = None
     failure: SpanFailure | None = None
     stop: SpanStop | None = None
+    invocation: str | None = None
+    """For an agent turn, the invocation it ran as: what the agent's own records (its usage,
+    its logs) name, so the runtime maps them to this span."""
     label: SpanLabel | None = None
     """The search's label of the span (``ctx.label``, or ``label=`` on an aspect call)."""
 
