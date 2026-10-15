@@ -1967,6 +1967,32 @@
       "title": "RunRole",
       "type": "string"
     },
+    "RunStartCompensationEvidence": {
+      "discriminator": {
+        "mapping": {
+          "stop_failed": "#/$defs/StopFailedCompensationFailure",
+          "stop_unconfirmed": "#/$defs/StopUnconfirmedCompensationFailure",
+          "worker_start_refused": "#/$defs/WorkerStartRefusedCompensationFailure"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/WorkerStartRefusedCompensationFailure"
+        },
+        {
+          "$ref": "#/$defs/StopFailedCompensationFailure"
+        },
+        {
+          "$ref": "#/$defs/StopUnconfirmedCompensationFailure"
+        }
+      ]
+    },
+    "RunStartCompensationFailure": {
+      "$ref": "#/$defs/RunStartCompensationEvidence",
+      "description": "One strict stderr line preserving an undisclosed instance cleanup failure.\n\nA successful ``run.start`` reply could not reach the client, so only this\ndiagnostic can tell an operator which live instance may need recovery. The\ndiscriminated variants make result presence and nonterminal outcomes part of\nthe generated schema rather than Python-only validation.",
+      "title": "RunStartCompensationFailure"
+    },
     "RunStartReply": {
       "additionalProperties": false,
       "description": "The started server's record, or why nothing started.",
@@ -2341,6 +2367,54 @@
       "title": "StartupStage",
       "type": "string"
     },
+    "StopFailedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The registry stop raised before returning typed evidence.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "stop_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "instance_id"
+      ],
+      "title": "StopFailedCompensationFailure",
+      "type": "object"
+    },
     "StopOutcome": {
       "description": "What ``vibesys instances stop`` observed.",
       "enum": [
@@ -2361,6 +2435,52 @@
       ],
       "title": "StopRoute",
       "type": "string"
+    },
+    "StopUnconfirmedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The registry returned a typed result that does not prove terminal cleanup.\n\nThe stop result is the one source of the instance identity in this variant,\nso a serialized report cannot carry two identities that disagree.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "stop_unconfirmed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stop_result": {
+          "$ref": "#/$defs/UnconfirmedInstanceStopResult"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "stop_result"
+      ],
+      "title": "StopUnconfirmedCompensationFailure",
+      "type": "object"
     },
     "TaskList": {
       "additionalProperties": false,
@@ -2470,6 +2590,49 @@
       "title": "TasksListRequest",
       "type": "object"
     },
+    "UnconfirmedInstanceStopResult": {
+      "additionalProperties": false,
+      "description": "A complete stop result whose outcome does not prove terminal cleanup.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "stopping",
+            "still_running",
+            "unsupported"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopRoute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "outcome"
+      ],
+      "title": "UnconfirmedInstanceStopResult",
+      "type": "object"
+    },
     "UnreadableRecord": {
       "additionalProperties": false,
       "description": "A registry entry this reader cannot interpret; ``version`` is ``None`` if it has none.",
@@ -2496,6 +2659,54 @@
         "version"
       ],
       "title": "UnreadableRecord",
+      "type": "object"
+    },
+    "WorkerStartRefusedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The helper could not start the worker that owns the compensating stop.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "worker_start_refused",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "instance_id"
+      ],
+      "title": "WorkerStartRefusedCompensationFailure",
       "type": "object"
     }
   },
@@ -2652,12 +2863,16 @@
     },
     "channel_end": {
       "$ref": "#/$defs/ChannelEnd"
+    },
+    "compensation_failure": {
+      "$ref": "#/$defs/RunStartCompensationFailure"
     }
   },
   "required": [
     "request",
     "message",
-    "channel_end"
+    "channel_end",
+    "compensation_failure"
   ],
   "title": "HostHelperDocument",
   "type": "object",

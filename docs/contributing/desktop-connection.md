@@ -165,6 +165,14 @@ The connection manager opens two kinds of channel to a host. Both start with the
 | run | one per run-protocol connection the page opens (control, subscribe, chat, per `WP-ROLES`) | One `run.connect`; on `connected` the channel becomes a byte relay to the run's socket and carries the run protocol unchanged until either side ends. |
 | logs | one per host, opened when the first log view comes on screen | `logs.list` and `logs.read` only; see [Logs](#logs). |
 
+A control channel normally exits `0`. If a successful `run.start` reply cannot reach the client,
+the helper owns stopping that undisclosed instance. Only `stopped` and `not_running` release that
+ownership as success. A thrown stop, a refused cleanup worker, or any nonterminal result
+(`stopping`, `still_running`, or `unsupported`) ends the channel with status `12` and writes one
+typed `RunStartCompensationFailure` line per affected instance on stderr. Each line preserves the
+request id, instance id, failure kind, detail, and the complete `InstanceStopResult` when one
+exists, so the app or an operator can recover an instance the failed stdout reply never disclosed.
+
 Framing is the run protocol's: one JSON message per line, UTF-8 (`WP-GRANULARITY`, `WP-FRAME-TYPE`,
 `WP-NEWLINE`), read with the existing `NewlineFramer`. After `connected`, the run channel's bytes
 are the run protocol's own, so the whole `wire-protocol.md` contract holds through it, as it does

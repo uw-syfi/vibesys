@@ -32,8 +32,9 @@ from server.api.schema import (
     run_event_typescript,
 )
 from server.events import EventData
+from server.events import GateKind as ServerGateKind
 from server.host_api import HelperFeature
-from vibesys.api import RunFailedData, RunFailure, ToolResultPayload
+from vibesys.api import GateKind, RunFailedData, RunFailure, ToolResultPayload
 from vs_logs.api import NarrationLevel, NarrationLine
 
 SCHEMA_PATH = Path("clients/libs/contracts/src/generated/protocol.schema.json")
@@ -645,6 +646,11 @@ def test_wire_run_failure_is_the_core_contract() -> None:
     assert defs["RunFailure"]["required"] == core["required"]
     assert defs["RunFailureKind"]["enum"] == core["$defs"]["RunFailureKind"]["enum"]
     assert RunFailedData.model_fields["failure"].annotation is RunFailure
+
+
+def test_gate_kind_has_one_definition_on_both_wire_contracts() -> None:
+    """Run events and log owners share vibesys' GateKind, so one schema entry serves both."""
+    assert ServerGateKind is GateKind
 
 
 def test_thread_creation_request_no_longer_accepts_a_driver() -> None:
