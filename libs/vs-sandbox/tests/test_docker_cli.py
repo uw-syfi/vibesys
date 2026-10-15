@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -11,6 +12,7 @@ from hypothesis import strategies as st
 from vs_sandbox.api import SubprocessDockerCli
 from vs_sim.api import (
     DISCARD,
+    Capture,
     OutputSink,
     OutputStream,
     ProcessOutputTooLarge,
@@ -65,6 +67,26 @@ def test_a_finished_command_keeps_its_status_streams_and_arguments(
     assert result.stderr == stderr.replace("\r\n", "\n").replace("\r", "\n")
     assert processes.ran == [ProcessSpec(("docker", "version"))]
     assert clock.now() == 2
+
+
+# A finished command's streams are decoded as strict UTF-8, as `subprocess.run(text=True)` does.
+_UTF8 = st.text(max_size=40).map(str.encode)
+
+
+@given(stdout=_UTF8, stderr=_UTF8, finishes=st.booleans())
+def test_every_byte_a_command_writes_reaches_the_output_whether_it_finishes_or_times_out(
+    stdout: bytes, stderr: bytes, *, finishes: bool
+) -> None:
+    script = ProcessScript(
+        stdout=stdout, stderr=stderr, duration_s=1, runs_until_signalled=not finishes
+    )
+    docker, _ = _docker(script, ManualClock())
+    output = Capture(limit=1 << 10)
+
+    with pytest.raises(ProcessTimeoutError) if not finishes else contextlib.nullcontext():
+        docker.run(["docker", "run", "-d", "image"], timeout_seconds=30, output=output)
+
+    assert (output.stdout, output.stderr) == (stdout, stderr)
 
 
 @given(timeout=_TIMEOUTS, stdout=st.binary(max_size=40), stderr=st.binary(max_size=40))

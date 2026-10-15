@@ -34,6 +34,7 @@ from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_decode.api import decode_json
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
 from vs_sim.api import (
+    DISCARD,
     Clock,
     Lines,
     OsThreads,
@@ -44,6 +45,7 @@ from vs_sim.api import (
     StreamingCommand,
     SubprocessPipedProcessLauncher,
     Threads,
+    tee,
 )
 
 if TYPE_CHECKING:
@@ -51,7 +53,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_sandbox.api import FeatureRef
-    from vs_sim.api import Worker
+    from vs_sim.api import OutputSink, Worker
 
 DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS = 1200.0
 """Default budget for one launch's image builds, summed over every Docker command."""
@@ -65,8 +67,6 @@ DOCKER_OUTPUT_TAIL_CHARACTERS = 64 * 1024
 """Maximum characters retained from each Docker command output stream."""
 
 _OUTPUT_READ_CHARACTERS = 16 * 1024
-DOCKER_PROGRESS_LINE_CHARACTERS = 16 * 1024
-"""Maximum characters delivered for one Docker stderr progress line."""
 
 _PROCESS_SETTLE_TIMEOUT_SECONDS = 5.0
 # After a normally exited leader, leave half of the one final cleanup budget
@@ -270,7 +270,12 @@ type BuildProgressSink = Callable[[ImageBuildProgress], None]
 
 
 class _StepTracker:
-    """Turn a build's BuildKit progress lines into forward-moving step observations."""
+    """Turn a build's BuildKit progress lines into forward-moving step observations.
+
+    It reads the lines of the build's raw output (through :class:`~vs_sim.api.Lines`,
+    teed beside the caller's sink), so parsing never decides which bytes reach the
+    caller. BuildKit writes its progress to stderr; stdout lines are not steps.
+    """
 
     def __init__(self, sink: BuildProgressSink | None = None) -> None:
         self._sink = sink
@@ -282,7 +287,10 @@ class _StepTracker:
         """The latest Dockerfile step Docker announced, such as ``[2/14] RUN ...``."""
         return self._running
 
-    def line(self, text: str) -> None:
+    def line(self, stream: OutputStream, text: str) -> None:
+        """Observe one line of the build's output."""
+        if stream is not OutputStream.STDERR:
+            return
         match = _BUILD_STEP.match(text)
         if match is None:
             return
@@ -501,65 +509,39 @@ class DockerBuildRunner(Protocol):
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink = DISCARD,
     ) -> DockerBuildResult:
         """Run one Docker command without a shell.
 
-        When ``on_stderr_line`` is given, it receives each line of the
-        command's standard error, in order, while the command runs. An
-        individual progress line is capped before delivery; the result keeps
-        an independently bounded tail of both streams.
+        Every chunk the command writes to stdout or stderr is written to
+        ``output`` while the command runs, in order per stream, before this
+        returns or raises. The result keeps an independently bounded tail of
+        both streams, whatever ``output`` is.
         """
         ...
 
 
-class _ProgressLines:
-    """Forward bounded logical stderr lines without buffering an unbounded line."""
+class _GuardedSink:
+    """Forward drained chunks to the caller's sink, keeping its first failure for later.
 
-    def __init__(
-        self,
-        sink: Callable[[str], None],
-        errors: queue.SimpleQueue[Exception],
-    ) -> None:
-        self._sink: Callable[[str], None] | None = sink
+    A drain keeps reading after the sink fails: a drain that stopped would leave the
+    child blocked on a full pipe until its timeout. The failure is raised once both
+    pipes have drained, and the sink receives nothing after it.
+    """
+
+    def __init__(self, sink: OutputSink, errors: queue.SimpleQueue[Exception]) -> None:
+        self._sink: OutputSink | None = sink
         self._errors = errors
-        self._prefix = ""
-        self._line_open = False
 
-    def feed(self, text: str) -> None:
-        """Consume a fixed-size stream chunk and emit every completed line."""
-        start = 0
-        while True:
-            end = text.find("\n", start)
-            if end < 0:
-                self._append(text[start:])
-                return
-            self._append(text[start:end])
-            self._emit()
-            start = end + 1
-
-    def finish(self) -> None:
-        """Emit the final unterminated line, when present."""
-        if self._line_open:
-            self._emit()
-
-    def _append(self, text: str) -> None:
-        if text:
-            self._line_open = True
-        remaining = DOCKER_PROGRESS_LINE_CHARACTERS - len(self._prefix)
-        if remaining > 0:
-            self._prefix += text[:remaining]
-
-    def _emit(self) -> None:
+    def write(self, stream: OutputStream, data: bytes) -> None:
         sink = self._sink
-        if sink is not None:
-            try:
-                sink(self._prefix.removesuffix("\r"))
-            except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-994700 [BLE001]; progress observer failures are reported after both process pipes have been drained, so callbacks cannot deadlock the child.
-                self._errors.put(exc)
-                self._sink = None
-        self._prefix = ""
-        self._line_open = False
+        if sink is None:
+            return
+        try:
+            sink.write(stream, data)
+        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-994700 [BLE001]; output sink failures are reported after both process pipes have been drained, so a failing sink cannot deadlock the child.
+            self._errors.put(exc)
+            self._sink = None
 
 
 @dataclass
@@ -606,9 +588,8 @@ class SubprocessDockerBuildRunner:
     ) -> None:
         """Use OS effects by default, retaining the positional streaming test seam.
 
-        An explicitly injected legacy ``streaming`` command remains active for
-        calls that request stderr progress. Production execution and calls
-        without a progress observer use the bounded piped-process boundary.
+        An explicitly injected legacy ``streaming`` command runs every call.
+        Production execution uses the bounded piped-process boundary.
         """
         if not math.isfinite(cleanup_timeout) or cleanup_timeout < 0:
             message = "Docker process cleanup timeout must be finite and nonnegative"
@@ -624,20 +605,18 @@ class SubprocessDockerBuildRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink = DISCARD,
     ) -> DockerCommandResult:
-        """Run one command with continuously drained, bounded output."""
+        """Run one command with continuously drained, bounded output.
+
+        The pipes are read as text, so ``output`` receives each chunk as UTF-8 of
+        the decoded text: an undecodable byte arrives as U+FFFD.
+        """
         normalized = tuple(argv)
-        if self._streaming is not None and on_stderr_line is not None:
-
-            def progress(stream: OutputStream, line: str) -> None:
-                if stream is OutputStream.STDERR:
-                    on_stderr_line(line[:DOCKER_PROGRESS_LINE_CHARACTERS])
-
-            with Lines(progress) as lines:
-                result = self._streaming.run(
-                    normalized, cwd=cwd, timeout_seconds=timeout, output=lines
-                )
+        if self._streaming is not None:
+            result = self._streaming.run(
+                normalized, cwd=cwd, timeout_seconds=timeout, output=output
+            )
             return _bounded_result(result)
         process = self._processes.start(normalized, cwd=cwd)
         stdout_tail = _OutputTail(DOCKER_OUTPUT_TAIL_CHARACTERS)
@@ -648,7 +627,7 @@ class SubprocessDockerBuildRunner:
             stdout_tail,
             stderr_tail,
             drain_errors,
-            on_stderr_line,
+            output,
         )
         try:
             returncode = process.wait(timeout=timeout)
@@ -697,39 +676,31 @@ class SubprocessDockerBuildRunner:
         stdout_tail: _OutputTail,
         stderr_tail: _OutputTail,
         drain_errors: queue.SimpleQueue[Exception],
-        on_stderr_line: Callable[[str], None] | None,
+        output: OutputSink,
     ) -> _DockerExecution:
         """Start both drains, cleaning up the process if either worker cannot start."""
+        sink = _GuardedSink(output, drain_errors)
 
-        def drain(
-            stream: io.TextIOBase,
-            tail: _OutputTail,
-            progress: _ProgressLines | None = None,
-        ) -> None:
+        def drain(stream: io.TextIOBase, name: OutputStream, tail: _OutputTail) -> None:
             try:
                 while chunk := stream.readline(_OUTPUT_READ_CHARACTERS):
                     tail.append(chunk)
-                    if progress is not None:
-                        progress.feed(chunk)
+                    sink.write(name, chunk.encode())
             except (OSError, UnicodeError, ValueError) as exc:
                 drain_errors.put(exc)
-            finally:
-                if progress is not None:
-                    progress.finish()
 
         execution = _DockerExecution(process, (process.stdout, process.stderr), [])
-        progress = None if on_stderr_line is None else _ProgressLines(on_stderr_line, drain_errors)
         try:
             execution.workers.append(
                 self._threads.spawn(
-                    lambda: drain(process.stdout, stdout_tail),
+                    lambda: drain(process.stdout, OutputStream.STDOUT, stdout_tail),
                     name="docker-stdout",
                     daemon=True,
                 )
             )
             execution.workers.append(
                 self._threads.spawn(
-                    lambda: drain(process.stderr, stderr_tail, progress),
+                    lambda: drain(process.stderr, OutputStream.STDERR, stderr_tail),
                     name="docker-stderr",
                     daemon=True,
                 )
@@ -799,9 +770,9 @@ class SubprocessDockerBuildRunner:
         return _Settlement(workers_stopped, tuple(errors))
 
 
-# lint-waiver: LW-731409 [PLR0913]; the Dockerfile, base, runner, budget, progress sink and the
-# > clock that measures the budget each change one build independently; a settings object would
-# > only rename the keywords agent_image already passes the same way.
+# lint-waiver: LW-731409 [PLR0913]; the Dockerfile, base, runner, budget, progress sink, output
+# > sink and the clock that measures the budget each change one build independently; a settings
+# > object would only rename the keywords agent_image already passes the same way.
 def build_task_image(  # noqa: PLR0913
     dockerfile_path: Path,
     *,
@@ -809,6 +780,7 @@ def build_task_image(  # noqa: PLR0913
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
+    output: OutputSink = DISCARD,
     clock: Clock,
 ) -> str:
     """Build a task Dockerfile and return its immutable Docker image ID.
@@ -834,6 +806,8 @@ def build_task_image(  # noqa: PLR0913
     that does not know whether the task Dockerfile uses it.
 
     ``on_progress``, when given, receives the build's step observations.
+    ``output`` receives every chunk each Docker command of the build writes, as
+    it is written; the step observations are parsed from the same bytes.
 
     ``timeout`` is the budget for the whole build, not for one Docker command.
     When it runs out, the running Docker process group is killed and
@@ -845,7 +819,9 @@ def build_task_image(  # noqa: PLR0913
     return _build_task_image(
         dockerfile,
         base_image=base_image,
-        build=_BuildRun(runner=runner, timeout=timeout, on_progress=on_progress, clock=clock),
+        build=_BuildRun(
+            runner=runner, timeout=timeout, on_progress=on_progress, output=output, clock=clock
+        ),
     ).image_id
 
 
@@ -922,6 +898,7 @@ def _prune_superseded_task_tags(build: _BuildRun, context: Path, *, keep_tag: st
                 ("docker", "image", "ls", "--format", "{{.Tag}}", _TASK_IMAGE_REPOSITORY),
                 cwd=context,
                 timeout=timeout,
+                output=build.output,
             )
         )
     except (FileNotFoundError, ProcessTimeoutError):
@@ -940,6 +917,7 @@ def _prune_superseded_task_tags(build: _BuildRun, context: Path, *, keep_tag: st
                 ("docker", "image", "rm", f"{_TASK_IMAGE_REPOSITORY}:{tag}"),
                 cwd=context,
                 timeout=timeout,
+                output=build.output,
             )
 
 
@@ -966,7 +944,7 @@ def _resolvable_base(base_image: str, build: _BuildRun) -> str:
     return tag
 
 
-def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, Features, injected runner, timeout, and progress sink independently affect build layers, execution, or observation; callers use this public builder directly.
+def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, Features, injected runner, timeout, progress sink, and output sink independently affect build layers, execution, or observation; callers use this public builder directly.
     base_image: str,
     *,
     task_dockerfile: Path | None = None,
@@ -974,6 +952,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
+    output: OutputSink = DISCARD,
     clock: Clock,
 ) -> str:
     """Build the agent layer on top of a task image, and return its image ID.
@@ -998,7 +977,9 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
 
     ``on_progress``, when given, receives each build's step observations
     (the task image's, then the agent layer's), parsed from Docker's
-    progress output.
+    progress output. ``output`` receives every chunk each Docker command of
+    the build writes (the base tag, both builds, their inspections), in the
+    order the commands run, as it is written.
 
     ``timeout`` is the budget for the whole build (the task image, the base
     tag, and the Feature build together). The Docker command that is running
@@ -1011,7 +992,9 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
         raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
-    build = _BuildRun(runner=runner, timeout=timeout, on_progress=on_progress, clock=clock)
+    build = _BuildRun(
+        runner=runner, timeout=timeout, on_progress=on_progress, output=output, clock=clock
+    )
     if task_dockerfile is not None:
         dockerfile = _validated_task_dockerfile(task_dockerfile, timeout)
         base = _build_task_image(
@@ -1042,17 +1025,19 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
 
 @dataclass(frozen=True)
 class _BuildRun:
-    """How every build of one launch runs: its runner, budget, and progress sink.
+    """How every build of one launch runs: its runner, budget, progress and output sinks.
 
     ``timeout`` is the budget for all of the launch's Docker commands together;
     each command gets what remains of it by ``clock``, so no sequence of
-    commands can outlive the caller's limit.
+    commands can outlive the caller's limit. ``output`` receives the raw output
+    of every Docker command the build runs.
     """
 
     runner: DockerBuildRunner
     timeout: float
     clock: Clock
     on_progress: BuildProgressSink | None = None
+    output: OutputSink = DISCARD
     started: float = field(init=False)
 
     def __post_init__(self) -> None:
@@ -1079,8 +1064,9 @@ class _BuildCommandRunner:
     The mechanism reports timeouts as ``TimeoutError`` and knows nothing of
     progress or of the launch's shared budget, so this adapter clamps each
     command to what remains of the budget, translates an expired one while
-    keeping what the build printed (``expired``), and, for each ``docker
-    build`` it runs, reports progress to the run's progress sink.
+    keeping what the build printed (``expired``), writes every command's
+    output to the run's output sink, and, for each ``docker build`` it runs,
+    reports progress to the run's progress sink.
     """
 
     def __init__(self, build: _BuildRun) -> None:
@@ -1088,16 +1074,17 @@ class _BuildCommandRunner:
         self.expired: ImageBuildTimeoutError | None = None
 
     def run(self, argv: Sequence[str], *, cwd: Path, timeout: float) -> _FeatureCommandResult:
-        tracker = _StepTracker(self._build.on_progress)
+        tracker = _StepTracker(self._build.on_progress if argv[1] == "build" else None)
         try:
-            result = _bounded_result(
-                self._build.runner.run(
-                    argv,
-                    cwd=cwd,
-                    timeout=_command_budget(self._build, argv, timeout),
-                    on_stderr_line=tracker.line if argv[1] == "build" else None,
+            with Lines(tracker.line) as lines:
+                result = _bounded_result(
+                    self._build.runner.run(
+                        argv,
+                        cwd=cwd,
+                        timeout=_command_budget(self._build, argv, timeout),
+                        output=tee(self._build.output, lines),
+                    )
                 )
-            )
         except ProcessTimeoutError as exc:
             self.expired = _timeout_error(
                 self._build, exc, action="building", subject="the agent image", step=tracker.running
@@ -1215,15 +1202,17 @@ def _run_docker(
     target: _BuildTarget,
     steps: _StepTracker | None = None,
 ) -> DockerCommandResult:
+    tracker = steps or _StepTracker()
     try:
-        return _bounded_result(
-            build.runner.run(
-                argv,
-                cwd=target.context,
-                timeout=_command_budget(build, argv, build.timeout),
-                on_stderr_line=None if steps is None else steps.line,
+        with Lines(tracker.line) as lines:
+            return _bounded_result(
+                build.runner.run(
+                    argv,
+                    cwd=target.context,
+                    timeout=_command_budget(build, argv, build.timeout),
+                    output=tee(build.output, lines),
+                )
             )
-        )
     except FileNotFoundError as exc:
         raise TaskImageBuildError.docker_not_found(action, target) from exc
     except ProcessTimeoutError as exc:
@@ -1232,7 +1221,7 @@ def _run_docker(
             exc,
             action=action,
             subject=f"{target.image_label} from {target.source}",
-            step="" if steps is None else steps.running,
+            step=tracker.running,
         ) from exc
 
 
@@ -1262,6 +1251,7 @@ def push_agent_image(
     repository: str = DEFAULT_AGENT_IMAGE_REGISTRY,
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_PUSH_TIMEOUT_SECONDS,
+    output: OutputSink = DISCARD,
 ) -> str:
     """Tag, push, and resolve the pullable digest reference for *image_id*.
 
@@ -1271,6 +1261,8 @@ def push_agent_image(
     address, not a moving tag), pushed, and then resolved back to the
     ``<repository>@sha256:...`` manifest digest Docker recorded for that push,
     which is what a remote backend actually pulls.
+
+    ``output`` receives every chunk the tag, push, and inspect commands write.
 
     Always pushes, even when the registry already has this content: callers
     that want to skip a redundant push when it is already verified present
@@ -1293,29 +1285,21 @@ def push_agent_image(
         raise ValueError(message)
 
     runner = command_runner or SubprocessDockerBuildRunner()
-    cwd = Path.cwd()
+    registry = _RegistryCommands(runner, Path.cwd(), timeout, output)
     tag = f"{repository}:{image_id.removeprefix('sha256:')[:_SHORT_ID_LENGTH]}"
 
-    tag_result = _run_registry_command(
-        runner, ("docker", "tag", image_id, tag), cwd=cwd, timeout=timeout, action="tagging"
-    )
+    tag_result = registry.run(("docker", "tag", image_id, tag), action="tagging")
     if tag_result.returncode != 0:
         detail = tag_result.failure_diagnostic("docker tag failed")
         raise ImagePushError.tag_failed(image_id, tag, tag_result.returncode, detail)
 
-    push_result = _run_registry_command(
-        runner, ("docker", "push", tag), cwd=cwd, timeout=timeout, action="pushing"
-    )
+    push_result = registry.run(("docker", "push", tag), action="pushing")
     if push_result.returncode != 0:
         detail = push_result.failure_diagnostic("docker push failed")
         raise ImagePushError.push_failed(tag, push_result.returncode, detail)
 
-    inspect_result = _run_registry_command(
-        runner,
-        ("docker", "inspect", "--format", "{{json .RepoDigests}}", tag),
-        cwd=cwd,
-        timeout=timeout,
-        action="inspecting",
+    inspect_result = registry.run(
+        ("docker", "inspect", "--format", "{{json .RepoDigests}}", tag), action="inspecting"
     )
     if inspect_result.returncode != 0 or not inspect_result.stdout.strip():
         detail = inspect_result.failure_diagnostic("no output")
@@ -1345,6 +1329,7 @@ def agent_image_is_pushed(
     *,
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_VERIFY_TIMEOUT_SECONDS,
+    output: OutputSink = DISCARD,
 ) -> bool:
     """Return whether *reference* (a ``repository@sha256:...`` digest) is live in its registry.
 
@@ -1354,12 +1339,16 @@ def agent_image_is_pushed(
     is unreachable, or credentials are missing or expired: this function
     only answers "is it there right now", and :func:`push_agent_image`'s own
     error reporting is what surfaces which of those it was when a caller
-    acts on a ``False`` result by trying to push.
+    acts on a ``False`` result by trying to push. ``output`` receives what the
+    inspection writes.
     """
     runner = command_runner or SubprocessDockerBuildRunner()
     try:
         result = runner.run(
-            ("docker", "manifest", "inspect", reference), cwd=Path.cwd(), timeout=timeout
+            ("docker", "manifest", "inspect", reference),
+            cwd=Path.cwd(),
+            timeout=timeout,
+            output=output,
         )
     except (FileNotFoundError, ProcessTimeoutError):
         return False
@@ -1372,6 +1361,7 @@ def ensure_pushed(
     repository: str = DEFAULT_AGENT_IMAGE_REGISTRY,
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_PUSH_TIMEOUT_SECONDS,
+    output: OutputSink = DISCARD,
 ) -> str:
     """Return a pullable ``repository@sha256:...`` reference for *image_id*, pushing only if needed.
 
@@ -1383,7 +1373,7 @@ def ensure_pushed(
     neither check succeeds does this actually push, via
     :func:`push_agent_image`, and it re-verifies the result before returning
     so a caller never receives a digest this function has not confirmed is
-    fetchable.
+    fetchable. ``output`` receives every chunk each Docker command writes.
 
     Raises:
         ImagePushError: if pushing fails, or if the registry does not report
@@ -1391,14 +1381,18 @@ def ensure_pushed(
             digest that could not be verified.
     """
     runner = command_runner or SubprocessDockerBuildRunner()
-    cached = _cached_repo_digest(image_id, repository, runner=runner, timeout=timeout)
-    if cached is not None and agent_image_is_pushed(cached, command_runner=runner, timeout=timeout):
+    cached = _cached_repo_digest(
+        image_id, repository, runner=runner, timeout=timeout, output=output
+    )
+    if cached is not None and agent_image_is_pushed(
+        cached, command_runner=runner, timeout=timeout, output=output
+    ):
         return cached
 
     pushed = push_agent_image(
-        image_id, repository=repository, command_runner=runner, timeout=timeout
+        image_id, repository=repository, command_runner=runner, timeout=timeout, output=output
     )
-    if not agent_image_is_pushed(pushed, command_runner=runner, timeout=timeout):
+    if not agent_image_is_pushed(pushed, command_runner=runner, timeout=timeout, output=output):
         raise ImagePushError.digest_not_visible(pushed)
     return pushed
 
@@ -1409,6 +1403,7 @@ def _cached_repo_digest(
     *,
     runner: DockerBuildRunner,
     timeout: float,
+    output: OutputSink,
 ) -> str | None:
     """Return a previously pushed ``repository@sha256:...`` digest for *image_id*, if known.
 
@@ -1424,6 +1419,7 @@ def _cached_repo_digest(
                 ("docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image_id),
                 cwd=Path.cwd(),
                 timeout=timeout,
+                output=output,
             )
         )
     except (FileNotFoundError, ProcessTimeoutError):
@@ -1458,17 +1454,22 @@ def _repo_digest_for(repo_digests_json: str, repository: str) -> str | None:
     )
 
 
-def _run_registry_command(
-    runner: DockerBuildRunner,
-    argv: Sequence[str],
-    *,
-    cwd: Path,
-    timeout: float,
-    action: str,
-) -> DockerCommandResult:
-    try:
-        return _bounded_result(runner.run(argv, cwd=cwd, timeout=timeout))
-    except FileNotFoundError as exc:
-        raise ImagePushError.docker_not_found(action) from exc
-    except ProcessTimeoutError as exc:
-        raise ImagePushError.docker_timed_out(timeout, action) from exc
+@dataclass(frozen=True)
+class _RegistryCommands:
+    """How one push runs its Docker commands: runner, directory, timeout, and output sink."""
+
+    runner: DockerBuildRunner
+    cwd: Path
+    timeout: float
+    output: OutputSink
+
+    def run(self, argv: Sequence[str], *, action: str) -> DockerCommandResult:
+        """Run one registry command, translating a missing Docker and a timeout."""
+        try:
+            return _bounded_result(
+                self.runner.run(argv, cwd=self.cwd, timeout=self.timeout, output=self.output)
+            )
+        except FileNotFoundError as exc:
+            raise ImagePushError.docker_not_found(action) from exc
+        except ProcessTimeoutError as exc:
+            raise ImagePushError.docker_timed_out(self.timeout, action) from exc

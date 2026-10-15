@@ -45,6 +45,7 @@ from vs_runtime._environment_startup import (
     EnvironmentStartup,
     EnvironmentStartupSink,
     EnvironmentStartupStage,
+    StartupOutputOpener,
 )
 from vs_runtime._environment_system import EnvironmentSystem
 from vs_runtime._evaluator_packages import (
@@ -554,6 +555,7 @@ __all__ = [
     "SlurmEnvironment",
     "SlurmEnvironmentFacts",
     "StageFailureText",
+    "StartupOutputOpener",
     "StateValidationPasses",
     "StopGraceError",
     "StopTimer",
