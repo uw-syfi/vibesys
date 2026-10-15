@@ -88,3 +88,46 @@ def open_workspace(
         plan=core.WorkspacePlan(mode=core.WorkspaceMode.EXCLUSIVE_ROOT, base=ctx.facts.baseline),
         budget=core.AttemptBudget(),
     )
+
+
+_OPEN = frozenset({core.SpanStatus.RUNNING, core.SpanStatus.WAITING, core.SpanStatus.PENDING})
+_FAILURE_OF = {
+    core.SpanStatus.FAILED: core.FailureKind.OUTCOME,
+    core.SpanStatus.STOPPED: core.FailureKind.INTERRUPTION,
+}
+
+
+def assert_trace_well_formed(trace: core.RunTrace, now: float) -> None:
+    """Check the run trace's shape at run-clock time ``now``.
+
+    Every span comes after its parent, its times are on the clock so far and in order, and its
+    status agrees with its end, its failure and what it waits on.
+    """
+    seen: dict[core.SpanId, core.Span] = {}
+    for span in trace.spans:
+        assert span.id not in seen, f"{span.id} recorded twice"
+        if span.parent is not None:
+            parent = seen.get(span.parent)
+            assert parent is not None, f"{span.id} comes before its parent {span.parent}"
+            assert parent.started_at <= span.started_at
+        assert span.started_at <= now
+        assert (span.status in _OPEN) == (span.ended_at is None), span
+        if span.ended_at is not None:
+            assert span.started_at <= span.ended_at <= now, span
+            assert not span.waiting_on, span
+        expected = _FAILURE_OF.get(span.status)
+        assert (span.failure.kind if span.failure else None) == expected, span
+        assert all(span.started_at <= w.since <= now for w in span.waiting_on), span
+        if span.type is core.SpanType.OPERATION:
+            assert span.status not in {core.SpanStatus.WAITING, core.SpanStatus.PENDING}, span
+            assert not span.attempts, span
+        for attempt in span.attempts:
+            assert attempt.n <= attempt.of
+            assert attempt.ended_at is not None or attempt is span.attempts[-1], span
+        seen[span.id] = span
+
+
+def assert_trace_ended(trace: core.RunTrace) -> None:
+    """A run that finished has no span still running, waiting or pending."""
+    still = [span.id.root for span in trace.spans if span.status in _OPEN]
+    assert not still, f"spans open after the run finished: {still}"
