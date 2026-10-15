@@ -33,7 +33,9 @@ from vs_slurm.api import (
     LedgerRecord,
     LedgerState,
     SlurmBatchRequest,
+    SlurmBatchResult,
     SlurmBatchStage,
+    SlurmBatchStageResult,
     SlurmConfig,
     SlurmFileArtifact,
     SlurmJobStatus,
@@ -260,21 +262,73 @@ def test_a_job_that_ended_unsuccessfully_is_run_again_by_the_next_asker(
     assert (entry.record.attempt, entry.record.state) == (1, LedgerState.SUBMITTED)
 
 
-def test_a_job_that_finished_successfully_is_reused_by_every_later_asker(tmp_path: Path) -> None:
+def _batch_result(stage_exit: int | None) -> SlurmBatchResult:
+    return SlurmBatchResult(
+        job_id="0",
+        job_exit_code=0,
+        job_output="",
+        stages=(
+            SlurmBatchStageResult(
+                name="benchmark",
+                exit_code=stage_exit,
+                stdout="",
+                stderr="",
+                elapsed_seconds=1.0,
+                skipped=False,
+            ),
+        ),
+        phase_timings_seconds={},
+        content_cache_hits=0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("stage_exit", "reused"),
+    [(0, True), (1, True), (124, False), (137, False), (143, False), (None, False)],
+    ids=["passed", "failed_stage", "timed_out", "killed", "terminated", "uncollectable"],
+)
+def test_a_completed_job_is_reused_only_once_collected_with_its_stages_own_results(
+    tmp_path: Path, stage_exit: int | None, *, reused: bool
+) -> None:
+    """Slurm says COMPLETED whatever the stages did: the batch script always exits 0.
+
+    A stage that ran to an exit code, a failing one too, is an evaluation result
+    every later asker reuses. A stage its time limit or a signal stopped, or one
+    that left no result (collection reports it Unknown), is run again.
+    """
     world = _World(tmp_path)
     first = world.attachment("run-a")
     key = first.key(world.request("run-a"))
-    world.cluster.script(ledger_operation_id(key, 0), states=(SlurmJobStatus.COMPLETED,))
+    operation = ledger_operation_id(key, 0)
+    world.cluster.script(
+        operation, states=(SlurmJobStatus.COMPLETED,), result=_batch_result(stage_exit)
+    )
     attached = first.attach(world.cluster, world.request("run-a"), labels=LedgerLabels())
     assert isinstance(attached, Attached)
 
-    for run in ("run-b", "run-c"):
-        again = world.attachment(run).attach(
-            world.cluster, world.request(run), labels=LedgerLabels()
-        )
-        assert isinstance(again, Attached)
-        assert again.handle.job.job_id == attached.handle.job.job_id
-    assert world.state(key) is LedgerState.COMPLETED
+    # Before any run collected it, a later asker attaches to the ended job to collect it.
+    early = world.attachment("run-b").attach(
+        world.cluster, world.request("run-b"), labels=LedgerLabels()
+    )
+    assert isinstance(early, Attached)
+    assert early.operation_id == operation
+    assert world.state(key) is LedgerState.SUBMITTED
+
+    collected = world.cluster.collect(attached.handle)
+    first.settle(key, operation, SlurmJobStatus.COMPLETED, collected)
+
+    later = world.attachment("run-c").attach(
+        world.cluster, world.request("run-c"), labels=LedgerLabels()
+    )
+    assert isinstance(later, Attached)
+    if reused:
+        assert world.state(key) is LedgerState.COMPLETED
+        assert later.handle.job.job_id == attached.handle.job.job_id
+    else:
+        assert later.operation_id == ledger_operation_id(key, 1)
+        entry = world.ledger.read(key)
+        assert entry is not None
+        assert (entry.record.attempt, entry.record.state) == (1, LedgerState.SUBMITTED)
 
 
 def test_an_edited_setup_script_is_another_request(tmp_path: Path) -> None:

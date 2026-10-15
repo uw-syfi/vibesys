@@ -286,7 +286,8 @@ def _collected(
         phase_timings_seconds={},
         content_cache_hits=0,
     )
-    if mode == "unknown" or "missing" in outcomes:  # incomplete evidence is never Collected
+    # Incomplete evidence is never Collected: a cluster reports it as Unknown.
+    if mode == "unknown" or "missing" in outcomes or not result.stages:
         return ClusterUnknown(operation_id="op", reason="transport lost", result=result)
     return ClusterCollected(operation_id="op", result=result)
 

@@ -98,6 +98,8 @@ class _Scheduler(FakeCluster):
         self.run_s = 100.0
         # How many submissions die before sbatch, as a submitter process that crashed would.
         self.crash_submits = 0
+        # Each stage's exit code; None leaves the stage no result file.
+        self.stage_exit: int | None = 0
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
@@ -122,7 +124,7 @@ class _Scheduler(FakeCluster):
                     stages=tuple(
                         SlurmBatchStageResult(
                             name=stage.name,
-                            exit_code=0,
+                            exit_code=self.stage_exit,
                             stdout="ok",
                             stderr="",
                             elapsed_seconds=1.0,
@@ -415,3 +417,36 @@ async def test_a_claim_whose_submitter_died_before_sbatch_is_taken_over_once_it_
     assert elapsed <= claim_s + world.scheduler.queue_s + world.scheduler.run_s + 10
     assert elapsed < CONFIG.job_timeout_seconds
     await run.executor.close()
+
+
+@pytest.mark.parametrize(
+    ("stage_exit", "reused"),
+    [(0, True), (1, True), (124, False), (None, False)],
+    ids=["passed", "failed_stage", "timed_out", "uncollectable"],
+)
+async def test_a_finished_job_is_reused_only_if_every_stage_left_its_own_result(
+    tmp_path: Path, stage_exit: int | None, *, reused: bool
+) -> None:
+    """The run settles its attempt from what it collected, never from Slurm's COMPLETED alone."""
+    world = _World()
+    world.scheduler.stage_exit = stage_exit
+    first = world.run(tmp_path / "run-1", "run-1")
+    await _attached(first, "eval-1")
+    world.clock.advance(world.scheduler.queue_s + world.scheduler.run_s)
+    expected = EvaluationState.SUCCEEDED if stage_exit == 0 else EvaluationState.FAILED
+    assert (await first.terminal("eval-1")).state is expected
+    await first.executor.close()
+    assert world.entry_state() is (LedgerState.COMPLETED if reused else LedgerState.FAILED)
+
+    second = world.run(tmp_path / "run-2", "run-2")
+    await second.executor.submit(_request(), handle_id="eval-2")
+    if reused:
+        assert (await _finished(second.executor, "eval-2")).state is expected
+        assert len(world.scheduler.jobs) == 1
+    else:
+        await second.parked("eval-2")
+        assert world.scheduler.jobs == {
+            ledger_operation_id(world.only_key(), 0),
+            ledger_operation_id(world.only_key(), 1),
+        }
+    await second.executor.close()
