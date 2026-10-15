@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, TypeAlias, TypedDict, Unpack
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from .cluster import job_handle, payload_digest
+from .cluster import collection_locator, job_handle, payload_digest
 from .cluster_types import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -582,7 +582,9 @@ class FakeCluster:
                 job_id=observation.job_id,
                 reason="job is not terminal",
             )
-        self._collect_artifacts(job, status=observation.status)
+        self._collect_artifacts(
+            job, collection_locator(target, job.handle), status=observation.status
+        )
         result = job.result
         code = result.job_exit_code if isinstance(result, SlurmBatchResult) else result.exit_code
         if code == 0 and observation.status in {SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED}:
@@ -611,12 +613,14 @@ class FakeCluster:
             )
         return ClusterCollected(operation_id=job.operation_id, result=result)
 
-    def _collect_artifacts(self, job: _Job, *, status: SlurmJobStatus) -> None:
+    def _collect_artifacts(
+        self, job: _Job, locator: ClusterHandle | None, *, status: SlurmJobStatus
+    ) -> None:
         contents = self._scripts[job.operation_id].artifact_contents or {}
         result = job.result
-        if isinstance(result, SlurmBatchResult) and isinstance(job.handle, SlurmBatchHandle):
+        if isinstance(result, SlurmBatchResult) and isinstance(locator, SlurmBatchHandle):
             stages = []
-            handles = {stage.name: stage for stage in job.handle.stages}
+            handles = {stage.name: stage for stage in locator.stages}
             for stage in result.stages:
                 declared = handles.get(stage.name)
                 if type(stage.exit_code) is not int or stage.exit_code != 0 or declared is None:

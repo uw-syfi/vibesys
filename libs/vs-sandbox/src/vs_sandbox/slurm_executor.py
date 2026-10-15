@@ -44,6 +44,7 @@ from vs_sandbox.slurm_deadlines import (
     first_deadlines,
 )
 from vs_sandbox.slurm_deadlines import observe as observe_deadlines
+from vs_sandbox.slurm_ledger import Attached, LedgerWithdrawnError
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
     INITIAL_LIFE,
@@ -58,6 +59,8 @@ from vs_slurm.api import (
     Ended,
     EndOutcome,
     JobLife,
+    LedgerError,
+    LedgerLabels,
     Queued,
     Running,
     SlurmBatchHandle,
@@ -77,6 +80,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
     from pathlib import Path
 
+    from vs_sandbox.slurm_ledger import SlurmLedgerAttachment
     from vs_sim.api import Clock, Processes, Sleeper
     from vs_slurm.api import (
         Cluster,
@@ -277,6 +281,10 @@ class _DurableEnd(StrEnum):
     # Dispatch started, but its sbatch never reached the scheduler: cancellation
     # acknowledgements with no job, repeated, proved no job exists.
     CANCELLED_WITHOUT_JOB = "cancelled_without_job"
+    # A ledger evaluation this run let go of (#2757): its job belongs to the
+    # evaluation ledger, which keeps it for other runs or cancels it once no run
+    # has leased it for the grace period. This run reports it cancelled.
+    RELEASED = "released"
 
 
 class _DurableSlurmEvaluation(BaseModel):
@@ -309,10 +317,17 @@ class _DurableSlurmEvaluation(BaseModel):
     # Set once the evaluation was cancelled while it waited for local admission.
     # Such a record is final: nothing may dispatch it.
     ended: _DurableEnd | None = None
+    # The evaluation ledger key of the request this evaluation attached to, when
+    # the operator enabled the ledger. The workspace changes once artifacts land,
+    # so the key is saved, not recomputed.
+    ledger_key: str | None = None
 
     @model_validator(mode="after")
     def _ended_before_dispatch_has_no_job(self) -> _DurableSlurmEvaluation:
-        if self.ended is not None and self.handle is not None:
+        if self.ended is _DurableEnd.RELEASED and self.ledger_key is None:
+            message = "only a ledger evaluation can be released"
+            raise ValueError(message)
+        if self.ended not in {None, _DurableEnd.RELEASED} and self.handle is not None:
             message = "an evaluation that ended without a job cannot have a job"
             raise ValueError(message)
         if self.ended is _DurableEnd.CANCELLED_BEFORE_DISPATCH and self.dispatch_started:
@@ -347,8 +362,15 @@ class SlurmEvaluationExecutor:
         clock: Clock,
         sleeper: Sleeper,
         cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
+        ledger: SlurmLedgerAttachment | None = None,
+        ledger_candidate: str | None = None,
     ) -> None:
         """Bind scheduler policy, durable intent, and the cluster interface.
+
+        With ``ledger``, jobs are submitted through the project's evaluation ledger
+        (#2757): a request the ledger already holds attaches to its job, ``close``
+        detaches without cancelling, and ``cancel`` releases this run's lease.
+        ``ledger_candidate`` labels the ledger entries for people reading them.
 
         ``clock`` times the job deadline and availability readings. The deadline is
         persisted, so a production clock is :class:`vs_sim.api.SystemClock`.
@@ -399,6 +421,10 @@ class SlurmEvaluationExecutor:
         self._confirmations_left: dict[str, int] = {}
         # Highest stage index reported per evaluation: a running job's stage never goes back.
         self._stage_floor: dict[str, int] = {}
+        self._ledger = ledger
+        self._ledger_candidate = ledger_candidate
+        # Set by ``close`` in ledger mode: stopping leaves every job to the ledger.
+        self._detaching = False
 
     async def availability(self, requirements: ResourceRequirements) -> AvailabilitySnapshot:
         """Report normalized process-local capacity without probing credentials."""
@@ -514,6 +540,8 @@ class SlurmEvaluationExecutor:
         return await self._poll_cluster(handle_id, durable)
 
     async def _poll_cluster(self, handle_id: str, durable: _DurableSlurmEvaluation) -> ExecutorPoll:
+        if not await self._ledger_heartbeat(handle_id, durable):
+            return ExecutorPoll(phase=PollPhase.ENDED, terminal=_ENDED_BEFORE_DISPATCH)
         target = durable.handle if durable.handle is not None else handle_id
         inspected = await self._in_thread(self._cluster.inspect, target)
         if not isinstance(inspected, ClusterObservation):
@@ -648,7 +676,15 @@ class SlurmEvaluationExecutor:
         # acknowledged, so a later inspect or cancel reconciles it to CANCELED.
 
     async def close(self) -> None:
-        """Cancel and drain every background execution owned by this executor."""
+        """Cancel and drain every background execution owned by this executor.
+
+        With the evaluation ledger, closing detaches instead: every job keeps
+        running, its record keeps it resumable, and its lease lapses.
+        """
+        if self._ledger is not None:
+            self._detaching = True
+            await self._drain()
+            return
         active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
         # A cancel whose job is still tearing down returns with the evaluation
         # CANCELING; the durable record keeps the job for a later reconcile.
@@ -657,6 +693,13 @@ class SlurmEvaluationExecutor:
         )
         # A cancel of an evaluation that already ended durably returns without touching
         # its task, so a task still waiting for admission would outlive the executor.
+        await self._drain()
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+
+    async def _drain(self) -> None:
+        """Cancel every background task and wait for the cluster calls they left running."""
         leftover = tuple(task for task in self._tasks.values() if not task.done())
         for task in leftover:
             task.cancel()
@@ -668,9 +711,6 @@ class SlurmEvaluationExecutor:
         # loop and starve that very callback.
         while pending := tuple(call for call in self._calls if not call.done()):
             await asyncio.gather(*pending, return_exceptions=True)
-        for result in results:
-            if isinstance(result, BaseException):
-                raise result
 
     async def _admit_and_execute(
         self,
@@ -698,6 +738,8 @@ class SlurmEvaluationExecutor:
                 )
                 await self._execute(handle_id, request)
         except asyncio.CancelledError:
+            if self._detaching:
+                raise  # the saved record resumes it; the job stays with the ledger
             durable = self._read_evaluation(handle_id)
             if durable is not None and not durable.dispatch_started:
                 self._end_before_dispatch(handle_id, durable.request)
@@ -759,6 +801,21 @@ class SlurmEvaluationExecutor:
         if existing is not None:
             self._handles[handle_id] = existing
             return
+        if self._ledger is not None:
+            await self._attach(self._ledger, handle_id, request, stages)
+        else:
+            await self._dispatch(handle_id, request, stages, durable, reconcile=reconcile)
+
+    async def _dispatch(
+        self,
+        handle_id: str,
+        request: EvaluationRequest,
+        stages: tuple[SlurmStagePayload, ...],
+        durable: _DurableSlurmEvaluation | None,
+        *,
+        reconcile: bool,
+    ) -> None:
+        """Submit under the evaluation's own operation id, or find its job after a restart."""
         if reconcile and durable is not None and durable.dispatch_started:
             observed = await self._in_thread(self._cluster.inspect, handle_id)
             if isinstance(observed, ClusterObservation) and isinstance(
@@ -773,33 +830,9 @@ class SlurmEvaluationExecutor:
                 else "missing batch identity"
             )
             raise SlurmOutcomeUnknownError.observation(handle_id, reason)
-        lifecycle = stages[0].target_lifecycle
-        batch_stages = tuple(
-            SlurmBatchStage(
-                name=step.name,
-                command=_stage_command(step.name, stage.command),
-                timeout_seconds=stage.timeout_seconds,
-                tree_artifacts=tuple(
-                    SlurmTreeArtifact(remote_path=ref, local_path=self._workspace / ref)
-                    for ref in stage.tree_artifact_refs
-                ),
-            )
-            for step, stage in zip(request.stages, stages, strict=True)
-        )
         self._write_evaluation(handle_id, None, request, dispatch_started=True)
         submitted = await self._in_thread(
-            self._cluster.submit,
-            SlurmBatchRequest(
-                workspace=self._workspace,
-                stages=batch_stages,
-                stop_on_failure=request.stop_on_failure,
-                setup_script=self._setup_script,
-                service=(
-                    None if lifecycle is SlurmTargetLifecycle.COMMAND_MANAGED else self._service
-                ),
-                support_trees=self._support_trees,
-            ),
-            operation_id=handle_id,
+            self._cluster.submit, self._batch_request(request, stages), operation_id=handle_id
         )
         if isinstance(submitted, ClusterRejected):
             raise SlurmSubmissionRejectedError(submitted.reason)
@@ -820,6 +853,84 @@ class SlurmEvaluationExecutor:
             raise SlurmOutcomeUnknownError.observation(handle_id, "missing batch identity")
         self._handles[handle_id] = handle
         self._write_evaluation(handle_id, handle, request)
+
+    def _batch_request(
+        self, request: EvaluationRequest, stages: tuple[SlurmStagePayload, ...]
+    ) -> SlurmBatchRequest:
+        lifecycle = stages[0].target_lifecycle
+        return SlurmBatchRequest(
+            workspace=self._workspace,
+            stages=tuple(
+                SlurmBatchStage(
+                    name=step.name,
+                    command=_stage_command(step.name, stage.command),
+                    timeout_seconds=stage.timeout_seconds,
+                    tree_artifacts=tuple(
+                        SlurmTreeArtifact(remote_path=ref, local_path=self._workspace / ref)
+                        for ref in stage.tree_artifact_refs
+                    ),
+                )
+                for step, stage in zip(request.stages, stages, strict=True)
+            ),
+            stop_on_failure=request.stop_on_failure,
+            setup_script=self._setup_script,
+            service=None if lifecycle is SlurmTargetLifecycle.COMMAND_MANAGED else self._service,
+            support_trees=self._support_trees,
+        )
+
+    async def _attach(
+        self,
+        ledger: SlurmLedgerAttachment,
+        handle_id: str,
+        request: EvaluationRequest,
+        stages: tuple[SlurmStagePayload, ...],
+    ) -> None:
+        """Attach to the ledger's job for this request, submitting it only if it has none.
+
+        While another process holds the request's submission, wait for it, up to
+        the job deadline. A definite rejection raises like a direct submission.
+        """
+        self._write_evaluation(handle_id, None, request, dispatch_started=True)
+        batch = self._batch_request(request, stages)
+        labels = LedgerLabels(candidate=self._ledger_candidate, workstream=request.owner_scope)
+        deadline = self._clock.now() + self._job_timeout_seconds
+        while True:
+            outcome = await self._in_thread(ledger.attach, self._cluster, batch, labels=labels)
+            if isinstance(outcome, Attached):
+                break
+            remaining = deadline - self._clock.now()
+            if remaining <= 0:
+                raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
+            _LOG.info("evaluation %s waits on the ledger: %s", handle_id, outcome.reason)
+            await self._sleeper.sleep(min(self._poll_interval, remaining))
+        self._handles[handle_id] = outcome.handle
+        self._save_evaluation(
+            handle_id,
+            _DurableSlurmEvaluation(handle=outcome.handle, request=request, ledger_key=outcome.key),
+        )
+
+    async def _ledger_heartbeat(self, handle_id: str, durable: _DurableSlurmEvaluation) -> bool:
+        """Keep a ledger evaluation leased; False once it was withdrawn and has ended here.
+
+        A ledger the run cannot reach does not fail the evaluation: the lease
+        outlasts several missed renewals, and the job's own state still decides.
+        """
+        if self._ledger is None or durable.ledger_key is None or durable.handle is None:
+            return True
+        try:
+            await self._in_thread(
+                self._ledger.heartbeat,
+                self._cluster,
+                durable.ledger_key,
+                durable.handle.job.invocation_id,
+            )
+        except LedgerWithdrawnError:
+            _LOG.warning("evaluation %s was withdrawn from the evaluation ledger", handle_id)
+            self._end_cancelled(handle_id)
+            return False
+        except LedgerError:
+            _LOG.exception("could not renew the ledger lease of evaluation %s", handle_id)
+        return True
 
     async def _execute(self, handle_id: str, request: EvaluationRequest) -> None:
         self._publish(
@@ -957,16 +1068,19 @@ class SlurmEvaluationExecutor:
         Queue wait and run time are bounded separately (``slurm_deadlines``): a job
         that starts late still gets its whole run budget.
         """
-        deadlines = None if durable is None else _deadlines_of(durable)
+        record = durable or _DurableSlurmEvaluation(handle=handle, request=request)
+        deadlines = _deadlines_of(record)
         if deadlines is None:
             deadlines = first_deadlines(
                 now=self._clock.now(),
                 queued_seconds=handle.waited_seconds,
                 limits=self._deadline_limits,
             )
-            self._save_deadlines(handle_id, handle, request, deadlines)
+            record = self._save_deadlines(handle_id, record, deadlines)
         while True:
             self._check_deadline(deadlines)
+            if durable is not None and not await self._ledger_heartbeat(handle_id, durable):
+                return SlurmJobStatus.CANCELLED
             observed = await self._inspect_cancellation_safe(handle_id, handle)
             if isinstance(observed, ClusterObservation):
                 if observed.status.terminal:
@@ -980,7 +1094,7 @@ class SlurmEvaluationExecutor:
                 )
                 if folded != deadlines:
                     deadlines = folded
-                    self._save_deadlines(handle_id, handle, request, deadlines)
+                    record = self._save_deadlines(handle_id, record, deadlines)
                 active = self._lifecycle_observation(handle_id, observed, request)
                 if active is not None:
                     self._publish(handle_id, active)
@@ -1000,14 +1114,21 @@ class SlurmEvaluationExecutor:
         raise _SlurmExecutionError.queue_deadline_exceeded(self._queue_timeout_seconds or 0)
 
     def _save_deadlines(
-        self,
-        handle_id: str,
-        handle: SlurmBatchHandle,
-        request: EvaluationRequest,
-        deadlines: WaitDeadlines,
-    ) -> None:
-        """Persist the deadlines before acting on them, so a restart enforces the same ones."""
-        self._write_evaluation(handle_id, handle, request, deadlines=deadlines)
+        self, handle_id: str, record: _DurableSlurmEvaluation, deadlines: WaitDeadlines
+    ) -> _DurableSlurmEvaluation:
+        """Persist the deadlines before acting on them, so a restart enforces the same ones.
+
+        The rest of the record, its ledger key included, is kept as it was.
+        """
+        saved = record.model_copy(
+            update={
+                "wait_deadline_epoch_s": deadlines.queue_epoch_s,
+                "run_deadline_epoch_s": deadlines.run_epoch_s,
+                "deadline_attempt": deadlines.attempt,
+            }
+        )
+        self._save_evaluation(handle_id, saved)
+        return saved
 
     def _scheduler_view(
         self, handle_id: str, observed: ClusterObservation
@@ -1133,6 +1254,38 @@ class SlurmEvaluationExecutor:
         return stages
 
     async def _cancel_running(self, handle_id: str, *, resend: bool = False) -> _CancelOutcome:
+        """Cancel the evaluation's job, or with the ledger, let go of it."""
+        if self._ledger is not None:
+            released = await self._release(self._ledger, handle_id)
+            if released is not None:
+                return released
+        return await self._cancel_scheduler_job(handle_id, resend=resend)
+
+    async def _release(
+        self, ledger: SlurmLedgerAttachment, handle_id: str
+    ) -> _CancelOutcome | None:
+        """Let go of a ledger job instead of cancelling it; None for a job outside the ledger.
+
+        Stopping (``close``) leaves even the lease. Otherwise this run drops its
+        lease, and the ledger cancels the job once no run has leased it for the
+        grace period. A job this run attached to before the operator enabled the
+        ledger is cancelled as before.
+        """
+        if self._detaching:
+            return _CancelRequested(None)
+        durable = self._read_evaluation(handle_id)
+        if durable is None or durable.handle is None:
+            # No job is attached: a submission this run started is the ledger's,
+            # held by this run's lease until it lapses.
+            return _CancelConfirmed()
+        if durable.ledger_key is None:
+            return None
+        await self._finish_in_thread(ledger.release, durable.ledger_key)
+        return _CancelConfirmed()
+
+    async def _cancel_scheduler_job(
+        self, handle_id: str, *, resend: bool = False
+    ) -> _CancelOutcome:
         """Send scancel once, report CANCELING, then confirm termination within a bound.
 
         A job that still reads active right after scancel is "cancel requested",
@@ -1257,14 +1410,18 @@ class SlurmEvaluationExecutor:
         durable = self._read_evaluation(handle_id)
         if (
             durable is not None
-            and durable.handle is None
             and durable.dispatch_started
             and durable.submission_rejection is None
             and durable.terminal_failure is None
             and durable.ended is None
         ):
-            self._end_without_job(handle_id, durable, _DurableEnd.CANCELLED_WITHOUT_JOB)
-            return
+            if durable.handle is None:
+                self._end_without_job(handle_id, durable, _DurableEnd.CANCELLED_WITHOUT_JOB)
+                return
+            if durable.ledger_key is not None:
+                # A poll must not read the ledger's still-running job as this run's.
+                self._end_without_job(handle_id, durable, _DurableEnd.RELEASED)
+                return
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
 
     def _end_before_dispatch(self, handle_id: str, request: EvaluationRequest) -> None:
@@ -1329,22 +1486,20 @@ class SlurmEvaluationExecutor:
         handle: SlurmBatchHandle | None,
         request: EvaluationRequest,
         *,
-        deadlines: WaitDeadlines | None = None,
         dispatch_started: bool = True,
     ) -> None:
-        path = self._handle_root / f"{handle_id}.json"
-        document = (
+        self._save_evaluation(
+            handle_id,
             _DurableSlurmEvaluation(
                 handle=handle,
                 request=request,
-                wait_deadline_epoch_s=None if deadlines is None else deadlines.queue_epoch_s,
-                run_deadline_epoch_s=None if deadlines is None else deadlines.run_epoch_s,
-                deadline_attempt=None if deadlines is None else deadlines.attempt,
                 dispatch_started=dispatch_started,
-            ).model_dump_json()
-            + "\n"
+            ),
         )
-        atomic_write_bytes(path, document.encode("utf-8"))
+
+    def _save_evaluation(self, handle_id: str, record: _DurableSlurmEvaluation) -> None:
+        path = self._handle_root / f"{handle_id}.json"
+        atomic_write_bytes(path, (record.model_dump_json() + "\n").encode("utf-8"))
 
     def _read_evaluation(self, handle_id: str) -> _DurableSlurmEvaluation | None:
         path = self._handle_root / f"{handle_id}.json"

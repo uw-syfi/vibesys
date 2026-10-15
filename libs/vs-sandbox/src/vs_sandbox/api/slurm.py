@@ -51,6 +51,14 @@ from vs_sandbox.slurm_gpu_alias import (
     load_slurm_gpu_alias_settings,
     translate_slurm_gpu,
 )
+from vs_sandbox.slurm_ledger import (
+    Attached,
+    AttachOutcome,
+    AttachPending,
+    LedgerAttachError,
+    LedgerWithdrawnError,
+    SlurmLedgerAttachment,
+)
 from vs_sandbox.slurm_policy import (
     SlurmExecutionPolicy,
     SlurmOperatorSettings,
@@ -91,6 +99,9 @@ __all__ = [
     "AgentGpuConfig",
     "AgentGpuLauncher",
     "AgentGpuRequestError",
+    "AttachOutcome",
+    "AttachPending",
+    "Attached",
     "BrokerReplyError",
     "BrokerTransport",
     "BrokeredProcesses",
@@ -103,6 +114,8 @@ __all__ = [
     "HostCommandBrokerError",
     "HostJobConfinement",
     "JobConfinement",
+    "LedgerAttachError",
+    "LedgerWithdrawnError",
     "ProfileCaptureDescriptor",
     "ProfileStats",
     "ReadOnlyPathLinkError",
@@ -116,6 +129,7 @@ __all__ = [
     "SlurmExecutionMetadata",
     "SlurmExecutionPolicy",
     "SlurmGpuAliasError",
+    "SlurmLedgerAttachment",
     "SlurmOperatorSettings",
     "SlurmOutcomeUnknownError",
     "SlurmPolicyError",

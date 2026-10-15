@@ -159,6 +159,9 @@ def evaluation_key(project: str, request: SlurmBatchRequest, config: SlurmConfig
         "cluster": {
             "name": config.name,
             "remote_workspace_root": config.remote_workspace_root,
+            # The transport reaches the cluster; a job submitted through another
+            # one is not this cluster's (it is part of every job's config identity).
+            "transport": config.transport.model_dump(mode="json"),
             "sbatch_command": list(config.sbatch_command),
             "sbatch_arguments": list(config.sbatch_arguments),
         },
