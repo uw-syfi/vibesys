@@ -353,6 +353,7 @@ class SimThreads:
         self._closed = False
         self._driven = False
         self._outside_ident: int | None = None
+        self._executor = _SimExecutor(self)
         self.errors: list[BaseException] = []
         """Exceptions that ended threads, in the order they happened."""
         _CREATED.append(weakref.ref(self))
@@ -563,6 +564,11 @@ class SimThreads:
             raise SimMisuseError(message)
         return _OUTSIDE
 
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        """Runs each submitted call as a new simulated thread, in place of a real thread pool."""
+        return self._executor
+
     def attach(self) -> None:
         """Mark this simulator as driven by a virtual loop from now on."""
         self._driven = True
@@ -661,7 +667,6 @@ class _LoopWake:
     def __init__(self, sim: SimThreads) -> None:
         self._sim = sim
         self._woken = sim.event()
-        self._executor = _SimExecutor(sim)
 
     def park(self, timeout: float | None) -> None:
         self._woken.wait(timeout)
@@ -682,7 +687,7 @@ class _LoopWake:
 
     @property
     def executor(self) -> concurrent.futures.Executor:
-        return self._executor
+        return self._sim.executor
 
 
 class _SimExecutor(concurrent.futures.Executor):

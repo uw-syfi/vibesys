@@ -57,6 +57,11 @@ class IdleDriver(Protocol):
         """Take note that a virtual loop drives this work from now on."""
         ...
 
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        """The loop's default executor: ``run_in_executor`` calls run as this work's threads."""
+        ...
+
     def run_until_blocked(self) -> None:
         """Run until nothing the driver owns can run."""
         ...
@@ -333,11 +338,13 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         func: Callable[[*Ts], T],
         *args: *Ts,
     ) -> asyncio.Future[T]:
-        if self.host is not None and executor is None:
-            # The host's executor runs the call as a simulated thread, whose completion
-            # wakes this loop like any other callback: nothing to wait for outside. (asyncio
-            # accepts only a real thread pool as the default executor, so it is chosen here.)
-            return super().run_in_executor(self.host.executor, func, *args)
+        owner = self.host or self.driver
+        if owner is not None and executor is None:
+            # The owner's executor runs the call as a simulated thread, whose completion wakes
+            # this loop like any other callback, and no real thread reaches the simulation's
+            # locks. (asyncio accepts only a real thread pool as the default executor, so it is
+            # chosen here.)
+            return super().run_in_executor(owner.executor, func, *args)
         # Count the call until its future is done, so the selector can tell "idle" from
         # "waiting for a thread". A call whose waiter was cancelled stops counting at once.
         self.workers_in_flight += 1

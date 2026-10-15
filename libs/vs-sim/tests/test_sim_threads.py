@@ -429,3 +429,29 @@ def test_a_driven_simulator_reports_no_stranded_threads() -> None:
 
     assert sorted(ran) == ["early", "main"]
     assert sim.never_ran() == ()
+
+
+@given(seed=SEEDS, calls=st.integers(1, 4))
+@settings(max_examples=15, deadline=None)
+def test_to_thread_on_a_driven_virtual_loop_runs_on_simulated_threads(
+    seed: int, calls: int
+) -> None:
+    """No call reaches a real thread: a simulated lock the loop's thread used still serves it."""
+    clock = VirtualClock()
+    threads = SimThreads(clock, schedule_seed=seed)
+    lock = threads.lock()
+    with lock:
+        pass
+
+    def serve(index: int) -> int:
+        threads.sleep(1.0)
+        with lock:
+            return index
+
+    async def main() -> list[int]:
+        return list(await asyncio.gather(*(asyncio.to_thread(serve, i) for i in range(calls))))
+
+    answers = run_virtual(clock, main(), driver=threads)
+
+    assert answers == list(range(calls))
+    assert clock.now() >= 1.0
