@@ -272,11 +272,13 @@ class Crash:
     the middle of an agent's call; the agent's later calls fail until a new host starts, and
     the dead host's loop is stopped at its next publication, so what it had admitted and not
     yet committed may or may not reach the record. ``publish_at`` is the n-th publication of
-    the process, where it dies between requests. Either, both or neither may be set.
+    the process, where it dies between requests, or (``mid_request``) at that publication
+    even while requests run. Either, both or neither may be set.
     """
 
     ledger_at: int | None = None
     publish_at: int | None = None
+    mid_request: bool = False
 
 
 @dataclass
@@ -289,11 +291,20 @@ class Mortality:
 
 
 class MortalDelivery:
-    """The publication ledger of a host that can die at a publication or once marked dead."""
+    """The publication ledger of a host that can die at a publication or once marked dead.
 
-    def __init__(self, inner: FakePublicationDelivery, mortality: Mortality) -> None:
+    The loop may deliver a publication while requests run, so the host dies at the first
+    publication from the ``publish_at``-th on that ``idle`` allows: one that finds none
+    running (a death between requests, which the scripted executors' answers can recover
+    from), or any, for a crash drawn ``mid_request``.
+    """
+
+    def __init__(
+        self, inner: FakePublicationDelivery, mortality: Mortality, idle: Callable[[], bool]
+    ) -> None:
         self._inner = inner
         self._mortality = mortality
+        self._idle = idle
 
     def read(self) -> tuple[Publication, ...]:
         """The acknowledged publication history."""
@@ -304,7 +315,10 @@ class MortalDelivery:
     ) -> PublicationAcknowledgement:
         """Publish, unless the process is dead or dies at this publication."""
         self._mortality.published += 1
-        if self._mortality.dead or self._mortality.published == self._mortality.publish_at:
+        due = self._mortality.publish_at
+        if self._mortality.dead or (
+            due is not None and self._mortality.published >= due and self._idle()
+        ):
             raise ProcessKilledError
         return await self._inner.publish(publication, context)
 
@@ -673,7 +687,11 @@ def _play(
         agent.view, agent.shell = views[-1], shell
         agent.bridge = make_bridge()
         mortality.dead, mortality.published, mortality.publish_at = False, 0, crash.publish_at
-        return CoreRunHost(shell, MortalDelivery(delivery, mortality), clock)
+        return CoreRunHost(
+            shell,
+            MortalDelivery(delivery, mortality, lambda: crash.mid_request or not shell.in_flight),
+            clock,
+        )
 
     config = RunLoopConfig(host_id="property", lease_duration=LEASE, max_dispatches=400)
     died = False
@@ -958,6 +976,8 @@ _CRASH = st.builds(
     Crash,
     ledger_at=st.none() | st.integers(0, 10),
     publish_at=st.none() | st.integers(1, 12),
+    # A death with a request running ends loudly (UnrecoverableRestartError) or recovers.
+    mid_request=st.booleans(),
 )
 
 

@@ -1305,9 +1305,11 @@ class CoreRuntime[S: StrategyState]:
         can decide, tick the clock and read controls while they run. A refusal (an unbound
         role) is returned; passing a refusal already hit starts nothing more.
 
-        Publication is diagnostic, so a failing delivery never blocks dispatch
-        (cancellations must still go out). Publishing stops after the first failure and
-        that failure is re-raised once nothing is running.
+        Publication is diagnostic, so it never blocks dispatch: prepared requests start
+        before each publication is delivered, and a slow delivery holds a request back by at
+        most its own length, never by the whole backlog (cancellations and closes must still
+        go out before the run deadline). Publishing stops after the first failure and that
+        failure is re-raised once nothing is running.
 
         Only this method authorizes, commits and queues observations, so the record has
         one writer; observations commit in completion order, same-tick completions in
@@ -1326,15 +1328,15 @@ class CoreRuntime[S: StrategyState]:
                     continue
                 if self.advance():
                     continue
-                if self._publication_failure is None:
-                    published, self._publication_failure = await self._try_publish(delivery, now_at)
-                    if published or self._publication_failure is not None:
-                        # The await let tools admit inputs and heartbeats commit: consume
-                        # them before the next request starts.
-                        continue
                 if refusal is None:
                     budget = None if max_dispatches is None else max_dispatches + entered
                     refusal = self._start_available(now_at, max_concurrent, budget)
+                if self._publication_failure is None:
+                    published, self._publication_failure = await self._try_publish(delivery, now_at)
+                    if published or self._publication_failure is not None:
+                        # The await let requests finish, tools admit inputs and heartbeats
+                        # commit: consume them before the next request starts.
+                        continue
                 if self._flights:
                     return refusal
                 failure, self._publication_failure = self._publication_failure, None

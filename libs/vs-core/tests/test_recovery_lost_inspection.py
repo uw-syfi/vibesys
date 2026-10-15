@@ -10,12 +10,14 @@ from vs_core.api import (
     Access,
     BlockRequest,
     CancelOwnedResource,
+    ClockAdvanced,
     EnsureSession,
     FailureReason,
     InspectRequest,
     LifecycleClass,
     RecordsState,
     RecoveryBarrier,
+    RecoveryPhase,
     RecoveryStarted,
     RequestId,
     RequestPhase,
@@ -29,7 +31,9 @@ from vs_core.api import (
     Transition,
     Until,
     Value,
+    WaitKind,
     initial_state,
+    orphan_waits,
     step,
 )
 
@@ -200,3 +204,31 @@ def test_a_cancel_or_block_the_dead_host_never_sent_goes_out_with_a_bound_from_t
     now_at = max(result.state.run.now_at, restart_at)
     assert rows[lost.request_id].phase == RequestPhase.PREPARED
     assert rows[lost.request_id].until.at >= now_at + result.state.run.limits.reconciliation_bound
+
+
+@given(silent_for=st.floats(min_value=0.0, max_value=10_000.0, allow_nan=False))
+def test_a_recovery_check_whose_inspection_is_never_answered_blocks_and_is_no_orphan(
+    silent_for: float,
+) -> None:
+    """The check's inspection ends at its limit, and then the check ends blocked.
+
+    ``RESOLUTIONS`` says so: a recovery check is never a silent orphan, and recovery blocks
+    with the target named once its inspection could not settle it.
+    """
+    target = _session_record()
+    state = initial_state()
+    state = state.model_copy(
+        update={
+            "records": RecordsState(hosts=(), records=(target,), recovery=RecoveryBarrier()),
+            "run": state.run.model_copy(update={"status": RunStatus.PAUSED}),
+        }
+    )
+    state = step(state, RecoveryStarted(epoch=1, now_at=0.0)).state
+    assert state.records.recovery.phase == RecoveryPhase.RECOVERING
+    bound = state.run.limits.reconciliation_bound
+    for now_at in (bound + 1.0 + silent_for, 2 * bound + 2.0 + silent_for):
+        state = step(state, ClockAdvanced(now_at=now_at)).state
+
+    assert state.records.recovery.phase == RecoveryPhase.BLOCKED
+    assert [check.resolution for check in state.records.recovery.checks] == ["blocked"]
+    assert not [wait for wait in orphan_waits(state) if wait.waiter == WaitKind.RECOVERY_CHECK]

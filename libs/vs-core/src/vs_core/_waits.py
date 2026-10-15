@@ -159,12 +159,18 @@ RESOLUTIONS: Mapping[WaitKind, Resolution] = MappingProxyType(
         WaitKind.SESSION: Resolution(
             outcome=Outcome.HALTS_THE_RUN,
             reason="a request that ends without moving its session wakes it, and it waits on its "
-            "other requests still open; once none is left (its last request blocked, or its "
-            "cancel failed), it may hold a lease or a running turn that nothing releases",
+            "other requests still open. Once none is left, an unknown session cancels its turn "
+            "as lost or closes its known lease, and a closing session inspects its unanswered "
+            "turn once and sends its close once more. The run halts when the turn is still not "
+            "ended after that inspection (a turn that may be running is never released), when "
+            "the second close ends unanswered too, or for an ambiguous ensure whose lease core "
+            "does not know",
         ),
         WaitKind.RECOVERY_CHECK: Resolution(
-            outcome=Outcome.HALTS_THE_RUN,
-            reason="a recovery check whose inspection was lost has no deadline of its own",
+            outcome=Outcome.FAILS_WITH_REASON,
+            reason="the check's inspection ends at its own limit (ReconciliationCommandLapsed); "
+            "at the target's limit the check ends blocked and recovery is BLOCKED with the "
+            "target named",
         ),
         WaitKind.OWNED_JOB: Resolution(
             outcome=Outcome.WAITS_AGAIN,
