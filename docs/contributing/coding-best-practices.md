@@ -57,14 +57,22 @@ significant, put it behind a focused Python interface. One-off calls stay local.
 - Test serialized contracts at the boundary: round-trip representative payloads
   and exercise each consumer, not only the producer.
 - Parse untrusted JSON (from a peer, an agent, an evaluator, or a file another
-  process may have torn) with pydantic's parser: a model's `validate_json`,
-  `TypeAdapter(JsonValue).validate_json`, or `pydantic_core.from_json`. It
-  bounds nesting and reports deep nesting and invalid UTF-8 as `ValueError`.
+  process may have torn) with `vs_decode.api`: `decode_json` for bytes or text,
+  `read_json` for a file. Both take a required `max_bytes` cap, decode into a
+  model (or `TypeAdapter`) that forbids unknown keys at every depth, and return
+  the value or an `Unreadable` naming the source and the offending key paths;
+  they never raise for bad input. `read_json` reads at most one byte past the
+  cap and refuses anything but a regular file, so a FIFO cannot hang it.
+  Calling pydantic's `validate_json`, `model_validate_json` or
+  `pydantic_core.from_json` directly is allowed only in the modules listed in
+  `PARSE_EDGE_MODULES`
+  (`tests/quality/test_real_apis_confined.py::test_product_code_parses_json_only_through_vs_decode`).
   `json.loads` raises `RecursionError` and, on bytes, `UnicodeDecodeError`,
-  which escape a handler that catches decoding errors. Code that runs with the
-  standard library only catches `(ValueError, RecursionError)`. Add each such
-  decoder as a row of `tests/system/test_hostile_json.py`, which runs it
-  against the shared corpus `vs_sim.api.testing.hostile_json_frames`.
+  which escape a handler that catches decoding errors; code that runs with the
+  standard library only bounds its input size and catches
+  `(ValueError, RecursionError)`. Add each decoder of untrusted JSON as a row of
+  `tests/system/test_hostile_json.py`, which runs it against the shared corpus
+  `vs_sim.api.testing.hostile_json_frames`.
 
 ## Prompts, Templates, And Skills
 
