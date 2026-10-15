@@ -219,7 +219,9 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
         result = registry.stop(
             instance_id,
             StopEffects(
-                ControlSocketStopRequester(UnixNetwork(), clock=SystemClock()),
+                ControlSocketStopRequester(
+                    UnixNetwork(), clock=SystemClock(), deadline_clock=threads
+                ),
                 _NoSignal(),
                 threads,
                 threads.sleep,

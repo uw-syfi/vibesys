@@ -39,8 +39,11 @@ export type StopEvent =
   /** The run is no longer live (stopped by anyone). */
   | {readonly type: 'ended'};
 
-/** What to do next, besides showing the new state. */
-type StopEffect = {readonly kind: 'stop'; readonly force: boolean} | null;
+/** What the shell must do next, besides showing the new state. */
+type StopEffect =
+  | {readonly kind: 'confirm'; readonly force: boolean}
+  | {readonly kind: 'stop'; readonly force: boolean}
+  | null;
 
 export const STOP_IDLE: StopState = {phase: 'idle'};
 
@@ -56,8 +59,11 @@ export function stopStep(state: StopState, event: StopEvent): StopStep {
   return {state: next, effect: next === state ? null : effectOf(state, next)};
 }
 
-/** The stop command a transition from `before` to `after` sends: only a confirmed dialog does. */
+/** The one request a transition from `before` to `after` authorizes. */
 function effectOf(before: StopState, after: StopState): StopEffect {
+  if (after.phase === 'confirming' && before.phase !== 'confirming') {
+    return {kind: 'confirm', force: after.force};
+  }
   return before.phase === 'confirming' && after.phase === 'stopping'
     ? {kind: 'stop', force: before.force}
     : null;

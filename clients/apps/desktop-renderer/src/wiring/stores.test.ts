@@ -78,6 +78,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
   };
   signIn = (host: HostKey) => this.#ask(`sign-in ${host}`, null);
   tasks = (host: HostKey, project: string) => this.#ask(`tasks ${host} ${project}`, ['spsc']);
+  harnesses = (host: HostKey) => this.#ask(`harnesses ${host}`, {kind: 'unsupported' as const});
   complete = (host: HostKey, directory: string) =>
     this.#ask(`complete ${host} ${directory}`, {
       kind: 'listed' as const,
@@ -99,6 +100,12 @@ class FakeWelcomeBridge implements WelcomeBridge {
     this.inspectionReplies.push(reply);
     return reply.promise;
   };
+  /** Logs are not this suite's subject: every run has none. */
+  logs = async () => ({
+    ok: true as const,
+    value: {ok: true as const, instanceId: '0123456789ab', streams: []},
+  });
+  releaseLogs = async () => ({ok: true as const, value: null});
   onChrome = (listener: (event: WelcomeEvent<ChromeState>) => void) => {
     this.#chrome.push(listener);
   };

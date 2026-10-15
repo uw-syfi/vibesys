@@ -25,11 +25,12 @@ _ORCHESTRATION = _SRC / "orchestration"
 # dynamic_core.py, single_core.py and multi_core.py are the strategies' own host compositions (see
 # their docstrings), and dynamic_roles.py, single_roles.py and multi_roles.py declare the roles those
 # compositions run; issue_queue_core.py and issue_queue_board.py are the issue queue's, for its roles
-# and its tracker.
+# and its tracker; dynamic_handoff.py is the owner of the dynamic search's handoff write.
 _ALLOWED_EXTERNAL_POLICY_IMPORTS = {
     "api/evolve.py",
     "api/catalog.py",
     "dynamic_core.py",
+    "dynamic_handoff.py",
     "dynamic_roles.py",
     "issue_queue_board.py",
     "issue_queue_core.py",

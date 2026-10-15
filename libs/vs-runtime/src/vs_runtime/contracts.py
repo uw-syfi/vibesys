@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from vs_runtime._operation_wiring import OperationRole
     from vs_runtime._run_environment import RunEnvironmentView
     from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, OutputSink, Threads
 
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 _CONTROL_CHARACTER_LIMIT = 32
@@ -629,8 +629,12 @@ class Evaluation(Protocol):
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        output: OutputSink,
     ) -> AccuracyEvaluation:
-        """Evaluate correctness, optionally reusing an exact-candidate pass."""
+        """Evaluate correctness, optionally reusing an exact-candidate pass.
+
+        The accuracy command's raw output is written to *output* while it runs.
+        """
         ...
 
     async def benchmark(
@@ -638,8 +642,12 @@ class Evaluation(Protocol):
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        output: OutputSink,
     ) -> BenchmarkEvaluation:
-        """Measure one live workspace against policy-selected objectives."""
+        """Measure one live workspace against policy-selected objectives.
+
+        The benchmark command's raw output is written to *output* while it runs.
+        """
         ...
 
     async def validate_local(

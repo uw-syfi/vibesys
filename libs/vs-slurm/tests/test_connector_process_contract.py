@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     import pytest
+from vs_sim.api import DISCARD
 
 _JOB_NAME = re.compile(r"--job-name=\S+")
 
@@ -174,10 +175,14 @@ def test_an_interceptor_answers_or_forwards_every_request_and_none_restores_the_
 
     connector.intercept(intercept)
     refused = connector.run(
-        ProcessSpec(("x",), input=_exec_request(f"refuse {text}").encode()), timeout=1
+        ProcessSpec(("x",), input=_exec_request(f"refuse {text}").encode()),
+        timeout=1,
+        output=DISCARD,
     )
     forwarded = connector.run(
-        ProcessSpec(("x",), input=_exec_request(f"echo {text}").encode()), timeout=1
+        ProcessSpec(("x",), input=_exec_request(f"echo {text}").encode()),
+        timeout=1,
+        output=DISCARD,
     )
 
     assert isinstance(refused, ProcessOutcome)
@@ -188,5 +193,7 @@ def test_an_interceptor_answers_or_forwards_every_request_and_none_restores_the_
     # The refused request never reached the cluster; the forwarded one did.
     assert recorded_commands(connector.state) == [f"echo {text}"]
     connector.intercept(None)
-    connector.run(ProcessSpec(("x",), input=_exec_request(f"echo {text}").encode()), timeout=1)
+    connector.run(
+        ProcessSpec(("x",), input=_exec_request(f"echo {text}").encode()), timeout=1, output=DISCARD
+    )
     assert seen == [f"refuse {text}", f"echo {text}"]

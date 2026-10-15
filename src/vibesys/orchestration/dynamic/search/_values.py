@@ -81,6 +81,28 @@ class WorkPlan(Value):
     decision_impact: str = ""
 
 
+class Expectation(Value):
+    """What a planner expected of one workstream it scheduled, and what it meant to do next."""
+
+    work_id: str
+    expected: str
+    if_it_succeeds: str
+    if_it_fails: str
+
+
+class HandoffNote(Value):
+    """A planner's note to the planners after it, as its reply gave it, for what was scheduled.
+
+    ``expectations`` name only workstreams the plan scheduled; ``dropped`` names the workstreams
+    whose expectations were left out because they were not scheduled (or are not in the reply),
+    so the note never says what to do next about work that never ran.
+    """
+
+    expectations: tuple[Expectation, ...] = ()
+    doubts: tuple[str, ...] = ()
+    dropped: tuple[str, ...] = ()
+
+
 # -- why work ended -----------------------------------------------------------------------------
 
 
@@ -290,6 +312,7 @@ class ViolationCode(StrEnum):
     UPDATE_DUPLICATE = "update-duplicate"
     UPDATE_UNKNOWN = "update-unknown"
     UPDATE_INCOMPLETE = "update-incomplete"
+    EXPECTATION_UNKNOWN = "expectation-unknown"
 
 
 class Alternative(Value):

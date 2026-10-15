@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
+from tests.support.dynamic_script import REGISTRY
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
@@ -22,13 +23,15 @@ from tests.vibesys.vibesys_flows import start_flow
 from vibesys.metrics import EvidenceReading
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
-    OPERATIONS,
+    WRITE_HANDOFF_KIND,
     DynamicConfig,
     EvidenceReadings,
+    HandoffWritten,
     InterpretEvidence,
     MetricRow,
     ParentVerification,
     RunSnapshot,
+    WriteHandoff,
     dynamic,
 )
 from vs_core.api import (
@@ -94,10 +97,15 @@ _KINDS = {
     "benchmark": EvidenceKind.BENCHMARK,
     "profile": EvidenceKind.PROFILING,
 }
-_REGISTRY = OPERATIONS.registry()
+_REGISTRY = REGISTRY
 PLANNER_LABEL = "orchestrator"
 INPUT_THROUGHPUT = 50.0
 _CANDIDATE_THROUGHPUT = 100.0
+
+
+def handoff_path(call: int) -> str:
+    """Where the host keeps the handoff file of the ``call``-th planning call."""
+    return f".vibesys/state/runs/run/orchestrator-handoff/calls/call-{call:04d}.md"
 
 
 def config(**overrides: object) -> DynamicConfig:
@@ -127,6 +135,8 @@ class World(TypedDict, total=False):
     """Whether a parent revision still reproduces its retained content."""
     baseline: Literal["measured", "failed-workload", "no-evidence", "lost"]
     """How the measurement of the input ends."""
+    handoff_writes_open: bool
+    """Leave each handoff write open for the story to answer; else the owner writes it at once."""
 
 
 @dataclass
@@ -141,6 +151,10 @@ class Host:
     settled: set[str] = field(default_factory=set)
     """The attempts whose workspace the host closed."""
     planner_calls: int = 0
+    handoffs: dict[str, WriteHandoff] = field(default_factory=dict)
+    """The handoff files the host's owner holds, by path: the last write of each."""
+    handoff_writes: int = 0
+    """Every handoff write the host performed, a replayed one included."""
     _hypotheses: int = 0
     _commits: int = 0
     _events: int = 0
@@ -150,6 +164,12 @@ class Host:
     throughputs: dict[str, float] = field(default_factory=dict)
     verified: bool = True
     baseline: Literal["measured", "failed-workload", "no-evidence", "lost"] = "measured"
+    handoff_writes_open: bool = False
+
+    def __post_init__(self) -> None:
+        """Have the handoff owner write each file at once, unless the story answers the writes."""
+        if not self.handoff_writes_open:
+            self.run.own(WRITE_HANDOFF_KIND, self.write_handoff)
 
     @property
     def record(self) -> RunSnapshot | None:
@@ -367,9 +387,20 @@ class Host:
             outcome = EvidenceReadings(
                 status="succeeded", readings=tuple(self._reading_of(ref) for ref in typed.evidence)
             )
+        elif isinstance(typed, WriteHandoff):
+            outcome = self.write_handoff(typed)
         else:
             outcome = ParentVerification(status="succeeded", verified=self.verified)
         self.run.finish_operation(asked, outcome)
+
+    def write_handoff(self, request: OperationRequest) -> HandoffWritten:
+        """Keep a handoff file at the path a real owner would give the planning call."""
+        assert isinstance(request, WriteHandoff)
+        path = handoff_path(request.call)
+        self.handoffs[path] = request
+        self.handoff_writes += 1
+        held = sorted(self.handoffs.items(), key=lambda item: item[1].call)
+        return HandoffWritten(path=path, listed=tuple(name for name, _ in held))
 
     def _reading_of(self, ref: EvidenceRef) -> EvidenceReading:
         """What the evidence owner decodes of a record: the host's idea of how it measured."""

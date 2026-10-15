@@ -1,5 +1,5 @@
 /** Semantic refinement of a structurally parsed `instances.inspect` reply. */
-import {INSTANCE_LOG_TAIL_BYTES, type InstanceInspection} from '@vibesys/contracts/host-helper';
+import type {InstanceInspection} from '@vibesys/contracts/host-helper';
 
 function invalid(detail: string): never {
   throw new Error(`Invalid instances.inspect reply: ${detail}`);
@@ -7,18 +7,6 @@ function invalid(detail: string): never {
 
 function absolute(path: string, field: string): void {
   if (!path.startsWith('/')) invalid(`${field} must be an absolute host path`);
-}
-
-function utf8Bytes(value: string): number {
-  let bytes = 0;
-  for (const character of value) {
-    const point = character.codePointAt(0) ?? 0;
-    if (point <= 0x7f) bytes += 1;
-    else if (point <= 0x7ff) bytes += 2;
-    else if (point <= 0xffff) bytes += 3;
-    else bytes += 4;
-  }
-  return bytes;
 }
 
 function validateRecord(inspection: InstanceInspection): void {
@@ -58,11 +46,12 @@ function validateMetadata(inspection: InstanceInspection): void {
   }
 }
 
+/**
+ * The app never asks for the `server.log` tail (`include_log`, deprecated): a run's logs come from
+ * its log store. A reply that carries one anyway answers a request the app did not make.
+ */
 function validateLog(inspection: InstanceInspection): void {
-  const log = inspection.log;
-  if (log?.state === 'available' && utf8Bytes(log.text) > INSTANCE_LOG_TAIL_BYTES) {
-    invalid(`log tail exceeds ${INSTANCE_LOG_TAIL_BYTES} UTF-8 bytes`);
-  }
+  if (inspection.log != null) invalid('it carries a server log the app did not ask for');
 }
 
 /**

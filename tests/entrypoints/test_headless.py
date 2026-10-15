@@ -953,7 +953,7 @@ def test_omitted_config_uses_builtin_defaults(
 
     config, skills, _ = load_config_and_skills(args, domain=DomainName.GENERIC)
 
-    assert config.model.name == "gpt-5.4"
+    assert config.model.name is None  # the provider default applies
     assert skills is None
 
 
@@ -970,7 +970,7 @@ def test_omitted_config_loads_only_the_launch_directory_config(
     args = parse_cli_invocation(["--input", str(project)]).args
 
     config, _, _ = load_config_and_skills(args, domain=DomainName.GENERIC)
-    assert config.model.name == "gpt-5.4"
+    assert config.model.name is None  # the provider default applies
 
     (launch / "agent.toml").write_text('[model]\nname = "launch-model"\n')
     config, _, _ = load_config_and_skills(args, domain=DomainName.GENERIC)

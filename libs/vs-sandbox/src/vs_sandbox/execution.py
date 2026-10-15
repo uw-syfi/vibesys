@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 _TRUNCATION_MARKER = "\n...[truncated]...\n"
 
@@ -63,8 +63,14 @@ class CommandRunner(Protocol):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink,
     ) -> CommandResult:
         """Run a shell command and return its bounded result.
+
+        Every chunk the command writes to stdout or stderr is also written to
+        *output* as it is read, in order per stream, past the cap too and before
+        a timeout or cancel stops it; nothing is written after the call returns.
+        The result is the same whatever *output* is.
 
         Setting *cancel* while the command runs, or exceeding *timeout*,
         stops the command and every process it started (``SIGTERM``, then

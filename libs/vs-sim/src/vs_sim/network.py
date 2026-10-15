@@ -83,6 +83,18 @@ class Network(Protocol):
         ...
 
 
+class DeadlineNetwork(Network, Protocol):
+    """A network and the monotonic timeline that its blocking timeouts use.
+
+    A caller can turn one duration into a deadline, then pass the decreasing remainder
+    to several network calls without combining clocks from different implementations.
+    """
+
+    def now(self) -> float:
+        """Seconds on the same monotonic timeline as this network's timeouts."""
+        ...
+
+
 class _UnixConnection:
     def __init__(self, sock: socket.socket) -> None:
         self._sock = sock
@@ -166,6 +178,10 @@ class _UnixListener:
 
 class UnixNetwork:
     """``AF_UNIX`` stream sockets; an address is a filesystem path."""
+
+    def now(self) -> float:
+        """Seconds on the monotonic timeline used to bound socket operations."""
+        return time.monotonic()
 
     def listen(self, address: str) -> Listener:
         """Bind and listen on the path; ``OSError`` when a socket file is already there."""

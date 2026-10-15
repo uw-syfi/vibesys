@@ -474,16 +474,29 @@ class AgentEvaluationBridge:
         The bridge never creates that directory: a create that accepts an existing
         path would serve inside one another user planted, who could then replace
         the socket and answer the agent's evaluation calls. Each connection is read
-        on its own worker thread; its call is answered on this event loop.
+        on its own worker thread; its call is answered on this event loop. If the accept
+        worker cannot start, the bridge releases the listener before reporting the failure.
         """
         with contextlib.suppress(FileNotFoundError):
             self._socket_path.unlink()
         loop = asyncio.get_running_loop()
         listener = self._network.listen(str(self._socket_path))
         self._listener = listener
-        self._threads.spawn(
-            partial(self._accept_loop, listener, loop), name="agent-evaluation-bridge"
-        )
+        try:
+            self._threads.spawn(
+                partial(self._accept_loop, listener, loop), name="agent-evaluation-bridge"
+            )
+        except BaseException as start_error:
+            try:
+                await self.close()
+            except BaseException as cleanup_error:  # noqa: BLE001  # lint-waiver: LW-114091 [BLE001]; cancellation and worker-start failures must retain their identity if partial-listener cleanup also fails.
+                # > Catching only Exception would let cleanup cancellation replace worker-start;
+                # > separate Exception and CancelledError handlers would duplicate one rule.
+                start_error.add_note(
+                    "Additional error while closing the partially started agent evaluation "
+                    f"bridge: {type(cleanup_error).__name__}: {cleanup_error}"
+                )
+            raise
 
     async def close(self) -> None:
         """Stop accepting calls, hang up on every open connection, and remove the socket.

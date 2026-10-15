@@ -155,6 +155,7 @@ class _LocalRunSession:
             self._registration.plugin.agents,
             backend=request.agent_backend,
             provider=request.cli_provider,
+            allow_unvetted_model=request.allow_unvetted_model,
         )
         self._integration = LocalRunIntegration(
             implementations.git_repository,

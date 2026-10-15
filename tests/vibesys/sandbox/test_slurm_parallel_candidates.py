@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     )
     from vs_sandbox.api import CommandResult
     from vs_sim.api import Processes
+from vs_sim.api import DISCARD
 
 _CONFIG = """[slurm]
 name = "test-cluster"
@@ -148,7 +149,7 @@ def _run(
 def _in(workspaces: RuntimeWorkspaces, path: Path, command: str) -> CommandResult:
     sandbox = workspaces.agent_sandbox_at(path)
     assert sandbox is not None
-    return sandbox.execute(command)
+    return sandbox.execute(command, output=DISCARD)
 
 
 def test_a_candidates_gpu_command_runs_in_its_own_worktree(tmp_path: Path) -> None:
@@ -236,7 +237,7 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             env["VIBESYS_SLURM_BROKER_TOKEN"],
             network=UnixNetwork(),
         )
-        run = processes.run(ProcessSpec(tuple(argv)), timeout=5)
+        run = processes.run(ProcessSpec(tuple(argv)), timeout=5, output=DISCARD)
         assert isinstance(run, ProcessOutcome)
         return run.returncode
 

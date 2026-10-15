@@ -53,6 +53,18 @@ def planner_reply_example() -> str:
                 for ordinal in ordinals
             ],
             "hypothesis_updates": [],
+            "handoff": {
+                "expectations": [
+                    {
+                        "work_id": f"{ordinal}-idea",
+                        "expected": f"What the {ordinal} workstream should show.",
+                        "if_it_succeeds": f"What to plan next if the {ordinal} claim holds.",
+                        "if_it_fails": f"What to plan next if the {ordinal} claim fails.",
+                    }
+                    for ordinal in ordinals
+                ],
+                "doubts": ["What is still unclear and how to check it."],
+            },
         }
     )
     return plan.model_dump_json(indent=2)

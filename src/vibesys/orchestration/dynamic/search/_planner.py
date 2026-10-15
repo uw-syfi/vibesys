@@ -5,6 +5,7 @@ model; `plan` validates it against what the run has recorded, asks for a correct
 `MAX_CORRECTIONS` times, and when the corrections do not fix the plan keeps the best valid
 outcome: a held underfilled plan, else the valid part of the last reply, else a fresh question,
 else a typed give-up. A lost turn is asked again, a few times, after a backoff on the run clock.
+A call that schedules a plan has its handoff file written before it ends (see `_handoff`).
 
 The planner's role has core's own corrections and re-asks off: every ask carries a prompt built
 from the run at that moment, and every correction names the problem as typed data.
@@ -12,8 +13,11 @@ from the run at that moment, and every correction names the problem as typed dat
 
 from dataclasses import dataclass
 
+from pydantic import BaseModel
+
 from vibesys.orchestration.dynamic.models import PortfolioPlan
 from vibesys.orchestration.dynamic.search._context import PlanWorld
+from vibesys.orchestration.dynamic.search._handoff import HandoffWritten, handoff_request
 from vibesys.orchestration.dynamic.search._plan import PlanCheck, validate
 from vibesys.orchestration.dynamic.search._roles import LOST_TURN_BACKOFF, PLANNER
 from vibesys.orchestration.dynamic.search._run_state import (
@@ -50,6 +54,8 @@ LOST_TURNS = RetryPolicy(max_tries=3, backoff=LOST_TURN_BACKOFF)
 class Call:
     """What one planning call has spent and kept, which its asks and judgments read."""
 
+    number: int
+    """The planning call's number, counted from 1: its handoff file's identity."""
     capacity: int
     """The slots that were free when the call began; a reply should fill them."""
     problem: PlanProblem | None
@@ -78,7 +84,7 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
     A planning call is not restartable from a snapshot: after a code change the root plans again.
     """
     planner = ctx.agents.session(PLANNER)
-    call = Call(capacity=run.capacity(), problem=run.gate.last_error)
+    call = Call(number=run.calls, capacity=run.capacity(), problem=run.gate.last_error)
 
     async def ask(tries: Tries[Failed]) -> Reply | NoPlan | Again[Failed]:
         return await ask_planner(planner, run, call, tries.reasons)
@@ -91,7 +97,40 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
                 return outcome
             case Reply() as reply:
                 if (outcome := _judge(call, reply)) is not None:
-                    return outcome
+                    return await _handed_off(ctx, call.number, outcome)
+
+
+async def _handed_off(ctx: Flow, number: int, outcome: PlanOutcome) -> PlanOutcome:
+    """A scheduled plan with its handoff file written; a call that planned nothing writes none.
+
+    A write whose wait timed out or was lost may have landed, so it is sent again (the write is
+    keyed, so the same bytes land). One that still fails leaves the plan standing without a new
+    listing: the plan is what the run needs, and the next successful write lists every file the
+    owner holds, this one included if its bytes landed.
+    """
+    if not isinstance(outcome, Scheduled):
+        return outcome
+    request = handoff_request(number, outcome.check)
+
+    async def write(tries: Tries[Failed]) -> BaseModel | Failed | Again[Failed]:
+        del tries
+        written = await ctx.owners.perform(request, within=ctx.task.terms.operation_seconds)
+        if isinstance(written, Failed) and written.reason in _UNKNOWN_WRITE:
+            return Again(reason=written)
+        return written
+
+    match await ctx.retry(write, HANDOFF_TRIES):
+        case HandoffWritten() as written:
+            return Scheduled(outcome.check, handoff=written)
+        case _:
+            return outcome
+
+
+HANDOFF_TRIES = RetryPolicy(max_tries=2)
+"""A handoff write whose outcome is unknown is sent once more."""
+
+_UNKNOWN_WRITE = frozenset({FailureReason.TIMED_OUT, FailureReason.LOST})
+"""The failures after which the write may have landed."""
 
 
 async def ask_planner(

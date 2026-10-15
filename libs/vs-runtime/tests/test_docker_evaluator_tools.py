@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shlex
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,7 @@ import pytest
 
 from vs_runtime.api.infrastructure import (
     SANDBOX_EVALUATOR_TOOLS_ROOT,
+    DockerToolBuilder,
     TrustedEvaluatorRequirements,
     docker_evaluator_tools_root,
     evaluator_container_setup,
@@ -34,10 +36,11 @@ from vs_sandbox.api.testing import (
     FakeComputeBackend,
     FakeLifecycleRunner,
 )
+from vs_sim.api import Capture
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
 _IMAGE = "sha256:target-image"
 
@@ -93,9 +96,7 @@ def test_verified_cache_returns_read_only_resources_without_a_builder(tmp_path: 
     resources = prepare_docker_evaluator_resources(
         requirements,
         workspace,
-        backend=backend,
-        log_dir=log_dir,
-        container_image=_IMAGE,
+        builder=DockerToolBuilder(backend=backend, log_dir=log_dir, image=_IMAGE),
     )
 
     spec = requirements.tools["check-tool"]
@@ -118,9 +119,9 @@ def test_empty_requirements_do_not_require_cache_or_builder_paths(tmp_path: Path
         prepare_docker_evaluator_resources(
             TrustedEvaluatorRequirements(),
             tmp_path / "missing-workspace",
-            backend=backend,
-            log_dir=tmp_path / "missing-logs",
-            container_image=_IMAGE,
+            builder=DockerToolBuilder(
+                backend=backend, log_dir=tmp_path / "missing-logs", image=_IMAGE
+            ),
         )
         == ()
     )
@@ -139,9 +140,11 @@ def test_declared_tools_require_an_operator_owned_cache_root(tmp_path: Path) -> 
         prepare_docker_evaluator_resources(
             requirements,
             workspace,
-            backend=FakeComputeBackend(threads=SimThreads()),
-            log_dir=tmp_path / "logs",
-            container_image=_IMAGE,
+            builder=DockerToolBuilder(
+                backend=FakeComputeBackend(threads=SimThreads()),
+                log_dir=tmp_path / "logs",
+                image=_IMAGE,
+            ),
         )
 
 
@@ -160,9 +163,7 @@ def test_missing_cache_uses_target_image_ephemeral_builder_then_verifies(
         prepare_docker_evaluator_resources(
             requirements,
             workspace,
-            backend=backend,
-            log_dir=log_dir,
-            container_image=_IMAGE,
+            builder=DockerToolBuilder(backend=backend, log_dir=log_dir, image=_IMAGE),
         )
 
     assert len(backend.creations) == 1
@@ -213,9 +214,7 @@ def test_builder_installs_system_packages_as_root_before_building_tools(tmp_path
         prepare_docker_evaluator_resources(
             requirements,
             workspace,
-            backend=backend,
-            log_dir=log_dir,
-            container_image=_IMAGE,
+            builder=DockerToolBuilder(backend=backend, log_dir=log_dir, image=_IMAGE),
         )
 
     install_tools = evaluator_tools_install_command(
@@ -245,9 +244,7 @@ def test_builder_setup_failure_names_the_step_and_still_stops(tmp_path: Path) ->
         prepare_docker_evaluator_resources(
             requirements,
             workspace,
-            backend=backend,
-            log_dir=log_dir,
-            container_image=_IMAGE,
+            builder=DockerToolBuilder(backend=backend, log_dir=log_dir, image=_IMAGE),
         )
 
     assert sandbox.stop_count == 1
@@ -276,9 +273,7 @@ def test_builder_ownership_failure_is_bounded_and_still_stops(tmp_path: Path) ->
         prepare_docker_evaluator_resources(
             requirements,
             workspace,
-            backend=backend,
-            log_dir=log_dir,
-            container_image=_IMAGE,
+            builder=DockerToolBuilder(backend=backend, log_dir=log_dir, image=_IMAGE),
         )
 
     assert "could not return cache ownership" in str(raised.value)
@@ -301,10 +296,79 @@ def test_builder_start_failure_still_attempts_cleanup(tmp_path: Path) -> None:
         prepare_docker_evaluator_resources(
             requirements,
             workspace,
-            backend=backend,
-            log_dir=log_dir,
-            container_image=_IMAGE,
+            builder=DockerToolBuilder(backend=backend, log_dir=log_dir, image=_IMAGE),
         )
 
     assert sandbox.start_count == 1
     assert sandbox.stop_count == 1
+
+
+class _BuildStreams:
+    """An opener that keeps each build's output and records which builds opened and closed."""
+
+    def __init__(self) -> None:
+        self.opened: list[tuple[str, ...]] = []
+        self.closed: list[tuple[str, ...]] = []
+        self.output = Capture(1 << 16)
+
+    @contextmanager
+    def open(self, tools: tuple[str, ...]) -> Iterator[Capture]:
+        self.opened.append(tools)
+        try:
+            yield self.output
+        finally:
+            self.closed.append(tools)
+
+
+def test_a_build_writes_its_commands_output_to_one_stream_closed_on_failure(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    log_dir = tmp_path / "logs"
+    backend = FakeComputeBackend(threads=SimThreads())
+    printed = "   Compiling check-tool v1.0.0\n"
+    sandbox = FakeLifecycleRunner(
+        default_result=CommandResult(output=printed, exit_code=0, stdout=printed)
+    )
+    backend.script_sandbox(SandboxKind.DOCKER, str(_builder_workspace(log_dir)), sandbox)
+    streams = _BuildStreams()
+
+    with pytest.raises(EvaluatorToolError, match="did not publish every declared tool"):
+        prepare_docker_evaluator_resources(
+            _system_package_requirements(tmp_path),
+            workspace,
+            builder=DockerToolBuilder(
+                backend=backend, log_dir=log_dir, image=_IMAGE, output=streams.open
+            ),
+        )
+
+    assert streams.opened == streams.closed == [("check-tool",)]
+    root_setup = [call for call in sandbox.calls if call.as_root]
+    assert root_setup
+    # The root setup and the installer print to the build's stream; returning the
+    # cache to the host user (the last call) is the framework's and prints nowhere.
+    builder_commands = len(sandbox.calls) - 1
+    assert streams.output.stdout == printed.encode() * builder_commands
+
+
+def test_a_verified_cache_builds_nothing_and_opens_no_stream(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    requirements = _requirements(tmp_path)
+    host_parent = docker_evaluator_tools_root(requirements, workspace, image_identity=_IMAGE)
+    prepare_evaluator_tools(requirements.tools, host_parent, command_runner=_install_fake_binary)
+    streams = _BuildStreams()
+
+    prepare_docker_evaluator_resources(
+        requirements,
+        workspace,
+        builder=DockerToolBuilder(
+            backend=FakeComputeBackend(threads=SimThreads()),
+            log_dir=tmp_path / "logs",
+            image=_IMAGE,
+            output=streams.open,
+        ),
+    )
+
+    assert streams.opened == []

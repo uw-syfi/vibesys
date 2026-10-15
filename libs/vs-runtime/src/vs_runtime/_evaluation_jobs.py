@@ -183,6 +183,7 @@ def measurement_request(
             fingerprints=fingerprints,
             submitted_at_s=plan.submitted_at,
             deadline_at_s=deadline_at,
+            purpose=plan.purpose,
         )
         steps.append(EvaluationStep(name=stage_id, payload=stage.model_dump(mode="json")))
     return EvaluationRequest(

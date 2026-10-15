@@ -43,6 +43,7 @@ from vs_sim.crash import (
     swept,
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
+from vs_sim.fake_byte_source import FakeByteSource
 from vs_sim.fake_piped_process import ScriptedPipedProcess
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
@@ -74,6 +75,12 @@ from vs_sim.gate import Gate, arrival, start_thread, wait_until_started, wait_un
 from vs_sim.host_clock import CrashableClock, HostCrashedError, ProbedClock, clock_from
 from vs_sim.hostile_input import DEEP_NESTING, OVERSIZED_BYTES, hostile_json_frames
 from vs_sim.manual import ManualClock
+from vs_sim.output_contracts import (
+    ByteSourceContract,
+    ByteSourceUnderTest,
+    OutputSinkContract,
+    OutputSinkUnderTest,
+)
 from vs_sim.pairwise import pairwise_rows
 from vs_sim.seeds import (
     SCHEDULE_SEED_OPTION,
@@ -144,6 +151,8 @@ __all__ = [
     "WORKER_GUARD_S",
     "WORLDS",
     "BlockingRunnerContract",
+    "ByteSourceContract",
+    "ByteSourceUnderTest",
     "CallCounter",
     "Changes",
     "ChildDiedError",
@@ -154,6 +163,7 @@ __all__ = [
     "Depth",
     "End",
     "EventTrace",
+    "FakeByteSource",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
     "FakeLoopbackHttp",
@@ -182,6 +192,8 @@ __all__ = [
     "ManualClock",
     "NetworkContract",
     "NetworkUnderTest",
+    "OutputSinkContract",
+    "OutputSinkUnderTest",
     "PipedProcessContract",
     "PipedStart",
     "PipedUnderTest",

@@ -62,3 +62,13 @@ h2 { font-size: 16px; margin: 0; }
 .event-truncated { color: var(--warning); font-size: 0.875rem; }
 @media (max-width: 760px) { .shell { width: min(100% - 28px, 1120px); padding-top: 28px; } .summary { grid-template-columns: repeat(2, 1fr); } .run-layout { grid-template-columns: 1fr; } .round-rail { position: static; } }
 @media (max-width: 420px) { .summary { grid-template-columns: 1fr; } .control-actions, .steer-form div { align-items: stretch; flex-direction: column; } }
+.startup-log { margin: 18px 0; }
+.startup-log .panel-heading { align-items: center; gap: 12px; padding-bottom: 12px; }
+.startup-log-toggle { background: none; border: 0; color: var(--text); cursor: pointer; font: inherit; font-size: 1.1rem; font-weight: 700; padding: 0; }
+.startup-log-toggle::before { content: '\25B8  '; }
+.startup-log-toggle[aria-expanded="true"]::before { content: '\25BE  '; }
+.startup-log select { background: var(--field-background); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font: inherit; padding: 4px 6px; }
+.startup-log-notice { color: var(--subtle); margin: 12px 0 0; }
+.startup-log-body { display: flex; flex-direction: column-reverse; margin-top: 12px; max-height: 360px; overflow-y: auto; overscroll-behavior: contain; }
+.startup-log-body pre { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; line-height: 1.45; margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.startup-log-earlier { color: var(--subtle); }

@@ -52,6 +52,7 @@ if TYPE_CHECKING:
         RunEnvironmentSession,
         WorkspaceRuntime,
     )
+    from vs_sim.api import OutputSink
 
 
 GATE_LOG_TAIL_CHARS = 1000
@@ -251,6 +252,7 @@ class _EvaluationAdapter:
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
+        output: OutputSink,
     ) -> AccuracyEvaluation:
         """Run or explicitly reuse trusted accuracy for one candidate."""
         live = self._live_workspace(workspace)
@@ -262,6 +264,7 @@ class _EvaluationAdapter:
                     self._run_id,
                     live,
                     reuse=reuse,
+                    output=output,
                 )
             except asyncio.CancelledError:
                 self._finish_gate_error(GateKind.ACCURACY, "evaluation cancelled")
@@ -288,6 +291,7 @@ class _EvaluationAdapter:
                 self._run_id,
                 live,
                 release=release,
+                output=output,
             )
             result = self._require_accuracy_result(run.result)
             self._log_provisioning(result.provisioned_volumes, result.failure)
@@ -317,6 +321,7 @@ class _EvaluationAdapter:
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
+        output: OutputSink,
     ) -> BenchmarkEvaluation:
         """Run the benchmark and apply policy-selected headline semantics."""
         self._validate_objectives(objectives)
@@ -329,6 +334,7 @@ class _EvaluationAdapter:
             run = await self._runtime_evaluation.benchmark(
                 live,
                 required_metrics=frozenset(item.name for item in objectives),
+                output=output,
             )
             result = run.result
             self._log_provisioning(result.provisioned_volumes, result.failure)

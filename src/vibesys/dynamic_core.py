@@ -21,6 +21,7 @@ from vibesys.core_wiring import (
     operation_catalog,
     require_candidate_sandboxes,
 )
+from vibesys.dynamic_handoff import handoff_entries
 from vibesys.dynamic_roles import CORE_ROLES
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.orchestration.dynamic.core_policy.api import (
@@ -43,7 +44,7 @@ from vibesys.plugin_registration import (
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
 from vibesys.run.contracts import IterationTree, PluginProjection
-from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, RevisionRef
+from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, OperationRegistry, RevisionRef
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import (
     CoreOperation,
@@ -54,6 +55,7 @@ from vs_runtime.api import (
 from vs_runtime.api.core import (
     AgentEvaluationPolicy,
     OperationCatalog,
+    OperationEntry,
     OperationPorts,
     RuntimeRecord,
     operation_roles,
@@ -68,9 +70,21 @@ if TYPE_CHECKING:
 _PLUGIN_ID = dynamic.name
 
 
-def dynamic_operation_catalog(ports: OperationPorts) -> OperationCatalog:
-    """The operations the dynamic search requires, each owned by the production owner of its role."""
-    return operation_catalog(OPERATIONS, ports)
+def _registry() -> OperationRegistry:
+    """The codec of every operation a run records: the kit's and the handoff write."""
+    registry = dynamic.registry()
+    if registry is None:
+        message = "the dynamic search registers operations"
+        raise ValueError(message)
+    return registry
+
+
+def dynamic_operation_catalog(
+    ports: OperationPorts, handoff: tuple[OperationEntry, ...]
+) -> OperationCatalog:
+    """The operations the search requires: the kit's from their roles' owners, and the handoff's."""
+    catalog = operation_catalog(OPERATIONS, ports)
+    return OperationCatalog(_registry(), (*catalog.entries, *handoff))
 
 
 def dynamic_projector() -> RuntimeRecordProjector[FlowState]:
@@ -86,7 +100,7 @@ def dynamic_projector() -> RuntimeRecordProjector[FlowState]:
         plugin_id=_PLUGIN_ID,
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
-        operations=OPERATIONS.registry(),
+        operations=_registry(),
         project=project,
     )
 
@@ -206,6 +220,7 @@ def dynamic_core_policy() -> CorePolicy:
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(CORE_PROTOCOL_DIR,),
+        owned_operations=handoff_entries,
     )
 
 

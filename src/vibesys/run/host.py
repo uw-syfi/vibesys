@@ -28,7 +28,7 @@ from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
-from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor
+from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -69,7 +69,7 @@ if TYPE_CHECKING:
         RunFacts,
         Workspaces,
     )
-    from vs_runtime.api.core import RunTiming
+    from vs_runtime.api.core import RunTiming, StageOutputOpener
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
         OwnedWorkspaces,
@@ -78,7 +78,7 @@ if TYPE_CHECKING:
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
-    from vs_sim.api import BlockingRunner, Network, ReleaseStack, SleepingClock
+    from vs_sim.api import BlockingRunner, Network, ReleaseStack
 
 
 type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
@@ -167,6 +167,7 @@ class _ProductHostFactory:
             plugin.agents,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
         _require_supported_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
         resources = open_run_resources(
@@ -338,6 +339,7 @@ class _ProductHostFactory:
             self.request.config,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
         # One client serves every role, so each role's own model and effort ride the spec.
         base = replace(
@@ -394,12 +396,15 @@ class _ProductHostFactory:
             project.state, AgentSessionKey.for_member("core", "run")
         )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
-        handle_root = _slurm_handle_root(namespace)
-        executor = self._semantic_executor(
-            self.integration, resources, workspaces, namespace, self.timing.clock
-        )
+        # Each stage's output goes to the run's log store under its gate, named by the
+        # measurement's handle and try, as its gate events name it: an in-process stage's as
+        # its command prints it, a Slurm stage's as each scheduler poll reads it.
+        tries = TryHandles()
+        stage_output = tries.stage_output(resources.stage_output)
+        executor = self._semantic_executor(resources, workspaces, namespace, stage_output)
         tool_context = _tool_context(
-            resources, self._serve_queue_status(resources, handle_root, ownership)
+            resources,
+            self._serve_queue_status(resources, _slurm_handle_root(namespace), ownership),
         )
         configuration = partial(self._agent_configuration, resources)
         return build_core_services(
@@ -413,11 +418,17 @@ class _ProductHostFactory:
                 evaluation=RetryingEvaluationExecutor(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces, clock=self.timing.clock),
+                    else PollingEvaluationExecutor(
+                        evaluation,
+                        workspaces,
+                        clock=self.timing.clock,
+                        stage_output=stage_output,
+                    ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
                         project.state.run_id, "core-evaluation-tries"
                     ),
+                    tries=tries,
                 ),
                 environment=self._core_environment(resources),
                 roles=self._offered_roles(tool_context),
@@ -522,13 +533,12 @@ class _ProductHostFactory:
             ),
         )
 
-    @staticmethod
     def _semantic_executor(
-        integration: LocalRunIntegration,
+        self,
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
-        clock: SleepingClock,
+        stage_output: StageOutputOpener,
     ) -> SlurmSemanticEvaluationExecutor | None:
         """Build the cluster's semantic execution adapter when the environment reports one."""
         cluster = resources.environment_resources.view.cluster_evaluation
@@ -542,9 +552,10 @@ class _ProductHostFactory:
             workspaces,
             namespace,
             _slurm_handle_root(namespace),
-            clock=clock,
-            sleeper=clock,
-            processes=integration.system.slurm_processes,
+            clock=self.timing.clock,
+            sleeper=self.timing.clock,
+            processes=self.integration.system.slurm_processes,
+            stage_output=stage_output,
         )
 
     async def stop_new_work(self) -> None:

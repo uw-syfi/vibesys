@@ -53,6 +53,7 @@ FRAMEWORK_PACKAGES = (
     "vs_mcp",
     "vs_faults",
     "vs_sim",
+    "vs_logs",
 )
 REQUIRED_SYSTEM_TOOLS = ("git",)
 SYSTEM_JAVASCRIPT_TOOLS = ("bun", "node", "npm", "pnpm")
@@ -165,9 +166,6 @@ def verify_first_launch_defaults() -> None:
         _fail(f"Installed first launch unexpectedly contains a config file: {config_path}")
     config_path.write_text(
         """\
-[model]
-name = "gpt-5.4"
-
 [repository]
 visibility = "public"
 

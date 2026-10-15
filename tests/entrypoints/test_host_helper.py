@@ -13,6 +13,8 @@ import pytest
 
 from entrypoints.host_helper import real_host
 from server.host_api import (
+    HarnessesListReply,
+    HarnessesListRequest,
     InstanceList,
     InstancesListReply,
     InstancesListRequest,
@@ -28,6 +30,7 @@ from server.host_api import (
 )
 from server.host_helper_requests import answer
 from server.registry import FileInstanceStore, instance_root
+from vibesys.api import HARNESSES
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
@@ -50,6 +53,23 @@ def test_the_real_host_reads_this_users_registry_and_filesystem(tmp_path: Path) 
     assert [entry.name for entry in completed.entries] == ["alpha"]
     assert isinstance(stopped, RunStopReply)
     assert stopped.result.outcome is StopOutcome.NOT_RUNNING
+
+
+def test_the_real_host_offers_the_vetted_harnesses_with_one_default_per_provider(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), SimThreads())
+
+    reply = answer(HarnessesListRequest(request_id="h", deadline_ms=1), host)
+
+    assert isinstance(reply, HarnessesListReply)
+    offered = reply.harnesses
+    assert [(o.provider, o.model) for o in offered] == [(h.provider, h.model) for h in HARNESSES]
+    for provider in {option.provider for option in offered}:
+        models = [option for option in offered if option.provider == provider]
+        assert [option.default for option in models] == [True] + [False] * (len(models) - 1)
 
 
 def test_an_unsafe_registry_root_is_refused(tmp_path: Path) -> None:

@@ -9,7 +9,15 @@
  */
 
 import type {RelayPort} from '@vibesys/feature-run-control/main';
-import {type ChromeState, CONNECT_CHANNEL, WAKE_CHANNEL, type WelcomeEvent} from '@vibesys/ipc';
+import {
+  type ChromeState,
+  CONNECT_CHANNEL,
+  LOGS_CHANNEL,
+  type RunLogsReply,
+  type RunLogsRequest,
+  WAKE_CHANNEL,
+  type WelcomeEvent,
+} from '@vibesys/ipc';
 import {
   BaseWindow,
   dialog,
@@ -50,6 +58,15 @@ function runIpcRegistry(log: (message: string) => void): RunIpcRegistry {
           });
         });
       },
+      onLogs: listener => {
+        ipcMain.handle(LOGS_CHANNEL, (event, request: unknown) =>
+          listener({
+            request,
+            senderId: event.sender.id,
+            senderUrl: event.senderFrame?.url ?? null,
+          }),
+        );
+      },
     },
     APP_ENTRY_URL,
     log,
@@ -61,6 +78,8 @@ export interface AppWindowDeps {
   readonly log: (message: string) => void;
   /** The run page opened one connection, for the run bound to it (`openRunPage`'s `runId`). */
   readonly connect: (port: RelayPort, runId: string) => void;
+  /** The run page asked about its run's logs (`openRunPage`'s `runId`). */
+  readonly logs: (runId: string, request: RunLogsRequest) => Promise<RunLogsReply<RunLogsRequest>>;
   /** The native window or its current run page disappeared: detach the run bound to it. */
   readonly closed: (runId: string) => void;
   /** The welcome surface exhausted its bounded recovery; enter fatal app shutdown. */
@@ -142,6 +161,11 @@ export class AppWindow {
           return;
         }
         this.#deps.connect(port, runId);
+      },
+      logs: request => {
+        const runId = this.#currentRunId;
+        if (runId === null) return Promise.reject(new Error('this window shows no run'));
+        return this.#deps.logs(runId, request);
       },
     });
   }
