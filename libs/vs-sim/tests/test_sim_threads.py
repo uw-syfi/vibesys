@@ -413,6 +413,24 @@ def test_a_second_real_thread_cannot_use_a_simulator(primitive: str) -> None:
     assert not lock.held_by_caller()
 
 
+def test_a_real_thread_that_did_not_build_the_simulator_cannot_be_its_first_user() -> None:
+    """The first real user does not matter: a pool worker fails on every run, not by chance."""
+    sim = SimThreads()
+    raised: list[BaseException] = []
+
+    def only_user() -> None:
+        try:
+            sim.lock().acquire(blocking=False)
+        except SimMisuseError as error:
+            raised.append(error)
+
+    worker = threading.Thread(target=only_user)
+    worker.start()
+    join_or_fail(worker)
+
+    assert [type(error) for error in raised] == [SimMisuseError]
+
+
 def test_a_thread_spawned_on_an_undriven_simulator_is_reported_as_never_run() -> None:
     sim = SimThreads()
     sim.spawn(lambda: None, name="watchdog")

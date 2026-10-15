@@ -352,7 +352,7 @@ class SimThreads:
         self._yield_to_driver = threading.Semaphore(0)
         self._closed = False
         self._driven = False
-        self._outside_ident: int | None = None
+        self._outside_ident = threading.get_ident()
         self._executor = _SimExecutor(self)
         self.errors: list[BaseException] = []
         """Exceptions that ended threads, in the order they happened."""
@@ -543,23 +543,23 @@ class SimThreads:
         """The simulated thread running this code, or the one real thread that drives them.
 
         Every caller that is not a simulated thread is the same stand-in, so only one real
-        thread may use a simulator: the test's, or the event loop's that drives it. Two
-        would share lock ownership and race on its state.
+        thread may use a simulator: the one that built it (the test's, or the event loop's
+        that drives it). Two would share lock ownership and race on its state. The thread
+        is fixed at construction, so a worker that uses the simulator fails on every run,
+        not only on the runs where a pool happens to hand the work to a second worker.
 
         Raises:
-            SimMisuseError: a second real thread used this simulator.
+            SimMisuseError: a real thread other than the one that built this simulator used it.
         """
         ident = threading.get_ident()
         thread = self._by_ident.get(ident)
         if thread is not None:
             return thread
-        if self._outside_ident is None:
-            self._outside_ident = ident
-        elif ident != self._outside_ident:
+        if ident != self._outside_ident:
             message = (
-                f"real thread {threading.current_thread().name!r} used a SimThreads that "
-                "another real thread already uses; run the work as a simulated thread "
-                "(spawn it from SimThreads.run or Sim.run) instead of on a real one"
+                f"real thread {threading.current_thread().name!r} used a SimThreads built on "
+                "another real thread; run the work as a simulated thread (spawn it from "
+                "SimThreads.run or Sim.run) instead of on a real one"
             )
             raise SimMisuseError(message)
         return _OUTSIDE
