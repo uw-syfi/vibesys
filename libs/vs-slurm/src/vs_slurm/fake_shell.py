@@ -194,7 +194,7 @@ def _program(name: str, args: list[str]) -> Callable[[list[str], list[str]], int
         "ln": _ln,
         "rm": _rm,
         "sync": _sync,
-        "stat": _stat,
+        "ls": _ls,
         "od": _od,
     }
     if name not in builders:
@@ -355,27 +355,29 @@ def _sync(_args: list[str]) -> Callable[[list[str], list[str]], int]:
     return sync
 
 
-_STAT_FORMAT = "%d:%i:%s"
-_STAT_WORDS = 3  # -c FORMAT PATH
+_LS_WORDS = 2  # -lni PATH
 _OD_WORDS = 10  # -A n -v -t x1 -j OFFSET -N COUNT PATH
 _OD_BYTES_PER_LINE = 16
 
 
-def _stat(args: list[str]) -> Callable[[list[str], list[str]], int]:
-    """``stat -c %d:%i:%s PATH``: the one format the cluster file reader asks for."""
-    if len(args) != _STAT_WORDS or args[:2] != ["-c", _STAT_FORMAT]:
+def _ls(args: list[str]) -> Callable[[list[str], list[str]], int]:
+    """``ls -lni PATH``: the long listing the cluster file reader takes inode and size from."""
+    if len(args) != _LS_WORDS or args[0] != "-lni":
         raise _UnsupportedError
-    path = Path(args[2])
+    path = Path(args[1])
 
-    def stat(out: list[str], errors: list[str]) -> int:
+    def ls(out: list[str], errors: list[str]) -> int:
         try:
             status = path.stat()
         except OSError as error:
-            return _fail(errors, "stat", str(path), error)
-        out.append(f"{status.st_dev}:{status.st_ino}:{status.st_size}\n")
+            return _fail(errors, "ls", str(path), error)
+        out.append(
+            f"{status.st_ino} -rw-r--r-- {status.st_nlink} {status.st_uid} {status.st_gid} "
+            f"{status.st_size} Jan 1 00:00 {path}\n"
+        )
         return 0
 
-    return stat
+    return ls
 
 
 def _od(args: list[str]) -> Callable[[list[str], list[str]], int]:

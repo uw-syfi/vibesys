@@ -59,8 +59,8 @@ it as the command runs; the bounded `CommandResult` does not change.
 A Slurm stage runs on the cluster, where the batch script writes its stdout and stderr to
 per-stage files (`job.log` holds the job's setup and service output, not a stage's).
 `vs_slurm.api.SlurmFileSource` reads such a file as a `ByteSource` through the runner's
-own transport: one framed remote command per call (`od` for the bytes, `stat` after it
-for identity and size), at most `MAX_REMOTE_READ_BYTES` (256 KiB) a read, so its hex
+own transport: one framed remote command per call (`od` for the bytes, `ls -lni` after it
+for inode and size, both POSIX), at most `MAX_REMOTE_READ_BYTES` (256 KiB) a read, so its hex
 form stays under the transport's 1 MiB stream cap. `Cluster.stage_output(handle, index,
 stream)` names a stage's file. `vs_sandbox`'s `StageOutputFollower` is the pump: a
 library cannot import `vs_logs.follow`, and the executor already polls the scheduler, so

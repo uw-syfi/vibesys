@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
-import sys
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -219,7 +218,6 @@ def test_evidence_past_the_size_cap_is_invalid_without_being_parsed(tmp_path: Pa
         operations.inspect("op-1")
 
 
-@pytest.mark.skipif(sys.platform != "linux", reason="clusters run GNU stat; BSD stat has no -c")
 @settings(max_examples=examples(pr=5, nightly=20), deadline=None)
 @given(
     content=st.binary(max_size=80),
