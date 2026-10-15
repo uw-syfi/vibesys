@@ -39,6 +39,7 @@ from .config import (
     SlurmSshTransport,
     shell_join_with_port,
 )
+from .remote_file import SlurmFileSource
 from .remote_operations import (
     RemoteOperationClaim,
     RemoteOperationEvidence,
@@ -796,6 +797,10 @@ class SlurmJobRunner:
             return max(0, int(output))
         except ValueError as error:
             raise SlurmError.malformed_result() from error
+
+    def remote_file(self, path: PurePosixPath) -> SlurmFileSource:
+        """The cluster file at ``path``, read through this runner's transport as it grows."""
+        return SlurmFileSource(path, self._whole_reading)
 
     def poll_batch(self, handle: SlurmBatchHandle) -> SlurmJobStatus:
         """Read the scheduler state of a batch handle."""

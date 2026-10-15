@@ -194,6 +194,8 @@ def _program(name: str, args: list[str]) -> Callable[[list[str], list[str]], int
         "ln": _ln,
         "rm": _rm,
         "sync": _sync,
+        "stat": _stat,
+        "od": _od,
     }
     if name not in builders:
         raise _UnsupportedError
@@ -236,11 +238,13 @@ def _mkdir(args: list[str]) -> Callable[[list[str], list[str]], int]:
 
 
 def _printf(args: list[str]) -> Callable[[list[str], list[str]], int]:
-    if not args or "\\" in args[0]:
+    if not args or ("\\" in args[0] and args[0] != "%s\\n"):
         raise _UnsupportedError
     template, values = args[0], args[1:]
     if template == "%s":
         text = "".join(values)
+    elif template == "%s\\n":
+        text = "".join(f"{value}\n" for value in values)
     elif "%" not in template and not values:
         text = template
     else:
@@ -349,3 +353,53 @@ def _sync(_args: list[str]) -> Callable[[list[str], list[str]], int]:
         return 0
 
     return sync
+
+
+_STAT_FORMAT = "%d:%i:%s"
+_STAT_WORDS = 3  # -c FORMAT PATH
+_OD_WORDS = 10  # -A n -v -t x1 -j OFFSET -N COUNT PATH
+_OD_BYTES_PER_LINE = 16
+
+
+def _stat(args: list[str]) -> Callable[[list[str], list[str]], int]:
+    """``stat -c %d:%i:%s PATH``: the one format the cluster file reader asks for."""
+    if len(args) != _STAT_WORDS or args[:2] != ["-c", _STAT_FORMAT]:
+        raise _UnsupportedError
+    path = Path(args[2])
+
+    def stat(out: list[str], errors: list[str]) -> int:
+        try:
+            status = path.stat()
+        except OSError as error:
+            return _fail(errors, "stat", str(path), error)
+        out.append(f"{status.st_dev}:{status.st_ino}:{status.st_size}\n")
+        return 0
+
+    return stat
+
+
+def _od(args: list[str]) -> Callable[[list[str], list[str]], int]:
+    """``od -A n -v -t x1 -j OFFSET -N COUNT PATH``: bytes as hex, sixteen to a line."""
+    if len(args) != _OD_WORDS or args[:6] != ["-A", "n", "-v", "-t", "x1", "-j"]:
+        raise _UnsupportedError
+    if args[7] != "-N" or not args[6].isdigit() or not args[8].isdigit():
+        raise _UnsupportedError
+    offset, count, path = int(args[6]), int(args[8]), Path(args[9])
+
+    def od(out: list[str], errors: list[str]) -> int:
+        try:
+            with path.open("rb") as file:
+                size = os.fstat(file.fileno()).st_size
+                if offset > size:
+                    errors.append("od: cannot skip past end of combined input\n")
+                    return 1
+                file.seek(offset)
+                data = file.read(count)
+        except OSError as error:
+            return _fail(errors, "od", str(path), error)
+        for start in range(0, len(data), _OD_BYTES_PER_LINE):
+            line = data[start : start + _OD_BYTES_PER_LINE]
+            out.append("".join(f" {byte:02x}" for byte in line) + "\n")
+        return 0
+
+    return od
