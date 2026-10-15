@@ -37,7 +37,7 @@ import {
   hostLabel,
   instanceObservation,
 } from '@vibesys/hosts';
-import type {ChromeState, StartOutcome} from '@vibesys/ipc';
+import type {ChromeState, HarnessChoice, StartOutcome} from '@vibesys/ipc';
 import type {ResumeRunId, StopView} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {type RelayPort, relay} from './relay.js';
@@ -125,6 +125,15 @@ interface PendingAdoption {
 
 /** What a run start asked the host for. */
 type Resume = {readonly run_id: ResumeRunId} | null;
+
+/** What one `run.start` asks for besides its project. */
+interface Launch {
+  readonly task: string | null;
+  readonly args: readonly string[];
+  readonly resume: Resume;
+  /** A pair the host's `harnesses.list` offered; null keeps the project's configuration. */
+  readonly harness: HarnessChoice | null;
+}
 
 export class RunControl {
   readonly #deps: RunControlDeps;
@@ -234,8 +243,9 @@ export class RunControl {
   }
 
   /**
-   * Start a run of `task` in `project` on `id` and attach to it. When the start was cancelled by
-   * the time its record appears, the run is stopped instead.
+   * Start a run of `task` in `project` on `id` and attach to it, with `harness` (one the host's
+   * `harnesses.list` offered; null keeps the project's configuration). When the start was cancelled
+   * by the time its record appears, the run is stopped instead.
    */
   async start(
     id: HostId,
@@ -243,13 +253,14 @@ export class RunControl {
     task: string | null,
     args: readonly string[],
     identity: StartIdentity | null = null,
+    harness: HarnessChoice | null = null,
   ): Promise<StartOutcome> {
     if (identity !== null && this.#startClaim(identity) !== undefined)
       throw new Error('that start was already asked for');
     const claim: Claim = this.#newClaim();
     if (identity !== null) this.#setStartClaim(identity, claim);
     try {
-      return await this.#launch(id, project, task, args, null, claim);
+      return await this.#launch(id, project, {task, args, resume: null, harness}, claim);
     } finally {
       if (identity !== null) this.#deleteStartClaim(identity, claim);
     }
@@ -275,7 +286,8 @@ export class RunControl {
 
   /** Resume run `run` of `project` on `id` and attach. */
   async resume(id: HostId, project: string, run: ResumeRunId): Promise<void> {
-    await this.#launch(id, project, null, [], {run_id: run}, this.#newClaim());
+    const launch: Launch = {task: null, args: [], resume: {run_id: run}, harness: null};
+    await this.#launch(id, project, launch, this.#newClaim());
   }
 
   /** Stop `instanceId` on `id` after asking. */
@@ -357,14 +369,8 @@ export class RunControl {
     }
   }
 
-  async #launch(
-    id: HostId,
-    project: string,
-    task: string | null,
-    args: readonly string[],
-    resume: Resume,
-    claim: Claim,
-  ): Promise<StartOutcome> {
+  async #launch(id: HostId, project: string, run: Launch, claim: Claim): Promise<StartOutcome> {
+    const {task, args, resume, harness} = run;
     let lease: ConnectionLease | null = await this.#deps.connection(id);
     try {
       const connection = lease.connection;
@@ -375,6 +381,8 @@ export class RunControl {
         task,
         args: [...args],
         resume,
+        // Sent only when chosen: a helper without the `harnesses` feature never sees the field.
+        ...(harness === null ? {} : {harness: {provider: harness.provider, model: harness.model}}),
       });
       let record: LiveInstanceRecord;
       let alreadyLive = false;
