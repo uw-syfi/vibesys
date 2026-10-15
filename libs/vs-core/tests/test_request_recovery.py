@@ -198,6 +198,29 @@ def pending_record(
     )
 
 
+def pending_operation(
+    identity: str = "original", phase: RequestPhase = RequestPhase.DISPATCHED
+) -> RequestRecord:
+    """A persisted registered operation, the one kind whose resource core cancels itself."""
+    record = pending_record(identity, phase)
+    request = ExecuteRegisteredOperation(
+        request_id=record.request_id,
+        scope=record.request.scope,
+        operation_id=OperationId(root=identity),
+        operation=OperationWire(
+            schema_ref=OperationSchemaRef(
+                kind="test.write",
+                request_schema=SchemaRef(name="write", version=1),
+                outcome_schema=SchemaRef(name="write-result", version=1),
+                lifecycle=LifecycleClass.IDEMPOTENT_WRITE,
+            ),
+            payload_json="{}",
+        ),
+        retry_limit=0,
+    )
+    return record.model_copy(update={"request": request, "payload_digest": fixture_digest(request)})
+
+
 def recovering_state(*records: RequestRecord) -> CoreState:
     """Reloaded state starts behind the required barrier, retaining all ledgers."""
     state = initial_state()
@@ -555,7 +578,7 @@ def test_cas_fence_reducer_side_requires_committed_recovery_before_dispatch() ->
 
 
 def test_child_ownership_survives_parent_deadline_and_cleanup_requests() -> None:
-    original = pending_record()
+    original = pending_operation()
     root = ResourceId(root="parent")
     child = ResourceId(root="late-child")
     original = original.model_copy(
@@ -1094,8 +1117,8 @@ def test_composite_resource_ids_cannot_alias_another_targets_cleanup(
     """Colon boundaries distinguish (a:b,c) from (a,b:c) cleanup identities."""
     first, middle, last = pieces
     originals = (
-        pending_record(identity=f"{first}:{middle}"),
-        pending_record(identity=first),
+        pending_operation(identity=f"{first}:{middle}"),
+        pending_operation(identity=first),
     )
     resources = (ResourceId(root=last), ResourceId(root=f"{middle}:{last}"))
     records = tuple(
@@ -1320,7 +1343,7 @@ def test_known_resource_deadline_requires_conclusive_release_before_skipping_can
     status: ObservationStatus, *, terminal: bool, released: bool, complete: bool
 ) -> None:
     """F5: raw released flags and cancellation acknowledgement do not prove drain."""
-    original = pending_record(phase=RequestPhase.COMPLETED)
+    original = pending_operation(phase=RequestPhase.COMPLETED)
     resource = ResourceId(root="known-resource")
     original = original.model_copy(
         update={
@@ -1362,7 +1385,7 @@ def test_reordered_time_cannot_expire_new_inspection_and_cancellation_bounds(
     logical_now: int,
 ) -> None:
     """Restart preserves the overdue original deadline and uses current supplied time."""
-    original = pending_record()
+    original = pending_operation()
     resource = ResourceId(root="live-resource")
     original = original.model_copy(
         update={"observation": observed(original, accepted=True, resource_id=resource)}
@@ -2052,7 +2075,7 @@ def test_generated_successor_deadlines_reconcile_original_root_without_recursive
 
 def test_late_child_cleanup_survives_previous_parent_block_and_cancel_requests() -> None:
     """A reload with new child proof adds one cleanup, even when parent cleanup exists."""
-    original = pending_record()
+    original = pending_operation()
     parent = ResourceId(root="parent")
     original = original.model_copy(
         update={"observation": observed(original, accepted=True, resource_id=parent)}

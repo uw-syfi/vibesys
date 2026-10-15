@@ -63,6 +63,7 @@ from .types.records import (
     ChildObservationWatermark,
     InspectRequest,
     Outbound,
+    ReconciliationCommandLapsed,
     ReconciliationDeadline,
     RecoveryBarrier,
     RecoveryCheck,
@@ -1571,6 +1572,7 @@ def _deadline(
         and isinstance(observation_for(record, observation), Proven)
         and _resource_identified(record, context, observation)
         and not isinstance(resolved_observation(observation), Proven)
+        and _cancelled_here(record)
     ):
         resources.append(observation.resource_id)
     resources.extend(
@@ -1610,6 +1612,43 @@ def _deadline(
         signals=signals,
         requests=tuple(requests),
         events=events,
+    )
+
+
+def _lapse_command(
+    state: RecordsState, context: RecordsContext, event: ReconciliationCommandLapsed
+) -> AreaChange[RecordsState]:
+    """End an inspection, cancel or block that is still open at its limit.
+
+    Left open, it would count as live forever for every wait that names it. The command has
+    no owner to tell; its target's fate is decided by whatever waits on the command.
+    """
+    _deadline_target(state, event.request_id)
+    command = state.record(event.request_id)
+    now_at = max(context.run.now_at, event.now_at)
+    if command is None or not command_open(command) or now_at < command.until.at:
+        return AreaChange(state=state)
+    blocked = command.model_copy(update={"phase": RequestPhase.BLOCKED})
+    return AreaChange(state=_replace_record(state, blocked))
+
+
+def _cancelled_here(record: RequestRecord) -> bool:
+    """Whether the record's own resource is cancelled here, by ``CancelOwnedResource``.
+
+    That command reaches the operations executor, which holds receipts for registered
+    operations only: it can end an operation's resource and nothing else. Every other
+    resource is released by the area that owns it, through the command whose outcome that
+    area already defines, so sending a generic cancel for it only adds a command that is
+    answered "unknown". Evaluation terminates an owned job (``CancelOwnedJob``) at the job's
+    own deadline or the run's close, within its retry limit. A turn's session is cancelled
+    through ``_lost_turn`` (``CancelTurn``). Sessions closes a session's lease when the block
+    wakes the session's wait (``CloseSession``), and an attempt's retirement discards its
+    workspace (``DiscardWorkspace``). A request that only names a resource another request
+    owns has nothing of its own to release.
+    """
+    return isinstance(record.request, ExecuteRegisteredOperation) and record.lifecycle not in (
+        LifecycleClass.OWNED_JOB,
+        LifecycleClass.SESSION_TURN,
     )
 
 
@@ -1727,14 +1766,30 @@ def is_open(record: RequestRecord) -> bool:
     )
 
 
+def command_open(record: RequestRecord) -> bool:
+    """An inspection, cancel or block that has not ended: its limit ends it if nothing else."""
+    return not _canonical(record) and record.phase in (
+        RequestPhase.PREPARED,
+        RequestPhase.DISPATCHED,
+        RequestPhase.RECONCILING,
+    )
+
+
 def overdue_reconciliations(
     state: RecordsState, now_at: float
-) -> tuple[ReconciliationDeadline, ...]:
-    """One deadline event per open canonical record whose limit has passed."""
-    return tuple(
-        ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
-        for record in state.records
-        if is_open(record) and record.until.at <= now_at
+) -> tuple[ReconciliationDeadline | ReconciliationCommandLapsed, ...]:
+    """One deadline event per open record, or lapse per open command, whose limit has passed."""
+    return (
+        *(
+            ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
+            for record in state.records
+            if is_open(record) and record.until.at <= now_at
+        ),
+        *(
+            ReconciliationCommandLapsed(request_id=record.request_id, now_at=now_at)
+            for record in state.records
+            if command_open(record) and record.until.at <= now_at
+        ),
     )
 
 
@@ -1744,7 +1799,7 @@ def next_reconciliation_at(state: RecordsState) -> float | None:
         (
             max(record.until.at, _awaiting_report(state, record) or record.until.at)
             for record in state.records
-            if is_open(record)
+            if is_open(record) or command_open(record)
         ),
         default=None,
     )
@@ -1761,12 +1816,12 @@ def advance(
             return _observe(state, context, event)
         case ReconciliationDeadline():
             return _deadline(state, context, event)
+        case ReconciliationCommandLapsed():
+            return _lapse_command(state, context, event)
         case RecoveryCheckWaitLapsed():
             return _recheck(state, context, event)
         case RecoveryReady():
-            if event.epoch != state.recovery.epoch:
-                return AreaChange(state=state)
-            if state.recovery.phase != RecoveryPhase.READY:
+            if event.epoch == state.recovery.epoch and state.recovery.phase != RecoveryPhase.READY:
                 raise ContractError(
                     ("recovery",), "readiness requires resolved current-epoch checks"
                 )

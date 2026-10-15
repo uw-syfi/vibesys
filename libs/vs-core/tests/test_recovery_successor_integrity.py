@@ -19,20 +19,28 @@ class CommandFields(TypedDict):
 
 
 def state_with_root() -> tuple[core.CoreState, core.RequestRecord]:
-    """An accepted live root with no typed owner remains cleanup authority."""
+    """An accepted live operation with no typed owner remains cleanup authority.
+
+    Only a registered operation's resource is cancelled by ``CancelOwnedResource``: every
+    other resource is released by the area that owns it.
+    """
     state = core.initial_state()
     identity = core.RequestId(root="root")
     scope = core.Scope(owner=state.run.run_id, generation=0)
-    request = core.EnsureSession(
+    request = core.ExecuteRegisteredOperation(
         request_id=identity,
         scope=scope,
-        spec=core.SessionSpec(
-            session_id=core.SessionId(root="session"),
-            role_id=core.RoleId(root="worker"),
-            policy="reuse",
-            lifetime="owner",
-            access=core.Access.WRITE_ARTIFACTS,
+        operation_id=core.OperationId(root="operation"),
+        operation=core.OperationWire(
+            schema_ref=core.OperationSchemaRef(
+                kind="test.write",
+                request_schema=core.SchemaRef(name="write", version=1),
+                outcome_schema=core.SchemaRef(name="write-result", version=1),
+                lifecycle=core.LifecycleClass.IDEMPOTENT_WRITE,
+            ),
+            payload_json="{}",
         ),
+        retry_limit=0,
     )
     root = core.RequestRecord(
         request_id=identity,

@@ -696,6 +696,21 @@ class RequestUndispatchable(Value):
     request_id: RequestId
 
 
+class ReconciliationCommandLapsed(Value):
+    """Internal signal: an inspection, cancel or block is still open at its limit.
+
+    Raised on every clock tick for each such command. Its executor never answered, or answered
+    without a conclusion (Unknown, or a failure it may retry), and nothing sends it again. The
+    ledger blocks it, so no wait counts it as live any longer: the target's own deadline, the
+    recovery check that sent it, or a closing run's stalled-record ending decides the target.
+    Never shell input.
+    """
+
+    kind: Literal["reconciliation_command_lapsed"] = "reconciliation_command_lapsed"
+    request_id: RequestId
+    now_at: Seconds
+
+
 class BlockedRecordStalled(Value):
     """Internal signal: a closing run holds a blocked record that nothing can still end.
 
@@ -764,6 +779,7 @@ type RecordsEvent = Annotated[
     | RetryDue
     | RequestUndispatchable
     | BlockedRecordStalled
+    | ReconciliationCommandLapsed
     | RecoveryCheckWaitLapsed
     | OperationRetireRequested
     | HostRenewed,
