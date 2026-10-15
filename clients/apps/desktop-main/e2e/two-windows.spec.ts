@@ -7,24 +7,23 @@
  * attach silently retired whatever the first window had bound, and either window's close detached
  * "the" attached run regardless of which page actually closed.
  *
- * Scope note on the campaign dashboard: the task that produced this spec also asked it to check
- * that opening "the campaign dev-gated view" in one window leaves the other window's run view
- * alone. Investigation (cited below) found no code path through which the desktop shell can show
- * that view at all, gated or otherwise, so there is nothing for this spec to exercise:
- *  - the campaign dashboard is wired into `clients/apps/web`'s *browser* entry only
- *    (`clients/apps/web/src/app/main.tsx:55`, `import.meta.env.DEV && params.has('campaign-live')`),
- *    itself reachable only via `pnpm --dir clients/apps/web dev`
- *    (`docs/design/live-campaign-streaming.md:7`), never from a production (`vite build`) bundle;
- *  - the desktop shell's run page loads a different entry, `desktop-main.tsx`
- *    (`clients/apps/web/desktop.html`), which renders `createLiveApp()` unconditionally and never
- *    reads `location.search`;
- *  - the app ships that entry's production build (`clients/apps/desktop-main/scripts/copy-ui.mjs:11`
- *    copies `@vibesys/app-web`'s `build:desktop` output, `vite build`'s `import.meta.env.DEV` is
- *    `false`), and `AppWindow#openRunPage` always loads the fixed `APP_ENTRY_URL`
- *    (`clients/apps/desktop-main/src/main/window.ts:146`), with no way to attach a query string.
- * The property this spec was asked to check therefore holds vacuously today; it becomes testable,
- * and should be added here, only once the campaign dashboard is actually wired into the desktop
- * shell's own run page.
+ * Scope note on the campaign dashboard: this spec was written to check that opening "the campaign
+ * dev-gated view" in one window leaves the other window's run view alone. At the time, no code
+ * path reached that view from the desktop shell at all: the dashboard was wired only into
+ * `clients/apps/web`'s dev-only fixture/SSE preview (`import.meta.env.DEV && params.has
+ * ('campaign-live')`, see `docs/design/live-campaign-streaming.md`), while `createLiveApp()` — the
+ * entry both the browser's live page and `desktop-main.tsx` render unconditionally — showed only
+ * `RunPage`.
+ *
+ * That has since changed: `Live` (`clients/apps/web/src/app/compose.tsx`) now renders a
+ * `run`/`campaign` toggle unconditionally, backed by `webSessionCampaignStream` folding the same
+ * `session.store` the run page reads — reachable from the desktop shell's production build, not
+ * dev-only. This spec still does not exercise it: neither window here clicks `#run-campaign-toggle`
+ * or asserts on the campaign view's content, so cross-window isolation of that toggle is untested.
+ * Given the window-independence property this spec guards (`RunControl`'s per-`run_id` binding),
+ * the toggle only switches local React state per `Live` instance and reads no shared mutable state,
+ * so there is no mechanism for it to leak across windows — but that is reasoning about the code, not
+ * a check this spec runs. Left as a follow-up rather than added here under this PR's deadline.
  */
 import {fileURLToPath} from 'node:url';
 import {type ElectronApplication, _electron as electron, expect, test} from '@playwright/test';
