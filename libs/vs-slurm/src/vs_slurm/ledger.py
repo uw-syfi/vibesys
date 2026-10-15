@@ -34,7 +34,6 @@ import re
 import stat
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
@@ -42,15 +41,16 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 from vs_decode.api import Unreadable, decode_json
 
 from .runner import (
-    SlurmArtifactTarget,
     SlurmBatchHandle,
     SlurmBatchRequest,
-    SlurmBatchStageHandle,
     SlurmJobHandle,
     _validate_batch_request,
+    batch_stage_handles,
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .config import SlurmConfig
 
 LEDGER_FORMAT_VERSION = 1
@@ -86,11 +86,6 @@ class LedgerError(RuntimeError):
     def invalid_name(cls, kind: str, value: str) -> LedgerError:
         """Name an identifier that cannot be a ledger path component."""
         return cls(f"invalid evaluation ledger {kind} {value!r}")
-
-    @classmethod
-    def unrelocatable(cls, path: Path) -> LedgerError:
-        """Name an artifact destination outside the workspace the ledger rebases onto."""
-        return cls(f"artifact destination {path} is outside the evaluated workspace")
 
     @classmethod
     def transport(cls, error: BaseException) -> LedgerError:
@@ -259,10 +254,13 @@ class _Document(BaseModel):
 
 
 class LedgerArtifact(_Document):
-    """One declared artifact: where the job writes it, and where it lands, relative to the workspace."""
+    """One declared artifact: where the job writes it, relative to its remote workspace.
+
+    Where it lands locally is not recorded: every attaching run collects into its
+    own workspace, at the destination its own request declares.
+    """
 
     remote_path: str
-    local_relative: str
     kind: Literal["file", "tree"]
     collect_on_failure: bool = False
 
@@ -410,16 +408,8 @@ def encode(document: LedgerRecord | LedgerLease) -> str:
     return document.model_dump_json() + "\n"
 
 
-def job_of_handle(handle: SlurmBatchHandle, workspace: Path) -> SubmitBoundJob:
-    """The versioned locator of a submitted batch, its artifacts relative to ``workspace``."""
-    root = workspace.resolve()
-
-    def relative(path: Path) -> str:
-        resolved = path.resolve()
-        if not resolved.is_relative_to(root):
-            raise LedgerError.unrelocatable(path)
-        return resolved.relative_to(root).as_posix()
-
+def job_of_handle(handle: SlurmBatchHandle) -> SubmitBoundJob:
+    """The versioned locator of a submitted batch: where the job and its results are."""
     return SubmitBoundJob(
         job_id=handle.job.job_id,
         config_identity=handle.job.config_identity,
@@ -433,7 +423,6 @@ def job_of_handle(handle: SlurmBatchHandle, workspace: Path) -> SubmitBoundJob:
                 artifacts=tuple(
                     LedgerArtifact(
                         remote_path=item.remote_path,
-                        local_relative=relative(item.local_path),
                         kind=item.kind,
                         collect_on_failure=item.collect_on_failure,
                     )
@@ -445,18 +434,38 @@ def job_of_handle(handle: SlurmBatchHandle, workspace: Path) -> SubmitBoundJob:
     )
 
 
-def handle_of_job(job: SubmitBoundJob, *, operation_id: str, workspace: Path) -> SlurmBatchHandle:
-    """The handle that reaches ``job``, its artifacts landing under this run's ``workspace``."""
+def handle_of_job(
+    job: SubmitBoundJob, *, operation_id: str, request: SlurmBatchRequest
+) -> SlurmBatchHandle:
+    """The handle that reaches ``job``, its artifacts landing where ``request`` declares them.
 
-    def target(item: LedgerArtifact) -> SlurmArtifactTarget:
-        local = workspace.joinpath(*PurePosixPath(item.local_relative).parts)
-        return SlurmArtifactTarget(
-            remote_path=item.remote_path,
-            local_path=local,
-            kind=item.kind,
-            collect_on_failure=item.collect_on_failure,
+    The job locator comes from the ledger; every local path comes from the
+    attaching run's own request, so a run in another worktree than the submitter
+    collects into its own. The request asks for the same key, so its stages and
+    remote artifacts are the job's; a mismatch is an unreadable record.
+    """
+    stages = batch_stage_handles(request)
+    declared = tuple(
+        (
+            stage.name,
+            tuple(
+                (item.remote_path, item.kind, item.collect_on_failure)
+                for item in (*stage.file_artifacts, *stage.tree_artifacts)
+            ),
         )
-
+        for stage in stages
+    )
+    recorded = tuple(
+        (
+            stage.name,
+            tuple(
+                (item.remote_path, item.kind, item.collect_on_failure) for item in stage.artifacts
+            ),
+        )
+        for stage in job.stages
+    )
+    if declared != recorded:
+        raise LedgerError.unreadable(operation_id, "its stages differ from the request's")
     return SlurmBatchHandle(
         job=SlurmJobHandle(
             job_id=job.job_id,
@@ -466,14 +475,7 @@ def handle_of_job(job: SubmitBoundJob, *, operation_id: str, workspace: Path) ->
             remote_status_path=job.remote_status_path,
             remote_log_path=job.remote_log_path,
         ),
-        stages=tuple(
-            SlurmBatchStageHandle(
-                name=stage.name,
-                file_artifacts=tuple(target(a) for a in stage.artifacts if a.kind == "file"),
-                tree_artifacts=tuple(target(a) for a in stage.artifacts if a.kind == "tree"),
-            )
-            for stage in job.stages
-        ),
+        stages=stages,
         stop_on_failure=job.stop_on_failure,
         submission_seconds=0.0,
     )

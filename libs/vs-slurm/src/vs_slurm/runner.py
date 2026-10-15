@@ -757,28 +757,7 @@ class SlurmJobRunner:
         )
         return SlurmBatchHandle(
             job=job,
-            stages=tuple(
-                SlurmBatchStageHandle(
-                    name=stage.name,
-                    file_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=item.remote_path,
-                            local_path=item.local_path,
-                            kind="file",
-                        )
-                        for item in stage.file_artifacts
-                    ),
-                    tree_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=item.remote_path,
-                            local_path=item.local_path,
-                            kind="tree",
-                        )
-                        for item in stage.tree_artifacts
-                    ),
-                )
-                for stage in stages
-            ),
+            stages=batch_stage_handles(request),
             submission_seconds=max(0.0, self._clock.now() - started),
             stop_on_failure=request.stop_on_failure,
         )
@@ -1106,7 +1085,7 @@ class SlurmJobRunner:
         invocation = _safe_component(operation_id)
         base = PurePosixPath(self._config.remote_workspace_root) / self._config.name / invocation
         if isinstance(request, SlurmBatchRequest):
-            stages = _validate_batch_request(request)
+            _validate_batch_request(request)
             job = self.recover_handle(
                 SlurmJobRequest(
                     workspace=request.workspace,
@@ -1124,27 +1103,7 @@ class SlurmJobRunner:
                 job=job,
                 submission_seconds=0.0,
                 stop_on_failure=request.stop_on_failure,
-                stages=tuple(
-                    SlurmBatchStageHandle(
-                        name=stage.name,
-                        file_artifacts=tuple(
-                            SlurmArtifactTarget(
-                                remote_path=a.remote_path,
-                                local_path=a.local_path,
-                                kind="file",
-                                collect_on_failure=a.collect_on_failure,
-                            )
-                            for a in stage.file_artifacts
-                        ),
-                        tree_artifacts=tuple(
-                            SlurmArtifactTarget(
-                                remote_path=a.remote_path, local_path=a.local_path, kind="tree"
-                            )
-                            for a in stage.tree_artifacts
-                        ),
-                    )
-                    for stage in stages
-                ),
+                stages=batch_stage_handles(request),
             )
         _validate_request(request)
         return SlurmJobHandle(
@@ -1692,6 +1651,29 @@ def _validate_request(
         for item in request.tree_artifacts
     ]
     return source, support, files, trees
+
+
+def batch_stage_handles(request: SlurmBatchRequest) -> tuple[SlurmBatchStageHandle, ...]:
+    """Each stage's artifact targets as the request declares them: remote paths to local ones."""
+    return tuple(
+        SlurmBatchStageHandle(
+            name=stage.name,
+            file_artifacts=tuple(
+                SlurmArtifactTarget(
+                    remote_path=a.remote_path,
+                    local_path=a.local_path,
+                    kind="file",
+                    collect_on_failure=a.collect_on_failure,
+                )
+                for a in stage.file_artifacts
+            ),
+            tree_artifacts=tuple(
+                SlurmArtifactTarget(remote_path=a.remote_path, local_path=a.local_path, kind="tree")
+                for a in stage.tree_artifacts
+            ),
+        )
+        for stage in _validate_batch_request(request)
+    )
 
 
 def _validate_support(support_trees: Mapping[str, Path] | None) -> list[tuple[PurePosixPath, Path]]:

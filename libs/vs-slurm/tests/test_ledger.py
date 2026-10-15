@@ -21,6 +21,7 @@ from vs_slurm.api import (
     FakeEvaluationLedger,
     Leased,
     LedgerEntry,
+    LedgerError,
     LedgerLease,
     LedgerRecord,
     LedgerStage,
@@ -243,15 +244,28 @@ def test_a_request_is_unleased_only_after_its_newest_lease_and_the_grace_period(
         assert isinstance(later, Unleased)
 
 
-def test_a_locator_rebases_its_artifacts_onto_the_attaching_workspace(tmp_path: Path) -> None:
+def test_a_locator_lands_artifacts_where_the_attaching_request_declares(tmp_path: Path) -> None:
     original = tmp_path / "run-1"
     handle = _handle(original)
-    job = job_of_handle(handle, original)
-    rebased = handle_of_job(job, operation_id="ev-op", workspace=tmp_path / "run-2")
+    job = job_of_handle(handle)
+    elsewhere = tmp_path / "run-2" / "worktree"
+    elsewhere.mkdir(parents=True)
+    rebased = handle_of_job(job, operation_id="ev-op", request=_request(elsewhere))
     assert rebased.job.job_id == handle.job.job_id
     assert rebased.job.remote_workspace == handle.job.remote_workspace
-    assert rebased.stages[0].tree_artifacts[0].local_path == tmp_path / "run-2" / "traces"
-    assert job_of_handle(rebased, tmp_path / "run-2") == job
+    assert rebased.stages[0].tree_artifacts[0].local_path == elsewhere / "traces"
+    assert job_of_handle(rebased) == job
+
+
+def test_a_locator_refuses_a_request_whose_stages_differ(tmp_path: Path) -> None:
+    job = job_of_handle(_handle(tmp_path / "run-1"))
+    other = tmp_path / "run-2"
+    other.mkdir()
+    request = SlurmBatchRequest(
+        workspace=other, stages=(SlurmBatchStage(name="profile", command=("true",)),)
+    )
+    with pytest.raises(LedgerError):
+        handle_of_job(job, operation_id="ev-op", request=request)
 
 
 class _World:
@@ -280,7 +294,7 @@ class _World:
                 owner="run-a",
                 created_at=0.0,
                 state=LedgerState.SUBMITTED,
-                job=job_of_handle(submitted.handle, workspace),
+                job=job_of_handle(submitted.handle),
             )
         )
         self.ledger.renew(self.key, LedgerLease(holder="run-a", renewed_at=0.0, expires_at=300.0))

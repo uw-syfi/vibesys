@@ -225,7 +225,7 @@ class SlurmLedgerAttachment:
         if job.result_layout != BATCH_RESULT_LAYOUT:
             raise LedgerAttachError.unknown_layout(record.key, job.result_layout)
         self.renew(record.key)
-        handle = handle_of_job(job, operation_id=record.operation_id, workspace=request.workspace)
+        handle = handle_of_job(job, operation_id=record.operation_id, request=request)
         return Attached(record.key, record.operation_id, handle)
 
     def _resolve(
@@ -269,16 +269,20 @@ class SlurmLedgerAttachment:
     def _record_job(
         self, record: LedgerRecord, request: SlurmBatchRequest, handle: SlurmBatchHandle
     ) -> Attached:
+        job = job_of_handle(handle)
         self.ledger.update(
             record.model_copy(
                 update={
                     "state": LedgerState.SUBMITTED,
-                    "job": job_of_handle(handle, request.workspace),
+                    "job": job,
                 }
             )
         )
         self.renew(record.key)
-        return Attached(record.key, record.operation_id, handle)
+        # The handle may be another process's (found by name after its crash): its
+        # artifacts would land in that process's workspace. Rebase onto this request.
+        rebased = handle_of_job(job, operation_id=record.operation_id, request=request)
+        return Attached(record.key, record.operation_id, rebased)
 
 
 def open_ledger_attachment(  # noqa: PLR0913  # lint-waiver: LW-275701 [PLR0913]; each argument is an independent operator setting, identity or injected port of the one ledger connection; a carrier type would only rename this signature.

@@ -33,7 +33,6 @@ from .runner import (
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
-    SlurmBatchStageHandle,
     SlurmBatchStageResult,
     SlurmError,
     SlurmJobHandle,
@@ -42,6 +41,7 @@ from .runner import (
     SlurmJobStatus,
     SlurmSubmissionRejectedError,
     _safe_relative_path,
+    batch_stage_handles,
 )
 from .scheduler_states import (
     Completing,
@@ -744,24 +744,7 @@ class FakeCluster:
             job=job,
             submission_seconds=0.0,
             stop_on_failure=request.stop_on_failure,
-            stages=tuple(
-                SlurmBatchStageHandle(
-                    name=stage.name,
-                    file_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=a.remote_path, local_path=a.local_path, kind="file"
-                        )
-                        for a in stage.file_artifacts
-                    ),
-                    tree_artifacts=tuple(
-                        SlurmArtifactTarget(
-                            remote_path=a.remote_path, local_path=a.local_path, kind="tree"
-                        )
-                        for a in stage.tree_artifacts
-                    ),
-                )
-                for stage in request.stages
-            ),
+            stages=batch_stage_handles(request),
         )
 
     @staticmethod
