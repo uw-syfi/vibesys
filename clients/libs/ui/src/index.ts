@@ -1,13 +1,10 @@
 /**
- * Domain-free React primitives and the design tokens they are drawn with (`./tokens.css`). Props
- * in, events out: no I/O, no effect hooks, and no word of any one product's domain, so the desktop
- * views and the web page compose the same pieces.
+ * The design system: domain-free React components drawn only from the design tokens. Props are data
+ * and callbacks; variants are token names; no component takes `className` or `style`, so a screen
+ * composed from them needs no CSS of its own. An app imports `./tokens.css`, `./fonts.css` and
+ * `./components.css` once.
  */
 export {applyTheme, type ThemeTarget} from './apply-theme.js';
-export {Button, type ButtonVariant} from './button.js';
-export {Combobox} from './combobox.js';
-export {Dialog} from './dialog.js';
-export {StatusChip, type Tone} from './status-chip.js';
 export type {
   ColorRole,
   ElevationLevel,

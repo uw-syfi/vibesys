@@ -1,6 +1,6 @@
 /** "Connect to host": search `~/.ssh/config` aliases or type a destination; arrows and Enter pick. */
 
-import {Button, Dialog} from '@vibesys/ui';
+import {Button, Dialog} from '@vibesys/ui/legacy';
 import {type JSX, type KeyboardEvent, useId} from 'react';
 import {type PickerAction, type PickerState, pickerChoices} from '../../state/picker.js';
 

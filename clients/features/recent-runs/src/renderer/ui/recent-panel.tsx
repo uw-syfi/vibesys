@@ -8,7 +8,7 @@ import {
   recentRunKey,
   resumeDecision,
 } from '@vibesys/runs';
-import {Button} from '@vibesys/ui';
+import {Button} from '@vibesys/ui/legacy';
 import type {JSX, ReactNode} from 'react';
 import {type ListsState, statusOf} from '../../state/lists.js';
 

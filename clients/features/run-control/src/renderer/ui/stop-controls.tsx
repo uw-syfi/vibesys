@@ -4,7 +4,7 @@
  */
 
 import type {StopView} from '@vibesys/runs';
-import {Button} from '@vibesys/ui';
+import {Button} from '@vibesys/ui/legacy';
 import type {JSX} from 'react';
 
 export function StopControls(props: {

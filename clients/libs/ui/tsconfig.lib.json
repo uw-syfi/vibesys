@@ -19,7 +19,8 @@
   "exclude": [
     "src/**/*.test.ts",
     "src/**/*.test.tsx",
-    "src/tokens/**"
+    "src/tokens/**",
+    "src/legacy/**"
   ],
   "references": [
     {

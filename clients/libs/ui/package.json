@@ -7,9 +7,11 @@
     "layer": "foundation",
     "entries": {
       ".": "dom",
+      "./legacy": "dom",
       "./tokens": "neutral",
       "./tokens.css": "dom",
-      "./fonts.css": "dom"
+      "./fonts.css": "dom",
+      "./components.css": "dom"
     }
   },
   "exports": {
@@ -17,6 +19,11 @@
       "@vibesys/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./legacy": {
+      "@vibesys/source": "./src/legacy/index.ts",
+      "types": "./dist/legacy/index.d.ts",
+      "default": "./dist/legacy/index.js"
     },
     "./tokens": {
       "@vibesys/source": "./src/tokens/index.ts",
@@ -30,6 +37,10 @@
     "./fonts.css": {
       "@vibesys/source": "./src/fonts.css",
       "default": "./src/fonts.css"
+    },
+    "./components.css": {
+      "@vibesys/source": "./src/components.css",
+      "default": "./src/components.css"
     }
   },
   "files": [
@@ -37,10 +48,11 @@
     "!dist/.*.tsbuildinfo",
     "src/tokens.css",
     "src/fonts.css",
+    "src/components.css",
     "src/fonts"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json tsconfig.tokens.json",
+    "build": "tsc -b tsconfig.lib.json tsconfig.legacy.json tsconfig.tokens.json",
     "check": "tsc -b",
     "generate:tokens": "bun scripts/tokens-css.ts generate",
     "check:tokens": "bun scripts/tokens-css.ts check",

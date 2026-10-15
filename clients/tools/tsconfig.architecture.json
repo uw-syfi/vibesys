@@ -61,7 +61,9 @@
       "@vibesys/transport/testing": ["libs/transport/src/testing/index.ts"],
       "@vibesys/transport/websocket": ["libs/transport/src/websocket.ts"],
       "@vibesys/ui": ["libs/ui/src/index.ts"],
+      "@vibesys/ui/components.css": ["libs/ui/src/components.css"],
       "@vibesys/ui/fonts.css": ["libs/ui/src/fonts.css"],
+      "@vibesys/ui/legacy": ["libs/ui/src/legacy/index.ts"],
       "@vibesys/ui/tokens": ["libs/ui/src/tokens/index.ts"],
       "@vibesys/ui/tokens.css": ["libs/ui/src/tokens.css"]
     }

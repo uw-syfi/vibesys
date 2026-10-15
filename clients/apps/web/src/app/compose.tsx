@@ -29,7 +29,7 @@ import type {RunStore, WebSession} from '@vibesys/run-session';
 import {type CoreState, hasRunEnded} from '@vibesys/run-state';
 import type {Store} from '@vibesys/store';
 import type {ScheduleTimeout} from '@vibesys/transport';
-import {Button, Dialog} from '@vibesys/ui';
+import {Button, Dialog} from '@vibesys/ui/legacy';
 import {type JSX, type ReactNode, useEffect, useState, useSyncExternalStore} from 'react';
 import {bootstrapGateway, fetchCampaignFixture} from '../platform/backend.js';
 import type {WebThemeController} from './theme.js';
