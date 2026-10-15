@@ -7,7 +7,15 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    NonNegativeInt,
+    field_validator,
+    model_validator,
+)
 
 import vs_agent.api as _agent_api
 
@@ -22,6 +30,7 @@ from vs_agent.api import (
     ToolResultPayload,
 )
 from vs_core.api import EndReason, SpanId, WireSpan
+from vs_redaction.api import redact_diagnostic_text
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
 
 CommandResultPayload = _agent_api.CommandResultPayload
@@ -462,6 +471,11 @@ class SubprocessOutputData(EventPayload):
     stream: OutputStream
     content: str
 
+    @field_validator("content", mode="before")
+    @classmethod
+    def _redact_content(cls, value: object) -> object:
+        return redact_diagnostic_text(value) if isinstance(value, str) else value
+
 
 class JudgeResultData(EventPayload):
     """Verdict and feedback returned by the judge.
@@ -556,6 +570,11 @@ class GateFinishedData(EventPayload):
     round_label: str | None = None
     source: FrameworkSource = FrameworkSource.GATES
     source_label: str | None = None
+
+    @field_validator("output_tail", mode="before")
+    @classmethod
+    def _redact_output_tail(cls, value: object) -> object:
+        return redact_diagnostic_text(value) if isinstance(value, str) else value
 
 
 class WorkspaceSnapshotData(EventPayload):
@@ -670,6 +689,11 @@ class WorkstreamFailureData(BaseModel):
     turns: int | None = None
     limit: int | None = None
     text: str = ""
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def _redact_text(cls, value: object) -> object:
+        return redact_diagnostic_text(value) if isinstance(value, str) else value
 
 
 class WorkstreamFinishedData(EventPayload):

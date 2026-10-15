@@ -13,9 +13,9 @@ from server.diagnostics import (
     DiagnosticSeverity,
     exception_detail,
     exception_to_diagnostic,
-    redact_diagnostic_text,
 )
 from server.events import EventType, RunEvent, make_event
+from vs_redaction.api import redact_diagnostic_text
 
 
 class _NestedValidationInput(BaseModel):

@@ -11,6 +11,7 @@ PACKAGE_SOURCE_ROOTS = (
     Path("src"),
     Path("libs/vs-evaluator-protocol/src"),
     Path("libs/vs-decode/src"),
+    Path("libs/vs-redaction/src"),
     Path("libs/vs-evaluation/src"),
     Path("libs/vs-async-ops/src"),
     Path("libs/vs-github/src"),

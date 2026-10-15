@@ -45,6 +45,7 @@ source_roots = [
     "src",
     "libs/vs-evaluator-protocol/src",
     "libs/vs-decode/src",
+    "libs/vs-redaction/src",
     "libs/vs-evaluation/src",
     "libs/vs-async-ops/src",
     "libs/vs-github/src",
@@ -114,7 +115,7 @@ depends_on = ["server.diagnostics", "server.events", "server.execution", "server
 
 [[modules]]
 path = "server.diagnostics"
-depends_on = []
+depends_on = ["vs_redaction.api"]
 
 [[modules]]
 path = "server.event_index"
@@ -122,7 +123,7 @@ depends_on = []
 
 [[modules]]
 path = "server.events"
-depends_on = ["server.diagnostics", "server.host_api", "server.run_lifecycle", "server.event_index", "vibesys.api", "vs_sim.api"]
+depends_on = ["server.diagnostics", "server.host_api", "server.run_lifecycle", "server.event_index", "vibesys.api", "vs_redaction.api", "vs_sim.api"]
 
 [[modules]]
 path = "server.execution"
@@ -231,7 +232,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_logs", "se
 [[modules]]
 path = "vibesys"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.run.evaluation_identity", "vs_core"]
+depends_on = ["vs_agent", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_redaction.api", "vs_runtime", "vs_sandbox", "vibesys.errors", "vibesys.run.evaluation_identity", "vs_core"]
 
 [[modules]]
 # Typed product configuration failures shared by public transports. No
@@ -502,6 +503,16 @@ depends_on = ["vs_decode._decode"]
 
 [[modules]]
 path = "vs_decode._decode"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_redaction"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[modules]]
+path = "vs_redaction.api"
 layer = "prompts_and_lower_libs"
 depends_on = []
 
@@ -976,6 +987,10 @@ from = ["vs_evaluator_protocol"]
 [[interfaces]]
 expose = ["api", "api\\..*"]
 from = ["vs_decode"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vs_redaction"]
 
 [[interfaces]]
 expose = ["api", "api\\..*"]
