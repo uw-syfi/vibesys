@@ -33,6 +33,12 @@
     },
     {
       "path": "../../libs/machine/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/contracts/tsconfig.testing.json"
     }
   ]
 }

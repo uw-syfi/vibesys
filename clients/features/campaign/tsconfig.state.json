@@ -23,6 +23,12 @@
     },
     {
       "path": "../../libs/store/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-session/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.lib.json"
     }
   ]
 }

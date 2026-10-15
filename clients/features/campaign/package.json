@@ -39,6 +39,8 @@
   },
   "dependencies": {
     "@vibesys/machine": "workspace:*",
+    "@vibesys/run-session": "workspace:*",
+    "@vibesys/run-state": "workspace:*",
     "@vibesys/store": "workspace:*",
     "xstate": "5.33.2",
     "react": "19.1.1",
@@ -53,6 +55,7 @@
     "@types/bun": "1.4.2",
     "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
+    "@vibesys/contracts": "workspace:*",
     "typescript": "^5.8.3"
   }
 }

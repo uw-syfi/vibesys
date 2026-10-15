@@ -216,6 +216,12 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/run-session':
+        specifier: workspace:*
+        version: link:../../libs/run-session
+      '@vibesys/run-state':
+        specifier: workspace:*
+        version: link:../../libs/run-state
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
@@ -247,6 +253,9 @@ importers:
       '@types/react':
         specifier: 19.1.13
         version: 19.1.13
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../libs/contracts
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

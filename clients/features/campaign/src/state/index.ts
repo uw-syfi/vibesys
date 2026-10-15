@@ -47,6 +47,12 @@ export type {
   WorkstreamSort,
 } from './campaign-view.js';
 export {
+  type CampaignProjectionState,
+  initialCampaignProjection,
+  projectCampaignFrames,
+  webSessionCampaignStream,
+} from './live-campaign-stream.js';
+export {
   type MeasurementDisposition,
   type MetricDirection,
   parseReplayScenario,
