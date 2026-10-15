@@ -88,6 +88,15 @@ from vibesys.events import (
     WinnerSelectedData,
     WorkspaceSnapshotData,
 )
+from vibesys.log_owners import (
+    AgentInvocation,
+    GateStage,
+    LogOwner,
+    RunNarration,
+    SlurmJob,
+    StartupStep,
+    ToolBuild,
+)
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
@@ -99,6 +108,7 @@ __all__ = [
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
     "AgentExecutionStartedData",
+    "AgentInvocation",
     "AgentOutputChannel",
     "AgentOutputChunkData",
     "AgentSpec",
@@ -118,6 +128,7 @@ __all__ = [
     "EventStatus",
     "FrameworkWarningData",
     "GateFinishedData",
+    "GateStage",
     "GateStartedData",
     "IterationKind",
     "IterationMetric",
@@ -129,6 +140,7 @@ __all__ = [
     "IterationUnavailable",
     "IterationUnavailableReason",
     "JsonResultPayload",
+    "LogOwner",
     "ManagedAgent",
     "OrchestrationDescriptor",
     "OrchestrationRegistry",
@@ -148,6 +160,7 @@ __all__ = [
     "RunFailure",
     "RunFailureKind",
     "RunHandle",
+    "RunNarration",
     "RunReady",
     "RunRecord",
     "RunRecordFacts",
@@ -160,8 +173,11 @@ __all__ = [
     "RunStore",
     "RunView",
     "Runs",
+    "SlurmJob",
+    "StartupStep",
     "TodoItemData",
     "TodoUpdateData",
+    "ToolBuild",
     "ToolCallData",
     "ToolResultData",
     "ToolResultPayload",

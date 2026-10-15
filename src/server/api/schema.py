@@ -25,7 +25,13 @@ from server.host_api import (
     HelperMessage,
     HelperRequest,
 )
-from vibesys.api import IterationKind, IterationMetric, IterationStatus, IterationSummary
+from vibesys.api import (
+    IterationKind,
+    IterationMetric,
+    IterationStatus,
+    IterationSummary,
+    LogOwner,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -103,6 +109,8 @@ class ProtocolDocument(BaseModel):
     event: RunEvent
     snapshot: RunSnapshot
     server_message: ServerMessage
+    log_owner: LogOwner
+    """What a run's log stream is for; the host helper's log listing carries it."""
 
 
 class HostHelperDocument(BaseModel):

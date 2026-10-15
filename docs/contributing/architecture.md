@@ -69,6 +69,11 @@ for durable intent, recovery, and tests.
 Execution environments, command runners, and agent confinement have separate
 owners; see [Sandboxing and confinement](sandboxing.md).
 
+Long-running work writes its output to `vs_logs`, which keeps each stream under a typed
+owner for humans to read. `vs_logs` sits in the tach layer `logs`, above every library, so
+no library imports it; only the product writes logs and only `server.host_helper` reads
+them (`vs_logs.read`). See [Log streams](logs.md).
+
 The TypeScript clients under `clients/` have their own package graph, layers, and
 build model; see [Clients architecture](clients-architecture.md).
 
@@ -154,6 +159,7 @@ graph TD
     server --> vibesys
     server --> vs_async_ops
     server --> vs_decode
+    server --> vs_logs
     server --> vs_project
     server --> vs_prompts
     server --> vs_sim
@@ -164,6 +170,7 @@ graph TD
     vibesys --> vs_evaluator_protocol
     vibesys --> vs_github
     vibesys --> vs_issue_tracker
+    vibesys --> vs_logs
     vibesys --> vs_mcp
     vibesys --> vs_project
     vibesys --> vs_prompts
@@ -196,6 +203,8 @@ graph TD
     vs_issue_tracker --> vs_decode
     vs_issue_tracker --> vs_github
     vs_issue_tracker --> vs_sim
+    vs_logs --> vs_decode
+    vs_logs --> vs_sim
     vs_project --> vs_decode
     vs_project --> vs_sim
     vs_runtime --> vs_agent
