@@ -149,3 +149,22 @@ def resolve_agent_specs(
             ),
         )
     return MappingProxyType(resolved)
+
+
+def resolve_run_agent_specs(
+    config: Config,
+    roles: tuple[AgentRole, ...],
+    *,
+    backend: AgentBackend | str | None = None,
+    provider: str | None = None,
+) -> Mapping[str, AgentSpec]:
+    """Resolve the agent resources a selected run policy can actually consume.
+
+    A policy that declares no roles has no agent configuration namespace: role
+    overrides belong to the operator's agent strategies and are irrelevant to this
+    run. Role-bearing policies keep the strict resolver above, including its early
+    unknown-role diagnostic.
+    """
+    if not roles:
+        return MappingProxyType({})
+    return resolve_agent_specs(config, roles, backend=backend, provider=provider)

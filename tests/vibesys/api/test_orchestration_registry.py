@@ -29,6 +29,7 @@ from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vibesys.orchestration.dynamic import PLUGIN as DYNAMIC_PLUGIN
 from vibesys.orchestration.evolve import PLUGIN as EVOLVE_PLUGIN
 from vibesys.orchestration.evolve.launch import EvolveLaunch
+from vibesys.orchestration.input_check import PLUGIN as INPUT_CHECK_PLUGIN
 from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vibesys.orchestration.multi import (
@@ -171,6 +172,7 @@ def test_registry_rejects_ids_outside_descriptor_envelope(invalid_id: str) -> No
 def test_builtin_catalog_selects_only_plugins() -> None:
     registry = built_in_orchestrations()
     expected = {
+        "check-input": INPUT_CHECK_PLUGIN,
         "dynamic": DYNAMIC_PLUGIN,
         "multi-agent": MULTI_PLUGIN,
         "single-agent": SINGLE_PLUGIN,

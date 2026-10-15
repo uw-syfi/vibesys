@@ -20,6 +20,7 @@ from launch import validate_descriptor, validate_run_request
 from vibesys.api import (
     DomainName,
     OrchestrationDescriptor,
+    ProfilerKind,
     ResumeRef,
     RunFailure,
     RunFailureKind,
@@ -228,6 +229,15 @@ def _validate_plain(args: argparse.Namespace) -> None:
     _validate_run_environment_profiler(args)
 
 
+def _validate_input_check(args: argparse.Namespace) -> None:
+    """Validate the one-shot command separately from resumable search runs."""
+    _validate_plain(args)
+    if args.resume is not None:
+        _configuration_error("check-input does not resume an earlier run; start a fresh check.")
+    if args.profiler is not ProfilerKind.NONE:
+        _configuration_error("check-input does not capture a profiler; use --profiler none.")
+
+
 def _agent_policy_descriptor(
     args: argparse.Namespace, bundle: InputBundle
 ) -> OrchestrationDescriptor:
@@ -293,6 +303,23 @@ def _plain_policy_descriptor(args: argparse.Namespace) -> OrchestrationDescripto
     return OrchestrationDescriptor(id="plain", config_version=1, options=options)
 
 
+def _input_check_descriptor(args: argparse.Namespace) -> OrchestrationDescriptor:
+    """Describe the zero-agent run using only the task's metric space."""
+    metrics = _resolve_metric_space(args)
+    benchmark = args.input_bundle.benchmark_result
+    if benchmark is not None and metrics.axis(benchmark.metric) is None:
+        metrics = metrics.model_copy(
+            update={
+                "objectives": (*metrics.objectives, Objective(benchmark.metric, "max")),
+            }
+        )
+    return OrchestrationDescriptor(
+        id="check-input",
+        config_version=1,
+        options={"metric_space": metrics.model_dump(mode="json")},
+    )
+
+
 def _evolve_policy_descriptor(
     args: argparse.Namespace, bundle: InputBundle
 ) -> OrchestrationDescriptor:
@@ -324,7 +351,10 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
     with boot_trace.span("run_preamble"):
         bundle: InputBundle = args.input_bundle
         config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
-        if args.outer_loop in {"agent", "profile-guided", "dynamic"}:
+        if args.outer_loop == "check-input":
+            descriptor = _input_check_descriptor(args)
+            objective = bundle.objective
+        elif args.outer_loop in {"agent", "profile-guided", "dynamic"}:
             descriptor = _agent_policy_descriptor(args, bundle)
             objective = with_operator_constraints(bundle.objective, args.constraint)
         elif args.outer_loop == "plain":
@@ -372,6 +402,14 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
 def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:
     request = _build_run_request(args)
     result = _execute_run_request(request, production_runs() if runs is None else runs)
+    if request.orchestration.id == "check-input":
+        if result.succeeded:
+            sys.stdout.write("\nInput gates passed.\n")
+            return
+        sys.stdout.write("\nInput gates failed.\n")
+        if result.failure is not None:
+            sys.stdout.write(f"Reason: {result.failure.reason}\n")
+        sys.exit(1)
     if result.succeeded:
         sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
     else:

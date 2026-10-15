@@ -301,6 +301,11 @@ layer = "loops"
 depends_on = ["vibesys.issue_queue_core", "vibesys.orchestration.issue_queue.launch", "vibesys.orchestration.issue_queue.models"]
 
 [[modules]]
+path = "vibesys.orchestration.input_check"
+layer = "loops"
+depends_on = ["vibesys.input_check_core", "vibesys.orchestration.input_check.launch"]
+
+[[modules]]
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
 path = "vibesys.hypothesis"
 layer = "roles_search"
@@ -1080,7 +1085,7 @@ depends_on = ["vibesys.api.contracts", "vibesys.api.session"]
 [[modules]]
 path = "vibesys.api.catalog"
 visibility = ["launch", "tests", "scripts"]
-depends_on = ["vibesys.orchestration.dynamic", "vibesys.orchestration.evolve", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi"]
+depends_on = ["vibesys.orchestration.dynamic", "vibesys.orchestration.evolve", "vibesys.orchestration.input_check", "vibesys.orchestration.issue_queue", "vibesys.orchestration.single", "vibesys.orchestration.multi"]
 
 [[modules]]
 path = "vibesys.api.wiring"
@@ -1308,6 +1313,55 @@ depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.mo
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.search"]
 expose = ["api", "api\\..*"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.input_check"]
+expose = ["InputCheckLaunch", "PLUGIN", "REGISTRATION"]
+
+[[modules]]
+path = "vibesys.orchestration.input_check.search"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.input_check.operations"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.input_check.search"]
+expose = ["InputCheckConfig", "InputCheckSnapshot", "check_input", "failure_reason"]
+
+[[modules]]
+path = "vibesys.orchestration.input_check.operations"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.metrics"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.input_check.operations"]
+expose = ["OPERATIONS", "EvidenceReadings", "InputCheckPromptContext", "InterpretEvidence", "RenderRoleArtifacts", "VerifyParentRevision"]
+
+[[modules]]
+path = "vibesys.orchestration.input_check.launch"
+layer = "loops"
+depends_on = ["vs_core", "vibesys.metrics"]
+
+[[interfaces]]
+from = ["vibesys.orchestration.input_check.launch"]
+expose = ["InputCheckLaunch"]
+
+[[modules]]
+path = "vibesys.orchestration.input_check.prompts"
+layer = "loops"
+depends_on = []
+
+[[interfaces]]
+from = ["vibesys.orchestration.input_check.prompts"]
+expose = ["__file__"]
+
+[[interfaces]]
+from = ["vibesys.input_check_core"]
+expose = ["input_check_core_registration", "input_check_operation_catalog"]
+
+[[modules]]
+path = "vibesys.input_check_core"
+layer = "loops"
+depends_on = ["vs_core", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.orchestration.input_check.launch", "vibesys.orchestration.input_check.operations", "vibesys.orchestration.input_check.prompts", "vibesys.orchestration.input_check.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts"]
 
 [[modules]]
 # The options a dynamic run is launched with: the search's config and the task's inputs.

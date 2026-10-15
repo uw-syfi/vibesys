@@ -424,6 +424,46 @@ def test_extract_loop_selection_defaults_to_agent_and_rejects_unknown() -> None:
     assert exc.value.diagnostic.stage == "argument_parsing"
 
 
+def test_check_input_is_a_gates_only_command_with_no_search_budget(tmp_path: Path) -> None:
+    project = _write_input_project(tmp_path)
+
+    invocation = parse_cli_invocation(["check-input", "--project", str(project)])
+
+    assert invocation.loop_kind == "check-input"
+    assert invocation.args.input_bundle.root == project.resolve()
+    assert invocation.args.profiler is ProfilerKind.NONE
+    assert not hasattr(invocation.args, "max_rounds")
+
+    with pytest.raises(ConfigurationError, match="does not capture a profiler"):
+        parse_cli_invocation(["check-input", "--project", str(project), "--profiler", "torch"])
+
+
+def test_check_input_rejects_resume_before_reading_or_switching_the_project(
+    tmp_path: Path,
+) -> None:
+    project = _write_input_project(tmp_path)
+    git = project / ".git"
+    git.mkdir()
+    (git / "HEAD").write_text("ref: refs/heads/main\n")
+    before = {
+        path.relative_to(project): path.read_bytes()
+        for path in project.rglob("*")
+        if path.is_file()
+    }
+
+    with pytest.raises(ConfigurationError) as raised:
+        parse_cli_invocation(["check-input", "--project", str(project), "--resume", "recorded-run"])
+
+    assert raised.value.diagnostic.code == "invalid_arguments"
+    assert raised.value.diagnostic.stage == "argument_parsing"
+    assert "--resume" in raised.value.diagnostic.message
+    assert {
+        path.relative_to(project): path.read_bytes()
+        for path in project.rglob("*")
+        if path.is_file()
+    } == before
+
+
 def test_profile_guided_loop_requires_and_accepts_manifest_capability(tmp_path: Path) -> None:
     project = _write_input_project(tmp_path)
     command = ["--outer-loop", "profile-guided", "--input", str(project)]

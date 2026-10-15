@@ -7,12 +7,13 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-from vibesys.composition import AgentToolContext, agent_spec_from_config, resolve_agent_specs
+from vibesys.composition import AgentToolContext, agent_spec_from_config, resolve_run_agent_specs
 from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.contracts import ProfilerKind
 from vibesys.run.core_services import (
+    CoreAgentResources,
     CoreCompositionError,
     CoreEnvironment,
     CoreResources,
@@ -152,13 +153,14 @@ class _ProductHostFactory:
                 f"plugin {plugin.id!r}"
             )
             raise ValueError(message)
-        agent_specs = resolve_agent_specs(
+        agent_specs = resolve_run_agent_specs(
             self.request.config,
             plugin.agents,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
         )
-        _require_supported_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
+        if agent_specs:
+            _require_supported_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
         resources = open_run_resources(
             self.request,
             self.integration,
@@ -175,11 +177,6 @@ class _ProductHostFactory:
         project = resources.project_resources
         environment = resources.environment_resources
         logger = project.logger
-        session_store = DurableSessionStore(
-            project.state.local("agent").slot("sessions.json", AgentSessionState),
-            log=logger.lprint,
-            threads=self.timing.threads,
-        )
         policy = self.plugin.core
         if policy is None:
             message = "core services require a plugin with a core policy"
@@ -222,7 +219,7 @@ class _ProductHostFactory:
         self.local_evaluation = evaluation
         self.facts = resources.facts
         self.core_services = self._core_services(
-            resources, workspace_resources, session_store, agent_runtime, evaluation, ownership
+            resources, workspace_resources, agent_runtime, evaluation, ownership
         )
         if self.core_services.profile_capture_withheld:
             logger.lprint(_NO_PROFILE_CAPTURE_NOTE)
@@ -273,6 +270,8 @@ class _ProductHostFactory:
         tool, and a strategy only runs the turns that use it when the run offers it. A stateless
         tool with no provider at all is a wiring mistake and stays for composition to refuse.
         """
+        if not self.plugin.agents:
+            return ()
         context = _tool_context(resources)
         declined = frozenset(
             tool
@@ -292,19 +291,22 @@ class _ProductHostFactory:
             for role in self.plugin.agents
         )
 
-    def _stateless_tool_servers(self, resources: _PreparedRun) -> dict[str, ToolServerDescriptor]:
+    def _stateless_tool_servers(
+        self, resources: _PreparedRun, roles: tuple[AgentRole, ...]
+    ) -> dict[str, ToolServerDescriptor]:
         """The server of each stateless tool this run's environment can serve, by tool id."""
+        if not roles:
+            return {}
         context = _tool_context(resources)
         served = {
             tool: server(context) for tool, server in (self.stateless_tool_servers or {}).items()
         }
         return {tool: server for tool, server in served.items() if server is not None}
 
-    def _core_services(  # noqa: PLR0913  # lint-waiver: LW-948090 [PLR0913]; each argument is an independently owned resource the host already opened, and the composition reads them once.
+    def _core_services(
         self,
         resources: _PreparedRun,
         workspace_resources: WorkspaceResourceFactory,
-        session_store: DurableSessionStore,
         agent_runtime: WorkspaceRuntime,
         evaluation: Evaluation,
         ownership: ReleaseStack,
@@ -314,16 +316,77 @@ class _ProductHostFactory:
         if policy is None:
             message = "core services require a plugin with a core policy"
             raise ValueError(message)
+        project = resources.project_resources
+        workspaces = agent_runtime.workspaces
+        roles, agents, role_models = self._core_agent_resources(
+            resources, workspace_resources, agent_runtime, ownership
+        )
+        namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
+        executor = self._semantic_executor(
+            self.integration, resources, workspaces, namespace, self.timing.clock
+        )
+        return build_core_services(
+            policy,
+            CoreResources(
+                run_id=project.state.run_id,
+                project=project.project,
+                facts=resources.facts,
+                options=self.options,
+                workspaces=workspaces,
+                evaluation=RetryingEvaluationExecutor(
+                    executor
+                    if executor is not None
+                    else PollingEvaluationExecutor(evaluation, workspaces, clock=self.timing.clock),
+                    self.request.config.evaluation.evaluation_retries(),
+                    project.project.state.local_namespace(
+                        project.state.run_id, "core-evaluation-tries"
+                    ),
+                ),
+                environment=self._core_environment(resources),
+                roles=roles,
+                role_models=role_models,
+                agents=agents,
+                clock=self.timing.clock,
+                github=self.integration.github,
+                threads=self.integration.threads,
+                blocking=self.blocking,
+                network=self.network,
+                evaluation_diagnostics=self._evaluation_diagnostic,
+                stateless_tool_servers=self._stateless_tool_servers(resources, roles),
+                commands=agent_runtime.commands,
+                measurement_observer=CoreMeasurementEvents(self.integration.events),
+                commit_observer=self.integration.core_commit_observer(
+                    project.state.run_id, self.projector, self.plugin.id
+                ),
+            ),
+        )
+
+    def _core_agent_resources(
+        self,
+        resources: _PreparedRun,
+        workspace_resources: WorkspaceResourceFactory,
+        agent_runtime: WorkspaceRuntime,
+        ownership: ReleaseStack,
+    ) -> tuple[tuple[AgentRole, ...], CoreAgentResources | None, dict[str, str]]:
+        """Resolve offered roles and open their indivisible session bundle, if any."""
+        roles = self._offered_roles(resources)
+        if not roles:
+            return (), None, {}
         if self.agent_client_factory is None:
             raise CoreCompositionError(
-                "agent_client_factory", "a core run needs a factory for its agent client"
+                "agent_client_factory", "a core run with agent roles needs a client factory"
             )
         if self.invocation_store_factory is None:
             raise CoreCompositionError(
-                "invocation_store_factory", "a core run needs a durable invocation journal"
+                "invocation_store_factory",
+                "a core run with agent roles needs a durable invocation journal",
             )
         project = resources.project_resources
-        workspaces = agent_runtime.workspaces
+        session_store = DurableSessionStore(
+            project.state.local("agent").slot("sessions.json", AgentSessionState),
+            log=project.logger.lprint,
+            threads=self.timing.threads,
+        )
         scope = workspace_resources.root.agent_scope()
         specs = resources.agent_specs
         base = agent_spec_from_config(
@@ -351,7 +414,7 @@ class _ProductHostFactory:
             clock=self.timing.clock,
             session_store=session_store,
             backends=(
-                {role.id: environment.backends["chat"] for role in self.plugin.agents}
+                {role.id: environment.backends["chat"] for role in roles}
                 if environment.backends is not None
                 else None
             ),
@@ -381,55 +444,21 @@ class _ProductHostFactory:
             ),
             clock=self.timing.clock,
         )
-        # Every core session shares one run-scoped journal, named by a fixed member key.
+        configuration = partial(self._agent_configuration, resources)
         invocations = self.invocation_store_factory(
             project.state, AgentSessionKey.for_member("core", "run")
         )
-        namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
-        executor = self._semantic_executor(
-            self.integration, resources, workspaces, namespace, self.timing.clock
-        )
-        configuration = partial(self._agent_configuration, resources)
-        return build_core_services(
-            policy,
-            CoreResources(
-                run_id=project.state.run_id,
-                project=project.project,
-                facts=resources.facts,
-                options=self.options,
-                workspaces=workspaces,
-                evaluation=RetryingEvaluationExecutor(
-                    executor
-                    if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces, clock=self.timing.clock),
-                    self.request.config.evaluation.evaluation_retries(),
-                    project.project.state.local_namespace(
-                        project.state.run_id, "core-evaluation-tries"
-                    ),
-                ),
-                environment=self._core_environment(resources),
-                roles=self._offered_roles(resources),
-                role_models={
-                    role: spec.model
-                    for role, spec in specs.items()
-                    if spec.model and spec.model != base.model
-                },
-                agent_client=client,
+        role_models = {
+            role: spec.model
+            for role, spec in specs.items()
+            if spec.model and spec.model != base.model
+        }
+        return (
+            roles,
+            CoreAgentResources(
+                client=client,
                 invocation_slot=invocations,
                 configuration=configuration,
-                clock=self.timing.clock,
-                github=self.integration.github,
-                threads=self.integration.threads,
-                blocking=self.blocking,
-                network=self.network,
-                agent_lifecycle=self.integration.agent_execution_event,
-                evaluation_diagnostics=self._evaluation_diagnostic,
-                stateless_tool_servers=self._stateless_tool_servers(resources),
-                commands=agent_runtime.commands,
-                measurement_observer=CoreMeasurementEvents(self.integration.events),
-                commit_observer=self.integration.core_commit_observer(
-                    project.state.run_id, self.projector, self.plugin.id
-                ),
                 session_spec=agent_session_spec(
                     client=client,
                     environment=environment,
@@ -437,7 +466,9 @@ class _ProductHostFactory:
                     variables=scope.environment_variables,
                     configuration=configuration,
                 ),
+                lifecycle=self.integration.agent_execution_event,
             ),
+            role_models,
         )
 
     def _core_environment(self, resources: _PreparedRun) -> CoreEnvironment:

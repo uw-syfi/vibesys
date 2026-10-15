@@ -31,6 +31,7 @@ from entrypoints.cli.args import (
     _add_common_args,
     _build_agent_parser,
     _build_evolve_parser,
+    _build_input_check_parser,
     _build_plain_parser,
     _extract_flag,
     _extract_loop_selection,
@@ -58,6 +59,7 @@ from entrypoints.cli.loops import (
     _resolve_openevolve_options,
     _run_request,
     _validate_evolve,
+    _validate_input_check,
     _validate_plain,
 )
 from entrypoints.cli.resume import _resolve_resume_args
@@ -89,6 +91,7 @@ __all__ = [
     "_apply_bundle_profiler_default",
     "_build_agent_parser",
     "_build_evolve_parser",
+    "_build_input_check_parser",
     "_build_plain_parser",
     "_configuration_error",
     "_extract_flag",
@@ -137,6 +140,7 @@ class _LoopCommand:
 
 
 _LOOP_COMMANDS: dict[str, _LoopCommand] = {
+    "check-input": _LoopCommand(_build_input_check_parser, _validate_input_check),
     "agent": _LoopCommand(_build_agent_parser, _validate_agent),
     "profile-guided": _LoopCommand(_build_agent_parser, _validate_agent),
     "dynamic": _LoopCommand(_build_agent_parser, _validate_agent),
@@ -173,10 +177,14 @@ def _explicit_cli_dests(
 
 def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     """Parse and validate one invocation without printing or exiting."""
-    loop_kind, remaining = _extract_loop_selection(argv)
+    if argv and argv[0] == "check-input":
+        loop_kind, remaining = "check-input", argv[1:]
+    else:
+        loop_kind, remaining = _extract_loop_selection(argv)
     command = _LOOP_COMMANDS[loop_kind]
     parser = command.build_parser()
-    parser.prog = f"vibesys --outer-loop {loop_kind}"
+    if loop_kind != "check-input":
+        parser.prog = f"vibesys --outer-loop {loop_kind}"
     args = parser.parse_args(remaining)
     args.outer_loop = loop_kind
     args.explicit_cli_dests = _explicit_cli_dests(parser, remaining)

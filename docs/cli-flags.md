@@ -11,7 +11,7 @@ is the exhaustive flag reference.
 ## Entry Point
 
 Use the installed `vibesys` command. It launches the interactive TUI by default
-and runs headless with `--headless`, `--help`, `validate`, or when not attached
+and runs headless with `--headless`, `--help`, `check-input`, `validate`, or when not attached
 to a TTY. Examples below use this command.
 
 ### Agent configuration
@@ -443,6 +443,22 @@ and exits with status 1. Command-line usage errors exit with status 2.
 Validation does not execute the checker or benchmark. A project with a root
 `vibesys.input.toml` fails validation, naming the file and its place under
 `.vibesys/tasks/<task>/`.
+
+## Check the Input Gates
+
+Run `vibesys check-input [--project PROJECT] [--task NAME]` to execute the
+selected task's configured accuracy and benchmark gates once against its
+unchanged input revision:
+
+```bash
+vibesys check-input --project /path/to/project --task latency
+```
+
+The command uses the task's normal run environment and streams the ordinary
+gate output, but starts no agent and creates no candidate workstream. It exits
+with status 0 only when the configured input gates produce a trusted passing
+result; a failed or unreadable gate exits nonzero. This is a fresh one-shot
+check, so it does not accept a profiler or resume an earlier run.
 
 ## Interface
 

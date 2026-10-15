@@ -208,7 +208,7 @@ def _headless_requested(args: list[str]) -> bool:
         or "-h" in args
     ):
         return True
-    if args and args[0] in {"tui-defaults", "validate", "web"}:
+    if args and args[0] in {"check-input", "tui-defaults", "validate", "web"}:
         return True
     return not (sys.stdin.isatty() and sys.stdout.isatty())
 

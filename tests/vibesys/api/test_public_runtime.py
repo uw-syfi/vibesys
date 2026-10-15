@@ -24,6 +24,7 @@ from vibesys.api.testing import FakeProfilerPreflight
 from vibesys.run.core_services import CoreCompositionError
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration
+from vs_runtime.api import AgentRole
 from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer, idle_environment_system
 from vs_sandbox.api.testing import FakeComputeBackend
@@ -34,6 +35,10 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 _PLUGIN = capability_plugin("three-agent-rounds")
+_AGENT_PLUGIN = capability_plugin(
+    "three-agent-rounds",
+    agents=(AgentRole(id="implementer", system_prompt="Implement the requested change."),),
+)
 
 
 class _LifecycleMonitor:
@@ -140,7 +145,7 @@ def test_product_host_closes_resources_when_composition_fails(tmp_path: Path) ->
             async with open_product_core_host(
                 _request(project_root),
                 integration,
-                plugin=_PLUGIN,
+                plugin=_AGENT_PLUGIN,
                 options=EmptyOptions(),
                 timing=RunTiming(SystemClock(), 60.0, OsThreads()),
                 backend_factory=backend_factory,

@@ -126,3 +126,41 @@ def test_a_successful_run_returns_without_exiting(tmp_path: Path) -> None:
     ok = _result(succeeded=True, status=RunStatus.COMPLETED)
 
     cli.dispatch(["--outer-loop", "agent", "--input", str(project)], _Runs(ok))
+
+
+def test_check_input_ignores_agent_role_overrides(tmp_path: Path) -> None:
+    project = _write_input_project(tmp_path)
+    config = tmp_path / "agent.toml"
+    config.write_text('[model]\nname = "base"\n[agent.roles.implementer]\nmodel = "unused"\n')
+    ok = _result(succeeded=True, status=RunStatus.COMPLETED)
+
+    cli.dispatch(
+        ["check-input", "--project", str(project), "--config", str(config)],
+        _Runs(ok),
+    )
+
+
+def test_check_input_failure_exits_one_with_a_concise_reason(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = _write_input_project(tmp_path)
+    failed = _result(
+        succeeded=False,
+        status=RunStatus.FAILED,
+        failure=RunFailure(
+            kind=RunFailureKind.NO_RESULT,
+            reason="benchmark evidence was unreadable",
+            workstreams_started=0,
+            workstream_budget=0,
+            candidates_kept=0,
+        ),
+    )
+
+    with pytest.raises(SystemExit) as ended:
+        cli.dispatch(["check-input", "--project", str(project)], _Runs(failed))
+
+    output = capsys.readouterr()
+    assert ended.value.code == 1
+    assert output.err == ""
+    assert output.out.endswith("\nInput gates failed.\nReason: benchmark evidence was unreadable\n")
+    assert output.out.count("Input gates failed.") == 1

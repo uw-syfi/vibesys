@@ -501,22 +501,25 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _apply_common_args(parser: argparse.ArgumentParser) -> None:
-    """Common args + the cross-loop ``--resume`` flag."""
+def _apply_common_args(parser: argparse.ArgumentParser, *, resumable: bool) -> None:
+    """Common run args, with resume exposed only by resumable commands."""
     _add_common_args(parser)
     parser.add_argument(
         "--headless",
         action="store_true",
         help="Disable the interactive client even when attached to a terminal.",
     )
-    parser.add_argument(
-        "--resume",
-        nargs="?",
-        const="latest",
-        default=None,
-        metavar="RUN",
-        help="Resume a run; omit RUN to select the current or latest run.",
-    )
+    if resumable:
+        parser.add_argument(
+            "--resume",
+            nargs="?",
+            const="latest",
+            default=None,
+            metavar="RUN",
+            help="Resume a run; omit RUN to select the current or latest run.",
+        )
+    else:
+        parser.set_defaults(resume=None)
     parser.add_argument(
         "--run-id",
         type=_run_id,
@@ -535,9 +538,9 @@ def _run_id(value: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
-def _make_parser(prog: str, description: str) -> argparse.ArgumentParser:
+def _make_parser(prog: str, description: str, *, resumable: bool = True) -> argparse.ArgumentParser:
     parser = _RunArgumentParser(prog=prog, description=description)
-    _apply_common_args(parser)
+    _apply_common_args(parser, resumable=resumable)
     return parser
 
 
@@ -559,6 +562,18 @@ def _build_validate_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="Task name; optional when the project defines exactly one task.",
     )
+    return parser
+
+
+def _build_input_check_parser() -> argparse.ArgumentParser:
+    parser = _make_parser(
+        prog="vibesys check-input",
+        description=(
+            "Run the configured accuracy and benchmark gates once against the unchanged input."
+        ),
+        resumable=False,
+    )
+    parser.set_defaults(profiler=ProfilerKind.NONE)
     return parser
 
 

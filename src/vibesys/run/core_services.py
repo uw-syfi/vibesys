@@ -130,8 +130,25 @@ def ignore_diagnostic(line: str) -> None:
 
 
 @dataclass(frozen=True, slots=True)
+class CoreAgentResources:
+    """Agent-session resources, absent as a group from a zero-agent run."""
+
+    client: AgentClientProtocol
+    invocation_slot: AgentInvocationStore
+    configuration: AgentConfigurationResolver
+    session_spec: SessionSpecFactory
+    lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
+    """Receives provider-turn lifecycle observations for the host's event stream."""
+
+
+@dataclass(frozen=True, slots=True)
 class CoreResources:
-    """What the host already opened, as one value the composition reads."""
+    """What the host already opened, as one value the composition reads.
+
+    ``agents`` is one optional capability bundle: a policy with no declared
+    roles composes without an agent environment, provider client, or invocation
+    journal. A policy with roles must supply the whole bundle.
+    """
 
     run_id: str
     project: Project
@@ -144,10 +161,7 @@ class CoreResources:
     roles: tuple[AgentRole, ...]
     role_models: Mapping[str, str]
     """The model the operator chose per role id where it differs from the run's default."""
-    agent_client: AgentClientProtocol
-    invocation_slot: AgentInvocationStore
-    configuration: AgentConfigurationResolver
-    session_spec: SessionSpecFactory
+    agents: CoreAgentResources | None
     clock: SleepingClock
     """The run's clock: it places the deadline and later paces the loop on one timeline."""
     github: GitHubClient
@@ -162,14 +176,33 @@ class CoreResources:
     """Hears each measurement stage start and end, for the host's event stream."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
     """Hears each confirmed commit, for committed views and round events."""
-    agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
-    """Receives the start and end of each provider turn, for the host's event stream."""
     evaluation_diagnostics: Callable[[str], None] = ignore_diagnostic
     """Receives one line for each agent evaluation call the run refused as busy."""
     stateless_tool_servers: Mapping[str, ToolServerDescriptor] = field(default_factory=dict)
     """The server of each stateless tool a role may declare, keyed by tool id."""
     commands: Commands | None = None
     """Sandboxed process execution in a run workspace, which a command-capturing operation uses."""
+
+    def __post_init__(self) -> None:
+        """Reject a role declaration whose session capability bundle disagrees."""
+        if not self.roles and self.agents is not None:
+            detail = "a run with no declared agent roles must not open them"
+            error = CoreCompositionError("agent resources", detail)
+            raise error
+        if self.roles and self.agents is None:
+            detail = "a run with declared agent roles needs session resources"
+            error = CoreCompositionError("agent resources", detail)
+            raise error
+
+
+@dataclass(frozen=True, slots=True)
+class _SessionComposition:
+    """Shared resources for resolving and executing the run's declared roles."""
+
+    receipts: ReceiptStore
+    artifacts: ArtifactStore
+    bridge: AgentEvaluationBridge | None
+    stateless: StatelessToolServers
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,18 +258,11 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         bridge = _agent_bridge(plan, resources, receipt_store, evidence)
         catalog = _catalog(policy, plan, resources, artifacts, evidence)
         catalog.require_owned(plan.search.declaration)
-        resolver = ProductionSessionResolver(
-            ResolverInputs(
-                roles=resources.roles,
-                schemas=plan.search.reply_schemas,
-                workspaces=resources.workspaces,
-                workspace_receipts=StoreWorkspaceReceipts(receipt_store),
-                artifacts=artifacts,
-                configuration=resources.configuration,
-                session_spec=resources.session_spec,
-                artifact_directories=policy.artifact_directories,
-                tool_servers=CombinedToolServers(*(() if bridge is None else (bridge,)), stateless),
-            )
+        sessions = _session_services(
+            policy,
+            plan,
+            resources,
+            _SessionComposition(receipt_store, artifacts, bridge, stateless),
         )
         state = _initial_state(plan, resources, catalog, suspendable=bridge is not None)
     except ContractError as error:
@@ -247,7 +273,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         blocking=resources.blocking,
         workspaces=resources.workspaces,
         measurement=MeasurementServices(resources.evaluation, resources.measurement_observer),
-        sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
+        sessions=sessions,
         operations=catalog,
     )
     return CoreServices(
@@ -439,14 +465,47 @@ def _catalog(
     )
 
 
-def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:
-    client = resources.agent_client
+def _session_services(
+    policy: CorePolicy,
+    plan: CorePlan,
+    resources: CoreResources,
+    composition: _SessionComposition,
+) -> SessionServices | None:
+    """Bind declared agent roles, or make the session role explicitly unavailable."""
+    agent_resources = resources.agents
+    if agent_resources is None:
+        return None
+    resolver = ProductionSessionResolver(
+        ResolverInputs(
+            roles=resources.roles,
+            schemas=plan.search.reply_schemas,
+            workspaces=resources.workspaces,
+            workspace_receipts=StoreWorkspaceReceipts(composition.receipts),
+            artifacts=composition.artifacts,
+            configuration=agent_resources.configuration,
+            session_spec=agent_resources.session_spec,
+            artifact_directories=policy.artifact_directories,
+            tool_servers=CombinedToolServers(
+                *(() if composition.bridge is None else (composition.bridge,)),
+                composition.stateless,
+            ),
+        )
+    )
+    return SessionServices(
+        _agent_sessions(agent_resources, resources.threads),
+        resolver,
+        yields=composition.bridge,
+    )
+
+
+def _agent_sessions(resources: CoreAgentResources, threads: Threads) -> ClientAgentSessions:
+    client = resources.client
     if not isinstance(client, AgentTurnExecutor):
         detail = "a durable core session needs a client that implements AgentTurnExecutor"
         resource = "agent client"
         raise CoreCompositionError(resource, detail)
-    reported = report_turns(client, resources.agent_lifecycle)
-    return ClientAgentSessions(reported, resources.invocation_slot, threads=resources.threads)
+    reported = report_turns(client, resources.lifecycle)
+    return ClientAgentSessions(reported, resources.invocation_slot, threads=threads)
 
 
 def agent_session_spec(
@@ -487,6 +546,7 @@ def agent_session_spec(
 
 
 __all__ = [
+    "CoreAgentResources",
     "CoreCompositionError",
     "CoreEnvironment",
     "CoreResources",

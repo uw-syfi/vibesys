@@ -22,10 +22,9 @@ import pytest
 _SRC = Path(__file__).resolve().parents[3] / "src" / "vibesys"
 _ORCHESTRATION = _SRC / "orchestration"
 
-# dynamic_core.py, single_core.py and multi_core.py are the strategies' own host compositions (see
-# their docstrings), and dynamic_roles.py, single_roles.py and multi_roles.py declare the roles those
-# compositions run; issue_queue_core.py and issue_queue_board.py are the issue queue's, for its roles
-# and its tracker.
+# The ``*_core.py`` modules are their strategies' host compositions (see their docstrings), and the
+# ``*_roles.py`` modules declare the roles those compositions run; ``issue_queue_board.py`` is the
+# issue queue's tracker composition.
 _ALLOWED_EXTERNAL_POLICY_IMPORTS = {
     "api/evolve.py",
     "api/catalog.py",
@@ -33,6 +32,7 @@ _ALLOWED_EXTERNAL_POLICY_IMPORTS = {
     "dynamic_roles.py",
     "issue_queue_board.py",
     "issue_queue_core.py",
+    "input_check_core.py",
     "multi_core.py",
     "evolve_core.py",
     "evolve_roles.py",

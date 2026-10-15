@@ -2,31 +2,37 @@
 
 from __future__ import annotations
 
-import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
 from tests.entrypoints.test_launch_frontends import _request
-from tests.support.core_plugins import failing_plugin
-from tests.support.real_git import REAL_GIT, REAL_PROCESSES
+from tests.support.core_plugins import capability_plugin, core_policy, failing_plugin
+from tests.support.skeleton_strategy import SkeletonStrategy
 
-from entrypoints.production import production_timing
 from launch import (
     LaunchSettings,
     default_runs,
-    open_run_store,
     validate_descriptor,
-    validate_run_request,
 )
 from launch.agents import BuiltInSessionAgents
-from vibesys.api import AuxiliaryAgentLaunch, OrchestrationRegistry, RunReady
-from vs_agent.api import AgentCapabilities, AgentSessionKey
-from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore
-from vs_project.api import Project
-from vs_project.api.testing import FakeGitRepositories
-from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
+from vibesys.api import AuxiliaryAgentLaunch, OrchestrationRegistry, RunReady, RunStatus
+from vs_agent.api import AgentCapabilities, AgentSessionKey, Completed
+from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeInvocation
+from vs_project.api.testing import FakeGitRepositories, FakeGitRepository
+from vs_runtime.api import AgentRole
+from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
+from vs_runtime.api.testing import FakeStopTimer
+from vs_sandbox.api import SandboxKind
+from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    FakeProcesses,
+    InlineBlockingRunner,
+    ProcessScript,
+    Sim,
+    SimNetwork,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -34,8 +40,13 @@ if TYPE_CHECKING:
     from vibesys.api import AuxiliaryAgents, ManagedAgent
     from vibesys.api.wiring import RunResources
     from vs_agent.api import AgentEventSink, AgentInvocationStore
+    from vs_project.api import GitFaultSink
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment
     from vs_sandbox.api import HostResource
+    from vs_sim.api import Threads
+
+
+_IMPLEMENTER = AgentRole(id="skeleton-implementer", system_prompt="Implement the requested change.")
 
 
 class FalseyOrchestrationRegistry(OrchestrationRegistry):
@@ -49,7 +60,8 @@ class FalseyLaunchSettings(LaunchSettings):
 
 
 class FalseyFakeAgentFactory:
-    def __init__(self) -> None:
+    def __init__(self, threads: Threads) -> None:
+        self.threads = threads
         self.clients: list[FakeAgentClient] = []
 
     def __bool__(self) -> bool:
@@ -59,14 +71,15 @@ class FalseyFakeAgentFactory:
         client = FakeAgentClient(
             session_reuse=True,
             capabilities=AgentCapabilities(provider_session_resume=True),
-            threads=OsThreads(),
+            threads=self.threads,
         ).set_text(None, "selected fake")
         self.clients.append(client)
         return client
 
 
 class FalseyFakeBackendFactory:
-    def __init__(self) -> None:
+    def __init__(self, threads: Threads) -> None:
+        self.threads = threads
         self.calls = 0
 
     def __bool__(self) -> bool:
@@ -74,7 +87,11 @@ class FalseyFakeBackendFactory:
 
     def __call__(self, *_args: object, **_kwargs: object) -> FakeComputeBackend:
         self.calls += 1
-        return FakeComputeBackend(threads=SimThreads())
+        backend = FakeComputeBackend(threads=self.threads)
+        backend.script_sandbox_for_kind(
+            SandboxKind.DOCKER, FakeLifecycleRunner(threads=self.threads)
+        )
+        return backend
 
 
 class FalseyFakeSessionAgents:
@@ -110,30 +127,68 @@ class FalseyFakeSessionAgents:
         return self.implementation.create_agent(launch, resources, agent_events)
 
 
-def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> None:
+class FalseyInvocationStoreFactory:
+    def __init__(self) -> None:
+        self.keys: list[AgentSessionKey] = []
+        self.store = FakeAgentInvocationStore()
+
+    def __bool__(self) -> bool:
+        return False
+
+    def __call__(self, _state: RunState, key: AgentSessionKey) -> AgentInvocationStore:
+        self.keys.append(key)
+        return self.store
+
+
+def _processes() -> FakeProcesses:
+    return FakeProcesses(lambda _spec: ProcessScript(), pass_time=lambda _seconds: None)
+
+
+class _WorktreeMarkerRepository(FakeGitRepository):
+    """Give linked Fake worktrees the ``.git`` marker real Git creates."""
+
+    def add_worktree(self, destination: Path, commit: str) -> None:
+        super().add_worktree(destination, commit)
+        (destination / ".git").touch()
+
+
+class _WorktreeMarkerRepositories(FakeGitRepositories):
+    """Factory for the production-shaped linked-worktree Fake above."""
+
+    def repository(self, root: Path, faults: GitFaultSink | None = None) -> FakeGitRepository:
+        if faults is None:
+            return super().repository(root)
+        return _WorktreeMarkerRepository(root, self, faults=faults)
+
+
+def test_launch_preserves_falsey_injected_implementations(tmp_path: Path, sim: Sim) -> None:
     registry = FalseyOrchestrationRegistry()
     registry.register_plugin(failing_plugin("launch-test"))
     request = _request(tmp_path / "project")
-    agents_factory = FalseyFakeAgentFactory()
-    backend_factory = FalseyFakeBackendFactory()
+    threads = sim.threads()
+    agents_factory = FalseyFakeAgentFactory(threads)
+    backend_factory = FalseyFakeBackendFactory(threads)
     agents = FalseyFakeSessionAgents(agents_factory)
+    invocation_stores = FalseyInvocationStoreFactory()
     settings = FalseyLaunchSettings(
-        timing=production_timing(),
-        processes=REAL_PROCESSES,
+        timing=RunTiming(sim.clock, PRODUCTION_LEASE_SECONDS, threads),
+        processes=_processes(),
         piped_processes=FakePipedProcessLauncher(),
         registry=registry,
         agent_client_factory=agents_factory,
         backend_factory=backend_factory,
         agents=agents,
+        invocation_store_factory=invocation_stores,
         git_repository=FakeGitRepositories().repository,
-        blocking=ThreadBlockingRunner(),
-        network=UnixNetwork(),
+        stop_timer=FakeStopTimer(threads=threads),
+        blocking=InlineBlockingRunner(),
+        network=SimNetwork(threads),
     )
     validate_descriptor(request.orchestration, registry=registry)
-    validate_run_request(request, registry=registry, git=REAL_GIT)
+    runs = default_runs(settings)
 
     async def execute() -> None:
-        handle = default_runs(settings).start(request)
+        handle = runs.start(request)
         scopes: list[AuxiliaryAgents] = []
 
         def ready(_ready: RunReady) -> None:
@@ -154,70 +209,89 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
             result = await handle.result()
             assert backend_factory.calls == 1
             assert agents.calls == 1
-            # The auxiliary agent's client, then the run's own: each from the injected factory.
-            assert len(agents_factory.clients) == 2
+            # The zero-role core opens no provider client or invocation journal; the one
+            # client belongs solely to the explicitly requested auxiliary conversation.
+            assert len(agents_factory.clients) == 1
             assert not agents_factory.clients[0].closed
-            assert agents_factory.clients[1].closed
-            assert (
-                open_run_store(
-                    Project.open(request.project_root),
-                    registry=registry,
-                    git=REAL_GIT,
-                    threads=SimThreads(),
-                )
-                .get_run(result.run_id)
-                .run_id
-                == result.run_id
-            )
+            assert invocation_stores.keys == []
+            assert runs.attach(result.run_id).run_id == result.run_id
         finally:
             for scope in scopes:
                 scope.close()
         assert all(client.closed for client in agents_factory.clients)
 
-    asyncio.run(execute())
-
-
-class FalseyInvocationStoreFactory:
-    def __init__(self) -> None:
-        self.keys: list[AgentSessionKey] = []
-        self.store = FakeAgentInvocationStore()
-
-    def __bool__(self) -> bool:
-        return False
-
-    def __call__(self, _state: RunState, key: AgentSessionKey) -> AgentInvocationStore:
-        self.keys.append(key)
-        return self.store
+    sim.run(execute(), threads=threads)
 
 
 @pytest.mark.parametrize("injected", [False, True])
-def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool) -> None:
+def test_launch_wires_durable_invocation_store(tmp_path: Path, sim: Sim, *, injected: bool) -> None:
     factory = FalseyInvocationStoreFactory()
     registry = OrchestrationRegistry()
-    registry.register_plugin(failing_plugin("launch-test"))
+    strategy = SkeletonStrategy.unmeasured(keeps_candidate=False)
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "skeleton.j2").write_text("Make the candidate faster.\n", encoding="utf-8")
+    (templates / "skeleton-resume.j2").write_text(
+        "Continue improving the candidate.\n", encoding="utf-8"
+    )
+    plugin = capability_plugin(
+        "launch-test",
+        agents=(_IMPLEMENTER,),
+        strategy=strategy,
+    )
+    plugin = replace(plugin, core=core_policy(templates, strategy))
+    registry.register_plugin(plugin)
     request = _request(tmp_path / "project")
+    threads = sim.threads()
+    repositories = _WorktreeMarkerRepositories()
+    clients: list[FakeAgentClient] = []
+    backend = FakeComputeBackend(threads=threads)
+    backend.script_sandbox_for_kind(SandboxKind.DOCKER, FakeLifecycleRunner(threads=threads))
+
+    def implement(invocation: FakeInvocation) -> dict[str, object]:
+        (invocation.workspace / "candidate.py").write_text("VALUE = 2\n", encoding="utf-8")
+        repository = repositories.repository(invocation.workspace)
+        repository.stage_all(["."])
+        repository.commit("implement candidate")
+        commit = repository.head()
+        assert commit is not None
+        return {"commit": commit}
+
+    def agent_client(**_kwargs: object) -> FakeAgentClient:
+        client = FakeAgentClient(
+            capabilities=AgentCapabilities(provider_session_resume=True), threads=threads
+        ).set_response(_IMPLEMENTER.id, implement)
+        clients.append(client)
+        return client
+
     runs = default_runs(
         LaunchSettings(
-            blocking=ThreadBlockingRunner(),
-            network=UnixNetwork(),
-            timing=production_timing(),
-            processes=REAL_PROCESSES,
+            blocking=InlineBlockingRunner(),
+            network=SimNetwork(threads),
+            timing=RunTiming(sim.clock, PRODUCTION_LEASE_SECONDS, threads),
+            processes=_processes(),
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
-            agent_client_factory=lambda **_kwargs: FakeAgentClient(
-                capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
-            ),
-            backend_factory=lambda *_args, **_kwargs: FakeComputeBackend(threads=SimThreads()),
-            git_repository=FakeGitRepositories().repository,
+            agent_client_factory=agent_client,
+            backend_factory=lambda *_args, **_kwargs: backend,
+            git_repository=repositories.repository,
             invocation_store_factory=factory if injected else None,
+            stop_timer=FakeStopTimer(threads=threads),
         )
     )
 
     async def execute() -> None:
         result = await runs.start(request).result()
         assert result.loop == "launch-test"
+        assert len(clients) == 1
+        assert [call.kind for call in clients[0].calls] == [_IMPLEMENTER.id]
+        assert result.status is RunStatus.COMPLETED
         if injected:
             # One run-scoped journal serves every core session.
             assert factory.keys == [AgentSessionKey.for_member("core", "run")]
+            state = factory.store.load_optional()
+            assert state is not None
+            [record] = state.invocations.values()
+            assert isinstance(record.outcome, Completed)
 
-    asyncio.run(execute())
+    sim.run(execute(), threads=threads)
