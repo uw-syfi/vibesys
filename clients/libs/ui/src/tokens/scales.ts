@@ -25,7 +25,11 @@ export const SPACE: Readonly<Record<SpaceToken, number>> = {
   'space-8': 48,
 };
 
-/** Control and row heights (`control-sm`, `control`, `row`), the sidebar, and page content widths. */
+/**
+ * Control and row heights (`control-sm`, `control`, `row`), the sidebar, page content widths, the
+ * columns `Grid` and `Split` wrap at, and the small fixed sizes of the components: the hairline, the
+ * focus ring and its offset, icons, status dots and the ring of a live one, and check boxes.
+ */
 export type SizeToken =
   | 'control-sm'
   | 'control'
@@ -33,7 +37,19 @@ export type SizeToken =
   | 'sidebar'
   | 'content'
   | 'content-wide'
-  | 'content-narrow';
+  | 'content-narrow'
+  | 'column-main'
+  | 'column-aside'
+  | 'column-field'
+  | 'column-tile'
+  | 'column-swatch'
+  | 'hairline'
+  | 'focus-ring'
+  | 'focus-offset'
+  | 'icon'
+  | 'dot'
+  | 'dot-ring'
+  | 'check';
 export const SIZE: Readonly<Record<SizeToken, number>> = {
   'control-sm': 32,
   control: 40,
@@ -42,6 +58,18 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   content: 1060,
   'content-wide': 1100,
   'content-narrow': 900,
+  'column-main': 520,
+  'column-aside': 300,
+  'column-field': 240,
+  'column-tile': 200,
+  'column-swatch': 160,
+  hairline: 1,
+  'focus-ring': 2,
+  'focus-offset': 1,
+  icon: 16,
+  dot: 8,
+  'dot-ring': 3,
+  check: 18,
 };
 
 export type RadiusToken = 'radius-sm' | 'radius' | 'radius-lg' | 'radius-full';

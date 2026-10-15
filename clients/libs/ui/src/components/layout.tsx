@@ -1,0 +1,91 @@
+import type {CSSProperties, JSX, ReactNode} from 'react';
+import type {SpaceToken} from '../tokens/index.js';
+
+/** The page content's max width: `content` (1060), `wide` (1100) or `narrow` (900). */
+export type PageWidth = 'content' | 'wide' | 'narrow';
+export type Align = 'start' | 'center' | 'end' | 'stretch' | 'baseline';
+export type Justify = 'start' | 'center' | 'end' | 'between';
+/** The narrowest column a `Grid` wraps at: a form field, a tile, or a theme swatch. */
+export type GridColumn = 'field' | 'tile' | 'swatch';
+
+interface FlexProps {
+  readonly gap?: SpaceToken;
+  readonly align?: Align;
+  readonly justify?: Justify;
+  readonly wrap?: boolean;
+  /** Take the free space of the `Row` or `Stack` this sits in. */
+  readonly grow?: boolean;
+  readonly children: ReactNode;
+}
+
+function gapStyle(gap: SpaceToken): CSSProperties {
+  return {gap: `var(--${gap})`};
+}
+
+function Flex(props: FlexProps & {readonly direction: 'row' | 'column'}): JSX.Element {
+  const {direction, gap = 'space-3', align, justify, wrap = false, grow = false} = props;
+  return (
+    <div
+      className="vs-flex"
+      data-direction={direction}
+      data-align={align}
+      data-justify={justify}
+      data-wrap={wrap || undefined}
+      data-grow={grow || undefined}
+      style={gapStyle(gap)}
+    >
+      {props.children}
+    </div>
+  );
+}
+
+/** The scrolling main area: the page gutter, and content centred at `width`. */
+export function Page(props: {
+  readonly width?: PageWidth;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <main className="vs-page">
+      <div className="vs-page-content" data-width={props.width ?? 'content'}>
+        {props.children}
+      </div>
+    </main>
+  );
+}
+
+/** Children in a column, `gap` apart. */
+export function Stack(props: FlexProps): JSX.Element {
+  return <Flex {...props} direction="column" gap={props.gap ?? 'space-4'} />;
+}
+
+/** Children in a line, `gap` apart; with `wrap` they flow onto more lines. */
+export function Row(props: FlexProps): JSX.Element {
+  return <Flex {...props} direction="row" align={props.align ?? 'center'} />;
+}
+
+/** A main column and an aside beside it; the aside moves under the main column when narrow. */
+export function Split(props: {
+  readonly main: ReactNode;
+  readonly aside: ReactNode;
+  readonly gap?: SpaceToken;
+}): JSX.Element {
+  return (
+    <div className="vs-split" style={gapStyle(props.gap ?? 'space-5')}>
+      <div className="vs-split-main">{props.main}</div>
+      <div className="vs-split-aside">{props.aside}</div>
+    </div>
+  );
+}
+
+/** As many equal columns as fit, none narrower than `min`. */
+export function Grid(props: {
+  readonly min: GridColumn;
+  readonly gap?: SpaceToken;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="vs-grid" data-min={props.min} style={gapStyle(props.gap ?? 'space-4')}>
+      {props.children}
+    </div>
+  );
+}

@@ -82,6 +82,18 @@
   --content: 1060px;
   --content-wide: 1100px;
   --content-narrow: 900px;
+  --column-main: 520px;
+  --column-aside: 300px;
+  --column-field: 240px;
+  --column-tile: 200px;
+  --column-swatch: 160px;
+  --hairline: 1px;
+  --focus-ring: 2px;
+  --focus-offset: 1px;
+  --icon: 16px;
+  --dot: 8px;
+  --dot-ring: 3px;
+  --check: 18px;
   --radius-sm: 4px;
   --radius: 6px;
   --radius-lg: 8px;
