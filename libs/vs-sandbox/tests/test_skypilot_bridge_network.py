@@ -53,7 +53,8 @@ def _resources() -> ResolvedSkyPilotResources:
 
 
 class _Runner(SkyPilotJobRunner):
-    def __init__(self) -> None:
+    def __init__(self, output: str = "out\n") -> None:
+        self.output = output
         self.ensure_calls = 0
         self.released: list[str] = []
         self.commands: list[tuple[str, ...]] = []
@@ -90,7 +91,7 @@ class _Runner(SkyPilotJobRunner):
         assert job_started is not None
         self.commands.append(tuple(command))
         job_started(9)
-        stdout_sink("out\n")
+        stdout_sink(self.output)
         stderr_sink("err\n")
         return JobResult(JobStatus.COMPLETED, 0, 9, "out\n", "err\n", cluster_name)
 
@@ -106,34 +107,6 @@ class _Runner(SkyPilotJobRunner):
     def release(self, cluster_name: str, *, timeout: float = 60) -> None:
         del timeout
         self.released.append(cluster_name)
-
-
-class _FloodingRunner(_Runner):
-    """Streams more evaluator output than any socket buffer holds."""
-
-    def run(  # noqa: PLR0913  # lint-waiver: LW-731021 [PLR0913]; this Fake keeps the public SkyPilotJobRunner.run signature.
-        self,
-        cluster_name: str,
-        resources: ResolvedSkyPilotResources,
-        *,
-        workdir: Path,
-        command: Sequence[str],
-        timeout: float | None = None,
-        stdout_sink: Callable[[str], None] | None = None,
-        stderr_sink: Callable[[str], None] | None = None,
-        job_started: Callable[[int], None] | None = None,
-        job_name: str | None = None,
-        existing_job_id: int | None = None,
-        log_tail: int = 0,
-    ) -> JobResult:
-        del resources, workdir, timeout, stderr_sink, job_name, existing_job_id, log_tail
-        assert stdout_sink is not None
-        assert job_started is not None
-        self.commands.append(tuple(command))
-        job_started(9)
-        for _ in range(64):
-            stdout_sink("x" * 1023 + "\n")
-        return JobResult(JobStatus.COMPLETED, 0, 9, "", "", cluster_name)
 
 
 class _Setup:
@@ -286,7 +259,9 @@ def test_a_client_that_stops_reading_is_disconnected_and_frees_its_request(
 ) -> None:
     """REVIEW-11 P2-1: an unread client cannot hold the handler, and so the cluster, for ever."""
     threads = SimThreads()
-    setup = _Setup(tmp_path, SimNetwork(threads, buffer_bytes=4096), threads, _FloodingRunner())
+    setup = _Setup(
+        tmp_path, SimNetwork(threads, buffer_bytes=4096), threads, _Runner(output="x" * (64 << 10))
+    )
     stalled_for: list[float] = []
 
     def scenario(setup: _Setup) -> None:
