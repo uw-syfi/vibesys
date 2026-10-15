@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import signal
 import subprocess
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -19,8 +18,8 @@ from typing import TYPE_CHECKING, Any
 from vs_sim.child import run_in_child
 from vs_sim.gate import Gate
 from vs_sim.loopback_http import HttpReply
+from vs_sim.output import Capture, OutputStream
 from vs_sim.processes import (
-    OutputStream,
     ProcessGroupUnreaped,
     ProcessOutcome,
     ProcessOutputTooLarge,
@@ -586,6 +585,37 @@ class ProcessesContract:
             )
             assert outcome == ProcessOutcome(status, out, err), seed
 
+    def test_output_gets_every_byte_the_outcome_holds(self) -> None:
+        """What a run writes reaches ``output`` too, and the outcome is the same without it."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        for seed in range(_PROCESS_CASES):
+            rng = SeededRandom(seed)
+            out, err = (_random_bytes(rng) for _ in "oe")
+            spec = ProcessSpec(subject.exit_with(1, out, err))
+            seen = Capture(len(out) + len(err))
+            outcome = subject.processes.run(spec, timeout=HANG_GUARD_S, output=seen)
+            assert outcome == ProcessOutcome(1, out, err), seed
+            assert (seen.stdout, seen.stderr) == (out, err), seed
+
+    def test_output_gets_what_a_stopped_run_wrote_past_its_cap(self) -> None:
+        """A run stopped at the cap or the timeout still forwarded what it read, cap or not."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        written = b"more than four"
+        seen = Capture(len(written))
+        spec = ProcessSpec(subject.outlives_timeout(written), max_output_bytes=4)
+        run = subject.processes.run(spec, timeout=HANG_GUARD_S, output=seen)
+        assert isinstance(run, ProcessOutputTooLarge), run
+        assert seen.stdout.startswith(run.stdout), (seen.stdout, run)
+        assert len(seen.stdout) > len(run.stdout), (seen.stdout, run)
+        timed_out = Capture(len(written))
+        run = subject.processes.run(
+            ProcessSpec(subject.outlives_timeout(written)),
+            timeout=_SHORT_TIMEOUT_S,
+            output=timed_out,
+        )
+        assert isinstance(run, ProcessTimedOut), run
+        assert timed_out.stdout == run.stdout, (timed_out.stdout, run)
+
     def test_input_reaches_the_process(self) -> None:
         """The spec's input is the process's stdin."""
         subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
@@ -966,6 +996,8 @@ class StreamingUnderTest:
 
 
 _LINE_CHARACTERS = "".join(chr(code) for code in range(32, 127))
+_STREAMED_BYTES = 1 << 20
+"""More than any case writes, so the capture keeps everything."""
 
 
 def _text(rng: SeededRandom, longest: int) -> str:
@@ -979,8 +1011,8 @@ class StreamingCommandContract:
         """A fresh command with its harness."""
         raise NotImplementedError
 
-    def test_lines_stream_in_order_and_the_result_keeps_status_and_both_streams(self) -> None:
-        """Each stderr line reaches the callback once, in order; the result holds all of it."""
+    def test_output_streams_in_order_and_the_result_keeps_status_and_both_streams(self) -> None:
+        """Every byte reaches the sink once, in order, per stream; the result holds all of it."""
         for seed in range(_CASES):
             rng = SeededRandom(seed)
             subject = self.streaming_under_test()
@@ -988,28 +1020,15 @@ class StreamingCommandContract:
             stdout = _text(rng, 20)
             lines = tuple(_text(rng, 12) for _ in range(rng.randint(0, 5)))
             argv = subject.exits_with(status, stdout, lines)
-            seen: list[str] = []
+            seen = Capture(_STREAMED_BYTES)
 
-            result = subject.command.run(
-                argv, cwd=subject.cwd, timeout_seconds=30, on_stderr_line=seen.append
-            )
+            result = subject.command.run(argv, cwd=subject.cwd, timeout_seconds=30, output=seen)
 
-            assert seen == list(lines), seed
+            stderr = "".join(f"{line}\n" for line in lines)
+            assert (seen.stdout, seen.stderr) == (stdout.encode(), stderr.encode()), seed
             assert result.args == argv, seed
             assert (result.returncode, result.stdout) == (status, stdout), seed
-            assert result.stderr == "".join(f"{line}\n" for line in lines), seed
-
-    def test_the_callback_runs_on_the_calling_thread(self) -> None:
-        """No line is handed to the callback from another thread."""
-        subject = self.streaming_under_test()
-        threads: list[int] = []
-        subject.command.run(
-            subject.exits_with(0, "", ("one", "two")),
-            cwd=subject.cwd,
-            timeout_seconds=30,
-            on_stderr_line=lambda _line: threads.append(threading.get_ident()),
-        )
-        assert threads == [threading.get_ident()] * 2
+            assert result.stderr == stderr, seed
 
     def test_the_command_runs_in_the_given_directory(self) -> None:
         """``cwd`` is the command's working directory."""
@@ -1018,7 +1037,6 @@ class StreamingCommandContract:
             subject.prints_cwd,
             cwd=subject.cwd,
             timeout_seconds=30,
-            on_stderr_line=lambda _line: None,
         )
         assert result.returncode == 0
         assert Path(result.stdout).resolve() == subject.cwd.resolve()
@@ -1032,7 +1050,6 @@ class StreamingCommandContract:
                 subject.missing_program,
                 cwd=subject.cwd,
                 timeout_seconds=30,
-                on_stderr_line=lambda _line: None,
             )
         except FileNotFoundError:
             raised = True
@@ -1047,7 +1064,6 @@ class StreamingCommandContract:
                 subject.blocks_forever,
                 cwd=subject.cwd,
                 timeout_seconds=0.2,
-                on_stderr_line=lambda _line: None,
             )
         except subprocess.TimeoutExpired as error:
             raised = error

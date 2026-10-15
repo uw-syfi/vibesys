@@ -35,7 +35,9 @@ from vs_decode.api import decode_json
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
 from vs_sim.api import (
     Clock,
+    Lines,
     OsThreads,
+    OutputStream,
     PipedProcess,
     PipedProcessLauncher,
     ProcessTimeoutError,
@@ -627,12 +629,15 @@ class SubprocessDockerBuildRunner:
         """Run one command with continuously drained, bounded output."""
         normalized = tuple(argv)
         if self._streaming is not None and on_stderr_line is not None:
-            result = self._streaming.run(
-                normalized,
-                cwd=cwd,
-                timeout_seconds=timeout,
-                on_stderr_line=lambda line: on_stderr_line(line[:DOCKER_PROGRESS_LINE_CHARACTERS]),
-            )
+
+            def progress(stream: OutputStream, line: str) -> None:
+                if stream is OutputStream.STDERR:
+                    on_stderr_line(line[:DOCKER_PROGRESS_LINE_CHARACTERS])
+
+            with Lines(progress) as lines:
+                result = self._streaming.run(
+                    normalized, cwd=cwd, timeout_seconds=timeout, output=lines
+                )
             return _bounded_result(result)
         process = self._processes.start(normalized, cwd=cwd)
         stdout_tail = _OutputTail(DOCKER_OUTPUT_TAIL_CHARACTERS)

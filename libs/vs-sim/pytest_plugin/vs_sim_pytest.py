@@ -71,7 +71,7 @@ import pytest
 from _pytest.runner import runtestprotocol
 
 # The contract suites are test code: let pytest show their assertions with introspection.
-pytest.register_assert_rewrite("vs_sim.contracts")
+pytest.register_assert_rewrite("vs_sim.contracts", "vs_sim.output_contracts")
 
 from vs_sim.api.testing import (  # noqa: E402  # LW-163810 [E402]; the assert-rewrite registration must run before vs_sim.contracts is first imported, which this import does.
     SCHEDULE_SEED_OPTION,

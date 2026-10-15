@@ -10,6 +10,8 @@ from hypothesis import strategies as st
 
 from vs_sandbox.api import SubprocessDockerCli
 from vs_sim.api import (
+    DISCARD,
+    OutputSink,
     OutputStream,
     ProcessOutputTooLarge,
     ProcessRun,
@@ -117,8 +119,10 @@ class _StoppedForOutput:
     def __init__(self, stopped: ProcessOutputTooLarge) -> None:
         self._stopped = stopped
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
-        del spec, timeout
+    def run(
+        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
+    ) -> ProcessRun:
+        del spec, timeout, output
         return self._stopped
 
 

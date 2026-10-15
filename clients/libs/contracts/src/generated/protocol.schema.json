@@ -297,6 +297,29 @@
       "title": "AgentExecutionStartedData",
       "type": "object"
     },
+    "AgentInvocation": {
+      "additionalProperties": false,
+      "description": "One agent invocation, as the invocation events identify it.",
+      "properties": {
+        "kind": {
+          "const": "agent_invocation",
+          "default": "agent_invocation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "invocation_id": {
+          "minLength": 1,
+          "title": "Invocation Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "invocation_id"
+      ],
+      "title": "AgentInvocation",
+      "type": "object"
+    },
     "AgentOutputChunkData": {
       "additionalProperties": false,
       "description": "Incremental output produced during agent execution.",
@@ -1355,6 +1378,15 @@
       "title": "DiagnosticSeverity",
       "type": "string"
     },
+    "EnvironmentStartupStage": {
+      "description": "Where an opening environment is, in the order it gets there.",
+      "enum": [
+        "building_image",
+        "starting_container"
+      ],
+      "title": "EnvironmentStartupStage",
+      "type": "string"
+    },
     "EventBatchMessage": {
       "additionalProperties": false,
       "description": "Event batch and cursor metadata sent to subscribers.",
@@ -2055,6 +2087,39 @@
       ],
       "title": "GateKind",
       "type": "string"
+    },
+    "GateStage": {
+      "additionalProperties": false,
+      "description": "One attempt of one gate of a candidate's evaluation.",
+      "properties": {
+        "kind": {
+          "const": "gate_stage",
+          "default": "gate_stage",
+          "title": "Kind",
+          "type": "string"
+        },
+        "execution_id": {
+          "minLength": 1,
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "gate": {
+          "$ref": "#/$defs/GateKind"
+        },
+        "attempt": {
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "execution_id",
+        "gate",
+        "attempt"
+      ],
+      "title": "GateStage",
+      "type": "object"
     },
     "GateStartedData": {
       "additionalProperties": false,
@@ -3137,6 +3202,39 @@
       ],
       "title": "JudgeResultData",
       "type": "object"
+    },
+    "LogOwner": {
+      "discriminator": {
+        "mapping": {
+          "agent_invocation": "#/$defs/AgentInvocation",
+          "gate_stage": "#/$defs/GateStage",
+          "run_narration": "#/$defs/RunNarration",
+          "slurm_job": "#/$defs/SlurmJob",
+          "startup_step": "#/$defs/StartupStep",
+          "tool_build": "#/$defs/ToolBuild"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/StartupStep"
+        },
+        {
+          "$ref": "#/$defs/GateStage"
+        },
+        {
+          "$ref": "#/$defs/AgentInvocation"
+        },
+        {
+          "$ref": "#/$defs/ToolBuild"
+        },
+        {
+          "$ref": "#/$defs/SlurmJob"
+        },
+        {
+          "$ref": "#/$defs/RunNarration"
+        }
+      ]
     },
     "OutputData": {
       "additionalProperties": false,
@@ -4676,6 +4774,23 @@
       "title": "RunInterruptedData",
       "type": "object"
     },
+    "RunNarration": {
+      "additionalProperties": false,
+      "description": "The run's own narration for humans: what it is doing, warnings, tracebacks.",
+      "properties": {
+        "kind": {
+          "const": "run_narration",
+          "default": "run_narration",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "RunNarration",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
     "RunSnapshot": {
       "additionalProperties": false,
       "description": "Current server projection of a run's public state.",
@@ -4895,6 +5010,35 @@
         "kind"
       ]
     },
+    "SlurmJob": {
+      "additionalProperties": false,
+      "description": "A Slurm job an execution submitted; its log is the job's own output file.",
+      "properties": {
+        "kind": {
+          "const": "slurm_job",
+          "default": "slurm_job",
+          "title": "Kind",
+          "type": "string"
+        },
+        "execution_id": {
+          "minLength": 1,
+          "title": "Execution Id",
+          "type": "string"
+        },
+        "job_id": {
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "execution_id",
+        "job_id"
+      ],
+      "title": "SlurmJob",
+      "type": "object"
+    },
     "SnapshotQuery": {
       "additionalProperties": false,
       "description": "Request the current run snapshot.\n\n``expected_store_id`` fences the read to the event store whose batch established a\nclient's sequence space. None preserves the unfenced request used by\nclients that do not combine a snapshot with a live subscription. An empty\nstring is a real fence for the pre-attachment store, not an alias for None.",
@@ -4988,6 +5132,27 @@
       ],
       "title": "StartupStage",
       "type": "string"
+    },
+    "StartupStep": {
+      "additionalProperties": false,
+      "description": "A step of opening the run's environment, such as building its image.",
+      "properties": {
+        "kind": {
+          "const": "startup_step",
+          "default": "startup_step",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stage": {
+          "$ref": "#/$defs/EnvironmentStartupStage"
+        }
+      },
+      "required": [
+        "kind",
+        "stage"
+      ],
+      "title": "StartupStep",
+      "type": "object"
     },
     "SteerCommand": {
       "additionalProperties": false,
@@ -5260,6 +5425,29 @@
       "required": [
         "kind"
       ]
+    },
+    "ToolBuild": {
+      "additionalProperties": false,
+      "description": "Building or pulling a tool the run needs, such as a profiler.",
+      "properties": {
+        "kind": {
+          "const": "tool_build",
+          "default": "tool_build",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ],
+      "title": "ToolBuild",
+      "type": "object"
     },
     "ToolCallData": {
       "additionalProperties": false,
@@ -5914,6 +6102,9 @@
         }
       ],
       "title": "Server Message"
+    },
+    "log_owner": {
+      "$ref": "#/$defs/LogOwner"
     }
   },
   "required": [
@@ -5921,7 +6112,8 @@
     "response",
     "event",
     "snapshot",
-    "server_message"
+    "server_message",
+    "log_owner"
   ],
   "title": "ProtocolDocument",
   "type": "object"

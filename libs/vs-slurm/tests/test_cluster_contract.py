@@ -16,7 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis.stateful import RuleBasedStateMachine, initialize, precondition, rule
 
-from vs_sim.api import ProcessTimedOut
+from vs_sim.api import DISCARD, OutputSink, ProcessTimedOut
 from vs_sim.api.testing import ManualClock, examples, wait_until_started_sync
 from vs_slurm.api import (
     INITIAL_LIFE,
@@ -886,7 +886,10 @@ def test_local_rejection_survives_lost_remote_rejection_publication(tmp_path: Pa
     connector.script("rejected-publication", rejected_reason="staging rejected")
 
     class _LosesRejectionPublication:
-        def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        def run(
+            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
+        ) -> ProcessRun:
+            del output
             if b"rejected.json.pending." in spec.input:
                 message = "rejection publication unavailable"
                 raise OSError(message)
@@ -931,8 +934,10 @@ def test_fresh_operation_transport_failures_are_typed_unknown(
     tmp_path: Path, action: str, error: Exception | ProcessTimedOut
 ) -> None:
     class _Fails:
-        def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
-            del spec, timeout
+        def run(
+            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
+        ) -> ProcessRun:
+            del spec, timeout, output
             if isinstance(error, ProcessTimedOut):
                 return error
             raise error

@@ -909,6 +909,7 @@ REAL_API_EDGES: dict[Key, str] = {
             ("libs/vs-runtime/src/vs_runtime/_artifact_store.py", "artifact files and receipts"),
             ("libs/vs-runtime/src/vs_runtime/_receipt_store.py", "the receipt namespace lock"),
             ("libs/vs-runtime/src/vs_runtime/_slot_meter.py", "the lease ledger"),
+            ("libs/vs-logs/src/vs_logs/_volume.py", "atomic pipe-mark file replacement"),
             ("libs/vs-evaluation/src/vs_evaluation/filesystem_store.py", "the lifecycle store"),
             ("src/server/event_index.py", "the event journal's index"),
             ("src/server/registry.py", "each live server's registry record lock"),
@@ -1298,6 +1299,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "bundled evaluator packages",
     ),
     "libs/vs-runtime/src/vs_runtime/_event_journal.py": (EdgeKind.STORE, "the event journal"),
+    "libs/vs-logs/src/vs_logs/_volume.py": (EdgeKind.STORE, "log stream segments and index"),
     "libs/vs-runtime/src/vs_runtime/_host_command_bridge.py": (
         EdgeKind.AGENT_WORKSPACE,
         "stages the host command client for the agent",

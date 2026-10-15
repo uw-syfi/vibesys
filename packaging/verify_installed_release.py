@@ -53,6 +53,7 @@ FRAMEWORK_PACKAGES = (
     "vs_mcp",
     "vs_faults",
     "vs_sim",
+    "vs_logs",
 )
 REQUIRED_SYSTEM_TOOLS = ("git",)
 SYSTEM_JAVASCRIPT_TOOLS = ("bun", "node", "npm", "pnpm")

@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from vs_sim.api import OsProcesses, ProcessOutcome, ProcessRun, ProcessSpec
+from vs_sim.api import DISCARD, OsProcesses, OutputSink, ProcessOutcome, ProcessRun, ProcessSpec
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterObservation,
@@ -56,8 +56,10 @@ class _InProcessConnector:
     def __init__(self, state: Path) -> None:
         self._state = state
 
-    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
-        del timeout
+    def run(
+        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
+    ) -> ProcessRun:
+        del timeout, output
         assert spec.input
         answer = handle(self._state, json.loads(spec.input))
         return ProcessOutcome(0, json.dumps(answer).encode(), b"")

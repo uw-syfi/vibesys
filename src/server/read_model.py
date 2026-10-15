@@ -225,8 +225,12 @@ class RunInspector:
                 answer = self._status_answer(question, self.round_detail(int(match.group(1))))
             elif "previous" in query or "last round" in query:
                 number = self._previous_round_number()
-                if number:
-                    answer = self._status_answer(question, self.round_detail(number))
+                detail = (
+                    "No previous round has been recorded yet."
+                    if number is None
+                    else self.round_detail(number)
+                )
+                answer = self._status_answer(question, detail)
         return answer
 
     def round_detail(self, number: int) -> str:
@@ -267,7 +271,7 @@ class RunInspector:
         """The round before the current one, else the latest round that finished."""
         current = _round_number(self.integration.current_round)
         if current is not None:
-            return max(1, current - 1)
+            return current - 1 if current > 1 else None
         finished = [
             number
             for event in self.integration.read_history_events()
