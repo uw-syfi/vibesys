@@ -34,8 +34,8 @@ from vs_core.api import (
     CancelOwnedJob,
     Failed,
     FailureReason,
-    MeasurementResult,
     Measure,
+    MeasurementResult,
     ObserveOwnedJob,
     SubmitMeasurement,
     Wait,
@@ -65,7 +65,10 @@ class SlowPolls:
 
     def __call__(self, request: Request, core: CoreState) -> Answer | tuple[Answer, ...]:
         """What the executors report for ``request``."""
-        if not isinstance(request, ObserveOwnedJob) or request.resource_id.root not in self.baseline:
+        if (
+            not isinstance(request, ObserveOwnedJob)
+            or request.resource_id.root not in self.baseline
+        ):
             answer = self.inner(request, core)
             if (
                 isinstance(request, SubmitMeasurement)
