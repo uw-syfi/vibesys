@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from . import _continuations, _job_releases, _measurements
+from . import _continuations, _job_releases, _measurements, _wait_clock
 from .types.evaluation import (
     AgentMeasurementRequested,
     ContinuationJobsChanged,
@@ -67,10 +67,15 @@ def advance_evaluation(
 
     The event's time has already moved the run clock. Waits whose deadline it reached
     freeze first, on the job facts they had at the deadline, before the event changes them.
+    A job fact that ends an interval the job spent queued then moves its submission's
+    deadline later by that interval, so a wait's limit counts from its job's start.
     """
     due = _continuations.reach_deadlines(state, context)
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
     change = reducer(due.state, context, event)
+    change = change.model_copy(
+        update={"state": _wait_clock.charge_queue_time(due.state, change.state, context.run)}
+    )
     # A job's release is announced to its closing attempt here, whichever subarea recorded it.
     announced = _job_releases.job_release_signals(state, change.state, context)
     return change.model_copy(
