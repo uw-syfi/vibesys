@@ -884,6 +884,10 @@ REAL_API_EDGES: dict[Key, str] = {
     ("src/entrypoints/web.py", "interpreter"): (
         "entrypoint: names the interpreter in the server command it starts"
     ),
+    ("src/entrypoints/detached_run.py", "threading"): (
+        "entrypoint: installs and restores threading.excepthook, a process-global interpreter "
+        "hook no vs_sim interface stands in for; it starts no thread"
+    ),
     **{
         ("src/entrypoints/server.py", rule): (
             "entrypoint: starts the detached web gateway in its own session with the log "

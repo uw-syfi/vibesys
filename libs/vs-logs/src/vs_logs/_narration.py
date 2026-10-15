@@ -253,14 +253,13 @@ class _Named(Protocol):
     def name(self) -> str: ...
 
 
-type UncaughtHook = Callable[[type[BaseException], BaseException, TracebackType | None], None]
+type UncaughtHook = Callable[[type[BaseException], BaseException, TracebackType | None], object]
 """The shape of ``sys.excepthook``."""
 
-type ThreadUncaughtHook = Callable[[ThreadFailure], None]
-"""The shape of ``threading.excepthook``."""
 
-
-def uncaught_hook(handler: NarrationHandler, previous: UncaughtHook) -> UncaughtHook:
+def uncaught_hook(
+    handler: NarrationHandler, previous: UncaughtHook
+) -> Callable[[type[BaseException], BaseException, TracebackType | None], None]:
     """A ``sys.excepthook`` that records the exception in ``handler``, then calls ``previous``."""
 
     def hook(kind: type[BaseException], error: BaseException, trace: TracebackType | None) -> None:
@@ -270,15 +269,15 @@ def uncaught_hook(handler: NarrationHandler, previous: UncaughtHook) -> Uncaught
     return hook
 
 
-def uncaught_thread_hook(
-    handler: NarrationHandler, previous: ThreadUncaughtHook
-) -> ThreadUncaughtHook:
+def uncaught_thread_hook[FailureT: ThreadFailure](
+    handler: NarrationHandler, previous: Callable[[FailureT], object]
+) -> Callable[[FailureT], None]:
     """A ``threading.excepthook`` that records the exception, then calls ``previous``.
 
     A ``SystemExit`` ends its thread quietly, as the default hook treats it.
     """
 
-    def hook(failure: ThreadFailure) -> None:
+    def hook(failure: FailureT) -> None:
         error = failure.exc_value
         if error is not None and not isinstance(error, SystemExit):
             thread = None if failure.thread is None else failure.thread.name
