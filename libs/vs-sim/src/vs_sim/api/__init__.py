@@ -42,7 +42,7 @@ if TYPE_CHECKING:
         WorkerStartRefusedError,
     )
     from vs_sim.loopback_http import HttpReply, LoopbackHttp, UrllibLoopbackHttp
-    from vs_sim.network import Connection, Listener, Network, UnixNetwork
+    from vs_sim.network import Connection, DeadlineNetwork, Listener, Network, UnixNetwork
     from vs_sim.os_platform import Platform
     from vs_sim.output import (
         DEFAULT_MAX_LINE_BYTES,
@@ -123,6 +123,7 @@ _MODULES: dict[str, str] = {
     "Worker": "vs_sim.concurrency",
     "WorkerStartRefusedError": "vs_sim.concurrency",
     "Connection": "vs_sim.network",
+    "DeadlineNetwork": "vs_sim.network",
     "Listener": "vs_sim.network",
     "Network": "vs_sim.network",
     "UnixNetwork": "vs_sim.network",
@@ -226,6 +227,7 @@ __all__ = [
     "CommandProbe",
     "Condition",
     "Connection",
+    "DeadlineNetwork",
     "Event",
     "ForegroundChild",
     "ForegroundLauncher",
