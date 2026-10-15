@@ -66,10 +66,10 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Callable, Iterator, Sequence
     from pathlib import Path
 
-    from vs_sandbox.api import CommandRunner, HostResource
+    from vs_sandbox.api import CommandRunner, DockerCli, HostResource
     from vs_sim.api import Connection, Network, ProcessSpec
 
 _PLUGIN_ID = "whole-run"
@@ -238,8 +238,10 @@ def _request(root: Path, docker: SubprocessDockerCli) -> RunRequest:
     )
 
 
-def _reaper(run_id: str, **options: Any) -> tuple[str, ...]:  # noqa: ANN401
-    return reap_orphaned_agents(run_id, confinement_for=lambda _id: FakeConfinement(), **options)
+def _reaper(run_id: str, *, docker: DockerCli, log: Callable[[str], None]) -> tuple[str, ...]:
+    return reap_orphaned_agents(
+        run_id, docker=docker, log=log, confinement_for=lambda _id: FakeConfinement()
+    )
 
 
 @dataclass
@@ -364,7 +366,9 @@ def _run(tmp_path: Path, sim: Sim, *, kills_removals: bool = False) -> _Outcome:
         error: BaseException | None = None
         try:
             result = runtime.run(lambda: runtime.drive(request))
-        except Exception as raised:  # noqa: BLE001
+        except Exception as raised:  # noqa: BLE001  # LW-415607 [BLE001]; the invariants judge whichever failure the run ends with.
+            # > Naming the expected types here would duplicate the invariant that a failed run names
+            # > the killed command, and an unexpected type would escape before the cleanup checks run.
             error = raised
         follower.join(HANG_GUARD_S)
         assert not follower.is_alive(), "the client never saw the connection end"

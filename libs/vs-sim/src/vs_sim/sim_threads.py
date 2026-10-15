@@ -398,7 +398,8 @@ class SimThreads:
         """
         if isinstance(self.caller(), _OutsideThread):
             message = "run_async must be called from a simulated thread"
-            raise RuntimeError(message)  # noqa: TRY004  # LW-163811 [TRY004]; a missing precondition of the call, not a bad argument type.
+            raise RuntimeError(message)  # noqa: TRY004  # LW-222587 [TRY004]; a missing precondition of the call, not a bad argument type.
+            # > TypeError would say an argument has the wrong type; no argument is wrong here.
         seed = None if self._rng is None else self._rng.randint(0, 2**32 - 1)
         return run_hosted(
             self.clock, main, host=_LoopWake(self), trace=self._trace, schedule_seed=seed
