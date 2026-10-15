@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, PipedProcessLauncher, Threads
 
 _DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
@@ -56,6 +56,7 @@ class LocalBackend:
         image: str | None = None,
         docker: DockerCli,
         threads: Threads,
+        launcher: PipedProcessLauncher,
     ) -> None:
         """Configure the Metal or CPU backend from its platform identity."""
         self.name = name
@@ -72,6 +73,7 @@ class LocalBackend:
         self.image = image
         self._docker = docker
         self._threads = threads
+        self._launcher = launcher
         # No accelerator to pick — kept for protocol parity with other backends
         # (e.g. run resources read ``selected_device``).
         self.selected_device = None
@@ -112,6 +114,7 @@ class LocalBackend:
                 env=extra_env,
                 lifecycle_hooks=lifecycle_hooks,
                 threads=self._threads,
+                launcher=self._launcher,
             )
         if kind is SandboxKind.DOCKER and self._supports_docker:
             if self.image is None:
@@ -177,6 +180,7 @@ def metal_backend(  # noqa: PLR0913
     image: str | None = None,
     docker: DockerCli,
     threads: Threads,
+    launcher: PipedProcessLauncher,
     clock: Clock,
 ) -> LocalBackend:
     """Apple Silicon / Metal backend (local execution only); it records no timestamps."""
@@ -188,6 +192,7 @@ def metal_backend(  # noqa: PLR0913
         image=image,
         docker=docker,
         threads=threads,
+        launcher=launcher,
     )
 
 
@@ -201,6 +206,7 @@ def cpu_backend(  # noqa: PLR0913
     image: str | None = None,
     docker: DockerCli,
     threads: Threads,
+    launcher: PipedProcessLauncher,
     clock: Clock,
 ) -> LocalBackend:
     """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers); no timestamps."""
@@ -212,4 +218,5 @@ def cpu_backend(  # noqa: PLR0913
         image=image or _DEFAULT_CPU_IMAGE,
         docker=docker,
         threads=threads,
+        launcher=launcher,
     )

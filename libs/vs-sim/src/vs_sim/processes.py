@@ -11,14 +11,14 @@ import signal
 import subprocess
 import threading
 import time
-from collections.abc import Callable
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
     from typing import IO
 
@@ -26,7 +26,6 @@ if TYPE_CHECKING:
 # Preserve the established stdlib exception type while keeping the concrete
 # subprocess dependency behind the public process boundary.
 ProcessTimeoutError = subprocess.TimeoutExpired
-type PopenFactory = Callable[..., subprocess.Popen[bytes]]
 _CLEANUP_TIMEOUT_S = 5.0
 _PIPE_CHUNK_BYTES = 64 * 1024
 
@@ -345,55 +344,33 @@ def _close_quietly(stream: IO[bytes] | None) -> None:
             stream.close()
 
 
-class MergedOutputProcess(Protocol):
-    """A process-group leader whose stdout and stderr share one binary pipe."""
-
-    def read(self, max_bytes: int) -> bytes:
-        """Read at most *max_bytes* from the merged output, or empty bytes at EOF."""
-        ...
-
-    def wait(self) -> int:
-        """Wait for the group leader and return its ``subprocess`` status."""
-        ...
-
-    def terminate_group(self) -> None:
-        """Send SIGTERM to every process remaining in the owned group."""
-        ...
-
-    def kill_group(self) -> None:
-        """Send SIGKILL to every process remaining in the owned group."""
-        ...
-
-
-class MergedOutputProcessLauncher(Protocol):
-    """Start merged-binary-output commands as leaders of owned POSIX process groups."""
-
-    def start(
-        self,
-        argv: Sequence[str],
-        *,
-        cwd: Path | str | None,
-        env: Mapping[str, str],
-    ) -> MergedOutputProcess:
-        """Start *argv* with no input and one merged binary output pipe."""
-        ...
-
-
 class PipedProcess(Protocol):
-    """A synchronous child that owns a POSIX process group and two text output pipes."""
+    """A synchronous child that owns a POSIX process group and two text output pipes.
+
+    Signals reach the group only while its leader is unreaped, so a group whose
+    numeric ID the kernel may already have reused is never signalled.
+    """
 
     @property
     def stdout(self) -> io.TextIOBase:
-        """The process's text stdout pipe."""
+        """The process's text stdout pipe (stdout and stderr when started merged).
+
+        ``readline`` returns one line; ``read(size)`` returns as soon as any
+        output is available, at most *size* characters, and ``""`` at EOF.
+        """
         ...
 
     @property
     def stderr(self) -> io.TextIOBase:
-        """The process's text stderr pipe."""
+        """The process's text stderr pipe, already at EOF when started merged."""
         ...
 
     def wait(self, timeout: float | None) -> int:
         """Wait for the group leader, raising :class:`ProcessTimeoutError` on timeout."""
+        ...
+
+    def terminate_group(self) -> None:
+        """Send SIGTERM to the leader and every descendant remaining in its group."""
         ...
 
     def kill_group(self) -> None:
@@ -408,8 +385,20 @@ class PipedProcess(Protocol):
 class PipedProcessLauncher(Protocol):
     """Start a synchronous command with piped text output in an owned process group."""
 
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
-        """Start *argv* without a shell, raising ``OSError`` when it cannot start."""
+    def start(
+        self,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        merge_stderr: bool = False,
+    ) -> PipedProcess:
+        """Start *argv* without a shell or input, raising ``OSError`` when it cannot start.
+
+        *env* replaces the caller's environment when given. With
+        *merge_stderr* the child's stderr shares its stdout pipe, so the two
+        interleave in the order the child wrote them.
+        """
         ...
 
 
@@ -420,9 +409,11 @@ class _StartedPipedProcess(Protocol):
     def stdout(self) -> IO[bytes]: ...
 
     @property
-    def stderr(self) -> IO[bytes]: ...
+    def stderr(self) -> IO[bytes] | None: ...
 
     def wait(self, timeout: float | None) -> int: ...
+
+    def terminate_group(self) -> None: ...
 
     def kill_group(self) -> None: ...
 
@@ -489,6 +480,24 @@ class _CancellableTextPipe(io.TextIOBase):
                 return line
             self._read_available()
 
+    def read(self, size: int | None = -1, /) -> str:
+        """Return what is available, at most *size* characters, waiting only for the first.
+
+        A negative or missing *size* reads to EOF. ``""`` means EOF (or a
+        cancelled read).
+        """
+        if self.closed:
+            raise _closed_pipe_error()
+        if size is None or size < 0:
+            while not self._eof:
+                self._read_available()
+            text, self._decoded = self._decoded, ""
+            return text
+        while size and not self._decoded and not self._eof:
+            self._read_available()
+        text, self._decoded = self._decoded[:size], self._decoded[size:]
+        return text
+
     def cancel(self) -> None:
         """Wake an active read without waiting for the child to close its pipe."""
         if self.closed or self._cancel_writer < 0:
@@ -528,6 +537,28 @@ class _CancellableTextPipe(io.TextIOBase):
         self._eof = True
 
 
+class _ExhaustedTextPipe(io.TextIOBase):
+    """The stderr of a merged-output process, which shares the stdout pipe: always at EOF."""
+
+    def readable(self) -> bool:
+        """Report the only operation this pipe supports."""
+        return True
+
+    def readline(self, size: int = -1, /) -> str:
+        """Return EOF."""
+        del size
+        if self.closed:
+            raise _closed_pipe_error()
+        return ""
+
+    def read(self, size: int | None = -1, /) -> str:
+        """Return EOF."""
+        return self.readline(-1 if size is None else size)
+
+    def cancel(self) -> None:
+        """Nothing can block on this pipe."""
+
+
 def _closed_pipe_error() -> ValueError:
     return ValueError("I/O operation on closed file")
 
@@ -552,6 +583,7 @@ class _SubprocessGroup:
 
     def __init__(self, process: subprocess.Popen[bytes]) -> None:
         self._process = process
+        self._group = _OwnedProcessGroup(process)
 
     @property
     def stdout(self) -> IO[bytes]:
@@ -562,18 +594,20 @@ class _SubprocessGroup:
         return stream
 
     @property
-    def stderr(self) -> IO[bytes]:
-        stream = self._process.stderr
-        if stream is None:
-            message = "piped subprocess has no stderr stream"
-            raise RuntimeError(message)
-        return stream
+    def stderr(self) -> IO[bytes] | None:
+        return self._process.stderr
 
     def wait(self, timeout: float | None) -> int:
-        return self._process.wait(timeout=timeout)
+        returncode = self._group.wait(timeout)
+        if returncode is None:
+            raise ProcessTimeoutError(self._process.args, timeout or 0.0)
+        return returncode
+
+    def terminate_group(self) -> None:
+        self._group.send_signal(signal.SIGTERM)
 
     def kill_group(self) -> None:
-        _signal_process_group(self._process.pid, signal.SIGKILL)
+        self._group.send_signal(signal.SIGKILL)
 
 
 def _signal_process_group(pid: int, number: signal.Signals) -> None:
@@ -603,14 +637,39 @@ class _OwnedProcessGroup:
         self._process = process
         self._reap_lock = threading.Lock()
         self._returncode: int | None = None
+        self._exit_watch_lock = threading.Lock()
+        self._exited: threading.Event | None = None
 
-    def wait(self) -> int:
-        """Wait without reaping until a signal can no longer race PGID reuse."""
+    def wait(self, timeout: float | None) -> int | None:
+        """Wait without reaping until a signal can no longer race PGID reuse.
+
+        Returns ``None`` when the leader is still running after *timeout*
+        seconds. A concurrent signal is never held back by a wait in progress.
+        """
         with self._reap_lock:
             if self._returncode is not None:
                 return self._returncode
-        self._wait_until_exited_without_reaping()
+        if timeout is None:
+            self._wait_until_exited_without_reaping()
+        elif not self._exit_watch().wait(timeout):
+            return None
         return self.reap(timeout=None)
+
+    def _exit_watch(self) -> threading.Event:
+        """Return an event set once the leader exited, watched by one thread at most."""
+        with self._exit_watch_lock:
+            if self._exited is None:
+                exited = threading.Event()
+
+                def watch() -> None:
+                    try:
+                        self._wait_until_exited_without_reaping()
+                    finally:
+                        exited.set()
+
+                threading.Thread(target=watch, name="vs-sim-group-exit", daemon=True).start()
+                self._exited = exited
+            return self._exited
 
     def reap(self, timeout: float | None) -> int:
         """Reap the leader once while excluding every process-group signal."""
@@ -644,57 +703,6 @@ class _OwnedProcessGroup:
             raise
 
 
-class _SubprocessMergedOutputProcess:
-    """The real merged-output process-group handle."""
-
-    def __init__(self, process: subprocess.Popen[bytes]) -> None:
-        self._process = process
-        self._group = _OwnedProcessGroup(process)
-
-    def read(self, max_bytes: int) -> bytes:
-        stdout = self._process.stdout
-        if stdout is None:
-            message = "merged-output subprocess has no stdout stream"
-            raise RuntimeError(message)
-        return os.read(stdout.fileno(), max_bytes)
-
-    def wait(self) -> int:
-        return self._group.wait()
-
-    def terminate_group(self) -> None:
-        self._group.send_signal(signal.SIGTERM)
-
-    def kill_group(self) -> None:
-        self._group.send_signal(signal.SIGKILL)
-
-
-class SubprocessMergedOutputProcessLauncher:
-    """Launch real merged-output commands in process groups owned by the caller."""
-
-    def __init__(self, popen: PopenFactory | None = None) -> None:
-        """Use *popen* when supplied, preserving legacy process-factory injection."""
-        self._popen = popen or subprocess.Popen
-
-    def start(
-        self,
-        argv: Sequence[str],
-        *,
-        cwd: Path | str | None,
-        env: Mapping[str, str],
-    ) -> MergedOutputProcess:
-        """Start *argv* without a shell, isolated from the caller's terminal group."""
-        process = self._popen(
-            tuple(argv),
-            cwd=cwd,
-            env=dict(env),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            process_group=0,
-        )
-        return _SubprocessMergedOutputProcess(process)
-
-
 class _SubprocessPipedProcess:
     def __init__(
         self,
@@ -708,7 +716,8 @@ class _SubprocessPipedProcess:
             stdout = open_output(process.stdout)
             ownership.callback(stdout.close)
             _require_cancellable(stdout)
-            stderr = open_output(process.stderr)
+            raw_stderr = process.stderr
+            stderr = _ExhaustedTextPipe() if raw_stderr is None else open_output(raw_stderr)
             ownership.callback(stderr.close)
             _require_cancellable(stderr)
         except BaseException as construction_error:
@@ -732,6 +741,9 @@ class _SubprocessPipedProcess:
     def wait(self, timeout: float | None) -> int:
         return self._process.wait(timeout=timeout)
 
+    def terminate_group(self) -> None:
+        self._process.terminate_group()
+
     def kill_group(self) -> None:
         self._process.kill_group()
 
@@ -750,16 +762,26 @@ def _require_cancellable(stream: io.TextIOBase) -> None:
 def _close_process_output(process: _StartedPipedProcess) -> None:
     """Close both raw pipes even when closing either one fails."""
     with ExitStack() as cleanup:
-        cleanup.callback(process.stderr.close)
+        stderr = process.stderr
+        if stderr is not None:
+            cleanup.callback(stderr.close)
         cleanup.callback(process.stdout.close)
 
 
-def _start_subprocess_group(argv: tuple[str, ...], cwd: Path | None) -> _StartedPipedProcess:
+def _start_subprocess_group(
+    argv: tuple[str, ...],
+    cwd: Path | None,
+    *,
+    env: Mapping[str, str] | None,
+    merge_stderr: bool,
+) -> _StartedPipedProcess:
     process = subprocess.Popen(  # noqa: S603  # lint-waiver: LW-994699 [S603]; execute the caller's argv directly with no shell at the process adapter boundary.
         argv,
         cwd=cwd,
+        env=None if env is None else dict(env),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT if merge_stderr else subprocess.PIPE,
         process_group=0,
     )
     return _SubprocessGroup(process)
@@ -771,12 +793,20 @@ _START_ROLLBACK_TIMEOUT_S = 5.0
 class SubprocessPipedProcessLauncher:
     """Start piped commands in owned groups on VibeSys's supported POSIX hosts."""
 
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
+    def start(
+        self,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        merge_stderr: bool = False,
+    ) -> PipedProcess:
         """Start *argv* in a new POSIX process group with UTF-8 text pipes."""
         if os.name != "posix":
             message = "piped process groups require a POSIX host"
             raise OSError(message)
-        return _start_piped_process(argv, cwd, _start_subprocess_group, _CancellableTextPipe)
+        start = partial(_start_subprocess_group, env=env, merge_stderr=merge_stderr)
+        return _start_piped_process(argv, cwd, start, _CancellableTextPipe)
 
 
 def _start_piped_process(

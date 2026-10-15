@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource
-    from vs_sim.api import Threads
+    from vs_sim.api import PipedProcessLauncher, Threads
 
 
 class DaemonBackend:
@@ -77,12 +77,18 @@ class DaemonBackend:
         return
 
 
-def daemon_engine(directory: Path) -> FakeDockerEngine:
-    """Return a fake daemon keeping its bookkeeping under *directory*."""
+def daemon_engine(directory: Path, *, launcher: PipedProcessLauncher) -> FakeDockerEngine:
+    """Return a fake daemon keeping its bookkeeping under *directory*.
+
+    *launcher* starts the host processes that stand in for its exec clients.
+    """
     state = directory / "engine"
     state.mkdir(exist_ok=True)
     return FakeDockerEngine(
-        state, agent_ids=(os.getuid(), os.getgid()), runtimes=("runc", "sysbox-runc")
+        state,
+        agent_ids=(os.getuid(), os.getgid()),
+        runtimes=("runc", "sysbox-runc"),
+        launcher=launcher,
     )
 
 

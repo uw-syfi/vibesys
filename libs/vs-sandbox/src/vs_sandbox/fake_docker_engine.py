@@ -21,10 +21,12 @@ from vs_sandbox.container_runtime import (
     NESTED_DAEMON_START_SCRIPT,
 )
 from vs_sandbox.docker_cli import EXEC_MARKER_ENV, SIGNAL_EXEC_SCRIPT
-from vs_sandbox.process_execution import shell_exit_status, start_process_group
+from vs_sandbox.process_execution import shell_exit_status
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
+
+    from vs_sim.api import PipedProcess, PipedProcessLauncher
 
 # The container program's parent, standing in for the ``docker exec`` client.
 # It starts the program in a session of its own (the daemon's side), records
@@ -241,14 +243,17 @@ class FakeDockerEngine:
         agent_ids: tuple[int, int] = (1000, 1000),
         runtimes: Sequence[str] = _DEFAULT_RUNTIMES,
         nested_daemons_start: bool = True,
+        launcher: PipedProcessLauncher,
     ) -> None:
         """Keep exec bookkeeping in *state_dir*; the ``agent`` user has *agent_ids*.
 
         *runtimes* are the names ``docker info`` reports; *nested_daemons_start*
         says whether a daemon started inside a container ever becomes ready.
         Without a *state_dir* the bookkeeping lives in a temporary directory
-        that goes with the engine.
+        that goes with the engine. *launcher* starts the host processes that
+        stand in for spawned ``docker exec`` clients.
         """
+        self._launcher = launcher
         self._scratch: tempfile.TemporaryDirectory[str] | None = None
         if state_dir is None:
             self._scratch = tempfile.TemporaryDirectory()
@@ -316,7 +321,7 @@ class FakeDockerEngine:
                 message = f"FakeDockerEngine does not model `docker {other}`"
                 raise AssertionError(message)
 
-    def spawn(self, argv: Sequence[str]) -> subprocess.Popen[str]:
+    def spawn(self, argv: Sequence[str]) -> PipedProcess:
         """Start a ``docker exec`` whose program survives its client's death."""
         arguments = tuple(argv)
         self.calls.append(arguments)
@@ -342,9 +347,7 @@ class FakeDockerEngine:
             "env": {**os.environ, **(container.env if container else {}), **request.env},
             "pidfile": str(pidfile),
         }
-        return start_process_group(
-            (sys.executable, "-c", _EXEC_CLIENT, json.dumps(spec)), env=None, cwd=None
-        )
+        return self._launcher.start((sys.executable, "-c", _EXEC_CLIENT, json.dumps(spec)))
 
     def _pidfile(self, marker: str) -> Path:
         return self._state_dir / f"{marker}.pid"

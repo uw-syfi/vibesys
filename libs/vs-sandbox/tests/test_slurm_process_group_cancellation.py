@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,12 +16,30 @@ from vs_sandbox.api.slurm import (
     GpuJobRequest,
 )
 from vs_sim.api import ProbeResult
-from vs_sim.api.testing import FakeMergedOutputProcessLauncher, SimThreads, examples
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_sim.api import Event
+
+
+class _HeldOutput(io.TextIOBase):
+    """Merged output that announces readiness, then stays open until the group settles."""
+
+    def __init__(self, closed: Event) -> None:
+        super().__init__()
+        self._output_closed = closed
+        self._announced = False
+
+    def read(self, size: int | None = -1, /) -> str:
+        assert size is not None
+        assert size > 0
+        if not self._announced:
+            self._announced = True
+            return "wrapper ready\n"
+        assert self._output_closed.wait(timeout=300)
+        return ""
 
 
 class _DescendantHeldProcess:
@@ -38,18 +57,12 @@ class _DescendantHeldProcess:
         self._term_survivors = term_survivors
         self._trace = trace
         self._on_term = on_term
-        self._announced = False
         self._status = 143
+        self.stdout: io.TextIOBase = _HeldOutput(self._output_closed)
+        self.stderr: io.TextIOBase = io.StringIO()
 
-    def read(self, max_bytes: int) -> bytes:
-        assert max_bytes > 0
-        if not self._announced:
-            self._announced = True
-            return b"wrapper ready\n"
-        assert self._output_closed.wait(timeout=300)
-        return b""
-
-    def wait(self) -> int:
+    def wait(self, timeout: float | None) -> int:
+        assert timeout is None
         assert self._output_closed.is_set()
         return self._status
 
@@ -68,6 +81,10 @@ class _DescendantHeldProcess:
     def kill_group(self) -> None:
         self._trace.append("SIGKILL")
         self._output_closed.set()
+
+    def cancel_output(self) -> None:
+        """The launcher stops output by stopping the group, never by cancelling reads."""
+        raise AssertionError
 
 
 class _ScancelProbe:
@@ -106,8 +123,8 @@ def test_agent_gpu_cancellation_scancels_before_stopping_the_whole_local_group(
         term_survivors=term_survivors,
         trace=trace,
     )
-    processes = FakeMergedOutputProcessLauncher(
-        lambda _argv, _cwd, _env: process,
+    processes = FakePipedProcessLauncher(
+        lambda _start: process,
     )
     launcher = AgentGpuLauncher(
         AgentGpuConfig(
@@ -138,7 +155,8 @@ def test_agent_gpu_cancellation_scancels_before_stopping_the_whole_local_group(
     assert trace == expected
     assert status == 143
     assert output.endswith(b"wrapper ready\n")
-    assert processes.started[0][2] == {"TOKEN": "value"}
+    assert processes.started[0].env == {"TOKEN": "value"}
+    assert processes.started[0].merge_stderr
 
 
 def test_agent_gpu_does_not_signal_a_group_that_settles_during_scancel() -> None:
@@ -158,7 +176,7 @@ def test_agent_gpu_does_not_signal_a_group_that_settles_during_scancel() -> None
         ),
         ("transport", "shell"),
         probe=_ScancelProbe(trace, on_scancel=lambda: process.settle(0)),
-        processes=FakeMergedOutputProcessLauncher(lambda _argv, _cwd, _env: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         threads=threads,
     )
 

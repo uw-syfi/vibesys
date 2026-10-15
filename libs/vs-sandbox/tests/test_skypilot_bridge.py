@@ -329,6 +329,10 @@ class _TimeoutAfterBridgeWriteProcess:
     def kill_group(self) -> None:
         self.group_kills += 1
 
+    def terminate_group(self) -> None:
+        """These runners stop a process group only with SIGKILL."""
+        raise AssertionError
+
     def cancel_output(self) -> None:
         pass
 
@@ -345,7 +349,7 @@ class _BlockingBridgeRunner(FakeRunner):
         self.finished = threads.event()
         self._command = SubprocessCommandRunner(
             threads,
-            processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+            processes=FakePipedProcessLauncher(lambda _start: process),
             cleanup_timeout=1,
         )
 

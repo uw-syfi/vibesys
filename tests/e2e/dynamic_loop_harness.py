@@ -65,7 +65,7 @@ from vs_core.testing.liveness import Budget, End, Journal, assert_live
 from vs_project.api import FakeStateStores, Project, StoredEnvelope
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_runtime.api.testing import CrashableRunClock, FakeStopTimer
-from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import run_virtual
 from vs_slurm.fake_connector import HOLD_FILE, SUBMITTED_FILE, FakeConnector, recorded_commands
 
@@ -657,6 +657,7 @@ def run_request(  # noqa: PLR0913
             # The agent's container mounts the repository's `.git` read-only, so the
             # repository must exist on disk: these runs use the product's real Git.
             processes=REAL_PROCESSES,
+            piped_processes=SubprocessPipedProcessLauncher(),
             git_repository=None,
             slurm_processes=slurm_processes,
             state_stores=state_stores,

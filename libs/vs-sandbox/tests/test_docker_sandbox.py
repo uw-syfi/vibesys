@@ -33,7 +33,7 @@ from vs_sandbox.docker_sandbox import (
     _live_containers,
 )
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
-from vs_sim.api import OsThreads, ProcessTimeoutError
+from vs_sim.api import OsThreads, ProcessTimeoutError, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import SimThreads
 
 
@@ -334,7 +334,9 @@ class TestAgentUserRemap:
     def test_remap_runs_as_root_but_agent_commands_do_not(self, tmp_path: Path) -> None:
         (tmp_path / "workspace").mkdir()
         (tmp_path / "engine").mkdir()
-        engine = FakeDockerEngine(tmp_path / "engine", agent_ids=(1000, 1000))
+        engine = FakeDockerEngine(
+            tmp_path / "engine", agent_ids=(1000, 1000), launcher=SubprocessPipedProcessLauncher()
+        )
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",
@@ -399,7 +401,11 @@ class TestExecute:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         (tmp_path / "engine").mkdir()
-        engine = FakeDockerEngine(tmp_path / "engine", agent_ids=(os.getuid(), os.getgid()))
+        engine = FakeDockerEngine(
+            tmp_path / "engine",
+            agent_ids=(os.getuid(), os.getgid()),
+            launcher=SubprocessPipedProcessLauncher(),
+        )
         sandbox = DockerSandbox(
             host_workspace=str(workspace),
             image="nvcr.io/nvidia/pytorch:25.04-py3",
@@ -1137,7 +1143,7 @@ class TestWritableCredentialMounts:
         auth_files: list[tuple[str, str]] | None = None,
     ) -> FakeDockerEngine:
         (tmp_path / "engine").mkdir()
-        engine = FakeDockerEngine(tmp_path / "engine")
+        engine = FakeDockerEngine(tmp_path / "engine", launcher=SubprocessPipedProcessLauncher())
         sandbox = DockerSandbox(
             host_workspace=str(tmp_path / "workspace"),
             image="test-image",

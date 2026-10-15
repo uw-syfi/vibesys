@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import inspect
 from functools import partial
+from io import StringIO
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,12 +28,14 @@ from vs_sandbox.api import (
     TrainiumBackend,
 )
 from vs_sandbox.api.testing import FakeComputeBackend, ScriptedDockerCli
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api import OsThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, PipedStart
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.api import CommandRunner
+    from vs_sim.api import PipedProcess
 
 
 class _RecordingHooks(SandboxLifecycleHooks):
@@ -43,9 +46,41 @@ class _RecordingHooks(SandboxLifecycleHooks):
         self.sandbox = context.sandbox
 
 
+class _FinishedShell:
+    """A host shell that already printed its scripted output and exited 0."""
+
+    def __init__(self, stdout: str) -> None:
+        self.stdout = StringIO(stdout)
+        self.stderr = StringIO()
+
+    def wait(self, timeout: float | None) -> int:
+        del timeout
+        return 0
+
+    def terminate_group(self) -> None:
+        raise AssertionError
+
+    def kill_group(self) -> None:
+        raise AssertionError
+
+    def cancel_output(self) -> None:
+        raise AssertionError
+
+
+def _printf_shell(start: PipedStart) -> PipedProcess:
+    """Run the one host command the contract issues: ``printf hello`` under ``/bin/sh``."""
+    assert start.argv == ("/bin/sh", "-c", "printf hello"), start.argv
+    return _FinishedShell("hello")
+
+
 _FACTORIES = {
     "real": partial(
-        CudaBackend, clock=ManualClock(), docker=ScriptedDockerCli(), threads=SimThreads()
+        CudaBackend,
+        clock=ManualClock(),
+        docker=ScriptedDockerCli(),
+        # The scripted shell exits at once, so its output drains never wait on time.
+        threads=OsThreads(),
+        launcher=FakePipedProcessLauncher(_printf_shell),
     ),
     "fake": FakeComputeBackend,
 }

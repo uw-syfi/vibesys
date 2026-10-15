@@ -11,6 +11,7 @@ from vs_sim.api import (
     OsProcesses,
     OsThreads,
     PidfdProcessSignaller,
+    SubprocessPipedProcessLauncher,
     SystemClock,
     ThreadBlockingRunner,
     UnixNetwork,
@@ -34,6 +35,7 @@ def production_runs() -> Runs:
         LaunchSettings(
             timing=production_timing(),
             processes=OsProcesses(),
+            piped_processes=SubprocessPipedProcessLauncher(),
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),
         )

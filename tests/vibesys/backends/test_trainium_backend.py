@@ -21,7 +21,7 @@ from vs_sandbox.api import (
     create_compute_backend,
 )
 from vs_sandbox.api.testing import FakeAcceleratorDiscovery, ScriptedDockerCli
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -42,6 +42,7 @@ def _make_backend(
         docker=ScriptedDockerCli() if docker is None else docker,
         clock=ManualClock(),
         threads=SimThreads(),
+        launcher=FakePipedProcessLauncher(),
     )
 
 
@@ -53,6 +54,7 @@ class TestTrainiumRegistry:
             clock=ManualClock(),
             docker=ScriptedDockerCli(),
             threads=SimThreads(),
+            launcher=FakePipedProcessLauncher(),
         )
         assert isinstance(impl, TrainiumBackend)
         assert impl.name is ComputeBackend.TRAINIUM

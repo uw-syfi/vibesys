@@ -16,7 +16,7 @@ from vs_agent.api import OrphanReapError, reap_orphaned_agents
 from vs_agent.api.testing import DockerResult, docker_result, docker_timed_out
 from vs_sandbox.api import RUN_ID_LABEL
 from vs_sandbox.fake_docker_engine import FakeDockerEngine
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import FakePipedProcessLauncher, examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -60,7 +60,9 @@ def test_every_container_of_the_run_and_only_those_are_reaped_then_removed(
     own: int, others: int, unlabelled: int
 ) -> None:
     with tempfile.TemporaryDirectory() as raw:
-        engine = FakeDockerEngine(Path(raw), agent_ids=(1000, 1000))
+        engine = FakeDockerEngine(
+            Path(raw), agent_ids=(1000, 1000), launcher=FakePipedProcessLauncher()
+        )
         mine = [_start(engine, "run-a") for _ in range(own)]
         theirs = [_start(engine, "run-b") for _ in range(others)]
         loose = [_start(engine, None) for _ in range(unlabelled)]
@@ -83,7 +85,9 @@ def test_every_container_of_the_run_and_only_those_are_reaped_then_removed(
 
 def test_a_failed_reap_stops_the_resume_and_leaves_the_container_for_inspection() -> None:
     with tempfile.TemporaryDirectory() as raw:
-        engine = FakeDockerEngine(Path(raw), agent_ids=(1000, 1000))
+        engine = FakeDockerEngine(
+            Path(raw), agent_ids=(1000, 1000), launcher=FakePipedProcessLauncher()
+        )
         container = _start(engine, "run-a")
         recorder = _Recorder(engine)
         recorder.failing.add(container)

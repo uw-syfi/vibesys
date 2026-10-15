@@ -41,13 +41,13 @@ from vs_sim.crash import (
     swept,
 )
 from vs_sim.depth import Depth, depth, examples, set_depth, using_depth
+from vs_sim.fake_piped_process import ScriptedPipedProcess
 from vs_sim.fake_signal_relay import FakeMainThreadWake, FakeSignalRelay
 from vs_sim.fakes import (
     NO_PROCESSES,
     FakeForegroundChild,
     FakeForegroundLauncher,
     FakeLoopbackHttp,
-    FakeMergedOutputProcessLauncher,
     FakePipedProcessLauncher,
     FakeProcesses,
     FakeProcessLauncher,
@@ -56,6 +56,7 @@ from vs_sim.fakes import (
     ForegroundScript,
     GatedBlockingRunner,
     InlineBlockingRunner,
+    PipedStart,
     ProcessScript,
     ProcessStartRefusedError,
     RefusingProcesses,
@@ -143,7 +144,6 @@ __all__ = [
     "FakeForegroundLauncher",
     "FakeLoopbackHttp",
     "FakeMainThreadWake",
-    "FakeMergedOutputProcessLauncher",
     "FakePipedProcessLauncher",
     "FakeProcessLauncher",
     "FakeProcessSignaller",
@@ -165,6 +165,7 @@ __all__ = [
     "ManualClock",
     "NetworkContract",
     "NetworkUnderTest",
+    "PipedStart",
     "ProbeUnderTest",
     "ProbedClock",
     "ProcessLauncherContract",
@@ -181,6 +182,7 @@ __all__ = [
     "Restarted",
     "RunnerUnderTest",
     "ScheduledRule",
+    "ScriptedPipedProcess",
     "ScriptedProbe",
     "ScriptedStreamingCommand",
     "SignalRelayContract",

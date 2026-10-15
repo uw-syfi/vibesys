@@ -16,7 +16,7 @@ from vs_sandbox.api import (
     create_compute_backend,
 )
 from vs_sandbox.api.testing import ScriptedDockerCli
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,6 +29,7 @@ def _make_backend(tmp_path: Path) -> LocalBackend:
         clock=ManualClock(),
         docker=ScriptedDockerCli(),
         threads=SimThreads(),
+        launcher=FakePipedProcessLauncher(),
     )
     assert isinstance(impl, LocalBackend)
     return impl
@@ -42,6 +43,7 @@ class TestMetalRegistry:
             clock=ManualClock(),
             docker=ScriptedDockerCli(),
             threads=SimThreads(),
+            launcher=FakePipedProcessLauncher(),
         )
         assert isinstance(impl, LocalBackend)
         assert impl.name is ComputeBackend.METAL

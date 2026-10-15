@@ -31,7 +31,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ComputeBackend, ProjectPathPolicy, SubprocessDockerCli
 from vs_sandbox.local_compute_backend import LocalBackend
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import NO_PROCESSES
 
 if TYPE_CHECKING:
@@ -79,8 +79,11 @@ def candidate(tmp_path: Path) -> Iterator[tuple[RunEnvironmentSession, Path, Pat
             ComputeBackend.CPU,
             log_dir,
             image=_BASE_IMAGE,
-            docker=SubprocessDockerCli(processes=OsProcesses()),
+            docker=SubprocessDockerCli(
+                processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+            ),
             threads=OsThreads(),
+            launcher=SubprocessPipedProcessLauncher(),
         ),
         agent_backend="stub",
         cli_provider=None,

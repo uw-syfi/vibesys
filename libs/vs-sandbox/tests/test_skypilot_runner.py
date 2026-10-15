@@ -198,6 +198,10 @@ class _StuckSkyPilotProcess:
     def kill_group(self) -> None:
         self.group_kills += 1
 
+    def terminate_group(self) -> None:
+        """These runners stop a process group only with SIGKILL."""
+        raise AssertionError
+
     def cancel_output(self) -> None:
         self._threads.release_drains()
 
@@ -313,6 +317,10 @@ class _ExitedSkyPilotProcess:
     def kill_group(self) -> None:
         self.group_kills += 1
 
+    def terminate_group(self) -> None:
+        """These runners stop a process group only with SIGKILL."""
+        raise AssertionError
+
     def cancel_output(self) -> None:
         pass
 
@@ -337,6 +345,10 @@ class _TimeoutAfterSinkStartsProcess:
 
     def kill_group(self) -> None:
         self.group_kills += 1
+
+    def terminate_group(self) -> None:
+        """These runners stop a process group only with SIGKILL."""
+        raise AssertionError
 
     def cancel_output(self) -> None:
         pass
@@ -386,6 +398,10 @@ class _PermissionDeniedSkyPilotProcess:
         self.group_kills += 1
         raise PermissionError(_GROUP_PERMISSION_ERROR)
 
+    def terminate_group(self) -> None:
+        """These runners stop a process group only with SIGKILL."""
+        raise AssertionError
+
     def cancel_output(self) -> None:
         self.output_cancellations += 1
         self.stdout.cancel()
@@ -401,7 +417,7 @@ def test_subprocess_timeout_kills_the_group_and_bounds_all_cleanup_waits() -> No
     process = _StuckSkyPilotProcess(threads)
     runner = SubprocessCommandRunner(
         threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=7,
     )
 
@@ -421,7 +437,7 @@ def test_normal_exit_with_stuck_drains_reaps_workers_and_closes_pipes_after_grou
     process = _NormalSkyPilotProcess(threads)
     runner = SubprocessCommandRunner(
         threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=7,
     )
 
@@ -444,7 +460,7 @@ def test_timeout_cancels_blocked_bridge_sink_without_retaining_drain_workers_or_
     process = _TimeoutAfterSinkStartsProcess(sink)
     runner = SubprocessCommandRunner(
         threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=1,
     )
 
@@ -467,7 +483,7 @@ def test_timeout_surfaces_group_kill_permission_error_after_settling_owned_resou
     process = _PermissionDeniedSkyPilotProcess(threads)
     runner = SubprocessCommandRunner(
         threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=1,
     )
 
@@ -492,7 +508,7 @@ def test_success_waits_for_slow_ordinary_sink_without_abandoning_a_delivery_work
     process = _ExitedSkyPilotProcess()
     runner = SubprocessCommandRunner(
         threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         cleanup_timeout=0,
     )
     drains_finished: list[bool] = []
@@ -526,7 +542,7 @@ def test_subprocess_result_bounds_multiline_and_unterminated_output_while_sink_g
     stderr_sink = _RecordingCancellableSink()
     runner = SubprocessCommandRunner(
         threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         max_output_characters=127,
     )
 
@@ -560,7 +576,7 @@ def test_subprocess_result_is_the_exact_bounded_suffix(stdout: str, stderr: str,
     process = _ExitedSkyPilotProcess(stdout, stderr)
     runner = SubprocessCommandRunner(
         threads,
-        processes=FakePipedProcessLauncher(lambda _argv, _cwd: process),
+        processes=FakePipedProcessLauncher(lambda _start: process),
         max_output_characters=cap,
     )
 

@@ -37,7 +37,7 @@ from vs_core.api import AssessmentKind
 from vs_project.api import OrchestrationDescriptor
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -79,7 +79,7 @@ def _request(root: Path, config: Path) -> RunRequest:
             {
                 "config_path": str(config),
                 "build_runner": FakeDockerBuildRunner(),
-                "docker": FakeDockerEngine(),
+                "docker": FakeDockerEngine(launcher=FakePipedProcessLauncher()),
                 "orphan_reaper": partial(
                     reap_orphaned_agents, confinement_for=lambda _id: FakeConfinement()
                 ),

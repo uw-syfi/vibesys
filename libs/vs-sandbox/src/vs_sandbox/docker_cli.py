@@ -5,7 +5,6 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sandbox.process_execution import start_process_group
 from vs_sim.api import (
     ProcessGroupUnreaped,
     ProcessOutcome,
@@ -18,7 +17,7 @@ from vs_sim.api import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from vs_sim.api import Processes
+    from vs_sim.api import PipedProcess, PipedProcessLauncher, Processes
 
 # Signals every process whose environment carries the marker in ``$1`` with
 # signal number ``$2``. Passed as ``sh -c SCRIPT sh MARKER SIGNAL`` so the
@@ -49,17 +48,21 @@ class DockerCli(Protocol):
         """
         ...
 
-    def spawn(self, argv: Sequence[str]) -> subprocess.Popen[str]:
-        """Start *argv* as a process group leader with piped, text-mode output."""
+    def spawn(self, argv: Sequence[str]) -> PipedProcess:
+        """Start *argv* as a process group leader with piped, text-mode output.
+
+        Raises ``OSError`` when ``docker`` cannot be launched.
+        """
         ...
 
 
 class SubprocessDockerCli:
     """The real ``docker`` binary on ``PATH``."""
 
-    def __init__(self, *, processes: Processes) -> None:
-        """Run synchronous Docker commands through *processes*."""
+    def __init__(self, *, processes: Processes, launcher: PipedProcessLauncher) -> None:
+        """Run synchronous Docker commands through *processes*, streamed ones through *launcher*."""
         self._processes = processes
+        self._launcher = launcher
 
     def run(
         self, argv: Sequence[str], *, timeout_seconds: float
@@ -94,9 +97,9 @@ class SubprocessDockerCli:
                     error.add_note(detail)
                 raise error
 
-    def spawn(self, argv: Sequence[str]) -> subprocess.Popen[str]:
+    def spawn(self, argv: Sequence[str]) -> PipedProcess:
         """Start *argv* in its own process group."""
-        return start_process_group(argv, env=None, cwd=None)
+        return self._launcher.start(tuple(argv))
 
 
 def _text(output: bytes) -> str:

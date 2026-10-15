@@ -12,7 +12,6 @@ from vs_sim.gate import arrival
 from vs_sim.loopback_http import HttpReply
 from vs_sim.processes import (
     ForegroundChild,
-    MergedOutputProcess,
     OutputStream,
     PipedProcess,
     ProcessGroupUnreaped,
@@ -326,40 +325,46 @@ NO_PROCESSES = RefusingProcesses()
 """Shared :class:`RefusingProcesses`; it holds no state."""
 
 
+@dataclass(frozen=True)
+class PipedStart:
+    """One request a :class:`FakePipedProcessLauncher` received."""
+
+    argv: tuple[str, ...]
+    cwd: Path | None = None
+    env: Mapping[str, str] | None = None
+    merge_stderr: bool = False
+
+
+def _refuse_piped_start(request: PipedStart) -> PipedProcess:
+    message = f"this test starts no piped process, but {request.argv[0]!r} was started"
+    raise ProcessStartRefusedError(message)
+
+
 @dataclass
 class FakePipedProcessLauncher:
-    """Record synchronous piped process starts and create each process through a Fake factory."""
+    """Record synchronous piped process starts and create each process through a Fake factory.
 
-    factory: Callable[[tuple[str, ...], Path | None], PipedProcess]
-    started: list[tuple[tuple[str, ...], Path | None]] = field(default_factory=list)
+    Without a factory, any start fails the test: the launcher stands in for one that the
+    code under test is handed but must not use.
+    """
 
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
-        """Record the normalized start request and return its scripted process."""
-        request = (tuple(argv), cwd)
-        self.started.append(request)
-        return self.factory(*request)
-
-
-@dataclass
-class FakeMergedOutputProcessLauncher:
-    """Record merged-output starts and create each process through a Fake factory."""
-
-    factory: Callable[[tuple[str, ...], Path | str | None, Mapping[str, str]], MergedOutputProcess]
-    started: list[tuple[tuple[str, ...], Path | str | None, Mapping[str, str]]] = field(
-        default_factory=list
-    )
+    factory: Callable[[PipedStart], PipedProcess] = _refuse_piped_start
+    started: list[PipedStart] = field(default_factory=list)
 
     def start(
         self,
-        argv: Sequence[str],
+        argv: tuple[str, ...],
         *,
-        cwd: Path | str | None,
-        env: Mapping[str, str],
-    ) -> MergedOutputProcess:
-        """Record a normalized start request and return its scripted process."""
-        request = (tuple(argv), cwd, dict(env))
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        merge_stderr: bool = False,
+    ) -> PipedProcess:
+        """Record the normalized start request and return its scripted process."""
+        request = PipedStart(
+            tuple(argv), cwd, None if env is None else dict(env), merge_stderr=merge_stderr
+        )
         self.started.append(request)
-        return self.factory(*request)
+        return self.factory(request)
 
 
 @dataclass(frozen=True)

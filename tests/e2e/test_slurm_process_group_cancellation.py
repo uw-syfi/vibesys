@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 import re
 import signal
-import subprocess
 import sys
 import threading
 from contextlib import suppress
@@ -51,7 +50,6 @@ signal.pause()
             default_time_minutes=5,
         ),
         (sys.executable, "-c", wrapper),
-        popen=subprocess.Popen,
         probe=probe,
     )
     cancel = threading.Event()

@@ -28,7 +28,13 @@ from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import (
+    NO_PROCESSES,
+    FakePipedProcessLauncher,
+    ManualClock,
+    VirtualClock,
+    run_virtual,
+)
 
 
 def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]:
@@ -37,13 +43,19 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
     templates = root / "templates"
     templates.mkdir()
     _write_project(project_root)
-    engine = FakeDockerEngine(root / "engine")
+    engine = FakeDockerEngine(root / "engine", launcher=FakePipedProcessLauncher())
 
     def backend_factory(
         _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(
+            log_dir,
+            log=log,  # ty: ignore[invalid-argument-type]
+            image=image,
+            threads=OsThreads(),
+            launcher=FakePipedProcessLauncher(),
+        )
         made.engine = engine
         return made
 

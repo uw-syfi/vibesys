@@ -1,7 +1,7 @@
 """Contract suite for :class:`~vs_sandbox.process_execution.StoppableProcess`.
 
 Subclass :class:`StoppableProcessContract`, name the subclass ``Test<Variant>`` and
-implement :meth:`~StoppableProcessContract.harness`. The real ``PopenProcess`` and the
+implement :meth:`~StoppableProcessContract.harness`. The real ``PipedStoppableProcess`` and the
 simulated ``FakeStoppableProcess`` pass the same cases. Cases assert outcomes and signal
 effects, never durations; every wait that does not synchronize on the process is bounded
 by a hang guard.

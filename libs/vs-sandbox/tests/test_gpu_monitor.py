@@ -29,7 +29,7 @@ from vs_sandbox.api.testing import (
     TelemetryHarness,
     docker_result,
 )
-from vs_sim.api.testing import ManualClock, SimThreads, examples
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -365,6 +365,7 @@ class TestReselectGpu:
             threads=ctx.threads,
             docker=docker,
             clock=ManualClock(),
+            launcher=FakePipedProcessLauncher(),
         )
         backend_impl.selected_device = selected_gpu
         ctx.backend_impl = backend_impl

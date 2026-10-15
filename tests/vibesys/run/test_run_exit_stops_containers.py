@@ -44,7 +44,7 @@ from vs_project.api import OrchestrationDescriptor, Project, ProjectStateError
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakeSignalSource
+from vs_sim.api.testing import FakePipedProcessLauncher, FakeSignalSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -179,7 +179,7 @@ def _execute(
         _project(root)
     state = tmp_path / "engine"
     state.mkdir(exist_ok=True)
-    engine = FakeDockerEngine(state)
+    engine = FakeDockerEngine(state, launcher=FakePipedProcessLauncher())
     if exit_path == "start-lost":
         engine.runs_lost_after_creating([False])
 
@@ -206,7 +206,13 @@ def _execute(
         clock: object,
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        backend = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())
+        backend = _DaemonBackend(
+            log_dir,
+            log=log,
+            image=image,
+            threads=OsThreads(),
+            launcher=FakePipedProcessLauncher(),
+        )
         backend.engine = engine
         return backend
 
@@ -231,6 +237,7 @@ def _execute(
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=lambda **_: FakeAgentClient(
                 capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
@@ -285,7 +292,7 @@ def test_resuming_a_run_ends_only_the_containers_its_dead_host_left_behind(
     that is accepted removes the run's own orphans and leaves other runs' containers."""
     engine, first = _execute(tmp_path, monkeypatch, exit_path="SIGINT")
     assert engine.containers() == ()
-    host_docker = FakeDockerEngine()
+    host_docker = FakeDockerEngine(launcher=FakePipedProcessLauncher())
     own = _plant_container(host_docker, first.run_id)
     other = _plant_container(host_docker, "some-other-run")
     calls_before_resume = tuple(host_docker.calls)

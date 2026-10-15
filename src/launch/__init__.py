@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
-    from vs_sim.api import BlockingRunner, Network, Processes, Threads
+    from vs_sim.api import BlockingRunner, Network, PipedProcessLauncher, Processes, Threads
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +57,8 @@ class LaunchSettings:
     """The run's time sources and lease; the entrypoint builds them from real or simulated time."""
     processes: Processes
     """Starts the run's Git and GitHub CLI commands; the entrypoint builds real or fake ones."""
+    piped_processes: PipedProcessLauncher
+    """Starts the run's streamed commands, such as a container command's ``docker exec``."""
     blocking: BlockingRunner
     """Runs the run's blocking calls off the event loop."""
     network: Network
@@ -98,8 +100,11 @@ def create_session(
     backend_factory = (
         partial(
             create_compute_backend,
-            docker=SubprocessDockerCli(processes=settings.processes),
+            docker=SubprocessDockerCli(
+                processes=settings.processes, launcher=settings.piped_processes
+            ),
             threads=timing.threads,
+            launcher=settings.piped_processes,
         )
         if settings.backend_factory is None
         else settings.backend_factory

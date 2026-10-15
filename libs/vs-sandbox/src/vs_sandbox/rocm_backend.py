@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, PipedProcessLauncher, Threads
 
 # ROCm PyTorch image. Carries the ROCm runtime + a matching torch build.
 # Pinned rather than ``:latest`` for reproducibility and because the
@@ -96,6 +96,7 @@ class RocmBackend:
         accelerator_discovery: AcceleratorDiscovery | None = None,
         docker: DockerCli,
         threads: Threads,
+        launcher: PipedProcessLauncher,
         clock: Clock,
     ) -> None:
         """Configure ROCm execution with its log directory and image override."""
@@ -105,6 +106,7 @@ class RocmBackend:
         self.image = image or _DEFAULT_IMAGE
         self._docker = docker
         self._threads = threads
+        self._launcher = launcher
         # No per-device auto-selection yet; pinning is via HIP_VISIBLE_DEVICES.
         # Kept for ComputeBackendImpl parity.
         self.selected_device = None
@@ -163,6 +165,7 @@ class RocmBackend:
                 env=env,
                 lifecycle_hooks=lifecycle_hooks,
                 threads=self._threads,
+                launcher=self._launcher,
             )
 
         if kind is SandboxKind.DOCKER:

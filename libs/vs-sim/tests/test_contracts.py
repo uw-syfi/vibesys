@@ -345,6 +345,9 @@ class _StartedPipedGroup:
         self.group_kills = 0
         self.wait_timeouts: list[float | None] = []
 
+    def terminate_group(self) -> None:
+        raise AssertionError
+
     def kill_group(self) -> None:
         self.group_kills += 1
 

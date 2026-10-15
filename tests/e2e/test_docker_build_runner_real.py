@@ -17,6 +17,7 @@ from vs_agent.api.images import (
 from vs_sim.api import PipedProcess, PipedProcessLauncher, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
 pytestmark = pytest.mark.real_contract
@@ -29,8 +30,15 @@ class _ReadyLauncher:
     delegate: PipedProcessLauncher
     ready_fifo: Path
 
-    def start(self, argv: tuple[str, ...], *, cwd: Path | None = None) -> PipedProcess:
-        process = self.delegate.start(argv, cwd=cwd)
+    def start(
+        self,
+        argv: tuple[str, ...],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        merge_stderr: bool = False,
+    ) -> PipedProcess:
+        process = self.delegate.start(argv, cwd=cwd, env=env, merge_stderr=merge_stderr)
         assert self.ready_fifo.read_text(encoding="utf-8") == "ready"
         return process
 

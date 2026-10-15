@@ -38,7 +38,13 @@ from vs_runtime.api.core import RunTiming
 from vs_runtime.api.testing import FakeStopTimer
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, VirtualClock, run_virtual
+from vs_sim.api.testing import (
+    NO_PROCESSES,
+    FakePipedProcessLauncher,
+    ManualClock,
+    VirtualClock,
+    run_virtual,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -53,7 +59,7 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
     templates = root / "templates"
     templates.mkdir()
     _write_project(project_root)
-    engine = FakeDockerEngine(root / "engine")
+    engine = FakeDockerEngine(root / "engine", launcher=FakePipedProcessLauncher())
     given_to_client: dict[str, object] = {}
 
     def client_factory(**kwargs: object) -> FakeAgentClient:
@@ -66,7 +72,13 @@ def _sandboxes_seen_by_the_client(root: Path, candidates: int) -> tuple[bool, li
         _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(
+            log_dir,
+            log=log,  # ty: ignore[invalid-argument-type]
+            image=image,
+            threads=OsThreads(),
+            launcher=FakePipedProcessLauncher(),
+        )
         made.engine = engine
         return made
 
@@ -162,7 +174,7 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
     templates = root / "templates"
     templates.mkdir()
     _write_project(project_root)
-    engine = FakeDockerEngine(root / "engine")
+    engine = FakeDockerEngine(root / "engine", launcher=FakePipedProcessLauncher())
     executor = FakeExecutor(
         [],
         peers=stream_peers("claude", *(["ok"] * (candidates + 1))).build,
@@ -182,7 +194,13 @@ def _turns_through_the_public_builder(root: Path, candidates: int) -> _Turns:
         _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(
+            log_dir,
+            log=log,  # ty: ignore[invalid-argument-type]
+            image=image,
+            threads=OsThreads(),
+            launcher=FakePipedProcessLauncher(),
+        )
         made.engine = engine
         return made
 

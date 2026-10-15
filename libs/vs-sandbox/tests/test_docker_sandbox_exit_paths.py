@@ -19,6 +19,7 @@ from vs_agent.api.testing import docker_timed_out
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads
+from vs_sim.api.testing import FakePipedProcessLauncher
 
 # One entry per `docker run` that loses its client after the daemon created the
 # container: False leaves no id on stdout (crashed or interrupted client), True
@@ -37,7 +38,7 @@ class _BodyFailedError(RuntimeError):
 def _engine(base: Path) -> FakeDockerEngine:
     state = base / "engine"
     state.mkdir(exist_ok=True)
-    return FakeDockerEngine(state)
+    return FakeDockerEngine(state, launcher=FakePipedProcessLauncher())
 
 
 def _sandbox(base: Path, engine: FakeDockerEngine, run_id: str | None = "run-1") -> DockerSandbox:

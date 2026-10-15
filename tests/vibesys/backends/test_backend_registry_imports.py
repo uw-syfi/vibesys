@@ -21,7 +21,7 @@ from vs_sandbox.api import (
     create_compute_backend,
 )
 from vs_sandbox.api.testing import ScriptedDockerCli
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import ManualClock
 
 _PROBE = """
@@ -29,13 +29,15 @@ import sys
 
 from vs_sandbox.api import ComputeBackend, SubprocessDockerCli, create_compute_backend
 from vs_sim.api import OsProcesses, OsThreads, SystemClock
+from vs_sim.api import SubprocessPipedProcessLauncher
 
 create_compute_backend(
     ComputeBackend.{backend},
     log_dir={log_dir!r},
     clock=SystemClock(),
-    docker=SubprocessDockerCli(processes=OsProcesses()),
+    docker=SubprocessDockerCli(processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()),
     threads=OsThreads(),
+    launcher=SubprocessPipedProcessLauncher(),
 )
 print("vs_sandbox.docker_sandbox" in sys.modules)
 """
@@ -68,6 +70,7 @@ def test_local_sandbox_construction_builds_a_local_shell_sandbox(tmp_path: Path)
         clock=ManualClock(),
         docker=ScriptedDockerCli(),
         threads=OsThreads(),
+        launcher=SubprocessPipedProcessLauncher(),
     ).make_sandbox(
         SandboxKind.LOCAL,
         host_workspace=str(tmp_path),
@@ -95,6 +98,7 @@ def test_backend_registry_still_resolves_every_default(tmp_path: Path) -> None:
                 clock=ManualClock(),
                 docker=ScriptedDockerCli(),
                 threads=OsThreads(),
+                launcher=SubprocessPipedProcessLauncher(),
             )
             is not None
         )

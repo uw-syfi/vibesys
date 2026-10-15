@@ -84,8 +84,8 @@ def execute_command(  # noqa: PLR0913  # lint-waiver: LW-731010 [PLR0913]; the s
     """Run *command* through *launch* under the module's result contract.
 
     *launch* starts the command as a process group leader with piped output
-    (:func:`~vs_sandbox.process_execution.start_process_group`, wrapped in a
-    :class:`~vs_sandbox.process_execution.PopenProcess`), or is a test's Fake
+    (a ``vs_sim`` piped process wrapped in a
+    :class:`~vs_sandbox.process_execution.PipedStoppableProcess`), or is a test's Fake
     :class:`~vs_sandbox.process_execution.StoppableProcess`. *signal_remote* signals the command's processes where they actually
     live when that is outside the launched group. *threads* is the clock the
     timeout is measured on.

@@ -28,7 +28,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import FakeModelVolumeProvisioner
 from vs_sandbox.api import CommandResult, LocalShellRunner
 from vs_sandbox.api.testing import FakeCommandRunner
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import (
     InlineBlockingRunner,
     Sim,
@@ -239,6 +239,7 @@ def _bulky_executor(
         env={"PATH": os.environ["PATH"]},
         max_output_chars=max_output_chars,
         threads=OsThreads(),
+        launcher=SubprocessPipedProcessLauncher(),
     )
     return _executor(
         tmp_path,

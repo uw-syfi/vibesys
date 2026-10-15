@@ -26,7 +26,7 @@ from vs_project.api.testing import GitKind
 from vs_runtime.api.infrastructure import DockerEnvironment, SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api.slurm import load_slurm_operator_settings
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import (
@@ -143,7 +143,7 @@ def _git_lookup_problems(view: _ContainerView, workspace: Path) -> list[str]:
 def _problems_of_every_candidate(
     tmp_path: Path, make_environment: object, candidates: int
 ) -> list[str]:
-    engine = daemon_engine(tmp_path)
+    engine = daemon_engine(tmp_path, launcher=FakePipedProcessLauncher())
     backend = DaemonBackend(engine, threads=SimThreads())
     environment = make_environment(tmp_path, engine)  # ty: ignore[call-non-callable]
     found: list[str] = []
@@ -220,7 +220,7 @@ def test_a_candidate_container_cannot_read_the_shared_repository_s_credential(
     ``https://user:token@host/...``, embedding a credential. A candidate's
     container must never see it, in a file mounted at any path.
     """
-    engine = daemon_engine(tmp_path)
+    engine = daemon_engine(tmp_path, launcher=FakePipedProcessLauncher())
     backend = DaemonBackend(engine, threads=SimThreads())
     environment = make_environment(tmp_path, engine)  # ty: ignore[call-non-callable]
     views: list[_ContainerView] = []

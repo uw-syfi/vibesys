@@ -28,7 +28,7 @@ from vs_sandbox.docker_sandbox import (
     DockerSandbox,
 )
 from vs_sandbox.host_resources import HostResource, HostResourceAccess
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
 
 pytestmark = pytest.mark.e2e
 
@@ -99,7 +99,9 @@ def test_docker_probe_enforces_the_shared_resource_contract(tmp_path: Path) -> N
         host_workspace=str(workspace),
         image=image,
         resources=resources,
-        docker=SubprocessDockerCli(processes=OsProcesses()),
+        docker=SubprocessDockerCli(
+            processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+        ),
         threads=OsThreads(),
     )
     sandbox.start()
@@ -160,7 +162,9 @@ def test_a_sandbox_container_exits_on_sigterm_so_stop_needs_no_sigkill(tmp_path:
         host_workspace=str(workspace),
         image=image,
         auto_remove=False,
-        docker=SubprocessDockerCli(processes=OsProcesses()),
+        docker=SubprocessDockerCli(
+            processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+        ),
         threads=OsThreads(),
     )
     sandbox.start()

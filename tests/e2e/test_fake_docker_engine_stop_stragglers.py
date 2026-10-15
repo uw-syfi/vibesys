@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api import OsThreads
+from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import join_or_fail
 
 if TYPE_CHECKING:
@@ -32,7 +32,11 @@ def test_a_stop_after_a_lost_signal_request_still_ends_the_program(tmp_path: Pat
     os.mkfifo(workspace / "alive")
     # The program holds a write end of `alive`; end-of-file means it exited.
     alive = os.open(workspace / "alive", os.O_RDONLY | os.O_NONBLOCK)
-    engine = FakeDockerEngine(tmp_path / "engine-state", agent_ids=(os.getuid(), os.getgid()))
+    engine = FakeDockerEngine(
+        tmp_path / "engine-state",
+        agent_ids=(os.getuid(), os.getgid()),
+        launcher=SubprocessPipedProcessLauncher(),
+    )
     sandbox = DockerSandbox(
         host_workspace=str(workspace),
         image="fake-image",

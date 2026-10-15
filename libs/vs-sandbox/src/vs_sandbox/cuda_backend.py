@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sandbox.local_shell import LocalShellRunner
-    from vs_sim.api import Clock, CommandProbe
+    from vs_sim.api import Clock, CommandProbe, PipedProcessLauncher
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
 _DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
@@ -66,7 +66,7 @@ class CudaBackend:
 
     name = ComputeBackend.CUDA
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's four collaborators (GPU telemetry, threads, Docker CLI, command probe) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-692102 [PLR0913]; the backend's five collaborators (GPU telemetry, threads, process launcher, Docker CLI, command probe) are keyword-only seams on top of its three settings; bundling them in a holder object would only rename the same parameters.
         self,
         log_dir: Path,
         *,
@@ -74,6 +74,7 @@ class CudaBackend:
         image: str | None = None,
         gpu_telemetry: GpuTelemetry | None = None,
         threads: Threads,
+        launcher: PipedProcessLauncher,
         docker: DockerCli,
         probe: CommandProbe | None = None,
         clock: Clock,
@@ -86,6 +87,7 @@ class CudaBackend:
         self._probe: CommandProbe = probe or SubprocessProbe()
         self._telemetry: GpuTelemetry = gpu_telemetry or NvidiaSmiTelemetry(probe=self._probe)
         self._threads = threads
+        self._launcher = launcher
         self._docker = docker
         self.log_dir = Path(log_dir)
         self._lprint = log or print
@@ -143,6 +145,7 @@ class CudaBackend:
                 env=env,
                 lifecycle_hooks=lifecycle_hooks,
                 threads=self._threads,
+                launcher=self._launcher,
             )
         elif kind is SandboxKind.DOCKER:
             sandbox = docker_sandbox_class(

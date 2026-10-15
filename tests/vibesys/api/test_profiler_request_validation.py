@@ -32,6 +32,7 @@ from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import FakePipedProcessLauncher
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -181,6 +182,7 @@ def test_profile_workload_requirement_precedes_provisioning(
                 settings=LaunchSettings(
                     timing=production_timing(),
                     processes=REAL_PROCESSES,
+                    piped_processes=FakePipedProcessLauncher(),
                     backend_factory=host_container_backend,
                     blocking=ThreadBlockingRunner(),
                     network=UnixNetwork(),
@@ -195,6 +197,7 @@ def test_profile_workload_requirement_precedes_provisioning(
             settings=LaunchSettings(
                 timing=production_timing(),
                 processes=REAL_PROCESSES,
+                piped_processes=FakePipedProcessLauncher(),
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),
@@ -229,6 +232,7 @@ def test_incompatible_profiler_is_a_typed_early_configuration_failure(
             settings=LaunchSettings(
                 timing=production_timing(),
                 processes=REAL_PROCESSES,
+                piped_processes=FakePipedProcessLauncher(),
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),
                 network=UnixNetwork(),
@@ -260,6 +264,7 @@ def test_auto_native_preflight_failure_records_none_without_profiler_support(
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=_profiler_registry(),
             backend_factory=backend,
             git_repository=git.repository,
@@ -315,6 +320,7 @@ def test_auto_native_preflight_failure_through_default_launch_wiring(
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=_profiler_registry(),
             backend_factory=_RecordingBackendFactory(),
             git_repository=FakeGitRepositories().repository,
@@ -347,6 +353,7 @@ def test_explicit_native_preflight_failure_precedes_backend_and_project_effects(
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            piped_processes=FakePipedProcessLauncher(),
             registry=_profiler_registry(),
             backend_factory=backend,
             profiler_preflight=preflight,

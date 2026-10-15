@@ -34,7 +34,7 @@ from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -87,7 +87,7 @@ def _candidate_container_counts(
     """Return (supported, containers before, with a candidate, after discarding it)."""
     project_root = root / "project"
     _write_project(project_root)
-    engine = FakeDockerEngine(root / "engine")
+    engine = FakeDockerEngine(root / "engine", launcher=FakePipedProcessLauncher())
     options: dict[str, object] = {"build_runner": FakeDockerBuildRunner(), "docker": engine}
     if image is not None:
         options["image"] = image
@@ -116,7 +116,13 @@ def _candidate_container_counts(
         clock: object,
     ) -> _DaemonBackend:
         del clock  # the fake backend records no timestamps
-        made = _DaemonBackend(log_dir, log=log, image=image, threads=OsThreads())  # ty: ignore[invalid-argument-type]
+        made = _DaemonBackend(
+            log_dir,
+            log=log,  # ty: ignore[invalid-argument-type]
+            image=image,
+            threads=OsThreads(),
+            launcher=FakePipedProcessLauncher(),
+        )
         made.engine = engine
         return made
 

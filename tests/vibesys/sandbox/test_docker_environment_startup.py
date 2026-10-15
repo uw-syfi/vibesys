@@ -18,7 +18,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
 )
 from vs_runtime.api.testing import DaemonBackend, daemon_engine
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -35,7 +35,7 @@ _BUILD_OUTPUT = """\
 def _open(
     tmp_path: Path, runner: FakeDockerBuildRunner, observed: list[EnvironmentStartup]
 ) -> None:
-    engine = daemon_engine(tmp_path)
+    engine = daemon_engine(tmp_path, launcher=FakePipedProcessLauncher())
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     request = RunEnvironmentRequest(

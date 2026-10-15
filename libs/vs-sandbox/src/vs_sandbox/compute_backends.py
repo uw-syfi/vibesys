@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, PipedProcessLauncher, Threads
 
 
 class ComputeBackend(StrEnum):
@@ -164,13 +164,16 @@ def make_local_shell_sandbox(
     env: dict[str, str],
     lifecycle_hooks: list[SandboxLifecycleHooks] | None = None,
     threads: Threads,
+    launcher: PipedProcessLauncher,
 ) -> LocalShellRunner:
     """Construct the unconfined local-shell sandbox and run its lifecycle hooks.
 
     Every backend builds the local sandbox the same way, so the construction
     lives here once.
     """
-    sandbox = LocalShellRunner(host_workspace, env=env, inherit_env=True, threads=threads)
+    sandbox = LocalShellRunner(
+        host_workspace, env=env, inherit_env=True, threads=threads, launcher=launcher
+    )
     SandboxLifecycle(lifecycle_hooks).before_ready(sandbox)
     return sandbox
 
@@ -217,12 +220,14 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
     image: str | None = None,
     docker: DockerCli,
     threads: Threads,
+    launcher: PipedProcessLauncher,
     clock: Clock,
 ) -> ComputeBackendImpl:
     """Construct the registered implementation for one compute stack.
 
-    *docker* runs the backend's ``docker`` commands and *threads* is the clock its
-    sandboxes measure command timeouts on.
+    *docker* runs the backend's ``docker`` commands, *threads* is the clock its
+    sandboxes measure command timeouts on, and *launcher* starts its host shell
+    commands.
     ``clock`` counts seconds since the epoch; a backend stamps what it records with it.
     """
     _ensure_defaults()
@@ -230,7 +235,13 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
         message = f"No backend impl registered for {backend!r}"
         raise ValueError(message)
     return _REGISTRY[backend](
-        log_dir=log_dir, log=log, image=image, docker=docker, threads=threads, clock=clock
+        log_dir=log_dir,
+        log=log,
+        image=image,
+        docker=docker,
+        threads=threads,
+        launcher=launcher,
+        clock=clock,
     )
 
 

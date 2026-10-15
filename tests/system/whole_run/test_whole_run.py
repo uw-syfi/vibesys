@@ -58,6 +58,7 @@ from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import Signals
 from vs_sim.api.testing import (
     HANG_GUARD_S,
+    FakePipedProcessLauncher,
     FakeProcesses,
     FakeProcessSignaller,
     ProcessScript,
@@ -402,7 +403,10 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults) -> _Outcome:
     threads = SimThreads(sim.clock, schedule_seed=schedule, trace=sim.trace)
     sim.clock.limit = sim.clock.now() + _RUN_LIMIT_S
     daemon = _Daemon(faults)
-    docker = SubprocessDockerCli(processes=FakeProcesses(daemon.answer, pass_time=threads.sleep))
+    docker = SubprocessDockerCli(
+        processes=FakeProcesses(daemon.answer, pass_time=threads.sleep),
+        launcher=FakePipedProcessLauncher(),
+    )
     root = tmp_path / "project"
     _project(root)
     registry = OrchestrationRegistry()
@@ -430,6 +434,7 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults) -> _Outcome:
             LaunchSettings(
                 timing=RunTiming(platform.clock, _LEASE_S, threads),
                 processes=platform.processes,
+                piped_processes=FakePipedProcessLauncher(),
                 blocking=platform.blocking,
                 network=platform.network,
                 registry=registry,

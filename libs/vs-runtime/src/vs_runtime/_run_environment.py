@@ -126,7 +126,7 @@ from vs_sandbox.api.symlink_mounts import (
     find_mount_root,
     symlink_lifecycle_hooks,
 )
-from vs_sim.api import OsProcesses
+from vs_sim.api import OsProcesses, SubprocessPipedProcessLauncher
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
@@ -934,7 +934,10 @@ class DockerEnvironment:
             # Fail before the image build when the host has no Sysbox; nothing
             # falls back to the host socket.
             require_sysbox_runtime(
-                self.config.docker or SubprocessDockerCli(processes=OsProcesses())
+                self.config.docker
+                or SubprocessDockerCli(
+                    processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+                )
             )
             toolchains.add(CONTAINER_RUNTIME_TOOLCHAIN)
             log(DOCKER_IN_DOCKER_NOTICE)
@@ -1017,7 +1020,10 @@ class DockerEnvironment:
         )
         reaper(
             run_id,
-            docker=self.config.docker or SubprocessDockerCli(processes=OsProcesses()),
+            docker=self.config.docker
+            or SubprocessDockerCli(
+                processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+            ),
             log=log,
         )
 

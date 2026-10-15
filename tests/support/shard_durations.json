@@ -507,7 +507,7 @@
  "tests/e2e/test_live_instances_e2e.py": 0.59,
  "tests/e2e/test_nvidia_smi_telemetry.py": 0.06,
  "tests/e2e/test_operator_isolation_e2e.py": 0.0,
- "tests/e2e/test_popen_process_contract.py": 0.07,
+ "tests/e2e/test_piped_stoppable_process_contract.py": 0.07,
  "tests/e2e/test_profiler_capture_processes_e2e.py": 3.14,
  "tests/e2e/test_profiler_mcp_capture_e2e.py": 1.5,
  "tests/e2e/test_relay.py": 2.22,

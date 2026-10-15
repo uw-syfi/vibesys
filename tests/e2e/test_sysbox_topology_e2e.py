@@ -33,7 +33,7 @@ from vs_sandbox.api import (
     DockerSandbox,
     SubprocessDockerCli,
 )
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads
+from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     import subprocess
@@ -99,7 +99,9 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
             clock=MonotonicClock(),
         ),
         docker_in_docker=True,
-        docker=SubprocessDockerCli(processes=OsProcesses()),
+        docker=SubprocessDockerCli(
+            processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+        ),
         threads=OsThreads(),
     )
 

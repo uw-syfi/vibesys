@@ -3,7 +3,7 @@
 ``FakeStoppableProcess`` follows a script (how long it works, how it answers ``SIGTERM``)
 on ``SimThreads``' virtual clock, so a 30 s grace period costs nothing and every schedule
 seed explores another interleaving of the process, the caller's cancel and the timeout.
-The same contract the real ``PopenProcess`` passes (``tests/e2e``) holds for the Fake.
+The same contract the real ``PipedStoppableProcess`` passes (``tests/e2e``) holds for the Fake.
 """
 
 from __future__ import annotations

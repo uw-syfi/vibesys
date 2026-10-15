@@ -14,7 +14,7 @@ from vs_sandbox.api import (
     SandboxKind,
 )
 from vs_sandbox.api.testing import FakeGpuTelemetry, ScriptedDockerCli
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, SimThreads
 
 
 def test_cpu_only_control_plane_docker_skips_gpu_runtime(
@@ -22,7 +22,13 @@ def test_cpu_only_control_plane_docker_skips_gpu_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     docker = recording_docker_cli()
-    backend = CudaBackend(tmp_path, docker=docker, clock=ManualClock(), threads=SimThreads())
+    backend = CudaBackend(
+        tmp_path,
+        docker=docker,
+        clock=ManualClock(),
+        threads=SimThreads(),
+        launcher=FakePipedProcessLauncher(),
+    )
     pick_device = MagicMock()
     monkeypatch.setattr("vs_sandbox.cuda_backend.pick_gpu", pick_device)
 
@@ -43,7 +49,11 @@ def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     backend = CudaBackend(
-        tmp_path, clock=ManualClock(), threads=SimThreads(), docker=ScriptedDockerCli()
+        tmp_path,
+        clock=ManualClock(),
+        threads=SimThreads(),
+        docker=ScriptedDockerCli(),
+        launcher=FakePipedProcessLauncher(),
     )
 
     sandbox = backend.make_sandbox(
@@ -73,7 +83,13 @@ def test_ephemeral_setup_sandbox_is_not_restarted_on_reselection(
 
 def test_docker_forwards_resources_to_the_sandbox(tmp_path: Path) -> None:
     docker = recording_docker_cli()
-    backend = CudaBackend(tmp_path, docker=docker, clock=ManualClock(), threads=SimThreads())
+    backend = CudaBackend(
+        tmp_path,
+        docker=docker,
+        clock=ManualClock(),
+        threads=SimThreads(),
+        launcher=FakePipedProcessLauncher(),
+    )
     resource = HostResource(tmp_path / "history", HostResourceAccess.READ_ONLY, "history")
 
     sandbox = backend.make_sandbox(
@@ -96,6 +112,7 @@ def test_ensure_accelerator_available_rejects_a_host_with_no_gpu(tmp_path: Path)
         clock=ManualClock(),
         threads=SimThreads(),
         docker=ScriptedDockerCli(),
+        launcher=FakePipedProcessLauncher(),
     )
 
     with pytest.raises(CudaAcceleratorUnavailableError, match="NVIDIA GPU"):
@@ -110,6 +127,7 @@ def test_ensure_accelerator_available_accepts_a_host_with_a_gpu(tmp_path: Path) 
         clock=ManualClock(),
         threads=SimThreads(),
         docker=ScriptedDockerCli(),
+        launcher=FakePipedProcessLauncher(),
     )
 
     backend.ensure_accelerator_available()  # must not raise
@@ -126,6 +144,7 @@ def test_ensure_accelerator_available_trusts_a_pinned_cuda_visible_devices(
         clock=ManualClock(),
         threads=SimThreads(),
         docker=ScriptedDockerCli(),
+        launcher=FakePipedProcessLauncher(),
     )
 
     backend.ensure_accelerator_available()  # must not raise

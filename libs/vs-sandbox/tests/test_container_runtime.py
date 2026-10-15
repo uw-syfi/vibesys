@@ -25,7 +25,7 @@ from vs_sandbox.api import (
 )
 from vs_sandbox.api.testing import FakeDockerEngine, ScriptedDockerCli
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import examples
+from vs_sim.api.testing import FakePipedProcessLauncher, examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -51,6 +51,7 @@ def _engine(
         agent_ids=(os.getuid(), os.getgid()),
         runtimes=runtimes,
         nested_daemons_start=nested_daemons_start,
+        launcher=FakePipedProcessLauncher(),
     )
 
 

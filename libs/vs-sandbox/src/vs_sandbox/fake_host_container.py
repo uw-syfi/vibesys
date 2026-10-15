@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Threads
+    from vs_sim.api import PipedProcessLauncher, Threads
 
 
 class HostExecutedContainer(LocalShellRunner):
@@ -45,10 +45,12 @@ class HostExecutedContainerBackend(LocalBackend):
         log: Callable[[str], None] | None = None,
         image: str | None = None,
         threads: Threads,
+        launcher: PipedProcessLauncher,
     ) -> None:
         """Report a base image so Docker run environments can derive an agent image.
 
-        *threads* is the clock the host-run commands' timeouts are measured on. No
+        *threads* is the clock the host-run commands' timeouts are measured on and
+        *launcher* starts their shells. No
         ``docker`` command runs, so the backend's Docker CLI refuses every call.
         """
         super().__init__(
@@ -58,8 +60,10 @@ class HostExecutedContainerBackend(LocalBackend):
             image=image or "fake-backend-image",
             docker=ScriptedDockerCli(),
             threads=threads,
+            launcher=launcher,
         )
         self._threads = threads
+        self._launcher = launcher
 
     def make_sandbox(  # noqa: PLR0913  # lint-waiver: LW-012001 [PLR0913]; mirrors the structural ComputeBackendImpl.make_sandbox signature this Fake substitutes for.
         self,
@@ -100,7 +104,11 @@ class HostExecutedContainerBackend(LocalBackend):
         del bind_mounts, log_path, attach_accelerator, ephemeral
         del container_image, auth_files, resources, docker_in_docker, same_path_workspace, run_id
         container = HostExecutedContainer(
-            host_workspace, env=extra_env, inherit_env=True, threads=self._threads
+            host_workspace,
+            env=extra_env,
+            inherit_env=True,
+            threads=self._threads,
+            launcher=self._launcher,
         )
         SandboxLifecycle(lifecycle_hooks).before_ready(container)
         return container

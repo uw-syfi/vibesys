@@ -36,7 +36,7 @@ from vs_sandbox.docker_states import (
 from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
-from vs_sandbox.process_execution import PopenProcess
+from vs_sandbox.process_execution import PipedStoppableProcess
 from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
@@ -1000,7 +1000,9 @@ class DockerSandbox(WorkspaceSandbox):
             default_timeout=self._default_timeout,
             cancel=cancel,
             max_output_chars=self._max_output_bytes,
-            launch=lambda: PopenProcess(self._docker.spawn(exec_cmd)),
+            launch=lambda: PipedStoppableProcess(
+                self._docker.spawn(exec_cmd), threads=self._threads
+            ),
             signal_remote=lambda number: self._signal_exec(container_id, exec_id, number),
             threads=self._threads,
         )

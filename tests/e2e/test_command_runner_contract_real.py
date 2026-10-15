@@ -36,7 +36,13 @@ from tests.support.command_runner_contract import (
 from vs_agent.api.images import agent_image
 from vs_sandbox.api import CommandRunner, DockerSandbox, LocalShellRunner, SubprocessDockerCli
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, Threads
+from vs_sim.api import (
+    MonotonicClock,
+    OsProcesses,
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    Threads,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -129,7 +135,13 @@ class TestLocalShellRunner(CommandRunnerContract):
     @pytest.fixture
     def harness(self, tmp_path: Path) -> Iterator[Harness]:
         harness = _ShellHarness(
-            LocalShellRunner(tmp_path, max_output_chars=CAP, threads=OsThreads()), tmp_path
+            LocalShellRunner(
+                tmp_path,
+                max_output_chars=CAP,
+                threads=OsThreads(),
+                launcher=SubprocessPipedProcessLauncher(),
+            ),
+            tmp_path,
         )
         try:
             yield harness
@@ -150,7 +162,9 @@ class TestDockerSandboxOnFakeDaemon(CommandRunnerContract):
             agent_uid=os.getuid(),
             agent_gid=os.getgid(),
             docker=FakeDockerEngine(
-                tmp_path / "engine-state", agent_ids=(os.getuid(), os.getgid())
+                tmp_path / "engine-state",
+                agent_ids=(os.getuid(), os.getgid()),
+                launcher=SubprocessPipedProcessLauncher(),
             ),
             threads=OsThreads(),
         )
@@ -180,7 +194,9 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
                 _DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock()
             ),
             max_output_bytes=CAP,
-            docker=SubprocessDockerCli(processes=OsProcesses()),
+            docker=SubprocessDockerCli(
+                processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+            ),
             threads=OsThreads(),
         )
         sandbox.start()

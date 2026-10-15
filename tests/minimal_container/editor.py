@@ -43,7 +43,13 @@ from vs_sandbox.api import (
     create_compute_backend,
 )
 from vs_sandbox.api.slurm import load_slurm_operator_settings
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SystemClock
+from vs_sim.api import (
+    MonotonicClock,
+    OsProcesses,
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    SystemClock,
+)
 from vs_sim.api.testing import NO_PROCESSES
 
 if TYPE_CHECKING:
@@ -181,8 +187,11 @@ def make_backend(base: Base, log_dir: Path) -> ComputeBackendImpl:
         log=lambda _: None,
         image=base.image,
         clock=SystemClock(),
-        docker=SubprocessDockerCli(processes=OsProcesses()),
+        docker=SubprocessDockerCli(
+            processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
+        ),
         threads=OsThreads(),
+        launcher=SubprocessPipedProcessLauncher(),
     )
 
 

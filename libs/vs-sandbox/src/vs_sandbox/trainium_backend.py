@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
     from vs_sandbox.host_resources import HostResource
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, PipedProcessLauncher, Threads
 
 # AWS Neuron DLC.  Tag chosen to match the host's Neuron tools (2.30):
 # PyTorch 2.9 / Python 3.12 / Neuron SDK 2.30 on Ubuntu 24.04.  Carries
@@ -84,6 +84,7 @@ class TrainiumBackend:
         accelerator_discovery: AcceleratorDiscovery | None = None,
         docker: DockerCli,
         threads: Threads,
+        launcher: PipedProcessLauncher,
         clock: Clock,
     ) -> None:
         """Configure Trainium execution with its log directory and image override."""
@@ -93,6 +94,7 @@ class TrainiumBackend:
         self.image = image or _DEFAULT_IMAGE
         self._docker = docker
         self._threads = threads
+        self._launcher = launcher
         # No per-device selection; kept for protocol parity (read by
         # run resources for logging/pinning).
         self.selected_device = None
@@ -161,6 +163,7 @@ class TrainiumBackend:
                 env=local_env,
                 lifecycle_hooks=lifecycle_hooks,
                 threads=self._threads,
+                launcher=self._launcher,
             )
 
         if kind is SandboxKind.DOCKER:

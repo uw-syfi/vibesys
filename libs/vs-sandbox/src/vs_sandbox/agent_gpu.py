@@ -26,10 +26,8 @@ from pydantic import (
 
 from vs_decode.api import decode_json
 from vs_sim.api import (
-    MergedOutputProcess,
-    MergedOutputProcessLauncher,
     OsThreads,
-    SubprocessMergedOutputProcessLauncher,
+    SubprocessPipedProcessLauncher,
     SubprocessProbe,
 )
 
@@ -37,13 +35,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
-    from vs_sim.api import CommandProbe, Event, PopenFactory, Threads
+    from vs_sim.api import CommandProbe, Event, PipedProcess, PipedProcessLauncher, Threads
 
 _UNLIMITED = "unlimited"
 _WINDOWS_TIMEOUT_SECONDS = 30
 _CANCEL_GRACE_SECONDS = 30
 _SCANCEL_TIMEOUT_SECONDS = 60
-_READ_BYTES = 65_536
+_READ_CHARACTERS = 65_536
 _MAX_QUEUE_MINUTES = 60 * 24 * 365
 
 
@@ -307,29 +305,22 @@ class AgentGpuLauncher:
     names how to reach the Slurm binaries in one place. *processes* owns the
     local process group and *probe* runs the scheduler report and ``scancel``;
     tests inject both to drive the lifecycle without a cluster or OS process.
-    The legacy *popen* seam remains accepted and is adapted to *processes*.
     """
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-189701 [PLR0913]; preserve the published popen and probe parameters while exposing the process and thread interfaces needed for deterministic lifecycle tests.
-        # > Hiding popen in kwargs would silently weaken the constructor contract;
-        # > bundling independent process and thread effects would couple their Fakes.
+    def __init__(
         self,
         config: AgentGpuConfig,
         shell_command: Sequence[str],
         *,
-        popen: PopenFactory | None = None,
         probe: CommandProbe | None = None,
-        processes: MergedOutputProcessLauncher | None = None,
+        processes: PipedProcessLauncher | None = None,
         threads: Threads | None = None,
     ) -> None:
         """Bind the operator configuration and the process boundary."""
         self._config = config
         self._shell = tuple(shell_command)
         self._probe: CommandProbe = probe or SubprocessProbe()
-        if popen is not None and processes is not None:
-            message = "popen and processes are alternative process-launcher seams"
-            raise ValueError(message)
-        self._processes = processes or SubprocessMergedOutputProcessLauncher(popen)
+        self._processes = processes or SubprocessPipedProcessLauncher()
         self._threads = threads or OsThreads()
 
     def run(
@@ -359,6 +350,7 @@ class AgentGpuLauncher:
             (*self._shell, shlex.join(argv)),
             cwd=command.cwd,
             env=dict(command.env),
+            merge_stderr=True,
         )
         finished = self._threads.event()
         watcher = self._threads.spawn(
@@ -367,16 +359,16 @@ class AgentGpuLauncher:
             daemon=True,
         )
         try:
-            while chunk := process.read(_READ_BYTES):
-                write(chunk)
-            return process.wait()
+            while chunk := process.stdout.read(_READ_CHARACTERS):
+                write(chunk.encode())
+            return process.wait(None)
         finally:
             finished.set()
             watcher.join()
 
     def _cancel_when_asked(
         self,
-        process: MergedOutputProcess,
+        process: PipedProcess,
         job_name: str,
         cancel: Event,
         finished: Event,
