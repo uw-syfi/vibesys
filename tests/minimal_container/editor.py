@@ -30,6 +30,7 @@ from vs_agent.api import MCPServerSpec, containerize_server
 from vs_mcp.api import StdioServerDescriptor
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentConfig,
+    EnvironmentSystem,
     RunEnvironmentRequest,
     RunEnvironmentSession,
     SlurmEnvironment,
@@ -49,6 +50,7 @@ from vs_sim.api import (
     OsThreads,
     SubprocessPipedProcessLauncher,
     SystemClock,
+    UnixNetwork,
 )
 from vs_sim.api.testing import NO_PROCESSES, ScriptedProbe
 
@@ -256,7 +258,7 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
         profiler_support_name=definition.support_name,
         profiler_support_extra=profiler_support_extra(definition),
         clock=MonotonicClock(),
-        slurm_processes=NO_PROCESSES,
+        system=_real_system(),
     )
     environment = SlurmEnvironment(
         load_slurm_operator_settings(_slurm_config(directory)),
@@ -279,3 +281,14 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
             ids = docker("ps", "-aq", "--filter", f"label={RUN_ID_LABEL}={run_id}").stdout.split()
             if ids:
                 docker("rm", "-f", "-v", *ids, check=False)
+
+
+def _real_system() -> EnvironmentSystem:
+    """The host's own threads, sockets and processes; this test runs no Slurm program."""
+    return EnvironmentSystem(
+        threads=OsThreads(),
+        network=UnixNetwork(),
+        processes=OsProcesses(),
+        launcher=SubprocessPipedProcessLauncher(),
+        slurm_processes=NO_PROCESSES,
+    )

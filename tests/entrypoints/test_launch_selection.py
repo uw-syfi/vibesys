@@ -26,7 +26,7 @@ from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -120,6 +120,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
     settings = FalseyLaunchSettings(
         timing=production_timing(),
         processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
         piped_processes=FakePipedProcessLauncher(),
         registry=registry,
         agent_client_factory=agents_factory,
@@ -202,6 +203,7 @@ def test_launch_wires_durable_invocation_store(tmp_path: Path, *, injected: bool
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=lambda **_kwargs: FakeAgentClient(

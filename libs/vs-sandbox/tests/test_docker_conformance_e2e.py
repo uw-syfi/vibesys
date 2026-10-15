@@ -21,6 +21,7 @@ import pytest
 from tests.support import run_test_command
 
 from vs_agent.api.images import (
+    SubprocessDockerBuildRunner,
     agent_image,
 )
 from vs_sandbox.api import SubprocessDockerCli
@@ -94,7 +95,12 @@ def test_docker_probe_enforces_the_shared_resource_contract(tmp_path: Path) -> N
     unlisted_path.write_text("do not read\n")
     resources = (HostResource(readonly_path, HostResourceAccess.READ_ONLY, "conformance fixture"),)
 
-    image = agent_image(_DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock())
+    image = agent_image(
+        _DOCKER_BASE_IMAGE,
+        timeout=_DOCKER_BUILD_TIMEOUT_S,
+        command_runner=_real_builds(),
+        clock=MonotonicClock(),
+    )
     sandbox = DockerSandbox(
         host_workspace=str(workspace),
         image=image,
@@ -157,7 +163,12 @@ def test_a_sandbox_container_exits_on_sigterm_so_stop_needs_no_sigkill(tmp_path:
     """
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    image = agent_image(_DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock())
+    image = agent_image(
+        _DOCKER_BASE_IMAGE,
+        timeout=_DOCKER_BUILD_TIMEOUT_S,
+        command_runner=_real_builds(),
+        clock=MonotonicClock(),
+    )
     sandbox = DockerSandbox(
         host_workspace=str(workspace),
         image=image,
@@ -186,3 +197,10 @@ def test_a_sandbox_container_exits_on_sigterm_so_stop_needs_no_sigkill(tmp_path:
         assert inspected.stdout.strip() == "143"
     finally:
         sandbox.stop()
+
+
+def _real_builds() -> SubprocessDockerBuildRunner:
+    """Run the image builds with the host's own ``docker``."""
+    return SubprocessDockerBuildRunner(
+        threads=OsThreads(), processes=SubprocessPipedProcessLauncher()
+    )

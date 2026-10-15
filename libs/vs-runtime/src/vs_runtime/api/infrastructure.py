@@ -46,6 +46,7 @@ from vs_runtime._environment_startup import (
     EnvironmentStartupSink,
     EnvironmentStartupStage,
 )
+from vs_runtime._environment_system import EnvironmentSystem
 from vs_runtime._evaluator_packages import (
     PACKAGE_ROOT_TOKEN,
     TOOL_TOKEN_PREFIX,
@@ -454,6 +455,7 @@ __all__ = [
     "EnvironmentStartup",
     "EnvironmentStartupSink",
     "EnvironmentStartupStage",
+    "EnvironmentSystem",
     "EvaluatorPackageError",
     "EvaluatorPackageMetadata",
     "EvaluatorPackageNotFoundError",

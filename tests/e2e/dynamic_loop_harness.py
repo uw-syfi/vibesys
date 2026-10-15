@@ -659,7 +659,7 @@ def run_request(  # noqa: PLR0913
             processes=REAL_PROCESSES,
             piped_processes=SubprocessPipedProcessLauncher(),
             git_repository=None,
-            slurm_processes=slurm_processes,
+            slurm_processes=REAL_PROCESSES if slurm_processes is None else slurm_processes,
             state_stores=state_stores,
         )
     )

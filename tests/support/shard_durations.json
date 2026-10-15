@@ -378,7 +378,7 @@
  "libs/vs-sandbox/tests/test_feature_dockerfile.py": 0.39,
  "libs/vs-sandbox/tests/test_feature_image.py": 0.25,
  "libs/vs-sandbox/tests/test_gpu_monitor.py": 0.41,
- "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py": 0.0,
+ "tests/e2e/test_host_command_bridge_docker_e2e.py": 0.0,
  "libs/vs-sandbox/tests/test_host_command_broker.py": 0.41,
  "libs/vs-sandbox/tests/test_host_job_confinement.py": 0.01,
  "libs/vs-sandbox/tests/test_host_resource_importer.py": 0.01,

@@ -421,7 +421,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         def recover_existing_run() -> None:
             """Recover external resources while the project-run owner holds its host lock."""
             with boot_trace.span("reap_orphans"):
-                environment.reap_orphans(run_id, log=buffered_logs.append)
+                environment.reap_orphans(
+                    run_id, system=integration.system, log=buffered_logs.append
+                )
             with boot_trace.span("workspace_repair"):
                 workspace_files.repair()
 
@@ -587,7 +589,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 cli_provider=resolved_cli_provider,
                 run_id=run_id,
                 clock=clock,
-                slurm_processes=integration.slurm_processes,
+                system=integration.system,
                 objective=agent_objective,
                 objective_document=project_resources.objective_document,
                 accuracy_command=accuracy_command,

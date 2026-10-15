@@ -16,6 +16,7 @@ from vs_runtime.api.infrastructure import (
     SharedAgentEnvironmentConflictError,
     open_agent_execution_environment,
 )
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import (
     EnvironmentBindMount,
     HostResource,
@@ -23,7 +24,7 @@ from vs_sandbox.api import (
     ProjectPathPolicy,
 )
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from vs_sandbox.api import CommandRunner
@@ -71,7 +72,7 @@ def _request(tmp_path: Path) -> RunEnvironmentRequest:
         environment_bind_mounts=(EnvironmentBindMount(tmp_path / "base", "/base", read_only=True),),
         project_path_policy=ProjectPathPolicy(),
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
 

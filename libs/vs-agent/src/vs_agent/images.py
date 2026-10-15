@@ -35,12 +35,10 @@ from vs_decode.api import decode_json
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
 from vs_sim.api import (
     Clock,
-    OsThreads,
     PipedProcess,
     PipedProcessLauncher,
     ProcessTimeoutError,
     StreamingCommand,
-    SubprocessPipedProcessLauncher,
     Threads,
 )
 
@@ -598,11 +596,11 @@ class SubprocessDockerBuildRunner:
         self,
         streaming: StreamingCommand | None = None,
         *,
-        threads: Threads | None = None,
-        processes: PipedProcessLauncher | None = None,
+        threads: Threads,
+        processes: PipedProcessLauncher,
         cleanup_timeout: float = _PROCESS_SETTLE_TIMEOUT_SECONDS,
     ) -> None:
-        """Use OS effects by default, retaining the positional streaming test seam.
+        """Run Docker through *processes* on *threads*, keeping the positional streaming seam.
 
         An explicitly injected legacy ``streaming`` command remains active for
         calls that request stderr progress. Production execution and calls
@@ -611,8 +609,8 @@ class SubprocessDockerBuildRunner:
         if not math.isfinite(cleanup_timeout) or cleanup_timeout < 0:
             message = "Docker process cleanup timeout must be finite and nonnegative"
             raise ValueError(message)
-        self._threads = threads or OsThreads()
-        self._processes = processes or SubprocessPipedProcessLauncher()
+        self._threads = threads
+        self._processes = processes
         self._streaming = streaming
         self._cleanup_timeout = cleanup_timeout
 
@@ -801,7 +799,7 @@ def build_task_image(  # noqa: PLR0913
     dockerfile_path: Path,
     *,
     base_image: str | None = None,
-    command_runner: DockerBuildRunner | None = None,
+    command_runner: DockerBuildRunner,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
     clock: Clock,
@@ -836,11 +834,12 @@ def build_task_image(  # noqa: PLR0913
     ``clock`` measures the budget.
     """
     dockerfile = _validated_task_dockerfile(dockerfile_path, timeout)
-    runner = command_runner or SubprocessDockerBuildRunner()
     return _build_task_image(
         dockerfile,
         base_image=base_image,
-        build=_BuildRun(runner=runner, timeout=timeout, on_progress=on_progress, clock=clock),
+        build=_BuildRun(
+            runner=command_runner, timeout=timeout, on_progress=on_progress, clock=clock
+        ),
     ).image_id
 
 
@@ -966,7 +965,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     *,
     task_dockerfile: Path | None = None,
     features: Sequence[FeatureRef] = (),
-    command_runner: DockerBuildRunner | None = None,
+    command_runner: DockerBuildRunner,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
     clock: Clock,
@@ -1005,8 +1004,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
         message = "agent image build timeout must be positive"
         raise ValueError(message)
 
-    runner = command_runner or SubprocessDockerBuildRunner()
-    build = _BuildRun(runner=runner, timeout=timeout, on_progress=on_progress, clock=clock)
+    build = _BuildRun(runner=command_runner, timeout=timeout, on_progress=on_progress, clock=clock)
     if task_dockerfile is not None:
         dockerfile = _validated_task_dockerfile(task_dockerfile, timeout)
         base = _build_task_image(
@@ -1255,7 +1253,7 @@ def push_agent_image(
     image_id: str,
     *,
     repository: str = DEFAULT_AGENT_IMAGE_REGISTRY,
-    command_runner: DockerBuildRunner | None = None,
+    command_runner: DockerBuildRunner,
     timeout: float = _DEFAULT_PUSH_TIMEOUT_SECONDS,
 ) -> str:
     """Tag, push, and resolve the pullable digest reference for *image_id*.
@@ -1287,26 +1285,25 @@ def push_agent_image(
         message = "agent image push timeout must be positive"
         raise ValueError(message)
 
-    runner = command_runner or SubprocessDockerBuildRunner()
     cwd = Path.cwd()
     tag = f"{repository}:{image_id.removeprefix('sha256:')[:_SHORT_ID_LENGTH]}"
 
     tag_result = _run_registry_command(
-        runner, ("docker", "tag", image_id, tag), cwd=cwd, timeout=timeout, action="tagging"
+        command_runner, ("docker", "tag", image_id, tag), cwd=cwd, timeout=timeout, action="tagging"
     )
     if tag_result.returncode != 0:
         detail = tag_result.failure_diagnostic("docker tag failed")
         raise ImagePushError.tag_failed(image_id, tag, tag_result.returncode, detail)
 
     push_result = _run_registry_command(
-        runner, ("docker", "push", tag), cwd=cwd, timeout=timeout, action="pushing"
+        command_runner, ("docker", "push", tag), cwd=cwd, timeout=timeout, action="pushing"
     )
     if push_result.returncode != 0:
         detail = push_result.failure_diagnostic("docker push failed")
         raise ImagePushError.push_failed(tag, push_result.returncode, detail)
 
     inspect_result = _run_registry_command(
-        runner,
+        command_runner,
         ("docker", "inspect", "--format", "{{json .RepoDigests}}", tag),
         cwd=cwd,
         timeout=timeout,
@@ -1338,7 +1335,7 @@ def push_agent_image(
 def agent_image_is_pushed(
     reference: str,
     *,
-    command_runner: DockerBuildRunner | None = None,
+    command_runner: DockerBuildRunner,
     timeout: float = _DEFAULT_VERIFY_TIMEOUT_SECONDS,
 ) -> bool:
     """Return whether *reference* (a ``repository@sha256:...`` digest) is live in its registry.
@@ -1351,9 +1348,8 @@ def agent_image_is_pushed(
     error reporting is what surfaces which of those it was when a caller
     acts on a ``False`` result by trying to push.
     """
-    runner = command_runner or SubprocessDockerBuildRunner()
     try:
-        result = runner.run(
+        result = command_runner.run(
             ("docker", "manifest", "inspect", reference), cwd=Path.cwd(), timeout=timeout
         )
     except (FileNotFoundError, ProcessTimeoutError):
@@ -1365,7 +1361,7 @@ def ensure_pushed(
     image_id: str,
     *,
     repository: str = DEFAULT_AGENT_IMAGE_REGISTRY,
-    command_runner: DockerBuildRunner | None = None,
+    command_runner: DockerBuildRunner,
     timeout: float = _DEFAULT_PUSH_TIMEOUT_SECONDS,
 ) -> str:
     """Return a pullable ``repository@sha256:...`` reference for *image_id*, pushing only if needed.
@@ -1385,15 +1381,16 @@ def ensure_pushed(
             the freshly pushed digest as present. The message names the
             digest that could not be verified.
     """
-    runner = command_runner or SubprocessDockerBuildRunner()
-    cached = _cached_repo_digest(image_id, repository, runner=runner, timeout=timeout)
-    if cached is not None and agent_image_is_pushed(cached, command_runner=runner, timeout=timeout):
+    cached = _cached_repo_digest(image_id, repository, runner=command_runner, timeout=timeout)
+    if cached is not None and agent_image_is_pushed(
+        cached, command_runner=command_runner, timeout=timeout
+    ):
         return cached
 
     pushed = push_agent_image(
-        image_id, repository=repository, command_runner=runner, timeout=timeout
+        image_id, repository=repository, command_runner=command_runner, timeout=timeout
     )
-    if not agent_image_is_pushed(pushed, command_runner=runner, timeout=timeout):
+    if not agent_image_is_pushed(pushed, command_runner=command_runner, timeout=timeout):
         raise ImagePushError.digest_not_visible(pushed)
     return pushed
 

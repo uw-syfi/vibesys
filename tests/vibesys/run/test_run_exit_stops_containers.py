@@ -44,7 +44,7 @@ from vs_project.api import OrchestrationDescriptor, Project, ProjectStateError
 from vs_sandbox.api import RUN_ID_LABEL, DockerSandbox
 from vs_sandbox.api.testing import FakeContainer, FakeDockerEngine, HostExecutedContainerBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher, FakeSignalSource
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, FakeSignalSource
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -237,6 +237,7 @@ def _execute(
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=lambda **_: FakeAgentClient(

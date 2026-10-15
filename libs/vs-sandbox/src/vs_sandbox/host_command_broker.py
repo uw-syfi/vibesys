@@ -23,7 +23,7 @@ import contextlib
 import json
 import logging
 import secrets
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -36,13 +36,12 @@ from vs_sandbox.agent_gpu import (
     GpuLauncher,
 )
 from vs_sandbox.host_command_client import SOCKET_ENV, TOKEN_ENV
-from vs_sim.api import Network, OsThreads, Threads, UnixNetwork
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
     from vs_sandbox.job_confinement import JobConfinement
-    from vs_sim.api import Connection, Event, Listener, Worker
+    from vs_sim.api import Connection, Event, Listener, Network, Threads, Worker
 
 _MAX_FRAME_BYTES = 4 * 1024 * 1024
 # How long close() waits for cancelled jobs to be torn down (their scancel round trips).
@@ -178,8 +177,8 @@ class GpuCommands:
 class BrokerTransport:
     """The I/O a broker runs on: where its socket lives and the threads that serve it."""
 
-    network: Network = field(default_factory=UnixNetwork)
-    threads: Threads = field(default_factory=OsThreads)
+    network: Network
+    threads: Threads
 
 
 @dataclass(frozen=True, slots=True)
@@ -261,8 +260,7 @@ class HostCommandBroker:
 
     *roots* bound where a command may run. *gpu* is the operation the run offers;
     a broker without it refuses every request by name. *transport* is
-    where the socket is bound and what runs the accept loop and the handlers;
-    production uses the defaults, tests pass simulators.
+    where the socket is bound and what runs the accept loop and the handlers.
     """
 
     def __init__(
@@ -270,13 +268,12 @@ class HostCommandBroker:
         socket_path: Path,
         *,
         roots: RunRoots,
+        transport: BrokerTransport,
         gpu: GpuCommands | None = None,
-        transport: BrokerTransport | None = None,
     ) -> None:
         """Bind the private socket, the run's roots, and the operations it offers."""
         self.socket_path = socket_path
         self.token = secrets.token_urlsafe(32)
-        transport = transport or BrokerTransport()
         self._network = transport.network
         self._threads = transport.threads
         self._workspaces = tuple(path.resolve() for path in roots.workspaces)

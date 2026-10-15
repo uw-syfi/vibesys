@@ -40,12 +40,11 @@ from vs_runtime.api import (
     RuntimeContractError,
     Workspace,
 )
-from vs_runtime.api.testing import FakeWorkspace
+from vs_runtime.api.testing import FakeWorkspace, idle_environment_system
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import (
-    NO_PROCESSES,
     ManualClock,
     SimThreads,
     wait_or_fail,
@@ -190,7 +189,7 @@ def _run_project(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> _Result:
@@ -408,7 +407,7 @@ def test_the_adapter_evaluates_a_task_and_reports_each_gate_as_events(tmp_path: 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> None:
@@ -448,7 +447,7 @@ def test_a_docker_gate_runs_in_a_throwaway_candidate_not_the_live_root(tmp_path:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     backend = FakeComputeBackend(threads=SimThreads())
 
@@ -480,7 +479,7 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     sandbox = _BlockingEvaluationSandbox()
     backend = FakeComputeBackend(threads=SimThreads())

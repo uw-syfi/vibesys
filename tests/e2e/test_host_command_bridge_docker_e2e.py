@@ -9,7 +9,7 @@ mounted at its host path, and the client runs under the image's plain
 Skipped unless ``VIBESYS_E2E_DOCKER=1`` and ``docker`` is on PATH:
 
 ```bash
-VIBESYS_E2E_DOCKER=1 uv run pytest libs/vs-sandbox/tests/test_host_command_bridge_e2e.py -q -s
+VIBESYS_E2E_DOCKER=1 uv run pytest tests/e2e/test_host_command_bridge_docker_e2e.py -q -s
 ```
 """
 
@@ -33,10 +33,12 @@ from vs_sandbox.api.slurm import (
     HOST_COMMAND_CLIENT,
     AgentGpuConfig,
     AgentGpuLauncher,
+    BrokerTransport,
     GpuCommands,
     HostCommandBroker,
     RunRoots,
 )
+from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S
 
 if TYPE_CHECKING:
@@ -89,7 +91,14 @@ def _broker(
             "max_time_minutes": 60,
         }
     )
-    launcher = AgentGpuLauncher(config, (sys.executable, str(fake)))
+    threads = OsThreads()
+    launcher = AgentGpuLauncher(
+        config,
+        (sys.executable, str(fake)),
+        probe=SubprocessProbe(),
+        processes=SubprocessPipedProcessLauncher(),
+        threads=threads,
+    )
     env = dict(os.environ)
     workspace = tmp_path / "workspace"
     (workspace / "sub").mkdir(parents=True)
@@ -97,6 +106,7 @@ def _broker(
         tmp_path / "broker.sock",
         roots=RunRoots((workspace,)),
         gpu=GpuCommands(config, _NoConfinement(), env, launcher=launcher),
+        transport=BrokerTransport(UnixNetwork(), threads),
     )
     broker.start()
     try:

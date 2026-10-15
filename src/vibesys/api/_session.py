@@ -163,7 +163,7 @@ class _LocalRunSession:
             git=implementations.git,
             github=implementations.github,
             threads=implementations.timing.threads,
-            slurm_processes=implementations.slurm_processes,
+            system=implementations.system,
         )
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)

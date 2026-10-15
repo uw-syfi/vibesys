@@ -33,7 +33,7 @@ from tests.support.command_runner_contract import (
     Harness,
 )
 
-from vs_agent.api.images import agent_image
+from vs_agent.api.images import SubprocessDockerBuildRunner, agent_image
 from vs_sandbox.api import CommandRunner, DockerSandbox, LocalShellRunner, SubprocessDockerCli
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import (
@@ -193,7 +193,10 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
         sandbox = DockerSandbox(
             host_workspace=str(workspace),
             image=agent_image(
-                _DOCKER_BASE_IMAGE, timeout=_DOCKER_BUILD_TIMEOUT_S, clock=MonotonicClock()
+                _DOCKER_BASE_IMAGE,
+                timeout=_DOCKER_BUILD_TIMEOUT_S,
+                command_runner=_real_builds(),
+                clock=MonotonicClock(),
             ),
             max_output_bytes=CAP,
             docker=SubprocessDockerCli(
@@ -208,3 +211,10 @@ class TestDockerSandboxOnRealDaemon(CommandRunnerContract):
         finally:
             harness.close()
             sandbox.stop()
+
+
+def _real_builds() -> SubprocessDockerBuildRunner:
+    """Run the image builds with the host's own ``docker``."""
+    return SubprocessDockerBuildRunner(
+        threads=OsThreads(), processes=SubprocessPipedProcessLauncher()
+    )

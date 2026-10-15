@@ -75,6 +75,7 @@ def main(project_root: Path, slurm_config: Path) -> None:
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=REAL_PROCESSES,
             piped_processes=SubprocessPipedProcessLauncher(),
             registry=registry,
             agent_client_factory=_resumable_client,

@@ -31,10 +31,12 @@ def production_timing() -> RunTiming:
 
 def production_runs() -> Runs:
     """The in-process launcher over wall time, real threads, processes, sockets and the production lease."""
+    processes = OsProcesses()
     return default_runs(
         LaunchSettings(
             timing=production_timing(),
-            processes=OsProcesses(),
+            processes=processes,
+            slurm_processes=processes,
             piped_processes=SubprocessPipedProcessLauncher(),
             blocking=ThreadBlockingRunner(),
             network=UnixNetwork(),

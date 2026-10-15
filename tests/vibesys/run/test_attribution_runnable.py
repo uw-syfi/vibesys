@@ -27,7 +27,7 @@ from launch import LaunchSettings, create_session, validate_run_request
 from vibesys.api import Config, ConfigurationError, OrchestrationDescriptor, RunRequest
 from vibesys.api.request import RunEnvironmentSpec, load_task
 from vs_sim.api import ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher, examples
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -170,6 +170,7 @@ def test_session_construction_refuses_a_host_command_whose_interpreter_is_missin
             settings=LaunchSettings(
                 timing=production_timing(),
                 processes=REAL_PROCESSES,
+                slurm_processes=NO_PROCESSES,
                 piped_processes=FakePipedProcessLauncher(),
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),

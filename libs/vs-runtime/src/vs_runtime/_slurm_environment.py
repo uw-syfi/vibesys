@@ -12,6 +12,7 @@ from vs_runtime._agent_gpu_commands import (
     AGENT_GPU_LAUNCHER,
     agent_gpu_commands,
     agent_gpu_env,
+    agent_gpu_launcher,
 )
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
 from vs_runtime._container_runtime_policy import reject_docker_in_docker
@@ -47,6 +48,7 @@ from vs_runtime._trusted_evaluation_preparation import (
 from vs_sandbox.api import HostResource, HostResourceAccess, SandboxSession
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
+    BrokerTransport,
     GpuCommands,
     HostCommandBroker,
     RunRoots,
@@ -237,7 +239,7 @@ class _AgentGpuMode:
             self.config,
             workspace=request.workspace,
             project_path_policy=request.project_path_policy,
-            shell_command=self.shell_command,
+            launcher=agent_gpu_launcher(self.config, self.shell_command, request.system),
             confinement=confinement,
         )
 
@@ -583,6 +585,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             # Only this session's own workspace: with parallel candidates each session has
             # its own broker, and none may run a command in another candidate's worktree.
             roots=RunRoots((request.workspace,)),
+            transport=BrokerTransport(request.system.network, request.system.threads),
             gpu=gpu,
         )
         broker.start()
@@ -608,7 +611,7 @@ def _start_transport_broker(
     broker = SlurmProcessBroker(
         policy,
         new_broker_socket_path(),
-        processes=request.slurm_processes,
+        processes=request.system.slurm_processes,
     )
     broker.start()
     brokers.append(broker)

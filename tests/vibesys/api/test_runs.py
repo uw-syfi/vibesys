@@ -35,7 +35,7 @@ from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import Project, ProjectStateError, validate_run_id
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, SimThreads, examples
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -81,6 +81,7 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=_fake_agent,
@@ -179,6 +180,7 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=_fake_agent,

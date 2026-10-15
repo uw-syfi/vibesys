@@ -590,6 +590,7 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults, stall: _Stall | None = None)
             LaunchSettings(
                 timing=RunTiming(platform.clock, _LEASE_S, threads),
                 processes=platform.processes,
+                slurm_processes=platform.processes,
                 piped_processes=FakePipedProcessLauncher(),
                 blocking=platform.blocking,
                 network=platform.network,

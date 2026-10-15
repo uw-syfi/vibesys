@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support import run_test_command
 
-from vs_agent.api.images import agent_image
+from vs_agent.api.images import SubprocessDockerBuildRunner, agent_image
 from vs_runtime.api.infrastructure import image_features
 from vs_sandbox.api import (
     AGENT_HOME,
@@ -96,6 +96,7 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
             _BASE_IMAGE,
             features=image_features({CONTAINER_RUNTIME_TOOLCHAIN}),
             timeout=_BUILD_TIMEOUT_S,
+            command_runner=_real_builds(),
             clock=MonotonicClock(),
         ),
         docker_in_docker=True,
@@ -146,3 +147,10 @@ def _host_container_names(project: str) -> str:
         check=True,
     )
     return listing.stdout.strip()
+
+
+def _real_builds() -> SubprocessDockerBuildRunner:
+    """Run the image builds with the host's own ``docker``."""
+    return SubprocessDockerBuildRunner(
+        threads=OsThreads(), processes=SubprocessPipedProcessLauncher()
+    )

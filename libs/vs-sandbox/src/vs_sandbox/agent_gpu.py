@@ -25,11 +25,6 @@ from pydantic import (
 )
 
 from vs_decode.api import decode_json
-from vs_sim.api import (
-    OsThreads,
-    SubprocessPipedProcessLauncher,
-    SubprocessProbe,
-)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -238,15 +233,11 @@ def choose_partition(
     return fits[0] if fits else config.partitions[0]
 
 
-def read_windows(
-    config: AgentGpuConfig, probe: CommandProbe | None = None
-) -> Mapping[str, object] | None:
+def read_windows(config: AgentGpuConfig, probe: CommandProbe) -> Mapping[str, object] | None:
     """Run the operator's window report command, or return ``None`` if unavailable."""
     if config.windows_command is None:
         return None
-    completed = (probe or SubprocessProbe()).run(
-        config.windows_command, timeout_seconds=_WINDOWS_TIMEOUT_SECONDS
-    )
+    completed = probe.run(config.windows_command, timeout_seconds=_WINDOWS_TIMEOUT_SECONDS)
     if completed is None or completed.returncode != 0:
         return None
     report = decode_json(
@@ -314,8 +305,8 @@ class AgentGpuLauncher:
     ``srun`` and ``scancel`` run through *shell_command*, the local transport's
     shell (a login-container wrapper may precede ``bash -c``), so the operator
     names how to reach the Slurm binaries in one place. *processes* owns the
-    local process group and *probe* runs the scheduler report and ``scancel``;
-    tests inject both to drive the lifecycle without a cluster or OS process.
+    local process group, *probe* runs the scheduler report and ``scancel``, and
+    *threads* runs the output pump and bounds the waits.
     """
 
     def __init__(
@@ -323,16 +314,16 @@ class AgentGpuLauncher:
         config: AgentGpuConfig,
         shell_command: Sequence[str],
         *,
-        probe: CommandProbe | None = None,
-        processes: PipedProcessLauncher | None = None,
-        threads: Threads | None = None,
+        probe: CommandProbe,
+        processes: PipedProcessLauncher,
+        threads: Threads,
     ) -> None:
         """Bind the operator configuration and the process boundary."""
         self._config = config
         self._shell = tuple(shell_command)
-        self._probe: CommandProbe = probe or SubprocessProbe()
-        self._processes = processes or SubprocessPipedProcessLauncher()
-        self._threads = threads or OsThreads()
+        self._probe = probe
+        self._processes = processes
+        self._threads = threads
 
     def run(
         self,

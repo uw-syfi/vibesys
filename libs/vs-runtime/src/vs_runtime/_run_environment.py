@@ -125,7 +125,7 @@ from vs_sandbox.api.symlink_mounts import (
     find_mount_root,
     symlink_lifecycle_hooks,
 )
-from vs_sim.api import CloseOnce, OsProcesses, ReleaseStack, SubprocessPipedProcessLauncher
+from vs_sim.api import CloseOnce, ReleaseStack
 
 _RUNTIME_OBJECTIVE_CONTAINER_PATH = "/opt/vibesys-runtime/objective.md"
 _RUNTIME_DOCUMENT_NAME = "runtime-environment.md"
@@ -139,10 +139,12 @@ container path, so this constant and the resource declaration are the single
 source of truth an environment consults."""
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from types import ModuleType
 
     from vs_agent.api.images import BuildProgressSink, DockerBuildRunner, ImageBuildProgress
     from vs_evaluation.api import ProfileField
     from vs_project.api import StateNamespace
+    from vs_runtime._environment_system import EnvironmentSystem
     from vs_sandbox.api import (
         CommandRunner,
         ComputeBackendImpl,
@@ -150,7 +152,7 @@ if TYPE_CHECKING:
         WorkspaceSandbox,
     )
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
-    from vs_sim.api import Clock, Processes
+    from vs_sim.api import Clock
 
 
 @dataclass(frozen=True)
@@ -371,8 +373,8 @@ class RunEnvironmentRequest:
     framework_root: Path
     clock: Clock
     """Measures the agent image build budget."""
-    slurm_processes: Processes
-    """Starts the Slurm transport programs a host broker runs for the agent's container."""
+    system: EnvironmentSystem
+    """The host's threads, sockets and processes the environment's brokers and tools run on."""
     objective: str | None = None
     # Authored run state belongs to git_history_root, including when workspace
     # is a candidate revision that predates the objective's committed document.
@@ -614,7 +616,9 @@ class RunEnvironment(Protocol):
         """Remove a workspace-relative child and report whether it is absent."""
         ...
 
-    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
         """End the agent processes and containers a dead host left for *run_id*.
 
         Called when a run resumes, before anything else touches its workspace.
@@ -625,8 +629,10 @@ class RunEnvironment(Protocol):
 
 
 class _NoopWorkspaceRecovery:
-    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
-        del run_id, log
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
+        del run_id, system, log
 
     def repair_workspace(
         self,
@@ -929,12 +935,7 @@ class DockerEnvironment:
         if request.docker_in_docker:
             # Fail before the image build when the host has no Sysbox; nothing
             # falls back to the host socket.
-            require_sysbox_runtime(
-                self.config.docker
-                or SubprocessDockerCli(
-                    processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
-                )
-            )
+            require_sysbox_runtime(self._docker(request.system))
             toolchains.add(CONTAINER_RUNTIME_TOOLCHAIN)
             log(DOCKER_IN_DOCKER_NOTICE)
         # The task image, when a task has a Dockerfile, is built by the
@@ -943,7 +944,7 @@ class DockerEnvironment:
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
             features=image_features(toolchains),
-            command_runner=self.config.build_runner,
+            command_runner=_build_runner(image_helpers, request.system, self.config.build_runner),
             timeout=(
                 image_helpers.DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS
                 if self.config.image_build_timeout_seconds is None
@@ -1007,21 +1008,22 @@ class DockerEnvironment:
         log(f"[docker] starting container with image {container_image}")
         return sandbox
 
-    def reap_orphans(self, run_id: str, *, log: Callable[[str], None]) -> None:
+    def reap_orphans(
+        self, run_id: str, *, system: EnvironmentSystem, log: Callable[[str], None]
+    ) -> None:
         """End the agents and containers a previous host process left for *run_id*."""
         reaper = (
             self.config.orphan_reaper
             if self.config.orphan_reaper is not None
             else reap_orphaned_agents
         )
-        reaper(
-            run_id,
-            docker=self.config.docker
-            or SubprocessDockerCli(
-                processes=OsProcesses(), launcher=SubprocessPipedProcessLauncher()
-            ),
-            log=log,
-        )
+        reaper(run_id, docker=self._docker(system), log=log)
+
+    def _docker(self, system: EnvironmentSystem) -> DockerCli:
+        """The configured ``docker`` client, or the host's own over *system*'s processes."""
+        if self.config.docker is not None:
+            return self.config.docker
+        return SubprocessDockerCli(processes=system.processes, launcher=system.launcher)
 
     def repair_workspace(
         self, workspace: Path, *, backend: ComputeBackendImpl, log: Callable[[str], None]
@@ -1222,16 +1224,17 @@ class SkyPilotEnvironment(DockerEnvironment):
             bridge.start()
 
             image_helpers = import_module("vs_agent.api.images")
-
+            build_runner = _build_runner(image_helpers, request.system, None)
             container_image = image_helpers.agent_image(
                 _docker_backend_image(request),
                 features=image_features(evaluator_agent_toolchains(requirements)),
+                command_runner=build_runner,
                 on_progress=_image_build_progress(request),
                 clock=request.clock,
             )
             container_image = _ensure_pushed_for_remote_backend(
                 container_image,
-                ensure_pushed=image_helpers.ensure_pushed,
+                ensure_pushed=partial(image_helpers.ensure_pushed, command_runner=build_runner),
                 backend_label="SkyPilot",
             )
 
@@ -1397,19 +1400,20 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
         self._ensure_draft_volume(request)
 
         image_helpers = import_module("vs_agent.api.images")
-
+        build_runner = _build_runner(image_helpers, request.system, None)
         requirements = request.evaluator_requirements
         container_image = image_helpers.agent_image(
             _docker_backend_image(request),
             features=image_features(
                 evaluator_agent_toolchains(requirements), _MODAL_EDITOR_PIP_EXTRAS
             ),
+            command_runner=build_runner,
             on_progress=_image_build_progress(request),
             clock=request.clock,
         )
         container_image = _ensure_pushed_for_remote_backend(
             container_image,
-            ensure_pushed=image_helpers.ensure_pushed,
+            ensure_pushed=partial(image_helpers.ensure_pushed, command_runner=build_runner),
             backend_label="Modal",
         )
 
@@ -1873,6 +1877,17 @@ def _cli_provider_env_and_auth_files(
 ) -> tuple[dict[str, str], list[tuple[str, str]]]:
     """Return the container env and staged auth copies for a CLI provider, if any."""
     return cli_provider_env_and_auth_files(request.agent_backend, request.cli_provider)
+
+
+def _build_runner(
+    image_helpers: ModuleType, system: EnvironmentSystem, configured: DockerBuildRunner | None
+) -> DockerBuildRunner:
+    """The configured image build runner, or the host's ``docker`` over *system*."""
+    if configured is not None:
+        return configured
+    return image_helpers.SubprocessDockerBuildRunner(
+        threads=system.threads, processes=system.launcher
+    )
 
 
 def _ensure_pushed_for_remote_backend(

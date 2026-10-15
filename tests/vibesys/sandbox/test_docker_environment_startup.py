@@ -17,8 +17,8 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentRequest,
     TrustedEvaluatorRequirements,
 )
-from vs_runtime.api.testing import DaemonBackend, daemon_engine
-from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, ManualClock, SimThreads
+from vs_runtime.api.testing import DaemonBackend, daemon_engine, idle_environment_system
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -50,7 +50,7 @@ def _open(
         evaluator_requirements=TrustedEvaluatorRequirements(),
         startup=observed.append,
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     environment = DockerEnvironment(DockerEnvironmentConfig(docker=engine, build_runner=runner))
     open_run_environment(environment, request).close()

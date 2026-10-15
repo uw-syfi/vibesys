@@ -1919,49 +1919,12 @@ PROGRAM_ENTRIES: dict[str, str] = {
 # lets a caller omit, without a line number), then the owner. A new real default in a pending
 # file is a new site, so it fails the check.
 REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
-    "libs/vs-agent/src/vs_agent/images.py": {
-        "SubprocessDockerBuildRunner.__init__:threads=None": Owner.LANE_A,
-        "SubprocessDockerBuildRunner.__init__:processes=None": Owner.LANE_A,
-        "SubprocessDockerBuildRunner.__init__:OsThreads()": Owner.LANE_A,
-        "SubprocessDockerBuildRunner.__init__:SubprocessPipedProcessLauncher()": Owner.LANE_A,
-        "build_task_image:SubprocessDockerBuildRunner()": Owner.LANE_A,
-        "agent_image:SubprocessDockerBuildRunner()": Owner.LANE_A,
-        "push_agent_image:SubprocessDockerBuildRunner()": Owner.LANE_A,
-        "agent_image_is_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
-        "ensure_pushed:SubprocessDockerBuildRunner()": Owner.LANE_A,
-    },
-    "libs/vs-runtime/src/vs_runtime/_agent_gpu_commands.py": {
-        "agent_gpu_commands:AgentGpuLauncher(...)": Owner.LANE_A,
-    },
     "libs/vs-runtime/src/vs_runtime/_run_environment.py": {
-        "DockerEnvironment.build_editor:OsProcesses()": Owner.LANE_A,
-        "DockerEnvironment.build_editor:SubprocessPipedProcessLauncher()": Owner.LANE_A,
-        "DockerEnvironment.reap_orphans:OsProcesses()": Owner.LANE_A,
-        "DockerEnvironment.reap_orphans:SubprocessPipedProcessLauncher()": Owner.LANE_A,
         "SkyPilotEnvironment._open_skypilot:SkyPilotBridge(...)": Owner.CONFINEMENT,
         "SkyPilotEnvironment._open_skypilot:SkyPilotJobRunner(...)": Owner.CONFINEMENT,
     },
-    "libs/vs-runtime/src/vs_runtime/_semantic_slurm_evaluation.py": {
-        "SemanticSlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
-    },
-    "libs/vs-runtime/src/vs_runtime/_slurm_environment.py": {
-        "SlurmEnvironment._start_command_broker:HostCommandBroker(...)": Owner.LANE_A,
-    },
-    "libs/vs-sandbox/src/vs_sandbox/agent_gpu.py": {
-        "read_windows:SubprocessProbe()": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:processes=None": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:threads=None": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:SubprocessProbe()": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:SubprocessPipedProcessLauncher()": Owner.LANE_A,
-        "AgentGpuLauncher.__init__:OsThreads()": Owner.LANE_A,
-    },
     "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": {
         "FakeCommandRunner:default_factory=OsThreads": Owner.PURITY,
-    },
-    "libs/vs-sandbox/src/vs_sandbox/host_command_broker.py": {
-        "BrokerTransport:default_factory=UnixNetwork": Owner.PURITY,
-        "BrokerTransport:default_factory=OsThreads": Owner.PURITY,
-        "HostCommandBroker.__init__:BrokerTransport()": Owner.PURITY,
     },
     "libs/vs-sandbox/src/vs_sandbox/host_sandbox.py": {
         "build:SubprocessProbe()": Owner.CONFINEMENT,
@@ -1980,15 +1943,6 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
         "SkyPilotJobRunner.__init__:threads=None": Owner.CONFINEMENT,
         "SkyPilotJobRunner.__init__:OsThreads()": Owner.CONFINEMENT,
         "SkyPilotJobRunner.__init__:SubprocessCommandRunner(...)": Owner.CONFINEMENT,
-    },
-    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": {
-        "SlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
-    },
-    "src/launch/__init__.py": {
-        "LaunchSettings:slurm_processes=None": Owner.LANE_A,
-    },
-    "src/vibesys/run/slurm_evaluation.py": {
-        "SlurmSemanticEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
     },
 }
 

@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 from tests.support import run_test_command
 
-from vs_agent.api.images import agent_image
+from vs_agent.api.images import SubprocessDockerBuildRunner, agent_image
 from vs_runtime.api.infrastructure import (
     SANDBOX_EVALUATOR_TOOLS_ROOT,
     TrustedEvaluatorRequirements,
@@ -32,7 +32,7 @@ from vs_runtime.api.infrastructure import (
     load_evaluator_package,
 )
 from vs_sandbox.api.evaluator_tools import evaluator_tools_install_command, tool_install_root
-from vs_sim.api import MonotonicClock
+from vs_sim.api import MonotonicClock, OsThreads, SubprocessPipedProcessLauncher
 
 pytestmark = pytest.mark.e2e
 
@@ -66,6 +66,7 @@ def test_every_bundled_evaluator_tool_installs_in_the_agent_image(base: str, roo
         base,
         features=image_features(evaluator_agent_toolchains(requirements)),
         timeout=_BUILD_TIMEOUT_S,
+        command_runner=_real_builds(),
         clock=MonotonicClock(),
     )
     script = "set -eux\n" + "\n".join(
@@ -99,3 +100,10 @@ def test_every_bundled_evaluator_tool_installs_in_the_agent_image(base: str, roo
     )
 
     assert result.returncode == 0, (result.returncode, result.stdout[-2000:], result.stderr[-4000:])
+
+
+def _real_builds() -> SubprocessDockerBuildRunner:
+    """Run the image builds with the host's own ``docker``."""
+    return SubprocessDockerBuildRunner(
+        threads=OsThreads(), processes=SubprocessPipedProcessLauncher()
+    )

@@ -19,8 +19,9 @@ from vibesys.run.contracts import RunRequest
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import OrchestrationDescriptor
 from vs_runtime.api import WorkspaceRestoreError
+from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +62,7 @@ def test_root_workspace_revision_restore_and_retention_contract(tmp_path: Path) 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> None:

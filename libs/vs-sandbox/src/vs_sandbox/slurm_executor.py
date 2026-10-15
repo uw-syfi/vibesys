@@ -37,7 +37,6 @@ from vs_evaluation.api import (
     is_finished,
 )
 from vs_project.api import atomic_write_bytes
-from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
     INITIAL_LIFE,
     SERVICE_NOT_READY_EXIT_CODE,
@@ -70,7 +69,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
     from pathlib import Path
 
-    from vs_sim.api import Clock, Processes, Sleeper
+    from vs_sim.api import Clock, Sleeper
     from vs_slurm.api import (
         Cluster,
         ClusterCollectOutcome,
@@ -328,8 +327,7 @@ class SlurmEvaluationExecutor:
         handle_root: Path,
         supported_evidence_kinds: tuple[str, ...] = ("accuracy", "benchmark"),
         admission: SharedSlurmAdmission | None = None,
-        cluster: Cluster | None = None,
-        processes: Processes | None = None,
+        cluster: Cluster,
         clock: Clock,
         sleeper: Sleeper,
         cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
@@ -338,16 +336,9 @@ class SlurmEvaluationExecutor:
 
         ``clock`` times the job deadline and availability readings. The deadline is
         persisted, so a production clock is :class:`vs_sim.api.SystemClock`.
-        ``sleeper`` paces the polls of a running job and of a cancel's confirmation. The
-        executor uses ``cluster``, or reaches the configured cluster by starting ``processes``.
+        ``sleeper`` paces the polls of a running job and of a cancel's confirmation.
+        ``cluster`` is the scheduler the jobs run on (:func:`make_cluster` for a real one).
         """
-        if cluster is None:
-            if processes is None:
-                message = "a Slurm executor needs a cluster or the processes that reach one"
-                raise ValueError(message)
-            cluster = make_cluster(
-                config, state_root=handle_root / "cluster", processes=processes, clock=clock
-            )
         self._cluster = cluster
         self._sleeper = sleeper
         self._poll_interval = config.poll_interval_seconds

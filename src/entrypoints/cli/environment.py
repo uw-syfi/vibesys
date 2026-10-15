@@ -12,7 +12,8 @@ from vibesys.api.request import (
     make_run_environment_spec,
     supported_profilers,
 )
-from vs_sim.api import MonotonicClock
+from vs_agent.api.images import SubprocessDockerBuildRunner
+from vs_sim.api import MonotonicClock, OsThreads, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     import argparse
@@ -110,7 +111,13 @@ def run_environment_spec_from_args(
         and build_task_docker_image
         and not keeps_recorded_image
     ):
-        task_image = build_task_image(dockerfile_path, clock=MonotonicClock())
+        task_image = build_task_image(
+            dockerfile_path,
+            command_runner=SubprocessDockerBuildRunner(
+                threads=OsThreads(), processes=SubprocessPipedProcessLauncher()
+            ),
+            clock=MonotonicClock(),
+        )
 
     if requested_environment == "slurm-gpu":
         return RunEnvironmentSpec(

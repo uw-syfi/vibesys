@@ -544,6 +544,16 @@ class TestFakeProcesses(ProcessesContract):
         )
 
 
+class TestProcessesProbeOverFakeProcesses(CommandProbeContract):
+    def probe_under_test(self) -> ProbeUnderTest:
+        return ProbeUnderTest(
+            ProcessesProbe(FakeProcesses(_processes_script, pass_time=ManualClock().advance)),
+            exit_with_stdout=lambda status, text: ("exit", str(status), text.encode().hex(), ""),
+            blocks_forever=("block", ""),
+            missing_program=("no-such-program",),
+        )
+
+
 def _probe_script(argv: tuple[str, ...]) -> ProbeResult | None:
     match argv:
         case ("exit", status, text):

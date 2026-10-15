@@ -17,7 +17,8 @@ from vibesys.api import IterationKind, IterationStatus, IterationSummary, Iterat
 from vibesys.events import CoreEvent, CoreEventType, IterationsChangedData
 from vibesys.run.contracts import RoundSummary, RunStatus, RunView
 from vibesys.run.integration import LocalRunIntegration
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads, examples
+from vs_runtime.api.testing import idle_environment_system
+from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 
 class _FakeAgentState(BaseModel):
@@ -81,7 +82,7 @@ def test_commit_projection_preserves_semantics_and_publication_order() -> None:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     order: list[str] = []
     captured: list[CoreEvent] = []
@@ -145,7 +146,7 @@ def test_commit_events_property_no_double_emission_and_semantic_changes(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
     captured: list[CoreEvent] = []
@@ -191,7 +192,7 @@ def test_a_commit_of_another_namespace_projects_nothing() -> None:
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)

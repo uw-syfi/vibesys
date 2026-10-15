@@ -31,10 +31,11 @@ from vibesys.api import (
 from vibesys.api.request import RunEnvironmentSpec, load_task
 from vibesys.run.integration import LocalRunIntegration
 from vs_agent.api.testing import FakeDockerBuildRunner
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import FakeDockerEngine, HostExecutedContainerBackend
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, ManualClock
+from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -131,7 +132,7 @@ def _candidate_container_counts(
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
     async def exercise() -> tuple[bool, int, int, int]:

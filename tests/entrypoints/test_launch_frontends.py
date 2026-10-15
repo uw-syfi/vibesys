@@ -35,7 +35,7 @@ from vs_sim.api import (
     ThreadBlockingRunner,
     UnixNetwork,
 )
-from vs_sim.api.testing import FakePipedProcessLauncher, FakeSignalSource, SimThreads
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, FakeSignalSource, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -95,6 +95,7 @@ def _runs(clients: list[FakeAgentClient] | None = None, *, real_git: bool = Fals
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=agent_factory,
@@ -148,6 +149,7 @@ def _rejecting_runs(plan: Callable[[CoreRunContext], CorePlan]) -> Runs:
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             agent_client_factory=_fake_agent,
@@ -221,6 +223,7 @@ def test_launch_rejects_invalid_builtin_options_before_execution(tmp_path: Path)
             LaunchSettings(
                 timing=production_timing(),
                 processes=REAL_PROCESSES,
+                slurm_processes=NO_PROCESSES,
                 piped_processes=FakePipedProcessLauncher(),
                 agent_client_factory=_fake_agent,
                 blocking=ThreadBlockingRunner(),

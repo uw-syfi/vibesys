@@ -811,6 +811,7 @@ def test_core_path_runs_the_fake_slurm_search(
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=REAL_PROCESSES,
             piped_processes=SubprocessPipedProcessLauncher(),
             agent_client_factory=_core_agents,
             backend_factory=host_container_backend,

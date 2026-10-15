@@ -51,11 +51,12 @@ from vs_runtime.api.infrastructure import (
     RunEnvironmentSpec,
     resolve_evaluator_package,
 )
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import ReleaseStack
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 class _PortableStateProbe(BaseModel):
@@ -225,7 +226,7 @@ def _create_context(
                 git=REAL_GIT,
                 github=NO_GITHUB,
                 threads=SimThreads(),
-                slurm_processes=NO_PROCESSES,
+                system=idle_environment_system(),
             ),
             ownership=ownership,
             agent_specs=resolve_agent_specs(
@@ -495,7 +496,7 @@ def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> Non
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     try:
         with _create_context(project, evaluator=evaluator, integration=integration) as ctx:
@@ -870,7 +871,7 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=SimThreads(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
     def reject_resources(_resources: object) -> None:

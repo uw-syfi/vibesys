@@ -39,7 +39,7 @@ from vs_project.api.testing import run_execution_record
 from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher, ManualClock
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -143,6 +143,7 @@ def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
         network=UnixNetwork(),
         timing=production_timing(),
         processes=REAL_PROCESSES,
+        slurm_processes=NO_PROCESSES,
         piped_processes=FakePipedProcessLauncher(),
         agents=FakeSessionAgents(OsThreads()) if request.param else None,
         backend_factory=host_container_backend,
@@ -184,6 +185,7 @@ def _session(tmp_path: Path, settings: LaunchSettings | None = None) -> _LocalRu
                 LaunchSettings(
                     timing=production_timing(),
                     processes=REAL_PROCESSES,
+                    slurm_processes=NO_PROCESSES,
                     piped_processes=FakePipedProcessLauncher(),
                     blocking=ThreadBlockingRunner(),
                     network=UnixNetwork(),
@@ -455,6 +457,7 @@ def test_independent_auxiliary_scope_survives_session_close(
             network=UnixNetwork(),
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
             piped_processes=FakePipedProcessLauncher(),
             registry=registry,
             backend_factory=host_container_backend,

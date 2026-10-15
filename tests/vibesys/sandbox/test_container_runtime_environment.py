@@ -26,7 +26,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
     build_run_environment,
 )
-from vs_runtime.api.testing import unconfined_host_environment
+from vs_runtime.api.testing import idle_environment_system, unconfined_host_environment
 from vs_sandbox.api import (
     CONTAINER_RUNTIME_TOOLCHAIN,
     ComputeBackendImpl,
@@ -38,7 +38,6 @@ from vs_sandbox.api import (
 )
 from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry, ScriptedDockerCli
 from vs_sim.api.testing import (
-    NO_PROCESSES,
     FakePipedProcessLauncher,
     ManualClock,
     ScriptedProbe,
@@ -153,7 +152,7 @@ def _request(
         evaluator_requirements=TrustedEvaluatorRequirements(),
         docker_in_docker=docker_in_docker,
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
 

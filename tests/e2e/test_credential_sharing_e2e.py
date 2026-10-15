@@ -29,7 +29,7 @@ import agentshim
 import pytest
 
 from vs_agent.api import auth_bind_mounts, auth_copy_paths
-from vs_agent.api.images import agent_image
+from vs_agent.api.images import SubprocessDockerBuildRunner, agent_image
 from vs_sandbox.api import SubprocessDockerCli
 from vs_sandbox.docker_sandbox import DockerSandbox
 from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
@@ -68,7 +68,12 @@ def container(tmp_path: Path, host_home: Path) -> Iterator[DockerSandbox]:
     workspace.mkdir()
     sandbox = DockerSandbox(
         host_workspace=str(workspace),
-        image=agent_image(_BASE_IMAGE, timeout=_BUILD_TIMEOUT_S, clock=MonotonicClock()),
+        image=agent_image(
+            _BASE_IMAGE,
+            timeout=_BUILD_TIMEOUT_S,
+            command_runner=_real_builds(),
+            clock=MonotonicClock(),
+        ),
         bind_mounts=auth_bind_mounts(_PROVIDER),
         auth_files=auth_copy_paths(_PROVIDER),
         docker=SubprocessDockerCli(
@@ -153,3 +158,10 @@ def test_settings_and_history_stay_inside_the_container(
     assert not (_credential(host_home).parent / "sessions-in-container.jsonl").exists()
     # The shared credential was not rewritten by any of that.
     assert _credential(host_home).read_text() == "host-original\n"
+
+
+def _real_builds() -> SubprocessDockerBuildRunner:
+    """Run the image builds with the host's own ``docker``."""
+    return SubprocessDockerBuildRunner(
+        threads=OsThreads(), processes=SubprocessPipedProcessLauncher()
+    )

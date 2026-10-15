@@ -52,11 +52,12 @@ if TYPE_CHECKING:
     from vs_project.api import Git, GitRepositoryFactory, Project, StateStoreFactory
     from vs_runtime.api.core import WinnerSelection
     from vs_runtime.api.infrastructure import (
+        EnvironmentSystem,
         ProjectRunResources,
         RunEnvironmentResources,
     )
     from vs_sandbox.api import HostResource
-    from vs_sim.api import Clock, Processes, Threads
+    from vs_sim.api import Clock, Threads
 
 
 def run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
@@ -325,13 +326,13 @@ class LocalRunIntegration:
         git: Git,
         github: GitHubCLI,
         threads: Threads,
-        slurm_processes: Processes,
+        system: EnvironmentSystem,
     ) -> None:
         """Compose a durable journal with direct invocation control.
 
         ``git`` starts the run's Git commands and ``github`` its GitHub CLI commands. ``git_repository`` builds the run's
-        ``GitRepository`` implementations; ``None`` opens the configured one over ``git``. ``slurm_processes`` starts the Slurm
-        transport's programs for the run's evaluations.
+        ``GitRepository`` implementations; ``None`` opens the configured one over ``git``. ``system`` is the host's threads, sockets
+        and processes the run's environments and Slurm evaluations run on.
         ``state_stores`` opens each run's ``StateStore``; ``None`` is the local
         crash-atomic one. ``clock`` counts seconds since the epoch; it stamps the
         run's events, names its logs, and times its boot. ``threads`` makes the run's
@@ -340,7 +341,7 @@ class LocalRunIntegration:
         self.git = git
         self.github = github
         self.git_repository = git_repositories(git) if git_repository is None else git_repository
-        self.slurm_processes = slurm_processes
+        self.system = system
         self.state_stores = state_stores
         self.clock = clock
         self.threads = threads

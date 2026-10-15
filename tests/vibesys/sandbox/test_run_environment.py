@@ -48,7 +48,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.infrastructure import (
     resolve_evaluator_package as _resolve_evaluator_package,
 )
-from vs_runtime.api.testing import unconfined_host_environment
+from vs_runtime.api.testing import idle_environment_system, unconfined_host_environment
 from vs_sandbox.api import (
     EnvironmentBindMount,
     HostResource,
@@ -72,7 +72,7 @@ from vs_sandbox.api.slurm import (
     read_slurm_capture_plan,
 )
 from vs_sim.api import ProcessOutcome, ProcessSpec, UnixNetwork
-from vs_sim.api.testing import NO_PROCESSES, FakeProcesses, ManualClock, ProcessScript
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -241,7 +241,7 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
         "run_id": "run-123",
         "framework_root": tmp_path / "framework",
         "clock": ManualClock(),
-        "slurm_processes": NO_PROCESSES,
+        "system": idle_environment_system(),
     }
     package_root = overrides.pop("evaluator_package_root", None)
     tools_root = overrides.pop("evaluator_tools_root", None)
@@ -631,8 +631,8 @@ rsync_command = ["/bin/true"]
             tmp_path,
             FakeBackend(),
             run_owned_roots=(worktrees,),
-            slurm_processes=FakeProcesses(
-                lambda _spec: ProcessScript(), pass_time=ManualClock().advance
+            system=idle_environment_system(
+                FakeProcesses(lambda _spec: ProcessScript(), pass_time=ManualClock().advance)
             ),
         ),
     )
@@ -1917,7 +1917,7 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         run_id="20260429-100000-runa",
         framework_root=tmp_path / "framework",
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     req_b = RunEnvironmentRequest(
         log_dir=log_b,
@@ -1929,7 +1929,7 @@ def test_modal_environment_uses_explicit_run_id_for_namespace(tmp_path: Path) ->
         run_id="20260429-100100-runb",
         framework_root=tmp_path / "framework",
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
     _open(env, req_a)
     _open(env, req_b)

@@ -25,9 +25,9 @@ import pytest
 from tests.support import run_test_command
 
 from vs_agent.api import CONTAINER_PYTHON
-from vs_agent.api.images import agent_image, build_task_image
+from vs_agent.api.images import SubprocessDockerBuildRunner, agent_image, build_task_image
 from vs_runtime.api.infrastructure import image_features
-from vs_sim.api import MonotonicClock
+from vs_sim.api import MonotonicClock, OsThreads, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -73,6 +73,7 @@ def test_cpu_agent_image_runs_every_shipped_cli_as_the_agent_user() -> None:
         "python:3.12-bookworm",
         features=image_features(("rust", "go")),
         timeout=_BUILD_TIMEOUT_S,
+        command_runner=_real_builds(),
         clock=MonotonicClock(),
     )
 
@@ -101,6 +102,7 @@ def test_container_runtime_and_pip_extras_features_install_everything_they_use()
         "python:3.12-bookworm",
         features=image_features(("container-runtime",), ("modal>=0.66",)),
         timeout=_BUILD_TIMEOUT_S,
+        command_runner=_real_builds(),
         clock=MonotonicClock(),
     )
 
@@ -152,14 +154,18 @@ def test_agent_layer_builds_on_a_task_image_end_to_end(tmp_path: Path, flow: str
             dockerfile,
             base_image="python:3.12-bookworm",
             timeout=_BUILD_TIMEOUT_S,
+            command_runner=_real_builds(),
             clock=MonotonicClock(),
         )
-        image_id = agent_image(task_id, timeout=_BUILD_TIMEOUT_S, clock=MonotonicClock())
+        image_id = agent_image(
+            task_id, timeout=_BUILD_TIMEOUT_S, command_runner=_real_builds(), clock=MonotonicClock()
+        )
     else:
         image_id = agent_image(
             "python:3.12-bookworm",
             task_dockerfile=dockerfile,
             timeout=_BUILD_TIMEOUT_S,
+            command_runner=_real_builds(),
             clock=MonotonicClock(),
         )
 
@@ -197,6 +203,7 @@ def test_agent_user_and_group_are_both_named_agent_over_a_uid_1000_base(tmp_path
         "python:3.12-bookworm",
         task_dockerfile=dockerfile,
         timeout=_BUILD_TIMEOUT_S,
+        command_runner=_real_builds(),
         clock=MonotonicClock(),
     )
 
@@ -220,3 +227,10 @@ def test_agent_user_and_group_are_both_named_agent_over_a_uid_1000_base(tmp_path
 
     assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
     assert result.stdout.split() == ["agent", "agent"]
+
+
+def _real_builds() -> SubprocessDockerBuildRunner:
+    """Run the image builds with the host's own ``docker``."""
+    return SubprocessDockerBuildRunner(
+        threads=OsThreads(), processes=SubprocessPipedProcessLauncher()
+    )

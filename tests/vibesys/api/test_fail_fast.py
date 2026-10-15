@@ -22,7 +22,7 @@ from vibesys.api import (
 )
 from vibesys.api.request import load_task
 from vs_sim.api import ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -91,6 +91,7 @@ def test_incompatible_profiler_is_rejected_at_session_construction(
             settings=LaunchSettings(
                 timing=production_timing(),
                 processes=REAL_PROCESSES,
+                slurm_processes=NO_PROCESSES,
                 piped_processes=FakePipedProcessLauncher(),
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),
@@ -151,6 +152,7 @@ def test_collection_in_repository_fails_before_session_start(
             settings=LaunchSettings(
                 timing=production_timing(),
                 processes=REAL_PROCESSES,
+                slurm_processes=NO_PROCESSES,
                 piped_processes=FakePipedProcessLauncher(),
                 backend_factory=host_container_backend,
                 blocking=ThreadBlockingRunner(),

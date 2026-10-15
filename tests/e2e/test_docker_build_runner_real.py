@@ -14,7 +14,7 @@ from vs_agent.api.images import (
     DOCKER_OUTPUT_TAIL_CHARACTERS,
     SubprocessDockerBuildRunner,
 )
-from vs_sim.api import PipedProcess, PipedProcessLauncher, SubprocessPipedProcessLauncher
+from vs_sim.api import OsThreads, PipedProcess, PipedProcessLauncher, SubprocessPipedProcessLauncher
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -60,7 +60,9 @@ def test_real_runner_drains_large_multiline_and_unterminated_streams_into_bounde
         "raise SystemExit(23)"
     )
 
-    result = SubprocessDockerBuildRunner().run(
+    result = SubprocessDockerBuildRunner(
+        threads=OsThreads(), processes=SubprocessPipedProcessLauncher()
+    ).run(
         (sys.executable, "-c", program),
         cwd=tmp_path,
         timeout=30,
@@ -98,7 +100,7 @@ def test_timeout_kills_descendant_that_inherits_both_output_pipes(tmp_path: Path
     launcher = _ReadyLauncher(SubprocessPipedProcessLauncher(), ready_fifo)
 
     with pytest.raises(subprocess.TimeoutExpired):
-        SubprocessDockerBuildRunner(processes=launcher).run(
+        SubprocessDockerBuildRunner(threads=OsThreads(), processes=launcher).run(
             (sys.executable, "-c", parent),
             cwd=tmp_path,
             timeout=0,

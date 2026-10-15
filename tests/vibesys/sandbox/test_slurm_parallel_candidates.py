@@ -20,7 +20,7 @@ import pytest
 from tests.support.workspace_world import open_workspace_env
 
 from vibesys.run.environment import open_run_environment
-from vs_runtime.api.infrastructure import SlurmEnvironment
+from vs_runtime.api.infrastructure import EnvironmentSystem, SlurmEnvironment
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api.slurm import BrokeredProcesses, load_slurm_operator_settings
 from vs_sim.api import (
@@ -111,9 +111,9 @@ def _run(
 
     Every session the run opens (the root's first, then each candidate's) is appended to *opened*.
     """
-    backend = DaemonBackend(
-        daemon_engine(tmp_path, launcher=SubprocessPipedProcessLauncher()), threads=OsThreads()
-    )
+    threads = OsThreads()
+    launcher = SubprocessPipedProcessLauncher()
+    backend = DaemonBackend(daemon_engine(tmp_path, launcher=launcher), threads=threads)
     environment = environment or _environment(tmp_path, backend)
 
     def open_session(request: RunEnvironmentRequest) -> RunEnvironmentSession:
@@ -129,7 +129,13 @@ def _run(
         backend=backend,
         open_session=open_session,
         owns_candidate_worktrees=True,
-        slurm_processes=slurm_processes,
+        system=EnvironmentSystem(
+            threads=threads,
+            network=UnixNetwork(),
+            processes=NO_PROCESSES,
+            launcher=launcher,
+            slurm_processes=slurm_processes,
+        ),
     ) as env:
         try:
             asyncio.run(exercise(env.hosts[0]))  # ty: ignore[call-non-callable]

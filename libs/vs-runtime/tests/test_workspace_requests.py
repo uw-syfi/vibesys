@@ -89,11 +89,10 @@ from vs_runtime.api.infrastructure import (
     open_run_environment_resources,
 )
 from vs_runtime.api.observation_contracts import assert_core_accepts
-from vs_runtime.api.testing import MemoryValidationPasses
+from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 from vs_sim.api.testing import (
-    NO_PROCESSES,
     InlineBlockingRunner,
     ManualClock,
     Sim,
@@ -242,7 +241,7 @@ def _env(
                 project_path_policy=ProjectPathPolicy(),
                 git_history_root=project.git.history_root,
                 clock=ManualClock(),
-                slurm_processes=NO_PROCESSES,
+                system=idle_environment_system(),
             ),
             lambda _request: _Session(),
             clock=ManualClock(),

@@ -281,7 +281,9 @@ def test_positional_streaming_command_seam_remains_compatible(tmp_path: Path) ->
     )
     observed: list[str] = []
 
-    result = SubprocessDockerBuildRunner(streaming).run(
+    result = SubprocessDockerBuildRunner(
+        streaming, threads=SimThreads(), processes=FakePipedProcessLauncher()
+    ).run(
         ("docker", "build"),
         cwd=tmp_path,
         timeout=30,

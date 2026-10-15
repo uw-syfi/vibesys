@@ -56,7 +56,7 @@ from vs_runtime.api import (
     OrchestrationResumeDecision,
 )
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher
+from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -77,6 +77,7 @@ _SETTINGS = LaunchSettings(
     network=UnixNetwork(),
     timing=production_timing(),
     processes=REAL_PROCESSES,
+    slurm_processes=NO_PROCESSES,
     piped_processes=FakePipedProcessLauncher(),
     backend_factory=host_container_backend,
     agent_client_factory=_resumable_client,
@@ -208,6 +209,7 @@ def test_builtin_single_agent_refuses_the_stub_backend_before_any_turn(
         settings=LaunchSettings(
             timing=production_timing(),
             processes=REAL_PROCESSES,
+            slurm_processes=NO_PROCESSES,
             piped_processes=FakePipedProcessLauncher(),
             backend_factory=host_container_backend,
             blocking=ThreadBlockingRunner(),

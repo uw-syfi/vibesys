@@ -23,16 +23,21 @@ from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
 from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
+    EnvironmentSystem,
     RunEnvironment,
     RunEnvironmentRequest,
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
     run_environment_deprecation,
 )
-from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
+from vs_runtime.api.testing import (
+    DaemonBackend,
+    daemon_docker_config,
+    daemon_engine,
+)
 from vs_sandbox.api import DockerSandbox, SandboxKind
 from vs_sandbox.api.slurm import SlurmPolicyError, load_slurm_operator_settings
-from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe
+from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
 from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
 if TYPE_CHECKING:
@@ -176,7 +181,13 @@ def _request(
         benchmark_command=benchmark,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=EnvironmentSystem(
+            threads=OsThreads(),
+            network=UnixNetwork(),
+            processes=NO_PROCESSES,
+            launcher=SubprocessPipedProcessLauncher(),
+            slurm_processes=NO_PROCESSES,
+        ),
     )
 
 

@@ -19,6 +19,7 @@ from vs_runtime.api.infrastructure import (
     resolve_run_environment_spec,
     run_environment_record,
 )
+from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api import (
     ComputeBackend,
     ProjectPathPolicy,
@@ -28,7 +29,7 @@ from vs_sandbox.api import (
     backend_is_host_only,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads
 
 _BACKENDS = st.sampled_from(list(ComputeBackend))
 _PLATFORMS = st.sampled_from(["darwin", "linux", "win32", "freebsd14", "cygwin"])
@@ -87,7 +88,7 @@ def _request(tmp_path: Path) -> RunEnvironmentRequest:
         environment_bind_mounts=(),
         project_path_policy=ProjectPathPolicy(),
         clock=ManualClock(),
-        slurm_processes=NO_PROCESSES,
+        system=idle_environment_system(),
     )
 
 

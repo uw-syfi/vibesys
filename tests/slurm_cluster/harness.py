@@ -31,6 +31,7 @@ from vibesys.run.environment import open_run_environment
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
     DockerEnvironmentConfig,
+    EnvironmentSystem,
     RunEnvironment,
     RunEnvironmentRequest,
     RunEnvironmentSession,
@@ -39,8 +40,13 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_sandbox.api import ComputeBackend, DockerSandbox, LocalBackend, SubprocessDockerCli
 from vs_sandbox.api.slurm import load_slurm_operator_settings
-from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedProcessLauncher
-from vs_sim.api.testing import NO_PROCESSES
+from vs_sim.api import (
+    MonotonicClock,
+    OsProcesses,
+    OsThreads,
+    SubprocessPipedProcessLauncher,
+    UnixNetwork,
+)
 
 if TYPE_CHECKING:
     import threading
@@ -322,7 +328,7 @@ def make_request(
         benchmark_output_argument=BENCHMARK_OUTPUT_ARGUMENT,
         evaluator_requirements=TrustedEvaluatorRequirements(),
         clock=MonotonicClock(),
-        slurm_processes=NO_PROCESSES,
+        system=_real_system(),
     )
 
 
@@ -402,3 +408,19 @@ def open_candidates(
             for opened in sessions:
                 remove_run_containers(opened.run_id)
             cluster.cancel_all()
+
+
+def _real_system() -> EnvironmentSystem:
+    """The host's own threads, sockets and processes.
+
+    The agent GPU launcher checks and cancels its jobs with ``squeue`` and ``scancel``
+    through ``slurm_processes``, so they reach the real cluster too.
+    """
+    processes = OsProcesses()
+    return EnvironmentSystem(
+        threads=OsThreads(),
+        network=UnixNetwork(),
+        processes=processes,
+        launcher=SubprocessPipedProcessLauncher(),
+        slurm_processes=processes,
+    )

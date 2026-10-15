@@ -18,11 +18,6 @@
 {"path": "libs/vs-runtime/tests/test_trusted_benchmark_partial.py", "rule": "interpreter", "count": 1}
 {"path": "libs/vs-runtime/tests/test_trusted_evaluation.py", "rule": "interpreter", "count": 1}
 {"path": "libs/vs-runtime/tests/test_trusted_evaluation_preparation.py", "rule": "subprocess", "count": 2}
-{"path": "libs/vs-sandbox/tests/test_agent_gpu.py", "rule": "threading", "count": 2}
-{"path": "libs/vs-sandbox/tests/test_agent_gpu.py", "rule": "interpreter", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "subprocess", "count": 3}
-{"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "threading", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_host_command_bridge_e2e.py", "rule": "interpreter", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_skypilot_bridge.py", "rule": "socket", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_skypilot_bridge.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_skypilot_evaluator_helper.py", "rule": "fs_sync", "count": 1}
@@ -169,7 +164,7 @@
 {"path": "libs/vs-runtime/tests/test_workspace_requests.py", "rule": "real_impl", "count": 2}
 {"path": "libs/vs-sandbox/tests/skypilot_world.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_agent_path_contract.py", "rule": "real_impl", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "rule": "real_impl", "count": 8}
+{"path": "libs/vs-sandbox/tests/test_docker_conformance_e2e.py", "rule": "real_impl", "count": 10}
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "real_impl", "count": 5}
 {"path": "libs/vs-sandbox/tests/test_local_shell.py", "rule": "real_impl", "count": 20}
 {"path": "libs/vs-sandbox/tests/test_slurm_broker.py", "rule": "real_impl", "count": 4}
@@ -253,8 +248,8 @@
 {"path": "tests/vibesys/run/test_slurm_evaluation.py", "rule": "real_impl", "count": 1}
 {"path": "tests/vibesys/run/test_slurm_run_facts.py", "rule": "real_impl", "count": 2}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "real_impl", "count": 1}
-{"path": "tests/vibesys/sandbox/test_slurm_environment.py", "rule": "real_impl", "count": 23}
-{"path": "tests/vibesys/sandbox/test_slurm_parallel_candidates.py", "rule": "real_impl", "count": 5}
+{"path": "tests/vibesys/sandbox/test_slurm_environment.py", "rule": "real_impl", "count": 26}
+{"path": "tests/vibesys/sandbox/test_slurm_parallel_candidates.py", "rule": "real_impl", "count": 6}
 {"path": "tests/vibesys/test_context.py", "rule": "real_impl", "count": 4}
 {"path": "tests/vibesys/test_evaluation_tool_offered.py", "rule": "real_impl", "count": 4}
 {"path": "tests/vibesys/test_experiment_repo.py", "rule": "real_impl", "count": 13}

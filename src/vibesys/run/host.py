@@ -43,6 +43,7 @@ from vs_runtime.api.infrastructure import (
     release_all,
     stop_gated_evaluation,
 )
+from vs_sandbox.api.slurm import make_cluster
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
@@ -483,20 +484,26 @@ class _ProductHostFactory:
         clock: SleepingClock,
     ) -> SlurmSemanticEvaluationExecutor | None:
         """Build the cluster's semantic execution adapter when the environment reports one."""
-        cluster = resources.environment_resources.view.cluster_evaluation
-        if cluster is None:
+        facts = resources.environment_resources.view.cluster_evaluation
+        if facts is None:
             return None
+        handle_root = namespace.external_directory() / "slurm-provider-handles"
         return SlurmSemanticEvaluationExecutor(
-            cluster.settings.config,
-            cluster.settings.policy,
-            cluster.plan,
+            facts.settings.config,
+            facts.settings.policy,
+            facts.plan,
             resources.evaluation_plan,
             workspaces,
             namespace,
-            namespace.external_directory() / "slurm-provider-handles",
+            handle_root,
             clock=clock,
             sleeper=clock,
-            processes=integration.slurm_processes,
+            cluster=make_cluster(
+                facts.settings.config,
+                state_root=handle_root / "cluster",
+                clock=clock,
+                processes=integration.system.slurm_processes,
+            ),
         )
 
     async def stop_new_work(self) -> None:
