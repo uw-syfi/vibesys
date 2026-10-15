@@ -248,7 +248,7 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
     )
 
 
-# lint-waiver: LW-731409 [PLR0913]; the registry's shared construction keywords, one to one.
+# lint-waiver: LW-731481 [PLR0913]; the registry's shared construction keywords, one to one.
 # > Grouping them would only rename the keywords create_compute_backend passes every
 # > registered backend.
 def _rocm_backend(  # noqa: PLR0913
@@ -276,7 +276,7 @@ def _rocm_backend(  # noqa: PLR0913
     )
 
 
-# lint-waiver: LW-731410 [PLR0913]; the registry's shared construction keywords, one to one.
+# lint-waiver: LW-731482 [PLR0913]; the registry's shared construction keywords, one to one.
 # > Grouping them would only rename the keywords create_compute_backend passes every
 # > registered backend.
 def _trainium_backend(  # noqa: PLR0913
