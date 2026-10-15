@@ -48,8 +48,10 @@ _ENABLE_ENV = "VIBESYS_E2E_DOCKER"
 _IMAGE = "python:3.12-slim"
 _CLIENT_IN_CONTAINER = "/opt/vibesys/vibesys-gpu"
 # Stands in for srun and scancel: records its argv and cwd, then runs what follows
-# `--`. Without a `--` it is scancel, and it reports the cancellation on a FIFO the
-# test blocks on, so the test waits for the event itself rather than polling for it.
+# `--`. Without a `--` it is scancel, or the squeue check after it (the one asking
+# for a headerless listing, answered with no job). scancel reports the
+# cancellation on a FIFO the test blocks on, so the test waits for the event
+# itself rather than polling for it.
 # Stands in for the Slurm shell: it receives the command line (`srun ...` or
 # `scancel ...`) as its one argument, as the local transport's shell does.
 _FAKE_SLURM = """\
@@ -60,7 +62,7 @@ with open({log!r}, "a") as log:
 if "--" in sys.argv:
     command = sys.argv[sys.argv.index("--") + 1 :]
     os.execvp(command[0], command)
-if {cancelled!r}:
+if {cancelled!r} and "--noheader" not in sys.argv:
     with open({cancelled!r}, "w") as fifo:
         fifo.write(" ".join(sys.argv[1:]))
 """

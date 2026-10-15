@@ -41,6 +41,17 @@ _UNLIMITED = "unlimited"
 _WINDOWS_TIMEOUT_SECONDS = 30
 _CANCEL_GRACE_SECONDS = 30
 _SCANCEL_TIMEOUT_SECONDS = 60
+#: ``scancel`` runs again while its outcome is unknown: it could not start, timed
+#: out, or exited nonzero (an ``ssh`` wrapper that lost its connection exits 255).
+_SCANCEL_ATTEMPTS = 3
+_SQUEUE_TIMEOUT_SECONDS = 30
+#: After a cancel, ``squeue`` is asked this many times, this far apart, whether
+#: the job is gone; a completing job can stay listed for a few seconds.
+_CONFIRM_ATTEMPTS = 6
+_CONFIRM_INTERVAL_SECONDS = 5
+#: How long ``run`` waits for the cancel worker once ``srun`` exited. It bounds
+#: every ``scancel`` attempt; the worker returns at once in every other state.
+_WATCHER_JOIN_SECONDS = _SCANCEL_ATTEMPTS * _SCANCEL_TIMEOUT_SECONDS + _CANCEL_GRACE_SECONDS
 _READ_CHARACTERS = 65_536
 _MAX_QUEUE_MINUTES = 60 * 24 * 365
 
@@ -335,7 +346,10 @@ class AgentGpuLauncher:
 
         Returns the command's exit status as ``srun`` reports it. Setting
         *cancel* (from any thread) cancels the job by its unique name, then
-        stops ``srun``; the call still returns only after ``srun`` exits.
+        stops ``srun``; the call still returns only after ``srun`` exits. Stopping
+        a ``docker exec`` or ``ssh`` wrapper does not stop the ``srun`` behind it,
+        so a cancelled job is then looked up in the queue, and one still listed is
+        reported on *write* as unconfirmed.
         """
         partition = choose_partition(self._config, request, read_windows(self._config, self._probe))
         job_name = new_job_name(self._config)
@@ -353,18 +367,25 @@ class AgentGpuLauncher:
             merge_stderr=True,
         )
         finished = self._threads.event()
+        cancelled = self._threads.event()
         watcher = self._threads.spawn(
-            lambda: self._cancel_when_asked(process, job_name, cancel, finished),
+            lambda: self._cancel_when_asked(process, job_name, cancel, finished, cancelled),
             name="vibesys-gpu-cancel",
             daemon=True,
         )
         try:
             while chunk := process.stdout.read(_READ_CHARACTERS):
                 write(chunk.encode())
-            return process.wait(None)
+            status = process.wait(None)
         finally:
             finished.set()
-            watcher.join()
+            watcher.join(_WATCHER_JOIN_SECONDS)
+        if cancelled.is_set() and not self.job_gone(job_name):
+            write(
+                f"[vibesys-gpu] cancel unconfirmed: job {job_name} is still in the "
+                "Slurm queue and may keep its allocation until its time limit\n".encode()
+            )
+        return status
 
     def _cancel_when_asked(
         self,
@@ -372,6 +393,7 @@ class AgentGpuLauncher:
         job_name: str,
         cancel: Event,
         finished: Event,
+        cancelled: Event,
     ) -> None:
         while not finished.is_set():
             if cancel.wait(0.2):
@@ -380,6 +402,7 @@ class AgentGpuLauncher:
             return
         if finished.is_set():
             return
+        cancelled.set()
         self.cancel(job_name)
         if finished.is_set():
             return
@@ -387,12 +410,37 @@ class AgentGpuLauncher:
         if not finished.wait(_CANCEL_GRACE_SECONDS):
             process.kill_group()
 
-    def cancel(self, job_name: str) -> None:
-        """Cancel this user's job named *job_name*, pending or running."""
-        self._probe.run(
-            (*self._shell, shlex.join(("scancel", f"--name={job_name}", "--me"))),
-            timeout_seconds=_SCANCEL_TIMEOUT_SECONDS,
+    def cancel(self, job_name: str) -> bool:
+        """Cancel this user's job named *job_name*, pending or running.
+
+        Returns whether ``scancel`` reported success. Slurm answers success for a
+        name that matches no job, so success is not proof the job is gone; see
+        :meth:`job_gone`.
+        """
+        argv = (*self._shell, shlex.join(("scancel", f"--name={job_name}", "--me")))
+        for _ in range(_SCANCEL_ATTEMPTS):
+            result = self._probe.run(argv, timeout_seconds=_SCANCEL_TIMEOUT_SECONDS)
+            if result is not None and result.returncode == 0:
+                return True
+        return False
+
+    def job_gone(self, job_name: str) -> bool:
+        """Whether ``squeue`` reports no job of this user named *job_name*, within a bound.
+
+        An unanswered or failed ``squeue`` is not an answer: the job counts as
+        present, so a cancel is never reported confirmed on no evidence.
+        """
+        argv = (
+            *self._shell,
+            shlex.join(("squeue", f"--name={job_name}", "--me", "--noheader", "--format=%i")),
         )
+        for attempt in range(_CONFIRM_ATTEMPTS):
+            if attempt:
+                self._threads.sleep(_CONFIRM_INTERVAL_SECONDS)
+            result = self._probe.run(argv, timeout_seconds=_SQUEUE_TIMEOUT_SECONDS)
+            if result is not None and result.returncode == 0 and not result.stdout.strip():
+                return True
+        return False
 
 
 def resolve_executable(command: tuple[str, ...]) -> tuple[str, ...]:

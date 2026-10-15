@@ -78,5 +78,5 @@ signal.pause()
     assert leader_and_group is not None
     assert leader_and_group[1] == leader_and_group[2]
     assert status == -signal.SIGTERM
-    assert len(probe.calls) == 1
-    assert "scancel" in probe.calls[0][0][-1]
+    programs = [argv[-1].split()[0] for argv, _timeout in probe.calls]
+    assert programs == ["scancel", "squeue"]

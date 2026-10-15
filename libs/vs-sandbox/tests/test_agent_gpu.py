@@ -190,11 +190,16 @@ class TestLauncher:
         assert match is not None
         job_name = match.group(1)
 
-        scancel_lines = [
+        # The fake logs the arguments without the program; only the squeue check
+        # after the cancel asks for a headerless listing.
+        named = [
             line for line in slurm_log.read_text().splitlines() if f"--name={job_name}" in line
         ]
+        scancel_lines = [line for line in named if "--noheader" not in line]
         assert len(scancel_lines) == 1
         assert "--me" in scancel_lines[0]
+        assert len(named) == 2
+        assert b"cancel unconfirmed" not in output
 
 
 _LIMITS = {"partitions": ["main"], "max_gpus": 2, "max_time_minutes": 30}

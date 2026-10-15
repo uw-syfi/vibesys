@@ -1,4 +1,9 @@
-"""The agent GPU launcher stops every local process that can retain their merged output pipe."""
+"""The agent GPU launcher cancels the job, stops every local process holding its output, and checks.
+
+``scancel`` and the ``squeue`` check after it run through the transport's shell,
+which may be a ``docker exec`` or ``ssh`` client; stopping that client does not
+stop the job, so only the scheduler's own answers decide whether a cancel took.
+"""
 
 from __future__ import annotations
 
@@ -87,18 +92,29 @@ class _DescendantHeldProcess:
         raise AssertionError
 
 
-class _ScancelProbe:
-    def __init__(self, trace: list[str], on_scancel: Callable[[], None] | None = None) -> None:
+class _SlurmProbe:
+    """Answers ``scancel`` and ``squeue`` in turn from scripts; the last answer repeats."""
+
+    def __init__(
+        self,
+        trace: list[str],
+        on_scancel: Callable[[], None] | None = None,
+        *,
+        scancel: Sequence[ProbeResult | None] = (ProbeResult(0, ""),),
+        squeue: Sequence[ProbeResult | None] = (ProbeResult(0, ""),),
+    ) -> None:
         self._trace = trace
         self._on_scancel = on_scancel
+        self._answers = {"scancel": list(scancel), "squeue": list(squeue)}
 
-    def run(self, argv: Sequence[str], *, timeout_seconds: float) -> ProbeResult:
+    def run(self, argv: Sequence[str], *, timeout_seconds: float) -> ProbeResult | None:
         assert timeout_seconds > 0
-        assert "scancel" in argv[-1]
-        self._trace.append("scancel")
-        if self._on_scancel is not None:
+        program = argv[-1].split()[0]
+        self._trace.append(program)
+        if program == "scancel" and self._on_scancel is not None:
             self._on_scancel()
-        return ProbeResult(0, "")
+        answers = self._answers[program]
+        return answers.pop(0) if len(answers) > 1 else answers[0]
 
 
 def _cancel_on_ready(cancel: Event, output: bytearray, chunk: bytes) -> None:
@@ -134,7 +150,7 @@ def test_agent_gpu_cancellation_scancels_before_stopping_the_whole_local_group(
             default_time_minutes=5,
         ),
         ("transport", "shell"),
-        probe=_ScancelProbe(trace),
+        probe=_SlurmProbe(trace),
         processes=processes,
         threads=threads,
     )
@@ -152,7 +168,7 @@ def test_agent_gpu_cancellation_scancels_before_stopping_the_whole_local_group(
     expected = ["scancel", "SIGTERM"]
     if term_survivors:
         expected.append("SIGKILL")
-    assert trace == expected
+    assert trace == [*expected, "squeue"]
     assert status == 143
     assert output.endswith(b"wrapper ready\n")
     assert processes.started[0].env == {"TOKEN": "value"}
@@ -175,7 +191,7 @@ def test_agent_gpu_does_not_signal_a_group_that_settles_during_scancel() -> None
             default_time_minutes=5,
         ),
         ("transport", "shell"),
-        probe=_ScancelProbe(trace, on_scancel=lambda: process.settle(0)),
+        probe=_SlurmProbe(trace, on_scancel=lambda: process.settle(0)),
         processes=FakePipedProcessLauncher(lambda _start: process),
         threads=threads,
     )
@@ -190,4 +206,67 @@ def test_agent_gpu_does_not_signal_a_group_that_settles_during_scancel() -> None
     )
 
     assert status == 0
-    assert trace == ["scancel"]
+    assert trace == ["scancel", "squeue"]
+
+
+def _launcher(
+    probe: _SlurmProbe, process: _DescendantHeldProcess, threads: SimThreads
+) -> AgentGpuLauncher:
+    return AgentGpuLauncher(
+        AgentGpuConfig(partitions=("gpu",), max_gpus=1, max_time_minutes=5, default_time_minutes=5),
+        ("transport", "shell"),
+        probe=probe,
+        processes=FakePipedProcessLauncher(lambda _start: process),
+        threads=threads,
+    )
+
+
+def _cancelled_run(probe: _SlurmProbe, trace: list[str]) -> bytes:
+    threads = SimThreads()
+    cancel = threads.event()
+    process = _DescendantHeldProcess(threads, term_survivors=0, trace=trace)
+    launcher = _launcher(probe, process, threads)
+    output = bytearray()
+    threads.run(
+        lambda: launcher.run(
+            GpuJobRequest(gpus=1, time_minutes=5),
+            GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+            write=lambda chunk: _cancel_on_ready(cancel, output, chunk),
+            cancel=cancel,
+        )
+    )
+    return bytes(output)
+
+
+_UNKNOWN = st.sampled_from([None, ProbeResult(255, "", "connection lost"), ProbeResult(1, "")])
+_LISTED = st.sampled_from([None, ProbeResult(1, ""), ProbeResult(0, "4242\n")])
+
+
+@settings(max_examples=examples(pr=20, nightly=100))
+@given(unknown=st.lists(_UNKNOWN, max_size=4))
+def test_scancel_runs_again_while_its_outcome_is_unknown_up_to_a_bound(
+    unknown: list[ProbeResult | None],
+) -> None:
+    """Regression (REVIEW-9 P2-3): one lost ``scancel`` used to count as a cancel."""
+    trace: list[str] = []
+    _cancelled_run(_SlurmProbe(trace, scancel=[*unknown, ProbeResult(0, "")]), trace)
+
+    assert trace.count("scancel") == min(len(unknown) + 1, 3)
+
+
+@settings(max_examples=examples(pr=20, nightly=100))
+@given(listed=st.lists(_LISTED, max_size=8))
+def test_a_cancel_is_reported_unconfirmed_while_squeue_still_lists_or_cannot_answer(
+    listed: list[ProbeResult | None],
+) -> None:
+    """Regression (REVIEW-9 P2-3): a killed wrapper's job kept its GPUs with no report.
+
+    The job counts as gone only on an ``squeue`` that succeeded and listed nothing,
+    and it is asked a bounded number of times.
+    """
+    trace: list[str] = []
+    output = _cancelled_run(_SlurmProbe(trace, squeue=[*listed, ProbeResult(0, "")]), trace)
+
+    confirmed = len(listed) < 6
+    assert trace.count("squeue") == (len(listed) + 1 if confirmed else 6)
+    assert (b"cancel unconfirmed" in output) is not confirmed
