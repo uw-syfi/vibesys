@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import StageOutputOpener
     from vs_runtime.api.infrastructure import RunControlChannel, TrustedEvaluationPlan
     from vs_sandbox.api.slurm import SharedSlurmAdmission, SlurmEvaluationPlan, SlurmExecutionPolicy
-    from vs_sim.api import Clock, Processes, Sleeper
+    from vs_sim.api import BlockingRunner, Clock, Processes, Sleeper
     from vs_slurm.api import Cluster, SlurmConfig, WorkspaceRootProof
 
 
@@ -34,9 +34,10 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
         *,
         clock: Clock,
         sleeper: Sleeper,
+        blocking: BlockingRunner,
+        processes: Processes,
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
-        processes: Processes | None = None,
         ledger_identity: tuple[str, str] | None = None,
         stage_output: StageOutputOpener | None = None,
         root_proof: WorkspaceRootProof | None = None,
@@ -54,6 +55,7 @@ class SlurmSemanticEvaluationExecutor(SemanticSlurmEvaluationExecutor):
             stage_failure_text=render_stage_failure,
             clock=clock,
             sleeper=sleeper,
+            blocking=blocking,
             admission=admission,
             cluster=cluster,
             processes=processes,

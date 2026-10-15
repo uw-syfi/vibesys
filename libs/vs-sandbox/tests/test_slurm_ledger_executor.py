@@ -41,8 +41,8 @@ from vs_sandbox.api.slurm import (
     SlurmLedgerAttachment,
     SlurmStagePayload,
 )
-from vs_sim.api import yield_now
-from vs_sim.api.testing import ManualClock, yield_until
+from vs_sim.api import ThreadBlockingRunner, yield_now
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, yield_until
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterCollectOutcome,
@@ -83,6 +83,7 @@ DEFAULT_POLICY = LedgerPolicy(lease_seconds=LEASE_S, grace_seconds=GRACE_S)
 KEEPING = DEFAULT_POLICY.model_copy(update={"keep_jobs_on_stop": True})
 # Only guards a hang: every wait below ends on an event the test already caused.
 _BOUND_S = 60.0
+_BLOCKING = ThreadBlockingRunner()
 CONFIG = SlurmConfig(
     name="fake-cluster",
     remote_workspace_root="/runs",
@@ -305,6 +306,8 @@ class _World:
             cluster=self.scheduler,
             clock=self.clock,
             sleeper=sleeper,
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
             ledger=SlurmLedgerAttachment(
                 ledger=self.ledger.reopen(),
                 config=CONFIG,

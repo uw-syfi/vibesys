@@ -637,6 +637,7 @@ class _ProductHostFactory:
             _slurm_handle_root(namespace),
             clock=clock,
             sleeper=clock,
+            blocking=self.blocking,
             processes=self.integration.system.slurm_processes,
             ledger_identity=ledger_identity,
             stage_output=stage_output,

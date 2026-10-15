@@ -24,7 +24,7 @@ from vs_evaluation.api import (
 )
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmStagePayload
 from vs_sim.api import Capture, OutputStream, yield_now
-from vs_sim.api.testing import ManualClock, arrival, examples
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock, arrival, examples
 from vs_slurm.api import (
     FakeCluster,
     SlurmBatchResult,
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
 _POLL_S = 10.0
 _HANDLE = "eval-live"
 _TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.CANCELED})
+_BLOCKING = InlineBlockingRunner()
 
 
 @dataclass
@@ -143,6 +144,8 @@ def _executor(
         # The job deadline is not under test; a clock that never moves keeps it out.
         clock=ManualClock(),
         stage_output=streams.open,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
 
 

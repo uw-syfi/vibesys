@@ -340,10 +340,10 @@ def _bridge(
         policy,
         ScopeWorkspaces(
             cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))),
-            StoreWorkspaceReceipts(ReceiptStore(namespace, threads=SimThreads())),
+            StoreWorkspaceReceipts(ReceiptStore(namespace, threads=threads)),
         ),
         AgentEvaluationRecords(
-            OwedSubmissions(ReceiptStore(namespace, threads=SimThreads())), SynthesizedEvidence()
+            OwedSubmissions(ReceiptStore(namespace, threads=threads)), SynthesizedEvidence()
         ),
         diagnostics=diagnostics or (lambda _message: None),
         network=network,

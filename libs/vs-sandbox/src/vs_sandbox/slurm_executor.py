@@ -91,7 +91,7 @@ if TYPE_CHECKING:
 
     from vs_sandbox.slurm_ledger import Attached, SlurmLedgerAttachment
     from vs_sandbox.slurm_stage_output import SlurmStageOutputOpener
-    from vs_sim.api import Clock, Processes, Sleeper
+    from vs_sim.api import BlockingRunner, Clock, Processes, Sleeper
     from vs_slurm.api import (
         Cluster,
         ClusterCollectOutcome,
@@ -329,11 +329,12 @@ class SlurmEvaluationExecutor:
         support_trees: Mapping[str, Path],
         handle_root: Path,
         supported_evidence_kinds: tuple[str, ...] = ("accuracy", "benchmark"),
-        admission: SharedSlurmAdmission | None = None,
-        cluster: Cluster | None = None,
-        processes: Processes | None = None,
+        processes: Processes,
         clock: Clock,
         sleeper: Sleeper,
+        blocking: BlockingRunner,
+        admission: SharedSlurmAdmission | None = None,
+        cluster: Cluster | None = None,
         cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
         ledger: SlurmLedgerAttachment | None = None,
         ledger_candidate: str | None = None,
@@ -361,11 +362,9 @@ class SlurmEvaluationExecutor:
         the poll interval, and a failed proof refuses the submission with the probe's error.
         ``before_dispatch`` may refuse a prepared job before its first scheduler or ledger
         contact; attaching to an already accepted job does not start another execution.
+        ``blocking`` owns calls into that synchronous cluster.
         """
         if cluster is None:
-            if processes is None:
-                message = "a Slurm executor needs a cluster or the processes that reach one"
-                raise ValueError(message)
             cluster = make_cluster(
                 config, state_root=handle_root / _CLUSTER_STATE, processes=processes, clock=clock
             )
@@ -373,6 +372,7 @@ class SlurmEvaluationExecutor:
         self._cluster = cluster
         self._stage_output = stage_output
         self._root_proof = root_proof
+        self._blocking = blocking
         self._sleeper = sleeper
         self._poll_interval = config.poll_interval_seconds
         # Confirmation is bounded by an inspection count so that it follows the
@@ -1509,14 +1509,13 @@ class SlurmEvaluationExecutor:
     async def _in_thread[**P, R](
         self, function: Callable[P, R], /, *args: P.args, **kwargs: P.kwargs
     ) -> R:
-        """Run a blocking call on a worker thread that ``close`` waits for.
+        """Run a call on the owned blocking boundary that ``close`` waits for.
 
-        ``asyncio.to_thread`` abandons its worker when the awaiting task is cancelled,
-        and the call keeps running in it. Every such call is held in ``_calls`` until
-        its thread returns, so ``close`` can wait for it, and a cancelled caller still
-        stops waiting at once.
+        A production worker keeps running when the awaiting task is cancelled. Every
+        call is held in ``_calls`` until its runner returns, so ``close`` can wait for it,
+        while a cancelled caller still stops waiting at once.
         """
-        work = asyncio.ensure_future(asyncio.to_thread(function, *args, **kwargs))
+        work = asyncio.ensure_future(self._blocking.run(function, *args, **kwargs))
         self._calls.add(work)
         work.add_done_callback(self._call_ended)
         return await asyncio.shield(work)
@@ -1531,10 +1530,9 @@ class SlurmEvaluationExecutor:
     ) -> R:
         """Run a blocking cluster call that must finish even if its awaiter is cancelled.
 
-        ``asyncio.to_thread`` abandons its worker when the awaiting task is cancelled,
-        so a cancel or inspect could still be mid-flight (an scancel not yet sent) after
-        the executor reported itself closed. This waits for the call to end, then
-        re-raises the cancellation.
+        A production worker may outlive a cancelled awaiter, so a cancel or inspect
+        could still be mid-flight (an scancel not yet sent) after the executor reported
+        itself closed. This waits for the call to end, then re-raises the cancellation.
         """
         work = asyncio.ensure_future(self._in_thread(function, *args, **kwargs))
         try:

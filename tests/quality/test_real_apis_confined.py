@@ -965,11 +965,6 @@ REAL_API_PENDING: dict[Key, Pending] = {
     ("libs/vs-project/src/vs_project/_state_store.py", "threading"): Pending(
         1, Owner.BAN_SWEEP, "FakeStateStore's lock; takes Threads from its callers"
     ),
-    ("libs/vs-runtime/src/vs_runtime/api/slurm_evaluation_stack.py", "threading"): Pending(
-        1,
-        Owner.LANE_A,
-        "ScenarioCluster.accepted is set on slurm_executor's real to_thread worker; moves after that row",
-    ),
     ("libs/vs-sandbox/src/vs_sandbox/command_execution.py", "subprocess"): Pending(
         1, Owner.LANE_A, "type only: SubprocessError in an except clause"
     ),
@@ -1023,9 +1018,6 @@ REAL_API_PENDING: dict[Key, Pending] = {
     ),
     ("libs/vs-sandbox/src/vs_sandbox/slurm_broker.py", "threading"): Pending(
         2, Owner.LANE_A, "the broker's server threads; move to Threads"
-    ),
-    ("libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "executor"): Pending(
-        1, Owner.LANE_A, "cluster calls on asyncio.to_thread; move to a BlockingRunner"
     ),
     ("libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "subprocess"): Pending(
         1, Owner.LANE_A, "type only: SubprocessError in an except clause"
@@ -2059,9 +2051,6 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
         "SkyPilotEnvironment._open_skypilot:SkyPilotBridge(...)": Owner.CONFINEMENT,
         "SkyPilotEnvironment._open_skypilot:SkyPilotJobRunner(...)": Owner.CONFINEMENT,
     },
-    "libs/vs-runtime/src/vs_runtime/_semantic_slurm_evaluation.py": {
-        "SemanticSlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
-    },
     "libs/vs-sandbox/src/vs_sandbox/fake_command_runner.py": {
         "FakeCommandRunner:default_factory=OsThreads": Owner.PURITY,
     },
@@ -2083,14 +2072,8 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
         "SkyPilotJobRunner.__init__:OsThreads()": Owner.CONFINEMENT,
         "SkyPilotJobRunner.__init__:SubprocessCommandRunner(...)": Owner.CONFINEMENT,
     },
-    "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": {
-        "SlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
-    },
     "src/launch/__init__.py": {
         "LaunchSettings:slurm_processes=None": Owner.LANE_A,
-    },
-    "src/vibesys/run/slurm_evaluation.py": {
-        "SlurmSemanticEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
     },
 }
 

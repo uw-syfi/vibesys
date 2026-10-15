@@ -22,8 +22,6 @@
 {"path": "libs/vs-sandbox/tests/test_skypilot_bridge.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_skypilot_evaluator_helper.py", "rule": "fs_sync", "count": 1}
 {"path": "libs/vs-sandbox/tests/test_slurm_admission_cancel.py", "rule": "threading", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_slurm_cancel_in_flight.py", "rule": "bare_wait", "count": 1}
-{"path": "libs/vs-sandbox/tests/test_slurm_cancel_in_flight.py", "rule": "threading", "count": 2}
 {"path": "libs/vs-sandbox/tests/test_slurm_executor.py", "rule": "bare_wait", "count": 3}
 {"path": "libs/vs-sandbox/tests/test_slurm_executor.py", "rule": "threading", "count": 10}
 {"path": "libs/vs-sandbox/tests/test_slurm_executor.py", "rule": "interpreter", "count": 1}
@@ -160,7 +158,8 @@
 {"path": "libs/vs-sandbox/tests/test_docker_sandbox.py", "rule": "real_impl", "count": 5}
 {"path": "libs/vs-sandbox/tests/test_local_shell.py", "rule": "real_impl", "count": 20}
 {"path": "libs/vs-sandbox/tests/test_slurm_broker.py", "rule": "real_impl", "count": 4}
-{"path": "libs/vs-sandbox/tests/test_slurm_close_drain.py", "rule": "real_impl", "count": 1}
+{"path": "libs/vs-sandbox/tests/test_slurm_executor.py", "rule": "real_impl", "count": 1}
+{"path": "libs/vs-sandbox/tests/test_slurm_ledger_executor.py", "rule": "real_impl", "count": 1}
 {"path": "libs/vs-slurm/tests/test_connector_process_contract.py", "rule": "real_impl", "count": 2}
 {"path": "libs/vs-slurm/tests/test_fake_connector.py", "rule": "real_impl", "count": 2}
 {"path": "tests/architecture/test_prompt_resource_contract.py", "rule": "real_impl", "count": 2}
@@ -203,7 +202,7 @@
 {"path": "tests/support/skeleton_world.py", "rule": "real_impl", "count": 1}
 {"path": "tests/support/stream_session_world.py", "rule": "real_impl", "count": 3}
 {"path": "tests/support/timed_dynamic_run.py", "rule": "real_impl", "count": 1}
-{"path": "tests/support/workspace_world.py", "rule": "real_impl", "count": 5}
+{"path": "tests/support/workspace_world.py", "rule": "real_impl", "count": 4}
 {"path": "tests/system/agent_evaluation/test_bridge.py", "rule": "real_impl", "count": 1}
 {"path": "tests/system/agent_tools/test_core_property.py", "rule": "real_impl", "count": 3}
 {"path": "tests/system/quota/test_quota_through_the_core_loop.py", "rule": "real_impl", "count": 4}
@@ -235,7 +234,6 @@
 {"path": "tests/vibesys/run/test_run_control_adapter.py", "rule": "real_impl", "count": 1}
 {"path": "tests/vibesys/run/test_run_exit_cancels_slurm_jobs.py", "rule": "real_impl", "count": 9}
 {"path": "tests/vibesys/run/test_run_exit_stops_containers.py", "rule": "real_impl", "count": 7}
-{"path": "tests/vibesys/run/test_slurm_evaluation.py", "rule": "real_impl", "count": 1}
 {"path": "tests/vibesys/run/test_slurm_run_facts.py", "rule": "real_impl", "count": 2}
 {"path": "tests/vibesys/sandbox/test_run_environment.py", "rule": "real_impl", "count": 1}
 {"path": "tests/vibesys/sandbox/test_slurm_environment.py", "rule": "real_impl", "count": 26}

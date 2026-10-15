@@ -84,7 +84,7 @@ if TYPE_CHECKING:
         SlurmLedgerAttachment,
         SlurmStageOutputOpener,
     )
-    from vs_sim.api import Clock, OutputSink, Processes, Sleeper
+    from vs_sim.api import BlockingRunner, Clock, OutputSink, Processes, Sleeper
     from vs_slurm.api import Cluster, SlurmConfig, WorkspaceRootProof
 
 _CLEANUP_FAILURE = "cleanup failed"
@@ -154,9 +154,10 @@ class SemanticSlurmEvaluationExecutor:
         stage_failure_text: StageFailureText,
         clock: Clock,
         sleeper: Sleeper,
+        blocking: BlockingRunner,
+        processes: Processes,
         admission: SharedSlurmAdmission | None = None,
         cluster: Cluster | None = None,
-        processes: Processes | None = None,
         ledger: SlurmLedgerAttachment | None = None,
         ledger_identity: tuple[str, str] | None = None,
         stage_output: StageOutputOpener | None = None,
@@ -168,6 +169,7 @@ class SemanticSlurmEvaluationExecutor:
 
         ``clock`` times job deadlines; ``sleeper`` paces the polls of running jobs. Each
         executor uses ``cluster``, or reaches the configured cluster by starting ``processes``.
+        ``blocking`` owns calls into that synchronous cluster.
 
         When the operator's policy enables the evaluation ledger (#2757), evaluations
         go through ``ledger``, or through the project's ledger on the configured
@@ -201,6 +203,7 @@ class SemanticSlurmEvaluationExecutor:
         self._cluster = cluster
         self._processes = processes
         self._stage_output = stage_output
+        self._blocking = blocking
         self._executions: dict[str, _Execution] = {}
         self._lock = asyncio.Lock()
         # Set by ``close``: no submission makes a new candidate executor after it.
@@ -461,6 +464,7 @@ class SemanticSlurmEvaluationExecutor:
             stage_output=stage_output,
             root_proof=self._root_proof,
             before_dispatch=self._admit_execution,
+            blocking=self._blocking,
         )
 
     def _admit_execution(self, request: EvaluationRequest) -> None:

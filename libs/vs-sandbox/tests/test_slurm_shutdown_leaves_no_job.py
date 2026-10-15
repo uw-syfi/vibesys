@@ -39,7 +39,16 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
 )
 from vs_sim.api import yield_now
-from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, examples, run_virtual
+from vs_sim.api.testing import (
+    NO_PROCESSES,
+    InlineBlockingRunner,
+    ManualClock,
+    SimBlockingRunner,
+    SimThreads,
+    VirtualClock,
+    examples,
+    run_virtual,
+)
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitOutcome,
@@ -73,6 +82,7 @@ if TYPE_CHECKING:
 
 PROJECT = "demo-0123456789ab"
 HANDLES = tuple(f"eval-{index}" for index in range(3))
+_BLOCKING = InlineBlockingRunner()
 CONFIG = SlurmConfig(
     name="fake-cluster",
     remote_workspace_root="/runs",
@@ -193,6 +203,8 @@ class _Shutdown:
             cluster=self.scheduler,
             clock=self.clock,
             sleeper=self.clock,
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
             ledger=ledger,
         )
 
@@ -549,6 +561,8 @@ class _TwoRuns:
             cluster=self.scheduler,
             clock=self.clock,
             sleeper=self.clock,
+            blocking=SimBlockingRunner(self.sim),
+            processes=NO_PROCESSES,
             ledger=SlurmLedgerAttachment(
                 ledger=_SwitchingLedger(self.ledger.reopen(), self.sim),
                 config=CONFIG,
@@ -786,6 +800,8 @@ def test_a_run_never_leases_a_request_it_is_withdrawing(
         cluster=scheduler,
         clock=clock,
         sleeper=clock,
+        blocking=SimBlockingRunner(sim),
+        processes=NO_PROCESSES,
         ledger=SlurmLedgerAttachment(
             ledger=_Watched(ledger, sim),
             config=CONFIG,

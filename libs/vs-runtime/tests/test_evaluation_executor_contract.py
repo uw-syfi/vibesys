@@ -8,6 +8,7 @@ reach a terminal state, render a failed stage's text, and cancel the same way.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -327,6 +328,24 @@ async def test_poll_reports_each_phase_without_submitting_or_cancelling(
     assert polled.terminal is not None
     assert polled.terminal.state is EvaluationState.SUCCEEDED
     await world.executor.close()
+
+
+def test_scenario_cluster_announces_acceptance_on_the_event_loop_itself() -> None:
+    """``ScenarioCluster.accepted`` is an ``asyncio.Event``, never a real thread's wait.
+
+    ``build_stack`` always runs cluster calls through ``InlineBlockingRunner``, so
+    ``submit`` always sets ``accepted`` on the event loop's own thread. A real
+    ``threading.Event`` observed through ``asyncio.to_thread`` races that
+    submission against the operation ``wait_until_executor_started`` watches for:
+    a scripted job with no held phase (``_Script.SUCCEED``) can submit, finish,
+    and publish its terminal state before a background thread notices the flag,
+    so the wait reports the operation ended before it ever caught a "started"
+    signal (``test_poll_reports_each_phase_without_submitting_or_cancelling``
+    failed this way under CI's parallel load). An ``asyncio.Event`` is set and
+    read on the same loop, in the same deterministic order every time.
+    """
+    cluster = ScenarioCluster()
+    assert isinstance(cluster.accepted, asyncio.Event)
 
 
 @pytest.mark.parametrize("build", BUILDERS)

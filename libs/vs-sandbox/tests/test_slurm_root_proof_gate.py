@@ -34,7 +34,14 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationExecutor,
     SlurmStagePayload,
 )
-from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, run_virtual
+from vs_sim.api.testing import (
+    NO_PROCESSES,
+    ManualClock,
+    SimBlockingRunner,
+    SimThreads,
+    VirtualClock,
+    run_virtual,
+)
 from vs_slurm.api import (
     ClusterInspectOutcome,
     ClusterSubmitOutcome,
@@ -163,8 +170,8 @@ def _evaluation() -> EvaluationRequest:
 def _executor(
     root: Path,
     cluster: FakeCluster,
-    clock: VirtualClock,
     proof: WorkspaceRootProof,
+    threads: SimThreads,
     *,
     handles: str = "handles",
 ) -> SlurmEvaluationExecutor:
@@ -183,8 +190,10 @@ def _executor(
         support_trees={},
         handle_root=root / handles,
         cluster=cluster,
-        sleeper=clock,
+        sleeper=threads.clock,
         clock=ManualClock(),
+        blocking=SimBlockingRunner(threads),
+        processes=NO_PROCESSES,
         root_proof=proof,
     )
 
@@ -195,7 +204,7 @@ def test_a_first_evaluation_waits_for_a_queued_probe_and_its_retry_then_is_refus
     threads = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
     proof = _proof(tmp_path, threads, scheduled=False, job_fails=True)
     cluster = _RecordingCluster()
-    executor = _executor(tmp_path, cluster, threads.clock, proof)
+    executor = _executor(tmp_path, cluster, proof, threads)
     coordinator = EvaluationCoordinator(
         executor,
         evaluation_testing.InMemoryEvaluationStore(),
@@ -232,7 +241,7 @@ def test_an_evaluation_reaches_the_scheduler_once_the_root_is_proven(tmp_path: P
     threads = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
     proof = _proof(tmp_path, threads, scheduled=True)
     cluster = _RecordingCluster()
-    executor = _executor(tmp_path, cluster, threads.clock, proof)
+    executor = _executor(tmp_path, cluster, proof, threads)
     coordinator = EvaluationCoordinator(
         executor,
         evaluation_testing.InMemoryEvaluationStore(),
@@ -340,7 +349,7 @@ def test_an_evaluation_dispatched_before_a_restart_reconciles_without_waiting_fo
     first = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
     proven = _proof(tmp_path / "first", first, scheduled=True)
     cluster = _RecordingCluster()
-    executor = _executor(tmp_path, cluster, first.clock, proven)
+    executor = _executor(tmp_path, cluster, proven, first)
     handle_id = "gated-evaluation-0001"
 
     def crash() -> None:
@@ -362,7 +371,7 @@ def test_an_evaluation_dispatched_before_a_restart_reconciles_without_waiting_fo
 
     restarted = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
     failed = _proof(tmp_path / "restarted", restarted, scheduled=True, job_fails=True)
-    resumed = _executor(tmp_path, cluster, restarted.clock, failed, handles="handles-at-crash")
+    resumed = _executor(tmp_path, cluster, failed, restarted, handles="handles-at-crash")
     inspected_before = len(cluster.inspections)
 
     async def resume() -> ExecutorPoll:
@@ -400,7 +409,7 @@ def test_an_evaluation_refused_by_a_failed_proof_says_the_run_environment_is_una
     threads = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
     proof = _proof(tmp_path, threads, scheduled=True, job_fails=True)
     cluster = _RecordingCluster()
-    executor = _executor(tmp_path, cluster, threads.clock, proof)
+    executor = _executor(tmp_path, cluster, proof, threads)
     handle_id = "refused-evaluation-0001"
 
     async def main() -> ExecutorObservation | None:

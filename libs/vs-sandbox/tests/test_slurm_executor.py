@@ -34,8 +34,15 @@ from vs_sandbox.api.slurm import (
     SlurmStagePayload,
     SlurmTargetLifecycle,
 )
-from vs_sim.api import yield_now
-from vs_sim.api.testing import Gate, InlineBlockingRunner, ManualClock, examples, wait_until_started
+from vs_sim.api import ThreadBlockingRunner, yield_now
+from vs_sim.api.testing import (
+    NO_PROCESSES,
+    Gate,
+    InlineBlockingRunner,
+    ManualClock,
+    examples,
+    wait_until_started,
+)
 from vs_slurm.api import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -66,6 +73,8 @@ from vs_slurm.api import (
     SlurmSshTransport,
     validate_cluster_operation_id,
 )
+
+_BLOCKING = ThreadBlockingRunner()
 
 _RAW_STAGE_INPUT = """import json, sys
 from pathlib import Path
@@ -580,6 +589,8 @@ async def test_executor_fuses_stages_and_preserves_execution_metadata(tmp_path: 
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
 
     await executor.submit(_request(), handle_id="eval-fused")
@@ -608,6 +619,8 @@ async def test_executor_rejects_malformed_stages_without_submitting(tmp_path: Pa
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     mixed = EvaluationRequest(
         key="mixed",
@@ -646,6 +659,8 @@ async def test_executor_maps_missing_stage_evidence_to_failed_collection(tmp_pat
         cluster=_ScenarioCluster(config, fail_before_stage=True),
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
 
     await executor.submit(_request(), handle_id="eval-failed")
@@ -681,6 +696,8 @@ async def test_executor_never_invents_a_successful_exit_code(exit_code: int | No
             cluster=runner,
             clock=ManualClock(),
             sleeper=ManualClock(),
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
         )
         try:
             runner.benchmark_exit_code = exit_code
@@ -735,6 +752,8 @@ async def test_executor_preserves_steps_but_rejects_failed_batch(
             cluster=runner,
             clock=ManualClock(),
             sleeper=ManualClock(),
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
         )
         try:
             runner.job_exit_code = exit_code
@@ -782,6 +801,8 @@ async def test_executor_keeps_both_stage_streams_across_unknown_and_incomplete_o
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(
@@ -832,6 +853,8 @@ async def test_failed_accuracy_skips_benchmark_when_requested(
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(_request(), handle_id="eval-accuracy-gate")
@@ -867,6 +890,8 @@ async def test_executor_preserves_both_stages_through_durable_coordinator_failur
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     coordinator = EvaluationCoordinator(
         executor,
@@ -915,6 +940,8 @@ async def test_executor_reports_a_silent_failed_stage(
         cluster=_ScenarioCluster(config, benchmark_exit_code=exit_code, benchmark_stdout=""),
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
 
     await executor.submit(_request(), handle_id="eval-silent")
@@ -955,6 +982,8 @@ async def test_failed_stage_reports_the_server_log_tail(
         ),
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
 
     await executor.submit(_request(), handle_id="eval-server-log")
@@ -984,6 +1013,8 @@ async def test_executor_recovers_durable_handle_without_resubmission(tmp_path: P
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     await first.submit(_request(), handle_id="eval-resume")
     assert (await _terminal(first, "eval-resume")).state is EvaluationState.SUCCEEDED
@@ -998,6 +1029,8 @@ async def test_executor_recovers_durable_handle_without_resubmission(tmp_path: P
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     recovered = await resumed.inspect("eval-resume")
     assert recovered is not None
@@ -1022,6 +1055,8 @@ async def test_recovered_evaluation_never_reports_starting_after_running(tmp_pat
             cluster=runner,
             clock=ManualClock(),
             sleeper=ManualClock(),
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
         )
 
     first = executor()
@@ -1060,6 +1095,8 @@ async def test_executor_enforces_one_persisted_queue_deadline(tmp_path: Path) ->
         cluster=runner,
         clock=runner.deadline_clock,
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
 
     await executor.submit(_request(), handle_id="eval-timeout")
@@ -1083,6 +1120,8 @@ async def test_executor_enforces_one_persisted_queue_deadline(tmp_path: Path) ->
         cluster=runner,
         clock=runner.deadline_clock,
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     recovered = await resumed.inspect("eval-timeout")
     assert recovered == observed
@@ -1110,6 +1149,8 @@ async def test_executor_recovers_deadline_persisted_before_interrupted_wait(
         cluster=runner,
         clock=clock,
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await first.submit(_request(), handle_id="eval-crash-during-wait")
@@ -1127,6 +1168,8 @@ async def test_executor_recovers_deadline_persisted_before_interrupted_wait(
             cluster=runner,
             clock=clock,
             sleeper=ManualClock(),
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
         )
 
         observed = await _terminal(resumed, "eval-crash-during-wait")
@@ -1151,6 +1194,8 @@ async def test_executor_close_cancels_and_drains_background_execution(tmp_path: 
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(_request(), handle_id="eval-close")
@@ -1189,6 +1234,8 @@ async def test_cancelling_the_execution_task_cancels_the_submitted_slurm_job(
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(_request(), handle_id="eval-interrupted")
@@ -1228,6 +1275,8 @@ async def test_a_cancelled_cancel_still_finishes_the_scancel_before_it_returns(
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(_request(), handle_id="eval-double-cancel")
@@ -1270,6 +1319,8 @@ async def test_a_failed_scancel_does_not_stop_the_cancellation_from_finishing(
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(_request(), handle_id="eval-unreachable")
@@ -1331,6 +1382,8 @@ async def test_scancel_acknowledgement_does_not_complete_release_or_suppress_ret
         cancel_confirmation_seconds=3 * config.poll_interval_seconds,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(_request(), handle_id="eval-pending-cancel")
@@ -1393,6 +1446,8 @@ async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure
         handle_root=tmp_path / "handles",
         cluster=runner,
         sleeper=clock,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         clock=clock,
     )
     coordinator = EvaluationCoordinator(
@@ -1426,6 +1481,8 @@ async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure
             cluster=runner,
             clock=ManualClock(),
             sleeper=ManualClock(),
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
         )
         polled = await observer.poll(handle.id)
         assert polled.phase is PollPhase.ENDED
@@ -1451,6 +1508,8 @@ async def test_late_job_identity_switches_ambiguous_cleanup_to_job_confirmation(
         handle_root=tmp_path / "handles",
         cluster=runner,
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         clock=ManualClock(),
     )
     terminal_wait = asyncio.create_task(_terminal(executor, "eval-late-job"))
@@ -1474,6 +1533,8 @@ async def test_late_job_identity_switches_ambiguous_cleanup_to_job_confirmation(
             cluster=runner,
             clock=ManualClock(),
             sleeper=ManualClock(),
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
         )
         polled = await observer.poll("eval-late-job")
         assert polled.phase is PollPhase.ENDED
@@ -1506,6 +1567,8 @@ async def test_unknown_during_absence_confirmation_keeps_ambiguous_submission_ow
         handle_root=tmp_path / "handles",
         cluster=runner,
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         clock=ManualClock(),
     )
     terminal_wait = asyncio.create_task(_terminal(executor, "eval-unknown"))
@@ -1559,6 +1622,8 @@ async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
         handle_root=tmp_path / "handles",
         cluster=cluster,
         sleeper=clock,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         clock=clock,
     )
     coordinator = EvaluationCoordinator(
@@ -1592,6 +1657,8 @@ async def test_remote_claim_lost_before_publication_ends_as_durable_failure(
             cluster=cluster,
             clock=ManualClock(),
             sleeper=ManualClock(),
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
         )
         polled = await observer.poll(handle.id)
         assert polled.phase is PollPhase.ENDED
@@ -1617,6 +1684,8 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     store = evaluation_testing.InMemoryEvaluationStore()
     coordinator = EvaluationCoordinator(
@@ -1646,6 +1715,8 @@ async def test_missing_external_identity_keeps_dispatched_cancellation_unresolve
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     restored = EvaluationCoordinator(
         resumed, store, ManualClock(), deadline_factory=loop_evaluation_deadline
@@ -1683,6 +1754,8 @@ async def test_known_staging_rejection_is_failed_and_cleanup_needs_no_external_i
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     coordinator = EvaluationCoordinator(
         executor,
@@ -1728,6 +1801,8 @@ async def test_cancellation_during_rejected_staging_preserves_definite_failure(
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(_request(), handle_id="staging-cancel")
@@ -1786,6 +1861,8 @@ async def test_executor_rejects_missing_or_blank_commands_before_acceptance(
         cluster=cluster,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     request = EvaluationRequest(
         key="invalid-command",
@@ -1821,6 +1898,8 @@ async def test_executor_rejects_invalid_identity_before_persistence(
         cluster=cluster,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         for operation, error in (
@@ -1854,6 +1933,8 @@ async def test_inactive_executor_cancels_prepared_intent_without_external_identi
         admission=admission,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     inactive = SlurmEvaluationExecutor(
         _config(),
@@ -1866,6 +1947,8 @@ async def test_inactive_executor_cancels_prepared_intent_without_external_identi
         admission=admission,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         async with admission.lease("occupied"):
@@ -1932,6 +2015,8 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
         cluster=cluster,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     conflicting = SlurmEvaluationExecutor(
         config,
@@ -1943,6 +2028,8 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
         cluster=cluster,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     reopened = SlurmEvaluationExecutor(
         config,
@@ -1954,6 +2041,8 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
         cluster=cluster,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     request = EvaluationRequest(
         key="claimed",
@@ -2017,6 +2106,8 @@ async def test_read_only_restart_inspection_never_resumes_or_cancels_work(
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     await first.submit(_request(), handle_id="inspect-only")
     assert (await _terminal(first, "inspect-only")).state is EvaluationState.SUCCEEDED
@@ -2032,6 +2123,8 @@ async def test_read_only_restart_inspection_never_resumes_or_cancels_work(
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     result = await resumed.inspect_only("inspect-only")
     if status in {SlurmJobStatus.FAILED, SlurmJobStatus.COMPLETED, SlurmJobStatus.UNKNOWN}:
@@ -2060,6 +2153,8 @@ async def test_read_only_pending_scheduler_does_not_regress_active_evaluation(
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     coordinator = EvaluationCoordinator(
         executor,
@@ -2118,6 +2213,8 @@ async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recoverin
         cluster=cluster,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         assert (await executor.poll(operation_id)).phase is PollPhase.UNSUBMITTED
@@ -2156,6 +2253,8 @@ async def test_a_poll_joining_an_owner_that_is_cancelled_returns_instead_of_rais
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(_request(), handle_id="eval-polled")
@@ -2205,6 +2304,8 @@ async def test_a_poll_joining_an_owner_that_fails_returns_instead_of_raising(
         cluster=runner,
         clock=ManualClock(),
         sleeper=ManualClock(),
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
     )
     try:
         await executor.submit(_request(), handle_id="eval-owner-fails")
@@ -2251,6 +2352,8 @@ async def test_a_cancel_that_proves_sbatch_never_arrived_ends_the_evaluation_dur
             handle_root=tmp_path / "handles",
             cluster=runner,
             sleeper=ManualClock(),
+            blocking=_BLOCKING,
+            processes=NO_PROCESSES,
             clock=ManualClock(),
         )
 

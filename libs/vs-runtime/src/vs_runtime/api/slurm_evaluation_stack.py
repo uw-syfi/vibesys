@@ -8,7 +8,7 @@ ends with, and counts real submissions so tests can prove "exactly once".
 
 from __future__ import annotations
 
-import threading
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -41,7 +41,7 @@ from vs_sandbox.api.slurm import (
     SlurmEvaluationPlan,
     SlurmExecutionPolicy,
 )
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock
 from vs_slurm.api import (
     ClusterSubmitOutcome,
     FakeCluster,
@@ -95,7 +95,12 @@ class ScenarioCluster(FakeCluster):
         """Every batch request the scheduler accepted, in submission order."""
         self.nodes: list[str | None] = []
         """The node each accepted batch ran on, in submission order; none when unscripted."""
-        self.accepted = threading.Event()
+        # ``build_stack`` always runs cluster calls through an inline blocking
+        # runner, so this always sets on the event loop's own thread: an
+        # asyncio.Event keeps that acceptance signal ordered against the
+        # evaluation's own completion, instead of racing a real OS thread's
+        # wakeup against a synchronous, zero-yield submit-to-terminal path.
+        self.accepted = asyncio.Event()
 
     @property
     def cancelled(self) -> list[str]:
@@ -258,6 +263,8 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
         clock=ManualClock(),
         # Pacing moves a timeline of its own, so polling never brings a deadline nearer.
         sleeper=sleeper or ManualClock(),
+        blocking=InlineBlockingRunner(),
+        processes=NO_PROCESSES,
         cluster=cluster,
         stage_output=stage_output,
         ledger=ledger,

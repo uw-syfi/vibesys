@@ -22,7 +22,7 @@ from vs_evaluation.api import (
     is_finished,
 )
 from vs_sandbox.api.slurm import SlurmEvaluationExecutor, SlurmLedgerAttachment, SlurmStagePayload
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock
 from vs_slurm.api import (
     ClusterObservation,
     ClusterSubmitOutcome,
@@ -48,6 +48,7 @@ POLL_S = 60.0
 # Only guards a hang: every evaluation here ends on the virtual clock.
 _BOUND_S = 60.0
 PROJECT = "demo-0123456789ab"
+_BLOCKING = InlineBlockingRunner()
 
 
 def _config(**update: object) -> SlurmConfig:
@@ -140,6 +141,8 @@ def _executor(
         cluster=scheduler,
         clock=clock,
         sleeper=clock,
+        blocking=_BLOCKING,
+        processes=NO_PROCESSES,
         ledger=attachment if ledger else None,
         ledger_candidate="0f3c9e1" if ledger else None,
     )

@@ -74,7 +74,7 @@ from vs_runtime.api.replay import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, plan
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
-from vs_sim.api.testing import InlineBlockingRunner, swept
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, swept
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 from .generated.vibesys.runtime.testing.v1.agent_replay_pb import AgentReplayResult
@@ -405,6 +405,8 @@ class CandidateWorld:
             stage_failure_text=render_stage_failure,
             clock=self.sim.clock,
             sleeper=self.sim.clock,
+            blocking=self.env.blocking,
+            processes=NO_PROCESSES,
             cluster=self.cluster,
         )
         self.jobs.append(measured)

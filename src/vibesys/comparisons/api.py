@@ -69,7 +69,7 @@ class ComparisonHost:
     repository: GitRepository
     scratch: Path
     """A fresh directory for the checkout and the plan; the caller removes it."""
-    processes: Processes | None
+    processes: Processes
     cluster: Cluster | None
     """An already-open cluster; without one, the settings' own transport is reached by *processes*."""
 
@@ -198,6 +198,7 @@ async def measure_comparisons(  # noqa: PLR0913  # lint-waiver: LW-930097 [PLR09
         state / "slurm-handles",
         clock=host.clock,
         sleeper=host.sleeper,
+        blocking=host.blocking,
         processes=host.processes,
         cluster=host.cluster,
     )

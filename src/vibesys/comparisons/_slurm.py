@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.comparisons import ComparisonExecutor, ComparisonSubject
     from vs_runtime.api.infrastructure import MeasuredCheckouts, TrustedEvaluationPlan
     from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmOperatorSettings
-    from vs_sim.api import Clock, Processes, Sleeper
+    from vs_sim.api import BlockingRunner, Clock, Processes, Sleeper
     from vs_slurm.api import Cluster
 
 
@@ -43,7 +43,8 @@ class SlurmSampleExecutors:
         *,
         clock: Clock,
         sleeper: Sleeper,
-        processes: Processes | None,
+        blocking: BlockingRunner,
+        processes: Processes,
         cluster: Cluster | None,
     ) -> None:
         """Bind the operator's settings and the plans every sample's job runs."""
@@ -55,6 +56,7 @@ class SlurmSampleExecutors:
         self._handle_root = handle_root
         self._clock = clock
         self._sleeper = sleeper
+        self._blocking = blocking
         self._processes = processes
         self._cluster = cluster
 
@@ -106,6 +108,7 @@ class SlurmSampleExecutors:
             stage_failure_text=render_stage_failure,
             clock=self._clock,
             sleeper=self._sleeper,
+            blocking=self._blocking,
             processes=self._processes,
             cluster=self._cluster,
         )

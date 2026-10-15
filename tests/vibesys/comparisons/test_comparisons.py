@@ -25,7 +25,7 @@ from vs_runtime.api.comparisons import (
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sandbox.api.slurm import ComparisonMachine, SlurmExecutionPolicy, SlurmOperatorSettings
-from vs_sim.api.testing import InlineBlockingRunner, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, InlineBlockingRunner, ManualClock
 from vs_slurm.api import SlurmConfig, SlurmService, SlurmSshTransport
 
 if TYPE_CHECKING:
@@ -109,7 +109,7 @@ class _World:
             blocking=InlineBlockingRunner(),
             repository=self.repository,
             scratch=scratch,
-            processes=None,
+            processes=NO_PROCESSES,
             cluster=self.cluster,
         )
 
