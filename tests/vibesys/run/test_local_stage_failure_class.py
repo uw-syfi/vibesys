@@ -72,8 +72,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import MemoryValidationPasses
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api import OsThreads, ThreadBlockingRunner
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -230,7 +229,7 @@ def _measure_with_lost_command(
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
+        threads=SimThreads(),
         slurm_processes=REAL_PROCESSES,
     )
     request = ProjectRunRequest(
@@ -290,12 +289,12 @@ def _measure_with_lost_command(
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=lambda _event: None,
-                threads=OsThreads(),
-                blocking=ThreadBlockingRunner(),
+                threads=SimThreads(),
+                blocking=InlineBlockingRunner(),
             )
             runtime = create_workspace_runtime(
                 workspace_resources=factory,
-                blocking=BlockingOperations(runner=ThreadBlockingRunner()),
+                blocking=BlockingOperations(runner=InlineBlockingRunner()),
                 validation_passes=MemoryValidationPasses(),
             )
             evaluation = create_evaluation(

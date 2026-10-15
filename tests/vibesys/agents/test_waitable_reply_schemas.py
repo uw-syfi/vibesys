@@ -22,8 +22,7 @@ from vs_agent.api import AgentClient, native_schema_problems
 from vs_agent.api.testing import FakeExecutor, fake_agentshim_launcher, scripted_turn
 from vs_core.api import WaitableReply
 from vs_prompts.api import TemplateRenderer
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -176,10 +175,10 @@ def test_waitable_replies_reach_codex_as_native_schemas(
     tmp_path: Path, model: type[BaseModel], payload: dict[str, object]
 ) -> None:
     executor = FakeExecutor(scripted_turn("codex", structured_output=payload))
-    launcher = fake_agentshim_launcher(provider="codex", executor=executor, threads=OsThreads())
+    launcher = fake_agentshim_launcher(provider="codex", executor=executor, threads=SimThreads())
 
     with AgentClient(
-        launcher, provider="codex", clock=ManualClock(), threads=OsThreads()
+        launcher, provider="codex", clock=ManualClock(), threads=SimThreads()
     ) as client:
         result = client.invoke(
             kind="implementer",

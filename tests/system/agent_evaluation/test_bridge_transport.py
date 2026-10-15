@@ -33,7 +33,6 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
-from vs_sim.api import OsThreads
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     SimBlockingRunner,
@@ -76,10 +75,10 @@ def _bridge(root: Path, network: SimNetwork, threads: SimThreads) -> AgentEvalua
         policy,
         ScopeWorkspaces(
             cast("RuntimeWorkspaces", FakeWorkspaces(FakeWorkspace(path=Path("/workspace")))),
-            StoreWorkspaceReceipts(ReceiptStore(namespace, threads=OsThreads())),
+            StoreWorkspaceReceipts(ReceiptStore(namespace, threads=SimThreads())),
         ),
         AgentEvaluationRecords(
-            OwedSubmissions(ReceiptStore(namespace, threads=OsThreads())), SynthesizedEvidence()
+            OwedSubmissions(ReceiptStore(namespace, threads=SimThreads())), SynthesizedEvidence()
         ),
         network=network,
         threads=threads,

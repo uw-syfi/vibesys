@@ -33,8 +33,8 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api import DockerSandbox, SandboxKind
 from vs_sandbox.api.slurm import SlurmPolicyError, load_slurm_operator_settings
-from vs_sim.api import OsThreads, SubprocessProbe
-from vs_sim.api.testing import ManualClock
+from vs_sim.api import SubprocessProbe
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -188,7 +188,7 @@ def _open(
     accuracy: str | None = "python accuracy.py",
     benchmark: str | None = "python benchmark.py",
 ) -> tuple[DaemonBackend, RunEnvironmentRequest, RunEnvironmentSession]:
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     request = _request(tmp_path, backend, accuracy=accuracy, benchmark=benchmark)
     return backend, request, open_run_environment(_environment(tmp_path, name, backend), request)
 
@@ -262,7 +262,7 @@ def test_a_gpu_command_from_the_container_runs_in_a_slurm_job_within_the_operato
 
 
 def test_the_profiler_follows_the_capability_not_the_environment_name(tmp_path: Path) -> None:
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     plain = _environment(tmp_path, "slurm", backend)
     gpu = _environment(tmp_path, "slurm+gpu", backend)
 
@@ -291,7 +291,7 @@ def test_the_profiler_follows_the_capability_not_the_environment_name(tmp_path: 
 def test_agent_gpu_commands_are_rejected_without_the_local_transport(
     tmp_path: Path, transport: str
 ) -> None:
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     config = _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log")
     replacement = {
         "ssh": 'kind = "ssh"\nhost = "login"',
@@ -311,7 +311,7 @@ def test_the_slurm_gpu_alias_deprecation_is_reported_once_per_run_not_once_per_o
     tmp_path: Path,
 ) -> None:
     """Regression: a run opens its environment for every candidate, and each open logged it."""
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     logged: list[str] = []
     request = replace(_request(tmp_path, backend), log=logged.append)
     environment = _environment(tmp_path, "slurm-gpu", backend)
@@ -329,7 +329,7 @@ def test_the_slurm_gpu_alias_deprecation_is_reported_once_per_run_not_once_per_o
 
 @pytest.mark.parametrize("name", ["slurm", "slurm-local", "slurm+gpu"])
 def test_a_selection_that_is_not_deprecated_has_no_deprecation(tmp_path: Path, name: str) -> None:
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
 
     assert run_environment_deprecation(_environment(tmp_path, name, backend)) is None
 
@@ -362,7 +362,7 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
 ) -> None:
     """The job's confinement hides everything but the workspace unless the operator exposes it."""
     tools = _read_only_tools(tmp_path)
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     request = _request(tmp_path, backend)
     environment = _real_confinement_environment(tmp_path, backend, [tools] if exposed else [])
     session = open_run_environment(environment, request)
@@ -383,7 +383,7 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
 def test_a_read_only_path_that_does_not_exist_fails_the_open_naming_the_key(
     tmp_path: Path,
 ) -> None:
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     environment = _real_confinement_environment(tmp_path, backend, [tmp_path / "missing-venv"])
 
     with pytest.raises(ValueError, match=r"agent_gpu\.read_only_paths.*missing-venv"):
@@ -408,7 +408,7 @@ def test_a_venv_whose_interpreter_link_leaves_the_listed_paths_fails_the_open_na
     tmp_path: Path,
 ) -> None:
     venv, alias = _aliased_venv(tmp_path)
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     environment = _real_confinement_environment(tmp_path, backend, [venv])
 
     with pytest.raises(ValueError, match=r"agent_gpu\.read_only_paths") as raised:
@@ -423,7 +423,7 @@ def test_a_gpu_job_runs_an_interpreter_reached_through_a_link_chain_once_the_ali
     tmp_path: Path,
 ) -> None:
     venv, alias = _aliased_venv(tmp_path)
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     environment = _real_confinement_environment(tmp_path, backend, [venv, alias])
     session = open_run_environment(environment, _request(tmp_path, backend))
     try:
@@ -441,7 +441,7 @@ def test_a_gpu_job_runs_an_interpreter_reached_through_a_link_chain_once_the_ali
 def test_the_notes_tell_the_agent_gpu_commands_run_in_the_hosts_environment_and_list_the_paths(
     tmp_path: Path, paths: tuple[str, ...]
 ) -> None:
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     config = _write_agent_gpu_slurm_config(tmp_path, tmp_path / "srun.log")
     quoted = ", ".join(f'"{path}"' for path in paths)
     with config.open("a", encoding="utf-8") as handle:
@@ -477,7 +477,7 @@ _PROFILERS = {
 def test_the_profilers_a_run_may_select_follow_how_the_environment_can_run_one(
     tmp_path: Path, name: str
 ) -> None:
-    backend = DaemonBackend(daemon_engine(tmp_path), threads=OsThreads())
+    backend = DaemonBackend(daemon_engine(tmp_path), threads=SimThreads())
     environment = _environment(tmp_path, name, backend)
 
     default, supported = _PROFILERS[name]

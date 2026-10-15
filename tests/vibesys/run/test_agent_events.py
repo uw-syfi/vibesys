@@ -31,15 +31,14 @@ from vs_agent.api import (
     QuotaCondition,
     QuotaPlan,
 )
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 
 def _attached_sink(tmp_path: Path, run_id: str) -> tuple[EventJournal, CoreAgentEventSink]:
-    journal = EventJournal(clock=ManualClock(), threads=OsThreads())
+    journal = EventJournal(clock=ManualClock(), threads=SimThreads())
     journal.attach(tmp_path / run_id, run_id)
     return journal, CoreAgentEventSink(journal.record, clock=ManualClock())
 

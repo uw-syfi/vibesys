@@ -19,8 +19,7 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
 )
 from vs_runtime.api.testing import DaemonBackend, daemon_engine
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -44,7 +43,7 @@ def _open(
         log_dir=tmp_path / "logs",
         workspace=workspace,
         ref_dir=None,
-        backend=DaemonBackend(engine, threads=OsThreads()),
+        backend=DaemonBackend(engine, threads=SimThreads()),
         agent_backend="stub",
         cli_provider=None,
         run_id="run-1",

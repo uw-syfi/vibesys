@@ -19,8 +19,7 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStarted,
     AgentExecutionStatus,
 )
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,7 +35,7 @@ def test_a_semantic_event_uses_the_unified_durable_stream(tmp_path: Path) -> Non
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
+        threads=SimThreads(),
         slurm_processes=REAL_PROCESSES,
     )
     try:
@@ -57,7 +56,7 @@ def test_agent_lifecycle_adapter_records_complete_invocation(tmp_path: Path) -> 
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
+        threads=SimThreads(),
         slurm_processes=REAL_PROCESSES,
     )
     try:
@@ -105,14 +104,14 @@ def test_local_integrations_own_isolated_agent_event_streams(tmp_path: Path) -> 
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
+        threads=SimThreads(),
         slurm_processes=REAL_PROCESSES,
     )
     second = LocalRunIntegration(
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
+        threads=SimThreads(),
         slurm_processes=REAL_PROCESSES,
     )
     try:

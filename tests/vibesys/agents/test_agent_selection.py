@@ -21,8 +21,7 @@ from vs_agent.api import (
     build_agent_client,
 )
 from vs_sandbox.api import SANDBOX_DISABLE_ENV
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock, examples
+from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -50,7 +49,7 @@ def _build(
 ) -> AgentClient:
     spec = agent_spec_from_config(config, model=options.get("model_name", "m"))
     client = build_agent_client(
-        threads=OsThreads(),
+        threads=SimThreads(),
         spec=spec,
         backends=options.get("backends"),
         skill_source_dirs=[],
@@ -190,7 +189,7 @@ def test_a_container_client_accepts_a_workspace_sandbox_lookup() -> None:
     spec = agent_spec_from_config(_config(backend="cli", cli_provider="claude"), model="m")
 
     client = build_agent_client(
-        threads=OsThreads(),
+        threads=SimThreads(),
         spec=spec,
         backends={},
         workspace_sandboxes=lambda _path: None,
@@ -209,7 +208,7 @@ def test_a_lookup_without_docker_is_refused_not_dropped() -> None:
 
     with pytest.raises(ValueError, match="does not use Docker"):
         build_agent_client(
-            threads=OsThreads(),
+            threads=SimThreads(),
             spec=spec,
             backends=None,
             workspace_sandboxes=lambda _path: None,
@@ -225,7 +224,7 @@ def test_a_docker_client_without_sandboxes_is_refused_at_build() -> None:
 
     with pytest.raises(ValueError, match="needs the run's sandboxes"):
         build_agent_client(
-            threads=OsThreads(),
+            threads=SimThreads(),
             spec=spec,
             backends=None,
             skill_source_dirs=[],

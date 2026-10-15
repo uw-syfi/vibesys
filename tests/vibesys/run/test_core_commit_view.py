@@ -18,8 +18,7 @@ from vibesys.events import CoreEvent, CoreEventType, WinnerSelectedData
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import RuntimeRecord, winner_selection
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -42,7 +41,7 @@ async def test_one_core_run_notifies_the_listener_per_commit_and_announces_its_w
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
+        threads=SimThreads(),
         slurm_processes=REAL_PROCESSES,
     )
     heard: list[CoreEvent] = []

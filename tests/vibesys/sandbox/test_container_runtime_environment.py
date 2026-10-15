@@ -38,8 +38,7 @@ from vs_sandbox.api import (
     SandboxKind,
 )
 from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry, ScriptedDockerCli
-from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -112,7 +111,7 @@ class _DaemonBackend:
             resources=resources,
             docker=self.engine,
             docker_in_docker=docker_in_docker,
-            threads=OsThreads(),
+            threads=SimThreads(),
         )
 
     def ensure_accelerator_available(self) -> None:
@@ -237,7 +236,7 @@ def test_a_host_without_a_gpu_fails_before_any_image_is_built(tmp_path: Path) ->
         tmp_path,
         gpu_telemetry=FakeGpuTelemetry(gpus=[]),
         clock=ManualClock(),
-        threads=OsThreads(),
+        threads=SimThreads(),
         docker=ScriptedDockerCli(),
     )
 

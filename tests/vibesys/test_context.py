@@ -54,7 +54,6 @@ from vs_runtime.api.infrastructure import (
 from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import OsThreads
 from vs_sim.api.testing import ManualClock, SimThreads
 
 
@@ -224,7 +223,7 @@ def _create_context(
                 clock=ManualClock(),
                 git=REAL_GIT,
                 github=NO_GITHUB,
-                threads=OsThreads(),
+                threads=SimThreads(),
                 slurm_processes=REAL_PROCESSES,
             ),
             ownership=ownership,
@@ -492,7 +491,7 @@ def test_run_context_announces_canonical_experiment_state(tmp_path: Path) -> Non
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
+        threads=SimThreads(),
         slurm_processes=REAL_PROCESSES,
     )
     try:
@@ -867,7 +866,7 @@ def test_late_construction_failure_does_not_advance_remote_run_branch(tmp_path: 
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
+        threads=SimThreads(),
         slurm_processes=REAL_PROCESSES,
     )
 
