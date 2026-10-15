@@ -1,0 +1,22 @@
+// Rule S8 of the desktop design system (docs/contributing/clients-architecture.md, "Design
+// system enforcement"), for `@vibesys/ui`'s hand-written stylesheets (`libs/ui/src/*.css`, except
+// the generated `tokens.css`): a declaration value holds no hex color, `rgb(`, `rgba(`, `hsl(`,
+// `hsla(`, `oklch(`, `color-mix(`, or CSS length (`<number>px`, `rem`, `em`, `vh`, `vw`). Values
+// come from the token table, written as `var(--...)`. The TypeScript rule is
+// `strict-no-raw-values.grit`; the regular expression is the same, and a Grit regex must match the
+// whole text.
+//
+// `biome.json` excludes `primitives.css`, the styles of the old primitives (Button, StatusChip,
+// Combobox, Dialog), whose pixel values have no token to read: a token would change what they draw.
+// The batch of components that replaces them deletes the file and this exclusion; biome.json takes
+// no comments, so the exclusion is tracked here. The list only shrinks.
+language css;
+
+CssGenericProperty(value = $value) as $declaration where {
+  $value <: r"(?s).*(?:(?:^|[^\w.#])\d*\.?\d+(?:px|rem|em|vh|vw)\b|#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3,4})\b|\b(?:rgba?|hsla?|oklch|color-mix)\().*",
+  register_diagnostic(
+    span = $declaration,
+    message = "ui-no-raw-css-values (S8): a raw color or CSS length in a `@vibesys/ui` stylesheet. Read it from the token table with `var(--...)`, such as `var(--space-3)` or `var(--radius)`. A value the table lacks is added to the table in `src/tokens/`, which regenerates `tokens.css`.",
+    severity = "error"
+  )
+}

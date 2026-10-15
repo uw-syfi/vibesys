@@ -11,8 +11,8 @@
  * From those declarations, the manifests, the tsconfig projects, and the source on disk, the gate
  * reports one message per violation, prefixed with the rule it breaks (`RULES` lists them):
  *
- * - `declarations`: the `vibesys` block exists, names a known layer and known runtimes, and has no
- *   other keys.
+ * - `declarations`: the `vibesys` block exists, names a known layer and known runtimes, may carry
+ *   the closed `design` marker (`strict`), and has no other keys.
  * - `entries-match-exports`: the `vibesys.entries` keys are exactly the `exports` keys (`.` alone
  *   when a package publishes no exports).
  * - `exports-name-source`: each export lists the `@vibesys/source` condition first, naming a source
@@ -57,6 +57,18 @@
  *   `apps/*` declares app. A package outside those folders fails, except a deprecated package on
  *   `DEPRECATED_OUTSIDE_FOLDERS` (`tui`), which stays where it is until it is deleted.
  *
+ * Three rules hold the desktop design system (docs/contributing/clients-architecture.md, "Design
+ * system enforcement") for packages marked `"design": "strict"`; each message names its rule id
+ * (S2, S5, S6) and the fix:
+ *
+ * - `strict-no-stylesheets`: a strict package exports no stylesheet and holds no style file.
+ * - `strict-imports`: a strict package imports UI only from `@vibesys/ui`'s `.` and `./tokens`,
+ *   workspace code only from `STRICT_WORKSPACE_IMPORTS`, and third-party code only from
+ *   `STRICT_THIRD_PARTY`.
+ * - `strict-lint-coverage`: the `includes` of `biome.json`'s strict override (the one loading the
+ *   strict Grit rules) are exactly the strict packages' sources, so a strict package cannot escape
+ *   the element and value rules and no other package is held to them by accident.
+ *
  * An export whose source is a stylesheet (`./tokens.css`) is a `dom` asset, not a compiled entry:
  * it has no tsconfig project, and bundlers resolve it through the same source condition.
  *
@@ -94,6 +106,9 @@ export const RULES = [
   'domain-free',
   'bucket-names',
   'layer-matches-folder',
+  'strict-no-stylesheets',
+  'strict-imports',
+  'strict-lint-coverage',
 ];
 
 /**
@@ -116,6 +131,11 @@ export const LAYER_FOLDERS = {
  * else belongs here, and this list only shrinks.
  */
 export const DEPRECATED_OUTSIDE_FOLDERS = new Set(['tui']);
+
+/** The keys of a package's `vibesys` block. */
+const DECLARED_KEYS = new Set(['layer', 'entries', 'design']);
+/** The closed values of `vibesys.design`: `strict` opts a package into the design-system rules. */
+const DESIGN_MODES = new Set(['strict']);
 
 /** Layer ranks. A package may depend only on a strictly lower rank. */
 export const LAYERS = {foundation: 0, core: 1, domain: 2, service: 3, feature: 4, app: 5};
@@ -277,7 +297,11 @@ export function packageGraphErrors(root) {
       errors.push(...domainWordErrors(root, workspacePackage));
     }
     errors.push(...bucketNameErrors(workspacePackage));
+    if (workspacePackage.manifest.vibesys.design === 'strict') {
+      errors.push(...strictErrors(root, workspacePackage, byName));
+    }
   }
+  errors.push(...lintCoverageErrors(root, packages));
   return errors;
 }
 
@@ -311,9 +335,19 @@ function declarationErrors(root, {name, directory, manifest}) {
   }
   const errors = [];
   for (const key of Object.keys(metadata)) {
-    if (key !== 'layer' && key !== 'entries') {
+    if (!DECLARED_KEYS.has(key)) {
       errors.push(violation('declarations', where, `unknown key vibesys.${key}`));
     }
+  }
+  if (metadata.design !== undefined && !DESIGN_MODES.has(metadata.design)) {
+    const modes = [...DESIGN_MODES].join(', ');
+    errors.push(
+      violation(
+        'declarations',
+        where,
+        `vibesys.design must be ${modes} (or absent), not ${JSON.stringify(metadata.design)}`,
+      ),
+    );
   }
   if (!Object.hasOwn(LAYERS, metadata.layer)) {
     const layers = Object.keys(LAYERS).join(', ');
@@ -483,16 +517,23 @@ function layerErrors({name, directory, manifest}, byName) {
 
 // --- imports ----------------------------------------------------------------------------------
 
-/** Source files under the package, package-relative, skipping installs, output, and dot-dirs. */
-function sourceFiles(packageRoot, relativeDirectory = '') {
+/** Files under the package that `accept` their name, package-relative, skipping installs, output, and dot-dirs. */
+function filesWhere(packageRoot, accept, relativeDirectory = '') {
   const files = [];
   for (const entry of readdirSync(join(packageRoot, relativeDirectory), {withFileTypes: true})) {
     if (entry.name.startsWith('.') || SKIPPED_DIRECTORIES.has(entry.name)) continue;
     const path = relativeDirectory === '' ? entry.name : `${relativeDirectory}/${entry.name}`;
-    if (entry.isDirectory()) files.push(...sourceFiles(packageRoot, path));
-    else if (SOURCE_FILE.test(entry.name) && !DECLARATION_FILE.test(entry.name)) files.push(path);
+    if (entry.isDirectory()) files.push(...filesWhere(packageRoot, accept, path));
+    else if (accept(entry.name)) files.push(path);
   }
   return files;
+}
+
+const isSourceFile = name => SOURCE_FILE.test(name) && !DECLARATION_FILE.test(name);
+
+/** Source files under the package, package-relative. */
+function sourceFiles(packageRoot) {
+  return filesWhere(packageRoot, isSourceFile);
 }
 
 /** Test code: a test file, a test-support directory, or anything outside `src/` (tooling). */
@@ -525,6 +566,17 @@ export function owningEntry(entries, path) {
 export function importedSpecifiers(text) {
   const {importedFiles} = ts.preProcessFile(text, true, true);
   return importedFiles.map(({fileName}) => fileName).filter(name => !name.startsWith('.'));
+}
+
+/** The bare specifiers a source text imports, each with its 1-based line. */
+export function importedSpecifierLines(text) {
+  const {importedFiles} = ts.preProcessFile(text, true, true);
+  return importedFiles
+    .filter(({fileName}) => !fileName.startsWith('.'))
+    .map(({fileName, pos}) => ({
+      specifier: fileName,
+      line: text.slice(0, pos).split('\n').length,
+    }));
 }
 
 /** The `@vibesys/*` specifiers among them. */
@@ -882,6 +934,215 @@ function bucketNameErrors({name, directory, manifest}) {
         'concept it owns; name it for that concept, or split it into one package per concept',
     ),
   ];
+}
+
+// --- strict design packages -------------------------------------------------------------------
+
+/**
+ * The workspace packages a strict package imports, with the entries it may import (`null`: any
+ * entry the package publishes). UI comes only from `@vibesys/ui`'s `.` and `./tokens`; the rest are
+ * the non-UI libraries a screen composes. No old feature package is on the list.
+ */
+export const STRICT_WORKSPACE_IMPORTS = {
+  '@vibesys/ui': ['.', './tokens'],
+  '@vibesys/contracts': null,
+  '@vibesys/store': null,
+  '@vibesys/machine': null,
+  '@vibesys/run-state': null,
+  '@vibesys/run-session': null,
+  '@vibesys/transport': null,
+  '@vibesys/hosts': null,
+  '@vibesys/runs': null,
+  '@vibesys/logs': null,
+  '@vibesys/ipc': null,
+  '@vibesys/connection': null,
+  '@vibesys/settings': ['./main'],
+};
+/** A strict app imports the generated stylesheets of `@vibesys/ui` once, in its entry wiring. */
+const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css'];
+/**
+ * The third-party packages a strict package imports and declares: no component kit, utility CSS or
+ * icon package. Electron and Node builtins stay confined by `external-dependencies`.
+ */
+export const STRICT_THIRD_PARTY = ['react', 'react-dom', 'xstate'];
+const STRICT_STYLE_FILE = /\.(?:css|scss|sass|less|styl|pcss)$/;
+const STRICT_FIX =
+  'build the UI from @vibesys/ui (add the missing component there) and drop the dependency';
+
+/** The Biome plugins every strict package runs; the override loading them is the strict override. */
+export const STRICT_LINT_PLUGINS = [
+  './tools/lint-rules/strict-no-raw-elements.grit',
+  './tools/lint-rules/strict-no-raw-values.grit',
+];
+const STRICT_TEST_EXCLUDES = ['!**/*.test.ts', '!**/*.test.tsx'];
+
+/** The `includes` of the strict Biome override for the packages in `directories`; none for none. */
+export function strictOverrideIncludes(directories) {
+  if (directories.length === 0) return [];
+  return [
+    ...[...directories]
+      .sort()
+      .flatMap(directory => [`${directory}/src/**/*.ts`, `${directory}/src/**/*.tsx`]),
+    ...STRICT_TEST_EXCLUDES,
+  ];
+}
+
+function strictErrors(root, workspacePackage, byName) {
+  return [
+    ...stylesheetErrors(root, workspacePackage),
+    ...strictManifestErrors(workspacePackage),
+    ...strictImportErrors(root, workspacePackage, byName),
+  ];
+}
+
+function stylesheetErrors(root, {name, directory, manifest}) {
+  const errors = [];
+  const fix = 'style through the components and tokens of @vibesys/ui, and delete it';
+  for (const [subpath, target] of Object.entries(manifest.exports ?? {})) {
+    const source = sourceTarget(target) ?? '';
+    if (STRICT_STYLE_FILE.test(subpath) || STRICT_STYLE_FILE.test(source)) {
+      errors.push(
+        violation(
+          'strict-no-stylesheets',
+          `${directory}/package.json`,
+          `exports["${subpath}"] is a stylesheet (S2), but the strict package ${name} ships none; ${fix}`,
+        ),
+      );
+    }
+  }
+  for (const path of filesWhere(join(root, directory), file => STRICT_STYLE_FILE.test(file))) {
+    errors.push(
+      violation(
+        'strict-no-stylesheets',
+        `${directory}/${path}`,
+        `a stylesheet (S2) in the strict package ${name}; ${fix}`,
+      ),
+    );
+  }
+  return errors;
+}
+
+function strictManifestErrors({name, directory, manifest}) {
+  const errors = [];
+  for (const dependency of Object.keys(manifest.dependencies ?? {})) {
+    const message = strictDependencyMessage(dependency);
+    if (message === undefined) continue;
+    errors.push(
+      violation(
+        'strict-imports',
+        `${directory}/package.json`,
+        `dependencies["${dependency}"] (S6) in the strict package ${name}: ${message}`,
+      ),
+    );
+  }
+  return errors;
+}
+
+/** Why a strict package may not depend on `dependency`, or undefined when it may. */
+function strictDependencyMessage(dependency) {
+  if (dependency.startsWith(SCOPE)) {
+    if (Object.hasOwn(STRICT_WORKSPACE_IMPORTS, dependency)) return undefined;
+    return `${dependency} is not a library a strict package may use; ${STRICT_FIX}`;
+  }
+  if (STRICT_THIRD_PARTY.includes(dependency) || dependency === 'electron') return undefined;
+  return `${dependency} is outside ${STRICT_THIRD_PARTY.join(', ')}; ${STRICT_FIX}`;
+}
+
+function strictImportErrors(root, workspacePackage, byName) {
+  const {directory} = workspacePackage;
+  const packageRoot = join(root, directory);
+  const errors = [];
+  for (const path of sourceFiles(packageRoot).filter(file => !isTestCode(file))) {
+    const text = readFileSync(join(packageRoot, path), 'utf8');
+    for (const {specifier, line} of importedSpecifierLines(text)) {
+      const message = strictSpecifierMessage(workspacePackage, specifier, byName);
+      if (message !== undefined) {
+        errors.push(violation('strict-imports', `${directory}/${path}:${line}`, message));
+      }
+    }
+  }
+  return errors;
+}
+
+/** Why a strict package may not import `specifier` (S6), or undefined when it may. */
+function strictSpecifierMessage({name, manifest}, specifier, byName) {
+  if (!specifier.startsWith(SCOPE)) return strictThirdPartyMessage(specifier);
+  const target = splitSpecifier(specifier);
+  if (target.name === name || !byName.has(target.name)) return undefined;
+  if (!Object.hasOwn(STRICT_WORKSPACE_IMPORTS, target.name)) {
+    return `imports ${specifier}, which a strict package may not use (S6); ${STRICT_FIX}`;
+  }
+  const entries = STRICT_WORKSPACE_IMPORTS[target.name];
+  const stylesheets = manifest.vibesys.layer === 'app' ? STRICT_APP_STYLESHEETS : [];
+  if (entries === null || [...entries, ...stylesheets].includes(target.subpath)) return undefined;
+  const allowed = entries.map(entry => `${target.name}${entry === '.' ? '' : entry.slice(1)}`);
+  return (
+    `imports ${specifier} (S6); a strict package imports only ${allowed.join(' and ')}: ` +
+    'use the public components and tokens'
+  );
+}
+
+function strictThirdPartyMessage(specifier) {
+  if (externalPolicy(specifier)?.rules.includes(NODE_BUILTINS)) return undefined;
+  const [first, second] = specifier.split('/');
+  const base = first.startsWith('@') ? `${first}/${second}` : first;
+  if (STRICT_THIRD_PARTY.includes(base) || base === 'electron') return undefined;
+  return `imports ${specifier} (S6), outside ${STRICT_THIRD_PARTY.join(', ')}; ${STRICT_FIX}`;
+}
+
+// --- strict lint coverage ---------------------------------------------------------------------
+
+function strictOverride(root) {
+  const path = join(root, 'biome.json');
+  if (!existsSync(path)) return {error: 'is missing; it holds the strict override', missing: true};
+  const overrides = JSON.parse(readFileSync(path, 'utf8')).overrides ?? [];
+  const override = overrides.find(({plugins = []}) => plugins.includes(STRICT_LINT_PLUGINS[0]));
+  if (override === undefined) {
+    return {error: `has no override loading ${STRICT_LINT_PLUGINS[0]}; add the strict override`};
+  }
+  return {override};
+}
+
+function lintCoverageErrors(root, packages) {
+  const strict = packages
+    .filter(({manifest}) => manifest.vibesys?.design === 'strict')
+    .map(({directory}) => directory);
+  const found = strictOverride(root);
+  // A workspace with no Biome configuration at all (a scaffolded one) has nothing to cover.
+  if (found.missing && strict.length === 0) return [];
+  if (found.error !== undefined) {
+    return [violation('strict-lint-coverage', 'biome.json', found.error)];
+  }
+  const {includes = [], plugins = []} = found.override;
+  const expected = strictOverrideIncludes(strict);
+  const errors = STRICT_LINT_PLUGINS.filter(plugin => !plugins.includes(plugin)).map(plugin =>
+    violation(
+      'strict-lint-coverage',
+      'biome.json',
+      `the strict override does not load ${plugin} (S3, S4); add it to its plugins`,
+    ),
+  );
+  for (const glob of expected.filter(each => !includes.includes(each))) {
+    errors.push(
+      violation(
+        'strict-lint-coverage',
+        'biome.json',
+        `the strict override's includes lack "${glob}" (S5), so a strict package escapes S3 and ` +
+          'S4 or its tests are held to them; add it, or drop "design": "strict" from the package',
+      ),
+    );
+  }
+  for (const glob of includes.filter(each => !expected.includes(each))) {
+    errors.push(
+      violation(
+        'strict-lint-coverage',
+        'biome.json',
+        `the strict override's includes list "${glob}" (S5), which no strict package accounts ` +
+          'for; remove it, or mark the package "design": "strict" in its vibesys block',
+      ),
+    );
+  }
+  return errors;
 }
 
 function main() {

@@ -14,9 +14,14 @@
       "**/*.cts",
       "**/*.mts",
       "tools/scripts/**/*.mjs",
+      "libs/ui/src/**/*.css",
+      "!libs/ui/src/tokens.css",
       "!**/dist",
       "!libs/contracts/src/generated"
     ]
+  },
+  "css": {
+    "formatter": { "enabled": false }
   },
   "formatter": {
     "enabled": true,
@@ -58,6 +63,31 @@
     }
   },
   "overrides": [
+    {
+      "includes": [],
+      "plugins": [
+        "./tools/lint-rules/strict-no-raw-elements.grit",
+        "./tools/lint-rules/strict-no-raw-values.grit"
+      ]
+    },
+    {
+      "includes": [
+        "libs/ui/src/**/*.ts",
+        "libs/ui/src/**/*.tsx",
+        "!libs/ui/src/tokens/**",
+        "!**/*.test.ts",
+        "!**/*.test.tsx"
+      ],
+      "plugins": ["./tools/lint-rules/strict-no-raw-values.grit"]
+    },
+    {
+      "includes": [
+        "libs/ui/src/**/*.css",
+        "!libs/ui/src/tokens.css",
+        "!libs/ui/src/primitives.css"
+      ],
+      "plugins": ["./tools/lint-rules/ui-no-raw-css-values.grit"]
+    },
     {
       "includes": [
         "**/ui/**/*.ts",
