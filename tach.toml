@@ -666,7 +666,7 @@ depends_on = ["vs_decode.api", "vs_sim.api"]
 [[modules]]
 path = "vibesys.run.logs"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["vibesys", "vs_logs", "vs_project", "vs_runtime", "vs_sim.api"]
 
 # Test-support simulation of the run lifecycle (store, commits, executors, effects) above vs_sim.
 # Nothing in production depends on it.
