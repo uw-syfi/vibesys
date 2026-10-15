@@ -16,7 +16,8 @@ The files: ``_define`` is ``@search`` and the driver; ``_defs`` registers flows;
 ``Flow`` and ``Group``; ``_kit`` is the handle core's own aspects use; ``_agents``,
 ``_workspaces``, ``_evaluation``, ``_owners`` and ``_winner`` are the aspects and the ending; ``_roles`` is
 the role declaration; ``_run`` drives the coroutines; ``_sources`` is what a flow waits on;
-``_resource`` is ``@resource``; ``_retry`` is the retry values; ``_state`` is the persisted state.
+``_resource`` is ``@resource``; ``_retry`` is the retry values; ``_state`` is the persisted state;
+``_spans`` is the run trace's read model and ``_trace`` records it.
 """
 
 from ._agents import Agents, Session
@@ -41,6 +42,20 @@ from ._roles import (
     reply_errors,
 )
 from ._sources import Latch, LatchKey, Pending, Source, StopSource, Task, Timer
+from ._spans import (
+    AttemptOutcome,
+    FailureKind,
+    RunTrace,
+    Span,
+    SpanAttempt,
+    SpanFailure,
+    SpanId,
+    SpanStatus,
+    SpanStop,
+    SpanType,
+    SpanWaitKind,
+    WaitingOn,
+)
 from ._state import Dropped, FlowState, JournaledEvent, Waiting
 from ._winner import INPUT, EndReason, Input, Kept, NoWinner
 from ._workspaces import Assessment, NotOpened, Workspace, Workspaces
@@ -54,12 +69,14 @@ __all__ = [
     "Again",
     "Agents",
     "Assessment",
+    "AttemptOutcome",
     "CaptureSpec",
     "Clock",
     "Deadlock",
     "Dropped",
     "EndReason",
     "Evaluation",
+    "FailureKind",
     "Flow",
     "FlowCodeChanged",
     "FlowDriver",
@@ -79,9 +96,18 @@ __all__ = [
     "RevisionReply",
     "Role",
     "RunTask",
+    "RunTrace",
     "SearchDef",
     "Session",
     "Source",
+    "Span",
+    "SpanAttempt",
+    "SpanFailure",
+    "SpanId",
+    "SpanStatus",
+    "SpanStop",
+    "SpanType",
+    "SpanWaitKind",
     "StopSource",
     "Stopped",
     "Task",
@@ -91,6 +117,7 @@ __all__ = [
     "Tries",
     "UnknownRoleError",
     "Waiting",
+    "WaitingOn",
     "Workspace",
     "Workspaces",
     "flow",

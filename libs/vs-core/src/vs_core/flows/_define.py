@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from vs_core.types.strategy import Decision
 
     from ._flow import Flow
+    from ._spans import RunTrace
     from ._state import LiveFlows
 
 type Root[C] = Callable[[Flow, C], Coroutine[Any, Any, NoWinner | None]]
@@ -227,6 +228,7 @@ class FlowDriver[C]:
             recorded=kept,
             reads=run.reads,
             digest=digest(state.journal[-1].digest, item, run.reads, decisions),
+            at=run.trace.at,
         )
         new = state.model_copy(
             update={
@@ -243,6 +245,11 @@ class FlowDriver[C]:
         """The record the flows last published (``ctx.publish``), or None if none yet."""
         text = state.live.published
         return None if text is None else model.model_validate_json(text)
+
+    @staticmethod
+    def trace(state: FlowState) -> RunTrace:
+        """The run's spans in ``state``: every flow task and awaited operation so far."""
+        return state.live.trace
 
     def waiting(self, state: FlowState) -> tuple[Waiting, ...]:
         """What each suspended flow waits for in ``state``: its sources, as data."""
@@ -263,7 +270,9 @@ class FlowDriver[C]:
         decisions: list[Decision],
     ) -> FlowState:
         """The state whose journal has just its first step: the start of the flows."""
-        first = Step(reads=run.reads, digest=digest("", None, run.reads, decisions))
+        first = Step(
+            reads=run.reads, digest=digest("", None, run.reads, decisions), at=run.trace.at
+        )
         state = FlowState(
             schema_version=1,
             facts=facts,
@@ -285,11 +294,11 @@ class FlowDriver[C]:
             item = step.event or step.recorded
             try:
                 if item is not None:
-                    decisions = run.feed(item, None, step.reads)
+                    decisions = run.feed(item, None, step.reads, step.at)
                 elif state.base is None:
-                    decisions = run.start(None, step.reads)
+                    decisions = run.start(None, step.reads, step.at)
                 else:
-                    decisions = run.restore(state.base, None, step.reads)
+                    decisions = run.restore(state.base, None, step.reads, step.at)
             except FlowCodeChanged as changed:
                 raise FlowCodeChanged(index) from changed
             if digest(before, item, step.reads, decisions) != step.digest:

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated, Literal
 from pydantic import Field, TypeAdapter
 
 from vs_core._registry import ContractError
-from vs_core.types.common import AttemptRef, DecisionId, RunFacts, Value
+from vs_core.types.common import AttemptRef, DecisionId, RunFacts, Seconds, Value
 from vs_core.types.kinds import EventKind
 from vs_core.types.search import (
     AdoptionFinished,
@@ -31,6 +31,8 @@ from vs_core.types.search import (
 from vs_core.types.settlement import Selection
 from vs_core.types.strategy import Decision, StrategyState
 from vs_core.types.until import Failed
+
+from ._spans import RunTrace
 
 if TYPE_CHECKING:
     from vs_core._registry import OperationRegistry
@@ -88,6 +90,11 @@ class Step(Value):
     recorded: Recorded | None = None
     reads: tuple[str, ...] = ()
     digest: str
+    at: Seconds
+    """The run-clock time of the step: the time of every span transition it recorded.
+
+    An input like the event, so it is not in the digest; replay takes it from here.
+    """
 
 
 class Issued(Value):
@@ -124,6 +131,8 @@ class LiveFlows(Value):
     """The flow's published record as JSON (``ctx.publish``), kept beside the journal."""
     choice: Selection | None = None
     """The winner named so far (``ctx.choose``): restarted flows keep it."""
+    trace: RunTrace
+    """The run's spans so far: a restart continues them."""
 
 
 class Waiting(Value):

@@ -20,6 +20,8 @@ if TYPE_CHECKING:
     from vs_core.types.common import DecisionId, Seconds
     from vs_core.types.strategy import Finish, Work
 
+    from ._spans import SpanId
+
 
 class Source[T]:
     """Something a flow can wait for. ``ready``/``take`` are the runtime's, not the author's."""
@@ -123,6 +125,8 @@ class Task[T](_Once[T | TaskStopped]):
     def __init__(self, key: str) -> None:
         super().__init__()
         self.key = key
+        self.span: SpanId | None = None
+        """The task's span in the run trace, once it started."""
 
     def describe(self) -> str:
         return f"task {self.key}"

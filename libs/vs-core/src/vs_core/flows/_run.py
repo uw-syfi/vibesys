@@ -28,6 +28,7 @@ from vs_core.types.search import (
 from vs_core.types.strategy import (
     Decision,
     Finish,
+    Operation,
     ProposeWinner,
     Settle,
     Wait,
@@ -41,7 +42,9 @@ from ._defs import FlowDef, _adapter, _Task, definition_of
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
 from ._flow import Flow
 from ._sources import First, Latch, LatchCell, LatchKey, Pending, Signal, Task, Timer
+from ._spans import RunTrace
 from ._state import Dropped, Issued, LiveFlow, LiveFlows, Recorded, RecordedOperation
+from ._trace import Trace
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -101,19 +104,26 @@ class _Run:
         self._view: RunView | None = None
         self._recorded: deque[str] | None = None
         self._reads: list[str] = []
+        self.trace = Trace(RunTrace())
 
     # -- one step: init, restore or one event ------------------------------------------------
 
     def start(
-        self, view: RunView | None, recorded: tuple[str, ...] | None = None
+        self, view: RunView | None, recorded: tuple[str, ...] | None = None, at: Seconds = 0.0
     ) -> list[Decision]:
         """Run the root flow until it first suspends."""
-        self._begin(view, recorded)
-        self._launch(self._tasks[0], self._root, self._config)
+        self._begin(view, recorded, at)
+        root = self._tasks[0]
+        root.span = self.trace.flow_started("", None, self._root.name, stopped=False)
+        self._launch(root, self._root, self._config)
         return self._end()
 
     def restore(
-        self, base: LiveFlows, view: RunView | None, recorded: tuple[str, ...] | None
+        self,
+        base: LiveFlows,
+        view: RunView | None,
+        recorded: tuple[str, ...] | None,
+        at: Seconds = 0.0,
     ) -> list[Decision]:
         """Restart the flows of ``base`` from their snapshots with the current code.
 
@@ -122,7 +132,8 @@ class _Run:
         that is not a registered flow has no snapshot: it is dropped with the old code, and if
         its parent, restarted from its own snapshot, starts that key again, it starts afresh.
         """
-        self._begin(view, recorded)
+        self.trace = Trace(base.trace)
+        self._begin(view, recorded, at)
         self.stop, self.published, self.choice = base.stop, base.published, base.choice
         self._issued = {(i.path, i.label): i.count for i in base.issued}
         self._restorable = {
@@ -131,6 +142,10 @@ class _Run:
         root = next(live for live in base.flows if not live.path)
         if root.name != self._root.name or not root.checkpointed:
             raise FlowCodeChanged(0)  # the root resumes only from a snapshot it recorded
+        self.trace.restarted(self._restorable)
+        self._tasks[0].span = self.trace.flow_started(
+            "", None, self._root.name, stopped=base.stop is not None
+        )
         for live in base.flows:
             for held in live.holds:
                 self._settle_held(held)
@@ -140,14 +155,20 @@ class _Run:
         return self._end()
 
     def feed(
-        self, item: Event | Recorded, view: RunView | None, recorded: tuple[str, ...] | None
+        self,
+        item: Event | Recorded,
+        view: RunView | None,
+        recorded: tuple[str, ...] | None,
+        at: Seconds = 0.0,
     ) -> list[Decision]:
         """Deliver one event; the flows it unblocks run until all are suspended again."""
-        self._begin(view, recorded)
+        self._begin(view, recorded, at)
         self._route(item)
         return self._end()
 
-    def _begin(self, view: RunView | None, recorded: tuple[str, ...] | None) -> None:
+    def _begin(self, view: RunView | None, recorded: tuple[str, ...] | None, at: Seconds) -> None:
+        """Start a step: live at the ``view``'s time, or replaying the ``recorded`` reads at ``at``."""
+        self.trace.at = at if view is None else view.now_at
         self.out = []
         self._reads = []
         self._view = view
@@ -198,6 +219,7 @@ class _Run:
             stop=self.stop,
             published=self.published,
             choice=self.choice,
+            trace=self.trace.snapshot(),
         )
 
     def waiting(self) -> tuple[tuple[str, tuple[str, ...]], ...]:
@@ -273,12 +295,26 @@ class _Run:
         self._pendings[pending.decision] = pending
         task.started.append(pending)
         self.out.append(decision)
+        match pending.work:
+            case Finish(result=result):
+                self.trace.run_ended(self._tasks[0].span_id, result)
+            case Operation(request=request):
+                self.trace.operation_started(task.span_id, pending.decision, request.kind)
+            case work:
+                self.trace.operation_started(task.span_id, pending.decision, _label(work))
         return pending
 
     def forget(self, pending: Pending) -> None:
         """Abandon a request's outcome: if it arrives later it is dropped and recorded."""
         pending.abandoned = True
         self._pendings.pop(pending.decision, None)
+        if not isinstance(pending.work, Finish):
+            self.trace.operation_abandoned(pending.decision)
+
+    def land_stop(self, task: _Task) -> None:
+        """Take the task's pending stop: the caller raises ``Stopped`` at its await."""
+        task.stop_pending, task.stopped = False, True
+        self.trace.stop_landed(task.span_id)
 
     def timer(self, at: Seconds) -> Timer:
         """A timer for ``at``, and the wake-up that makes core deliver the time."""
@@ -306,7 +342,7 @@ class _Run:
 
     def begin_task[R](
         self,
-        owner_path: str,
+        owner: _Task,
         group: Group[Any],
         key: str,
         start: tuple[Callable[..., Coroutine[Any, Any, R]], tuple[object, ...]],
@@ -314,17 +350,20 @@ class _Run:
         fn, args = start
         if not key or "/" in key:
             raise ContractError(("group", "key"), "a task key must be non-empty and contain no '/'")
-        path = f"{owner_path}{key}/"
+        path = f"{owner.path}{key}/"
         if any(live.path == path for live in self._tasks):
             raise ContractError(("group", "key"), f"a task {path} is already running")
-        task = _Task(path=path, group=group, handle=Task(key))
+        definition = definition_of(fn)
+        name = definition.name if definition else getattr(fn, "__name__", key)
+        span = self.trace.flow_started(path, owner.span_id, name, stopped=self.stop is not None)
+        task = _Task(path=path, group=group, handle=Task(key), span=span)
+        task.handle.span = span
         self._tasks.append(task)
         group.running += 1
         if self.stop is not None:
             task.stop.set(self.stop)
             task.stop_pending = group.stops
         restored = self._restorable.pop(path, None)
-        definition = definition_of(fn)
         if restored is not None:  # after a code change: resume from the flow's own snapshot
             if definition is None or definition.name != restored.name or not restored.checkpointed:
                 raise FlowCodeChanged(
@@ -398,6 +437,7 @@ class _Run:
         if not any(source.alive() for source in block.sources):
             raise Deadlock(task.path, tuple(s.describe() for s in block.sources))
         task.blocked = block
+        self.trace.suspended(task.span_id, block.sources)
 
     def _ended(self, task: _Task, result: object) -> None:
         self._tasks.remove(task)
@@ -406,6 +446,7 @@ class _Run:
                 self.forget(pending)
         for found in task.signals:
             self.release(found)
+        self.trace.flow_ended(task.span_id, result)
         task.handle.set(result)
         if task.group is not None:
             task.group.running -= 1
@@ -442,8 +483,11 @@ class _Run:
         pending = self._pendings.pop(decision, None)
         if pending is None:
             self.dropped.append(Dropped(event=_kind_of(item), decision=decision))
-        else:
-            pending.set(self._rebuilt(item))
+            return
+        event = self._rebuilt(item)
+        pending.set(event)
+        if not isinstance(pending.work, Finish):
+            self.trace.operation_answered(decision, event)
 
     def _answered_decision(self, item: Event | Recorded) -> DecisionId | None:
         """The request this event answers, by the table ``_ANSWER_RULES``.
@@ -470,6 +514,7 @@ class _Run:
 
     def _stop(self, item: StopRequested) -> None:
         self.stop = item
+        self.trace.stop_requested()
         for task in self._tasks:
             task.stop.set(item)
             if task.group is not None and task.group.stops and not task.stopped:
@@ -489,7 +534,7 @@ class _Run:
         if task.blocked is None:
             return False
         if task.stop_pending and task.shield == 0:
-            task.stop_pending, task.stopped = False, True
+            self.land_stop(task)
             self._resume(task, None, Stopped())
             return True
         ready = next((s for s in task.blocked.sources if s.ready()), None)
@@ -497,6 +542,11 @@ class _Run:
             return False
         self._resume(task, ready.take(), None)
         return True
+
+
+def _label(work: Work) -> str:
+    """The id root the aspect issued ``work`` under: ``a/worker.2`` was issued as ``worker``."""
+    return work.decision_id.root.rpartition("/")[2].rpartition(".")[0]
 
 
 def _kind_of(item: Event | Recorded) -> EventKind:

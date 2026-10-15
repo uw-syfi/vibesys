@@ -49,7 +49,7 @@ class Kit:
         """Raise a pending stop before anything is issued, awaited or acquired (unless shielded)."""
         task = self.task
         if task.stop_pending and task.shield == 0:
-            task.stop_pending, task.stopped = False, True
+            self.run.land_stop(task)
             raise Stopped
 
     @contextmanager

@@ -102,6 +102,7 @@ if TYPE_CHECKING:
         OperationRequest,
         Role,
         RunFacts,
+        RunTrace,
         RunView,
         SearchDef,
         Seconds,
@@ -297,6 +298,10 @@ class FlowRun[C]:
     def waiting(self) -> tuple[Waiting, ...]:
         """What each suspended flow waits for, as data: its path and its sources."""
         return self.driver.waiting(self.state)
+
+    def trace(self) -> RunTrace:
+        """The run's spans: every flow task and awaited operation so far."""
+        return self.driver.trace(self.state)
 
     def timeline(self) -> str:
         """The run so far as one line: ``worker.1:Plan ws-1/work.1:failed(timed-out) stop t=30``."""
