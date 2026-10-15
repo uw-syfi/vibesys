@@ -160,13 +160,13 @@ describe('core state projection', () => {
       statusEvent(3, 'replacement', 'agent_output_chunk', {progress: 'Streamed'}),
     );
     expect(Object.keys(streamed.activeExecutions)).toEqual(['previous']);
-    expect(streamed.executionStatuses.replacement).toBeUndefined();
+    expect(streamed.executionStatuses['replacement']).toBeUndefined();
 
     const completed = reduceEventBatch(streamed, [], [checkpoint('replacement')], 3, 0, {
       kind: 'complete',
       checkpointId,
     });
-    expect(completed.executionStatuses.replacement?.progress).toBe('Streamed');
+    expect(completed.executionStatuses['replacement']?.progress).toBe('Streamed');
   });
 
   it('applies the identity guard to snapshots and response events', () => {
@@ -382,7 +382,7 @@ describe('core state projection', () => {
     );
 
     expect(Object.keys(stale.activeExecutions)).toEqual(['snapshot']);
-    expect(stale.activeExecutions.snapshot?.activity.summary).toBe('Snapshot view');
+    expect(stale.activeExecutions['snapshot']?.activity.summary).toBe('Snapshot view');
 
     const current = reduceEventBatch(stale, [], [checkpoint('current')], 13, 0);
     expect(Object.keys(current.activeExecutions)).toEqual(['current']);
@@ -1792,13 +1792,13 @@ describe('events delivered in an RPC response', () => {
 
     const responded = reduceResponseEvents(deferred, [responseStatus]);
     expect(Object.keys(responded.activeExecutions)).toEqual(['previous']);
-    expect(responded.executionStatuses.replacement).toBeUndefined();
+    expect(responded.executionStatuses['replacement']).toBeUndefined();
 
     const completed = reduceEventBatch(responded, [], [checkpoint('replacement')], 3, 0, {
       kind: 'complete',
       checkpointId,
     });
-    expect(completed.executionStatuses.replacement?.progress).toBe('Arrived by response');
+    expect(completed.executionStatuses['replacement']?.progress).toBe('Arrived by response');
 
     const caught = reduceEvent(completed, responseStatus);
     const ordinary = reduceEventBatch(

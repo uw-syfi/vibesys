@@ -183,6 +183,13 @@ function checkpointMetadataDecision(
   };
 }
 
+function batchThroughSequence(
+  events: readonly RunEvent[],
+  throughSequence: number | undefined,
+): number | undefined {
+  return throughSequence ?? events.at(-1)?.sequence;
+}
+
 /** Keep a snapshot's liveness while still accepting event-derived status detail. */
 function preserveSnapshotExecutionLiveness(
   before: CoreState,
@@ -335,7 +342,7 @@ export function reduceEventBatch(
     state,
     activeExecutionCheckpoint,
     batch.acceptsMetadata,
-    throughSequence,
+    batchThroughSequence(events, throughSequence),
   );
   const snapshotSafe = preserveSnapshotExecutionLiveness(working, retained, metadata);
   const reduced =
@@ -413,7 +420,7 @@ export function reduceEventRebootstrap(
     state,
     activeExecutionCheckpoint,
     batch.acceptsMetadata,
-    throughSequence,
+    batchThroughSequence(events, throughSequence),
     true,
   );
   if (metadata.publishesMetadata) {
