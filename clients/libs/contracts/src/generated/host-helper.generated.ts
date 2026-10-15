@@ -12,7 +12,10 @@ export type Request =
   | RunStopRequest
   | RunConnectRequest
   | PingRequest
-  | PathsCompleteRequest;
+  | PathsCompleteRequest
+  | LogsListRequest
+  | LogsReadRequest
+  | HarnessesListRequest;
 export type RequestId = string;
 export type DeadlineMs = number;
 export type Type = "hello";
@@ -55,6 +58,8 @@ export type Args = string[];
 export type Resume = ResumeRun | ResumeLatest | null;
 export type RunId = string;
 export type Latest = true;
+export type Provider = string;
+export type Model = string;
 export type RequestId8 = string;
 export type DeadlineMs8 = number;
 export type Type8 = "run.stop";
@@ -75,6 +80,23 @@ export type RequestId11 = string;
 export type DeadlineMs11 = number;
 export type Type11 = "paths.complete";
 export type Prefix = string;
+export type RequestId12 = string;
+export type DeadlineMs12 = number;
+export type Type12 = "logs.list";
+export type InstanceId3 = string;
+export type RequestId13 = string;
+export type DeadlineMs13 = number;
+export type Type13 = "logs.read";
+export type InstanceId4 = string;
+export type StreamId = string;
+export type Start = LogOffset | LogTail;
+export type Offset = number;
+export type TailBytes = number;
+export type MaxBytes = number;
+export type WaitMs = number;
+export type RequestId14 = string;
+export type DeadlineMs14 = number;
+export type Type14 = "harnesses.list";
 export type Message =
   | HelloReply
   | InstancesListReply
@@ -88,10 +110,13 @@ export type Message =
   | RunConnectReply
   | PingReply
   | PathsCompleteReply
+  | LogsListReply
+  | LogsReadReply
+  | HarnessesListReply
   | InstancesChanged
   | HelperError;
-export type RequestId12 = string;
-export type Type12 = "hello";
+export type RequestId15 = string;
+export type Type15 = "hello";
 export type ProtocolVersion = number;
 /**
  * Optional capabilities negotiated by ``hello``; a closed set per protocol version.
@@ -99,14 +124,14 @@ export type ProtocolVersion = number;
  * A client calls a gated method only after ``hello`` returned its feature, so
  * a strict peer never sees a method it does not know.
  */
-export type HelperFeature = "instances_watch" | "paths_complete" | "instances_inspect";
+export type HelperFeature = "instances_watch" | "paths_complete" | "instances_inspect" | "logs" | "harnesses";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
 export type Commit = string | null;
 export type Dirty = boolean | null;
-export type RequestId13 = string;
-export type Type13 = "instances.list";
+export type RequestId16 = string;
+export type Type16 = "instances.list";
 export type Version = 4;
 export type Version1 = 4;
 export type Id = string;
@@ -157,8 +182,8 @@ export type Id1 = string;
 export type Version2 = number | null;
 export type Unreadable = UnreadableRecord[];
 export type Unverified = string[];
-export type RequestId14 = string;
-export type Type14 = "instances.inspect";
+export type RequestId17 = string;
+export type Type17 = "instances.inspect";
 export type Version3 = 1;
 export type Id2 = string;
 /**
@@ -185,29 +210,29 @@ export type State = "available";
 export type Text = string;
 export type Truncated = boolean;
 export type State1 = "missing";
-export type RequestId15 = string;
-export type Type15 = "instances.watch";
+export type RequestId18 = string;
+export type Type18 = "instances.watch";
 export type WatchId1 = string;
-export type RequestId16 = string;
-export type Type16 = "instances.unwatch";
+export type RequestId19 = string;
+export type Type19 = "instances.unwatch";
 export type WatchId2 = string;
-export type RequestId17 = string;
-export type Type17 = "tasks.list";
+export type RequestId20 = string;
+export type Type20 = "tasks.list";
 export type Version5 = 1;
 export type ProjectRoot2 = string;
 export type Name = string;
 export type Tasks = TaskSummary[];
-export type RequestId18 = string;
-export type Type18 = "runs.list";
+export type RequestId21 = string;
+export type Type21 = "runs.list";
 export type ProjectRoot3 = string;
 export type RunId3 = string;
 export type Task2 = string | null;
 export type DisplayName = string;
 export type CreatedAt = string;
-export type InstanceId3 = string | null;
+export type InstanceId5 = string | null;
 export type Runs = RunSummary[];
-export type RequestId19 = string;
-export type Type19 = "run.start";
+export type RequestId22 = string;
+export type Type22 = "run.start";
 export type Launch = LiveInstanceRecord | DetachedLaunchFailure;
 export type Version6 = 1;
 export type Outcome = "failed";
@@ -216,8 +241,8 @@ export type Stage1 = string;
 export type Message2 = string;
 export type ExitCode = number;
 export type LogPath1 = string | null;
-export type RequestId20 = string;
-export type Type20 = "run.stop";
+export type RequestId23 = string;
+export type Type23 = "run.stop";
 export type Version7 = 1;
 export type Id4 = string;
 /**
@@ -228,14 +253,14 @@ export type StopOutcome = "stopped" | "stopping" | "not_running" | "still_runnin
  * How ``vibesys instances stop`` reached the server.
  */
 export type StopRoute = "control_socket" | "signal";
-export type RequestId21 = string;
-export type Type21 = "run.connect";
+export type RequestId24 = string;
+export type Type24 = "run.connect";
 export type RunId4 = string;
 export type ProtocolVersion3 = number;
-export type RequestId22 = string;
-export type Type22 = "ping";
-export type RequestId23 = string;
-export type Type23 = "paths.complete";
+export type RequestId25 = string;
+export type Type25 = "ping";
+export type RequestId26 = string;
+export type Type26 = "paths.complete";
 export type Directory = string;
 export type Name1 = string;
 export type Path = string;
@@ -244,10 +269,43 @@ export type VibesysProject = boolean;
 export type GitRepository = boolean;
 export type Entries = PathEntry[];
 export type Truncated1 = boolean;
-export type Type24 = "instances.changed";
+export type RequestId27 = string;
+export type Type27 = "logs.list";
+export type Id5 = string;
+export type JsonValue = unknown;
+export type Command = string;
+export type RetainedStart = number;
+export type Size = number;
+/**
+ * How a stream was closed.
+ */
+export type LogStreamOutcome = "ended" | "failed" | "abandoned";
+export type Streams = LogStream[];
+export type RequestId28 = string;
+export type Type28 = "logs.read";
+export type Offset1 = number;
+export type Data = string;
+export type NextOffset = number;
+export type Eof = boolean;
+export type Closed = boolean;
+export type TruncatedBefore = boolean;
+export type Offset2 = number;
+export type Length = number;
+/**
+ * Which of a command's output pipes wrote some bytes.
+ */
+export type LogPipe = "stdout" | "stderr";
+export type Pipes = LogPipeSpan[];
+export type RequestId29 = string;
+export type Type29 = "harnesses.list";
+export type Provider1 = string;
+export type Model1 = string;
+export type Default = boolean;
+export type Harnesses = HarnessOption[];
+export type Type30 = "instances.changed";
 export type WatchId3 = string;
-export type Type25 = "error";
-export type RequestId24 = string | null;
+export type Type31 = "error";
+export type RequestId30 = string | null;
 /**
  * Why a request failed; a closed set.
  */
@@ -269,6 +327,9 @@ export type HelperErrorCode =
   | "run_gone"
   | "connect_denied"
   | "connect_failed"
+  | "unknown_instance"
+  | "unknown_log_stream"
+  | "unvetted_harness"
   | "internal";
 export type Message3 = string;
 export type Path1 = string | null;
@@ -371,6 +432,10 @@ export interface RunsListRequest {
 }
 /**
  * Start a detached run (``vibesys --detach``) in ``project``.
+ *
+ * ``args`` never carry ``UNVETTED_MODEL_FLAG`` (or an abbreviation of it): a run
+ * started through the helper uses only vetted harnesses. With ``harness``, they
+ * carry neither ``CLI_PROVIDER_FLAG`` nor ``MODEL_FLAG``, so the pair has one source.
  */
 export interface RunStartRequest {
   request_id: RequestId7;
@@ -380,6 +445,7 @@ export interface RunStartRequest {
   task?: Task;
   args?: Args;
   resume?: Resume;
+  harness?: HarnessChoice | null;
 }
 /**
  * Resume this run.
@@ -392,6 +458,13 @@ export interface ResumeRun {
  */
 export interface ResumeLatest {
   latest: Latest;
+}
+/**
+ * One agent CLI provider and one model it runs.
+ */
+export interface HarnessChoice {
+  provider: Provider;
+  model: Model;
 }
 /**
  * Stop a live detached server (``vibesys instances stop``).
@@ -431,11 +504,56 @@ export interface PathsCompleteRequest {
   prefix: Prefix;
 }
 /**
+ * The log streams recorded for one instance, live or ended.
+ */
+export interface LogsListRequest {
+  request_id: RequestId12;
+  deadline_ms: DeadlineMs12;
+  type: Type12;
+  instance_id: InstanceId3;
+}
+/**
+ * One bounded chunk of a stream; at the end of an open stream, wait up to ``wait_ms`` for more.
+ *
+ * A wait ends as soon as bytes arrive or the stream closes, and always before
+ * the request's deadline, so a follower keeps exactly one read in flight.
+ */
+export interface LogsReadRequest {
+  request_id: RequestId13;
+  deadline_ms: DeadlineMs13;
+  type: Type13;
+  instance_id: InstanceId4;
+  stream_id: StreamId;
+  start: Start;
+  max_bytes: MaxBytes;
+  wait_ms?: WaitMs;
+}
+/**
+ * Read from this byte offset of the stream.
+ */
+export interface LogOffset {
+  offset: Offset;
+}
+/**
+ * Read the last ``tail_bytes`` bytes the stream holds, from the first line start in them.
+ */
+export interface LogTail {
+  tail_bytes: TailBytes;
+}
+/**
+ * The vetted provider and model pairs ``run.start``'s ``harness`` accepts.
+ */
+export interface HarnessesListRequest {
+  request_id: RequestId14;
+  deadline_ms: DeadlineMs14;
+  type: Type14;
+}
+/**
  * The negotiated version and features, and what will start runs on this host.
  */
 export interface HelloReply {
-  request_id: RequestId12;
-  type: Type12;
+  request_id: RequestId15;
+  type: Type15;
   protocol_version: ProtocolVersion;
   features: Features1;
   vibesys_version: VibesysVersion;
@@ -453,8 +571,8 @@ export interface Checkout {
  * The registry's listing.
  */
 export interface InstancesListReply {
-  request_id: RequestId13;
-  type: Type13;
+  request_id: RequestId16;
+  type: Type16;
   listing: InstanceList;
 }
 /**
@@ -536,8 +654,8 @@ export interface UnreadableRecord {
  * One coherent inspection of a detached server and its retained artifacts.
  */
 export interface InstancesInspectReply {
-  request_id: RequestId14;
-  type: Type14;
+  request_id: RequestId17;
+  type: Type17;
   inspection: InstanceInspection;
 }
 /**
@@ -589,24 +707,24 @@ export interface MissingLogTail {
  * The watch started; ``instances.changed`` for ``watch_id`` follows at once and on change.
  */
 export interface InstancesWatchReply {
-  request_id: RequestId15;
-  type: Type15;
+  request_id: RequestId18;
+  type: Type18;
   watch_id: WatchId1;
 }
 /**
  * The watch ended; no ``instances.changed`` for ``watch_id`` follows.
  */
 export interface InstancesUnwatchReply {
-  request_id: RequestId16;
-  type: Type16;
+  request_id: RequestId19;
+  type: Type19;
   watch_id: WatchId2;
 }
 /**
  * The project's tasks.
  */
 export interface TasksListReply {
-  request_id: RequestId17;
-  type: Type17;
+  request_id: RequestId20;
+  type: Type20;
   tasks: TaskList;
 }
 /**
@@ -627,8 +745,8 @@ export interface TaskSummary {
  * The project's runs.
  */
 export interface RunsListReply {
-  request_id: RequestId18;
-  type: Type18;
+  request_id: RequestId21;
+  type: Type21;
   runs: RunList;
 }
 /**
@@ -647,14 +765,14 @@ export interface RunSummary {
   display_name: DisplayName;
   created_at: CreatedAt;
   phase: RunPhase | null;
-  instance_id: InstanceId3;
+  instance_id: InstanceId5;
 }
 /**
  * The started server's record, or why nothing started.
  */
 export interface RunStartReply {
-  request_id: RequestId19;
-  type: Type19;
+  request_id: RequestId22;
+  type: Type22;
   launch: Launch;
 }
 /**
@@ -680,8 +798,8 @@ export interface DetachedLaunchFailure {
  * What the stop observed.
  */
 export interface RunStopReply {
-  request_id: RequestId20;
-  type: Type20;
+  request_id: RequestId23;
+  type: Type23;
   result: InstanceStopResult;
 }
 /**
@@ -697,8 +815,8 @@ export interface InstanceStopResult {
  * The channel is now a byte relay carrying the run protocol to this run.
  */
 export interface RunConnectReply {
-  request_id: RequestId21;
-  type: Type21;
+  request_id: RequestId24;
+  type: Type24;
   run_id: RunId4;
   protocol_version: ProtocolVersion3;
 }
@@ -706,15 +824,15 @@ export interface RunConnectReply {
  * The channel is alive.
  */
 export interface PingReply {
-  request_id: RequestId22;
-  type: Type22;
+  request_id: RequestId25;
+  type: Type25;
 }
 /**
  * Matching directories of ``directory``, sorted by name, at most ``PATHS_COMPLETE_CAP``.
  */
 export interface PathsCompleteReply {
-  request_id: RequestId23;
-  type: Type23;
+  request_id: RequestId26;
+  type: Type26;
   directory: Directory;
   entries: Entries;
   truncated: Truncated1;
@@ -730,10 +848,81 @@ export interface PathEntry {
   git_repository: GitRepository;
 }
 /**
+ * The instance's streams, oldest first.
+ */
+export interface LogsListReply {
+  request_id: RequestId27;
+  type: Type27;
+  streams: Streams;
+}
+/**
+ * One recorded log stream of an instance, as its store indexes it.
+ */
+export interface LogStream {
+  id: Id5;
+  owner: Owner;
+  command: Command;
+  retained_start: RetainedStart;
+  size: Size;
+  outcome: LogStreamOutcome | null;
+}
+export interface Owner {
+  [k: string]: JsonValue;
+}
+/**
+ * One chunk of the stream.
+ */
+export interface LogsReadReply {
+  request_id: RequestId28;
+  type: Type28;
+  chunk: LogChunk;
+}
+/**
+ * Bytes ``[offset, next_offset)`` of a stream, decoded as UTF-8 text.
+ *
+ * The helper cuts a chunk that more bytes follow after the last line end in
+ * its window, or, with no line end there, before a character the window
+ * splits; so ``data`` decodes without loss except for bytes that are not
+ * UTF-8, which become U+FFFD. ``next_offset - offset`` counts bytes.
+ */
+export interface LogChunk {
+  offset: Offset1;
+  data: Data;
+  next_offset: NextOffset;
+  eof: Eof;
+  closed: Closed;
+  truncated_before: TruncatedBefore;
+  pipes: Pipes;
+}
+/**
+ * Bytes ``[offset, offset + length)`` of a stream were written by ``pipe``.
+ */
+export interface LogPipeSpan {
+  offset: Offset2;
+  length: Length;
+  pipe: LogPipe;
+}
+/**
+ * The vetted pairs, grouped by provider with each provider's default first.
+ */
+export interface HarnessesListReply {
+  request_id: RequestId29;
+  type: Type29;
+  harnesses: Harnesses;
+}
+/**
+ * A vetted provider and model pair a run may start with.
+ */
+export interface HarnessOption {
+  provider: Provider1;
+  model: Model1;
+  default: Default;
+}
+/**
  * A push on a watch: the listing as it is now, sent first and then on each change.
  */
 export interface InstancesChanged {
-  type: Type24;
+  type: Type30;
   watch_id: WatchId3;
   listing: InstanceList;
 }
@@ -741,8 +930,8 @@ export interface InstancesChanged {
  * A failed request, or a line that was not one (``request_id`` is ``None`` then).
  */
 export interface HelperError {
-  type: Type25;
-  request_id: RequestId24;
+  type: Type31;
+  request_id: RequestId30;
   code: HelperErrorCode;
   message: Message3;
   path?: Path1;

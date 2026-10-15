@@ -561,6 +561,9 @@ importers:
       '@types/react-dom':
         specifier: 19.1.9
         version: 19.1.9(@types/react@19.1.13)
+      happy-dom:
+        specifier: 20.14.5
+        version: 20.14.5
       react-dom:
         specifier: 19.1.1
         version: 19.1.1(react@19.1.1)
@@ -663,6 +666,31 @@ importers:
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../runs
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../store
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  libs/logs:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../machine
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../transport
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2

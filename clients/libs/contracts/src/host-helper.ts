@@ -24,6 +24,9 @@ export type {
   Checkout,
   DetachedLaunchFailure,
   FailureReason,
+  HarnessChoice,
+  HarnessesListReply,
+  HarnessOption,
   HelloReply,
   HelperError,
   HelperErrorCode,
@@ -35,6 +38,14 @@ export type {
   InstanceStopResult,
   InstancesChanged,
   LiveInstanceRecord,
+  LogChunk,
+  LogOffset,
+  LogStream,
+  LogsListReply,
+  LogsListRequest,
+  LogsReadReply,
+  LogsReadRequest,
+  LogTail,
   Message as HelperMessage,
   PathEntry,
   PathsCompleteReply,
@@ -74,8 +85,43 @@ export function helperFeatureForRequest(type: string): HelperFeature | null {
     : null;
 }
 
+const featureByField = hostHelperSchema['x-vibesys-feature-by-field'] as Readonly<
+  Partial<Record<Request['type'], Readonly<Record<string, HelperFeature>>>>
+>;
+
+/** The generated feature gate for each gated optional field, by request type then field name. */
+export const HELPER_FEATURE_BY_FIELD = featureByField;
+
+/**
+ * Every feature `request` needs: its method's, and those of the gated optional fields it sets
+ * (present and not null). A sender sends it only when `hello` returned them all.
+ */
+export function helperFeaturesForRequest(request: {
+  readonly type: string;
+}): readonly HelperFeature[] {
+  const features = new Set<HelperFeature>();
+  const method = helperFeatureForRequest(request.type);
+  if (method !== null) features.add(method);
+  const fields = Object.hasOwn(featureByField, request.type)
+    ? featureByField[request.type as Request['type']]
+    : undefined;
+  for (const [name, feature] of Object.entries(fields ?? {})) {
+    if ((request as Readonly<Record<string, unknown>>)[name] != null) features.add(feature);
+  }
+  return [...features];
+}
+
 /** Maximum UTF-8 bytes in an available instance log tail, generated from Python's contract. */
 export const INSTANCE_LOG_TAIL_BYTES = logText['x-vibesys-max-utf8-bytes'] as number;
+
+const logsRead = definitions['LogsReadRequest'] as Schema;
+const logsReadProperties = logsRead['properties'] as Record<string, Schema>;
+
+/** The most bytes one `logs.read` returns (its `max_bytes` bound), from Python's contract. */
+export const LOGS_READ_MAX_BYTES = (logsReadProperties['max_bytes'] as Schema)['maximum'] as number;
+
+/** The longest one `logs.read` waits at the end of an open stream (its `wait_ms` bound). */
+export const LOGS_WAIT_MAX_MS = (logsReadProperties['wait_ms'] as Schema)['maximum'] as number;
 
 /** The helper protocol versions this client speaks (`hello`'s `client_versions`). */
 export const HELPER_CLIENT_VERSIONS: readonly [number, number] = [1, 1];

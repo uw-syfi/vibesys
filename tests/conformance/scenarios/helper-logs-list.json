@@ -1,0 +1,78 @@
+{
+  "id": "helper-logs-list",
+  "protocol": "host-helper",
+  "title": "List an instance's log streams",
+  "description": "After negotiating logs, logs.list names the instance's recorded streams, oldest first, with owner, command, retained range and how each was closed.",
+  "role": "logs",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "logs"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "logs"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "logs.list",
+        "request_id": "l",
+        "deadline_ms": 10000,
+        "instance_id": "0123456789ab"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "logs.list",
+        "request_id": "l",
+        "streams": [
+          {
+            "id": "000001",
+            "owner": {
+              "kind": "startup_step",
+              "step": "image_build"
+            },
+            "command": "docker build .",
+            "retained_start": 0,
+            "size": 66,
+            "outcome": null
+          },
+          {
+            "id": "000002",
+            "owner": {
+              "kind": "server_process"
+            },
+            "command": "vibesys",
+            "retained_start": 14,
+            "size": 42,
+            "outcome": "failed"
+          }
+        ]
+      }
+    }
+  ]
+}

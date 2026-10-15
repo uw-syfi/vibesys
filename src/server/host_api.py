@@ -22,10 +22,16 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
 ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
 ``TaskList``, the inspection documents, and the host helper's messages:
+the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpan``,
+``LogPipe``, ``LogOffset``, ``LogTail`` and limits
+(``LOGS_READ_MAX_BYTES``, ``LOGS_READ_MIN_BYTES``, ``LOGS_WAIT_MAX_MS``),
 ``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
-``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
-members, ``HelperMessage`` and its members, ``HelperErrorCode``, and a relayed
-channel's end: ``ChannelEndOutcome``, ``ChannelEnd``.
+``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
+``HelperRequest`` (``parse_helper_request``) and its members, ``HelperMessage``
+and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
+``HarnessChoice``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
+``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
+``ChannelEnd``.
 
 The helper's messages follow ``docs/contributing/desktop-connection.md``
 ("Handshake and versioning"): strict within a negotiated version, additive
@@ -603,6 +609,18 @@ class HelperFeature(StrEnum):
     """``paths.complete``: directory completion for a typed path on the host."""
     INSTANCES_INSPECT = "instances_inspect"
     """``instances.inspect``: retained metadata and an optional bounded log tail."""
+    LOGS = "logs"
+    """``logs.list`` and ``logs.read``: a run's recorded log streams, read in bounded chunks."""
+    HARNESSES = "harnesses"
+    """``harnesses.list`` and ``run.start``'s ``harness``: start a run on a vetted provider and model."""
+
+
+CLI_PROVIDER_FLAG: Final = "--cli-provider"
+"""The run option that names the agent CLI provider; ``run.start`` emits it for ``harness``."""
+MODEL_FLAG: Final = "--model"
+"""The run option that names the agent model; ``run.start`` emits it for ``harness``."""
+UNVETTED_MODEL_FLAG: Final = "--allow-unvetted-model"
+"""The terminal's opt-out from the vetted harness list; ``run.start`` refuses it in ``args``."""
 
 
 RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -692,8 +710,39 @@ class ResumeLatest(BaseModel):
     latest: Literal[True]
 
 
+class HarnessChoice(BaseModel):
+    """One agent CLI provider and one model it runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: str
+    model: str
+
+
+class HarnessOption(BaseModel):
+    """A vetted provider and model pair a run may start with."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: str
+    model: str
+    default: bool
+    """The model a run on ``provider`` uses when nothing names one."""
+
+
+class HarnessesListRequest(_HelperRequest):
+    """The vetted provider and model pairs ``run.start``'s ``harness`` accepts."""
+
+    type: Literal["harnesses.list"] = "harnesses.list"
+
+
 class RunStartRequest(_HelperRequest):
-    """Start a detached run (``vibesys --detach``) in ``project``."""
+    """Start a detached run (``vibesys --detach``) in ``project``.
+
+    ``args`` never carry ``UNVETTED_MODEL_FLAG`` (or an abbreviation of it): a run
+    started through the helper uses only vetted harnesses. With ``harness``, they
+    carry neither ``CLI_PROVIDER_FLAG`` nor ``MODEL_FLAG``, so the pair has one source.
+    """
 
     type: Literal["run.start"] = "run.start"
     project: str
@@ -701,6 +750,9 @@ class RunStartRequest(_HelperRequest):
     args: tuple[str, ...] = ()
     """Further run options, one argument per item; never parsed by a shell."""
     resume: ResumeRun | ResumeLatest | None = None
+    harness: HarnessChoice | None = None
+    """A pair ``harnesses.list`` offered; ``None`` keeps the project's configuration.
+    Sent only after ``hello`` returned ``harnesses``."""
 
 
 class RunStopRequest(_HelperRequest):
@@ -742,13 +794,107 @@ class PathsCompleteRequest(_HelperRequest):
     directory, and a trailing ``/`` lists the directory itself."""
 
 
+LOGS_READ_MAX_BYTES: Final = 64 * 1024
+"""The most bytes one ``logs.read`` returns, so a reply stays a small helper line."""
+LOGS_READ_MIN_BYTES: Final = 4
+"""The fewest bytes one ``logs.read`` may ask for: one whole UTF-8 character, so every read of
+available bytes makes progress."""
+LOGS_WAIT_MAX_MS: Final = 30_000
+"""The longest a ``logs.read`` waits at the end of an open stream for more bytes."""
+
+LogStreamId = Annotated[str, StringConstraints(pattern=r"^[0-9]{6,12}$")]
+"""A recorded stream's id in its run's log store (``vs_logs``): digits, unique within the run."""
+
+LogOwner = dict[str, JsonValue]
+"""What a stream is for (a startup step, a gate stage, an agent invocation, ...).
+
+The writer validated it against vibesys's ``LogOwner`` union, whose generated TypeScript
+is ``LogOwner`` in the run protocol's bindings; the helper passes it through as JSON so it
+never imports vibesys, and a client narrows it with that union.
+"""
+
+
+class LogPipe(StrEnum):
+    """Which of a command's output pipes wrote some bytes."""
+
+    STDOUT = "stdout"
+    STDERR = "stderr"
+
+
+class LogStreamOutcome(StrEnum):
+    """How a stream was closed."""
+
+    ENDED = "ended"
+    """Its writer closed it normally."""
+    FAILED = "failed"
+    """Its writer closed it because the work it records failed."""
+    ABANDONED = "abandoned"
+    """Its writer stopped without closing it; a later store found it open."""
+
+
+class LogOffset(BaseModel):
+    """Read from this byte offset of the stream."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    offset: NonNegativeInt
+
+
+class LogTail(BaseModel):
+    """Read the last ``tail_bytes`` bytes the stream holds, from the first line start in them."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    tail_bytes: Annotated[int, Field(ge=1, le=LOGS_READ_MAX_BYTES)]
+
+
+class LogsListRequest(_HelperRequest):
+    """The log streams recorded for one instance, live or ended."""
+
+    type: Literal["logs.list"] = "logs.list"
+    instance_id: InstanceId
+
+
+class LogsReadRequest(_HelperRequest):
+    """One bounded chunk of a stream; at the end of an open stream, wait up to ``wait_ms`` for more.
+
+    A wait ends as soon as bytes arrive or the stream closes, and always before
+    the request's deadline, so a follower keeps exactly one read in flight.
+    """
+
+    type: Literal["logs.read"] = "logs.read"
+    instance_id: InstanceId
+    stream_id: LogStreamId
+    start: LogOffset | LogTail
+    max_bytes: Annotated[int, Field(ge=LOGS_READ_MIN_BYTES, le=LOGS_READ_MAX_BYTES)]
+    wait_ms: Annotated[int, Field(ge=0, le=LOGS_WAIT_MAX_MS)] = 0
+
+
 HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
     InstancesUnwatchRequest: HelperFeature.INSTANCES_WATCH,
     PathsCompleteRequest: HelperFeature.PATHS_COMPLETE,
+    LogsListRequest: HelperFeature.LOGS,
+    LogsReadRequest: HelperFeature.LOGS,
+    HarnessesListRequest: HelperFeature.HARNESSES,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
+
+HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFeature]]] = {
+    RunStartRequest: {"harness": HelperFeature.HARNESSES},
+}
+"""The feature each gated optional field needs when it is set (not ``None``), exported too."""
+
+
+def request_features(request: _HelperRequest) -> tuple[HelperFeature, ...]:
+    """The features ``hello`` must have returned for ``request``: its method's and its set fields'."""
+    method = HELPER_REQUEST_FEATURES.get(type(request))
+    features = [] if method is None else [method]
+    for name, feature in HELPER_FIELD_FEATURES.get(type(request), {}).items():
+        if getattr(request, name) is not None and feature not in features:
+            features.append(feature)
+    return tuple(features)
 
 
 HelperRequest = Annotated[
@@ -763,7 +909,10 @@ HelperRequest = Annotated[
     | RunStopRequest
     | RunConnectRequest
     | PingRequest
-    | PathsCompleteRequest,
+    | PathsCompleteRequest
+    | LogsListRequest
+    | LogsReadRequest
+    | HarnessesListRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -945,6 +1094,108 @@ class PathsCompleteReply(_HelperReply):
     """More directories match than were returned, or the directory was too large to read whole."""
 
 
+class LogStream(BaseModel):
+    """One recorded log stream of an instance, as its store indexes it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: LogStreamId
+    owner: LogOwner
+    command: str
+    """What wrote the stream, for display: a command line, or the narration's name."""
+    retained_start: NonNegativeInt
+    """The oldest offset the store still holds; bytes before it were evicted."""
+    size: NonNegativeInt
+    """How many bytes were ever written: the offset the next byte will have."""
+    outcome: LogStreamOutcome | None
+    """How the stream was closed; ``None`` while it is open."""
+
+    @model_validator(mode="after")
+    def _retained(self) -> LogStream:
+        if self.retained_start > self.size:
+            message = "retained_start must not pass size"
+            raise ValueError(message)
+        return self
+
+
+class LogPipeSpan(BaseModel):
+    """Bytes ``[offset, offset + length)`` of a stream were written by ``pipe``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    offset: NonNegativeInt
+    """A stream offset, like ``LogChunk.offset``."""
+    length: PositiveInt
+    pipe: LogPipe
+
+
+class LogsListReply(_HelperReply):
+    """The instance's streams, oldest first."""
+
+    type: Literal["logs.list"] = "logs.list"
+    streams: tuple[LogStream, ...]
+
+
+class LogChunk(BaseModel):
+    """Bytes ``[offset, next_offset)`` of a stream, decoded as UTF-8 text.
+
+    The helper cuts a chunk that more bytes follow after the last line end in
+    its window, or, with no line end there, before a character the window
+    splits; so ``data`` decodes without loss except for bytes that are not
+    UTF-8, which become U+FFFD. ``next_offset - offset`` counts bytes.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    offset: NonNegativeInt
+    """Where ``data`` starts: later than asked when the asked-for bytes were evicted
+    (``truncated_before``), or when a tail read skipped to the next line start."""
+    data: str = Field(json_schema_extra={"x-vibesys-max-utf8-bytes": 3 * LOGS_READ_MAX_BYTES})
+    next_offset: NonNegativeInt
+    """Where the next read continues."""
+    eof: bool
+    """``next_offset`` is the end of what the stream holds now (an unfinished last
+    character of an open stream is held back until it is complete)."""
+    closed: bool
+    """The stream is closed: once ``eof``, no more bytes will come."""
+    truncated_before: bool
+    """Bytes the read asked for, before ``offset``, were evicted and are gone."""
+    pipes: tuple[LogPipeSpan, ...]
+    """Which pipe wrote each byte of ``[offset, next_offset)``: adjacent spans, in order,
+    in stream offsets (the coordinates of ``offset``), covering the chunk exactly."""
+
+    @model_validator(mode="after")
+    def _ordered(self) -> LogChunk:
+        span = self.next_offset - self.offset
+        if span < 0 or span > LOGS_READ_MAX_BYTES:
+            message = "next_offset must follow offset by at most LOGS_READ_MAX_BYTES"
+            raise ValueError(message)
+        cursor = self.offset
+        for pipe in self.pipes:
+            if pipe.offset != cursor:
+                message = "pipe spans must be adjacent and start at offset"
+                raise ValueError(message)
+            cursor += pipe.length
+        if cursor != self.next_offset:
+            message = "pipe spans must cover offset to next_offset exactly"
+            raise ValueError(message)
+        return self
+
+
+class LogsReadReply(_HelperReply):
+    """One chunk of the stream."""
+
+    type: Literal["logs.read"] = "logs.read"
+    chunk: LogChunk
+
+
+class HarnessesListReply(_HelperReply):
+    """The vetted pairs, grouped by provider with each provider's default first."""
+
+    type: Literal["harnesses.list"] = "harnesses.list"
+    harnesses: tuple[HarnessOption, ...]
+
+
 class HelperErrorCode(StrEnum):
     """Why a request failed; a closed set."""
 
@@ -982,6 +1233,12 @@ class HelperErrorCode(StrEnum):
     """The run's socket exists but this user may not connect to it."""
     CONNECT_FAILED = "connect_failed"
     """Connecting to the run's socket failed another way."""
+    UNKNOWN_INSTANCE = "unknown_instance"
+    """``logs.list`` or ``logs.read`` named an instance this host recorded no logs for."""
+    UNKNOWN_LOG_STREAM = "unknown_log_stream"
+    """``logs.read`` named a stream the instance does not have."""
+    UNVETTED_HARNESS = "unvetted_harness"
+    """``run.start``'s ``harness`` is not one ``harnesses.list`` offers; only sent with ``harnesses``."""
     INTERNAL = "internal"
     """The helper failed; ``message`` says how."""
 
@@ -1016,6 +1273,9 @@ HelperReply = (
     | RunConnectReply
     | PingReply
     | PathsCompleteReply
+    | LogsListReply
+    | LogsReadReply
+    | HarnessesListReply
 )
 """A request's result; its ``type`` is the request's."""
 

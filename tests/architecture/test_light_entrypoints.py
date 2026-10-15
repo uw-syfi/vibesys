@@ -61,6 +61,7 @@ ALLOWED_FIRST_PARTY = (
     "server.diagnostics",
     "server.host_api",
     "server.host_helper",
+    "server.host_helper_logs",
     "server.host_helper_os",
     "server.host_helper_requests",
     "server.instances",
@@ -75,8 +76,9 @@ ALLOWED_FIRST_PARTY = (
 
 ``vs_sim``, ``vs_project``, ``vs_decode`` and ``vs_logs`` are allowed whole: they are the
 light libraries the host commands are built on (``vs_decode`` imports only pydantic;
-``vs_logs``, which a detached run needs to buffer its narration before the engine loads,
-only pydantic, ``vs_decode`` and ``vs_sim``), and their own boundaries are tach's job."""
+``vs_logs``, which a detached run needs to buffer its narration before the engine loads and
+the host helper reads run logs with, only pydantic, ``vs_decode`` and ``vs_sim``), and their
+own boundaries are tach's job."""
 
 
 def _module_file(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> Path | None:

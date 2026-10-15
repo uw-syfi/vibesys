@@ -16,7 +16,7 @@ tool's output at its call site, through a `tee` of its sink, is allowed.
 | Recorder | `vs_logs.api` | Streams, offsets, the cap, the index. No docker, gates or UI. |
 | Owners | `vibesys.log_owners` (`LogOwner`) | What each stream is for, as a typed reference to the run model. |
 | Reader | `vs_logs.read` | List streams; read a bounded chunk from an offset or the tail. |
-| Serving | `server.host_helper` (`logs` feature) | Chunk caps, long-poll follow, discovery. |
+| Serving | `server.host_helper_logs` (`logs` feature), over `server.host_helper_os.StoreLogReader` | Chunk caps, long-poll follow, discovery. |
 | Clients | `clients/` logs lib | Selection, follow, rendering. |
 
 ## Writing
@@ -150,7 +150,7 @@ means the chunk reaches the final end. Every byte is read through `ByteSource`.
 | Rule | Enforced by |
 | --- | --- |
 | No library imports `vs_logs` | tach layer `logs`, above `prompts_and_lower_libs` |
-| Only `server.host_helper` reads logs | tach `[[interfaces]]` for `vs_logs.read`, `visibility = ["server.host_helper"]` |
+| Only the host helper reads logs | tach `[[interfaces]]` for `vs_logs.read`, `visibility = ["server.host_helper_os"]` (its real-host `StoreLogReader`) |
 | Libraries cannot name owners | `LogOwner` lives in `vibesys`, which libraries cannot import |
 | Unknown owner keys and kinds are rejected | `extra="forbid"` and the discriminated union, `tests/vibesys/run/test_run_logs.py` |
 | Our own processes' output is never parsed for facts | Not lintable: a parse at a foreign tool's call site looks the same. Review. |
