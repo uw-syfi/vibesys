@@ -24,6 +24,9 @@ implementation to:
   ``stderr``; the exit code is the status the stopped command ended with.
 * A command that cannot be launched reports exit code 1 and the error on
   ``stderr``; no execution error raises.
+* A stop whose remote processes (a container exec's) cannot be shown to have
+  ended raises :class:`~vs_sandbox.execution.CommandStopUnconfirmedError`, which
+  carries the result the stop would have returned.
 """
 
 from __future__ import annotations
@@ -31,7 +34,11 @@ from __future__ import annotations
 import subprocess
 from typing import TYPE_CHECKING
 
-from vs_sandbox.execution import CommandResult, bounded_execution_result
+from vs_sandbox.execution import (
+    CommandResult,
+    CommandStopUnconfirmedError,
+    bounded_execution_result,
+)
 from vs_sandbox.process_execution import (
     DEFAULT_TERMINATION_GRACE_SECONDS,
     CancelSignal,
@@ -132,6 +139,8 @@ def result_of(outcome: ProcessOutcome, timeout: int, max_output_chars: int) -> C
         max_output_chars=max_output_chars,
     )
     result.cancelled = outcome.stopped is ProcessStop.CANCELLED
+    if outcome.unconfirmed is not None:
+        raise CommandStopUnconfirmedError(result, outcome.unconfirmed.survivors)
     return result
 
 

@@ -20,14 +20,22 @@ if TYPE_CHECKING:
     from vs_sim.api import PipedProcess, PipedProcessLauncher, Processes
 
 # Signals every process whose environment carries the marker in ``$1`` with
-# signal number ``$2``. Passed as ``sh -c SCRIPT sh MARKER SIGNAL`` so the
-# marker never needs shell quoting, and so a fake container can recognise the
-# stop request by this exact script instead of parsing its text.
+# signal number ``$2``, waits up to ``$3`` tenths of a second for them to end,
+# and prints how many remain. A zombie's environment reads empty, so an exited
+# but unreaped process is not counted. Passed as
+# ``sh -c SCRIPT sh MARKER SIGNAL TENTHS`` so the marker never needs shell
+# quoting, and so a fake container can recognise the stop request by this
+# exact script instead of parsing its text.
 SIGNAL_EXEC_SCRIPT = (
-    "for f in /proc/[0-9]*/environ; do"
+    "live() { n=0; for f in /proc/[0-9]*/environ; do"
+    ' if tr "\\0" "\\n" 2>/dev/null < "$f" | grep -qx -- "$1"; then n=$((n+1)); fi;'
+    " done; echo $n; };"
+    " for f in /proc/[0-9]*/environ; do"
     ' if tr "\\0" "\\n" 2>/dev/null < "$f" | grep -qx -- "$1"; then'
     ' p=${f#/proc/}; kill -"$2" "${p%/environ}" 2>/dev/null; fi;'
-    " done; true"
+    " done;"
+    ' i=0; while [ "$(live "$1")" -gt 0 ] && [ "$i" -lt "$3" ]; do sleep 0.1; i=$((i+1)); done;'
+    ' live "$1"'
 )
 # Every ``execute`` tags its in-container processes with this environment
 # variable so a stop can find them: stopping the ``docker exec`` client alone

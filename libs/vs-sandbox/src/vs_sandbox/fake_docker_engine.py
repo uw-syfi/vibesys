@@ -104,6 +104,39 @@ status = child.wait()
 sys.exit(128 - status if status < 0 else status)
 """
 
+# Counts the live (not yet exited) processes of session ``argv[1]``, after waiting up to
+# ``argv[2]`` tenths of a second for its leader to exit: the stop script's count, for a
+# program the fake runs on the host.
+_COUNT_SESSION = r"""
+import os, select, sys
+group, tenths = int(sys.argv[1]), int(sys.argv[2])
+
+def live():
+    count = 0
+    for name in os.listdir("/proc"):
+        if not name.isdigit():
+            continue
+        try:
+            with open(f"/proc/{name}/stat") as handle:
+                text = handle.read()
+        except OSError:
+            continue
+        state, _parent, process_group = text[text.rindex(")") + 2 :].split()[:3]
+        count += state != "Z" and int(process_group) == group
+    return count
+
+if tenths and live():
+    try:
+        leader = os.pidfd_open(group)
+    except ProcessLookupError:
+        pass
+    else:
+        select.select([leader], [], [], tenths / 10)
+print(live())
+"""
+# Guards the count against a hang; the pass path ends as soon as the count prints.
+_COUNT_BOUND_S = 30.0
+
 _FLAGS_WITH_VALUE = frozenset({"-e", "-w", "-u", "--env", "--workdir", "--user"})
 _FLAGS = frozenset({"-i", "-t", "-it", "-d"})
 _AGENT_IDENTITY_SCRIPT = "id -u agent && id -g agent"
@@ -265,6 +298,7 @@ class FakeDockerEngine:
         self._containers: dict[str, _Container] = {}
         self.calls: list[tuple[str, ...]] = []
         self._signal_requests_finding_nothing = 0
+        self._signal_requests_failing = 0
         self._runs_lost_after_creating: list[bool] = []
 
     def containers(self) -> tuple[FakeContainer, ...]:
@@ -298,6 +332,14 @@ class FakeDockerEngine:
         daemon when the request is handled.
         """
         self._signal_requests_finding_nothing = count
+
+    def signal_requests_fail(self, count: int) -> None:
+        """Fault: the next *count* signal requests fail before signalling anything.
+
+        This is what a request sees when its own ``docker exec`` client dies or the
+        daemon refuses it: exit 1, no count on stdout.
+        """
+        self._signal_requests_failing = count
 
     def run(
         self, argv: Sequence[str], *, timeout_seconds: float
@@ -411,7 +453,7 @@ class FakeDockerEngine:
         if container is None:
             return self._no_such_container(arguments, reference)
         for marker in container.markers:
-            self._signal_marker(marker, signal.SIGKILL)
+            self._signal_marker(marker, signal.SIGKILL, 0)
         container.running = False
         if arguments[1] == "rm":
             del self._containers[identifier]
@@ -453,12 +495,9 @@ class FakeDockerEngine:
             uid, gid = self._agent_ids
             return subprocess.CompletedProcess(arguments, 0, f"{uid}\n{gid}\n", "")
         if request.program[:3] == ("sh", "-c", SIGNAL_EXEC_SCRIPT):
-            marker, number = request.program[4], request.program[5]
-            if self._signal_requests_finding_nothing > 0:
-                self._signal_requests_finding_nothing -= 1
-            else:
-                self._signal_marker(marker.partition("=")[2], signal.Signals(int(number)))
-            return subprocess.CompletedProcess(arguments, 0, "", "")
+            return subprocess.CompletedProcess(
+                arguments, *self._signal_request(request.program[4:7])
+            )
         completed = subprocess.run(  # noqa: S603  # lint-waiver: LW-731012 [S603]; the fake daemon runs the exec argv a sandbox assembled, without a shell.
             request.program,
             cwd=self._host_path(container, request.workdir),
@@ -491,12 +530,38 @@ class FakeDockerEngine:
             return subprocess.CompletedProcess(arguments, _DAEMON_ERROR_EXIT, "", stderr)
         return None
 
-    def _signal_marker(self, marker: str, number: signal.Signals) -> None:
+    def _signal_request(self, operands: tuple[str, ...]) -> tuple[int, str, str]:
+        """Answer the stop script with its status, stdout and stderr.
+
+        It signals the marked program, then prints how many of its processes remain.
+        """
+        marker, number, tenths = operands
+        if self._signal_requests_failing > 0:
+            self._signal_requests_failing -= 1
+            return 1, "", "signal request failed\n"
+        survivors = 0
+        if self._signal_requests_finding_nothing > 0:
+            self._signal_requests_finding_nothing -= 1
+        else:
+            survivors = self._signal_marker(
+                marker.partition("=")[2], signal.Signals(int(number)), int(tenths)
+            )
+        return 0, f"{survivors}\n", ""
+
+    def _signal_marker(self, marker: str, number: signal.Signals, settle_tenths: int) -> int:
+        """Signal the program's session as the stop script does, and count what is left."""
         pidfile = self._pidfile(marker)
         if not pidfile.exists():
-            return
+            return 0
+        group = int(pidfile.read_text())
         with contextlib.suppress(ProcessLookupError, PermissionError):
-            os.killpg(int(pidfile.read_text()), number)
+            os.killpg(group, number)
+        counter = self._launcher.start(
+            (sys.executable, "-c", _COUNT_SESSION, str(group), str(settle_tenths))
+        )
+        survivors = counter.stdout.read()
+        counter.wait(settle_tenths / 10 + _COUNT_BOUND_S)
+        return int(survivors)
 
     def runtime_of(self, container_id: str) -> str | None:
         """Return the ``--runtime`` *container_id* was created with, if any."""

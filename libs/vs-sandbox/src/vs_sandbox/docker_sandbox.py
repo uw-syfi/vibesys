@@ -36,7 +36,7 @@ from vs_sandbox.docker_states import (
 from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
-from vs_sandbox.process_execution import PipedStoppableProcess
+from vs_sandbox.process_execution import KILL, PipedStoppableProcess, RemoteProcesses
 from vs_sim.api import ProcessTimeoutError
 
 if TYPE_CHECKING:
@@ -78,6 +78,12 @@ _AGENT_USER = "agent"
 _ROOT_SETUP_TIMEOUT_S = 60
 _CONTAINER_IDENTITY_LINE_COUNT = 2
 _EXEC_STOP_TIMEOUT_S = 30
+# A stop's signal request waits this long (in tenths of a second) for the signalled
+# processes to end before it counts them: 1 s after SIGTERM, 5 s after SIGKILL.
+_TERM_SETTLE_TENTHS = 10
+_KILL_SETTLE_TENTHS = 50
+# Signal requests per stop step before the remote side counts as unknown.
+_SIGNAL_ATTEMPTS = 3
 _NAMED_REMOVE_TIMEOUT_S = 30
 _REMOVE_ATTEMPTS = 3
 
@@ -1014,23 +1020,36 @@ class DockerSandbox(WorkspaceSandbox):
         )
         return result
 
-    def _signal_exec(self, container_id: str, exec_id: str, number: signal.Signals) -> None:
-        """Signal every container process tagged with *exec_id*."""
-        with suppress(OSError, subprocess.SubprocessError):
-            self._docker.run(
-                [
-                    "docker",
-                    "exec",
-                    container_id,
-                    "sh",
-                    "-c",
-                    SIGNAL_EXEC_SCRIPT,
-                    "sh",
-                    f"{EXEC_MARKER_ENV}={exec_id}",
-                    str(number.value),
-                ],
-                timeout_seconds=_EXEC_STOP_TIMEOUT_S,
-            )
+    def _signal_exec(
+        self, container_id: str, exec_id: str, number: signal.Signals
+    ) -> RemoteProcesses:
+        """Signal every container process tagged with *exec_id* and count those left.
+
+        A signal request whose client fails, times out, or answers outside the
+        script's protocol is retried; after the last attempt nothing is known.
+        """
+        settle = _KILL_SETTLE_TENTHS if number == KILL else _TERM_SETTLE_TENTHS
+        argv = [
+            "docker",
+            "exec",
+            container_id,
+            "sh",
+            "-c",
+            SIGNAL_EXEC_SCRIPT,
+            "sh",
+            f"{EXEC_MARKER_ENV}={exec_id}",
+            str(number.value),
+            str(settle),
+        ]
+        for _ in range(_SIGNAL_ATTEMPTS):
+            try:
+                result = self._docker.run(argv, timeout_seconds=_EXEC_STOP_TIMEOUT_S)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            survivors = result.stdout.strip()
+            if result.returncode == 0 and survivors.isdigit():
+                return RemoteProcesses(int(survivors))
+        return RemoteProcesses(None)
 
     def __enter__(self) -> DockerSandbox:
         """Start the sandbox and return it as a context manager."""

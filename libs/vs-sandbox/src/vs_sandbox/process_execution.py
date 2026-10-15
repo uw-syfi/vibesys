@@ -28,8 +28,27 @@ if TYPE_CHECKING:
 type StopSignal = signal.Signals
 TERMINATE: StopSignal = signal.SIGTERM
 KILL: StopSignal = signal.SIGKILL
-#: Delivers a signal to the processes of a command that live outside the launched process group.
-type SignalSender = Callable[[StopSignal], None]
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteProcesses:
+    """What signalling a command's remote processes found: how many remain, if known.
+
+    ``survivors`` is ``None`` when the signal could not be delivered or its answer
+    could not be read, so nothing is known about the remote side.
+    """
+
+    survivors: int | None
+
+    @property
+    def gone(self) -> bool:
+        """Whether the remote side was shown to hold none of the command's processes."""
+        return self.survivors == 0
+
+
+#: Signals the processes of a command that live outside the launched process group (a
+#: container exec's) and says how many of them remain.
+type SignalSender = Callable[[StopSignal], RemoteProcesses]
 
 #: Default time a stopped command gets between ``SIGTERM`` and ``SIGKILL``.
 DEFAULT_TERMINATION_GRACE_SECONDS = 30.0
@@ -59,6 +78,8 @@ class ProcessOutcome:
     stderr: str
     returncode: int
     stopped: ProcessStop | None = None
+    unconfirmed: RemoteProcesses | None = None
+    """Set when a stop could not show that the command's remote processes ended."""
 
 
 def shell_exit_status(returncode: int) -> int:
@@ -219,7 +240,7 @@ def wait_stoppable(  # noqa: PLR0913  # lint-waiver: LW-731015 [PLR0913]; the st
                 stop = ProcessStop.TIMEOUT
             else:
                 continue
-            return _stop(process, stop, grace_seconds, signal_remote)
+            return _stop(process, stop, grace_seconds, signal_remote, threads)
     except BaseException:
         _kill(process, signal_remote)
         raise
@@ -230,24 +251,42 @@ def _stop(
     stop: ProcessStop,
     grace_seconds: float,
     signal_remote: SignalSender | None,
+    threads: Threads,
 ) -> ProcessOutcome:
-    stop_signal = TERMINATE
+    grace_end = threads.now() + grace_seconds
     if signal_remote is not None:
-        signal_remote(stop_signal)
-    process.signal_group(stop_signal)
+        signal_remote(TERMINATE)
+    process.signal_group(TERMINATE)
     finished = process.wait(grace_seconds)
-    if finished is None:
+    killed = finished is None
+    if killed:
         _kill(process, signal_remote)
         finished = process.wait(None)
-    elif signal_remote is not None:
-        # The local client is gone. A command whose remote process started after the
-        # first request found nothing to signal (its client was killed before it
-        # existed there) is reachable only now, and nothing else would stop it.
-        signal_remote(stop_signal)
     if finished is None:
         message = "a killed process did not exit"
         raise RuntimeError(message)
-    return ProcessOutcome(*finished, shell_exit_status(process.returncode), stop)
+    unconfirmed = None
+    if signal_remote is not None:
+        remote = _end_remote(signal_remote, grace_end, threads, killed=killed)
+        unconfirmed = None if remote.gone else remote
+    return ProcessOutcome(*finished, shell_exit_status(process.returncode), stop, unconfirmed)
+
+
+def _end_remote(
+    signal_remote: SignalSender, grace_end: float, threads: Threads, *, killed: bool
+) -> RemoteProcesses:
+    """Stop what remains of the command where it runs, now that its local client is gone.
+
+    Killing the local client does not stop the remote command, so the remote side is
+    signalled again and checked. ``SIGTERM`` reaches a remote process that started
+    after the first request (its client was killed before it existed there); whatever
+    outlives the grace period gets ``SIGKILL``.
+    """
+    remote = signal_remote(KILL if killed else TERMINATE)
+    if remote.gone or killed:
+        return remote
+    threads.sleep(max(0.0, grace_end - threads.now()))
+    return signal_remote(KILL)
 
 
 def _kill(process: StoppableProcess, signal_remote: SignalSender | None) -> None:

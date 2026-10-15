@@ -26,6 +26,23 @@ class CommandResult:
     cancelled: bool = False
 
 
+class CommandStopUnconfirmedError(RuntimeError):
+    """A stopped command's processes could not be shown to have ended where they run.
+
+    Killing a ``docker exec`` client does not stop the command in the container, so a
+    stop is confirmed there. When that check finds survivors after ``SIGKILL``, or cannot
+    be made, the command may still be running and writing; ``result`` is what the stop
+    would otherwise have returned.
+    """
+
+    def __init__(self, result: CommandResult, survivors: int | None) -> None:
+        """Record the unconfirmed *result* and how many remote processes remain, if known."""
+        self.result = result
+        self.survivors = survivors
+        found = "could not be checked" if survivors is None else f"left {survivors} running"
+        super().__init__(f"stopping the command {found} where it runs")
+
+
 class CommandRunner(Protocol):
     """Execute one shell command and return its bounded result.
 

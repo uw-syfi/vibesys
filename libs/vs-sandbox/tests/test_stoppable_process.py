@@ -26,6 +26,7 @@ from vs_sandbox.process_execution import (
     KILL,
     TERMINATE,
     ProcessStop,
+    RemoteProcesses,
     StopSignal,
     wait_stoppable,
 )
@@ -43,6 +44,22 @@ _CANCEL_AT = st.one_of(st.none(), st.integers(0, 25).map(lambda n: n + 0.75))
 _TERM_DELAY = st.sampled_from([None, 0.0, 2.0])
 _GRACE = st.sampled_from([1.0, 5.0])
 _POLL_SLACK = 0.06
+
+
+class _Remote:
+    """A command's remote side: records each signal and answers how many processes remain.
+
+    ``answers`` are given in order, one per signal; once they run out, the remote side
+    is empty.
+    """
+
+    def __init__(self, *answers: int | None) -> None:
+        self.signals: list[StopSignal] = []
+        self._answers = list(answers)
+
+    def __call__(self, number: StopSignal) -> RemoteProcesses:
+        self.signals.append(number)
+        return RemoteProcesses(self._answers.pop(0) if self._answers else 0)
 
 
 class TestFakeStoppableProcess(StoppableProcessContract):
@@ -95,7 +112,7 @@ def _observe(scenario: _Scenario, seed: int | None, *, with_remote: bool) -> _Ob
         ),
     )
     cancel = threads.event()
-    remote: list[StopSignal] = []
+    remote = _Remote()
 
     def main() -> _Observed:
         if scenario.cancel_at is not None:
@@ -107,7 +124,7 @@ def _observe(scenario: _Scenario, seed: int | None, *, with_remote: bool) -> _Ob
             timeout=scenario.timeout,
             cancel=cancel if scenario.cancel_at is not None else None,
             grace_seconds=scenario.grace,
-            signal_remote=remote.append if with_remote else None,
+            signal_remote=remote if with_remote else None,
             threads=threads,
         )
         return _Observed(
@@ -115,7 +132,7 @@ def _observe(scenario: _Scenario, seed: int | None, *, with_remote: bool) -> _Ob
             outcome.returncode,
             outcome.stdout,
             [(number, at - origin) for number, at in process.signals],
-            remote,
+            remote.signals,
             threads.now() - origin,
         )
 
@@ -181,7 +198,7 @@ def test_a_process_is_stopped_by_whichever_comes_first_and_killed_only_after_the
         assert seen.group_signals[1][1] == pytest.approx(stop_at + grace)
         assert seen.returncode == _KILL_STATUS
         assert seen.ended_at == pytest.approx(stop_at + grace)
-        expected_remote = [TERMINATE, KILL]
+        expected_remote = [TERMINATE, KILL, KILL]
     assert seen.remote_signals == (expected_remote if with_remote else [])
 
 
@@ -195,7 +212,7 @@ class _InterruptedCancel:
 def test_an_interrupted_wait_kills_the_process_before_the_interruption_propagates() -> None:
     threads = SimThreads()
     process = FakeStoppableProcess(threads, StoppableScript(runs_for=None, term_delay=None))
-    remote: list[StopSignal] = []
+    remote = _Remote()
 
     def main() -> None:
         with pytest.raises(KeyboardInterrupt):
@@ -203,11 +220,61 @@ def test_an_interrupted_wait_kills_the_process_before_the_interruption_propagate
                 process,
                 timeout=60,
                 cancel=_InterruptedCancel(),
-                signal_remote=remote.append,
+                signal_remote=remote,
                 threads=threads,
             )
 
     threads.run(main)
 
     assert [number for number, _ in process.signals] == [KILL]
-    assert remote == [KILL]
+    assert remote.signals == [KILL]
+
+
+def _stop_with_remote(
+    remote: _Remote, *, grace: float = 5.0
+) -> tuple[object, list[StopSignal], float]:
+    """Time out a local client that dies on ``SIGTERM`` whose remote side answers as *remote*."""
+    threads = SimThreads()
+    origin = threads.now()
+    process = FakeStoppableProcess(threads, StoppableScript(runs_for=None, term_delay=0.0))
+
+    def main() -> tuple[object, list[StopSignal], float]:
+        outcome = wait_stoppable(
+            process,
+            timeout=1,
+            cancel=None,
+            grace_seconds=grace,
+            signal_remote=remote,
+            threads=threads,
+        )
+        assert outcome.stopped is ProcessStop.TIMEOUT
+        return outcome.unconfirmed, remote.signals, threads.now() - origin
+
+    return threads.run(main)
+
+
+def test_a_remote_side_that_outlives_its_killed_client_gets_sigkill_after_the_grace() -> None:
+    """The local client dies at once; the remote command still gets the grace, then SIGKILL."""
+    unconfirmed, signals, ended_at = _stop_with_remote(_Remote(1, 1, 0), grace=5.0)
+
+    assert signals == [TERMINATE, TERMINATE, KILL]
+    assert ended_at == pytest.approx(1 + 5.0)
+    assert unconfirmed is None
+
+
+@given(survivors=st.one_of(st.none(), st.integers(1, 5)))
+def test_a_stop_that_cannot_show_the_remote_side_ended_is_unconfirmed(
+    survivors: int | None,
+) -> None:
+    unconfirmed, signals, _ = _stop_with_remote(_Remote(survivors, survivors, survivors))
+
+    assert signals == [TERMINATE, TERMINATE, KILL]
+    assert unconfirmed == RemoteProcesses(survivors)
+
+
+def test_a_remote_side_shown_empty_after_the_client_died_is_not_waited_for() -> None:
+    unconfirmed, signals, ended_at = _stop_with_remote(_Remote(1, 0))
+
+    assert signals == [TERMINATE, TERMINATE]
+    assert ended_at == pytest.approx(1)
+    assert unconfirmed is None
