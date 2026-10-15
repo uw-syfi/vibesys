@@ -38,7 +38,7 @@ from vs_project._layout import (
     TasksRoot,
     UnsafeProjectPathError,
 )
-from vs_project._logger import RunLogger, strip_ansi
+from vs_project._logger import LPRINT_LOGGER, RunLogger, strip_ansi
 from vs_project._manifests import (
     AgentRoleExecutionRecord,
     GitObjectId,
@@ -132,6 +132,7 @@ __all__ = [
     "COMMIT_IDENTITY_NAME",
     "DEFAULT_GIT_BACKEND",
     "GIT_BACKEND_ENV",
+    "LPRINT_LOGGER",
     "MAX_SOCKET_PATH_BYTES",
     "PROJECT_SCHEMA_VERSION",
     "RUN_SCHEMA_VERSION",

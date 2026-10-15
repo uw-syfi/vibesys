@@ -43,11 +43,20 @@ def _config(**agent: object) -> Config:
     return Config.model_validate({"model": {"name": "m"}, "agent": agent})
 
 
+def _spec(config: Config, model: str | None = None) -> AgentSpec:
+    """Resolve a spec for a placeholder model.
+
+    These tests follow client selection, not the vetted list
+    (``libs/vs-agent/tests/test_vetted_harnesses.py``), so they opt out of it.
+    """
+    return agent_spec_from_config(config, model=model, allow_unvetted_model=True)
+
+
 def _build(
     config: Config,
     **options: Unpack[_BuildOptions],
 ) -> AgentClient:
-    spec = agent_spec_from_config(config, model=options.get("model_name", "m"))
+    spec = _spec(config, options.get("model_name", "m"))
     client = build_agent_client(
         threads=SimThreads(),
         spec=spec,
@@ -94,7 +103,7 @@ def test_agentshim_docker_configuration_is_preserved() -> None:
 
 def test_preflight_capabilities_match_constructed_driver() -> None:
     config = _config(backend="cli", cli_provider="codex")
-    spec = agent_spec_from_config(config)
+    spec = _spec(config)
     declared = agent_supports_tool_servers(spec)
     client = _build(config)
 
@@ -104,7 +113,7 @@ def test_preflight_capabilities_match_constructed_driver() -> None:
 
 def test_non_cli_backend_has_no_external_driver_capabilities() -> None:
     config = _config(backend="stub")
-    spec = agent_spec_from_config(config)
+    spec = _spec(config)
 
     assert agent_supports_tool_servers(spec) is None
 
@@ -145,7 +154,7 @@ def test_spec_rejects_any_provider_agentshim_does_not_ship(provider: str) -> Non
 
 def test_agent_env_passthrough_reaches_the_spec_and_bad_names_are_rejected_at_load() -> None:
     config = _config(env_passthrough=["HF_TOKEN"])
-    assert agent_spec_from_config(config).env_passthrough == ("HF_TOKEN",)
+    assert _spec(config).env_passthrough == ("HF_TOKEN",)
 
     with pytest.raises(ValueError, match=r"agent\.env_passthrough.*'HF-TOKEN'"):
         _config(env_passthrough=["HF-TOKEN"])
@@ -186,7 +195,7 @@ def test_built_client_reports_a_missing_provider_cli_before_its_first_turn(
 
 def test_a_container_client_accepts_a_workspace_sandbox_lookup() -> None:
     """The public builder passes the lookup a core run gives its client (#1552)."""
-    spec = agent_spec_from_config(_config(backend="cli", cli_provider="claude"), model="m")
+    spec = _spec(_config(backend="cli", cli_provider="claude"), "m")
 
     client = build_agent_client(
         threads=SimThreads(),
@@ -204,7 +213,7 @@ def test_a_container_client_accepts_a_workspace_sandbox_lookup() -> None:
 
 def test_a_lookup_without_docker_is_refused_not_dropped() -> None:
     """A routing lookup the client would silently ignore is a configuration error (#1613)."""
-    spec = agent_spec_from_config(_config(backend="cli", cli_provider="claude"), model="m")
+    spec = _spec(_config(backend="cli", cli_provider="claude"), "m")
 
     with pytest.raises(ValueError, match="does not use Docker"):
         build_agent_client(
@@ -220,7 +229,7 @@ def test_a_lookup_without_docker_is_refused_not_dropped() -> None:
 
 
 def test_a_docker_client_without_sandboxes_is_refused_at_build() -> None:
-    spec = agent_spec_from_config(_config(backend="cli", cli_provider="claude"), model="m")
+    spec = _spec(_config(backend="cli", cli_provider="claude"), "m")
 
     with pytest.raises(ValueError, match="needs the run's sandboxes"):
         build_agent_client(

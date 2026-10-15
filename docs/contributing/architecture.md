@@ -140,6 +140,7 @@ graph TD
     entrypoints --> vs_decode
     entrypoints --> vs_github
     entrypoints --> vs_issue_tracker
+    entrypoints --> vs_logs
     entrypoints --> vs_mcp
     entrypoints --> vs_project
     entrypoints --> vs_runtime

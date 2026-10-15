@@ -98,13 +98,21 @@ export class Desktop {
         if (this.#welcomeRenderer === rendererGeneration) this.#welcomeRenderer = null;
       },
       async rendererGeneration => {
-        try {
-          await Promise.all([
-            deps.hosts.cancelCheckoutOwner(rendererGeneration),
-            deps.hosts.retireOwner(rendererGeneration),
-          ]);
-        } catch (error) {
-          deps.log(`could not retire checkout changes: ${(error as Error).message}`);
+        const cleanups = [
+          {
+            name: 'checkout cancellation',
+            run: () => deps.hosts.cancelCheckoutOwner(rendererGeneration),
+          },
+          {name: 'host retirement', run: () => deps.hosts.retireOwner(rendererGeneration)},
+        ] as const;
+        const settled = await Promise.allSettled(cleanups.map(async cleanup => cleanup.run()));
+        const failures = settled.flatMap((result, index) =>
+          result.status === 'rejected'
+            ? [`${cleanups[index]?.name}: ${String(result.reason)}`]
+            : [],
+        );
+        if (failures.length > 0) {
+          deps.log(`could not retire checkout changes: ${failures.join('; ')}`);
         }
       },
     );

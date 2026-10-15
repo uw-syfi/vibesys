@@ -242,6 +242,7 @@ def _resources(tmp_path: Path, environment: _Environment) -> RunResources:
                 "agent": {"backend": "stub", "cli_provider": "codex"},
             }
         ),
+        allow_unvetted_model=False,
         backend=ComputeBackend.CPU,
         skill_source_dirs=(),
         host_resources=(),

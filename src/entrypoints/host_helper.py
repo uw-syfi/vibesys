@@ -81,7 +81,7 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
         registry=LiveRegistry(store, epoch),
         inspector=inspector,
         stop_effects=StopEffects(
-            requester=ControlSocketStopRequester(network, clock=epoch),
+            requester=ControlSocketStopRequester(network, clock=epoch, deadline_clock=threads),
             signaller=PidfdProcessSignaller(),
             clock=threads,
             pause=threads.sleep,
