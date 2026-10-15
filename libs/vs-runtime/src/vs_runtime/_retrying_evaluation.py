@@ -30,6 +30,7 @@ from vs_evaluation.api import (
     PollingEvaluationExecutor,
     PollPhase,
     TrustedEvidence,
+    same_work,
 )
 from vs_runtime._failure_classification import job_failure
 
@@ -175,9 +176,14 @@ class RetryingEvaluationExecutor:
         if tries is None:
             tries = _Tries(request=request)
             self._namespace.save(self._path(handle_id), tries)
-        elif tries.request != request:
+        elif not same_work(tries.request, request):
             message = f"retrying handle {handle_id!r} has different work"
             raise ExecutorRejectedError(message)
+        elif tries.request != request:
+            # The same work, recorded before its stages named their purpose: keep the
+            # request as it is now asked for, so the tries to come carry the purpose.
+            tries = tries.model_copy(update={"request": request})
+            self._namespace.save(self._path(handle_id), tries)
         await self._submit_try(handle_id, tries)
 
     async def poll(self, handle_id: str) -> ExecutorPoll:

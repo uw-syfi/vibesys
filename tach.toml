@@ -556,7 +556,7 @@ depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models"]
 [[modules]]
 path = "vs_evaluation.semantic_stage"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_evaluation.agent_evidence", "vs_evaluator_protocol"]
+depends_on = ["vs_evaluation.agent_evidence", "vs_evaluation.models", "vs_evaluator_protocol"]
 
 [[modules]]
 path = "vs_evaluation.coordinator"

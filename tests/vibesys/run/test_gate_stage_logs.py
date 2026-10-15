@@ -7,6 +7,7 @@ the stage, while it runs; and each evaluator tool build's output to one ``ToolBu
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -64,6 +65,7 @@ _PRINTED: dict[Literal["accuracy", "benchmark"], tuple[bytes, bytes]] = {
     "benchmark": (b"warmup\nrps=41\n", b""),
 }
 _STAGES = (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+_RETRIES = EvaluationRetries(infrastructure_attempts=2, ambiguous_attempts=1)
 
 
 def _request(snapshot: str, purpose: str, stages: tuple[EvidenceKind, ...]) -> EvaluationRequest:
@@ -85,6 +87,32 @@ def _request(snapshot: str, purpose: str, stages: tuple[EvidenceKind, ...]) -> E
     )
 
 
+def _without_purpose(request: EvaluationRequest) -> EvaluationRequest:
+    """``request`` as a host recorded it before stages carried a purpose."""
+    stages = []
+    for step in request.stages:
+        assert isinstance(step.payload, dict)
+        payload = {key: value for key, value in step.payload.items() if key != "purpose"}
+        stages.append(step.model_copy(update={"payload": payload}))
+    return request.model_copy(update={"stages": tuple(stages)})
+
+
+type _EarlierHost = Callable[
+    [EvaluationRequest, InMemoryEvaluationNamespace, FakeWorkspaces], Awaitable[None]
+]
+
+
+@dataclass(frozen=True)
+class _Hooks:
+    """What a test does around a measurement."""
+
+    earlier_host: _EarlierHost | None = None
+    """Runs first with the request, the retry wrapper's namespace and the workspaces,
+    as a host that stopped before this one resumed."""
+    while_running: Callable[[], Awaitable[None]] | None = None
+    """Runs right after the measurement is submitted."""
+
+
 def _store() -> MemoryLogStore[LogOwner]:
     return MemoryLogStore(LOG_OWNER, threads=SimThreads())
 
@@ -103,26 +131,30 @@ async def _measure(
     purpose: str,
     stage_output: Callable[[TryHandles], StageOutputOpener | None],
     stages: tuple[EvidenceKind, ...] = _STAGES,
-    on_started: Callable[[], Awaitable[None]] | None = None,
+    hooks: _Hooks | None = None,
 ) -> None:
     """Measure one candidate the way the run host does: polling under the retry wrapper."""
+    hooks = hooks or _Hooks()
     evaluation.printed.update(_PRINTED)
     workspaces = FakeWorkspaces(
         FakeWorkspace(path=Path("/workspace")), supports_parallel_candidates=True
     )
     tries = TryHandles()
+    namespace = InMemoryEvaluationNamespace()
+    request = _request(await workspaces.root.snapshot("candidate"), purpose, stages)
+    if hooks.earlier_host is not None:
+        await hooks.earlier_host(request, namespace, workspaces)
     executor = RetryingEvaluationExecutor(
         PollingEvaluationExecutor(
             evaluation, workspaces, clock=ManualClock(), stage_output=stage_output(tries)
         ),
-        EvaluationRetries(infrastructure_attempts=2, ambiguous_attempts=1),
-        InMemoryEvaluationNamespace(),
+        _RETRIES,
+        namespace,
         tries=tries,
     )
-    snapshot = await workspaces.root.snapshot("candidate")
-    await executor.submit(_request(snapshot, purpose, stages), handle_id=_HANDLE)
-    if on_started is not None:
-        await on_started()
+    await executor.submit(request, handle_id=_HANDLE)
+    if hooks.while_running is not None:
+        await hooks.while_running()
     await yield_until(
         lambda: executor.poll(_HANDLE),
         lambda polled: polled.phase is PollPhase.ENDED,
@@ -149,7 +181,7 @@ async def test_each_gate_stage_writes_to_its_gate_stream_before_it_settles() -> 
         evaluation,
         purpose="official",
         stage_output=lambda tries: tries.stage_output(stage_output_opener(store)),
-        on_started=look_while_accuracy_runs,
+        hooks=_Hooks(while_running=look_while_accuracy_runs),
     )
 
     accuracy = GateStage(execution_id=_HANDLE, gate=GateKind.ACCURACY, attempt=1)
@@ -205,6 +237,37 @@ async def test_a_retried_stage_writes_a_failed_stream_then_one_for_its_next_atte
         StreamOutcome.ENDED,
     )
     assert _read(reader, first) == _read(reader, second) == b"".join(_PRINTED["accuracy"])
+
+
+@pytest.mark.asyncio
+async def test_a_measurement_recorded_before_stages_named_a_purpose_resumes_on_its_gate() -> None:
+    store = _store()
+    stages = (EvidenceKind.ACCURACY,)
+
+    async def host_before_the_upgrade(
+        request: EvaluationRequest,
+        namespace: InMemoryEvaluationNamespace,
+        workspaces: FakeWorkspaces,
+    ) -> None:
+        # It recorded the measurement in the earlier format and stopped before it ran.
+        earlier = RetryingEvaluationExecutor(
+            PollingEvaluationExecutor(FakeEvaluation(), workspaces, clock=ManualClock()),
+            _RETRIES,
+            namespace,
+        )
+        await earlier.submit(_without_purpose(request), handle_id=_HANDLE)
+        await earlier.close()
+
+    await _measure(
+        FakeEvaluation(default_accuracy=AccuracyEvaluation(executed=True)),
+        purpose="local-validation",
+        stage_output=lambda tries: tries.stage_output(stage_output_opener(store)),
+        stages=stages,
+        hooks=_Hooks(earlier_host=host_before_the_upgrade),
+    )
+
+    validation = GateStage(execution_id=_HANDLE, gate=GateKind.VALIDATION, attempt=1)
+    assert _owners(store) == [(validation, StreamOutcome.ENDED)]
 
 
 @pytest.mark.asyncio

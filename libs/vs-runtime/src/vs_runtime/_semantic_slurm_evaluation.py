@@ -39,6 +39,7 @@ from vs_evaluation.api import (
     TrustedEvidence,
     evidence_identity,
     is_finished,
+    same_work,
 )
 from vs_runtime._failure_classification import RecordState, classify, is_unsettled, signal_of
 from vs_runtime._trusted_evaluation import (
@@ -175,9 +176,14 @@ class SemanticSlurmEvaluationExecutor:
         except ValueError as error:
             raise ExecutorRejectedError(str(error)) from error
         existing = self._load(handle_id)
-        if existing is not None and existing != record:
+        if existing is not None and (
+            existing.snapshot != record.snapshot or not same_work(existing.request, record.request)
+        ):
             message = f"semantic Slurm handle {handle_id!r} has different work"
             raise ExecutorRejectedError(message)
+        if existing is not None and existing != record:
+            # The same work, recorded before its stages named their purpose.
+            self._namespace.save(self._path(handle_id), record)
         if existing is None:
             # The revision to measure is named by a search, often from an agent's reply. A
             # revision the repository does not hold can never run, so refuse it before a
