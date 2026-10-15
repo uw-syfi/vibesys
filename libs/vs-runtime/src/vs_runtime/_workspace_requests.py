@@ -91,6 +91,8 @@ from vs_runtime._workspace_receipts import (
 from vs_runtime.contracts import RuntimeContractError, WorkspaceRestoreError
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
+
     from vs_core.api import Request
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
@@ -384,13 +386,15 @@ class RuntimeWorkspaceRequests:
         if closure.live:
             return _unknown("an ensure of the attempt's workspace is in flight")
         member = candidate_member_id(attempt)
-        leftover = self._workspaces.live_candidate(member)
-        if leftover is None:
-            leftover = await self._workspaces.reattach_candidate(member)
+
+        async def find() -> Callable[[], Awaitable[None]] | None:
+            leftover = self._workspaces.live_candidate(member)
+            if leftover is None:
+                leftover = await self._workspaces.reattach_candidate(member)
+            return None if leftover is None else leftover.discard
+
         try:
-            removed = await self._fences.remove(
-                closure, None if leftover is None else leftover.discard
-            )
+            removed = await self._fences.remove(closure, find)
         except (OSError, BaseExceptionGroup) as error:
             return _unknown(f"an unbound worktree of the attempt was not removed: {error}")
         return _never_held(self._fences.cleared(closure, removed), attempt, _WITHDRAWN)

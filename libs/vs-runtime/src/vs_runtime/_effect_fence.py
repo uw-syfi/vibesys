@@ -34,11 +34,12 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import HostFence, RequestId
+from vs_runtime._operation_catalog import NotApplied
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from vs_runtime._operation_catalog import NotApplied
+    from vs_runtime._operation_catalog import Applied, Indeterminate, Inspection
     from vs_runtime._receipt_store import ReceiptStore
 
 _FAMILY = "effect-fences"
@@ -196,14 +197,18 @@ class Unrecorded(_Minted):
 
 @dataclass(frozen=True)
 class Removed(_Minted):
-    """The closer removed what the entries of ``key`` created; only ``EffectFences.remove``."""
+    """After the close, the fence found what the entries of ``key`` left and removed it.
+
+    Only ``EffectFences.remove`` returns one, from a lookup it ran itself after the close.
+    """
 
 
 @dataclass(frozen=True)
 class OwnerNotApplied(_Minted):
     """The owner, asked after the close, says ``key``'s effect did not happen.
 
-    Only ``EffectFences.not_applied`` returns one, from the owner's ``NotApplied`` answer.
+    Only ``EffectFences.ask_owner`` returns one, from the ``NotApplied`` answer to the question
+    it asked itself after the close.
     """
 
 
@@ -297,20 +302,32 @@ class EffectFences:
         return closure, (Unrecorded(key, _MINT) if found is None else found)
 
     async def remove(
-        self, closure: MayHold, leftover: Callable[[], Awaitable[None]] | None
+        self, closure: MayHold, find: Callable[[], Awaitable[Callable[[], Awaitable[None]] | None]]
     ) -> Removed:
-        """Remove what the entries of *closure* left behind (``leftover``, when anything is).
+        """Look for what the entries of *closure* left behind, and remove it if anything is.
 
-        A removal that fails raises, and then there is no evidence.
+        ``find`` returns the removal of the leftover, or ``None`` when it finds none. The fence
+        runs the lookup itself, after the close, so "nothing is left" is its finding, never a
+        caller's word. A lookup or a removal that fails raises, and then there is no evidence.
         """
+        leftover = await find()
         if leftover is not None:
             await leftover()
         return Removed(closure.key, _MINT)
 
-    def not_applied(self, closure: MayHold, answer: NotApplied) -> OwnerNotApplied:
-        """The owner's ``NotApplied`` answer, asked after *closure*, as evidence for ``cleared``."""
-        del answer  # its type is the evidence: only the owner's NotApplied answer reaches here
-        return OwnerNotApplied(closure.key, _MINT)
+    async def ask_owner(
+        self, closure: MayHold, inspect: Callable[[], Awaitable[Inspection]]
+    ) -> OwnerNotApplied | Applied | Indeterminate:
+        """Ask the owner, now that *closure* closed its fence, whether the effect happened.
+
+        Only a ``NotApplied`` answer to this question becomes evidence for ``cleared``: it is
+        asked after the close, and nothing starts behind a closed fence, so it holds for good.
+        An answer got before the close cannot reach here. Any other answer is returned as is.
+        """
+        answer = await inspect()
+        if isinstance(answer, NotApplied):
+            return OwnerNotApplied(closure.key, _MINT)
+        return answer
 
     def cleared(self, closure: MayHold, evidence: Evidence) -> NothingHeld:
         """Nothing is held: ``evidence`` shows the entries hold nothing, and none is still creating.

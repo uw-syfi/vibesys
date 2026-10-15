@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
@@ -13,12 +14,15 @@ from hypothesis import strategies as st
 from vs_core.api import HostFence, HostId, RequestId
 from vs_project.api import Project
 from vs_runtime.api.core import (
+    Applied,
     EffectFences,
     Entered,
     Fenced,
     FenceKey,
     FenceKind,
+    Indeterminate,
     MayHold,
+    NotApplied,
     NothingHeld,
     ObservationFacts,
     OwnerNotApplied,
@@ -28,6 +32,9 @@ from vs_runtime.api.core import (
     Unrecorded,
 )
 from vs_sim.api.testing import SimThreads, examples
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 _KEYS = (FenceKey(FenceKind.INVOCATION, "s/i1"), FenceKey(FenceKind.ATTEMPT_WORKSPACE, "a1:0"))
 _REQUESTS = ("dispatch-a", "dispatch-b", "cancel-r")
@@ -198,3 +205,99 @@ def test_evidence_comes_only_from_the_step_that_establishes_it(evidence: type) -
     """Before, any caller could construct evidence and clear a fence on its own word."""
     with pytest.raises(TypeError, match="comes only from the step"):
         evidence(_KEYS[0], object())
+
+
+def _closed_after_an_entry(fences: EffectFences) -> MayHold:
+    key = _KEYS[0]
+    fences.enter(key, by=RequestId(root="dispatch-a"), host=_host(1))
+    fences.leave(key, by=RequestId(root="dispatch-a"))
+    closure = fences.close(key, by=RequestId(root="cancel-r"), host=_host(1))
+    assert isinstance(closure, MayHold)
+    return closure
+
+
+@pytest.mark.parametrize(
+    "answer", [NotApplied(), Applied(outcome={}), Indeterminate("unreadable")], ids=type
+)
+async def test_only_a_not_applied_the_fence_asked_for_after_the_close_is_evidence(
+    answer: NotApplied | Applied | Indeterminate,
+) -> None:
+    """The fence asks the owner itself, after the close; only its NotApplied answer clears.
+
+    Before, ``not_applied(closure, answer)`` took any ``NotApplied`` the caller held, one built
+    on the spot or answered before the close, and minted evidence from it.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        fences = EffectFences(
+            ReceiptStore(
+                Project.open(Path(directory)).state.state_store_namespace("run"),
+                threads=SimThreads(),
+            )
+        )
+        closure = _closed_after_an_entry(fences)
+        asked_closed: list[bool] = []
+
+        async def inspect() -> NotApplied | Applied | Indeterminate:
+            asked_closed.append(fences.is_closed(closure.key))
+            return answer
+
+        found = await fences.ask_owner(closure, inspect)
+        assert asked_closed == [True]
+        if isinstance(answer, NotApplied):
+            assert isinstance(found, OwnerNotApplied)
+            assert fences.cleared(closure, found).key == closure.key
+        else:
+            assert found is answer
+
+
+@pytest.mark.parametrize("left_behind", [False, True])
+async def test_removal_evidence_comes_from_the_fence_s_own_lookup_after_the_close(
+    *, left_behind: bool
+) -> None:
+    """The fence looks for leftovers itself, after the close, and removes what it finds.
+
+    Before, ``remove(closure, None)`` took the caller's word that nothing was left.
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        fences = EffectFences(
+            ReceiptStore(
+                Project.open(Path(directory)).state.state_store_namespace("run"),
+                threads=SimThreads(),
+            )
+        )
+        closure = _closed_after_an_entry(fences)
+        looked_closed: list[bool] = []
+        removed: list[str] = []
+
+        async def remove_it() -> None:
+            removed.append("leftover")
+
+        async def find() -> Callable[[], Awaitable[None]] | None:
+            looked_closed.append(fences.is_closed(closure.key))
+            return remove_it if left_behind else None
+
+        evidence = await fences.remove(closure, find)
+        assert looked_closed == [True]
+        assert removed == (["leftover"] if left_behind else [])
+        assert fences.cleared(closure, evidence).key == closure.key
+
+
+async def test_a_failed_removal_is_no_evidence() -> None:
+    """A removal that raises leaves the caller with an error, never with ``Removed``."""
+    with tempfile.TemporaryDirectory() as directory:
+        fences = EffectFences(
+            ReceiptStore(
+                Project.open(Path(directory)).state.state_store_namespace("run"),
+                threads=SimThreads(),
+            )
+        )
+        closure = _closed_after_an_entry(fences)
+
+        async def fails() -> None:
+            raise OSError("busy")
+
+        async def find() -> Callable[[], Awaitable[None]] | None:
+            return fails
+
+        with pytest.raises(OSError, match="busy"):
+            await fences.remove(closure, find)
