@@ -14,7 +14,6 @@ import stat
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.real_git import REAL_GIT
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,10 +40,8 @@ def _plant_repository_programs(git_dir: Path, marker: Path) -> None:
     for hook in _HOOKS:
         _plant_program(git_dir / "hooks" / hook, marker)
     monitor = _plant_program(git_dir / "fsmonitor", marker)
-    configured = REAL_GIT.run(
-        ["--git-dir", str(git_dir), "config", "core.fsmonitor", str(monitor)], cwd=git_dir
-    )
-    assert configured.returncode == 0
+    with (git_dir / "config").open("a", encoding="utf-8") as config:
+        config.write(f"[core]\n\tfsmonitor = {monitor}\n")
 
 
 def _snapshot(repo: GitRepository, root: Path) -> None:
@@ -85,7 +82,8 @@ def test_a_pinned_linked_worktree_ignores_a_redirected_git_file(
     # The agent points the worktree at a repository it made, with programs planted.
     decoy = tmp_path / "decoy"
     decoy.mkdir()
-    assert REAL_GIT.run(["init", "-q"], cwd=decoy).returncode == 0
+    decoy_repo = sandbox.factory(decoy)
+    decoy_repo.initialize(initial_branch="main")
     marker = tmp_path / "ran"
     _plant_repository_programs(decoy / ".git", marker)
     (destination / ".git").write_text(f"gitdir: {decoy / '.git'}\n", encoding="utf-8")
@@ -96,4 +94,4 @@ def test_a_pinned_linked_worktree_ignores_a_redirected_git_file(
     head = sandbox.repo.worktree_head(destination)
     assert head != base
     assert sandbox.repo.is_ancestor(base, head)
-    assert REAL_GIT.run(["rev-parse", "--verify", "HEAD"], cwd=decoy).returncode != 0
+    assert decoy_repo.head() is None
