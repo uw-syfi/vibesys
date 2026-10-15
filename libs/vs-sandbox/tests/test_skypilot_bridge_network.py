@@ -108,14 +108,49 @@ class _Runner(SkyPilotJobRunner):
         self.released.append(cluster_name)
 
 
+class _FloodingRunner(_Runner):
+    """Streams more evaluator output than any socket buffer holds."""
+
+    def run(  # noqa: PLR0913  # lint-waiver: LW-731021 [PLR0913]; this Fake keeps the public SkyPilotJobRunner.run signature.
+        self,
+        cluster_name: str,
+        resources: ResolvedSkyPilotResources,
+        *,
+        workdir: Path,
+        command: Sequence[str],
+        timeout: float | None = None,
+        stdout_sink: Callable[[str], None] | None = None,
+        stderr_sink: Callable[[str], None] | None = None,
+        job_started: Callable[[int], None] | None = None,
+        job_name: str | None = None,
+        existing_job_id: int | None = None,
+        log_tail: int = 0,
+    ) -> JobResult:
+        del resources, workdir, timeout, stderr_sink, job_name, existing_job_id, log_tail
+        assert stdout_sink is not None
+        assert job_started is not None
+        self.commands.append(tuple(command))
+        job_started(9)
+        for _ in range(64):
+            stdout_sink("x" * 1023 + "\n")
+        return JobResult(JobStatus.COMPLETED, 0, 9, "", "", cluster_name)
+
+
 class _Setup:
-    def __init__(self, tmp_path: Path, network: SimNetwork, threads: SimThreads) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        network: SimNetwork,
+        threads: SimThreads,
+        runner: _Runner | None = None,
+    ) -> None:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         (workspace / "candidate.py").write_text("candidate")
         state = scratch_state_directory(tmp_path, "skypilot")
         self.network = network
-        self.runner = _Runner()
+        self.runner = runner or _Runner()
+        self.logs: list[str] = []
         self.bridge = SkyPilotBridge(
             runner=self.runner,
             cluster_name="lease",
@@ -127,7 +162,7 @@ class _Setup:
             benchmark_output_argument=None,
             state_namespace=StateNamespace(project_root=tmp_path, root=state, portable=False),
             socket_path=tmp_path / _ADDRESS,
-            log=lambda _: None,
+            log=self.logs.append,
             network=network,
             threads=threads,
         )
@@ -244,3 +279,33 @@ def test_a_failed_bind_releases_the_allocation_and_reports_the_error(tmp_path: P
         assert setup.runner.released == ["lease"]
 
     _run(tmp_path, scenario)
+
+
+def test_a_client_that_stops_reading_is_disconnected_and_frees_its_request(
+    tmp_path: Path,
+) -> None:
+    """REVIEW-11 P2-1: an unread client cannot hold the handler, and so the cluster, for ever."""
+    threads = SimThreads()
+    setup = _Setup(tmp_path, SimNetwork(threads, buffer_bytes=4096), threads, _FloodingRunner())
+    stalled_for: list[float] = []
+
+    def scenario(setup: _Setup) -> None:
+        setup.bridge.start()
+        client = setup.dial()
+        try:
+            started = threads.now()
+            client.send(encode_message(EvaluationRequest(kind="accuracy", invocation_id="c" * 32)))
+            # The client never reads; the bridge's output fills the buffer and then waits.
+            while not any("disconnecting" in line for line in setup.logs):
+                assert threads.now() - started < HANG_GUARD_S
+                threads.sleep(1)
+            stalled_for.append(threads.now() - started)
+        finally:
+            setup.bridge.close()
+            client.close()
+        assert setup.runner.released == ["lease"]
+
+    threads.run(lambda: scenario(setup))
+
+    assert 30 <= stalled_for[0] < 32
+    assert not any("did not stop" in line for line in setup.logs)

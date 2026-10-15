@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from vs_sim.api import Connection, Event, Listener, Lock, Network, Threads, Worker
 
 _MAX_REQUEST_BYTES = 4096
+_SEND_BOUND_SECONDS = 30.0
 _OUTPUT_CHUNK_CHARACTERS = 64 * 1024
 _LOG_SPOOL_READ_CHARACTERS = 64 * 1024
 _MAX_ARTIFACT_BYTES = 512 * 1024
@@ -95,8 +96,9 @@ _STAGING_EXCLUDED_NAMES = frozenset(
 class _Wire:
     """Line-framed reads and whole-frame writes over one connection."""
 
-    def __init__(self, connection: Connection) -> None:
+    def __init__(self, connection: Connection, log: Callable[[str], None]) -> None:
         self._connection = connection
+        self._log = log
         self._buffer = b""
 
     def has_room(self, limit: int) -> bool:
@@ -136,8 +138,22 @@ class _Wire:
         return line
 
     def write(self, data: bytes) -> None:
-        """Send all of ``data``."""
-        self._connection.send(data)
+        """Send all of ``data``, or disconnect a client that read nothing for ``_SEND_BOUND_SECONDS``.
+
+        Raises:
+            BrokenPipeError: the client stopped reading; the connection is closed, so the
+                request ends as if the client had hung up (part of ``data`` may have gone).
+        """
+        try:
+            self._connection.send(data, _SEND_BOUND_SECONDS)
+        except TimeoutError as exc:
+            self._log(
+                f"[warn] SkyPilot bridge client read nothing for {_SEND_BOUND_SECONDS:g} s; "
+                "disconnecting it"
+            )
+            self._connection.close()
+            message = "the SkyPilot bridge client stopped reading"
+            raise BrokenPipeError(message) from exc
 
 
 class _BridgeOutputSink:
@@ -500,7 +516,7 @@ class SkyPilotBridge:
             )
 
     def _serve(self, connection: Connection) -> None:
-        wire = _Wire(connection)
+        wire = _Wire(connection, self._log)
         try:
             self._handle(wire, wire, connection)
         finally:
