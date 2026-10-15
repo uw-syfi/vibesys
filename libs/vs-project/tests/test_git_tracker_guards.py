@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -240,6 +241,44 @@ def test_checkout_tree_reports_failed_restore_of_preserved_memory(tmp_path: Path
         "failed to restore preserved workspace memory after tree restore error",
         f"git tree restore {sha[:8]} failed",
     ]
+
+
+class _RepositoryWhoseRestoreRacesALinkIn(_RepositoryWhoseRestoreReplacesMemory):
+    """A repository during whose restore the agent swaps ``memory`` for a link to ``target``."""
+
+    def __init__(self, root: Path, *, faults: GitFaultSink, target: Path) -> None:
+        super().__init__(root, faults=faults)
+        self._target = target
+
+    def restore_worktree(self, revision: str, exclude: Sequence[str] = ()) -> None:
+        CliGitRepository.restore_worktree(self, revision, exclude)
+        shutil.rmtree(self._memory)
+        self._memory.symlink_to(self._target, target_is_directory=True)
+
+
+def test_reapplying_preserved_memory_never_writes_through_a_planted_link(tmp_path: Path) -> None:
+    """Regression: the reapply wrote preserved files through a link swapped in for ``memory``."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "main.py").write_text("VALUE = 1\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    events = _RecordingEvents()
+    tracker = GitTracker(
+        workspace,
+        run_id="guard-run",
+        events=events,
+        repository=_RepositoryWhoseRestoreRacesALinkIn(workspace, faults=events, target=outside),
+    )
+    tracker.init(existing=False)
+    sha = tracker.current_sha()
+    assert sha is not None
+    (workspace / "memory").mkdir()
+    (workspace / "memory" / "notes.txt").write_text("keep\n", encoding="utf-8")
+
+    tracker.checkout_tree(sha, preserve_paths=["memory"])
+
+    assert list(outside.iterdir()) == []
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root can write a read-only file")

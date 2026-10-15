@@ -11,6 +11,12 @@ from typing import TYPE_CHECKING
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project.api.git_repository import GitError, PatchStyle, StagingError
+from vs_project.api.workspace_tree import (
+    EntryKind,
+    NotRegularFileError,
+    WorkspacePathError,
+    open_workspace_tree,
+)
 from vs_project.project import Project
 
 if TYPE_CHECKING:
@@ -19,6 +25,7 @@ if TYPE_CHECKING:
     from vs_project._git_events import GitTrackerEvents
     from vs_project._state import GitSnapshotPlan, ProjectGitIntegration, StateSnapshot
     from vs_project.api.git_repository import GitRepository, RepositoryLocation
+    from vs_project.api.workspace_tree import WorkspaceTree
 
 
 def _normalize_project_paths(paths: Iterable[str | Path]) -> tuple[Path, ...]:
@@ -624,39 +631,48 @@ class GitTracker:
         )
 
     def _capture_preserved_paths(self, paths: Iterable[str | Path]) -> dict[Path, bytes]:
-        """Read regular files below workspace-relative *paths*."""
+        """Read regular files below workspace-relative *paths*, by descriptor.
+
+        The agent writes these paths, so a path with a symlink on it or below it is
+        captured not at all, never followed to a host file: the restore leaves every
+        preserved path as it is on disk anyway, and the capture only guards it.
+        """
         preserved: dict[Path, bytes] = {}
-        for raw_path in paths:
-            relative = Path(raw_path)
-            if relative.is_absolute() or relative == Path() or ".." in relative.parts:
-                message = f"preserved path must be workspace-relative: {raw_path}"
-                raise ValueError(message)
-            source = self.root / relative
-            if source.is_file():
-                preserved[relative] = source.read_bytes()
-            elif source.is_dir():
-                for child in source.rglob("*"):
-                    if child.is_file():
-                        preserved[child.relative_to(self.root)] = child.read_bytes()
+        with open_workspace_tree(self.root) as tree:
+            for raw_path in paths:
+                relative = Path(raw_path)
+                if relative.is_absolute() or relative == Path() or ".." in relative.parts:
+                    message = f"preserved path must be workspace-relative: {raw_path}"
+                    raise ValueError(message)
+                try:
+                    preserved.update(_read_below(tree, relative.as_posix()))
+                except (WorkspacePathError, NotRegularFileError) as error:
+                    self._events.warning(
+                        f"preserved path not captured: {relative}", detail=str(error)
+                    )
         return preserved
 
     def _restore_preserved_paths(self, preserved: dict[Path, bytes]) -> None:
-        """Reapply files captured by :meth:`_capture_preserved_paths`.
+        """Reapply files captured by :meth:`_capture_preserved_paths`, by descriptor.
 
         A file whose bytes already match is left alone, and any other file is
         replaced rather than rewritten in place. An agent can leave a file it
         may not write, for example one a root container created in the
         workspace, and only the directory's permissions should decide whether
-        it can be replaced, as they do for ``git restore``.
+        it can be replaced, as they do for ``git restore``. A symlink the agent
+        planted on the way is never followed; that file is reported, not written.
         """
-        for relative, content in preserved.items():
-            destination = self.root / relative
-            if destination.is_file() and destination.read_bytes() == content:
-                continue
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            if destination.is_file():
-                destination.unlink()
-            destination.write_bytes(content)
+        with open_workspace_tree(self.root) as tree:
+            for relative, content in preserved.items():
+                name = relative.as_posix()
+                try:
+                    if _matches(tree, name, content):
+                        continue
+                    tree.write_bytes(name, content)
+                except WorkspacePathError as error:
+                    self._events.warning(
+                        f"preserved file not restored: {relative}", detail=str(error)
+                    )
 
     def trusted_input_changes(self) -> list[str]:
         """Return evaluator-owned paths changed since the trusted baseline."""
@@ -988,6 +1004,29 @@ class GitTracker:
 
     def _inside_work_tree(self) -> bool:
         return self._git.is_inside_work_tree()
+
+
+def _read_below(tree: WorkspaceTree, relative: str) -> dict[Path, bytes]:
+    """The bytes of the regular file ``relative``, or of every one below the directory."""
+    match tree.kind(relative):
+        case EntryKind.FILE:
+            names: tuple[str, ...] = (relative,)
+        case EntryKind.DIRECTORY:
+            names = tree.files_below(relative)
+        case _:
+            return {}
+    result: dict[Path, bytes] = {}
+    for name in names:
+        with tree.open_file(name) as stream:
+            result[Path(name)] = stream.read()
+    return result
+
+
+def _matches(tree: WorkspaceTree, relative: str, content: bytes) -> bool:
+    """Whether ``relative`` is a regular file holding exactly ``content``."""
+    if tree.kind(relative) is not EntryKind.FILE:
+        return False
+    return tree.read_bytes(relative, max_bytes=len(content)) == content
 
 
 def _wildcard_safe(path: str) -> str:
