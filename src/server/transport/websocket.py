@@ -209,6 +209,10 @@ class _DefaultStartupSynchronization:
 _DEFAULT_STARTUP_SYNCHRONIZATION = _DefaultStartupSynchronization()
 
 
+def _no_op() -> None:
+    """Wake an event loop without giving it work."""
+
+
 @dataclass
 class _GatewayAttempt:
     """All mutable resources for one independently stoppable gateway attempt."""
@@ -227,6 +231,8 @@ class _GatewayAttempt:
     retired: bool = False
     startup_server: asyncio.Server | None = None
     staged_instance_path: Path | None = None
+    stopped: asyncio.Event | None = None
+    """Set on ``loop`` once ``stop`` is; how the serving coroutine waits without a thread."""
 
 
 @dataclass(frozen=True)
@@ -520,12 +526,13 @@ class WebSocketGateway:
         attempt.stop.set()
         with attempt.lock:
             loop = attempt.loop
+            stopped = attempt.stopped
         if loop is not None:
             # A startup exception reports readiness before its event loop is
             # closed. `close()` can race that final close, and waking a closed
             # loop must not hide the original startup error or skip cleanup.
             with suppress(RuntimeError):
-                loop.call_soon_threadsafe(lambda: None)
+                loop.call_soon_threadsafe(stopped.set if stopped is not None else _no_op)
 
     def _retire_attempt(self, attempt: _GatewayAttempt) -> None:
         """Release an attempt without waiting for an uncooperative worker.
@@ -690,7 +697,14 @@ class WebSocketGateway:
         if not self._publish_attempt(attempt, record, staged_path, bound_port):
             server.close()
             return
-        await asyncio.to_thread(attempt.stop.wait)
+        # `_request_stop` sets `stop` and then reads `stopped` under the lock, and this
+        # registers `stopped` under the lock and then reads `stop`: one of them sees the other.
+        stopped = asyncio.Event()
+        with attempt.lock:
+            attempt.stopped = stopped
+        if attempt.stop.is_set():
+            return
+        await stopped.wait()
 
     def _publish_attempt(
         self,
