@@ -5,23 +5,25 @@ A Neuron profiling toolkit ships at `neuron_profiler/analyze_neuron.py`, wrappin
    already cached (first compile of each graph shape takes minutes and would
    otherwise dominate the capture):
    ```
-   <declared server command> > /tmp/prewarm.log 2>&1 &
+   {% include "shared/profilers/_stop_process_group.j2" %}
+   setsid <declared server command> > /tmp/prewarm.log 2>&1 &
    PID=$!
    for i in $(seq 1 180); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
    curl -s -X POST http://localhost:8077/v1/completions -H "Content-Type: application/json" \
      -d '{"prompt":"warmup","max_tokens":4,"temperature":0}' --max-time 600
-   kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
+   stop_group $PID
    ```
 
 2. Capture a system + device profile while the server is under a representative load. `neuron-explorer inspect` runs a command and captures both profiles around it:
    ```
-   <declared server command> > /tmp/server.log 2>&1 &
+   {% include "shared/profilers/_stop_process_group.j2" %}
+   setsid <declared server command> > /tmp/server.log 2>&1 &
    PID=$!
    for i in $(seq 1 180); do curl -s http://localhost:8077/health 2>/dev/null | grep -q ok && break; sleep 2; done
    python neuron_profiler/analyze_neuron.py capture \
      --out-dir /tmp/neuronprof \
      --workload "{% if benchmark_command is defined and benchmark_command %}{{ benchmark_command }}{% else %}<manifest benchmark command>{% endif %} --url http://localhost:8077 --lengths 256 --concurrency 4 --duration 10 --warmup-requests 1"
-   kill $PID 2>/dev/null; wait $PID 2>/dev/null; sleep 2
+   stop_group $PID
    ```
    (If your server cannot be driven this way, capture directly around a single compiled forward — see `analyze_neuron.py --help`.)
 
