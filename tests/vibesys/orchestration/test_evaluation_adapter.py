@@ -155,7 +155,7 @@ def _request(project_root: Path, *, agent_backend: str | None = None) -> RunRequ
         run_environment=fake_docker_environment(),
         project_root=project_root,
         orchestration=OrchestrationDescriptor(id="evaluation", config_version=1, options={}),
-        config=Config.model_validate({"model": {"name": "evaluation"}}),
+        config=Config.model_validate({"model": {"name": "claude-sonnet-5"}}),
         input_bundle=load_task(project_root),
         objective="Improve the queue.",
         exp_name="evaluation",

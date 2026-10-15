@@ -77,11 +77,16 @@ class TestLoadConfigErrors:
         with pytest.raises(ValueError, match=r"agent\.env_passthrough.*'BAD-NAME'"):
             load_config(cfg_file)
 
-    def test_missing_model_name(self, tmp_path: Path) -> None:
+    def test_unknown_model_key(self, tmp_path: Path) -> None:
         cfg_file = tmp_path / "agent.toml"
         cfg_file.write_text("[model]\nprovider = 'vertex-ai'\n")
-        with pytest.raises(ValueError, match="name"):
+        with pytest.raises(ValueError, match="provider"):
             load_config(cfg_file)
+
+    def test_omitted_model_name_leaves_the_provider_default(self, tmp_path: Path) -> None:
+        cfg_file = tmp_path / "agent.toml"
+        cfg_file.write_text("[repository]\nvisibility = 'public'\n")
+        assert load_config(cfg_file).model.name is None
 
     def test_missing_file(self) -> None:
         with pytest.raises(FileNotFoundError):
