@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, assert_never
 
 from pydantic import TypeAdapter
 
-from . import attempts, evaluation, records, scheduling, sessions, settlement
+from . import _wait_clock, attempts, evaluation, records, scheduling, sessions, settlement
 from ._continuations import SuspensionRefusal, exhausted, paid_prefix_refusal, wait_refusal_in
 from ._deadlines import queued_until, resolve_until
 from ._dispatch_episode import (
@@ -728,6 +728,18 @@ def _stall_entries(
     ]
 
 
+def _applied(state: CoreState, area: Area, change: AreaChange) -> CoreState:
+    """``state`` with ``area``'s new state, and the queue time an evaluation change ended charged.
+
+    A job fact that ends a queued interval moves every limit its job counts against: its
+    agent calls (evaluation) and the record that started it (records), so both move here.
+    """
+    changed = state.model_copy(update={area.value: change.state})
+    if area == Area.EVALUATION:
+        changed = _wait_clock.charge_queue_time(state, changed)
+    return changed
+
+
 def propagate(
     state: CoreState,
     initial: tuple[Signal, ...],
@@ -781,7 +793,7 @@ def propagate(
         expected = type(getattr(state, area.value))
         if type(change.state) is not expected:
             raise ContractError((area.value, "state"), "reducer returned another area state")
-        state = state.model_copy(update={area.value: change.state})
+        state = _applied(state, area, change)
         pending.extend((child, cause, admission_id) for child in change.signals)
         _validate_area_outputs(state, area, change, cause)
         requests.extend(

@@ -123,6 +123,14 @@ def _job(state: core.CoreState) -> core.OwnedJob:
     return job
 
 
+def _submission_ended(state: core.CoreState, submit: core.SubmitMeasurement) -> bool:
+    """Whether the submission's record was ended by its limit (blocked), not by its job."""
+    assert submit.request_id is not None
+    record = state.records.record(submit.request_id)
+    assert record is not None
+    return record.phase == core.RequestPhase.BLOCKED
+
+
 def _settled(job: core.OwnedJob) -> bool:
     return job.terminal and job.status != core.ObservationStatus.PENDING
 
@@ -322,6 +330,8 @@ def test_a_wait_charges_its_limit_from_the_job_start_never_its_queue(
             # Queued, however long: the wait never times out and nothing is terminated.
             assert row.timeout is None, (fact, at)
             assert terminations == 0
+            # Nor is the submission's own record ended by its limit.
+            assert not _submission_ended(state, submit), (fact, at)
             if isinstance(fact, Started):
                 started_at = at
             continue
@@ -391,6 +401,8 @@ def test_a_wait_times_out_exactly_when_its_job_has_run_its_limit(
         result = core.step(state, _lifecycle_event(fact, submit, sequence, at))
         state = result.state
         (row,) = state.evaluation.continuations
+        if job_queued and frozen is None:
+            assert not _submission_ended(state, submit), (fact, at, charged)
         if frozen is None and charged >= LIMIT and not _settled(before):
             assert row.timeout is not None, (fact, at, charged)
             assert row.timeout.unfinished == (

@@ -319,6 +319,7 @@ class SchedulingContext(AreaContext):
     records: RecordsState
     sessions: SessionsState
     settlement: SettlementState
+    evaluation: EvaluationState
 
 
 class AttemptsContext(AreaContext):

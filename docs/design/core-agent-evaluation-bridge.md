@@ -95,7 +95,9 @@ cannot recur.
   timeout outcome; later calls get `RUN_STOPPING` or `NOT_ALLOWED` by plan deadline. The
   limit counts from the job's start: while a job waits in a queue the wait has no deadline
   (only the run's own deadline and stop end it), and each queued interval moves the
-  submission's deadline later by its length (`vs_core._wait_clock`).
+  submission's deadline later by its length (`vs_core._wait_clock`). The same rule holds
+  for the submission's own record, so a strategy's `Measure` (whose limit counts from its
+  dispatch) and an agent's submission never time out while their job is queued.
 - Rejection: returned in the tool reply, nothing charged.
 - A resumed invocation reports released and children complete, like any dispatched turn,
   so its attempt drains. A yielded invocation holds nothing once its continuation was

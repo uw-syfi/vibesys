@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from . import _host_epochs
+from . import _host_epochs, _wait_clock
 from ._proofs import (
     Mismatch,
     Missing,
@@ -90,6 +90,7 @@ from .types.waits import WaitKind, WaitOn, WaitSubject
 
 if TYPE_CHECKING:
     from .types.common import Observation, ResourceId
+    from .types.evaluation import EvaluationState
     from .types.kernel import RecordsContext, RunState, Signal
     from .types.records import RecordsEvent, RecordsState, Request, RequestRecord, TargetObservation
     from .types.sessions import Invocation, SessionView
@@ -1563,10 +1564,13 @@ def _deadline(
     # the answer or the inspection's bound, because the limit may have passed while the host
     # was down and the far side may have finished in time.
     timed = event.reason == FailureReason.TIMED_OUT
+    # A limit counts from the job's start: while a job the record started is queued, it
+    # has none (``_wait_clock``), and only the run's deadline or a stop ends the record.
+    limit_at = _wait_clock.record_limit(record, context.evaluation)
     concluded = not is_open(record) and not unresolved_children
     asked_until = _awaiting_report(state, record)
     if (
-        (timed and now_at < record.until.at)
+        (timed and (limit_at is None or now_at < limit_at))
         or (timed and asked_until is not None and now_at < asked_until)
         or (resolution == "terminal" and not unresolved_children)
         or (timed and concluded and resolution == "reattached")
@@ -1792,15 +1796,23 @@ def command_open(record: RequestRecord) -> bool:
     )
 
 
+def _limit_passed(record: RequestRecord, evaluation: EvaluationState, now_at: float) -> bool:
+    limit_at = _wait_clock.record_limit(record, evaluation)
+    return limit_at is not None and limit_at <= now_at
+
+
 def overdue_reconciliations(
-    state: RecordsState, now_at: float
+    state: RecordsState, evaluation: EvaluationState, now_at: float
 ) -> tuple[ReconciliationDeadline | ReconciliationCommandLapsed, ...]:
-    """One deadline event per open record, or lapse per open command, whose limit has passed."""
+    """One deadline event per open record, or lapse per open command, whose limit has passed.
+
+    A record whose job is queued has no limit yet (``_wait_clock.record_limit``).
+    """
     return (
         *(
             ReconciliationDeadline(request_id=record.request_id, now_at=now_at)
             for record in state.records
-            if is_open(record) and record.until.at <= now_at
+            if is_open(record) and _limit_passed(record, evaluation, now_at)
         ),
         *(
             ReconciliationCommandLapsed(request_id=record.request_id, now_at=now_at)
@@ -1810,13 +1822,24 @@ def overdue_reconciliations(
     )
 
 
-def next_reconciliation_at(state: RecordsState) -> float | None:
-    """The earliest time a ``ClockAdvanced`` would end an open record at its limit."""
+def next_reconciliation_at(state: RecordsState, evaluation: EvaluationState) -> float | None:
+    """The earliest time a ``ClockAdvanced`` would end an open record at its limit.
+
+    A record whose job is queued has no limit yet, so it wakes nothing.
+    """
+    limits = (
+        (
+            record,
+            _wait_clock.record_limit(record, evaluation) if is_open(record) else record.until.at,
+        )
+        for record in state.records
+        if is_open(record) or command_open(record)
+    )
     return min(
         (
-            max(record.until.at, _awaiting_report(state, record) or record.until.at)
-            for record in state.records
-            if is_open(record) or command_open(record)
+            max(limit_at, _awaiting_report(state, record) or limit_at)
+            for record, limit_at in limits
+            if limit_at is not None
         ),
         default=None,
     )
