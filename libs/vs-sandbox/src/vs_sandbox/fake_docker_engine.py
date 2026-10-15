@@ -27,6 +27,7 @@ from vs_sim.api import DISCARD, OutputStream
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
+    from vs_sandbox.fake_docker_command import DockerResult
     from vs_sim.api import OutputSink, PipedProcess, PipedProcessLauncher
 
 # The container program's parent, standing in for the ``docker exec`` client.
@@ -376,9 +377,7 @@ class FakeDockerEngine:
         output.write(OutputStream.STDERR, result.stderr.encode())
         return result
 
-    def _answer(
-        self, arguments: tuple[str, ...], timeout_seconds: float
-    ) -> subprocess.CompletedProcess[str]:
+    def _answer(self, arguments: tuple[str, ...], timeout_seconds: float) -> DockerResult:
         self.calls.append(arguments)
         match arguments[1]:
             case "run":
