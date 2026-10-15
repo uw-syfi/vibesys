@@ -313,7 +313,7 @@ pixel values (`10px`, `5px`, `14px`, ...) have no token to read, and a token wou
 draw. The components that replace them delete the file and the exclusion.
 
 Every failure names the file and line (or the manifest key), the rule id and the fix, for example
-"a raw <button> ... Use `<Button>` from `@vibesys/ui`". The rules cannot see through a spread
+"a raw `<button>` ... Use `<Button>` from `@vibesys/ui`". The rules cannot see through a spread
 (`<Card {...props} />` can carry a `className`); the components take no `className` or `style`
 prop (rule S1, with the component API), which closes that path. Unenforced: whether a screen
 matches its design needs a reader; the checks hold the parts it is built from.
