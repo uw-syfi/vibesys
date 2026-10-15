@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from . import _host_epochs, _wait_clock
+from ._measurements import cancel_settled
 from ._proofs import (
     Mismatch,
     Missing,
@@ -1748,26 +1749,54 @@ def _orphaned_jobs(
 
     A strategy's ``Measure`` waits on its submission's record. Once that record ends at its
     limit or a watch, nothing waits on the job any longer: evaluation cancels it rather than
-    leave it in the scheduler's queue, holding nodes nobody will read. A job an agent
-    submitted is its wait's to end (``_continuations``), and a job evaluation is already
-    cancelling (an attempt's retirement, a run's stop) keeps that cancel and its retry limit.
+    leave it in the scheduler's queue, holding nodes nobody will read. A cancel of such a job
+    that ends blocked at its bound proved nothing, so core asks again, within the backend's
+    retry limit (``cancel_settled``). A job whose id arrives only after its submission ended
+    is cancelled when the id arrives (``_measurements``). A job an agent submitted is its
+    wait's to end (``_continuations``).
     """
-    if not isinstance(record.request, SubmitMeasurement) or any(
-        call.request_id == record.request_id for call in context.evaluation.agent_calls
-    ):
+    source = _orphan_source(state, context, record)
+    if source is None:
         return ()
     cause = "deadline" if reason == FailureReason.TIMED_OUT else "retirement"
     return tuple(
         JobTerminationRequested(resource_id=job.resource_id, cause=cause)
         for job in context.evaluation.jobs
-        if job.submission_id == record.request_id
+        if job.submission_id == source
         and job.resource_id is not None
         and not job.terminal
-        and not any(
-            isinstance(row.request, CancelOwnedJob) and row.request.resource_id == job.resource_id
-            for row in state.records
-        )
+        and not cancel_settled(state, context.run, job.resource_id)
     )
+
+
+def _orphan_source(
+    state: RecordsState, context: RecordsContext, record: RequestRecord
+) -> RequestId | None:
+    """The strategy's submission whose jobs core now ends, as *record* ends; else ``None``.
+
+    That is *record* itself when it is the submission, and the job's submission when
+    *record* is a cancel of a job whose submission core ended before.
+    """
+    request = record.request
+    if isinstance(request, SubmitMeasurement):
+        source: RequestId | None = record.request_id
+    elif isinstance(request, CancelOwnedJob):
+        source = next(
+            (
+                job.submission_id
+                for job in context.evaluation.jobs
+                if job.resource_id == request.resource_id
+            ),
+            None,
+        )
+        ended = state.record(source) if source is not None else None
+        if ended is None or ended.failure is None:
+            return None
+    else:
+        return None
+    if any(call.request_id == source for call in context.evaluation.agent_calls):
+        return None
+    return source
 
 
 def _job_step(record: RequestRecord) -> bool:
