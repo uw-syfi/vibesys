@@ -100,6 +100,7 @@ class _Run:
 
     def play(self, client: FakeAgentClient, prompts: tuple[str, ...]) -> list[str]:
         threads = client.threads
+        assert isinstance(threads, SimThreads)
         control = create_run_control_channel(
             FakeRunControlEventSink(on_transition=self._on_transition), threads=threads
         )
