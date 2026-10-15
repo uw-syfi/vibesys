@@ -1,15 +1,14 @@
 """The host helper's ``logs`` feature: chunk cutting, tails, the long poll, and the gate.
 
 Reads run through :func:`read_log` and :func:`list_logs` over ``FakeLogReader``, which
-:class:`LogReaderContract` holds to the ``LogReader`` contract; the vs_logs adapter
-joins that suite when it lands. The long poll runs through the channel on
+``test_log_reader_contract.py`` holds to the ``LogReader`` contract with the real
+``StoreLogReader``. The long poll runs through the channel on
 ``SimThreads``, so its waits are virtual time.
 """
 
 from __future__ import annotations
 
 import itertools
-import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +20,7 @@ from tests.server.host_helper_support import (
     ChannelClient,
     FakeLogReader,
     fake_host,
+    record,
     serve_on,
     with_logs,
 )
@@ -30,10 +30,12 @@ from server.host_api import (
     LOGS_READ_MIN_BYTES,
     HelperError,
     HelperErrorCode,
+    InspectionState,
+    InstanceInspection,
+    InstanceInspectionMetadata,
     LogChunk,
     LogOffset,
     LogPipe,
-    LogPipeSpan,
     LogsListReply,
     LogsListRequest,
     LogsReadReply,
@@ -45,11 +47,10 @@ from server.host_helper_logs import (
     POLL_INTERVAL_SECONDS,
     REPLY_MARGIN_MS,
     HelperLogs,
-    LogReader,
-    UnknownInstanceError,
-    UnknownLogStreamError,
+    RunLocation,
     list_logs,
     read_log,
+    run_location,
 )
 from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads, examples
 
@@ -382,106 +383,41 @@ def test_a_host_without_a_log_store_does_not_offer_logs() -> None:
     assert (refused["type"], refused["code"]) == ("error", "feature_not_negotiated")
 
 
-# ----- the LogReader contract -----
+# ----- finding an instance's run -----
 
 
-@dataclass(frozen=True)
-class LogReaderUnderTest:
-    """A reader, and the means to record what it then reads."""
-
-    reader: LogReader
-    open: Callable[[str, str], None]
-    write: Callable[[str, str, bytes], None]
-    write_pipe: Callable[[str, str, bytes, LogPipe], None]
-    close: Callable[[str, str], None]
-    evict: Callable[[str, str, int], None]
-    """Drop a stream's bytes before an offset, as the store's retention would."""
-
-
-class LogReaderContract:
-    """What the helper relies on from every ``LogReader``; a subclass names the implementation."""
-
-    def subject(self) -> LogReaderUnderTest:
-        raise NotImplementedError
-
-    def test_reads_from_an_offset_at_most_max_bytes(self) -> None:
-        subject = self.subject()
-        subject.open(_INSTANCE, _STREAM)
-        subject.write(_INSTANCE, _STREAM, b"0123456789")
-        stored = subject.reader.read(_INSTANCE, _STREAM, LogOffset(offset=3), 4)
-        assert (stored.offset, stored.data, stored.eof) == (3, b"3456", False)
-        assert not stored.closed
-        assert not stored.truncated_before
-
-    def test_reads_past_the_end_return_no_bytes_at_that_offset(self) -> None:
-        subject = self.subject()
-        subject.open(_INSTANCE, _STREAM)
-        subject.write(_INSTANCE, _STREAM, b"abc")
-        stored = subject.reader.read(_INSTANCE, _STREAM, LogOffset(offset=9), 4)
-        assert (stored.offset, stored.data, stored.eof) == (9, b"", True)
-
-    def test_reads_the_tail_from_the_oldest_byte_held(self) -> None:
-        subject = self.subject()
-        subject.open(_INSTANCE, _STREAM)
-        subject.write(_INSTANCE, _STREAM, b"0123456789")
-        subject.close(_INSTANCE, _STREAM)
-        tail = subject.reader.read(_INSTANCE, _STREAM, LogTail(tail_bytes=3), 64)
-        assert (tail.offset, tail.data, tail.closed) == (7, b"789", True)
-        subject.evict(_INSTANCE, _STREAM, 8)
-        tail = subject.reader.read(_INSTANCE, _STREAM, LogTail(tail_bytes=3), 64)
-        assert (tail.offset, tail.data, tail.truncated_before) == (8, b"89", True)
-
-    def test_reads_of_evicted_bytes_start_at_the_oldest_held(self) -> None:
-        subject = self.subject()
-        subject.open(_INSTANCE, _STREAM)
-        subject.write(_INSTANCE, _STREAM, b"0123456789")
-        subject.evict(_INSTANCE, _STREAM, 6)
-        stored = subject.reader.read(_INSTANCE, _STREAM, LogOffset(offset=2), 64)
-        assert (stored.offset, stored.data, stored.truncated_before) == (6, b"6789", True)
-
-    def test_lists_streams_oldest_first(self) -> None:
-        subject = self.subject()
-        subject.open(_INSTANCE, _STREAM)
-        subject.open(_INSTANCE, _OTHER)
-        subject.write(_INSTANCE, _OTHER, b"xy")
-        subject.close(_INSTANCE, _STREAM)
-        listed = subject.reader.streams(_INSTANCE)
-        assert [(s.id, s.size, s.outcome is None) for s in listed] == [
-            (_STREAM, 0, False),
-            (_OTHER, 2, True),
-        ]
-        json.loads(listed[0].model_dump_json())
-
-    def test_unknown_instances_and_streams_raise(self) -> None:
-        subject = self.subject()
-        subject.open(_INSTANCE, _STREAM)
-        with pytest.raises(UnknownInstanceError):
-            subject.reader.streams("f" * 12)
-        with pytest.raises(UnknownInstanceError):
-            subject.reader.read("f" * 12, _STREAM, LogOffset(offset=0), 4)
-        with pytest.raises(UnknownLogStreamError):
-            subject.reader.read(_INSTANCE, _MISSING, LogOffset(offset=0), 4)
-
-    def test_labels_each_byte_with_the_pipe_that_wrote_it(self) -> None:
-        subject = self.subject()
-        subject.open(_INSTANCE, _STREAM)
-        subject.write_pipe(_INSTANCE, _STREAM, b"out\n", LogPipe.STDOUT)
-        subject.write_pipe(_INSTANCE, _STREAM, b"err\n", LogPipe.STDERR)
-        stored = subject.reader.read(_INSTANCE, _STREAM, LogOffset(offset=2), 64)
-        assert stored.pipes == (
-            LogPipeSpan(offset=2, length=2, pipe=LogPipe.STDOUT),
-            LogPipeSpan(offset=4, length=4, pipe=LogPipe.STDERR),
-        )
+def _inspection(*, live: bool, retained: bool) -> InstanceInspection:
+    metadata = InstanceInspectionMetadata(
+        id=_INSTANCE,
+        project_root="/retained",
+        run_id="run-2",
+        pid=4242,
+        started_at=1.0,
+        hostname="node",
+        vibesys_version="0+test",
+        control_socket_path="/run/sock",
+        server_log_path="/run/server.log",
+    )
+    return InstanceInspection(
+        id=_INSTANCE,
+        state=InspectionState.LIVE if live else InspectionState.ENDED,
+        record=record(_INSTANCE, run_id="run-1", project_root="/live") if live else None,
+        metadata=metadata if retained else None,
+        control_socket_path="/run/sock",
+        server_log_path="/run/server.log",
+    )
 
 
-class TestFakeLogReader(LogReaderContract):
-    def subject(self) -> LogReaderUnderTest:
-        store = FakeLogReader(SimThreads(schedule_seed=0))
-        return LogReaderUnderTest(
-            reader=store,
-            open=lambda instance, stream: store.open(instance, stream, _OWNER, "make"),
-            write_pipe=store.write,
-            write=store.write,
-            close=store.close,
-            evict=store.evict,
-        )
+@pytest.mark.parametrize(
+    ("live", "retained", "expected"),
+    [
+        (True, True, RunLocation("/live", "run-1")),
+        (True, False, RunLocation("/live", "run-1")),
+        (False, True, RunLocation("/retained", "run-2")),
+        (False, False, None),
+    ],
+)
+def test_an_instances_run_comes_from_its_live_record_or_its_retained_metadata(
+    *, live: bool, retained: bool, expected: RunLocation | None
+) -> None:
+    assert run_location(_inspection(live=live, retained=retained)) == expected

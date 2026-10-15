@@ -6,8 +6,8 @@ through ``vs_sim.api``'s launchers, so this module names no interpreter of its o
 launch runs the command line the ``vibesys`` launcher would. Like the helper, the module
 is light (``tests/architecture/test_light_entrypoints.py``).
 
-Public surface: ``FileProjects``, ``OsDirectories``, ``SubprocessRunLauncher``, and
-``GitCheckoutProbe``.
+Public surface: ``FileProjects``, ``OsDirectories``, ``SubprocessRunLauncher``,
+``GitCheckoutProbe``, and ``StoreLogReader`` with ``run_streams_directory``.
 """
 
 from __future__ import annotations
@@ -18,14 +18,29 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter
+
 from server.host_api import (
     Checkout,
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
     HelperErrorCode,
     LiveInstanceRecord,
+    LogOffset,
+    LogOwner,
+    LogPipe,
+    LogPipeSpan,
+    LogStream,
+    LogStreamOutcome,
+    LogTail,
     TaskList,
     TaskSummary,
+)
+from server.host_helper_logs import (
+    RunLocation,
+    StoredBytes,
+    UnknownInstanceError,
+    UnknownLogStreamError,
 )
 from server.host_helper_requests import (
     PathHints,
@@ -35,12 +50,14 @@ from server.host_helper_requests import (
     ScannedEntry,
 )
 from vs_decode.api import Unreadable, decode_json
+from vs_logs.read import FromOffset, Tail, UnknownStreamError, open_log_directory
 from vs_project.api import Project, ProjectError
 from vs_sim.api import ProcessSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from vs_logs.read import LogReader as StoreReader
     from vs_sim.api import CommandProbe, ProcessLauncher
 
 _PYPROJECT_LIMIT_BYTES = 1 << 20
@@ -252,3 +269,75 @@ class GitCheckoutProbe:
             bool(status.stdout.strip()) if status is not None and status.returncode == 0 else None
         )
         return Checkout(root=root, commit=commit or None, dirty=dirty)
+
+
+_OWNER: TypeAdapter[LogOwner] = TypeAdapter(LogOwner)
+"""Owners pass through as JSON: the writer validated them, and the helper never imports vibesys."""
+
+
+def run_streams_directory(location: RunLocation) -> Path:
+    """Where ``location``'s run keeps its log streams, as ``vs_project`` lays it out."""
+    return Project.log_streams_directory_for(location.project_root, location.run_id)
+
+
+class StoreLogReader:
+    """The helper's ``LogReader`` over each run's ``vs_logs`` store on this host.
+
+    ``locate`` names the run an instance drives or drove (``None`` when the host knows
+    nothing of it); ``directory_for`` names that run's store. Each call opens the store
+    afresh, so the helper keeps no state between requests.
+    """
+
+    def __init__(
+        self,
+        locate: Callable[[str], RunLocation | None],
+        directory_for: Callable[[RunLocation], Path],
+    ) -> None:
+        """Read the store ``directory_for`` names for the run ``locate`` finds."""
+        self._locate = locate
+        self._directory_for = directory_for
+
+    def streams(self, instance_id: str) -> tuple[LogStream, ...]:
+        """The instance's streams, oldest first; none when its run recorded no logs."""
+        return tuple(
+            LogStream(
+                id=info.stream_id,
+                owner=info.owner,
+                command=info.command,
+                retained_start=info.retained_start,
+                size=info.size,
+                outcome=None if info.outcome is None else LogStreamOutcome(info.outcome.value),
+            )
+            for info in self._reader(instance_id).list_streams()
+        )
+
+    def read(
+        self, instance_id: str, stream_id: str, start: LogOffset | LogTail, max_bytes: int
+    ) -> StoredBytes:
+        """At most ``max_bytes`` of the stream from ``start``."""
+        reader = self._reader(instance_id)
+        origin = (
+            FromOffset(start.offset) if isinstance(start, LogOffset) else Tail(start.tail_bytes)
+        )
+        try:
+            chunk = reader.read(stream_id, origin, max_bytes)
+        except UnknownStreamError as error:
+            raise UnknownLogStreamError(stream_id) from error
+        return StoredBytes(
+            offset=chunk.offset,
+            data=chunk.data,
+            pipes=tuple(
+                LogPipeSpan(offset=span.offset, length=span.length, pipe=LogPipe(span.pipe.value))
+                for span in chunk.pipes
+                if span.length > 0
+            ),
+            truncated_before=chunk.truncated_before,
+            eof=chunk.eof,
+            closed=chunk.closed,
+        )
+
+    def _reader(self, instance_id: str) -> StoreReader[LogOwner]:
+        location = self._locate(instance_id)
+        if location is None:
+            raise UnknownInstanceError(instance_id)
+        return open_log_directory(self._directory_for(location), _OWNER)

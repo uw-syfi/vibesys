@@ -20,12 +20,10 @@ if TYPE_CHECKING:
 RUN_LOG_OWNER = LOG_OWNER
 """The owner adapter a reader of a run's log store decodes owners with."""
 
-_STREAMS_DIRECTORY = "streams"
-
 
 def open_run_log_store(
     project_root: Path, run_id: str, *, threads: Threads, limits: LogLimits | None = None
 ) -> FileLogStore[LogOwner]:
     """Open the log store in ``run_id``'s log directory, closing streams a crash left open."""
-    directory = Project.log_directory_for(project_root, run_id) / _STREAMS_DIRECTORY
+    directory = Project.log_streams_directory_for(project_root, run_id)
     return FileLogStore(directory, LOG_OWNER, threads=threads, limits=limits)

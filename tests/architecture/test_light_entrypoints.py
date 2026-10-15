@@ -70,11 +70,13 @@ ALLOWED_FIRST_PARTY = (
     "vs_sim",
     "vs_project",
     "vs_decode",
+    "vs_logs",
 )
 """First-party modules, or packages with everything under them, the closure may hold.
 
-``vs_sim``, ``vs_project`` and ``vs_decode`` are allowed whole: they are the light
-libraries the host commands are built on (``vs_decode`` imports only pydantic), and
+libraries the host commands are built on (``vs_decode`` imports only pydantic, and ``vs_logs``,
+which the helper reads run logs with, only pydantic, ``vs_decode`` and ``vs_sim``), and
+only it, ``vs_decode`` and ``vs_sim``; the helper reads run logs with it), and
 their own boundaries are tach's job."""
 
 
@@ -175,7 +177,7 @@ def _within(name: str, prefixes: tuple[str, ...]) -> bool:
 def _allowed(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> bool:
     if _module_file(name, roots) is not None:
         exact = name in ALLOWED_FIRST_PARTY
-        whole_package = _within(name, ("vs_sim", "vs_project", "vs_decode"))
+        whole_package = _within(name, ("vs_sim", "vs_project", "vs_decode", "vs_logs"))
         return (exact or whole_package) and not is_heavy(name)
     top = name.partition(".")[0]
     return (top in sys.stdlib_module_names or top in ALLOWED_THIRD_PARTY) and not is_heavy(name)

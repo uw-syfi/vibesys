@@ -86,7 +86,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vs_decode.api", "vs_sim.api", "vs_project", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os"]
+depends_on = ["vs_decode.api", "vs_sim.api", "vs_project", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.settings", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs"]
 
 [[modules]]
 path = "headless"
@@ -187,7 +187,7 @@ depends_on = ["server.host_api", "vs_sim.api"]
 # The host helper's channel: its pure core and shell (docs/contributing/desktop-connection.md).
 # Light: no engine, no run protocol beyond the control envelope's requester.
 path = "server.host_helper"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests", "server.relay", "vs_sim.api", "vs_logs"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests", "server.relay", "vs_sim.api"]
 
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
@@ -202,7 +202,7 @@ depends_on = ["server.host_api", "vs_sim.api"]
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_requests", "vs_logs", "vs_project", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys"
@@ -661,7 +661,7 @@ depends_on = ["vs_sim.child", "vs_sim.concurrency_contracts", "vs_sim.contracts"
 
 # Durable log streams for humans. Layer `logs`, above every library, so no library can
 # import it. `vs_logs.api` (the writer) is open to the product; `vs_logs.read` only to
-# `server.host_helper` (see the [[interfaces]] entries), so nothing else reads logs back.
+# `server.host_helper_os` (see the [[interfaces]] entries), so nothing else reads logs back.
 [[modules]]
 path = "vs_logs"
 layer = "logs"
@@ -987,7 +987,7 @@ from = ["vs_logs"]
 [[interfaces]]
 expose = ["read", "read\\.[A-Za-z_]+"]
 from = ["vs_logs"]
-visibility = ["server.host_helper"]
+visibility = ["server.host_helper_os"]
 
 [[interfaces]]
 expose = ["RUN_LOG_OWNER", "open_run_log_store"]

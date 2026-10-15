@@ -17,7 +17,7 @@ Light like the rest of the helper: the standard library, Pydantic, and
 ``server.host_api``.
 
 Public surface: ``LogReader``, ``StoredBytes``, ``UnknownInstanceError``,
-``UnknownLogStreamError``, ``HelperLogs``, ``cut_chunk``, ``clip_pipes``, ``list_logs``,
+``UnknownLogStreamError``, ``RunLocation``, ``run_location``, ``HelperLogs``, ``cut_chunk``, ``clip_pipes``, ``list_logs``,
 ``read_log``, and the limits ``POLL_INTERVAL_SECONDS`` and ``REPLY_MARGIN_MS``.
 """
 
@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Final, Protocol
 from server.host_api import (
     HelperError,
     HelperErrorCode,
+    InstanceInspection,
     LogChunk,
     LogOffset,
     LogPipeSpan,
@@ -105,6 +106,26 @@ class LogReader(Protocol):
     ) -> StoredBytes:
         """At most ``max_bytes`` bytes of the stream from ``start``."""
         ...
+
+
+@dataclass(frozen=True)
+class RunLocation:
+    """Where an instance's run keeps its state: the project and the run id."""
+
+    project_root: str
+    run_id: str
+
+
+def run_location(inspection: InstanceInspection) -> RunLocation | None:
+    """The run an inspected instance drives or drove, from its live record or retained metadata.
+
+    ``None`` when the host has neither, so it knows nothing of the instance's run.
+    """
+    if inspection.record is not None:
+        return RunLocation(inspection.record.project_root, inspection.record.run_id)
+    if inspection.metadata is not None:
+        return RunLocation(inspection.metadata.project_root, inspection.metadata.run_id)
+    return None
 
 
 @dataclass(frozen=True)
