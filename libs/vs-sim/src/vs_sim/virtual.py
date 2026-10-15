@@ -28,7 +28,7 @@ import asyncio
 import collections.abc
 import heapq
 import selectors
-from typing import TYPE_CHECKING, Any, Protocol, overload
+from typing import TYPE_CHECKING, Any, Protocol, cast, overload
 
 from vs_sim.randomness import SeededRandom
 
@@ -314,12 +314,19 @@ class _VirtualLoop(asyncio.SelectorEventLoop):
         coro: Coroutine[object, object, object],
         *,
         context: contextvars.Context | None = None,
+        **task_options: object,
     ) -> asyncio.Task[object]:
         # Task names count process-wide, so label by creation order within this loop.
         label = f"{getattr(coro, '__qualname__', type(coro).__name__)}#{self._created}"
         self._created += 1
-        return asyncio.Task(
-            _RecordedCoroutine(coro, label, self._trace), loop=loop, context=context
+        # The event loop forwards every task option its Python version supports. Keep that
+        # contract open rather than copying today's version-specific name/eager_start set.
+        task_constructor = cast("Callable[..., asyncio.Task[object]]", asyncio.Task)
+        return task_constructor(
+            _RecordedCoroutine(coro, label, self._trace),
+            loop=loop,
+            context=context,
+            **task_options,
         )
 
 

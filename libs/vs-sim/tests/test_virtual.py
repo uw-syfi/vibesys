@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import sys
 import threading
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import example, given, settings
@@ -19,6 +22,9 @@ from vs_sim.api.testing import (
     run_virtual,
     wait_or_fail,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 DURATIONS = st.lists(st.floats(min_value=0.01, max_value=500.0), min_size=1, max_size=8)
 
@@ -219,6 +225,31 @@ def test_the_trace_records_task_order_and_clock_jumps() -> None:
         "test_the_trace_records_task_order_and_clock_jumps.<locals>.worker#1",
         "test_the_trace_records_task_order_and_clock_jumps.<locals>.worker#2",
     ]
+
+
+def test_traced_tasks_preserve_the_event_loops_task_options() -> None:
+    trace = EventTrace()
+    inherited = contextvars.ContextVar("inherited", default="parent")
+    child_context = contextvars.copy_context()
+    child_context.run(inherited.set, "child")
+    observed: list[str] = []
+
+    async def worker() -> None:
+        observed.append(inherited.get())
+
+    async def main() -> None:
+        options: dict[str, object] = {"name": "named-worker", "context": child_context}
+        if sys.version_info >= (3, 14):
+            options["eager_start"] = True
+        create_task: Callable[..., asyncio.Task[None]] = asyncio.get_running_loop().create_task
+        task = create_task(worker(), **options)
+        assert task.get_name() == "named-worker"
+        if sys.version_info >= (3, 14):
+            assert observed == ["child"]
+        await task
+
+    run_virtual(VirtualClock(), main(), trace=trace)
+    assert observed == ["child"]
 
 
 def test_a_run_that_reads_the_wall_clock_leaves_a_different_trace() -> None:
