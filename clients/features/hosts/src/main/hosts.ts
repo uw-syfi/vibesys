@@ -75,6 +75,8 @@ export class Hosts {
   readonly #watched = new Map<HostKey, WatchedHost>();
   /** Checkout validations that still own permission to persist, by renderer-document operation. */
   readonly #checkoutChanges = new Map<string, CheckoutChange>();
+  /** The latest committed checkout identity for each host, fencing checkout-derived leases. */
+  readonly #checkoutRevisions = new Map<HostKey, CheckoutRevision>();
   /** The logs channel each renderer document's inspector holds, on one host at a time. */
   readonly #logs = new Map<string, InspectorLogs>();
   /** Latest inspection lease admitted for each renderer document. */
@@ -85,7 +87,9 @@ export class Hosts {
   #visible: {readonly owner: string; readonly host: HostKey} | null = null;
   /** Hosts mentioned by the bounded recent-run file. */
   #recent = new Set<HostKey>();
-  /** Advances before every desired-set change, fencing async checkout reads. */
+  /** The one replacement currently allowed to install for each host. */
+  readonly #watchIntents = new Map<HostKey, WatchIntent>();
+  /** Advances before desired-set changes, fencing reads against the desired-host union. */
   #generation = 0;
 
   constructor(deps: HostsDeps) {
@@ -114,9 +118,30 @@ export class Hosts {
 
   /** Lease the connection to `id`, from its checkout; rejects when none is set. */
   async connection(id: HostId): Promise<ConnectionLease> {
-    const checkout = await this.checkout(id);
-    if (checkout === null) throw new Error(`Set the VibeSys checkout for ${hostLabel(id)} first.`);
-    return this.#deps.manager.acquire(id, checkout);
+    const key = hostKey(id);
+    for (;;) {
+      const revision = this.#checkoutRevisions.get(key);
+      const checkout = await this.checkout(id);
+      if (this.#checkoutRevisions.get(key) !== revision) continue;
+      if (checkout === null) {
+        throw new Error(`Set the VibeSys checkout for ${hostLabel(id)} first.`);
+      }
+      let lease: ConnectionLease;
+      try {
+        lease = await this.#deps.manager.acquire(id, checkout);
+      } catch (error) {
+        if (this.#checkoutRevisions.get(key) !== revision) {
+          await this.#repairDesired(key);
+          continue;
+        }
+        throw error;
+      }
+      if (this.#checkoutRevisions.get(key) === revision) return lease;
+      // The old checkout may already have displaced the manager's shown slot. Releasing its exact
+      // lease before retrying restores convergence without exposing that stale connection.
+      await lease[Symbol.asyncDispose]();
+      await this.#repairDesired(key);
+    }
   }
 
   /** `id` as its panel shows it; `owner`'s previous panel stops retaining its host. */
@@ -124,8 +149,9 @@ export class Hosts {
     const key = hostKey(id);
     this.#visible = {owner, host: key};
     const generation = this.#changed();
+    const revision = this.#checkoutRevisions.get(key);
     const checkout = await this.checkout(id);
-    await this.#reconcile(generation, new Map([[key, {id, checkout}]]));
+    await this.#reconcile(generation, new Map([[key, {id, checkout, revision}]]));
     return {key, label: hostLabel(id), checkout};
   }
 
@@ -163,7 +189,8 @@ export class Hosts {
       );
       if (outcome === 'cancelled') operation.assertCurrent();
       operation.committed();
-      if (this.#desired().has(hostKey(id))) await this.#refresh(id, checkout);
+      const revision = this.#commitCheckout(hostKey(id), checkout);
+      if (this.#desired().has(hostKey(id))) await this.#refresh(id, revision);
       return root ?? checkout;
     } catch (error) {
       if (operation.cancelled())
@@ -404,7 +431,7 @@ export class Hosts {
     };
   }
 
-  #install(key: HostKey, lease: ConnectionLease): void {
+  #install(key: HostKey, checkout: string, lease: ConnectionLease): void {
     const connection = lease.connection;
     // A host returning to the set must overwrite any renderer cache before its old listing could
     // be drawn. A fresh listing, if already known, follows synchronously. `acquire` may hand back a
@@ -426,6 +453,7 @@ export class Hosts {
       }
     });
     this.#watched.set(key, {
+      checkout,
       lease,
       stop: () => {
         stopListing();
@@ -444,6 +472,12 @@ export class Hosts {
   #changed(): number {
     const generation = ++this.#generation;
     const desired = this.#desired();
+    // A host that actually left the desired set revokes an acquisition even if it is re-added
+    // before that acquisition returns. Updates which keep it desired leave its per-host intent
+    // alone, so they cannot supersede a committed checkout replacement.
+    for (const key of this.#watchIntents.keys()) {
+      if (!desired.has(key)) this.#watchIntents.delete(key);
+    }
     for (const [key, watched] of this.#watched) {
       if (desired.has(key)) continue;
       this.#watched.delete(key);
@@ -480,11 +514,17 @@ export class Hosts {
 
   async #reconcile(
     generation: number,
-    known = new Map<HostKey, {readonly id: HostId; readonly checkout: string | null}>(),
+    known = new Map<
+      HostKey,
+      {
+        readonly id: HostId;
+        readonly checkout: string | null;
+        readonly revision: CheckoutRevision | undefined;
+      }
+    >(),
   ): Promise<void> {
     for (const key of this.#desired()) {
       if (generation !== this.#generation) return;
-      if (this.#watched.has(key)) continue;
       try {
         await this.#acquireDesired(key, generation, known.get(key));
       } catch (error) {
@@ -500,21 +540,53 @@ export class Hosts {
   async #acquireDesired(
     key: HostKey,
     generation: number,
-    supplied: {readonly id: HostId; readonly checkout: string | null} | undefined,
+    supplied:
+      | {
+          readonly id: HostId;
+          readonly checkout: string | null;
+          readonly revision: CheckoutRevision | undefined;
+        }
+      | undefined,
   ): Promise<void> {
     const id = supplied?.id ?? hostFromKey(key);
+    const revision = supplied === undefined ? this.#checkoutRevisions.get(key) : supplied.revision;
     const checkout = supplied === undefined ? await this.checkout(id) : supplied.checkout;
-    if (!this.#current(key, generation) || checkout === null) return;
-    const lease = await this.#deps.manager.acquire(id, checkout);
-    if (!this.#current(key, generation) || this.#watched.has(key)) {
-      await lease[Symbol.asyncDispose]();
+    if (!this.#current(key, generation) || this.#checkoutRevisions.get(key) !== revision) return;
+    if (checkout === null) {
+      this.#watchIntents.delete(key);
+      const watched = this.#watched.get(key);
+      if (watched !== undefined) {
+        this.#watched.delete(key);
+        watched.stop();
+        this.#deps.retire(key);
+        this.#retireLease(key, watched.lease);
+      }
       return;
     }
+    const watched = this.#watched.get(key);
+    const pending = this.#watchIntents.get(key);
+    // A matching replacement is already converging this watcher. Reconciliation must not wait on
+    // its retirement barrier: desired-set updates remain independent of per-host replacement I/O.
+    if (pending?.checkout === checkout) return;
+    if (
+      pending === undefined &&
+      watched?.checkout === checkout &&
+      this.#deps.manager.existing(key) === watched.lease.connection
+    )
+      return;
+    await this.#replaceWatched(id, checkout, this.#claimWatch(key, checkout));
+  }
+
+  /** Repair one desired host without coupling its caller to unrelated connection I/O. */
+  async #repairDesired(key: HostKey): Promise<void> {
+    const generation = this.#generation;
+    if (!this.#current(key, generation)) return;
     try {
-      this.#install(key, lease);
+      await this.#acquireDesired(key, generation, undefined);
     } catch (error) {
-      await lease[Symbol.asyncDispose]();
-      throw error;
+      this.#deps.log(
+        `could not connect ${hostLabel(hostFromKey(key))}: ${(error as Error).message}`,
+      );
     }
   }
 
@@ -522,28 +594,60 @@ export class Hosts {
     return generation === this.#generation && this.#desired().has(key);
   }
 
-  async #refresh(id: HostId, checkout: string): Promise<void> {
+  #commitCheckout(key: HostKey, checkout: string): CheckoutRevision {
+    const revision = {checkout};
+    this.#checkoutRevisions.set(key, revision);
+    return revision;
+  }
+
+  async #refresh(id: HostId, revision: CheckoutRevision): Promise<void> {
     const key = hostKey(id);
-    const generation = ++this.#generation;
-    const lease = await this.#deps.manager.acquire(id, checkout);
-    if (generation !== this.#generation || !this.#desired().has(key)) {
+    this.#watchIntents.set(key, revision);
+    await this.#replaceWatched(id, revision.checkout, revision);
+    // An older desired-set pass may be waiting on this host before reaching later hosts. Start a
+    // current pass without invalidating the older one; per-host intents coalesce their overlap.
+    await this.#reconcile(this.#generation);
+  }
+
+  #claimWatch(key: HostKey, checkout: string): WatchIntent {
+    const intent = {checkout};
+    this.#watchIntents.set(key, intent);
+    return intent;
+  }
+
+  async #replaceWatched(id: HostId, checkout: string, intent: WatchIntent): Promise<boolean> {
+    const key = hostKey(id);
+    let lease: ConnectionLease;
+    try {
+      lease = await this.#deps.manager.acquire(id, checkout);
+    } catch (error) {
+      if (this.#watchIntents.get(key) === intent) this.#watchIntents.delete(key);
+      throw error;
+    }
+    if (this.#watchIntents.get(key) !== intent || !this.#desired().has(key)) {
       await lease[Symbol.asyncDispose]();
-      return;
+      return false;
     }
     const previous = this.#watched.get(key);
     previous?.stop();
     this.#watched.delete(key);
     try {
-      this.#install(key, lease);
+      this.#install(key, checkout, lease);
     } catch (error) {
-      await lease[Symbol.asyncDispose]();
-      await previous?.lease[Symbol.asyncDispose]();
+      try {
+        await lease[Symbol.asyncDispose]();
+        await previous?.lease[Symbol.asyncDispose]();
+      } finally {
+        if (this.#watchIntents.get(key) === intent) this.#watchIntents.delete(key);
+      }
       throw error;
     }
-    await previous?.lease[Symbol.asyncDispose]();
-    // Refresh advanced the generation that fences older reads. Fill every other member of the
-    // current union so a concurrent recent-host reconciliation cannot leave one unwatched.
-    await this.#reconcile(generation);
+    try {
+      await previous?.lease[Symbol.asyncDispose]();
+    } finally {
+      if (this.#watchIntents.get(key) === intent) this.#watchIntents.delete(key);
+    }
+    return true;
   }
 }
 
@@ -616,9 +720,19 @@ class InspectorLogs {
 }
 
 interface WatchedHost {
+  /** The configured checkout this watch represents, not the helper's normalized physical root. */
+  readonly checkout: string;
   readonly lease: ConnectionLease;
   readonly stop: () => void;
 }
+
+/** One per-host acquisition's permission to replace the current watcher. Identity is the fence. */
+interface WatchIntent {
+  readonly checkout: string;
+}
+
+/** One checkout after its settings commit; object identity is its acquisition revision. */
+type CheckoutRevision = WatchIntent;
 
 /** One checkout validation and the permission it must still own at the settings commit boundary. */
 class CheckoutChange {

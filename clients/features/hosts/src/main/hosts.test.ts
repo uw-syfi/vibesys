@@ -52,6 +52,60 @@ class FirstReleaseFailureManager extends ConnectionManager {
   }
 }
 
+/** A real manager that withholds one acquired lease after its shown connection already changed. */
+class DeferredAcquireManager extends ConnectionManager {
+  readonly releasedCheckouts: string[] = [];
+  #gate: AcquireGate | null = null;
+
+  override async acquire(host: HostId, checkout: string): Promise<ConnectionLease> {
+    await this.#wait(checkout, 'before');
+    const lease = await super.acquire(host, checkout);
+    await this.#wait(checkout, 'after');
+    let released = false;
+    return {
+      connection: lease.connection,
+      [Symbol.asyncDispose]: async () => {
+        if (released) return;
+        released = true;
+        this.releasedCheckouts.push(checkout);
+        await lease[Symbol.asyncDispose]();
+      },
+    };
+  }
+
+  deferNext(
+    checkout: string,
+    position: AcquireGate['position'] = 'after',
+  ): {readonly received: Promise<void>; readonly release: () => void} {
+    if (this.#gate !== null) throw new Error('an acquisition is already deferred');
+    let arrived = (): void => {};
+    let release = (): void => {};
+    const received = new Promise<void>(resolve => {
+      arrived = resolve;
+    });
+    const released = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    this.#gate = {checkout, position, arrived, released};
+    return {received, release};
+  }
+
+  async #wait(checkout: string, position: AcquireGate['position']): Promise<void> {
+    const gate = this.#gate;
+    if (gate?.checkout !== checkout || gate.position !== position) return;
+    this.#gate = null;
+    gate.arrived();
+    await gate.released;
+  }
+}
+
+interface AcquireGate {
+  readonly checkout: string;
+  readonly position: 'before' | 'after';
+  readonly arrived: () => void;
+  readonly released: Promise<void>;
+}
+
 /** An explicit SSH-config read result, with every requested path recorded. */
 class FakeSshConfigFilesystem implements SshConfigFilesystem {
   readonly reads: string[] = [];
@@ -113,6 +167,41 @@ class DeferredReadFilesystem extends FakeSettingsFilesystem {
   release(): void {
     this.#release();
   }
+}
+
+/** Hold one read after its bytes were captured, while later reads and writes see newer bytes. */
+class CapturedReadFilesystem extends FakeSettingsFilesystem {
+  #gate: CapturedReadGate | null = null;
+
+  override async readText(path: string): Promise<string> {
+    const text = await super.readText(path);
+    const gate = this.#gate;
+    if (gate !== null) {
+      this.#gate = null;
+      gate.captured();
+      await gate.released;
+    }
+    return text;
+  }
+
+  deferNextRead(): {readonly captured: Promise<void>; readonly release: () => void} {
+    if (this.#gate !== null) throw new Error('a settings read is already deferred');
+    let captured = (): void => {};
+    let release = (): void => {};
+    const reached = new Promise<void>(resolve => {
+      captured = resolve;
+    });
+    const released = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    this.#gate = {captured, released};
+    return {captured: reached, release};
+  }
+}
+
+interface CapturedReadGate {
+  readonly captured: () => void;
+  readonly released: Promise<void>;
 }
 
 async function configuredSettings(
@@ -378,6 +467,430 @@ describe('Hosts checkout changes', () => {
 });
 
 describe('Hosts desired set', () => {
+  test('a checkout read captured before commit cannot acquire the stale checkout afterward', async () => {
+    const filesystem = new CapturedReadFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new DeferredAcquireManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.host(ALPHA, '10:100');
+
+    const held = filesystem.deferNextRead();
+    const acquiring = hosts.connection(ALPHA);
+    await held.captured;
+    await hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
+    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
+    held.release();
+
+    const lease = await acquiring;
+    expect(lease.connection.where).toBe('/new on fake');
+    expect(manager.existing('ssh:alpha')).toBe(lease.connection);
+    expect(manager.releasedCheckouts).toEqual(['/old']);
+    await lease[Symbol.asyncDispose]();
+    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
+  });
+
+  test.each([
+    ['recent reconciliation', (hosts: Hosts) => hosts.recent([ALPHA])],
+    ['visible-host reconciliation', (hosts: Hosts) => hosts.host(ALPHA, '10:100')],
+  ] as const)('a checkout captured by %s cannot replace a newer same-host commit', async (_kind, reconcile) => {
+    const filesystem = new CapturedReadFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+
+    const held = filesystem.deferNextRead();
+    const older = reconcile(hosts);
+    await held.captured;
+    await hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
+    held.release();
+    await older;
+
+    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
+    expect(link.helper.checkouts).toEqual(['/new', '/new']);
+  });
+
+  test.each([
+    'before',
+    'after',
+  ] as const)('an acquisition superseded %s manager delivery disposes once and retries current', async position => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new DeferredAcquireManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.host(ALPHA, '10:100');
+
+    const held = manager.deferNext('/old', position);
+    const acquiring = hosts.connection(ALPHA);
+    await held.received;
+    await hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
+    held.release();
+
+    const lease = await acquiring;
+    expect(lease.connection.where).toBe('/new on fake');
+    expect(manager.existing('ssh:alpha')).toBe(lease.connection);
+    const releasedBeforeReturn =
+      position === 'before' ? ['/old', '/old', '/new'] : ['/old', '/old'];
+    expect(manager.releasedCheckouts).toEqual(releasedBeforeReturn);
+    await lease[Symbol.asyncDispose]();
+    await lease[Symbol.asyncDispose]();
+    expect(manager.releasedCheckouts).toEqual([...releasedBeforeReturn, '/new']);
+    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
+  });
+
+  test('a superseded acquisition repairs its host without waiting for an unrelated host', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, BETA, {checkout: '/beta'}));
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    await using manager = new DeferredAcquireManager({
+      linkFor: () => new FakeLink(),
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.recent([BETA, ALPHA]);
+
+    const heldAlpha = manager.deferNext('/old');
+    const acquiringAlpha = hosts.connection(ALPHA);
+    await heldAlpha.received;
+    await hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
+    const displacedBeta = await manager.acquire(BETA, '/other');
+    await displacedBeta[Symbol.asyncDispose]();
+    expect(manager.existing('ssh:beta')).toBeNull();
+    const heldBeta = manager.deferNext('/beta', 'before');
+
+    heldAlpha.release();
+    const winner = await Promise.race([
+      acquiringAlpha.then(() => 'alpha' as const),
+      heldBeta.received.then(() => 'beta' as const),
+    ]);
+    heldBeta.release();
+    const lease = await acquiringAlpha;
+
+    expect(winner).toBe('alpha');
+    expect(lease.connection.where).toBe('/new on fake');
+    expect(manager.existing('ssh:alpha')).toBe(lease.connection);
+    expect(manager.releasedCheckouts.filter(checkout => checkout === '/old')).toHaveLength(2);
+    await lease[Symbol.asyncDispose]();
+    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
+  });
+
+  test('a non-desired checkout commit cannot invalidate another host reconciliation', async () => {
+    const filesystem = new CapturedReadFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/alpha'}));
+    await settings.updateHosts(current => withHostSettings(current, BETA, {checkout: '/old-beta'}));
+    await using manager = new ConnectionManager({
+      linkFor: () => new FakeLink(),
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+
+    const heldAlpha = filesystem.deferNextRead();
+    const reconcilingAlpha = hosts.recent([ALPHA]);
+    await heldAlpha.captured;
+    await hosts.setCheckout(BETA, '/new-beta', {owner: 'retired', sequence: 1});
+    expect(manager.existing('ssh:beta')).toBeNull();
+    heldAlpha.release();
+    await reconcilingAlpha;
+
+    expect(manager.existing('ssh:alpha')?.where).toBe('/alpha on fake');
+    expect(settingsFor((await settings.hosts()).settings, BETA)?.checkout).toBe('/new-beta');
+  });
+
+  test.each([
+    ['recent hosts', (hosts: Hosts) => hosts.recent([ALPHA])],
+    ['visible owner', (hosts: Hosts) => hosts.host(ALPHA, '11:101').then(() => undefined)],
+  ] as const)('a committed checkout refresh survives an unrelated %s update', async (_update, changeDesired) => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new DeferredAcquireManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.host(ALPHA, '10:100');
+
+    const held = manager.deferNext('/new');
+    const changing = hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
+    await held.received;
+    await changeDesired(hosts);
+    held.release();
+    await changing;
+
+    expect(settingsFor((await settings.hosts()).settings, ALPHA)?.checkout).toBe('/new');
+    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
+    expect(link.helper.checkouts).toEqual(['/old', '/new', '/new']);
+  });
+
+  test('a newer committed checkout supersedes an older delayed refresh for the same host', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new DeferredAcquireManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.host(ALPHA, '10:100');
+
+    const held = manager.deferNext('/first');
+    const first = hosts.setCheckout(ALPHA, '/first', {owner: '10:100', sequence: 1});
+    await held.received;
+    await hosts.setCheckout(ALPHA, '/second', {owner: '10:100', sequence: 2});
+    held.release();
+    await first;
+
+    expect(settingsFor((await settings.hosts()).settings, ALPHA)?.checkout).toBe('/second');
+    expect(manager.existing('ssh:alpha')?.where).toBe('/second on fake');
+    expect(manager.releasedCheckouts).toEqual(['/old', '/first']);
+    expect(link.helper.checkouts.at(-1)).toBe('/second');
+  });
+
+  test('removing a host revokes and disposes its delayed checkout refresh', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new DeferredAcquireManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const retired: string[] = [];
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: host => retired.push(host),
+    });
+    await hosts.host(ALPHA, '10:100');
+
+    const held = manager.deferNext('/new');
+    const changing = hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
+    await held.received;
+    await hosts.retireOwner('10:100');
+    held.release();
+    await changing;
+
+    expect(manager.existing('ssh:alpha')).toBeNull();
+    expect(retired).toEqual(['ssh:alpha']);
+    expect(manager.releasedCheckouts).toEqual(['/old', '/new']);
+  });
+
+  test('reconciliation replaces a watcher whose checkout differs from authoritative settings', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.host(ALPHA, '10:100');
+    await settings.updateHosts(current =>
+      withHostSettings(current, ALPHA, {checkout: '/authoritative'}),
+    );
+
+    await hosts.recent([ALPHA]);
+
+    expect(manager.existing('ssh:alpha')?.where).toBe('/authoritative on fake');
+    expect(link.helper.checkouts).toEqual(['/old', '/authoritative']);
+  });
+
+  test('reconciliation repairs a watcher displaced from the manager shown slot', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.host(ALPHA, '10:100');
+    const displaced = await manager.acquire(ALPHA, '/other');
+    await displaced[Symbol.asyncDispose]();
+    expect(manager.existing('ssh:alpha')).toBeNull();
+
+    await hosts.recent([ALPHA]);
+
+    expect(manager.existing('ssh:alpha')?.where).toBe('/old on fake');
+    expect(link.helper.checkouts).toEqual(['/old', '/old']);
+  });
+
   test.each([
     'reject',
     'throw',
