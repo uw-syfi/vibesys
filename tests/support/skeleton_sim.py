@@ -27,6 +27,7 @@ from vs_core.api import RequestPhase, RunStatus
 from vs_faults.api import FaultGate, FaultPlan, HostCrashError
 from vs_project.api import FakeStateStore
 from vs_project.api.testing import GitKind
+from vs_runtime.api.core import OrphanWaitError
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
 from vs_sim.api.testing import current_virtual_clock
 
@@ -67,7 +68,7 @@ class Summary:
     agent_dispatches: tuple[tuple[str, int], ...]
     crashes: int
     stalled: str | None = None
-    """Why the run could not leave its last host, when it stalled instead of ending."""
+    """Why the run could not leave its last host: the stall, or the orphan waits it halted on."""
 
 
 @dataclass(frozen=True)
@@ -105,7 +106,7 @@ async def simulate(
             try:
                 process.shell.start(f"host-{crashes}", now_at=now, lease_duration=LEASE)
                 refusal = await drive(process, start=now + 1.0)
-            except StalledError as stalled:
+            except (StalledError, OrphanWaitError) as stalled:
                 return Simulation(
                     _summary(world, cluster, process, crashes, f"{stalled}; {_waiting(process)}"),
                     gate,
