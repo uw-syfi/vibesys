@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,10 +21,13 @@ from vs_slurm.api import (
     LedgerLabels,
     LedgerLease,
     LedgerRecord,
+    LedgerStage,
     LedgerState,
     RemoteEvaluationLedger,
     SlurmConfig,
     SlurmConnectorTransport,
+    SubmitBoundJob,
+    encode_ledger_document,
     ledger_operation_id,
 )
 
@@ -76,7 +80,7 @@ def _make(implementation: str, root: Path) -> _Case:
     def plant(key: str, attempt: int, document: str) -> None:
         directory = remote / "contract" / "ledger" / PROJECT / key
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / f"attempt-{attempt}.json").write_text(document, encoding="utf-8")
+        (directory / f"attempt-{attempt}.0.json").write_text(document, encoding="utf-8")
 
     def put_file(name: str, content: bytes) -> str:
         path = root / "site" / name
@@ -101,7 +105,10 @@ def _record(
     attempt: int = 0,
     owner: str = "run-a",
     state: LedgerState = LedgerState.SUBMITTING,
+    with_job: bool | None = None,
 ) -> LedgerRecord:
+    if with_job is None:
+        with_job = state in {LedgerState.SUBMITTED, LedgerState.COMPLETED}
     return LedgerRecord(
         key=key,
         project=PROJECT,
@@ -109,10 +116,23 @@ def _record(
         operation_id=ledger_operation_id(key, attempt),
         owner=owner,
         created_at=100.0,
+        claim_expires_at=1000.0,
         labels=LedgerLabels(candidate="abc123", workstream="ws-1"),
         state=state,
-        withdrawn_reason="removed" if state is LedgerState.WITHDRAWN else None,
+        job=_JOB if with_job else None,
+        reason="ended" if state in {LedgerState.FAILED, LedgerState.WITHDRAWN} else None,
     )
+
+
+_JOB = SubmitBoundJob(
+    job_id="7",
+    config_identity="0" * 64,
+    remote_workspace="/r/op/workspace",
+    remote_status_path="/r/op/exit-code.txt",
+    remote_log_path="/r/op/job.log",
+    stop_on_failure=True,
+    stages=(LedgerStage(name="s"),),
+)
 
 
 def test_an_unknown_request_reads_as_absent(case: _Case) -> None:
@@ -150,12 +170,106 @@ def test_of_many_claims_of_one_attempt_exactly_the_first_is_stored(owners: list[
 
 def test_the_highest_attempt_is_the_current_one(case: _Case) -> None:
     case.ledger.claim(_record(state=LedgerState.SUBMITTING))
-    case.ledger.update(_record(state=LedgerState.WITHDRAWN))
+    claimed = case.ledger.read(KEY)
+    assert claimed is not None
+    assert case.ledger.replace(claimed, _record(state=LedgerState.WITHDRAWN))
     case.ledger.claim(_record(attempt=1, owner="run-b"))
     entry = case.reopen().read(KEY)
     assert entry is not None
     assert (entry.record.attempt, entry.record.owner) == (1, "run-b")
     assert entry.record.state is LedgerState.SUBMITTING
+    assert entry.revision == 0
+
+
+_STATES = st.sampled_from(LedgerState)
+
+
+@given(
+    writers=st.lists(st.sampled_from((LedgerState.SUBMITTED, LedgerState.WITHDRAWN)), min_size=2)
+)
+@settings(max_examples=examples(pr=10, nightly=100), deadline=None)
+def test_of_many_swaps_from_one_revision_exactly_the_first_is_stored(
+    writers: list[LedgerState],
+) -> None:
+    """A submitter recording its job and a remover withdrawing it never overwrite each other."""
+    for implementation in IMPLEMENTATIONS:
+        with TemporaryDirectory() as directory:
+            case = _make(implementation, Path(directory))
+            case.ledger.claim(_record())
+            read = [case.reopen().read(KEY) for _ in writers]
+            won = [
+                case.reopen().replace(entry, _record(state=state))
+                for entry, state in zip(read, writers, strict=True)
+                if entry is not None
+            ]
+            assert won == [True] + [False] * (len(writers) - 1)
+            entry = case.reopen().read(KEY)
+            assert entry is not None
+            assert (entry.record.state, entry.revision) == (writers[0], 1)
+
+
+@given(before=_STATES, after=_STATES)
+@settings(max_examples=examples(pr=25, nightly=100), deadline=None)
+def test_a_store_writes_only_the_transitions_the_state_machine_allows(
+    before: LedgerState, after: LedgerState
+) -> None:
+    """Withdrawn and failed are final; nothing goes back to submitting."""
+    allowed = {
+        LedgerState.SUBMITTING: {
+            LedgerState.SUBMITTED,
+            LedgerState.FAILED,
+            LedgerState.WITHDRAWN,
+        },
+        LedgerState.SUBMITTED: {
+            LedgerState.COMPLETED,
+            LedgerState.FAILED,
+            LedgerState.WITHDRAWN,
+        },
+        LedgerState.COMPLETED: {LedgerState.WITHDRAWN},
+        LedgerState.FAILED: set(),
+        LedgerState.WITHDRAWN: set(),
+    }
+    for implementation in IMPLEMENTATIONS:
+        with TemporaryDirectory() as directory:
+            case = _make(implementation, Path(directory))
+            case.plant(KEY, 0, encode_ledger_document(_record(state=before)))
+            entry = case.reopen().read(KEY)
+            assert entry is not None
+            named = {LedgerState.SUBMITTED, LedgerState.COMPLETED}
+            moved = _record(
+                state=after,
+                with_job=after in named
+                or (before in named and after is not LedgerState.SUBMITTING),
+            )
+            if after in allowed[before]:
+                assert case.ledger.replace(entry, moved)
+            else:
+                with pytest.raises(LedgerError):
+                    case.ledger.replace(entry, moved)
+                current = case.reopen().read(KEY)
+                assert current is not None
+                assert current.record.state is before
+
+
+def test_a_lease_that_cannot_be_read_is_absent_not_malformed(tmp_path: Path) -> None:
+    """The remote read reads each lease in one step, so one that is gone by then is skipped.
+
+    A lease that exists but cannot be read stands for one a release removed
+    between the listing and the read: the old two-step read printed it with an
+    empty document, and the whole read failed as malformed.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("root reads a file without read permission")
+    case = _make("remote", tmp_path)
+    case.ledger.claim(_record())
+    case.ledger.renew(KEY, LedgerLease(holder="run-a", renewed_at=1.0, expires_at=301.0))
+    leases = tmp_path / "remote" / "contract" / "ledger" / PROJECT / KEY / "leases"
+    gone = leases / "run-gone.json"
+    gone.write_text("{}", encoding="utf-8")
+    gone.chmod(0)
+    entry = case.reopen().read(KEY)
+    assert entry is not None
+    assert [lease.holder for lease in entry.leases] == ["run-a"]
 
 
 def test_leases_are_per_holder_and_released_one_at_a_time(case: _Case) -> None:

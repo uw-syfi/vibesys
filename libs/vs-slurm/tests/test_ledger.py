@@ -14,6 +14,7 @@ from hypothesis import strategies as st
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     AttachJob,
+    CheckJob,
     ClaimAttempt,
     ClusterObservation,
     ClusterSubmitted,
@@ -43,6 +44,7 @@ from vs_slurm.api import (
     job_of_handle,
     lease_verdict,
     ledger_operation_id,
+    settled_state,
     submit_step,
     sweep_unleased,
     withdraw,
@@ -152,20 +154,25 @@ def test_the_key_follows_the_setup_script_content_the_job_sources(
         assert _key(PROJECT, _request(workspace), CONFIG) not in keys
 
 
+_JOB = SubmitBoundJob(
+    job_id="7",
+    config_identity="0" * 64,
+    remote_workspace="/r/op/workspace",
+    remote_status_path="/r/op/exit-code.txt",
+    remote_log_path="/r/op/job.log",
+    stop_on_failure=True,
+    stages=(LedgerStage(name="s"),),
+)
+
+
 def _record(
-    state: LedgerState, *, attempt: int = 0, created_at: float = 0.0, key: str = "c" * 64
+    state: LedgerState,
+    *,
+    attempt: int = 0,
+    created_at: float = 0.0,
+    claim_expires_at: float = 900.0,
+    key: str = "c" * 64,
 ) -> LedgerRecord:
-    job = None
-    if state is LedgerState.SUBMITTED:
-        job = SubmitBoundJob(
-            job_id="7",
-            config_identity="0" * 64,
-            remote_workspace="/r/op/workspace",
-            remote_status_path="/r/op/exit-code.txt",
-            remote_log_path="/r/op/job.log",
-            stop_on_failure=True,
-            stages=(LedgerStage(name="s"),),
-        )
     return LedgerRecord(
         key=key,
         project=PROJECT,
@@ -173,9 +180,10 @@ def _record(
         operation_id=ledger_operation_id(key, attempt),
         owner="run-a",
         created_at=created_at,
+        claim_expires_at=claim_expires_at,
         state=state,
-        job=job,
-        withdrawn_reason="gone" if state is LedgerState.WITHDRAWN else None,
+        job=_JOB if state in {LedgerState.SUBMITTED, LedgerState.COMPLETED} else None,
+        reason="gone" if state in {LedgerState.FAILED, LedgerState.WITHDRAWN} else None,
     )
 
 
@@ -200,18 +208,40 @@ def _handle(workspace: Path) -> SlurmBatchHandle:
     return submitted.handle
 
 
-@given(state=st.sampled_from(LedgerState), attempt=st.integers(min_value=0, max_value=5))
-@settings(max_examples=examples(pr=20, nightly=100), deadline=None)
-def test_only_an_absent_or_withdrawn_request_is_submitted(state: LedgerState, attempt: int) -> None:
-    step = submit_step(LedgerEntry(_record(state, attempt=attempt)))
+@given(
+    state=st.sampled_from(LedgerState),
+    attempt=st.integers(min_value=0, max_value=5),
+    now=st.floats(min_value=0, max_value=2000),
+)
+@settings(max_examples=examples(pr=30, nightly=200), deadline=None)
+def test_only_an_absent_failed_or_withdrawn_request_is_submitted_again(
+    state: LedgerState, attempt: int, now: float
+) -> None:
+    entry = LedgerEntry(_record(state, attempt=attempt, claim_expires_at=900.0))
+    step = submit_step(entry, now=now)
     match state:
+        case LedgerState.COMPLETED:
+            assert step == AttachJob(entry.record)
         case LedgerState.SUBMITTED:
-            assert isinstance(step, AttachJob)
+            assert step == CheckJob(entry)
         case LedgerState.SUBMITTING:
-            assert isinstance(step, ResolveSubmission)
-        case LedgerState.WITHDRAWN:
+            assert step == ResolveSubmission(entry, expired=now > 900.0)
+        case LedgerState.FAILED | LedgerState.WITHDRAWN:
             assert step == ClaimAttempt(attempt + 1)
-    assert submit_step(None) == ClaimAttempt(0)
+    assert submit_step(None, now=now) == ClaimAttempt(0)
+
+
+@given(status=st.sampled_from(SlurmJobStatus))
+def test_only_a_job_that_finished_successfully_settles_as_reusable(status: SlurmJobStatus) -> None:
+    settled = settled_state(status)
+    if not status.terminal:
+        assert settled is None
+    elif status is SlurmJobStatus.COMPLETED:
+        assert settled is LedgerState.COMPLETED
+    else:
+        assert settled is LedgerState.FAILED
+        # A failed attempt is final: the next ask claims a new one.
+        assert submit_step(LedgerEntry(_record(settled)), now=0.0) == ClaimAttempt(1)
 
 
 _TIMES = st.floats(min_value=0, max_value=1e6, allow_nan=False)
@@ -293,6 +323,7 @@ class _World:
                 operation_id=operation,
                 owner="run-a",
                 created_at=0.0,
+                claim_expires_at=900.0,
                 state=LedgerState.SUBMITTED,
                 job=job_of_handle(submitted.handle),
             )
@@ -342,10 +373,25 @@ def test_an_unleased_job_is_cancelled_only_after_its_grace_period(
             assert world.state() is LedgerState.WITHDRAWN
 
 
-def test_the_sweep_keeps_a_finished_job_collectable(tmp_path: Path) -> None:
-    world = _World(tmp_path, status=SlurmJobStatus.COMPLETED)
+@pytest.mark.parametrize(
+    ("status", "settled"),
+    [
+        (SlurmJobStatus.COMPLETED, LedgerState.COMPLETED),
+        (SlurmJobStatus.FAILED, LedgerState.FAILED),
+        (SlurmJobStatus.CANCELLED, LedgerState.FAILED),
+    ],
+)
+def test_the_sweep_settles_an_ended_job_and_never_asks_the_cluster_about_it_again(
+    tmp_path: Path, status: SlurmJobStatus, settled: LedgerState
+) -> None:
+    world = _World(tmp_path, status=status)
     assert sweep_unleased(world.ledger, world.cluster, now=1e9, grace_seconds=0.0) == ()
-    assert world.state() is LedgerState.SUBMITTED
+    assert world.state() is settled
+    # A cluster that has forgotten the job (accounting purged it) changes nothing:
+    # a settled request is not asked about again.
+    forgetful = FakeCluster(clock=ManualClock())
+    assert sweep_unleased(world.ledger, forgetful, now=2e9, grace_seconds=0.0) == ()
+    assert world.state() is settled
 
 
 def test_the_sweep_never_touches_a_job_outside_the_ledger(tmp_path: Path) -> None:

@@ -13,11 +13,14 @@ run-state schema, so a record written by an older build stays readable.
 
 Layout under ``<remote_workspace_root>/<config.name>/ledger/<project>/<key>/``:
 
-- ``attempt-<n>.json``: the record of attempt ``n``. Attempt ``n`` is created
-  with an atomic create-only link, so two processes asking for one key get one
-  attempt, and one job. Its state then advances by atomic replacement. The
-  highest attempt is the current one: a withdrawn attempt is followed by the
-  next one when the request is asked for again.
+- ``attempt-<n>.<r>.json``: revision ``r`` of the record of attempt ``n``.
+  Every revision is created with an atomic create-only link and never changed,
+  so two processes asking for one key get one attempt, and one job, and a state
+  change is a compare-and-swap: the writer of revision ``r + 1`` read revision
+  ``r``, and of two writers from one revision exactly one wins. The highest
+  revision of the highest attempt is the current record. Only the transitions
+  in ``check_transition`` are written; a withdrawn or failed attempt is final,
+  and the next ask for the request claims attempt ``n + 1``.
 - ``leases/<holder>.json``: one lease per attached run, written only by that
   run, so renewals never contend.
 
@@ -47,6 +50,7 @@ from .runner import (
     _validate_batch_request,
     batch_stage_handles,
 )
+from .scheduler_states import SlurmJobStatus
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -86,6 +90,14 @@ class LedgerError(RuntimeError):
     def invalid_name(cls, kind: str, value: str) -> LedgerError:
         """Name an identifier that cannot be a ledger path component."""
         return cls(f"invalid evaluation ledger {kind} {value!r}")
+
+    @classmethod
+    def illegal_transition(cls, before: LedgerRecord, after: LedgerRecord, why: str) -> LedgerError:
+        """Name a record change the attempt's state machine forbids."""
+        return cls(
+            f"evaluation ledger request {before.key[:12]} attempt {before.attempt} cannot go "
+            f"from {before.state.value} to {after.state.value}: {why}"
+        )
 
     @classmethod
     def transport(cls, error: BaseException) -> LedgerError:
@@ -293,14 +305,46 @@ class SubmitBoundJob(_Document):
 class LedgerState(StrEnum):
     """Where one attempt of a request stands.
 
-    ``submitting`` records the intent before sbatch; ``submitted`` names the job;
-    ``withdrawn`` means no run leased the request for its grace period, and its
-    job was cancelled. Phase 2 adds the slot states.
+    ``submitting`` records the intent before sbatch, until ``claim_expires_at``;
+    ``submitted`` names the job; ``completed`` means the job finished
+    successfully and its results are collectable, so later asks reuse it;
+    ``failed`` means the job ended any other way (or its submission never
+    produced one), so the next ask starts a new attempt; ``withdrawn`` means an
+    operator removed it or no run leased it for its grace period. ``failed`` and
+    ``withdrawn`` are final. Phase 2 adds the slot states.
     """
 
     SUBMITTING = "submitting"
     SUBMITTED = "submitted"
+    COMPLETED = "completed"
+    FAILED = "failed"
     WITHDRAWN = "withdrawn"
+
+    @property
+    def final(self) -> bool:
+        """Whether nothing may follow this state in its attempt."""
+        return not _NEXT_STATES[self]
+
+    @property
+    def settled(self) -> bool:
+        """Whether the attempt's job, if any, has ended: the cluster need not be asked again."""
+        return self in {LedgerState.COMPLETED, LedgerState.FAILED, LedgerState.WITHDRAWN}
+
+
+_NEXT_STATES: dict[LedgerState, frozenset[LedgerState]] = {
+    LedgerState.SUBMITTING: frozenset(
+        {LedgerState.SUBMITTED, LedgerState.FAILED, LedgerState.WITHDRAWN}
+    ),
+    LedgerState.SUBMITTED: frozenset(
+        {LedgerState.COMPLETED, LedgerState.FAILED, LedgerState.WITHDRAWN}
+    ),
+    # An operator may remove a finished entry, so that the next ask runs it again.
+    LedgerState.COMPLETED: frozenset({LedgerState.WITHDRAWN}),
+    LedgerState.FAILED: frozenset(),
+    LedgerState.WITHDRAWN: frozenset(),
+}
+_ENDED_WITH_REASON = frozenset({LedgerState.FAILED, LedgerState.WITHDRAWN})
+_NAMES_A_JOB = frozenset({LedgerState.SUBMITTED, LedgerState.COMPLETED})
 
 
 class LedgerLabels(_Document):
@@ -324,10 +368,13 @@ class LedgerRecord(_Document):
     operation_id: str
     owner: str
     created_at: float
+    # Until when the claim holds while ``submitting``; then another asker may take over.
+    claim_expires_at: float
     labels: LedgerLabels = LedgerLabels()
     state: LedgerState
     job: SubmitBoundJob | None = None
-    withdrawn_reason: str | None = None
+    # Why a failed or withdrawn attempt ended; only those, and every one of them, say.
+    reason: str | None = None
 
     @model_validator(mode="after")
     def _consistent(self) -> LedgerRecord:
@@ -340,11 +387,11 @@ class LedgerRecord(_Document):
         if self.state is LedgerState.SUBMITTING and self.job is not None:
             message = "a submitting record names no job yet"
             raise ValueError(message)
-        if self.state is LedgerState.SUBMITTED and self.job is None:
-            message = "a submitted record must name its job"
+        if self.state in _NAMES_A_JOB and self.job is None:
+            message = "a submitted or completed record must name its job"
             raise ValueError(message)
-        if (self.state is LedgerState.WITHDRAWN) != (self.withdrawn_reason is not None):
-            message = "a withdrawn record, and only one, states why"
+        if (self.state in _ENDED_WITH_REASON) != (self.reason is not None):
+            message = "a failed or withdrawn record, and only one, states why"
             raise ValueError(message)
         return self
 
@@ -368,10 +415,60 @@ class LedgerLease(_Document):
 
 @dataclass(frozen=True, slots=True)
 class LedgerEntry:
-    """The current attempt of a request and every lease on it."""
+    """The current attempt of a request, the revision it was read at, and every lease on it.
+
+    ``revision`` is what a compare-and-swap (``EvaluationLedger.replace``) is
+    against: revision 0 is the claim.
+    """
 
     record: LedgerRecord
     leases: tuple[LedgerLease, ...] = ()
+    revision: int = 0
+
+
+def check_transition(before: LedgerRecord, after: LedgerRecord) -> None:
+    """Refuse a record change outside the attempt's state machine. Pure.
+
+    Only the state, the job (once, when it is first named) and the reason
+    change; a final state never changes.
+    """
+    fixed = ("key", "project", "attempt", "operation_id", "owner", "created_at", "labels")
+    if any(getattr(before, name) != getattr(after, name) for name in fixed):
+        raise LedgerError.illegal_transition(before, after, "it changes the attempt's identity")
+    if (
+        before.claim_expires_at != after.claim_expires_at
+        or after.state not in _NEXT_STATES[before.state]
+    ):
+        raise LedgerError.illegal_transition(before, after, "the state machine does not allow it")
+    if before.job is not None and after.job != before.job:
+        raise LedgerError.illegal_transition(before, after, "it changes the attempt's job")
+
+
+def transitioned(
+    record: LedgerRecord,
+    state: LedgerState,
+    *,
+    job: SubmitBoundJob | None = None,
+    reason: str | None = None,
+) -> LedgerRecord:
+    """The record moved to ``state``, keeping its job unless it names one now. Pure."""
+    after = record.model_copy(
+        update={"state": state, "job": job if job is not None else record.job, "reason": reason}
+    )
+    after = LedgerRecord.model_validate(after.model_dump())
+    check_transition(record, after)
+    return after
+
+
+def settled_state(status: SlurmJobStatus) -> LedgerState | None:
+    """The state a job's terminal status settles its attempt in; None while it is live.
+
+    Only a job that finished successfully is reused: preemption, a node failure,
+    a cancel, a timeout or a failing command all make the next ask run it again.
+    """
+    if not status.terminal:
+        return None
+    return LedgerState.COMPLETED if status is SlurmJobStatus.COMPLETED else LedgerState.FAILED
 
 
 def decode_record(text: str, *, path: str) -> LedgerRecord:
@@ -490,6 +587,10 @@ class LedgerPolicy(_Document):
 
     lease_seconds: Annotated[float, Field(gt=0)] = 300.0
     grace_seconds: Annotated[float, Field(ge=0)] = 1800.0
+    # How long a claim holds a request while its submitter stages and submits the
+    # job. A claim older than this with no job under its name is taken over by
+    # the next asker, so a submitter that died before sbatch blocks no one longer.
+    claim_seconds: Annotated[float, Field(gt=0)] = 900.0
     # Whether submitted evaluations keep running while no VibeSys process is attached.
     # Submit-bound jobs (Phase 1) always do: a stop or a crash cancels nothing, and the
     # grace period bounds how long an unleased job lives. Phase 2 slot jobs read it: a
@@ -523,46 +624,63 @@ def lease_verdict(entry: LedgerEntry, *, now: float, grace_seconds: float) -> Le
 
 @dataclass(frozen=True, slots=True)
 class AttachJob:
-    """The request has a job: attach to it, whatever its scheduler state."""
+    """The request's job finished successfully: attach to it and collect its results."""
 
     record: LedgerRecord
+
+
+@dataclass(frozen=True, slots=True)
+class CheckJob:
+    """The request names a job: attach to it unless it has ended.
+
+    The shell asks the cluster; an ended job settles the attempt
+    (``settled_state``, a swap against ``entry``) and the request is read again.
+    """
+
+    entry: LedgerEntry
 
 
 @dataclass(frozen=True, slots=True)
 class ResolveSubmission:
-    """An attempt was claimed but names no job yet: find it by name, else submit it.
+    """An attempt was claimed but names no job yet: find its job by name.
 
-    Its submitter may have crashed between sbatch and the record write, so the job
-    is looked up by the attempt's operation identity before anything is submitted.
+    Its submitter may have crashed between sbatch and the record write, so the
+    job is looked up by the attempt's operation identity. With no job found,
+    a live claim (``expired`` false) is waited on; an expired one is taken over:
+    the attempt fails and the next read claims a new one.
     """
 
-    record: LedgerRecord
+    entry: LedgerEntry
+    expired: bool
 
 
 @dataclass(frozen=True, slots=True)
 class ClaimAttempt:
-    """No live attempt exists: claim attempt ``attempt``, then submit it."""
+    """No usable attempt exists: claim attempt ``attempt``, then submit it."""
 
     attempt: int
 
 
-SubmitStep = AttachJob | ResolveSubmission | ClaimAttempt
+SubmitStep = AttachJob | CheckJob | ResolveSubmission | ClaimAttempt
 
 
-def submit_step(entry: LedgerEntry | None) -> SubmitStep:
-    """What a submission of a request does, given its ledger entry. Pure.
+def submit_step(entry: LedgerEntry | None, *, now: float) -> SubmitStep:
+    """What a submission of a request does, given its ledger entry, at ``now``. Pure.
 
-    Only an absent or withdrawn request is submitted; every other state attaches.
+    Only an absent request, or one whose current attempt failed or was
+    withdrawn, is submitted; every other state attaches or waits.
     """
     if entry is None:
         return ClaimAttempt(0)
     record = entry.record
     match record.state:
-        case LedgerState.SUBMITTED:
+        case LedgerState.COMPLETED:
             return AttachJob(record)
+        case LedgerState.SUBMITTED:
+            return CheckJob(entry)
         case LedgerState.SUBMITTING:
-            return ResolveSubmission(record)
-        case LedgerState.WITHDRAWN:
+            return ResolveSubmission(entry, expired=now > record.claim_expires_at)
+        case LedgerState.FAILED | LedgerState.WITHDRAWN:
             return ClaimAttempt(record.attempt + 1)
         case _:
             assert_never(record.state)
@@ -572,6 +690,7 @@ __all__ = [
     "BATCH_RESULT_LAYOUT",
     "LEDGER_FORMAT_VERSION",
     "AttachJob",
+    "CheckJob",
     "ClaimAttempt",
     "LeaseVerdict",
     "Leased",
@@ -588,6 +707,7 @@ __all__ = [
     "SubmitBoundJob",
     "SubmitStep",
     "Unleased",
+    "check_transition",
     "content_digest",
     "decode_lease",
     "decode_record",
@@ -597,7 +717,9 @@ __all__ = [
     "job_of_handle",
     "lease_verdict",
     "ledger_operation_id",
+    "settled_state",
     "submit_step",
+    "transitioned",
     "validate_holder",
     "validate_key",
     "validate_project",

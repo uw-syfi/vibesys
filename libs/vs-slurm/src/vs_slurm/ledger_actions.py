@@ -2,7 +2,8 @@
 
 Both paths go through :func:`withdraw`, so a removed request and an abandoned one
 end the same way: the job is cancelled if it is still queued or running, and the
-attempt is recorded as withdrawn. The cancel comes first, so a crash between the
+attempt is recorded as withdrawn, by compare-and-swap, so a racing writer is
+never overwritten. The cancel comes first, so a crash between the
 two leaves a cancelled job under a live record, which the next withdrawal or a
 run attaching to it settles, never a withdrawn record over a live job.
 """
@@ -10,20 +11,23 @@ run attaching to it settles, never a withdrawn record over a live job.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING
 
 from .cluster_types import ClusterObservation, ClusterUnknown
 from .ledger import (
+    Leased,
     LedgerEntry,
     LedgerError,
     LedgerRecord,
     LedgerState,
-    Unleased,
     lease_verdict,
+    settled_state,
+    transitioned,
 )
 
 if TYPE_CHECKING:
     from .api import Cluster, EvaluationLedger
+    from .scheduler_states import SlurmJobStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,49 +58,81 @@ class WithdrawUnknown:
 WithdrawOutcome = Withdrawn | NotInLedger | WithdrawUnknown
 
 
+# Each lost compare-and-swap costs one more read; a race is lost only to a writer
+# that moved the attempt forward, and an attempt has at most three states ahead.
+_ROUNDS = 8
+
+
 def withdraw(
     ledger: EvaluationLedger, cluster: Cluster, key: str, *, reason: str
 ) -> WithdrawOutcome:
-    """Cancel the request's job if it is live, then record its attempt as withdrawn."""
+    """Cancel the request's job if it is live, then record its attempt as withdrawn.
+
+    The record changes by compare-and-swap: when a submitter records its job
+    between this read and this write, the write loses, and the next round
+    cancels the job it recorded. A failed or withdrawn attempt is final.
+    """
+    for _ in range(_ROUNDS):
+        outcome = _withdraw_once(ledger, cluster, key, reason=reason)
+        if outcome is not None:
+            return outcome
+    return WithdrawUnknown(key, "the request kept changing while it was withdrawn")
+
+
+def _withdraw_once(
+    ledger: EvaluationLedger, cluster: Cluster, key: str, *, reason: str
+) -> WithdrawOutcome | None:
+    """One read, cancel and swap; None when another writer won the swap."""
     try:
         entry = ledger.read(key)
+        if entry is None:
+            return NotInLedger(key)
+        record = entry.record
+        if record.state.final:
+            return Withdrawn(key, record.operation_id, None, already=True)
+        cancelled = _cancel_live(cluster, record)
+        if isinstance(cancelled, WithdrawUnknown):
+            return cancelled
+        won = ledger.replace(entry, transitioned(record, LedgerState.WITHDRAWN, reason=reason))
     except LedgerError as error:
         return WithdrawUnknown(key, str(error))
-    if entry is None:
-        return NotInLedger(key)
+    return Withdrawn(key, record.operation_id, cancelled) if won else None
+
+
+def settle(ledger: EvaluationLedger, entry: LedgerEntry, status: SlurmJobStatus) -> bool:
+    """Record that the attempt's job ended with ``status``; False if it is live or a writer won.
+
+    A settled attempt is never inspected on the cluster again: a completed one
+    is reused by every later ask, a failed one makes the next ask start anew.
+    """
+    state = settled_state(status)
     record = entry.record
-    if record.state is LedgerState.WITHDRAWN:
-        return Withdrawn(key, record.operation_id, None, already=True)
-    cancelled = _cancel_live(cluster, record)
-    if isinstance(cancelled, WithdrawUnknown):
-        return cancelled
-    try:
-        ledger.update(
-            record.model_copy(update={"state": LedgerState.WITHDRAWN, "withdrawn_reason": reason})
-        )
-    except LedgerError as error:
-        return WithdrawUnknown(key, str(error))
-    return Withdrawn(key, record.operation_id, cancelled)
+    if state is None or record.state is not LedgerState.SUBMITTED:
+        return False
+    job = record.job.job_id if record.job is not None else "?"
+    reason = None if state is LedgerState.COMPLETED else f"job {job} ended {status.value}"
+    return ledger.replace(entry, transitioned(record, state, reason=reason))
 
 
 def _cancel_live(cluster: Cluster, record: LedgerRecord) -> str | None | WithdrawUnknown:
     """Cancel the attempt's job if it may still run; the job cancelled, if known."""
+    if record.state.settled:
+        return None  # its job ended; the cluster may no longer even know it
     observed = cluster.inspect(record.operation_id)
     if isinstance(observed, ClusterObservation):
         if observed.status.terminal:
             return None
-        cancelled = cluster.cancel(record.operation_id)
-        if isinstance(cancelled, ClusterUnknown):
-            return WithdrawUnknown(record.key, cancelled.reason)
-        return cancelled.job_id or observed.job_id
-    if record.state is not LedgerState.SUBMITTING:
+        known: str | None = observed.job_id
+    elif record.state is LedgerState.SUBMITTING:
+        # No job is known under the attempt's identity: a tombstone keeps a submitter
+        # that is still on its way from starting one.
+        known = None
+    else:
         return WithdrawUnknown(record.key, observed.reason)
-    # No job is known under the attempt's identity: a tombstone keeps a submitter that
-    # is still on its way from starting one.
     cancelled = cluster.cancel(record.operation_id)
     if isinstance(cancelled, ClusterUnknown):
         return WithdrawUnknown(record.key, cancelled.reason)
-    return cancelled.job_id
+    return cancelled.job_id or known
 
 
 def sweep_unleased(
@@ -104,8 +140,10 @@ def sweep_unleased(
 ) -> tuple[WithdrawOutcome, ...]:
     """Withdraw every live request no run has leased for longer than ``grace_seconds``.
 
-    A finished job is left alone: nothing holds resources, and a later run that
-    asks for the same key collects its result instead of running it again.
+    A settled request (completed, failed or withdrawn) costs one ledger read and
+    no cluster call. A submitted job found finished is settled instead of
+    withdrawn: nothing holds resources, and a later ask for a completed one
+    collects its result instead of running it again.
     """
     outcomes: list[WithdrawOutcome] = []
     for key in ledger.list_keys():
@@ -114,32 +152,22 @@ def sweep_unleased(
         except LedgerError as error:
             outcomes.append(WithdrawUnknown(key, str(error)))
             continue
-        if entry is None or not _abandoned(entry, now=now, grace_seconds=grace_seconds):
+        if entry is None or entry.record.state.settled:
             continue
-        if _finished(cluster, entry.record):
+        if isinstance(lease_verdict(entry, now=now, grace_seconds=grace_seconds), Leased):
             continue
+        if entry.record.state is LedgerState.SUBMITTED:
+            observed = cluster.inspect(entry.record.operation_id)
+            if isinstance(observed, ClusterObservation) and observed.status.terminal:
+                try:
+                    settle(ledger, entry, observed.status)
+                except LedgerError as error:
+                    outcomes.append(WithdrawUnknown(key, str(error)))
+                continue
         outcomes.append(
             withdraw(ledger, cluster, key, reason=f"no run leased it for {grace_seconds:.0f} s")
         )
     return tuple(outcomes)
-
-
-def _abandoned(entry: LedgerEntry, *, now: float, grace_seconds: float) -> bool:
-    if entry.record.state is LedgerState.WITHDRAWN:
-        return False
-    verdict = lease_verdict(entry, now=now, grace_seconds=grace_seconds)
-    return isinstance(verdict, Unleased)
-
-
-def _finished(cluster: Cluster, record: LedgerRecord) -> bool:
-    observed = cluster.inspect(record.operation_id)
-    match observed:
-        case ClusterObservation():
-            return observed.status.terminal
-        case ClusterUnknown():
-            return False
-        case _:
-            assert_never(observed)
 
 
 __all__ = [
@@ -147,6 +175,7 @@ __all__ = [
     "WithdrawOutcome",
     "WithdrawUnknown",
     "Withdrawn",
+    "settle",
     "sweep_unleased",
     "withdraw",
 ]

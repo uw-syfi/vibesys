@@ -768,6 +768,12 @@ class SlurmEvaluationExecutor:
         *,
         reconcile: bool,
     ) -> None:
+        if self._ledger is not None:
+            # Each ledger step is shielded on its own, and the wait between steps is
+            # not: a stop never waits for another process's claim to resolve.
+            if not self._accepted_before(handle_id, self._read_evaluation(handle_id)):
+                await self._attach(self._ledger, handle_id, request, stages)
+            return
         acceptance = asyncio.create_task(
             self._accept(handle_id, request, stages, reconcile=reconcile)
         )
@@ -795,16 +801,19 @@ class SlurmEvaluationExecutor:
         reconcile: bool,
     ) -> None:
         durable = self._read_evaluation(handle_id)
+        if self._accepted_before(handle_id, durable):
+            return
+        await self._dispatch(handle_id, request, stages, durable, reconcile=reconcile)
+
+    def _accepted_before(self, handle_id: str, durable: _DurableSlurmEvaluation | None) -> bool:
+        """Whether the evaluation already has its job; raise if it was definitely rejected."""
         if durable is not None and durable.submission_rejection is not None:
             raise ExecutorRejectedError(durable.submission_rejection)
         existing = self._handles.get(handle_id) or (durable.handle if durable is not None else None)
-        if existing is not None:
-            self._handles[handle_id] = existing
-            return
-        if self._ledger is not None:
-            await self._attach(self._ledger, handle_id, request, stages)
-        else:
-            await self._dispatch(handle_id, request, stages, durable, reconcile=reconcile)
+        if existing is None:
+            return False
+        self._handles[handle_id] = existing
+        return True
 
     async def _dispatch(
         self,
@@ -888,14 +897,31 @@ class SlurmEvaluationExecutor:
         """Attach to the ledger's job for this request, submitting it only if it has none.
 
         While another process holds the request's submission, wait for it, up to
-        the job deadline. A definite rejection raises like a direct submission.
+        the job deadline; a claim whose submitter died expires (``claim_seconds``)
+        and the wait takes it over. A definite rejection raises like a direct
+        submission, and so does an operator's withdrawal of the attempt this
+        submission was recording: it ends the evaluation instead of resubmitting.
         """
         self._write_evaluation(handle_id, None, request, dispatch_started=True)
         batch = self._batch_request(request, stages)
         labels = LedgerLabels(candidate=self._ledger_candidate, workstream=request.owner_scope)
         deadline = self._clock.now() + self._job_timeout_seconds
         while True:
-            outcome = await self._in_thread(ledger.attach, self._cluster, batch, labels=labels)
+            step = asyncio.ensure_future(
+                self._in_thread(ledger.attach, self._cluster, batch, labels=labels)
+            )
+            try:
+                outcome = await asyncio.shield(step)
+            except asyncio.CancelledError:
+                # A submission this step started finishes and is recorded, so a
+                # restart reattaches to its job instead of submitting another.
+                with contextlib.suppress(Exception):
+                    attached = await step
+                    if isinstance(attached, Attached):
+                        self._save_attached(handle_id, request, attached)
+                raise
+            except LedgerWithdrawnError as error:
+                raise ExecutorRejectedError(str(error)) from error
             if isinstance(outcome, Attached):
                 break
             remaining = deadline - self._clock.now()
@@ -903,10 +929,17 @@ class SlurmEvaluationExecutor:
                 raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
             _LOG.info("evaluation %s waits on the ledger: %s", handle_id, outcome.reason)
             await self._sleeper.sleep(min(self._poll_interval, remaining))
-        self._handles[handle_id] = outcome.handle
+        self._save_attached(handle_id, request, outcome)
+
+    def _save_attached(
+        self, handle_id: str, request: EvaluationRequest, attached: Attached
+    ) -> None:
+        self._handles[handle_id] = attached.handle
         self._save_evaluation(
             handle_id,
-            _DurableSlurmEvaluation(handle=outcome.handle, request=request, ledger_key=outcome.key),
+            _DurableSlurmEvaluation(
+                handle=attached.handle, request=request, ledger_key=attached.key
+            ),
         )
 
     async def _ledger_heartbeat(self, handle_id: str, durable: _DurableSlurmEvaluation) -> bool:
@@ -932,6 +965,31 @@ class SlurmEvaluationExecutor:
             _LOG.exception("could not renew the ledger lease of evaluation %s", handle_id)
         return True
 
+    async def _ledger_settle(
+        self, handle_id: str, durable: _DurableSlurmEvaluation | None, status: SlurmJobStatus
+    ) -> None:
+        """Record a ledger job's end, so later asks reuse or replace it without asking Slurm.
+
+        Best effort: an unreachable ledger leaves the attempt to the next asker,
+        who inspects the job itself.
+        """
+        if (
+            self._ledger is None
+            or durable is None
+            or durable.ledger_key is None
+            or durable.handle is None
+        ):
+            return
+        try:
+            await self._in_thread(
+                self._ledger.settle,
+                durable.ledger_key,
+                durable.handle.job.invocation_id,
+                status,
+            )
+        except LedgerError:
+            _LOG.exception("could not record the end of ledger evaluation %s", handle_id)
+
     async def _execute(self, handle_id: str, request: EvaluationRequest) -> None:
         self._publish(
             handle_id,
@@ -945,6 +1003,7 @@ class SlurmEvaluationExecutor:
         if handle is None:
             raise _SlurmExecutionError.not_accepted()
         status = await self._wait_for_batch(handle_id, handle, request, durable)
+        await self._ledger_settle(handle_id, durable, status)
         if status is SlurmJobStatus.CANCELLED:
             # A cancelled job ends CANCELED however its allocation exit code reads,
             # as poll() reports it. Collecting would let a recorded "0:0" exit

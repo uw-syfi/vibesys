@@ -20,12 +20,14 @@ from vs_sandbox.slurm_wiring import make_evaluation_ledger
 from vs_slurm.api import (
     BATCH_RESULT_LAYOUT,
     AttachJob,
+    CheckJob,
     ClaimAttempt,
     ClusterConflict,
     ClusterObservation,
     ClusterRejected,
     ClusterSubmitted,
     ClusterUnknown,
+    LedgerEntry,
     LedgerError,
     LedgerLabels,
     LedgerLease,
@@ -38,8 +40,10 @@ from vs_slurm.api import (
     handle_of_job,
     job_of_handle,
     ledger_operation_id,
+    settle,
     submit_step,
     sweep_unleased,
+    transitioned,
     validate_holder,
     validate_project,
 )
@@ -54,6 +58,7 @@ if TYPE_CHECKING:
         LedgerPolicy,
         SlurmBatchRequest,
         SlurmConfig,
+        SlurmJobStatus,
         WithdrawOutcome,
     )
 
@@ -142,33 +147,30 @@ class SlurmLedgerAttachment:
         *,
         labels: LedgerLabels,
     ) -> AttachOutcome:
-        """Attach to the request's job, submitting it only when the ledger holds none."""
+        """Attach to the request's job, submitting it only when the ledger holds no usable one.
+
+        Raises ``LedgerWithdrawnError`` when an operator withdrew the attempt this
+        call was submitting, and ``SlurmSubmissionRejectedError`` when the cluster
+        refused it.
+        """
         key = self.key(request)
         for _ in range(_ATTACH_ROUNDS):
-            step = submit_step(self.ledger.read(key))
+            step = submit_step(self.ledger.read(key), now=self.clock.now())
+            outcome: AttachOutcome | None
             match step:
                 case AttachJob(record=record):
-                    return self._attached(record, request)
-                case ResolveSubmission(record=record):
-                    return self._resolve(cluster, request, record)
+                    outcome = self._attached(record, request)
+                case CheckJob(entry=current):
+                    outcome = self._check(cluster, current, request)
+                case ResolveSubmission(entry=current, expired=expired):
+                    outcome = self._resolve(cluster, current, request, expired=expired)
                 case ClaimAttempt(attempt=attempt):
-                    claimed = LedgerRecord(
-                        key=key,
-                        project=self.project,
-                        attempt=attempt,
-                        operation_id=ledger_operation_id(key, attempt),
-                        owner=self.holder,
-                        created_at=self.clock.now(),
-                        labels=labels,
-                        state=LedgerState.SUBMITTING,
-                    )
-                    stored = self.ledger.claim(claimed)
-                    if stored == claimed:
-                        self.renew(key)
-                        return self._submit(cluster, request, claimed)
-                    # Another process claimed this attempt first: read what it recorded.
+                    outcome = self._claim(cluster, request, key, attempt, labels)
                 case _:
                     assert_never(step)
+            if outcome is not None:
+                return outcome
+            # The attempt moved on (settled, taken over, or claimed by another): read again.
         return AttachPending(key, "the request's attempts kept changing")
 
     def renew(self, key: str) -> None:
@@ -204,9 +206,23 @@ class SlurmLedgerAttachment:
             if record.operation_id != operation_id:
                 raise LedgerWithdrawnError.of(key, "a newer attempt replaced it")
             if record.state is LedgerState.WITHDRAWN:
-                raise LedgerWithdrawnError.of(key, record.withdrawn_reason)
+                raise LedgerWithdrawnError.of(key, record.reason)
             self.renew(key)
         self.sweep_if_due(cluster)
+
+    def settle(self, key: str, operation_id: str, status: SlurmJobStatus) -> None:
+        """Record that the attached job ended with ``status``, so later asks need not ask the cluster.
+
+        Best effort: if another process moved the attempt on first, its record stands.
+        """
+        for _ in range(_ATTACH_ROUNDS):
+            entry = self.ledger.read(key)
+            if entry is None or entry.record.operation_id != operation_id:
+                return
+            if entry.record.state is not LedgerState.SUBMITTED or settle(
+                self.ledger, entry, status
+            ):
+                return
 
     def sweep_if_due(self, cluster: Cluster) -> tuple[WithdrawOutcome, ...]:
         """Withdraw unleased requests, at most once per lease period per run."""
@@ -228,61 +244,126 @@ class SlurmLedgerAttachment:
         handle = handle_of_job(job, operation_id=record.operation_id, request=request)
         return Attached(record.key, record.operation_id, handle)
 
+    def _check(
+        self, cluster: Cluster, entry: LedgerEntry, request: SlurmBatchRequest
+    ) -> Attached | None:
+        """Attach to a submitted job unless it ended; an ended one settles its attempt first."""
+        observed = cluster.inspect(entry.record.operation_id)
+        if isinstance(observed, ClusterObservation) and observed.status.terminal:
+            settle(self.ledger, entry, observed.status)
+            return None  # read again: a completed job is attached, a failed one replaced
+        return self._attached(entry.record, request)
+
     def _resolve(
-        self, cluster: Cluster, request: SlurmBatchRequest, record: LedgerRecord
-    ) -> AttachOutcome:
-        """Find a claimed attempt's job by its name before submitting it."""
+        self,
+        cluster: Cluster,
+        entry: LedgerEntry,
+        request: SlurmBatchRequest,
+        *,
+        expired: bool,
+    ) -> AttachOutcome | None:
+        """Find a claimed attempt's job by its name; take over the claim once it expired."""
+        record = entry.record
         observed = cluster.inspect(record.operation_id)
         if isinstance(observed, ClusterObservation) and isinstance(
             observed.handle, SlurmBatchHandle
         ):
-            return self._record_job(record, request, observed.handle)
-        return self._submit(cluster, request, record)
+            return self._record_job(cluster, entry, request, observed.handle)
+        if not expired:
+            return AttachPending(record.key, "another process is submitting the request's job")
+        # The submitter died before sbatch, or is still on its way: a tombstone keeps it
+        # from starting a job under this name, and the attempt fails so the next read
+        # claims a new one. A submitter that does get through loses its record write.
+        tombstone = cluster.cancel(record.operation_id)
+        if isinstance(tombstone, ClusterUnknown):
+            return AttachPending(record.key, tombstone.reason)
+        self.ledger.replace(
+            entry,
+            transitioned(
+                record,
+                LedgerState.FAILED,
+                reason="its submitter's claim expired before it recorded a job",
+            ),
+        )
+        return None
+
+    def _claim(
+        self,
+        cluster: Cluster,
+        request: SlurmBatchRequest,
+        key: str,
+        attempt: int,
+        labels: LedgerLabels,
+    ) -> AttachOutcome | None:
+        now = self.clock.now()
+        claimed = LedgerRecord(
+            key=key,
+            project=self.project,
+            attempt=attempt,
+            operation_id=ledger_operation_id(key, attempt),
+            owner=self.holder,
+            created_at=now,
+            claim_expires_at=now + self.policy.claim_seconds,
+            labels=labels,
+            state=LedgerState.SUBMITTING,
+        )
+        if self.ledger.claim(claimed) != claimed:
+            return None  # another process claimed this attempt first: read what it recorded
+        self.renew(key)
+        return self._submit(cluster, request, LedgerEntry(claimed))
 
     def _submit(
-        self, cluster: Cluster, request: SlurmBatchRequest, record: LedgerRecord
-    ) -> AttachOutcome:
+        self, cluster: Cluster, request: SlurmBatchRequest, entry: LedgerEntry
+    ) -> AttachOutcome | None:
+        record = entry.record
         submitted = cluster.submit(request, operation_id=record.operation_id)
         match submitted:
             case ClusterSubmitted(handle=SlurmBatchHandle() as handle):
-                return self._record_job(record, request, handle)
+                return self._record_job(cluster, entry, request, handle)
             case ClusterSubmitted():
                 return AttachPending(record.key, "the submission returned no batch handle")
             case ClusterRejected(reason=reason):
-                # Definitely not submitted: withdraw the attempt so the next ask claims a new one.
-                self.ledger.update(
-                    record.model_copy(
-                        update={
-                            "state": LedgerState.WITHDRAWN,
-                            "withdrawn_reason": f"rejected: {reason}",
-                        }
-                    )
+                # Definitely not submitted: fail the attempt so the next ask claims a new one.
+                self.ledger.replace(
+                    entry, transitioned(record, LedgerState.FAILED, reason=f"rejected: {reason}")
                 )
                 raise SlurmSubmissionRejectedError(reason)
             case ClusterConflict(reason=reason) | ClusterUnknown(reason=reason):
-                # Another process is submitting this attempt from another workspace, or
-                # the answer was lost: the job is found by name on the next ask.
+                # The answer was lost, or another process submits this attempt: the
+                # job is found by name on the next ask.
                 return AttachPending(record.key, reason)
             case _:
                 assert_never(submitted)
 
     def _record_job(
-        self, record: LedgerRecord, request: SlurmBatchRequest, handle: SlurmBatchHandle
-    ) -> Attached:
+        self,
+        cluster: Cluster,
+        entry: LedgerEntry,
+        request: SlurmBatchRequest,
+        handle: SlurmBatchHandle,
+    ) -> AttachOutcome | None:
+        """Name the job in the attempt, by compare-and-swap; a lost swap is read again.
+
+        If the attempt was withdrawn or taken over meanwhile, this job must not run:
+        it is cancelled, and a withdrawal is reported to the caller.
+        """
+        record = entry.record
         job = job_of_handle(handle)
-        self.ledger.update(
-            record.model_copy(
-                update={
-                    "state": LedgerState.SUBMITTED,
-                    "job": job,
-                }
-            )
-        )
-        self.renew(record.key)
-        # The handle may be another process's (found by name after its crash): its
-        # artifacts would land in that process's workspace. Rebase onto this request.
-        rebased = handle_of_job(job, operation_id=record.operation_id, request=request)
-        return Attached(record.key, record.operation_id, rebased)
+        if self.ledger.replace(entry, transitioned(record, LedgerState.SUBMITTED, job=job)):
+            self.renew(record.key)
+            # The handle may be another process's (found by name after its crash): its
+            # artifacts would land in that process's workspace. Build this request's.
+            rebased = handle_of_job(job, operation_id=record.operation_id, request=request)
+            return Attached(record.key, record.operation_id, rebased)
+        current = self.ledger.read(record.key)
+        if current is None or current.record.operation_id != record.operation_id:
+            cluster.cancel(record.operation_id)
+            return None
+        if current.record.state in {LedgerState.FAILED, LedgerState.WITHDRAWN}:
+            cluster.cancel(record.operation_id)
+            if current.record.state is LedgerState.WITHDRAWN:
+                raise LedgerWithdrawnError.of(record.key, current.record.reason)
+        return None
 
 
 def open_ledger_attachment(  # noqa: PLR0913  # lint-waiver: LW-275701 [PLR0913]; each argument is an independent operator setting, identity or injected port of the one ledger connection; a carrier type would only rename this signature.

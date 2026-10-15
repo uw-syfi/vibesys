@@ -30,6 +30,7 @@ from vs_sandbox.api.slurm import (
     SlurmLedgerAttachment,
     SlurmStagePayload,
 )
+from vs_sim.api import yield_now
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
     ClusterObservation,
@@ -46,6 +47,7 @@ from vs_slurm.api import (
     SlurmJobStatus,
     SlurmSshTransport,
     Withdrawn,
+    ledger_operation_id,
     withdraw,
 )
 
@@ -79,6 +81,13 @@ class _ParkingSleeper:
         await asyncio.Event().wait()
 
 
+_DIED = "the submitting process died before sbatch"
+
+
+def _die() -> None:
+    raise OSError(_DIED)
+
+
 class _Scheduler(FakeCluster):
     """A scheduler whose every batch queues, runs and succeeds on its clock; it records each job."""
 
@@ -87,10 +96,18 @@ class _Scheduler(FakeCluster):
         self.jobs: set[str] = set()
         self.queue_s = 100.0
         self.run_s = 100.0
+        # How many submissions die before sbatch, as a submitter process that crashed would.
+        self.crash_submits = 0
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
     ) -> ClusterSubmitOutcome:
+        if self.crash_submits:
+            # The submitter stages the job and dies before sbatch: the scheduler side
+            # holds a half-done submission under the name, and no job.
+            self.crash_submits -= 1
+            self.script(operation_id, on_dispatch=_die)
+            return super().submit(request, operation_id=operation_id)
         if isinstance(request, SlurmBatchRequest) and operation_id not in self.jobs:
             self.jobs.add(operation_id)
             self.script(
@@ -125,10 +142,22 @@ class _Scheduler(FakeCluster):
         return observed.status
 
 
+class _ClockSleeper:
+    """Every sleep moves the shared clock on by its length: time passes only by waiting."""
+
+    def __init__(self, clock: ManualClock) -> None:
+        self.parked = asyncio.Event()
+        self._clock = clock
+
+    async def sleep(self, seconds: float) -> None:
+        self._clock.advance(max(seconds, 0.0))
+        await yield_now()
+
+
 @dataclass
 class _Run:
     executor: SlurmEvaluationExecutor
-    sleeper: _ParkingSleeper
+    sleeper: _ParkingSleeper | _ClockSleeper
 
     async def parked(self, handle_id: str) -> None:
         """Return once the evaluation's wait loop sleeps; fail if the evaluation ends first."""
@@ -153,11 +182,19 @@ class _World:
     def __post_init__(self) -> None:
         self.scheduler = _Scheduler(self.clock)
 
-    def run(self, root: Path, holder: str, *, content: str = "print('bench')") -> _Run:
+    def run(
+        self,
+        root: Path,
+        holder: str,
+        *,
+        content: str = "print('bench')",
+        sleeper: _ParkingSleeper | _ClockSleeper | None = None,
+        claim_seconds: float = 900.0,
+    ) -> _Run:
         workspace = root / "workspace"
         workspace.mkdir(parents=True, exist_ok=True)
         (workspace / "bench.py").write_text(content, encoding="utf-8")
-        sleeper = _ParkingSleeper()
+        sleeper = sleeper or _ParkingSleeper()
         executor = SlurmEvaluationExecutor(
             CONFIG,
             workspace=workspace,
@@ -173,7 +210,9 @@ class _World:
                 config=CONFIG,
                 project=PROJECT,
                 holder=holder,
-                policy=LedgerPolicy(lease_seconds=LEASE_S, grace_seconds=GRACE_S),
+                policy=LedgerPolicy(
+                    lease_seconds=LEASE_S, grace_seconds=GRACE_S, claim_seconds=claim_seconds
+                ),
                 clock=self.clock,
             ),
             ledger_candidate="0f3c9e1",
@@ -342,3 +381,37 @@ async def test_a_job_no_run_leases_is_cancelled_by_another_runs_sweep_after_its_
     assert world.scheduler.status(abandoned) is SlurmJobStatus.CANCELLED
     assert world.scheduler.status(live) is SlurmJobStatus.PENDING
     await other.executor.close()
+
+
+async def test_a_claim_whose_submitter_died_before_sbatch_is_taken_over_once_it_expires(
+    tmp_path: Path,
+) -> None:
+    """A waiter makes progress on its own: no attached run, renewal or sweep is needed.
+
+    The first submitter claims the request and dies inside its submission,
+    before sbatch. The next run takes the claim over after ``claim_seconds``,
+    not after the job timeout.
+    """
+    world = _World()
+    claim_s = 120.0
+    dead = world.run(tmp_path / "run-1", "run-1", claim_seconds=claim_s)
+    world.scheduler.crash_submits = 1
+    await dead.executor.submit(_request(), handle_id="eval-1")
+    await dead.parked("eval-1")
+    await dead.executor.close()
+    assert world.entry_state() is LedgerState.SUBMITTING
+    assert world.scheduler.jobs == set()
+
+    start = world.clock.now()
+    run = world.run(
+        tmp_path / "run-2", "run-2", sleeper=_ClockSleeper(world.clock), claim_seconds=claim_s
+    )
+    await run.executor.submit(_request(), handle_id="eval-2")
+    finished = await _finished(run.executor, "eval-2")
+
+    assert finished.state is EvaluationState.SUCCEEDED
+    assert world.scheduler.jobs == {ledger_operation_id(world.only_key(), 1)}
+    elapsed = world.clock.now() - start
+    assert elapsed <= claim_s + world.scheduler.queue_s + world.scheduler.run_s + 10
+    assert elapsed < CONFIG.job_timeout_seconds
+    await run.executor.close()

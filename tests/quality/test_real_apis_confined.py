@@ -1025,9 +1025,6 @@ REAL_API_PENDING: dict[Key, Pending] = {
     ("libs/vs-slurm/src/vs_slurm/fake_cluster.py", "threading"): Pending(
         1, Owner.LANE_A, "FakeCluster's lock; takes Threads"
     ),
-    ("libs/vs-slurm/src/vs_slurm/fake_ledger.py", "threading"): Pending(
-        1, Owner.LANE_A, "FakeEvaluationLedger's lock, as FakeCluster's; takes Threads"
-    ),
     ("libs/vs-slurm/src/vs_slurm/fake_connector.py", "subprocess"): Pending(
         3, Owner.LANE_A, "the Fake connector runs commands on the host; edge or move, to classify"
     ),

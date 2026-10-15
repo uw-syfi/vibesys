@@ -16,6 +16,7 @@ from .ledger import (
     LedgerError,
     LedgerLease,
     LedgerRecord,
+    check_transition,
     decode_lease,
     decode_record,
     encode,
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
 _LEDGER_DIRECTORY = "ledger"
 _END = "VS-LEDGER-END"
 _SHA256 = re.compile(r"[0-9a-f]{64}")
+_REVISION = re.compile(r"attempt-(?P<attempt>[0-9]+)\.(?P<revision>[0-9]+)\.json")
 
 
 class RemoteEvaluationLedger:
@@ -42,8 +44,9 @@ class RemoteEvaluationLedger:
 
     It reaches the cluster through the same transport as the jobs (the operator's
     configuration and ``processes``) and lives under the operator's staging root,
-    outside any agent's mounts. Every write is an atomic rename or create-only
-    link of a complete file, so a reader never sees a partial document.
+    outside any agent's mounts. Every write is an atomic rename (a lease) or
+    create-only link (a record revision) of a complete file, so a reader never
+    sees a partial document and a record revision is never overwritten.
     """
 
     def __init__(
@@ -70,39 +73,46 @@ class RemoteEvaluationLedger:
         self._scratch_root = scratch_root
 
     def read(self, key: str) -> LedgerEntry | None:
-        """The request's current attempt and its leases, in one remote command."""
+        """The request's current attempt and its leases, in one remote command.
+
+        A document that vanishes between the listing and the read (a released
+        lease) is absent, never malformed: each file is read in one ``cat`` whose
+        failure skips it.
+        """
         directory = self._key_directory(key)
         quoted = shlex.quote(directory.as_posix())
         listing = (
-            f'for f in {quoted}/attempt-*.json; do if test -f "$f"; then printf "A %s " "$f"; cat "$f"; fi; done; '
-            f'for f in {quoted}/leases/*.json; do if test -f "$f"; then printf "L %s " "$f"; cat "$f"; fi; done; '
+            f"for f in {quoted}/attempt-*.json {quoted}/leases/*.json; do "
+            f'if d=$(cat -- "$f" 2>/dev/null); then printf "%s %s\\n" "$f" "$d"; fi; done; '
             f"printf '%s\\n' {_END}"
         )
         lines = self._exec(listing).splitlines()
         if not lines or lines[-1] != _END:
             raise LedgerError.malformed_reply("read")
-        records: list[LedgerRecord] = []
+        revisions: list[tuple[int, int, LedgerRecord]] = []
         leases: list[LedgerLease] = []
         for line in lines[:-1]:
-            kind, _, rest = line.partition(" ")
-            path, _, document = rest.partition(" ")
-            if kind == "A":
-                records.append(decode_record(document, path=path))
-            elif kind == "L":
+            path, _, document = line.partition(" ")
+            name = PurePosixPath(path)
+            if name.parent.name == "leases":
                 leases.append(decode_lease(document, path=path))
-            else:
+                continue
+            numbered = _REVISION.fullmatch(name.name)
+            if numbered is None:
                 raise LedgerError.malformed_reply("read")
-        if not records:
+            record = decode_record(document, path=path)
+            attempt, revision = int(numbered["attempt"]), int(numbered["revision"])
+            if record.key != key or record.attempt != attempt:
+                raise LedgerError.unreadable(path, "the record names another key or attempt")
+            revisions.append((attempt, revision, record))
+        if not revisions:
             return None
-        for record in records:
-            if record.key != key:
-                raise LedgerError.unreadable(directory.as_posix(), "record names another key")
-        current = max(records, key=lambda record: record.attempt)
-        return LedgerEntry(current, tuple(sorted(leases, key=lambda lease: lease.holder)))
+        _, revision, current = max(revisions, key=lambda item: item[:2])
+        return LedgerEntry(current, tuple(sorted(leases, key=lambda lease: lease.holder)), revision)
 
     def claim(self, record: LedgerRecord) -> LedgerRecord:
         """Create the record's attempt unless one exists; return the stored attempt."""
-        path = self._attempt_path(record)
+        path = self._revision_path(record, 0)
         outcome = self._publish(path, encode(record), create_only=True)
         if outcome == "CREATED":
             return record
@@ -112,9 +122,11 @@ class RemoteEvaluationLedger:
             raise LedgerError.claim_unreadable(record.key)
         return stored
 
-    def update(self, record: LedgerRecord) -> None:
-        """Replace the state of an attempt that exists."""
-        self._publish(self._attempt_path(record), encode(record), create_only=False)
+    def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
+        """Write ``record`` as the next revision of ``current``; False if another writer won."""
+        check_transition(current.record, record)
+        path = self._revision_path(record, current.revision + 1)
+        return self._publish(path, encode(record), create_only=True) == "CREATED"
 
     def renew(self, key: str, lease: LedgerLease) -> None:
         """Write this holder's lease; only this holder ever writes its file."""
@@ -163,8 +175,8 @@ class RemoteEvaluationLedger:
     def _key_directory(self, key: str) -> PurePosixPath:
         return self._root / validate_key(key)
 
-    def _attempt_path(self, record: LedgerRecord) -> PurePosixPath:
-        return self._key_directory(record.key) / f"attempt-{record.attempt}.json"
+    def _revision_path(self, record: LedgerRecord, revision: int) -> PurePosixPath:
+        return self._key_directory(record.key) / f"attempt-{record.attempt}.{revision}.json"
 
     def _publish(self, path: PurePosixPath, content: str, *, create_only: bool) -> str:
         with tempfile.TemporaryDirectory(prefix="vs-ledger-", dir=self._scratch_root) as temporary:

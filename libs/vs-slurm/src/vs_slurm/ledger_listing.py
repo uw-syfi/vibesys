@@ -1,7 +1,8 @@
 """What a person reading a project's evaluation ledger sees: one row per request (#2757).
 
 ``list_entries`` reads every request through the ledger interface and asks the
-cluster for the state of each live job. It needs no running VibeSys process.
+cluster for the state of each job not yet settled; a settled request (done,
+failed or withdrawn) is shown from its record alone. It needs no running VibeSys process.
 Rows name a request by its short entry id, the first characters of its key,
 which ``resolve_entries`` maps back to keys for a removal.
 """
@@ -157,7 +158,7 @@ def _row(entry: LedgerEntry, cluster: Cluster, *, now: float) -> LedgerRow:
         result_location=(
             None if job is None else PurePosixPath(job.remote_workspace).parent.as_posix()
         ),
-        detail=detail if detail is not None else record.withdrawn_reason,
+        detail=detail if detail is not None else record.reason,
     )
 
 
@@ -165,8 +166,17 @@ def _phase(
     entry: LedgerEntry, cluster: Cluster
 ) -> tuple[EntryPhase, ClusterObservation | None, str | None]:
     record = entry.record
-    if record.state is LedgerState.WITHDRAWN:
-        return EntryPhase.WITHDRAWN, None, None
+    match record.state:
+        case LedgerState.WITHDRAWN:
+            return EntryPhase.WITHDRAWN, None, None
+        case LedgerState.COMPLETED:
+            return EntryPhase.DONE, None, None
+        case LedgerState.FAILED:
+            return EntryPhase.FAILED, None, None
+        case LedgerState.SUBMITTING | LedgerState.SUBMITTED:
+            pass
+        case _:
+            assert_never(record.state)
     observed = cluster.inspect(record.operation_id)
     match observed:
         case ClusterUnknown(reason=reason):

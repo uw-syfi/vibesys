@@ -59,6 +59,7 @@ from .ledger import (
     BATCH_RESULT_LAYOUT,
     LEDGER_FORMAT_VERSION,
     AttachJob,
+    CheckJob,
     ClaimAttempt,
     Leased,
     LeaseVerdict,
@@ -75,6 +76,7 @@ from .ledger import (
     SubmitBoundJob,
     SubmitStep,
     Unleased,
+    check_transition,
     decode_lease,
     decode_record,
     evaluation_key,
@@ -82,7 +84,9 @@ from .ledger import (
     job_of_handle,
     lease_verdict,
     ledger_operation_id,
+    settled_state,
     submit_step,
+    transitioned,
     validate_holder,
     validate_project,
 )
@@ -92,6 +96,7 @@ from .ledger_actions import (
     Withdrawn,
     WithdrawOutcome,
     WithdrawUnknown,
+    settle,
     sweep_unleased,
     withdraw,
 )
@@ -194,6 +199,7 @@ __all__ = [
     "SLURM_CONNECTOR_REQUEST",
     "AccountingRow",
     "AttachJob",
+    "CheckJob",
     "ClaimAttempt",
     "Cluster",
     "ClusterCancelOutcome",
@@ -296,6 +302,7 @@ __all__ = [
     "Withdrawn",
     "advance",
     "advance_with_notice",
+    "check_transition",
     "decode_lease",
     "decode_record",
     "encode_ledger_document",
@@ -316,6 +323,8 @@ __all__ = [
     "phase_of",
     "resolve_entries",
     "runtime_content_identity",
+    "settle",
+    "settled_state",
     "shell_join_with_port",
     "slurm_transport_broker_available",
     "slurm_transport_broker_policy",
@@ -323,6 +332,7 @@ __all__ = [
     "status_of",
     "submit_step",
     "sweep_unleased",
+    "transitioned",
     "tree_content_identity",
     "unframed_output",
     "validate_cluster_operation_id",
@@ -375,7 +385,10 @@ class EvaluationLedger(Protocol):
     """
 
     def read(self, key: str) -> LedgerEntry | None:
-        """The request's current attempt and every lease on it, or None if never asked for."""
+        """The request's current attempt, its revision and every lease, or None if never asked for.
+
+        A lease removed while it is read is absent, never an error.
+        """
         ...
 
     def claim(self, record: LedgerRecord) -> LedgerRecord:
@@ -385,8 +398,13 @@ class EvaluationLedger(Protocol):
         """
         ...
 
-    def update(self, record: LedgerRecord) -> None:
-        """Replace the state of an attempt atomically."""
+    def replace(self, current: LedgerEntry, record: LedgerRecord) -> bool:
+        """Compare-and-swap: write ``record`` as the revision after ``current``.
+
+        True when it was written. False when another writer already moved the
+        attempt past ``current``: the caller reads the request again and decides
+        anew. Raises ``LedgerError`` for a change ``check_transition`` refuses.
+        """
         ...
 
     def renew(self, key: str, lease: LedgerLease) -> None:
