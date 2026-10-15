@@ -185,12 +185,14 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
         message = "fresh run resumed"
         raise AssertionError(message)
 
+    threads = OsThreads()
     effects = ProjectRunEffects(
         git_events=NullGitTrackerEvents(),
         log_emit=_emit,
         on_log_ready=lambda _path: None,
         git_repository=_git_factory(disk, wrap_git),
         clock=ManualClock(),
+        threads=threads,
     )
     with open_project_run_resources(
         request, effects=effects, resolve_resume=unexpected_resume
@@ -230,7 +232,7 @@ def open_workspace_env(  # noqa: PLR0913  # lint-waiver: LW-402330 [PLR0913]; ea
                 skill_selection=NULL_SKILL_SELECTION,
                 host_resources=(),
                 events=events or (lambda _event: None),
-                threads=OsThreads(),
+                threads=threads,
                 blocking=ThreadBlockingRunner(),
             )
             env = WorkspaceEnv(project.project, factory, git_disk=disk)

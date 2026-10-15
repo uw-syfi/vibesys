@@ -456,6 +456,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     log_emit=run_log_emitter(integration.agent_events),
                     on_log_ready=integration.attach,
                     clock=clock,
+                    threads=integration.threads,
                     git_repository=integration.git_repository,
                     state_stores=integration.state_stores,
                     resume_recovery=recover_existing_run if existing else None,

@@ -7,7 +7,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import RunLogger, read_latest_run_log
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 def test_a_missing_or_empty_directory_has_no_run_log(tmp_path: Path) -> None:
@@ -16,7 +16,7 @@ def test_a_missing_or_empty_directory_has_no_run_log(tmp_path: Path) -> None:
 
 
 def test_reads_back_what_the_run_logger_wrote(tmp_path: Path) -> None:
-    logger = RunLogger(tmp_path, tee_stderr=False, clock=ManualClock())
+    logger = RunLogger(tmp_path, tee_stderr=False, clock=ManualClock(), threads=SimThreads())
     logger.lprint("round 1 started\n")
     logger.close()
 

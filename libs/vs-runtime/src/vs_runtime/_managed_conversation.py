@@ -182,7 +182,7 @@ def open_managed_conversation(  # noqa: PLR0913  # lint-waiver: LW-994218 [PLR09
     ownership = ExitStack()
     ownership.callback(environment.close)
     try:
-        logger = RunLogger(log_directory, clock=clock, tee_stderr=False)
+        logger = RunLogger(log_directory, clock=clock, threads=threads, tee_stderr=False)
         ownership.callback(logger.close)
         logger.switch(f"auxiliary-{spec.role}")
         client = client_factory(

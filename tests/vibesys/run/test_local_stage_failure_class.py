@@ -250,6 +250,7 @@ def _measure_with_lost_command(
         on_log_ready=lambda _path: None,
         clock=ManualClock(),
         git_repository=git_repositories(REAL_GIT),
+        threads=SimThreads(),
     )
     with (
         closing(integration),

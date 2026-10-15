@@ -2,12 +2,11 @@
 
 import re
 import sys
-import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import TextIO, cast
 
-from vs_sim.api import Clock, utc_datetime
+from vs_sim.api import Clock, Threads, utc_datetime
 
 # Matches ANSI escape sequences (CSI colors, cursor control, and simple
 # single-character escapes) so the durable log stays plain text even when
@@ -109,13 +108,14 @@ class RunLogger:
         log_dir: Path,
         *,
         clock: Clock,
+        threads: Threads,
         tee_stderr: bool = True,
         emit: Callable[[str, TextIO], None] | None = None,
     ) -> None:
         self.log_dir = log_dir
         self._clock = clock
         self._emit = emit if emit is not None else _default_emit
-        self._lock = threading.RLock()
+        self._lock = threads.rlock()
         run_started = utc_datetime(clock).strftime("%Y%m%d-%H%M%S")
         self.path = log_dir / f"run-{run_started}.log"
         self.file = self.path.open("a", encoding="utf-8")

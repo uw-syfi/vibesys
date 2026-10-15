@@ -127,6 +127,7 @@ async def _workspaces(implementation: Implementation) -> AsyncIterator[Workspace
                         on_log_ready=lambda _path: None,
                         clock=ManualClock(),
                         git_repository=git_repositories(REAL_GIT),
+                        threads=SimThreads(),
                     ),
                     resolve_resume=lambda _manifest: pytest.fail("unexpected resume"),
                 )

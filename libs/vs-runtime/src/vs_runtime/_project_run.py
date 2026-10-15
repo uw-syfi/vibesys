@@ -29,7 +29,7 @@ from vs_sim.api import CloseOnce, ReleaseStack, utc_datetime
 if TYPE_CHECKING:
     from vs_project.api import GitRepositoryFactory, StateStoreFactory
     from vs_runtime._project_materialization import ProjectMaterializer
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, Threads
 
 type LogEmitter = Callable[[str, TextIO], None]
 type LogReady = Callable[[Path], None]
@@ -127,6 +127,8 @@ class ProjectRunEffects:
     on_log_ready: LogReady
     clock: Clock
     """Seconds since the epoch: names log files and stamps new project and run manifests."""
+    threads: Threads
+    """Makes the lock that serializes the run log's writers."""
     git_repository: GitRepositoryFactory
     """Builds the ``GitRepository`` of the project root and of every candidate worktree.
 
@@ -219,7 +221,11 @@ class ProjectRunResources:
                     self._request.project_root, workspace, self._request.candidate_support_dirs
                 )
             logger = RunLogger(
-                log_dir, clock=self._effects.clock, tee_stderr=False, emit=self._effects.log_emit
+                log_dir,
+                clock=self._effects.clock,
+                threads=self._effects.threads,
+                tee_stderr=False,
+                emit=self._effects.log_emit,
             )
             teardown_stack.callback(logger.close)
             # The agent can rewrite the workspace's ``.git``; host Git follows the
@@ -351,7 +357,9 @@ def _assemble_project_run_resources(
 
     with boot_trace.span("log_bootstrap"):
         effects.on_log_ready(log_dir)
-        logger = RunLogger(log_dir, clock=effects.clock, emit=effects.log_emit)
+        logger = RunLogger(
+            log_dir, clock=effects.clock, threads=effects.threads, emit=effects.log_emit
+        )
         teardown_stack.callback(logger.close)
         for message in buffered_logs:
             logger.lprint(message)

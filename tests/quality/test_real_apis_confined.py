@@ -950,9 +950,6 @@ REAL_API_PENDING: dict[Key, Pending] = {
         Owner.BAN_SWEEP,
         "the module-level FrameworkWrites lock; needs a Threads at its one construction",
     ),
-    ("libs/vs-project/src/vs_project/_logger.py", "threading"): Pending(
-        1, Owner.BAN_SWEEP, "RunLogger's lock; takes Threads from its callers"
-    ),
     ("libs/vs-project/src/vs_project/_state_store.py", "threading"): Pending(
         1, Owner.BAN_SWEEP, "FakeStateStore's lock; takes Threads from its callers"
     ),

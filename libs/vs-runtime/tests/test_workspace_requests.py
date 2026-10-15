@@ -225,6 +225,7 @@ def _env(
         on_log_ready=lambda _path: None,
         clock=ManualClock(),
         git_repository=git_repositories(REAL_GIT),
+        threads=SimThreads(),
     )
     with open_project_run_resources(
         request, effects=effects, resolve_resume=unexpected_resume
