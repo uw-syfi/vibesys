@@ -41,6 +41,7 @@ from vs_slurm.api import (
     job_of_handle,
     ledger_operation_id,
     settle,
+    settlement,
     submit_step,
     sweep_unleased,
     transitioned,
@@ -54,6 +55,7 @@ if TYPE_CHECKING:
     from vs_sim.api import Clock, Processes
     from vs_slurm.api import (
         Cluster,
+        ClusterCollectOutcome,
         EvaluationLedger,
         LedgerPolicy,
         SlurmBatchRequest,
@@ -210,19 +212,31 @@ class SlurmLedgerAttachment:
             self.renew(key)
         self.sweep_if_due(cluster)
 
-    def settle(self, key: str, operation_id: str, status: SlurmJobStatus) -> None:
-        """Record that the attached job ended with ``status``, so later asks need not ask the cluster.
+    def settle(
+        self,
+        key: str,
+        operation_id: str,
+        status: SlurmJobStatus,
+        collected: ClusterCollectOutcome | None,
+    ) -> None:
+        """Record how the attached job ended, so later asks need not ask the cluster.
 
-        Best effort: if another process moved the attempt on first, its record stands.
+        ``collected`` is what this run collected from it (None when it collected
+        nothing): only a collected result in which every stage left its own
+        makes the attempt reusable (``settlement``). Best effort: if another
+        process moved the attempt on first, its record stands.
         """
         for _ in range(_ATTACH_ROUNDS):
             entry = self.ledger.read(key)
             if entry is None or entry.record.operation_id != operation_id:
                 return
             if entry.record.state is not LedgerState.SUBMITTED or settle(
-                self.ledger, entry, status
+                self.ledger, entry, status, collected
             ):
                 return
+            job = entry.record.job
+            if job is None or settlement(status, collected, job=job) is None:
+                return  # nothing to record yet: not a lost swap, so do not read again
 
     def sweep_if_due(self, cluster: Cluster) -> tuple[WithdrawOutcome, ...]:
         """Withdraw unleased requests, at most once per lease period per run."""
@@ -247,11 +261,20 @@ class SlurmLedgerAttachment:
     def _check(
         self, cluster: Cluster, entry: LedgerEntry, request: SlurmBatchRequest
     ) -> Attached | None:
-        """Attach to a submitted job unless it ended; an ended one settles its attempt first."""
+        """Attach to a submitted job unless it ended unsuccessfully, which settles it first.
+
+        A job that COMPLETED is attached to like a live one: this run collects it,
+        and only then does its attempt settle (``SlurmLedgerAttachment.settle``).
+        """
         observed = cluster.inspect(entry.record.operation_id)
-        if isinstance(observed, ClusterObservation) and observed.status.terminal:
+        job = entry.record.job
+        if (
+            job is not None
+            and isinstance(observed, ClusterObservation)
+            and settlement(observed.status, None, job=job) is not None
+        ):
             settle(self.ledger, entry, observed.status)
-            return None  # read again: a completed job is attached, a failed one replaced
+            return None  # read again: the failed attempt is replaced
         return self._attached(entry.record, request)
 
     def _resolve(

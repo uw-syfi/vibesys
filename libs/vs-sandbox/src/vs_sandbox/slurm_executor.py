@@ -49,6 +49,7 @@ from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
     INITIAL_LIFE,
     SERVICE_NOT_READY_EXIT_CODE,
+    STAGE_TIMEOUT_EXIT_CODES,
     ClusterCollected,
     ClusterConflict,
     ClusterObservation,
@@ -593,6 +594,7 @@ class SlurmEvaluationExecutor:
         collected = await self._in_thread(
             functools.partial(self._cluster.collect, handle, observed=inspected)
         )
+        await self._ledger_settle(handle_id, durable, inspected.status, collected)
         try:
             terminal = self._collected_observation(handle_id, durable.request, handle, collected)
         except SlurmError as error:
@@ -966,12 +968,18 @@ class SlurmEvaluationExecutor:
         return True
 
     async def _ledger_settle(
-        self, handle_id: str, durable: _DurableSlurmEvaluation | None, status: SlurmJobStatus
+        self,
+        handle_id: str,
+        durable: _DurableSlurmEvaluation | None,
+        status: SlurmJobStatus,
+        collected: ClusterCollectOutcome | None,
     ) -> None:
         """Record a ledger job's end, so later asks reuse or replace it without asking Slurm.
 
-        Best effort: an unreachable ledger leaves the attempt to the next asker,
-        who inspects the job itself.
+        It runs after collection: only results this run collected, with every
+        stage's own result, make the attempt reusable. Best effort: an
+        unreachable ledger leaves the attempt to the next asker, who inspects
+        the job itself.
         """
         if (
             self._ledger is None
@@ -986,6 +994,7 @@ class SlurmEvaluationExecutor:
                 durable.ledger_key,
                 durable.handle.job.invocation_id,
                 status,
+                collected,
             )
         except LedgerError:
             _LOG.exception("could not record the end of ledger evaluation %s", handle_id)
@@ -1003,8 +1012,8 @@ class SlurmEvaluationExecutor:
         if handle is None:
             raise _SlurmExecutionError.not_accepted()
         status = await self._wait_for_batch(handle_id, handle, request, durable)
-        await self._ledger_settle(handle_id, durable, status)
         if status is SlurmJobStatus.CANCELLED:
+            await self._ledger_settle(handle_id, durable, status, None)
             # A cancelled job ends CANCELED however its allocation exit code reads,
             # as poll() reports it. Collecting would let a recorded "0:0" exit
             # contradict the scheduler and turn a requested stop into a failure.
@@ -1017,6 +1026,7 @@ class SlurmEvaluationExecutor:
             with contextlib.suppress(Exception):
                 await collection
             raise
+        await self._ledger_settle(handle_id, durable, status, collected)
         self._publish(handle_id, self._collected_observation(handle_id, request, handle, collected))
 
     @staticmethod
@@ -1609,7 +1619,6 @@ def _collected_batch(collected: ClusterCollectOutcome, job_id: str) -> SlurmBatc
 
 # GNU timeout's exit status when it stopped the command (the job script wraps
 # each stage in ``timeout --kill-after``; 137 is the follow-up SIGKILL).
-_TIMEOUT_EXIT_CODES = frozenset({124, 137})
 
 
 def _stage_failure(
@@ -1629,7 +1638,7 @@ def _stage_failure(
         failure = raw.output
     else:
         elapsed = "" if elapsed_seconds is None else f" after {elapsed_seconds:.0f} s"
-        if raw.exit_code in _TIMEOUT_EXIT_CODES:
+        if raw.exit_code in STAGE_TIMEOUT_EXIT_CODES:
             failure = f"stage {step.name!r} hit its time limit{elapsed} and printed no output"
         else:
             failure = (

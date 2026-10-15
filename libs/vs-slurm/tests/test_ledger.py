@@ -18,8 +18,10 @@ from vs_slurm.api import (
     AttachJob,
     CheckJob,
     ClaimAttempt,
+    ClusterCollected,
     ClusterObservation,
     ClusterSubmitted,
+    ClusterUnknown,
     FakeCluster,
     FakeEvaluationLedger,
     Leased,
@@ -31,9 +33,12 @@ from vs_slurm.api import (
     LedgerState,
     NotInLedger,
     ResolveSubmission,
+    Settlement,
     SlurmBatchHandle,
     SlurmBatchRequest,
+    SlurmBatchResult,
     SlurmBatchStage,
+    SlurmBatchStageResult,
     SlurmConfig,
     SlurmJobStatus,
     SlurmSshTransport,
@@ -47,7 +52,7 @@ from vs_slurm.api import (
     lease_verdict,
     ledger_operation_id,
     list_entries,
-    settled_state,
+    settlement,
     submit_step,
     sweep_unleased,
     withdraw,
@@ -251,17 +256,79 @@ def test_only_an_absent_failed_or_withdrawn_request_is_submitted_again(
     assert submit_step(None, now=now) == ClaimAttempt(0)
 
 
-@given(status=st.sampled_from(SlurmJobStatus))
-def test_only_a_job_that_finished_successfully_settles_as_reusable(status: SlurmJobStatus) -> None:
-    settled = settled_state(status)
-    if not status.terminal:
+_STAGE_OUTCOMES = st.sampled_from((0, 1, 2, 124, 137, 143, "skipped", "missing", "absent"))
+_STAGE_NAMES = ("build", "accuracy", "benchmark")
+_COMMAND_EXITS = frozenset({0, 1, 2})
+
+
+def _collected(
+    outcomes: list[object], job_exit_code: int, mode: str
+) -> ClusterCollected | ClusterUnknown | None:
+    """What a run collected: per stage an exit code, ``skipped``, ``missing`` or ``absent``."""
+    if mode == "none":
+        return None
+    result = SlurmBatchResult(
+        job_id="7",
+        job_exit_code=job_exit_code,
+        job_output="",
+        stages=tuple(
+            SlurmBatchStageResult(
+                name=name,
+                exit_code=outcome if isinstance(outcome, int) else None,
+                stdout="",
+                stderr="",
+                elapsed_seconds=1.0,
+                skipped=outcome == "skipped",
+            )
+            for name, outcome in zip(_STAGE_NAMES, outcomes, strict=False)
+            if outcome != "absent"
+        ),
+        phase_timings_seconds={},
+        content_cache_hits=0,
+    )
+    if mode == "unknown" or "missing" in outcomes:  # incomplete evidence is never Collected
+        return ClusterUnknown(operation_id="op", reason="transport lost", result=result)
+    return ClusterCollected(operation_id="op", result=result)
+
+
+@given(
+    status=st.sampled_from(SlurmJobStatus),
+    outcomes=st.lists(_STAGE_OUTCOMES, min_size=3, max_size=3),
+    job_exit_code=st.sampled_from((0, 1)),
+    mode=st.sampled_from(("collected", "unknown", "none")),
+)
+@settings(max_examples=examples(pr=200, nightly=2000), deadline=None)
+def test_an_attempt_is_reusable_only_once_collected_with_every_stages_own_result(
+    status: SlurmJobStatus, outcomes: list[object], job_exit_code: int, mode: str
+) -> None:
+    """A failing exit code is a result; a timeout, a kill, a missing file or no collection is not.
+
+    The batch script exits 0 whatever its stages do, so Slurm's COMPLETED alone
+    proves nothing about the stages.
+    """
+    job = _JOB.model_copy(update={"stages": tuple(LedgerStage(name=n) for n in _STAGE_NAMES)})
+    collected = _collected(outcomes, job_exit_code, mode)
+    settled = settlement(status, collected, job=job)
+
+    every_stage_ran_its_command = all(
+        outcome == "skipped" or outcome in _COMMAND_EXITS for outcome in outcomes
+    )
+    if not status.terminal or (status is SlurmJobStatus.COMPLETED and collected is None):
         assert settled is None
-    elif status is SlurmJobStatus.COMPLETED:
-        assert settled is LedgerState.COMPLETED
+    elif (
+        status is SlurmJobStatus.COMPLETED
+        and isinstance(collected, ClusterCollected)
+        and job_exit_code == 0
+        and every_stage_ran_its_command
+    ):
+        assert settled == Settlement(LedgerState.COMPLETED)
     else:
-        assert settled is LedgerState.FAILED
+        assert settled is not None
+        assert settled.state is LedgerState.FAILED
+        assert settled.reason
         # A failed attempt is final: the next ask claims a new one.
-        assert submit_step(LedgerEntry(_record(settled)), now=0.0) == ClaimAttempt(1)
+        record = _record(LedgerState.FAILED)
+        assert submit_step(LedgerEntry(record), now=0.0) == ClaimAttempt(1)
 
 
 _TIMES = st.floats(min_value=0, max_value=1e6, allow_nan=False)
@@ -396,19 +463,13 @@ def test_an_unleased_job_is_cancelled_only_after_its_grace_period(
             assert world.state() is LedgerState.WITHDRAWN
 
 
-@pytest.mark.parametrize(
-    ("status", "settled"),
-    [
-        (SlurmJobStatus.COMPLETED, LedgerState.COMPLETED),
-        (SlurmJobStatus.FAILED, LedgerState.FAILED),
-        (SlurmJobStatus.CANCELLED, LedgerState.FAILED),
-    ],
-)
-def test_the_sweep_settles_an_ended_job_and_never_asks_the_cluster_about_it_again(
-    tmp_path: Path, status: SlurmJobStatus, settled: LedgerState
+@pytest.mark.parametrize("status", [SlurmJobStatus.FAILED, SlurmJobStatus.CANCELLED])
+def test_the_sweep_settles_an_unsuccessful_job_and_never_asks_the_cluster_about_it_again(
+    tmp_path: Path, status: SlurmJobStatus
 ) -> None:
     world = _World(tmp_path, status=status)
     assert sweep_unleased(world.ledger, world.cluster, now=1e9, grace_seconds=0.0) == ()
+    settled = LedgerState.FAILED
     assert world.state() is settled
     # A cluster that has forgotten the job (accounting purged it) changes nothing:
     # a settled request is not asked about again.
@@ -433,6 +494,13 @@ def test_a_lease_this_build_cannot_read_holds_the_request_and_blocks_no_removal(
     outcome = withdraw(world.ledger, world.cluster, world.key, reason="removed by operator")
     assert outcome == Withdrawn(world.key, ledger_operation_id(world.key, 0), world.job_id)
     assert world.state() is LedgerState.WITHDRAWN
+
+
+def test_the_sweep_leaves_a_completed_job_for_a_run_to_collect(tmp_path: Path) -> None:
+    """Only collected results settle completed; the sweep collects nothing, so it waits."""
+    world = _World(tmp_path, status=SlurmJobStatus.COMPLETED)
+    assert sweep_unleased(world.ledger, world.cluster, now=1e9, grace_seconds=0.0) == ()
+    assert world.state() is LedgerState.SUBMITTED
 
 
 def test_the_sweep_never_touches_a_job_outside_the_ledger(tmp_path: Path) -> None:

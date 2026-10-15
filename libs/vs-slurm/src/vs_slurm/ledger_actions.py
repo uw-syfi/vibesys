@@ -21,12 +21,13 @@ from .ledger import (
     LedgerRecord,
     LedgerState,
     lease_verdict,
-    settled_state,
+    settlement,
     transitioned,
 )
 
 if TYPE_CHECKING:
     from .api import Cluster, EvaluationLedger
+    from .cluster_types import ClusterCollectOutcome
     from .scheduler_states import SlurmJobStatus
 
 
@@ -99,19 +100,26 @@ def _withdraw_once(
     return Withdrawn(key, record.operation_id, cancelled) if won else None
 
 
-def settle(ledger: EvaluationLedger, entry: LedgerEntry, status: SlurmJobStatus) -> bool:
-    """Record that the attempt's job ended with ``status``; False if it is live or a writer won.
+def settle(
+    ledger: EvaluationLedger,
+    entry: LedgerEntry,
+    status: SlurmJobStatus,
+    collected: ClusterCollectOutcome | None = None,
+) -> bool:
+    """Record how the attempt's job ended (``settlement``); False if it cannot settle yet or a writer won.
 
-    A settled attempt is never inspected on the cluster again: a completed one
-    is reused by every later ask, a failed one makes the next ask start anew.
+    ``collected`` is what a run collected from the ended job, None when nothing
+    was: a COMPLETED job settles only with its collected results. A settled
+    attempt is never inspected on the cluster again: a completed one is reused
+    by every later ask, a failed one makes the next ask start anew.
     """
-    state = settled_state(status)
     record = entry.record
-    if state is None or record.state is not LedgerState.SUBMITTED:
+    if record.state is not LedgerState.SUBMITTED or record.job is None:
         return False
-    job = record.job.job_id if record.job is not None else "?"
-    reason = None if state is LedgerState.COMPLETED else f"job {job} ended {status.value}"
-    return ledger.replace(entry, transitioned(record, state, reason=reason))
+    settled = settlement(status, collected, job=record.job)
+    if settled is None:
+        return False
+    return ledger.replace(entry, transitioned(record, settled.state, reason=settled.reason))
 
 
 def _cancel_live(cluster: Cluster, record: LedgerRecord) -> str | None | WithdrawUnknown:
@@ -141,9 +149,10 @@ def sweep_unleased(
     """Withdraw every live request no run has leased for longer than ``grace_seconds``.
 
     A settled request (completed, failed or withdrawn) costs one ledger read and
-    no cluster call. A submitted job found finished is settled instead of
-    withdrawn: nothing holds resources, and a later ask for a completed one
-    collects its result instead of running it again.
+    no cluster call. A submitted job found ended is not withdrawn, since it holds
+    no resources: one that ended unsuccessfully settles ``failed``, and one that
+    COMPLETED is left for the next ask, which collects it (only a collected
+    result settles ``completed``; it costs one cluster call per sweep until then).
     """
     outcomes: list[WithdrawOutcome] = []
     for key in ledger.list_keys():
@@ -163,7 +172,7 @@ def sweep_unleased(
                     settle(ledger, entry, observed.status)
                 except LedgerError as error:
                     outcomes.append(WithdrawUnknown(key, str(error)))
-                continue
+                continue  # settled failed, or completed and waiting for a run to collect it
         outcomes.append(
             withdraw(ledger, cluster, key, reason=f"no run leased it for {grace_seconds:.0f} s")
         )

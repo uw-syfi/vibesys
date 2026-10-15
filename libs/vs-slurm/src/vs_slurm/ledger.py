@@ -44,9 +44,13 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 
 from vs_decode.api import Unreadable, decode_json
 
+from .cluster_types import ClusterCollected, ClusterUnknown
 from .runner import (
+    STAGE_TIMEOUT_EXIT_CODES,
     SlurmBatchHandle,
     SlurmBatchRequest,
+    SlurmBatchResult,
+    SlurmBatchStageResult,
     SlurmJobHandle,
     _validate_batch_request,
     batch_stage_handles,
@@ -56,6 +60,7 @@ from .scheduler_states import SlurmJobStatus
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from .cluster_types import ClusterCollectOutcome
     from .config import SlurmConfig
 
 LEDGER_FORMAT_VERSION = 1
@@ -314,10 +319,11 @@ class LedgerState(StrEnum):
     """Where one attempt of a request stands.
 
     ``submitting`` records the intent before sbatch, until ``claim_expires_at``;
-    ``submitted`` names the job; ``completed`` means the job finished
-    successfully and its results are collectable, so later asks reuse it;
-    ``failed`` means the job ended any other way (or its submission never
-    produced one), so the next ask starts a new attempt; ``withdrawn`` means an
+    ``submitted`` names the job; ``completed`` means a run collected the job's
+    results and every stage left its own (``settlement``), so later asks reuse
+    it; ``failed`` means the job ended any other way, its results could not be
+    collected, a stage timed out or was killed, or the submission never
+    produced a job, so the next ask starts a new attempt; ``withdrawn`` means an
     operator removed it or no run leased it for its grace period. ``failed`` and
     ``withdrawn`` are final. Phase 2 adds the slot states.
     """
@@ -472,15 +478,77 @@ def transitioned(
     return after
 
 
-def settled_state(status: SlurmJobStatus) -> LedgerState | None:
-    """The state a job's terminal status settles its attempt in; None while it is live.
+# A stage stopped from outside rather than by its own command: by its time limit
+# (``STAGE_TIMEOUT_EXIT_CODES``) or by SIGTERM (143), which Slurm sends on preemption
+# and on a scancel. Its result says nothing about the candidate.
+_INTERRUPTED_EXIT_CODES = STAGE_TIMEOUT_EXIT_CODES | {143}
 
-    Only a job that finished successfully is reused: preemption, a node failure,
-    a cancel, a timeout or a failing command all make the next ask run it again.
+
+@dataclass(frozen=True, slots=True)
+class Settlement:
+    """The settled state of an attempt whose job ended, and why it failed, if it did."""
+
+    state: Literal[LedgerState.COMPLETED, LedgerState.FAILED]
+    reason: str | None = None
+
+
+def settlement(
+    status: SlurmJobStatus, collected: ClusterCollectOutcome | None, *, job: SubmitBoundJob
+) -> Settlement | None:
+    """How an attempt whose job reached ``status`` settles; None when it cannot settle yet. Pure.
+
+    The batch script exits 0 whatever its stages do, so Slurm's COMPLETED says
+    only that the allocation ran to its end. An attempt is reused only once a
+    run collected its results (``collected``) and every stage left its own: a
+    stage that ran its command to an exit code, failing ones included, is a
+    valid evaluation result, and a stage skipped after a failure is part of it.
+    A stage that timed out, was killed, or left no result file, and results
+    that could not be collected, settle it ``failed``, so the next ask runs it
+    again. A job that ended any other way than COMPLETED is ``failed`` with no
+    collection. A COMPLETED job not collected yet (``collected`` None) cannot
+    settle: a run that attaches to it collects it.
     """
     if not status.terminal:
         return None
-    return LedgerState.COMPLETED if status is SlurmJobStatus.COMPLETED else LedgerState.FAILED
+    if status is not SlurmJobStatus.COMPLETED:
+        return Settlement(LedgerState.FAILED, f"job {job.job_id} ended {status.value}")
+    if collected is None:
+        return None
+    problem = _unreusable(collected, job)
+    if problem is None:
+        return Settlement(LedgerState.COMPLETED)
+    return Settlement(LedgerState.FAILED, f"job {job.job_id} finished, but {problem}")
+
+
+def _unreusable(collected: ClusterCollectOutcome, job: SubmitBoundJob) -> str | None:
+    """Why collected results are no evaluation result to reuse; None when they are one."""
+    result = collected.result if isinstance(collected, ClusterCollected) else None
+    if not isinstance(result, SlurmBatchResult) or result.collection_failure is not None:
+        if isinstance(collected, ClusterUnknown):
+            detail = collected.reason
+        elif isinstance(result, SlurmBatchResult):
+            detail = str(result.collection_failure)
+        else:
+            detail = "they are not a batch's"
+        return f"its results could not be collected: {detail}"
+    if result.job_exit_code != 0:
+        return f"its batch exited with code {result.job_exit_code}"
+    by_name = {stage.name: stage for stage in result.stages}
+    problems = (_stage_problem(stage.name, by_name.get(stage.name)) for stage in job.stages)
+    return next((problem for problem in problems if problem is not None), None)
+
+
+def _stage_problem(name: str, item: SlurmBatchStageResult | None) -> str | None:
+    """Why one stage's collected result is no result of its command; None when it is one."""
+    if (
+        item is None
+        or item.collection_failure is not None
+        or (item.exit_code is None and not item.skipped)
+    ):
+        return f"stage {name!r} left no result"
+    if item.exit_code in _INTERRUPTED_EXIT_CODES:
+        return f"stage {name!r} timed out or was killed (exit code {item.exit_code})"
+    return None
 
 
 def decode_record(text: str, *, path: str) -> LedgerRecord:
@@ -651,8 +719,9 @@ class AttachJob:
 class CheckJob:
     """The request names a job: attach to it unless it has ended.
 
-    The shell asks the cluster; an ended job settles the attempt
-    (``settled_state``, a swap against ``entry``) and the request is read again.
+    The shell asks the cluster. A job that ended unsuccessfully settles the
+    attempt ``failed`` (``settlement``, a swap against ``entry``) and the request
+    is read again; a COMPLETED one is attached to, and collected, like a live one.
     """
 
     entry: LedgerEntry
@@ -722,6 +791,7 @@ __all__ = [
     "LedgerStage",
     "LedgerState",
     "ResolveSubmission",
+    "Settlement",
     "SubmitBoundJob",
     "SubmitStep",
     "Unleased",
@@ -735,7 +805,7 @@ __all__ = [
     "job_of_handle",
     "lease_verdict",
     "ledger_operation_id",
-    "settled_state",
+    "settlement",
     "submit_step",
     "transitioned",
     "validate_holder",
