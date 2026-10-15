@@ -3118,8 +3118,6 @@ describe('workstream telemetry state', () => {
         round_label: 'round-3',
         data: {
           kind: 'workstream_finished',
-          setup_failure: false,
-          refunded: false,
           repeated_error: false,
         },
       }),
@@ -3132,8 +3130,6 @@ describe('workstream telemetry state', () => {
         finished: true,
         finishedAt: timestamp(1),
         finishedAtSequence: 1,
-        setupFailure: false,
-        refunded: false,
         repeatedError: false,
         lastError: null,
         usage: {
@@ -3147,15 +3143,13 @@ describe('workstream telemetry state', () => {
     ]);
   });
 
-  it('folds the failure detail a repeated, refunded setup failure carries', () => {
+  it('folds the failure detail a repeated turn failure carries', () => {
     const state = reduceEvent(
       initialCoreState(),
       fixtureEvent(2, 'workstream_finished', {
         round_label: 'round-4',
         data: {
           kind: 'workstream_finished',
-          setup_failure: true,
-          refunded: true,
           repeated_error: true,
           last_error: {
             kind: 'out-of-budget',
@@ -3175,8 +3169,6 @@ describe('workstream telemetry state', () => {
       limit: 5,
       text: 'ran out of turns',
     });
-    expect(record?.setupFailure).toBe(true);
-    expect(record?.refunded).toBe(true);
     expect(record?.repeatedError).toBe(true);
   });
 
@@ -3233,8 +3225,6 @@ describe('workstream telemetry state', () => {
         round_label: 'round-2',
         data: {
           kind: 'workstream_finished',
-          setup_failure: false,
-          refunded: false,
           repeated_error: false,
         },
       }),
@@ -3256,8 +3246,6 @@ describe('workstream telemetry state', () => {
       fixtureEvent(1, 'workstream_finished', {
         data: {
           kind: 'workstream_finished',
-          setup_failure: false,
-          refunded: false,
           repeated_error: false,
         },
       }),

@@ -289,7 +289,7 @@ function workstreamFor(round: RoundState, core: CoreState): FrameWorkstream | nu
 /** `workstream_finished` (or `turn_usage_recorded`) already settled this round: its own terminal
  * facts take priority over the run map's coarser round status. */
 function finishedWorkstream(base: WorkstreamBase, record: WorkstreamRecordLike): FrameWorkstream {
-  const failed = record.setupFailure || record.lastError !== null;
+  const failed = record.lastError !== null;
   return {
     ...base,
     phase: failed ? 'failed' : 'evaluated',
@@ -298,8 +298,7 @@ function finishedWorkstream(base: WorkstreamBase, record: WorkstreamRecordLike):
     lastSequence: record.finishedAtSequence,
     outcome: failed ? 'rejected' : 'accepted',
     outcomeSummary: failed
-      ? (nonEmpty(record.lastError?.text) ??
-        (record.setupFailure ? 'Workstream setup failed' : 'Workstream failed'))
+      ? (nonEmpty(record.lastError?.text) ?? 'Workstream failed')
       : 'Workstream completed',
   };
 }
@@ -397,7 +396,7 @@ function dispositionFor(
   if (benchmark.roundKey === null) return 'inconclusive';
   const record = findWorkstreamRecord(core.workstreams, benchmark.roundKey);
   if (record?.finished) {
-    return record.setupFailure || record.lastError !== null ? 'rejected' : 'accepted';
+    return record.lastError !== null ? 'rejected' : 'accepted';
   }
   const round = core.rounds.find(candidate => sameRoundKey(candidate.key, benchmark.roundKey));
   if (round?.status === 'failed') return 'rejected';

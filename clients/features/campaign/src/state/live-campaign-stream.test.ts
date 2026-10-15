@@ -26,8 +26,6 @@ function finishedEvent(
   sequence: number,
   roundLabel: string,
   overrides: {
-    setup_failure?: boolean;
-    refunded?: boolean;
     repeated_error?: boolean;
     last_error?: {kind: string; text?: string};
   } = {},
@@ -36,8 +34,6 @@ function finishedEvent(
     round_label: roundLabel,
     data: {
       kind: 'workstream_finished',
-      setup_failure: false,
-      refunded: false,
       repeated_error: false,
       ...overrides,
     } as never,

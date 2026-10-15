@@ -52,8 +52,6 @@ interface WorkstreamRecord {
   readonly finishedAt: string | null;
   /** Sequence of the `workstream_finished` event, or null before it arrives. */
   readonly finishedAtSequence: number | null;
-  readonly setupFailure: boolean;
-  readonly refunded: boolean;
   readonly repeatedError: boolean;
   readonly lastError: WorkstreamFailure | null;
   readonly usage: WorkstreamUsage;
@@ -82,8 +80,6 @@ function emptyRecord(roundKey: RoundKey, roundLabel: string | null): WorkstreamR
     finished: false,
     finishedAt: null,
     finishedAtSequence: null,
-    setupFailure: false,
-    refunded: false,
     repeatedError: false,
     lastError: null,
     usage: EMPTY_USAGE,
@@ -123,8 +119,6 @@ export function workstreamsWithFinish(
     finished: true,
     finishedAt: event.timestamp,
     finishedAtSequence: sequence,
-    setupFailure: data.setup_failure,
-    refunded: data.refunded,
     repeatedError: data.repeated_error,
     lastError: failureFrom(data),
   };

@@ -297,21 +297,13 @@ def _workstream_failure_data(
 
 
 def _emit_workstream_finished(events: EventJournal, round_summary: _RoundProjection) -> None:
-    """Publish ``WORKSTREAM_FINISHED`` alongside ``ROUND_FINISHED`` for the same round.
-
-    ``setup_failure`` and ``refunded`` are always False here: a
-    ``_RoundProjection`` exists only once a workstream's workspace opened and
-    settled (see ``WorkstreamFinishedData``'s docstring), so a setup failure
-    never reaches this projection at all.
-    """
+    """Publish ``WORKSTREAM_FINISHED`` alongside ``ROUND_FINISHED`` for the same round."""
     status = EventStatus.FAILED if round_summary.status == "failed" else EventStatus.COMPLETED
     events.emit(
         CoreEventType.WORKSTREAM_FINISHED,
         status=status,
         round_label=f"round-{round_summary.number}",
         data=WorkstreamFinishedData(
-            setup_failure=False,
-            refunded=False,
             repeated_error=round_summary.repeated_error,
             last_error=_workstream_failure_data(round_summary.last_error),
         ),

@@ -443,33 +443,12 @@ class SubprocessOutputData(EventPayload):
 
 
 class JudgeResultData(EventPayload):
-    """Verdict and feedback returned by the judge.
-
-    ``skipped``/``skip_reason`` cover a round that never reached review
-    (``RoundFinishedData.judge_verdict == "skipped"`` is the existing
-    round-level fact this mirrors at the judge layer). ``implementer_outcome``
-    is the implementer's own self-assessed status shown in the judge's place
-    when review was skipped, using ``HypothesisOutcome``'s closed vocabulary
-    (``vibesys.hypothesis.history.HypothesisOutcome``) since that is the
-    existing record of it (``RoundRecord.outcome``).
-
-    No code in this tree constructs ``JUDGE_RESULT`` today (verified by a
-    repo-wide search): a judge verdict currently reaches the wire only as
-    ``RoundFinishedData.judge_verdict``. These three fields are additive and
-    safe to declare regardless, but, like ``RunConfiguredData``'s new fields
-    above, they carry no data until a producer exists; a separate,
-    pre-existing gap.
-    """
+    """Verdict and feedback returned by the judge."""
 
     kind: Literal["judge_result"] = "judge_result"
     verdict: Literal["pass", "fail"]
     feedback: str
     attempt: int
-    skipped: bool = False
-    skip_reason: str | None = None
-    implementer_outcome: (
-        Literal["continue", "supported", "nominated", "disproven", "implementation_failed"] | None
-    ) = None
 
 
 class BenchmarkResultData(EventPayload):
@@ -555,23 +534,7 @@ class WorkspaceSnapshotData(EventPayload):
 
 
 class RunConfiguredData(EventPayload):
-    """One per run: the resolved configuration a loop starts with.
-
-    ``max_continuation_rounds`` and ``max_unmeasured_turns`` are Hypothesis-
-    and Workstream-granularity limits (``DynamicConfig.max_continuation_rounds``
-    and ``DynamicConfig.max_unmeasured_turns``); they are run-config facts set
-    once, so they live here rather than on the narrower event that interprets
-    them. ``None`` for a policy that declares no such limit. The specific
-    limit value in force when a limit actually triggers survives separately
-    as ``WorkstreamFailureData.limit`` on ``WorkstreamFinishedData``.
-
-    No code in this tree constructs ``RUN_CONFIGURED`` today (verified by a
-    repo-wide search): the emitter that `src/headless/framework_events.py`
-    already renders for was removed in a past refactor and never replaced.
-    These two fields are additive and safe to declare regardless, but they
-    will carry no data until a run-startup producer is restored; that is a
-    separate, pre-existing gap, not introduced here.
-    """
+    """One per run: the resolved configuration a loop starts with."""
 
     kind: Literal["run_configured"] = "run_configured"
     run_log_path: str
@@ -582,8 +545,6 @@ class RunConfiguredData(EventPayload):
     search_policy: str | None = None
     benchmark_contract: bool = False
     pareto_objectives: str | None = None
-    max_continuation_rounds: int | None = None
-    max_unmeasured_turns: int | None = None
     source: FrameworkSource = FrameworkSource.LOOP
 
 
@@ -652,23 +613,9 @@ class WorkstreamFailureData(BaseModel):
 
 
 class WorkstreamFinishedData(EventPayload):
-    """One workstream (one dynamic-run round) ended; its typed failure, if any.
-
-    ``setup_failure`` and ``refunded`` are both always ``False`` from this
-    event's only current producer: a workstream whose workspace never opened
-    (``WorkstreamDone.not_opened``, refunded to the planner) never produces
-    the ``RoundRecord`` this event reads from
-    (``RunRecord.finished``/``_hypotheses.with_round`` only keep a round once
-    its workspace has a settlement, which ``not_opened`` never has), so the
-    only workstreams this event is ever emitted for already cleared setup.
-    Both fields are declared for a future producer that also covers setup
-    failures (none exists yet, since a refunded workstream's slot is tallied
-    only as an aggregate run-level count today, not a per-attempt fact).
-    """
+    """One workstream (one dynamic-run round) ended; its typed failure, if any."""
 
     kind: Literal["workstream_finished"] = "workstream_finished"
-    setup_failure: bool
-    refunded: bool
     repeated_error: bool
     last_error: WorkstreamFailureData | None = None
 

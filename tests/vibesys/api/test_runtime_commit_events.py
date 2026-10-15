@@ -23,6 +23,7 @@ from vibesys.events import (
     IterationsChangedData,
     WorkstreamFailureKind,
 )
+from vibesys.orchestration.dynamic.search.api import FailureKind
 from vibesys.run.contracts import RoundFailureSummary, RoundSummary, RunStatus, RunView
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.testing import idle_environment_system
@@ -122,8 +123,6 @@ def test_commit_projection_preserves_semantics_and_publication_order() -> None:
     )
     assert workstream_finished.data is not None
     assert workstream_finished.data.kind == "workstream_finished"
-    assert workstream_finished.data.setup_failure is False
-    assert workstream_finished.data.refunded is False
     assert workstream_finished.data.repeated_error is False
     assert workstream_finished.data.last_error is None
     assert workstream_finished.round_label == round_finished.round_label
@@ -184,6 +183,21 @@ def test_workstream_finished_carries_the_round_s_typed_failure() -> None:
     assert workstream_finished.data.last_error.turns == 3
     assert workstream_finished.data.last_error.limit == 3
     assert workstream_finished.data.last_error.text == "the implementer repeated an earlier turn"
+
+
+def test_workstream_failure_kind_mirrors_the_search_engine_s_failure_kind() -> None:
+    """`WorkstreamFailureKind` is a frozen wire mirror of core's `FailureKind`; they must stay equal.
+
+    `WorkstreamFailureData.kind` on the wire is this module's own enum, declared separately from
+    `vibesys.orchestration.dynamic.search.api.FailureKind` so core's engine never imports the event
+    schema. Nothing re-derives one from the other, so a renamed or added core member would silently
+    desync the wire vocabulary from the engine that reports it; this guard turns that into a test
+    failure instead.
+    """
+    wire_values = {member.value for member in WorkstreamFailureKind}
+    engine_values = {member.value for member in FailureKind}
+
+    assert wire_values == engine_values
 
 
 @given(

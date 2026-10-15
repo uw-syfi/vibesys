@@ -552,21 +552,12 @@ class SubprocessOutputData(EventPayload):
 
 
 class JudgeResultData(EventPayload):
-    """Verdict and feedback returned by the judge.
-
-    See ``vibesys.events.JudgeResultData`` for ``skipped``/``skip_reason``/
-    ``implementer_outcome``.
-    """
+    """Verdict and feedback returned by the judge."""
 
     kind: Literal["judge_result"] = "judge_result"
     verdict: Literal["pass", "fail"]
     feedback: str
     attempt: int
-    skipped: bool = False
-    skip_reason: str | None = None
-    implementer_outcome: (
-        Literal["continue", "supported", "nominated", "disproven", "implementation_failed"] | None
-    ) = None
 
 
 class BenchmarkResultData(EventPayload):
@@ -648,11 +639,7 @@ class WorkspaceSnapshotData(EventPayload):
 
 
 class RunConfiguredData(EventPayload):
-    """One per run: the resolved configuration a loop starts with.
-
-    See ``vibesys.events.RunConfiguredData`` for ``max_continuation_rounds``/
-    ``max_unmeasured_turns``.
-    """
+    """One per run: the resolved configuration a loop starts with."""
 
     kind: Literal["run_configured"] = "run_configured"
     run_log_path: str
@@ -663,8 +650,6 @@ class RunConfiguredData(EventPayload):
     search_policy: str | None = None
     benchmark_contract: bool = False
     pareto_objectives: str | None = None
-    max_continuation_rounds: int | None = None
-    max_unmeasured_turns: int | None = None
     source: FrameworkSource = FrameworkSource.LOOP
 
 
@@ -732,16 +717,9 @@ class WorkstreamFailureData(BaseModel):
 
 
 class WorkstreamFinishedData(EventPayload):
-    """One workstream (one dynamic-run round) ended; its typed failure, if any.
-
-    See ``vibesys.events.WorkstreamFinishedData`` for why ``setup_failure``
-    and ``refunded`` are always ``False`` from this event's only current
-    producer.
-    """
+    """One workstream (one dynamic-run round) ended; its typed failure, if any."""
 
     kind: Literal["workstream_finished"] = "workstream_finished"
-    setup_failure: bool
-    refunded: bool
     repeated_error: bool
     last_error: WorkstreamFailureData | None = None
 
