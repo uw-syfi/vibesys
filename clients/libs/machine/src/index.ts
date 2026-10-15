@@ -4,7 +4,7 @@
  * machine's `after` delays run on an injected scheduler, and the placeholder for an operation the
  * shell provides. Generic: it names no concept of the product.
  */
-import type {Store} from '@vibesys/store';
+import {createListenerDelivery, type Store} from '@vibesys/store';
 import {
   type Actor,
   type ActorOptions,
@@ -54,19 +54,16 @@ export function actorStore<L extends AnyActorLogic, V>(
   view: (snapshot: SnapshotFrom<L>) => V,
 ): Store<V, EventFromLogic<L>> {
   let current = view(actor.getSnapshot());
-  const listeners = new Set<() => void>();
+  const delivery = createListenerDelivery();
   actor.subscribe(snapshot => {
     const next = view(snapshot);
     if (Object.is(next, current)) return;
     current = next;
-    for (const listener of listeners) listener();
+    delivery.notify();
   });
   return {
     getState: () => current,
-    subscribe(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
+    subscribe: delivery.subscribe,
     dispatch: event => actor.send(event),
   };
 }
