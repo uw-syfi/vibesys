@@ -344,7 +344,7 @@ def _project_with_run(root: Path) -> tuple[Project, str]:
 
 def _published(snapshot: RunSnapshot) -> FlowState:
     """The state of a started dynamic search whose last publication is ``snapshot``."""
-    state = begin(config(), restarting=False).run.state
+    state = begin(config(), restarting=False, input_first=False).run.state
     return state.model_copy(
         update={"live": state.live.model_copy(update={"published": snapshot.model_dump_json()})}
     )
@@ -422,7 +422,7 @@ def test_a_run_without_a_record_has_identity_and_status_only_and_stays_unopened(
 
 def test_a_record_that_published_nothing_projects_to_an_empty_run(tmp_path: Path) -> None:
     project, run_id = _project_with_run(tmp_path)
-    state = begin(config(), restarting=False).run.state
+    state = begin(config(), restarting=False, input_first=False).run.state
     _commit(project, run_id, state)
 
     view = dynamic_projector().view(project, run_id, status=RunStatus.ACTIVE, loop="dynamic")

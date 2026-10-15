@@ -26,6 +26,12 @@ Input baseline (the root before any change, trusted benchmark):
 {% endfor %}
 A candidate must beat it on the objectives to be adopted.
 {% endif %}
+{% if baseline_pending %}
+
+Input baseline: still being measured (the trusted evaluation may wait in a queue). Plan
+from the task and the code now; the workstreams you schedule start once the input's
+measurement lands, and a later request shows its result.
+{% endif %}
 {% if input_failure %}
 
 Input not measurable: {% if input_failure.kind.value == 'no-evidence' %}the trusted measurement of the input ended without evidence ({{ input_failure.status.value }}){% elif input_failure.kind.value == 'readings-refused' %}the decoded readings did not match the evidence that was asked about{% elif input_failure.kind.value == 'readings-undecodable' %}the evidence of the input could not be decoded{% elif input_failure.kind.value == 'benchmark-failed' %}the input's own benchmark failed{% else %}the measurement of the input ended without a result ({{ input_failure.ended.value }}){% endif %}{{ "" }}

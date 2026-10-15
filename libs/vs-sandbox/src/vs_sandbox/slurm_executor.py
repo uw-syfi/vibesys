@@ -37,6 +37,13 @@ from vs_evaluation.api import (
     is_finished,
 )
 from vs_project.api import atomic_write_bytes
+from vs_sandbox.slurm_deadlines import (
+    DeadlineLimits,
+    DeadlinePhase,
+    WaitDeadlines,
+    first_deadlines,
+)
+from vs_sandbox.slurm_deadlines import observe as observe_deadlines
 from vs_sandbox.slurm_stage_output import CollectedStage, StageOutputFollower
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
@@ -285,7 +292,14 @@ class _DurableSlurmEvaluation(BaseModel):
 
     handle: SlurmBatchHandle | None
     request: EvaluationRequest
+    # The deadlines of the job's current scheduler attempt (``slurm_deadlines``):
+    # ``wait_deadline_epoch_s`` bounds its queue wait (None: unbounded),
+    # ``run_deadline_epoch_s`` its run from when it was first seen running.
+    # ``deadline_attempt`` is None until the deadlines were first saved; a record
+    # from before the split has only ``wait_deadline_epoch_s``, read as attempt 0.
     wait_deadline_epoch_s: float | None = None
+    run_deadline_epoch_s: float | None = None
+    deadline_attempt: int | None = None
     # Legacy records always contained an accepted handle. Missing dispatch
     # evidence is conservative: never authorize a replay from its absence.
     dispatch_started: bool = True
@@ -365,6 +379,10 @@ class SlurmEvaluationExecutor:
         )
         self._clock = clock
         self._job_timeout_seconds = config.job_timeout_seconds
+        self._queue_timeout_seconds = config.queue_timeout_seconds
+        self._deadline_limits = DeadlineLimits(
+            queue_seconds=config.queue_timeout_seconds, run_seconds=config.job_timeout_seconds
+        )
         self._workspace = workspace
         self._setup_script = setup_script
         self._service = service
@@ -959,37 +977,64 @@ class SlurmEvaluationExecutor:
         durable: _DurableSlurmEvaluation | None,
         follower: StageOutputFollower,
     ) -> SlurmJobStatus:
-        """Persist and enforce the scheduler observation deadline; return the terminal status.
+        """Persist and enforce the queue and run deadlines; return the terminal status.
 
-        Each poll that finds a stage running also copies its new output (``follower``).
+        Queue wait and run time are bounded separately (``slurm_deadlines``): a job
+        that starts late still gets its whole run budget. Each poll that finds a
+        stage running also copies its new output (``follower``).
         """
-        wait_deadline_epoch_s = durable.wait_deadline_epoch_s if durable is not None else None
-        if wait_deadline_epoch_s is None:
-            remaining = self._job_timeout_seconds - handle.waited_seconds
-            wait_deadline_epoch_s = self._clock.now() + remaining
-            self._write_evaluation(
-                handle_id,
-                handle,
-                request,
-                wait_deadline_epoch_s=wait_deadline_epoch_s,
+        deadlines = None if durable is None else _deadlines_of(durable)
+        if deadlines is None:
+            deadlines = first_deadlines(
+                now=self._clock.now(),
+                queued_seconds=handle.waited_seconds,
+                limits=self._deadline_limits,
             )
-        else:
-            remaining = wait_deadline_epoch_s - self._clock.now()
-        if remaining <= 0:
-            raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
+            self._save_deadlines(handle_id, handle, request, deadlines)
         while True:
+            self._check_deadline(deadlines)
             observed = await self._inspect_cancellation_safe(handle_id, handle)
             if isinstance(observed, ClusterObservation):
                 if observed.status.terminal:
                     return observed.status
+                folded = observe_deadlines(
+                    deadlines,
+                    attempt=observed.attempt,
+                    running=observed.status is SlurmJobStatus.RUNNING,
+                    now=self._clock.now(),
+                    limits=self._deadline_limits,
+                )
+                if folded != deadlines:
+                    deadlines = folded
+                    self._save_deadlines(handle_id, handle, request, deadlines)
                 active = self._lifecycle_observation(handle_id, observed, request)
                 if active is not None:
                     self._publish(handle_id, active)
                     await self._follow(follower, request, active)
-            remaining = wait_deadline_epoch_s - self._clock.now()
-            if remaining <= 0:
-                raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
-            await self._sleeper.sleep(min(self._poll_interval, remaining))
+            self._check_deadline(deadlines)
+            until = deadlines.active_epoch_s
+            pause = self._poll_interval
+            if until is not None:
+                pause = min(pause, until - self._clock.now())
+            await self._sleeper.sleep(pause)
+
+    def _check_deadline(self, deadlines: WaitDeadlines) -> None:
+        until = deadlines.active_epoch_s
+        if until is None or until - self._clock.now() > 0:
+            return
+        if deadlines.phase is DeadlinePhase.RUN:
+            raise _SlurmExecutionError.run_deadline_exceeded(self._job_timeout_seconds)
+        raise _SlurmExecutionError.queue_deadline_exceeded(self._queue_timeout_seconds or 0)
+
+    def _save_deadlines(
+        self,
+        handle_id: str,
+        handle: SlurmBatchHandle,
+        request: EvaluationRequest,
+        deadlines: WaitDeadlines,
+    ) -> None:
+        """Persist the deadlines before acting on them, so a restart enforces the same ones."""
+        self._write_evaluation(handle_id, handle, request, deadlines=deadlines)
 
     async def _follow(
         self,
@@ -1325,7 +1370,7 @@ class SlurmEvaluationExecutor:
         handle: SlurmBatchHandle | None,
         request: EvaluationRequest,
         *,
-        wait_deadline_epoch_s: float | None = None,
+        deadlines: WaitDeadlines | None = None,
         dispatch_started: bool = True,
     ) -> None:
         path = self._handle_root / f"{handle_id}.json"
@@ -1333,7 +1378,9 @@ class SlurmEvaluationExecutor:
             _DurableSlurmEvaluation(
                 handle=handle,
                 request=request,
-                wait_deadline_epoch_s=wait_deadline_epoch_s,
+                wait_deadline_epoch_s=None if deadlines is None else deadlines.queue_epoch_s,
+                run_deadline_epoch_s=None if deadlines is None else deadlines.run_epoch_s,
+                deadline_attempt=None if deadlines is None else deadlines.attempt,
                 dispatch_started=dispatch_started,
             ).model_dump_json()
             + "\n"
@@ -1360,6 +1407,17 @@ class _SlurmStagePayloadError(ValueError):
     @classmethod
     def missing_command(cls, name: str) -> _SlurmStagePayloadError:
         return cls(f"Slurm stage {name!r} requires a nonempty configured command")
+
+
+def _deadlines_of(record: _DurableSlurmEvaluation) -> WaitDeadlines | None:
+    """The saved deadlines, or None when the record has never saved any."""
+    if record.deadline_attempt is None and record.wait_deadline_epoch_s is None:
+        return None
+    return WaitDeadlines(
+        attempt=record.deadline_attempt or 0,
+        queue_epoch_s=record.wait_deadline_epoch_s,
+        run_epoch_s=record.run_deadline_epoch_s,
+    )
 
 
 def _stage_command(name: str, command: str | None) -> tuple[str, ...]:
@@ -1446,6 +1504,16 @@ class _SlurmExecutionError(RuntimeError):
     @classmethod
     def missing_durable_evaluation(cls, handle_id: str) -> _SlurmExecutionError:
         return cls(f"Slurm evaluation {handle_id!r} lost its durable lifecycle record")
+
+    @classmethod
+    def run_deadline_exceeded(cls, timeout_seconds: int) -> _SlurmExecutionError:
+        return cls(f"Slurm evaluation ran past its {timeout_seconds}-second run deadline")
+
+    @classmethod
+    def queue_deadline_exceeded(cls, timeout_seconds: int) -> _SlurmExecutionError:
+        return cls(
+            f"Slurm evaluation waited in the queue past its {timeout_seconds}-second queue deadline"
+        )
 
     @classmethod
     def deadline_exceeded(cls, timeout_seconds: int) -> _SlurmExecutionError:

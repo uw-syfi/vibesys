@@ -2,8 +2,11 @@
  * `HostConnection.openLogs`: the host's one logs request channel, opened by the first request of
  * the first lease, shared by every lease, closed when the last lease is released, and never opened
  * for a helper that does not offer `logs` (`docs/contributing/desktop-connection.md`, "Logs").
+ * An aborted read is withdrawn with `logs.cancel` when the helper offers `logs_cancel`.
  */
 import {describe, expect, test} from 'bun:test';
+import type {HelperRequest} from '@vibesys/contracts/host-helper';
+import {type LogReadInput, startLogFollower} from '@vibesys/logs';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {ConnectionConfig} from '../state/host-connection.js';
 import {FakeLink} from '../testing/fake-helper.js';
@@ -14,15 +17,33 @@ const INSTANCE = '0123456789ab';
 const encoder = new TextEncoder();
 const NEVER = new AbortController().signal;
 
-function connectionOver(link: FakeLink): HostConnection {
+function connectionOver(link: FakeLink, clock = new FakeClock()): HostConnection {
   return new HostConnection({
     link,
     checkout: '/src/vibesys',
     appVersion: 'test',
     config: CONFIG,
-    scheduleTimeout: new FakeClock().scheduleTimeout,
+    scheduleTimeout: clock.scheduleTimeout,
     log: () => {},
   });
+}
+
+/** A read that waits at the end of the seeded stream, as a follower's long poll does. */
+const WAITING_READ: LogReadInput = {
+  instance_id: INSTANCE,
+  stream_id: '000001',
+  start: {offset: 27},
+  max_bytes: 1024,
+  wait_ms: 25_000,
+};
+
+function requestsOf<T extends HelperRequest['type']>(
+  link: FakeLink,
+  type: T,
+): Extract<HelperRequest, {type: T}>[] {
+  return link.helper.requests.filter(
+    (request): request is Extract<HelperRequest, {type: T}> => request.type === type,
+  );
 }
 
 /** A link whose helper's store holds one startup stream for `INSTANCE`. */
@@ -123,5 +144,67 @@ describe('HostConnection.openLogs', () => {
     const abort = new AbortController();
     abort.abort(new Error('the view left'));
     await expect(lease.list(INSTANCE, abort.signal)).rejects.toThrow('the view left');
+  });
+
+  for (const offered of [true, false]) {
+    test(`aborting a read in flight ${offered ? 'withdraws it' : 'only drops it'} when the helper ${offered ? 'offers' : 'lacks'} logs_cancel`, async () => {
+      const link = seededLink();
+      if (!offered) link.helper.features.delete('logs_cancel');
+      await using connection = connectionOver(link);
+      await using lease = connection.openLogs();
+      const reads = 3;
+      for (let index = 0; index < reads; index += 1) {
+        const held = link.helper.deferNext('logs.read');
+        const abort = new AbortController();
+        const read = lease.read(WAITING_READ, abort.signal);
+        await held.received;
+        abort.abort(new Error('the view left'));
+        await expect(read).rejects.toThrow('the view left');
+        held.release();
+      }
+      // The channel keeps order: a withdrawal written before this request reached the helper first.
+      expect(await lease.list(INSTANCE, NEVER)).toMatchObject({ok: true});
+
+      const withdrawn = requestsOf(link, 'logs.cancel').map(cancel => cancel.read_id);
+      const ids = requestsOf(link, 'logs.read').map(read => read.request_id);
+      expect(ids).toHaveLength(reads);
+      expect(withdrawn).toEqual(offered ? ids : []);
+    });
+  }
+
+  test('a read that answered is not withdrawn by a later abort', async () => {
+    const link = seededLink();
+    await using connection = connectionOver(link);
+    await using lease = connection.openLogs();
+    const abort = new AbortController();
+    expect(await lease.read(WAITING_READ, abort.signal)).toMatchObject({ok: true});
+    abort.abort(new Error('the view left'));
+    expect(await lease.list(INSTANCE, NEVER)).toMatchObject({ok: true});
+    expect(requestsOf(link, 'logs.cancel')).toEqual([]);
+  });
+
+  test('stopping a following log follower withdraws its long poll', async () => {
+    const link = seededLink();
+    const clock = new FakeClock();
+    await using connection = connectionOver(link, clock);
+    await using lease = connection.openLogs();
+    link.helper.deferNext('logs.read').release();
+    const follow = link.helper.deferNext('logs.read');
+    const follower = startLogFollower(lease, clock.scheduleTimeout, {
+      instanceId: INSTANCE,
+      streamId: '000001',
+    });
+    await follow.received;
+    expect(follower.getSnapshot().value).toBe('following');
+
+    follower.send({type: 'stop'});
+    expect(await lease.list(INSTANCE, NEVER)).toMatchObject({ok: true});
+    const [, waiting] = requestsOf(link, 'logs.read');
+    if (waiting === undefined) throw new Error('the follower sent no follow read');
+    expect(waiting.wait_ms).toBe(25_000);
+    expect(requestsOf(link, 'logs.cancel').map(cancel => cancel.read_id)).toEqual([
+      waiting.request_id,
+    ]);
+    follow.release();
   });
 });

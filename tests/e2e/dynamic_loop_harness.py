@@ -803,12 +803,14 @@ class CoreRecords:
 
     def baseline_metric(self) -> float | None:
         """Return the trusted baseline's first metric value, if it was measured."""
-        reading = candidates.reading(self.snapshot.baseline)
+        baseline = self.snapshot.baseline
+        reading = None if baseline is None else candidates.reading(baseline)
         return reading.metrics[0].value if reading is not None and reading.metrics else None
 
     def baseline_failure(self) -> candidates.InputFailure | None:
-        """Return why the input could not be measured, or None when it was."""
-        return candidates.failure(self.snapshot.baseline)
+        """Return why the input could not be measured, or None when it was (or is still pending)."""
+        baseline = self.snapshot.baseline
+        return None if baseline is None else candidates.failure(baseline)
 
     def hypothesis(self, hypothesis_id: str) -> HypothesisRecord:
         """Return the search's record of one hypothesis."""

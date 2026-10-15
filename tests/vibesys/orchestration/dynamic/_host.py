@@ -89,6 +89,8 @@ TERMS = TaskTerms(
     accuracy_gated=(EvidenceKind.BENCHMARK,),
     operation_seconds=30,
 )
+UNMEASURED_TERMS = TERMS.model_copy(update={"measured": ()})
+"""A task with no stage configured to measure the input with."""
 FACTS = initial_state().run.facts.model_copy(update={"task": TERMS})
 """The run facts every story starts from: the core's sample facts plus a task that measures."""
 
@@ -99,6 +101,8 @@ _KINDS = {
 }
 _REGISTRY = REGISTRY
 PLANNER_LABEL = "orchestrator"
+INPUT_PATH = "input/"
+"""Where the waits of the task that measures the input are asked from."""
 INPUT_THROUGHPUT = 50.0
 _CANDIDATE_THROUGHPUT = 100.0
 
@@ -119,11 +123,20 @@ def begin(
     restarting: bool,
     view: FakeView | None = None,
     adopting: bool = True,
+    input_first: bool = True,
     **world: Unpack[World],
 ) -> Host:
-    """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves."""
+    """Start the dynamic search of ``cfg`` under a host; ``world`` sets how the far side behaves.
+
+    The search plans while it measures the input. With ``input_first`` (the default) the host
+    answers the input's measurement before anything else, so a story starts from a measured input
+    with the first planner turn open; a story about the overlap passes False.
+    """
     run = start_flow(dynamic, cfg, facts=FACTS, restarting=restarting, view=view, adopting=adopting)
-    return Host(run, cfg, **world)
+    host = Host(run, cfg, **world)
+    if input_first:
+        host.measure_input()
+    return host
 
 
 class World(TypedDict, total=False):
@@ -228,6 +241,20 @@ class Host:
             self.run.advance_to(min(self.run.sleeping_until))
             return True
         return False
+
+    def input_waits(self) -> list[Asked]:
+        """The open waits of the task that measures the input."""
+        return [item for item in self.run.open if item.path == INPUT_PATH]
+
+    def measure_input(self, *, limit: int = 10) -> None:
+        """Answer the input's measurement, and the decoding of its evidence, the ordinary way."""
+        for _ in range(limit):
+            waits = self.input_waits()
+            if not waits:
+                return
+            self.answer(waits[0])
+        message = f"the input's measurement did not end in {limit} steps: {self.run.timeline()}"
+        raise AssertionError(message)
 
     def drain_until_turn(self, role: str, *, limit: int = 50) -> None:
         """Answer the ordinary way until a turn of ``role`` is open."""

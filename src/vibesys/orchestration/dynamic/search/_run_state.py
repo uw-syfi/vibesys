@@ -23,7 +23,7 @@ from vibesys.orchestration.dynamic.search._context import (
     remaining,
 )
 from vibesys.orchestration.dynamic.search._handoff import HandoffWritten
-from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
+from vibesys.orchestration.dynamic.search._ids import INPUT_KEY, planning_key, workstream_key
 from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamDone,
     WorkstreamStart,
@@ -50,9 +50,13 @@ from vs_core.api.search import INPUT, Input, Kept, NoWinner, RevisionRef, TaskTe
 
 @dataclass(frozen=True)
 class Scheduled:
-    """A planning call ended with a plan to schedule, and the handoff file it left."""
+    """A planning call ended with a plan to schedule, and the handoff file it left.
+
+    ``blind`` says the plan answered a prompt asked before the input's measurement landed.
+    """
 
     check: PlanCheck
+    blind: bool = False
     handoff: HandoffWritten | None = None
     """The call's handoff file and every one the owner holds; None when its write failed."""
 
@@ -96,7 +100,8 @@ class RunSnapshot(Value):
     """What the search publishes of its record, for the projector and for tests."""
 
     kind: Literal["dynamic-run-snapshot"] = "dynamic-run-snapshot"
-    baseline: candidates.Baseline
+    baseline: candidates.Baseline | None
+    """The input's measurement; None while it is still being measured."""
     hypotheses: tuple[HypothesisRecord, ...] = ()
     finished: tuple[FinishedWork, ...] = ()
     running: tuple[Running, ...] = ()
@@ -113,7 +118,8 @@ class RunRecord:
     config: DynamicConfig
     base: RevisionRef
     """The revision the run started from."""
-    baseline: candidates.Baseline
+    baseline: candidates.Baseline | None
+    """The input's measurement; None while it is still being measured (see `measured`)."""
     terms: TaskTerms
     """What the task fixes: the space candidates are ranked in, and the capture's fields."""
     hypotheses: dict[str, HypothesisRecord] = field(default_factory=dict)
@@ -149,15 +155,21 @@ class RunRecord:
         return free_slots(self.config, active=len(self.running), left=left)
 
     def may_plan(self, *, stopping: bool) -> bool:
-        """Whether a planning call should start: a slot is free and planning is not held off."""
+        """Whether a planning call should start: a slot is free and planning is not held off.
+
+        While the input is being measured, a plan the planner already gave waits for it (see
+        `ready_to_start`), and no further call starts: the accepted plans hold the free slots.
+        """
         gate = self.gate
         if stopping or gate.failed or not self.capacity():
             return False
+        if self.baseline is None and self.accepted:
+            return False
         return gate.blocked_at_done is None or len(self.finished_work) > gate.blocked_at_done
 
-    def over(self, *, planning: bool, stopping: bool) -> bool:
+    def over(self, *, planning: bool, measuring: bool, stopping: bool) -> bool:
         """Whether nothing is in flight and nothing more will be scheduled."""
-        if self.running or planning or self.accepted:
+        if self.running or planning or measuring or self.accepted:
             return False
         left = remaining(self.config, started=self.started, refunded=self.refunded)
         return stopping or self.gate.failed or left == 0
@@ -173,6 +185,21 @@ class RunRecord:
     def offered(self) -> tuple[ParentOption, ...]:
         """The parents the planner may choose from now."""
         return offered_parents(self.parents, self.withheld)
+
+    # -- the input's measurement ---------------------------------------------------------------
+
+    def measured(self, baseline: candidates.Baseline) -> None:
+        """Fold the input's measurement, which planning did not wait for.
+
+        A trusted input lets the plans accepted meanwhile start now (`ready_to_start`). An input
+        that failed its measurement drops them, since they were made without knowing what the
+        benchmark requires: the planner is asked again with the failure in view (`planned` drops
+        a blind plan that arrives later). Either way a call that ended empty is asked again.
+        """
+        self.baseline = baseline
+        self.gate.blocked_at_done = None
+        if not candidates.trusted(baseline):
+            self.accepted = []
 
     def world(self) -> PlanWorld:
         """What a planning call reads of the run now."""
@@ -194,8 +221,16 @@ class RunRecord:
         )
 
     def planned(self, outcome: PlanOutcome) -> None:
-        """Fold a finished planning call: park or abandon what it decided, queue what it accepted."""
+        """Fold a finished planning call: park or abandon what it decided, queue what it accepted.
+
+        A plan made before the input's measurement landed is dropped when the input turned out
+        untrusted (see `measured`); planning is asked again.
+        """
         match outcome:
+            case Scheduled(blind=True, handoff=handoff) if self._input_failed():
+                if handoff is not None:
+                    self.handoffs = handoff.listed
+                self.gate.blocked_at_done = None
             case Scheduled(check=check, handoff=handoff):
                 if handoff is not None:
                     self.handoffs = handoff.listed
@@ -209,6 +244,9 @@ class RunRecord:
                 self.accepted.extend(check.accepted)
             case NoPlan(problem=problem, stuck=stuck, blocked_at_done=at_done):
                 self.gate = PlannerGate(failed=stuck, blocked_at_done=at_done, last_error=problem)
+
+    def _input_failed(self) -> bool:
+        return self.baseline is not None and not candidates.trusted(self.baseline)
 
     # -- workstreams ---------------------------------------------------------------------------
 
@@ -238,7 +276,14 @@ class RunRecord:
         return (earlier[-1].parent, earlier[-1].parent_hypothesis_id) if earlier else None
 
     def ready_to_start(self, free: int) -> list[WorkstreamStart]:
-        """A workstream for each accepted plan that fits in ``free`` slots, now running."""
+        """A workstream for each accepted plan that fits in ``free`` slots, now running.
+
+        None starts before the input is measured: a workstream settles against it, so accepted
+        plans wait in ``accepted`` until it lands.
+        """
+        baseline = self.baseline
+        if baseline is None:
+            return []
         starts = []
         ready, self.accepted = self.accepted[:free], self.accepted[free:]
         for plan in ready:
@@ -256,7 +301,7 @@ class RunRecord:
                 parent_hypothesis_id=lineage,
                 prior=prior,
                 config=self.config,
-                baseline=self.baseline,
+                baseline=baseline,
             )
             self.running[start.key] = start
             starts.append(start)
@@ -310,11 +355,15 @@ class RunRecord:
             self.kept[settlement.settlement_id.root] = retained
 
     def stopped_before_start(self, key: str) -> None:
-        """A task the stop ended: a workstream before it had a workspace, or a planning call.
+        """A task the stop ended before it had anything to settle.
 
+        That is a workstream before it had a workspace, a planning call, or the input's measurement.
         A planning call leaves nothing to record: after a stop nothing it planned would start.
+        Without the input's measurement no accepted plan can start either, so they are dropped.
         """
-        if key in self.running:
+        if key == INPUT_KEY:
+            self.accepted = []
+        elif key in self.running:
             self.finished(WorkstreamDone.stopped(self.running[key]))
 
     # -- the winner ----------------------------------------------------------------------------
@@ -355,8 +404,8 @@ class RunRecord:
 
     def ending(self) -> NoWinner | None:
         """None when the run ends with a winner or with the input standing; else why it has none."""
-        if self.eligible_rounds():
-            return None
+        if self.eligible_rounds() or self.baseline is None:
+            return None  # a stop before the input was measured leaves the input standing
         trusted = candidates.trusted(self.baseline)
         if self.gate.failed:
             return NoWinner(reason=self._no_winner_reason(trusted=trusted))
@@ -365,7 +414,7 @@ class RunRecord:
     def _no_winner_reason(self, *, trusted: bool) -> str:
         problem = self.gate.last_error
         asked = problem.kind.value if problem is not None else ""
-        if trusted:
+        if trusted or self.baseline is None:
             return asked or "no candidate could be adopted"
         why = candidates.failure(self.baseline)
         detail = why.kind.value if why is not None else "the input did not pass its measurement"

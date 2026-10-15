@@ -3,21 +3,31 @@
  * `LOGS_CHANNEL`, and what comes back. The page names no host and no channel: the main process
  * serves each request from the run the page is bound to, over that host's logs channel
  * (`docs/contributing/desktop-connection.md`, "Logs"). A listing names that run's instance, and a
- * read must name the same one.
+ * read must name the same one. A read carries a token the page chose, unique among its reads in
+ * flight, so the page can `withdraw` it when it stops waiting: an IPC invoke cannot be withdrawn
+ * itself, and the main process then withdraws the helper's long poll.
  */
 import type {LogListOutcome, LogReadInput, LogReadOutcome} from '@vibesys/logs';
 
 /** IPC channel on which the run page asks the main process for its run's logs (`invoke`). */
 export const LOGS_CHANNEL = 'vibesys:logs';
 
+/** The longest read token a page may choose. */
+const LOG_READ_TOKEN_MAX_LENGTH = 64;
+const LOG_READ_TOKEN = new RegExp(`^[A-Za-z0-9_-]{1,${LOG_READ_TOKEN_MAX_LENGTH}}$`);
+
 export type RunLogsRequest =
   | {readonly kind: 'list'}
-  | {readonly kind: 'read'; readonly read: LogReadInput};
+  | {readonly kind: 'read'; readonly token: string; readonly read: LogReadInput}
+  /** Abort the page's read in flight named `token`; a token naming none (it answered) is a no-op. */
+  | {readonly kind: 'withdraw'; readonly token: string};
 
-/** The reply to each request kind. */
+/** The reply to each request kind: a withdrawal answers `null` once the main process acted on it. */
 export type RunLogsReply<R extends RunLogsRequest> = R extends {readonly kind: 'list'}
   ? LogListOutcome
-  : LogReadOutcome;
+  : R extends {readonly kind: 'read'}
+    ? LogReadOutcome
+    : null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -29,6 +39,10 @@ function count(value: unknown): value is number {
 
 function onlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
   return Object.keys(value).every(key => keys.includes(key));
+}
+
+function token(value: unknown): value is string {
+  return typeof value === 'string' && LOG_READ_TOKEN.test(value);
 }
 
 function readStart(value: unknown): LogReadInput['start'] | null {
@@ -65,7 +79,11 @@ function readInput(value: unknown): LogReadInput | null {
 export function parseRunLogsRequest(value: unknown): RunLogsRequest | null {
   if (!isRecord(value)) return null;
   if (value['kind'] === 'list' && onlyKeys(value, ['kind'])) return {kind: 'list'};
-  if (value['kind'] !== 'read' || !onlyKeys(value, ['kind', 'read'])) return null;
+  if (value['kind'] === 'withdraw' && onlyKeys(value, ['kind', 'token'])) {
+    return token(value['token']) ? {kind: 'withdraw', token: value['token']} : null;
+  }
+  if (value['kind'] !== 'read' || !onlyKeys(value, ['kind', 'token', 'read'])) return null;
   const read = readInput(value['read']);
-  return read === null ? null : {kind: 'read', read};
+  if (read === null || !token(value['token'])) return null;
+  return {kind: 'read', token: value['token'], read};
 }

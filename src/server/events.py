@@ -43,6 +43,7 @@ from server.run_lifecycle import RunStatus
 from vibesys.api import (
     AgentOutputChannel,
     AgentStatusData,
+    GateKind,
     RunFailedData,
     TodoItemData,
     ToolResultPayload,
@@ -191,14 +192,6 @@ ChatThreadId = TypeAliasType(
     ],
 )
 """Portable identity shared by chat requests, events, and transcript paths."""
-
-
-class GateKind(StrEnum):
-    """Closed set of framework-owned gates a candidate passes through."""
-
-    VALIDATION = "validation"
-    ACCURACY = "accuracy"
-    BENCHMARK = "benchmark"
 
 
 class FrameworkSource(StrEnum):

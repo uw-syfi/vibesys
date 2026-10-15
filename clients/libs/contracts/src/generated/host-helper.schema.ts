@@ -548,6 +548,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "paths_complete",
         "instances_inspect",
         "logs",
+        "logs_cancel",
         "harnesses"
       ],
       "title": "HelperFeature",
@@ -1429,6 +1430,75 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "LogTail",
       "type": "object"
     },
+    "LogsCancelReply": {
+      "additionalProperties": false,
+      "description": "The withdrawal was taken: a read ``read_id`` named that was still waiting stops waiting.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "logs.cancel",
+          "default": "logs.cancel",
+          "title": "Type",
+          "type": "string"
+        },
+        "read_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Read Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "read_id"
+      ],
+      "title": "LogsCancelReply",
+      "type": "object"
+    },
+    "LogsCancelRequest": {
+      "additionalProperties": false,
+      "description": "Withdraw the ``logs.read`` whose request id is ``read_id``: a wait it is in ends now.\n\nThe read still answers, with what it holds (an empty chunk at the end of the\nstream), and its worker returns, so the channel can admit another request.\nNaming a read that already answered, or no read, is not an error: withdrawal\nraces the reply by nature. Admitted even when the channel's workers are full.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "logs.cancel",
+          "default": "logs.cancel",
+          "title": "Type",
+          "type": "string"
+        },
+        "read_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Read Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "read_id"
+      ],
+      "title": "LogsCancelRequest",
+      "type": "object"
+    },
     "LogsListReply": {
       "additionalProperties": false,
       "description": "The instance's streams, oldest first.",
@@ -1970,6 +2040,32 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunRole",
       "type": "string"
     },
+    "RunStartCompensationEvidence": {
+      "discriminator": {
+        "mapping": {
+          "stop_failed": "#/$defs/StopFailedCompensationFailure",
+          "stop_unconfirmed": "#/$defs/StopUnconfirmedCompensationFailure",
+          "worker_start_refused": "#/$defs/WorkerStartRefusedCompensationFailure"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/WorkerStartRefusedCompensationFailure"
+        },
+        {
+          "$ref": "#/$defs/StopFailedCompensationFailure"
+        },
+        {
+          "$ref": "#/$defs/StopUnconfirmedCompensationFailure"
+        }
+      ]
+    },
+    "RunStartCompensationFailure": {
+      "$ref": "#/$defs/RunStartCompensationEvidence",
+      "description": "One strict stderr line preserving an undisclosed instance cleanup failure.\n\nA successful ``run.start`` reply could not reach the client, so only this\ndiagnostic can tell an operator which live instance may need recovery. The\ndiscriminated variants make result presence and nonterminal outcomes part of\nthe generated schema rather than Python-only validation.",
+      "title": "RunStartCompensationFailure"
+    },
     "RunStartReply": {
       "additionalProperties": false,
       "description": "The started server's record, or why nothing started.",
@@ -2344,6 +2440,54 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "StartupStage",
       "type": "string"
     },
+    "StopFailedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The registry stop raised before returning typed evidence.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "stop_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "instance_id"
+      ],
+      "title": "StopFailedCompensationFailure",
+      "type": "object"
+    },
     "StopOutcome": {
       "description": "What ``vibesys instances stop`` observed.",
       "enum": [
@@ -2364,6 +2508,52 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "StopRoute",
       "type": "string"
+    },
+    "StopUnconfirmedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The registry returned a typed result that does not prove terminal cleanup.\n\nThe stop result is the one source of the instance identity in this variant,\nso a serialized report cannot carry two identities that disagree.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "stop_unconfirmed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "stop_result": {
+          "$ref": "#/$defs/UnconfirmedInstanceStopResult"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "stop_result"
+      ],
+      "title": "StopUnconfirmedCompensationFailure",
+      "type": "object"
     },
     "TaskList": {
       "additionalProperties": false,
@@ -2473,6 +2663,49 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "TasksListRequest",
       "type": "object"
     },
+    "UnconfirmedInstanceStopResult": {
+      "additionalProperties": false,
+      "description": "A complete stop result whose outcome does not prove terminal cleanup.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "stopping",
+            "still_running",
+            "unsupported"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "route": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopRoute"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "id",
+        "outcome"
+      ],
+      "title": "UnconfirmedInstanceStopResult",
+      "type": "object"
+    },
     "UnreadableRecord": {
       "additionalProperties": false,
       "description": "A registry entry this reader cannot interpret; ``version`` is ``None`` if it has none.",
@@ -2500,6 +2733,54 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "UnreadableRecord",
       "type": "object"
+    },
+    "WorkerStartRefusedCompensationFailure": {
+      "additionalProperties": false,
+      "description": "The helper could not start the worker that owns the compensating stop.",
+      "properties": {
+        "type": {
+          "const": "run.start_compensation_failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "exit_status": {
+          "const": 12,
+          "title": "Exit Status",
+          "type": "integer"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "detail": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Detail",
+          "type": "string"
+        },
+        "kind": {
+          "const": "worker_start_refused",
+          "title": "Kind",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "exit_status",
+        "request_id",
+        "detail",
+        "kind",
+        "instance_id"
+      ],
+      "title": "WorkerStartRefusedCompensationFailure",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -2514,6 +2795,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "instances.list": "#/$defs/InstancesListRequest",
           "instances.unwatch": "#/$defs/InstancesUnwatchRequest",
           "instances.watch": "#/$defs/InstancesWatchRequest",
+          "logs.cancel": "#/$defs/LogsCancelRequest",
           "logs.list": "#/$defs/LogsListRequest",
           "logs.read": "#/$defs/LogsReadRequest",
           "paths.complete": "#/$defs/PathsCompleteRequest",
@@ -2570,6 +2852,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/LogsReadRequest"
         },
         {
+          "$ref": "#/$defs/LogsCancelRequest"
+        },
+        {
           "$ref": "#/$defs/HarnessesListRequest"
         }
       ],
@@ -2586,6 +2871,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "instances.list": "#/$defs/InstancesListReply",
           "instances.unwatch": "#/$defs/InstancesUnwatchReply",
           "instances.watch": "#/$defs/InstancesWatchReply",
+          "logs.cancel": "#/$defs/LogsCancelReply",
           "logs.list": "#/$defs/LogsListReply",
           "logs.read": "#/$defs/LogsReadReply",
           "paths.complete": "#/$defs/PathsCompleteReply",
@@ -2642,6 +2928,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/LogsReadReply"
         },
         {
+          "$ref": "#/$defs/LogsCancelReply"
+        },
+        {
           "$ref": "#/$defs/HarnessesListReply"
         },
         {
@@ -2655,12 +2944,16 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "channel_end": {
       "$ref": "#/$defs/ChannelEnd"
+    },
+    "compensation_failure": {
+      "$ref": "#/$defs/RunStartCompensationFailure"
     }
   },
   "required": [
     "request",
     "message",
-    "channel_end"
+    "channel_end",
+    "compensation_failure"
   ],
   "title": "HostHelperDocument",
   "type": "object",
@@ -2671,6 +2964,7 @@ const hostHelperSchema: Record<string, unknown> = {
     "paths.complete": "paths_complete",
     "logs.list": "logs",
     "logs.read": "logs",
+    "logs.cancel": "logs_cancel",
     "harnesses.list": "harnesses"
   },
   "x-vibesys-feature-by-field": {

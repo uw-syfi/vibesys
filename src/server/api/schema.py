@@ -25,6 +25,7 @@ from server.host_api import (
     ChannelEnd,
     HelperMessage,
     HelperRequest,
+    RunStartCompensationFailure,
 )
 from vibesys.api import (
     IterationKind,
@@ -125,6 +126,7 @@ class HostHelperDocument(BaseModel):
     request: HelperRequest
     message: HelperMessage
     channel_end: ChannelEnd
+    compensation_failure: RunStartCompensationFailure
 
 
 def host_helper_json_schema() -> dict[str, Any]:

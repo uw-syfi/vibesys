@@ -135,6 +135,8 @@ class _Planning(RolePromptContext):
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
     input_failure: InputFailure | None = None
+    baseline_pending: bool = False
+    """The input is still being measured: what is scheduled now starts when its reading lands."""
     profiling: bool = False
     profile_fields: tuple[str, ...] = ()
     """The measurement fields a profile workstream may require: what the capture supplies."""

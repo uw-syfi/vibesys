@@ -1,4 +1,4 @@
-"""The keys of dynamic's concurrent flows: each planning call and each workstream has its own.
+"""Keys of dynamic's concurrent flows: the input's measurement, each planning call and workstream.
 
 The key order is the order the search folds finished work in: workstreams in the order they
 were scheduled.
@@ -9,6 +9,9 @@ from __future__ import annotations
 from vs_core.api.search import component
 
 PLANNING_PREFIX = "plan."
+
+INPUT_KEY = "input"
+"""The key of the one task that measures the input."""
 
 
 def planning_key(call: int) -> str:

@@ -73,7 +73,7 @@ def project_run_snapshot(snapshot: RunSnapshot, *, experiment_revision: int) -> 
 
 
 def _baseline_metrics(snapshot: RunSnapshot) -> tuple[MetricRow, ...]:
-    found = reading(snapshot.baseline)
+    found = None if snapshot.baseline is None else reading(snapshot.baseline)
     return () if found is None else found.metrics
 
 
