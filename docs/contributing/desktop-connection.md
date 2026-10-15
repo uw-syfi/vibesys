@@ -546,6 +546,10 @@ The campaign workspace UI these run pages can render, and the live telemetry str
 designed in [campaign-workspace-ui.md](../design/campaign-workspace-ui.md) and
 [live-campaign-streaming.md](../design/live-campaign-streaming.md).
 
+The proposed redesign of the desktop app (a sidebar shell, the New run, Machines, Run and Settings
+screens, and the design system they are built from) is specified in
+[desktop-redesign.md](../design/desktop-redesign.md).
+
 ## App lifecycle
 
 `AppLifecycle` is the one owner of process-wide state:
