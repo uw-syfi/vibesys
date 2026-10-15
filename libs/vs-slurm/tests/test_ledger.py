@@ -10,7 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_sim.api.testing import ManualClock, examples
@@ -256,7 +256,7 @@ def test_only_an_absent_failed_or_withdrawn_request_is_submitted_again(
     assert submit_step(None, now=now) == ClaimAttempt(0)
 
 
-_STAGE_OUTCOMES = st.sampled_from((0, 1, 2, 124, 137, 143, "skipped", "missing", "absent"))
+_STAGE_OUTCOMES = st.sampled_from((0, 1, 2, 70, 124, 137, 143, "skipped", "missing", "absent"))
 _STAGE_NAMES = ("build", "accuracy", "benchmark")
 _COMMAND_EXITS = frozenset({0, 1, 2})
 
@@ -264,9 +264,15 @@ _COMMAND_EXITS = frozenset({0, 1, 2})
 def _collected(
     outcomes: list[object], job_exit_code: int, mode: str
 ) -> ClusterCollected | ClusterUnknown | None:
-    """What a run collected: per stage an exit code, ``skipped``, ``missing`` or ``absent``."""
+    """What a run collected: per stage an exit code, ``skipped``, ``missing`` or ``absent``.
+
+    ``lost`` is a collection that failed before it read any result (a dropped
+    connection), ``unknown`` one that read result files that are incomplete.
+    """
     if mode == "none":
         return None
+    if mode == "lost":
+        return ClusterUnknown(operation_id="op", reason="ssh: connection reset")
     result = SlurmBatchResult(
         job_id="7",
         job_exit_code=job_exit_code,
@@ -288,16 +294,18 @@ def _collected(
     )
     # Incomplete evidence is never Collected: a cluster reports it as Unknown.
     if mode == "unknown" or "missing" in outcomes or not result.stages:
-        return ClusterUnknown(operation_id="op", reason="transport lost", result=result)
+        return ClusterUnknown(operation_id="op", reason="result files incomplete", result=result)
     return ClusterCollected(operation_id="op", result=result)
 
 
 @given(
     status=st.sampled_from(SlurmJobStatus),
     outcomes=st.lists(_STAGE_OUTCOMES, min_size=3, max_size=3),
-    job_exit_code=st.sampled_from((0, 1)),
-    mode=st.sampled_from(("collected", "unknown", "none")),
+    job_exit_code=st.sampled_from((0, 1, 70)),
+    mode=st.sampled_from(("collected", "unknown", "lost", "none")),
 )
+@example(status=SlurmJobStatus.COMPLETED, outcomes=[0, 70, 0], job_exit_code=0, mode="collected")
+@example(status=SlurmJobStatus.COMPLETED, outcomes=[0, 0, 0], job_exit_code=0, mode="lost")
 @settings(max_examples=examples(pr=200, nightly=2000), deadline=None)
 def test_an_attempt_is_reusable_only_once_collected_with_every_stages_own_result(
     status: SlurmJobStatus, outcomes: list[object], job_exit_code: int, mode: str
@@ -305,7 +313,10 @@ def test_an_attempt_is_reusable_only_once_collected_with_every_stages_own_result
     """A failing exit code is a result; a timeout, a kill, a missing file or no collection is not.
 
     The batch script exits 0 whatever its stages do, so Slurm's COMPLETED alone
-    proves nothing about the stages.
+    proves nothing about the stages. A service that never became ready (exit
+    code 70, of the batch or of a stage) is no result either. A collection lost
+    before it read anything settles nothing: the result files may be whole, so
+    a finished multi-hour job is collected again rather than run again.
     """
     job = _JOB.model_copy(update={"stages": tuple(LedgerStage(name=n) for n in _STAGE_NAMES)})
     collected = _collected(outcomes, job_exit_code, mode)
@@ -314,7 +325,8 @@ def test_an_attempt_is_reusable_only_once_collected_with_every_stages_own_result
     every_stage_ran_its_command = all(
         outcome == "skipped" or outcome in _COMMAND_EXITS for outcome in outcomes
     )
-    if not status.terminal or (status is SlurmJobStatus.COMPLETED and collected is None):
+    lost = collected is None or (isinstance(collected, ClusterUnknown) and collected.result is None)
+    if not status.terminal or (status is SlurmJobStatus.COMPLETED and lost):
         assert settled is None
     elif (
         status is SlurmJobStatus.COMPLETED

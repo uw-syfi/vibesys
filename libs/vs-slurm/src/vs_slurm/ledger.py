@@ -46,6 +46,7 @@ from vs_decode.api import Unreadable, decode_json
 
 from .cluster_types import ClusterCollected, ClusterUnknown
 from .runner import (
+    SERVICE_NOT_READY_EXIT_CODE,
     STAGE_TIMEOUT_EXIT_CODES,
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -483,8 +484,10 @@ def transitioned(
 
 # A stage stopped from outside rather than by its own command: by its time limit
 # (``STAGE_TIMEOUT_EXIT_CODES``) or by SIGTERM (143), which Slurm sends on preemption
-# and on a scancel. Its result says nothing about the candidate.
-_INTERRUPTED_EXIT_CODES = STAGE_TIMEOUT_EXIT_CODES | {143}
+# and on a scancel; or one that reports the service it measures never became ready
+# (``SERVICE_NOT_READY_EXIT_CODE``), which a node fault causes as often as the
+# candidate. Its result is not reused: the next ask runs it again.
+_INTERRUPTED_EXIT_CODES = STAGE_TIMEOUT_EXIT_CODES | {143, SERVICE_NOT_READY_EXIT_CODE}
 
 
 @dataclass(frozen=True, slots=True)
@@ -505,17 +508,20 @@ def settlement(
     run collected its results (``collected``) and every stage left its own: a
     stage that ran its command to an exit code, failing ones included, is a
     valid evaluation result, and a stage skipped after a failure is part of it.
-    A stage that timed out, was killed, or left no result file, and results
-    that could not be collected, settle it ``failed``, so the next ask runs it
-    again. A job that ended any other way than COMPLETED is ``failed`` with no
-    collection. A COMPLETED job not collected yet (``collected`` None) cannot
-    settle: a run that attaches to it collects it.
+    A stage that timed out, was killed, or left no result file, and result
+    files that are missing or malformed, settle it ``failed``, so the next ask
+    runs it again. A job that ended any other way than COMPLETED is ``failed``
+    with no collection. A COMPLETED job not collected yet (``collected`` None),
+    or whose collection failed before it read any result (a ``ClusterUnknown``
+    without a result: the connection dropped, the scheduler did not answer),
+    cannot settle: its result files may be whole, and a run that attaches to it
+    collects them again.
     """
     if not status.terminal:
         return None
     if status is not SlurmJobStatus.COMPLETED:
         return Settlement(LedgerState.FAILED, f"job {job.job_id} ended {status.value}")
-    if collected is None:
+    if collected is None or (isinstance(collected, ClusterUnknown) and collected.result is None):
         return None
     problem = _unreusable(collected, job)
     if problem is None:
