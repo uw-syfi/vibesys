@@ -50,7 +50,6 @@ from server.host_helper_requests import (
     ScannedEntry,
 )
 from vs_decode.api import Unreadable, decode_json
-from vs_logs.read import FromOffset, Tail, UnknownStreamError, open_log_directory
 from vs_project.api import Project, ProjectError
 from vs_sim.api import ProcessSpec
 
@@ -285,7 +284,9 @@ class StoreLogReader:
 
     ``locate`` names the run an instance drives or drove (``None`` when the host knows
     nothing of it); ``directory_for`` names that run's store. Each call opens the store
-    afresh, so the helper keeps no state between requests.
+    afresh, so the helper keeps no state between requests. ``vs_logs.read`` is imported
+    on the first logs request, so a channel that never asks for logs, and every
+    ``hello``, loads none of it (``tests/e2e/test_host_helper.py`` holds the ceiling).
     """
 
     def __init__(
@@ -315,6 +316,12 @@ class StoreLogReader:
         self, instance_id: str, stream_id: str, start: LogOffset | LogTail, max_bytes: int
     ) -> StoredBytes:
         """At most ``max_bytes`` of the stream from ``start``."""
+        # lint-waiver: LW-640281 [PLC0415]; logs cost the helper nothing until a client reads one.
+        # > At module level every channel would load vs_logs.read before `hello`, which the
+        # > helper's start-up ceiling forbids; a lazy facade (PEP 562) in vs_logs would hide
+        # > the import from tach, which keeps vs_logs.read visible to the host helper only.
+        from vs_logs.read import FromOffset, Tail, UnknownStreamError  # noqa: PLC0415
+
         reader = self._reader(instance_id)
         origin = (
             FromOffset(start.offset) if isinstance(start, LogOffset) else Tail(start.tail_bytes)
@@ -340,4 +347,9 @@ class StoreLogReader:
         location = self._locate(instance_id)
         if location is None:
             raise UnknownInstanceError(instance_id)
+        # lint-waiver: LW-640282 [PLC0415]; logs cost the helper nothing until a client reads one.
+        # > The same deferral as in `read`: `hello` must not load vs_logs.read, and an import
+        # > tach can see keeps its visibility rule enforced.
+        from vs_logs.read import open_log_directory  # noqa: PLC0415
+
         return open_log_directory(self._directory_for(location), _OWNER)

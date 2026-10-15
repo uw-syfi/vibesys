@@ -54,9 +54,7 @@ _SCENARIOS = tuple(
 # vs_project._workspace_tree (GitTracker restores preserved memory by descriptor) adds 1;
 # vs_project._nested_repositories (host Git refuses a work tree holding a nested repository)
 # adds 1.
-# vs_logs.read (the helper serves run logs through server.host_helper_os.StoreLogReader) and
-# server.host_helper_logs add 7.
-_MODULE_CEILING = 342
+_MODULE_CEILING = 335
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
@@ -161,6 +159,8 @@ def test_hello_loads_no_engine_and_reports_its_start_up_time(
     # #2351: minting an instance id with ``secrets`` loaded ``secrets``, ``hmac``
     # and ``base64`` on every hello and pushed the count over the ceiling.
     assert {"secrets", "hmac"}.isdisjoint(loaded)
+    # Logs cost nothing until a client reads one: vs_logs loads on the first logs request.
+    assert [name for name in loaded if name.split(".")[0] == "vs_logs"] == []
 
 
 def test_run_connect_makes_the_channel_a_relay_to_the_run(
