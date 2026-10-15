@@ -198,15 +198,20 @@ def test_previous_round_without_a_current_round_is_the_latest_finished(
     assert f"fb-r{max(finished)}" in answer
 
 
-@given(current=st.integers(min_value=2, max_value=8))
+@given(current=st.integers(min_value=1, max_value=8))
 def test_previous_round_with_a_current_round_is_the_one_before(current: int) -> None:
     events = [_judge(f"r{n}", round_label=f"round-{n}") for n in range(1, current + 1)]
     source = FakeInspectionSource(events, current_round=f"round {current}")
 
     answer = RunInspector(source).answer("and the previous round?")
 
-    assert f"fb-r{current - 1}" in answer
-    assert f"fb-r{current}" not in answer
+    if current == 1:
+        assert answer == "No previous round has been recorded yet."
+        assert "fb-r1" not in answer
+    else:
+        assert f"fb-r{current - 1}" in answer
+        assert f"fb-r{current}" not in answer
+    assert source.queries == ["and the previous round?"]
 
 
 def test_missing_events_say_so_and_unmatched_questions_explain_the_matcher() -> None:
