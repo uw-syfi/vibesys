@@ -9,6 +9,7 @@ process and reports state through ``inspect``/``wait_for_change``.
 from __future__ import annotations
 
 import asyncio
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -39,10 +40,15 @@ from vs_evaluation.api import (
 )
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
 from vs_runtime._failure_classification import is_unsettled
+from vs_runtime._measurement_progress import StageRun
+from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
+    from vs_runtime._measurement_progress import StageOutputOpener
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
-    from vs_sim.api import Clock
+    from vs_sim.api import Clock, OutputSink
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,12 +65,21 @@ class PollingEvaluationExecutor:
     Observations are process-local: nothing survives a restart.
     """
 
-    def __init__(self, evaluation: Evaluation, workspaces: Workspaces, *, clock: Clock) -> None:
+    def __init__(
+        self,
+        evaluation: Evaluation,
+        workspaces: Workspaces,
+        *,
+        clock: Clock,
+        stage_output: StageOutputOpener | None = None,
+    ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
-        ``clock`` stamps availability observations.
+        ``clock`` stamps availability observations. ``stage_output`` opens the stream
+        each stage's command writes its raw output to while it runs; ``None`` discards it.
         """
         self._clock = clock
+        self._stage_output = stage_output
         self._evaluation = evaluation
         self._workspaces = workspaces
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -146,7 +161,8 @@ class PollingEvaluationExecutor:
             )
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
-                observed = await self._evaluate(workspace, stage, handle_id)
+                with self._open_output(StageRun(handle_id, step.name)) as output:
+                    observed = await self._evaluate(workspace, stage, handle_id, output)
                 evidence = observed.evidence
                 results.append(
                     EvaluationStepResult(
@@ -222,11 +238,20 @@ class PollingEvaluationExecutor:
             if workspace is not None:
                 await workspace.discard()
 
+    def _open_output(self, run: StageRun) -> AbstractContextManager[OutputSink]:
+        if self._stage_output is None:
+            return nullcontext(DISCARD)
+        return self._stage_output(run)
+
     async def _evaluate(
-        self, workspace: Workspace, stage: SemanticEvaluationStage, handle_id: str
+        self,
+        workspace: Workspace,
+        stage: SemanticEvaluationStage,
+        handle_id: str,
+        output: OutputSink,
     ) -> _SemanticStageObservation:
         if stage.kind is EvidenceKind.ACCURACY:
-            result = await self._evaluation.accuracy(workspace)
+            result = await self._evaluation.accuracy(workspace, output=output)
             completed = not is_unsettled(result.failure_kind)
             outcome = (
                 EvidenceOutcome.PASSED if completed and result.passed else EvidenceOutcome.FAILED
@@ -236,7 +261,7 @@ class PollingEvaluationExecutor:
             partial = None
             kind = result.failure_kind
         elif stage.kind is EvidenceKind.BENCHMARK:
-            result = await self._evaluation.benchmark(workspace)
+            result = await self._evaluation.benchmark(workspace, output=output)
             completed = not is_unsettled(result.failure_kind)
             kind = result.failure_kind
             outcome = (

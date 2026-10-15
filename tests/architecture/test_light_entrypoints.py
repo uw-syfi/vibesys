@@ -74,10 +74,11 @@ ALLOWED_FIRST_PARTY = (
 )
 """First-party modules, or packages with everything under them, the closure may hold.
 
-libraries the host commands are built on (``vs_decode`` imports only pydantic, and ``vs_logs``,
-which the helper reads run logs with, only pydantic, ``vs_decode`` and ``vs_sim``), and
-only it, ``vs_decode`` and ``vs_sim``; the helper reads run logs with it), and
-their own boundaries are tach's job."""
+``vs_sim``, ``vs_project``, ``vs_decode`` and ``vs_logs`` are allowed whole: they are the
+light libraries the host commands are built on (``vs_decode`` imports only pydantic;
+``vs_logs``, which a detached run needs to buffer its narration before the engine loads and
+the host helper reads run logs with, only pydantic, ``vs_decode`` and ``vs_sim``), and their
+own boundaries are tach's job."""
 
 
 def _module_file(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> Path | None:

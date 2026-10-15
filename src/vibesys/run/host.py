@@ -158,6 +158,7 @@ class _ProductHostFactory:
             plugin.agents,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
         _require_supported_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
         resources = open_run_resources(
@@ -331,6 +332,7 @@ class _ProductHostFactory:
             self.request.config,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
         # One client serves every role, so each role's own model and effort ride the spec.
         base = replace(

@@ -107,6 +107,21 @@ existing core semantics: a turn whose outcome is unknown is inspected and never
 dispatched again, and a conversation the provider lost is not silently replaced
 by a fresh one.
 
+## Vetted harnesses
+
+`vs_agent.provider_policy.HARNESSES` is the one list of the provider and model
+pairs VibeSys runs agents with; a provider's first entry is its default model.
+Which pairs are vetted is launch policy, so the list lives here; whether a CLI
+accepts a model is provider knowledge, and stays in agentshim.
+
+`AgentSpec` enforces it: constructing a CLI spec, or replacing its model (a
+role override, a quota fallback, a chat thread), raises
+`UnvettedHarnessError` unless the spec carries `allow_unvetted_model`.
+`resolve_agent_specs` runs in `validate_run_request`, before any image build,
+and reports the error naming the configuration key. Only the terminal's
+`--allow-unvetted-model` and a resume set the opt-out. Experiment chat offers
+the same list, and the host helper serves it to the desktop app's start sheet.
+
 ## Provider readiness
 
 A missing CLI or a logged-out account would otherwise surface as the first

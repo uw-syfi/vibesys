@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from entrypoints.cli.constants import _DEFAULT_CONFIG_TEXT, _IGNORED_CONFIG_SECTIONS
+from entrypoints.cli.constants import _IGNORED_CONFIG_SECTIONS
 from entrypoints.cli.errors import _configuration_error, _project_resume_mismatch
 from vibesys.api import ComputeBackend, Config, DomainName, load_config
 from vibesys.api.request import (
@@ -45,7 +45,7 @@ def _restore_project_config(
 
     explicit_cli = getattr(args, "explicit_cli_dests", frozenset())
     specs = (
-        (("model", "name"), recorded.model, frozenset(), "model"),
+        (("model", "name"), recorded.model, frozenset({"model"}), "model"),
         (
             ("backend", "name"),
             recorded.compute_backend,
@@ -172,6 +172,11 @@ def _load_effective_config(args: argparse.Namespace) -> Config:
     except (ValueError, FileNotFoundError) as e:
         _configuration_error(str(e), code="config_load_failed", stage="config_loading")
 
+    model = getattr(args, "model", None)
+    if model is not None:
+        config = config.model_copy(
+            update={"model": config.model.model_copy(update={"name": model})}
+        )
     recorded = getattr(args, "project_run_configuration", None)
     if recorded is not None:
         config = _restore_project_config(args, config, recorded)
@@ -199,7 +204,7 @@ def _load_config_or_default(config_path: Path | None) -> Config:
     selected_path = Path.cwd() / "agent.toml"
     if selected_path.is_file():
         return load_config(selected_path, ignored_sections=_IGNORED_CONFIG_SECTIONS)
-    return Config.model_validate(tomllib.loads(_DEFAULT_CONFIG_TEXT))
+    return Config()
 
 
 def _prepare_experiment_repository(args: argparse.Namespace, config: Config) -> None:

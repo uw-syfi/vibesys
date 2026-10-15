@@ -10,15 +10,21 @@ import {
 class Deferred {
   readonly promise: Promise<void>;
   #resolve: () => void = () => undefined;
+  #reject: (error: unknown) => void = () => undefined;
 
   constructor() {
-    this.promise = new Promise(resolve => {
+    this.promise = new Promise((resolve, reject) => {
       this.#resolve = resolve;
+      this.#reject = reject;
     });
   }
 
   resolve(): void {
     this.#resolve();
+  }
+
+  reject(error: unknown): void {
+    this.#reject(error);
   }
 }
 
@@ -208,6 +214,50 @@ describe('bindWelcomeIpc', () => {
     ]);
     firstReply.resolve();
     await Promise.all([first, replacement]);
+  });
+
+  test('one rejected generation cannot skip a sibling retirement or poison its successor', async () => {
+    const ipc = new FakeWelcomeIpc();
+    const document = new FakeWelcomeDocument();
+    const firstRetirement = new Deferred();
+    const secondRetirement = new Deferred();
+    const retirementsStarted = new Deferred();
+    const retired: string[] = [];
+    const answered: string[] = [];
+    bindWelcomeIpc(
+      ipc,
+      document,
+      'app://vibesys/welcome.html',
+      async (_request, generation) => {
+        answered.push(generation);
+        return null;
+      },
+      () => undefined,
+      async generation => {
+        retired.push(generation);
+        if (retired.length === 2) retirementsStarted.resolve();
+        await (generation === '10:100' ? firstRetirement.promise : secondRetirement.promise);
+      },
+    );
+    await ipc.invokeFrom('10:100', WELCOME_CHANNELS.hosts);
+    await ipc.invokeFrom('10:101', WELCOME_CHANNELS.hosts);
+
+    document.navigate(null);
+    let successorResult: WelcomeResult<unknown> | undefined;
+    const successor = ipc.invokeFrom('11:102', WELCOME_CHANNELS.hosts);
+    void successor.then(result => {
+      successorResult = result;
+    });
+    await retirementsStarted.promise;
+    firstRetirement.reject(new Error('first retirement failed'));
+    await spin();
+
+    expect(retired).toEqual(['10:100', '10:101']);
+    expect(successorResult).toBeUndefined();
+    expect(answered).toEqual(['10:100', '10:101']);
+    secondRetirement.resolve();
+    await expect(successor).resolves.toEqual({ok: true, value: null});
+    expect(answered).toEqual(['10:100', '10:101', '11:102']);
   });
 
   test('a navigation with no retiring frame rejects a request waiting for admission', async () => {

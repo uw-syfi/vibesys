@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from vs_runtime.api import AgentRole
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration
     from vs_sandbox.api import CommandRunner
+    from vs_sim.api import OutputSink
 
 
 class _Resource:
@@ -135,7 +136,10 @@ class _Resource:
             deployment_release_env_var=None,
         )
 
-    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+    async def trusted_accuracy(
+        self, command_override: str | None, output: OutputSink
+    ) -> TrustedAccuracyResult:
+        del output
         self.accuracy_calls.append(command_override)
         return TrustedAccuracyResult(
             command=command_override,
@@ -147,7 +151,9 @@ class _Resource:
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
+        output: OutputSink,
     ) -> TrustedBenchmarkResult:
+        del output
         self.benchmark_calls.append((command_override, required_metrics))
         return TrustedBenchmarkResult(
             command=command_override,
@@ -214,14 +220,16 @@ class _ContentResource(_Resource):
         self.history[self.revision] = dict(self.files)
         return self.revision
 
-    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
+    async def trusted_accuracy(
+        self, command_override: str | None, output: OutputSink
+    ) -> TrustedAccuracyResult:
         before = dict(self.files)
         self.edit_while_staging()
         if dict(self.files) != before:
             message = "local input changed during remote staging"
             raise RuntimeError(message)
         self.staged.append(before)
-        return await super().trusted_accuracy(command_override)
+        return await super().trusted_accuracy(command_override, output)
 
 
 class _ContentProvider(_Provider):

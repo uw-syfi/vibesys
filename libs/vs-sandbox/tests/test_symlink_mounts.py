@@ -14,11 +14,12 @@ from vs_sandbox.api.symlink_mounts import (
     find_mount_root,
     symlink_lifecycle_hooks,
 )
+from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 
 @dataclass
@@ -37,9 +38,11 @@ class _RecordingSandbox:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
         assert timeout is None
         assert cancel is None
+        assert output is DISCARD
         self.commands.append(command)
         return self.result
 

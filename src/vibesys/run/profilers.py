@@ -221,7 +221,7 @@ def resolve_run_profiler(
             config,
             backend=request.agent_backend,
             provider=request.cli_provider,
-            model=config.model.name,
+            allow_unvetted_model=request.allow_unvetted_model,
         )
         if not agent_supports_tool_servers(agent_spec):
             definition = profiler_definition(resolved)

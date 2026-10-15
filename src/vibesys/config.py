@@ -46,7 +46,15 @@ class _Strict(BaseModel):
 class ModelCfg(_Strict):
     """Model identifier from agent.toml."""
 
-    name: str = Field(description="Model identifier, e.g. 'claude-sonnet-4-6'. Required.")
+    name: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=256,
+        description=(
+            "Model identifier, e.g. 'claude-opus-5'. The --model flag overrides. Must be a "
+            "vetted model of the selected CLI provider; None uses that provider's default."
+        ),
+    )
 
 
 class ThinkingCfg(_Strict):
@@ -219,7 +227,8 @@ class AgentCfg(_Strict):
         default=None,
         description=(
             "Which CLI coding-agent to drive: codex | claude | gemini | opencode. "
-            "The --cli-provider flag overrides; defaults to 'codex'."
+            "The --cli-provider flag overrides; defaults to 'codex'. [model].name "
+            "must be one of its vetted models."
         ),
     )
     cli_timeout: int | None = Field(
@@ -437,7 +446,10 @@ class Config(_Strict):
 
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
-    model: ModelCfg = Field(description="[model] — model name and provider. Required.")
+    model: ModelCfg = Field(
+        default_factory=ModelCfg,
+        description="[model] — the agent model; omitted uses the CLI provider's default.",
+    )
     thinking: ThinkingCfg = Field(
         default_factory=ThinkingCfg, description="[thinking] — reasoning/thinking controls."
     )
