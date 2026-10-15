@@ -283,13 +283,13 @@ tests hold the components, not the screens. Each screen PR attaches screenshots 
 
 ## Backend data
 
-Five additions make the screens honest. Each is a typed, versioned contract with one authoritative
+Five additions make the screens honest; the first changes the flow framework itself. Each is a typed, versioned contract with one authoritative
 Pydantic definition and generated TypeScript (`check_contract_sot`). Helper additions ship behind
 new `HelperFeature`s per [Handshake and versioning](../contributing/desktop-connection.md#handshake-and-versioning);
 run protocol additions follow the run protocol's capability probe until it has a `hello` of its
 own. No contract exposes `vs_core`'s `FlowState` or the dynamic search's private records.
 
-### B1. Run map: a public projection of the run's work
+### B1. Run trace: spans recorded by the runtime
 
 **What exists.** `vs_core`'s `FlowState` is a replay journal plus live flows identified by path; it
 has no kinds, states, timestamps or edges. The task model the Map shows (planning calls,
@@ -298,40 +298,96 @@ workstreams, agent turns, gates, the baseline) lives in the dynamic search's sta
 `RoundRecord`, `PlannerGate`), which keeps no timestamps and is not on the wire. The run protocol's
 `RunEvent` carries no workstream or parent id.
 
-**Design.** A public, versioned contract `RunMap` (`map_version: 1`) in `server.api`, built in
-`src/vibesys` by a pure projection, never by serializing internal state:
+**Design.** The runtime owns a run trace modeled on tracing spans. Lifecycle facts come from the
+runtime, which already journals every transition; meaning comes from the search, which labels its
+own spans through `ctx` with labels it declares at registration. This is a framework capability in
+`vs_core.flows` and `ctx`, added and reviewed under the rules of
+[flows.md](../contributing/flows.md) ("A capability a flow lacks is added here, to the framework,
+and reviewed; never hand-rolled in a search"). No search builds its own projection, and nothing
+serializes `FlowState`.
+
+**Runtime fields.** The runtime records a span for each flow task in a group and for each awaited
+operation (agent turn, evaluation stage, workspace, owner operation), at the place where the
+transition is journaled:
 
 ```text
-MapNode
-  id: NodeId                     stable for the run ("run", "baseline", "plan-2", "w5", "w5/impl-1", "w5/gate-correctness")
-  parent: NodeId | null
-  kind: run | baseline | planning_call | workstream | agent_turn | gate
-  title: str                     the workstream's title, "Planning call 2", "Gate · correctness"
-  state: pending | waiting | running | done | accepted | rejected | failed | skipped
-  waiting_on: WaitingOn | null   {kind: slot | agent_turn | gate | quota | dependency, detail, since}
-  attempts: [Attempt]            {number, of, started_at, ended_at, outcome, reason}
-  started_at, ended_at: timestamp | null
-  builds_on: [NodeId]            from WorkPlan.parent_revision / parent_hypothesis_id
-  role, provider, model: closed enums | null      for agent turns
-  result: {metric_value, vs_baseline, verdict} | null   for measured workstreams and the baseline
+Span
+  id: SpanId          deterministic: from the flow path and task key, or the operation's decision id;
+                      stable across replay and restart
+  parent: SpanId | null
+  type: flow | operation
+  name: str           the flow's name, or the operation's registered name
+  status: pending | running | waiting | done | failed | stopped        lifecycle only
+  waiting_on: [{kind: operation | slot | time | first | stop, ref, since}]
+  attempts: [{n, of, started_at, ended_at, outcome: done | again | gave_up, reason}]
+                      from ctx.retry's Tries and GaveUp
+  started_at, ended_at: run-clock time when the step is journaled, recorded in the journal,
+                      so replay yields the same times
+  failure: {kind: outcome | interruption | defect, message} | null      flows.md's three kinds
+  stop: {requested_at, landed} | null
+  label: Label | null  set by the search, below
 ```
 
-- **Where it is built.** Kinds are the strategy's semantics, so the projection is product code: a
-  `RunMapSource` protocol in `vibesys`, implemented by the dynamic search first. `vs_core` supplies
-  only what is generic (a flow's path, its `Tries` and `GaveUp` reasons, what it waits on); a
-  strategy without its own source gets the generic one (run, baseline, one node per live flow).
-- **Timestamps.** The search keeps none, so the projection takes them from the injected clock at
-  the point where each change is published, and they are recorded in the journal with the change.
-- **On the wire.** A new run event `map_changed {map_version, upserts: [MapNode], removed: [NodeId]}`
-  carries whole nodes (no field patches), with the event's `sequence` and `timestamp`; the snapshot
-  gains `map: [MapNode]`. A client folds upserts in sequence order; a node's latest upsert wins.
-- **Why events, not a query.** The time scrubber replays the run as it was at a point. Folding the
-  event prefix up to a sequence gives the map at that point with no extra backend API, live or
-  ended (see B5).
-- **Properties to test.** For any seeded search schedule: every node's parent exists and is
-  upserted before it; the map is a tree; `builds_on` names existing workstreams; folding all
-  `map_changed` events equals the snapshot's map; attempt numbers grow; an ended run has no
-  `running` or `waiting` node.
+**Search labels.** A search declares its span kinds at `@search` registration, as it declares
+roles and operations:
+
+```python
+@search("dynamic", config=DynamicConfig, roles=ROLES, operations=OPERATIONS,
+        spans=(
+            SpanKind("planning_call", attrs=PlanningAttrs, verdicts=()),
+            SpanKind("workstream", attrs=WorkstreamAttrs,
+                     verdicts=("accepted", "rejected"), links=("builds_on",)),
+            SpanKind("agent_turn", attrs=AgentTurnAttrs, verdicts=()),
+            SpanKind("gate", attrs=GateAttrs, verdicts=("passed", "failed_check", "slower")),
+        ))
+```
+
+and labels spans with one new `ctx` call:
+
+| Operation | What it does |
+|---|---|
+| `ctx.label(kind, title=..., links=..., attrs=..., verdict=..., reason=...)` | Labels the current task's span. A later call replaces the fields it names. Journaled like every other `ctx` effect. |
+| `label=Label(...)` on an aspect call (`session.turn(..., label=...)`, `ctx.evaluation.measure(..., label=...)`) | Labels the operation's span when it is issued. |
+
+- `kind` is one of the search's declared kinds; each kind has its own attribute schema (a pydantic
+  model with `extra="forbid"`): a workstream's `hypothesis_id` and `parent_revision`; an agent
+  turn's `role`, `provider`, `model` and `effort`; a gate's `stage`, `metric_value` and
+  `vs_baseline`.
+- `title` is display text.
+- `links: [{rel, to: SpanId}]` with relation names the kind declares (`builds_on`). Links are
+  first-class, so an agent graph with fan-in needs no protocol change later.
+- `verdict` comes from the kind's declared value set, with a `reason`, and is kept separate from
+  `status`: a workstream can be `done` and `rejected`.
+- An undeclared kind, attribute, relation or verdict is rejected when the label is applied, with
+  an error naming the key (rule 7: parse at boundaries); a link to a span that does not exist is
+  rejected the same way.
+
+**On the wire.** Three generic run events, `span_started`, `span_updated` and `span_ended`, carry
+the whole span (no field patches) with the event's `sequence` and `timestamp`; the snapshot carries
+the current spans, and each declared kind's attribute schema is exported in the `ProtocolDocument`
+so the TypeScript types are generated. The UI renders any search's spans: kinds it knows
+(planning call, workstream, agent turn, gate) get their own presentation, and unknown kinds render
+plainly from name, title, status, attrs and links.
+
+**What else hangs off span ids.**
+
+- Log-store owners are span ids, so a Map node opens exactly its logs (`LogOwner` gains the span
+  id; `logs.list` can be filtered by it).
+- Usage records (`turn_usage_recorded`) attach to agent-turn spans.
+- The Overview's "Current work", the Work history, the performance chart (gate spans with a
+  `metric_value`) and the key numbers are queries over the same spans; there is no second record of
+  the run's work.
+- The scrubber folds span events up to a sequence, live or ended (see B5).
+
+**Properties to test** (in `vs_core` with `FlowRun` stories and in the dynamic search with seeded
+schedules; `begin` already runs every story live and with a restart after every step):
+
+- Replaying a journal yields identical spans, ids and times.
+- A span's parent exists before the span is started.
+- Every link names an existing span.
+- Folding all span events equals the snapshot's spans.
+- An ended run has no `running` or `waiting` span.
+- An undeclared kind, attribute, relation or verdict is rejected naming the key.
 
 ### B2. Run overview: objective, benchmark versions and trajectories
 
@@ -340,17 +396,16 @@ MapNode
 per-candidate readings (`MetricRow`, `AcceptedReading`) are internal. The campaign projection's
 `objective`, `benchmarkVersions` and `trajectories` are therefore empty for live runs.
 
-**Design.** A `RunOverview` contract (`overview_version: 1`) in the snapshot, plus events:
+**Design.** A `RunOverview` contract (`overview_version: 1`) in the snapshot:
 
 - `objective`: the task's `OBJECTIVE.md` text (Markdown, rendered as text with headings and lists
   only), the metric's name, unit and direction, and the correctness requirement in one line.
 - `benchmarks`: the evaluator's name and version and each gate's tool and version, as measured
   (from the evaluator build and the gate records), so a later comparison can tell runs on
   different benchmark versions apart.
-- `measurement_recorded {node_id, sequence, at, value, unit, verdict: accepted | rejected | failed_check, vs_baseline}`
-  for the baseline and every measured candidate. The Overview chart and Work tab fold these.
-- Key numbers (best vs baseline, round, workstreams live and waiting, elapsed) are derived on the
-  client from the map and measurements; they are not a separate contract.
+- Trajectories are not a separate contract: each measurement is a gate span with `metric_value`
+  and `vs_baseline` attributes and a verdict (B1), so the chart, the Work tab and the key numbers
+  (best vs baseline, round, workstreams live and waiting, elapsed) are queries over spans.
 
 `query.performance` and `PerformanceContext` stay for the frozen web run page until it is deleted.
 
@@ -383,11 +438,10 @@ configuration seconds later; its errors name the key, as today.
 
 `run.start` gains typed options behind feature `run_options`, replacing free text for what the
 screen sets: `rounds`, `time_limit_s`, `results: keep | publish_github`, and
-`roles: [{role, harness: {provider, model} | null, reasoning_effort: default | low | medium | high}]`.
+`roles: [{role, model | null, reasoning_effort: default | low | medium | high}]`, where each
+role's model is one of the run harness's vetted models.
 `args` stays for Advanced and may not repeat a typed option (`invalid_request` naming it).
-Per-role harnesses need backend support first: `AgentRoleCfg` has `model` and `reasoning_effort`
-but no provider, so a role cannot run a different harness than the run today (see
-[Open questions](#open-questions)).
+Every role runs on the run's harness; a different harness per role is out of scope.
 
 Machine statuses map from facts, not from a separate status field: `Sign in` when the SSH
 connection needs a passphrase or key (the connection manager's state), `Checkout not found` when
@@ -448,7 +502,7 @@ them; it is marked strict too.
 | Need | Reuse |
 | --- | --- |
 | Live run connection, bootstrap, reconnect | `@vibesys/run-session` (`WebSession`, the session machine) |
-| Run event fold, rounds, performance | `@vibesys/run-state` (gains `./map` and `./overview` folds for B1 and B2, and the campaign analytics moved down) |
+| Run event fold, rounds, performance | `@vibesys/run-state` (gains `./trace` and `./overview` folds for B1 and B2, and the campaign analytics moved down) |
 | Logs: list, follow, fold | `@vibesys/logs` (`foldChunk`, the follow machine) and the connection's logs channel |
 | Host identity, connection status, path rules | `@vibesys/hosts`; the path-completion reducer moves down from `feature-hosts` into it |
 | Run ids, recent status, resume and stop policy | `@vibesys/runs` (the stop flow gains the force-stop offer) |
@@ -487,7 +541,7 @@ NewRunState =
   | {kind: 'starting', token, editing: Editing}
   | {kind: 'failed', failure, editing: Editing}
 ProjectChoice = {source: 'recent', path} | {source: 'folder', path} | {source: 'example', example, dest}
-AgentChoice = {harness, model /* ∈ vetted(harness) */, roles: RoleChoice[] | 'same'}
+AgentChoice = {harness, model /* ∈ vetted(harness) */, roles: {role, model /* ∈ vetted(harness) */ | 'same', effort}[] | 'same'}
 ```
 
 Invariants: Start is enabled only in `editing` when the checks' `for` equals the current inputs and
@@ -519,17 +573,17 @@ RunPageState = {
        | {kind: 'ended', end: EndRecord}
   view: {at: 'live'} | {at: Sequence}       the scrubber; 'live' follows new events
   tab: 'overview' | 'map' | 'work' | 'logs'
-  map: {filter: 'all' | 'running' | 'waiting' | 'failed' | 'finished', open: Set<NodeId>, selected: NodeId}
+  map: {filter: 'all' | 'running' | 'waiting' | 'failed' | 'finished', open: Set<SpanId>, selected: SpanId}
   work: {query, outcome: 'all' | 'accepted' | 'rejected' | 'running'}
   logs: {selected: StreamId | null, following: boolean}
   confirm: null | 'stop'
 }
 ```
 
-Everything shown is a selector over (folded run at `view`, `RunPageState`): the map, key numbers,
+Everything shown is a selector over (folded run at `view`, `RunPageState`): the Map (the span tree), key numbers,
 chart, work rows and "Current work" are `selectX(fold(events ≤ view), state)`, so the scrubber needs
 no second code path. Force stop is offered only in `stopping` after a bound (two minutes, from the
-injected clock); the Stop confirmation's "what is lost" text is a selector over the map (which
+injected clock); the Stop confirmation's "what is lost" text is a selector over the spans (which
 workstreams finish their step, which unfinished turns are discarded). Pause, Resume, Stop and
 "Wait and resume" are commands on the existing run-control machine.
 
@@ -547,8 +601,8 @@ the effective theme is a selector, persisted by the settings store.
 
 ## PR order
 
-Design system and enforcement first; backend contracts in parallel (they touch disjoint files);
-screens after both. Each PR is independently mergeable and leaves CI green. Merge once CI passes.
+Design system and enforcement first; backend contracts in parallel (they touch disjoint files),
+with the run trace's `vs_core` work first on the backend track; screens after both. Each PR is independently mergeable and leaves CI green. Merge once CI passes.
 
 | # | PR | Depends on |
 | --- | --- | --- |
@@ -560,31 +614,29 @@ screens after both. Each PR is independently mergeable and leaves CI green. Merg
 | B-b | Helper `examples.list`, `project.create_from_example`, `project.copy_out`. | none |
 | B-c | Helper `run.preflight` and `run.start` typed options (`run_options`). | none |
 | B-d | Ended record `end`, live record `paused`, helper `runs.read_events` (B5). | none |
-| B-e | Run overview contract and `measurement_recorded` (B2), with the `run-state` `./overview` fold. | none |
-| B-f | Run map projection, `map_changed`, snapshot `map` (B1), with the `run-state` `./map` fold. | none |
+| T-1 | **Run trace in `vs_core`, runtime fields.** Spans recorded where transitions are journaled, deterministic ids, run-clock times in the journal, attempts from `ctx.retry`, failure and stop; the replay and structure properties. Its own reviewed PR. | none |
+| T-2 | **Span labels in `vs_core`.** `SpanKind` declarations at `@search`, `ctx.label` and `label=` on aspect calls, key-naming rejection; `flows.md` updated. Its own reviewed PR. | T-1 |
+| T-3 | **Trace on the wire.** `span_started`, `span_updated`, `span_ended`, snapshot spans, attribute schemas in the `ProtocolDocument`, log owners and usage records keyed by span id; the `run-state` `./trace` fold. | T-2 |
+| T-4 | **Dynamic search labels.** Declares its kinds and labels planning calls, workstreams, agent turns and gates. | T-3 |
+| B-e | Run overview contract (B2), with the `run-state` `./overview` fold. | none |
 | B-g | `command.resume {when: capacity_returns}` and `quota_waiting` (B4). | none |
 | 5 | **App shell and Settings.** `feature-app-shell`, `feature-settings`, `shell.html`, theme application and `nativeTheme`, notifications; behind a development switch (`VIBESYS_DESKTOP_SHELL=next`) until cutover. | 2, 4, B-d |
 | 6 | **Machines.** `feature-machines`. | 5, B-a |
 | 7 | **New run.** `feature-new-run`, including examples, copy out and preflight. | 5, B-a, B-b, B-c |
 | 8 | **Run page, part 1.** Header and actions (Pause/Resume, Stop with confirmation, Force stop), startup timeline, Logs tab, ended banner, open in new window. | 5, B-d |
-| 9 | **Run page, part 2.** Overview (objective, key numbers, chart, current work) and Work. | 8, B-e |
-| 10 | **Run page, part 3.** Map and the scrubber. | 9, B-f |
+| 9 | **Run page, part 2.** Overview (objective, key numbers, chart, current work) and Work. | 8, B-e, T-4 |
+| 10 | **Run page, part 3.** Map and the scrubber. | 9, T-4 |
 | 11 | **Quota banner.** "Resume now" and "Wait and resume when quota is back". | 8, B-g |
 | 12 | **Cutover.** The new shell becomes the only desktop renderer; the welcome view, Start sheet, Inspect sheet, the desktop's use of the web run page and the old features only the desktop used are deleted, and leave `FROZEN_UI_PACKAGES`. Packages still used by `apps/web` are deleted with it, in the web deprecation. | 6–11 |
 | 13 | **Strict by default.** F2: strict rules apply to every package, the marker and `strict-lint-coverage` are removed, `FROZEN_UI_PACKAGES` is gone. | 12 and the web client's removal |
 
 Each screen PR (5 to 11) carries screenshots in all six themes and a Playwright journey against
-the fake helper and a fake run that reports startup stages, map changes and measurements.
+the fake helper and a fake run that reports startup stages and span events.
 
 ## Open questions
 
-1. **Per-role harness.** The agreed role table sets harness, model and reasoning effort per role,
-   but `AgentRoleCfg` has no provider today. Recommendation: ship the role table with model and
-   effort first (harness fixed to the run's), and add `agent.roles.<id>.cli_provider` with its
-   validation in a backend PR before enabling the harness column. Mixed providers in one run also
-   need the run image to hold each harness's CLI.
-2. **Time limit and results publishing.** "Time limit" maps to the run's deadline and "Also publish
+1. **Time limit and results publishing.** "Time limit" maps to the run's deadline and "Also publish
    to GitHub" to the existing publish settings; both need confirming against the current
    configuration keys in B-c.
-3. **Font choice.** Schibsted Grotesk and JetBrains Mono come from the prototype. Both are OFL; if
+2. **Font choice.** Schibsted Grotesk and JetBrains Mono come from the prototype. Both are OFL; if
    the user prefers system fonts to bundling, only `fonts.css` and the type table change.
