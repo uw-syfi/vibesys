@@ -112,7 +112,11 @@ def job_bound(job: Job, stated: float, run: RunState) -> Bound:
         bound = _earliest(
             (
                 Bound(at=bound.at + limits.observe_backoff_cap, by=WaitEnd.LIMIT),
-                Bound(at=queued_since + queue_budget_left(job, limits), by=WaitEnd.QUEUE_BUDGET),
+                # When the budget is (or was) spent: a fact after that instant leaves it put.
+                Bound(
+                    at=queued_since + limits.queue_wait_budget - job.queue_credit,
+                    by=WaitEnd.QUEUE_BUDGET,
+                ),
             ),
             bound,
         )

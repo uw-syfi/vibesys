@@ -136,7 +136,9 @@ def fact(
     return moved, (core.RequestObserved(observation=observed, progress=progress),)
 
 
-def _first_fact(state: core.CoreState, submit: core.SubmitMeasurement, job: core.ResourceId):
+def _first_fact(
+    state: core.CoreState, submit: core.SubmitMeasurement, job: core.ResourceId
+) -> core.CoreState:
     assert submit.request_id is not None
     state = core.step(state, core.DispatchAuthorized(request_id=submit.request_id)).state
     first = observation(submit, 1, resource_id=job)
@@ -186,7 +188,8 @@ def agent(run_limits: core.Limits) -> World:
     state, template = _base(run_limits)
     job = core.ResourceId(root="job")
     state, submit, call = _agent_call(state, plan(), "call")
-    assert submit is not None and call.deadline_at is not None
+    assert submit is not None
+    assert call.deadline_at is not None
     state = _first_fact(state, submit, job)
     state = _suspend(state, template, (job,), call.deadline_at)
     return World(Source.AGENT, state, (Job(job, submit=submit),), call.deadline_at)
@@ -200,7 +203,8 @@ def multi(run_limits: core.Limits) -> World:
     for index, purpose in enumerate(("baseline", "official")):
         resource = core.ResourceId(root=f"job-{index}")
         state, submit, call = _agent_call(state, plan(purpose=purpose), f"call-{index}")
-        assert submit is not None and call.deadline_at is not None
+        assert submit is not None
+        assert call.deadline_at is not None
         state = _first_fact(state, submit, resource)
         jobs.append(Job(resource, submit=submit))
         deadline = call.deadline_at
@@ -250,7 +254,9 @@ def agent_repeat(run_limits: core.Limits) -> World:
     job = core.ResourceId(root="job")
     state = _first_fact(state, submit, job)
     state, allocated, call = _agent_call(state, plan(), "repeat")
-    assert allocated is None and call.repeat and call.request_id == submit.request_id
+    assert allocated is None
+    assert call.repeat
+    assert call.request_id == submit.request_id
     assert call.deadline_at is not None
     state = _suspend(state, template, (job,), call.deadline_at)
     return World(
