@@ -48,6 +48,7 @@ from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
 from vibesys.run.gpu_events import CoreGpuContentionEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
+from vibesys.run.logs import open_run_logs
 from vibesys.run.profilers import (
     ProfilerPreflight,
     resolve_run_profiler,
@@ -78,6 +79,7 @@ from vs_agent.api import (
     AgentSpec,
     task_agent_host_resources,
 )
+from vs_logs.api import installed_narration
 from vs_project.api import (
     AgentRoleExecutionRecord,
     OrchestrationDescriptor,
@@ -475,6 +477,17 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         log_dir = project_resources.logger.log_dir
         logger = project_resources.logger
         git = project_resources.git
+        # The run's one log store, open until the run's resources close. Its scope is what
+        # the run's producers (startup steps, gate stages) are handed.
+        ownership.enter_context(
+            open_run_logs(
+                project_root,
+                run_id,
+                threads=integration.threads,
+                warn=sys.stderr.write,
+                narration=installed_narration(),
+            )
+        )
 
         prepared_evaluator = prepare_trusted_evaluator(
             evaluator_package_root,
