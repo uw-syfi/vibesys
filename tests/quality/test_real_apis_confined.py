@@ -912,6 +912,9 @@ REAL_API_EDGES: dict[Key, str] = {
             ("libs/vs-evaluation/src/vs_evaluation/filesystem_store.py", "the lifecycle store"),
             ("src/server/event_index.py", "the event journal's index"),
             ("src/server/registry.py", "each live server's registry record lock"),
+            ("libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py", "the tool install receipt"),
+            ("libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py", "the bridge's log spool"),
+            ("libs/vs-slurm/src/vs_slurm/cluster_store.py", "the cluster's operation records"),
         )
     },
 }
@@ -980,9 +983,6 @@ REAL_API_PENDING: dict[Key, Pending] = {
         Owner.LANE_A,
         "the repair container runs subprocess.run itself; route it through DockerCli",
     ),
-    ("libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py", "fs_sync"): Pending(
-        1, Owner.LANE_A, "evaluator tool staging fsync; own-store edge or move, to classify"
-    ),
     ("libs/vs-sandbox/src/vs_sandbox/evaluator_tools.py", "subprocess"): Pending(
         8,
         Owner.LANE_A,
@@ -1009,9 +1009,6 @@ REAL_API_PENDING: dict[Key, Pending] = {
     ("libs/vs-sandbox/src/vs_sandbox/process_execution.py", "signal"): Pending(
         3, Owner.LANE_A, "type only: the SIGTERM and SIGKILL names"
     ),
-    ("libs/vs-sandbox/src/vs_sandbox/skypilot_bridge.py", "fs_sync"): Pending(
-        1, Owner.LANE_A, "bridge state fsync; own-store edge or move, to classify"
-    ),
     ("libs/vs-sandbox/src/vs_sandbox/slurm_broker.py", "socket_io"): Pending(
         1, Owner.LANE_A, "the broker's socketserver; moves to Network"
     ),
@@ -1023,9 +1020,6 @@ REAL_API_PENDING: dict[Key, Pending] = {
     ),
     ("libs/vs-sandbox/src/vs_sandbox/slurm_executor.py", "subprocess"): Pending(
         1, Owner.LANE_A, "type only: SubprocessError in an except clause"
-    ),
-    ("libs/vs-slurm/src/vs_slurm/cluster_store.py", "fs_sync"): Pending(
-        4, Owner.LANE_A, "the cluster store's own flock and fsync; own-store edge, to list"
     ),
     ("libs/vs-slurm/src/vs_slurm/fake_cluster.py", "threading"): Pending(
         1, Owner.LANE_A, "FakeCluster's lock; takes Threads"
