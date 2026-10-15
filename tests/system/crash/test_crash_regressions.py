@@ -122,8 +122,9 @@ def test_a_restart_after_recovery_blocked_keeps_the_run_blocked(second: Crossing
     it ended the run as a plain failure, or, when the dead host had already stopped the run as
     blocked, its finish was refused and the runtime halted.
     """
-    (blocked,) = (c for c in all_crossings() if name(c) in BLOCKED_ENDINGS)
-    assert second in following(blocked, depth=len(all_crossings()))
+    crossings = all_crossings()
+    (blocked,) = (c for c in crossings if ends_blocked(crossings, c))
+    assert second in following(blocked, depth=len(crossings))
     plan = FaultPlan(seed=2, rules=(rule(blocked), rule(second)))
     summary = run(plan).summary
     replay = f"replay with {plan.model_dump_json()}"
