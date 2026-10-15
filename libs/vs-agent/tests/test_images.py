@@ -28,10 +28,13 @@ from vs_agent.api.images import (
 )
 from vs_agent.api.testing import DockerBuildResult, docker_build_result
 from vs_sandbox.api import LocalFeature
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
+
+    from vs_sim.api import OutputSink
 
 _TASK_IMAGE_ID = "sha256:" + "a" * 64
 _AGENT_IMAGE_ID = "sha256:" + "b" * 64
@@ -76,9 +79,9 @@ class _FakeRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink = DISCARD,
     ) -> DockerBuildResult:
-        del on_stderr_line
+        del output
         normalized = tuple(argv)
         self.calls.append((normalized, cwd, timeout))
         if normalized[1] == "build" and any(a.startswith("vibesys-agent-build:") for a in argv):

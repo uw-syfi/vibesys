@@ -23,10 +23,10 @@ from typing import TYPE_CHECKING
 from vs_sandbox.command_execution import rejected_result, result_of, validate_timeout
 from vs_sandbox.execution import CommandResult
 from vs_sandbox.process_execution import ProcessOutcome, ProcessStop
-from vs_sim.api import OsThreads, Threads
+from vs_sim.api import DISCARD, OsThreads, Threads
 
 if TYPE_CHECKING:
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 #: Result an unscripted command receives when no other default was set.
 DEFAULT_RESULT = CommandResult(output="", exit_code=0, stdout="", stderr="")
@@ -172,8 +172,9 @@ class FakeLifecycleRunner(FakeCommandRunner):
     start_error: Exception | None = None
     stop_error: Exception | None = None
 
-    def start(self) -> None:
-        """Record one lifecycle start attempt and raise a scripted error."""
+    def start(self, *, output: OutputSink = DISCARD) -> None:
+        """Record one lifecycle start attempt and raise a scripted error; it prints nothing."""
+        del output
         self.start_count += 1
         if self.start_error is not None:
             raise self.start_error

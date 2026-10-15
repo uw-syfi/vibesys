@@ -40,7 +40,7 @@ from vs_sandbox.host_resources import HostResourceAccess
 from vs_sandbox.host_sandbox import WorkspaceSandbox
 from vs_sandbox.lifecycle import SandboxLifecycle, SandboxLifecycleHooks
 from vs_sandbox.process_execution import KILL, PipedStoppableProcess, RemoteProcesses
-from vs_sim.api import NotReleasedError, ProcessTimeoutError
+from vs_sim.api import DISCARD, NotReleasedError, ProcessTimeoutError
 
 if TYPE_CHECKING:
     import signal
@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from vs_sandbox.docker_states import ContainerLife
     from vs_sandbox.execution import CommandResult
     from vs_sandbox.host_resources import HostResource
-    from vs_sim.api import Event, Threads
+    from vs_sim.api import Event, OutputSink, Threads
 
 # Global registry of live containers for cleanup on exit / SIGINT: each container's id and
 # the Docker CLI that started it, which is the one that can stop it.
@@ -592,8 +592,14 @@ class DockerSandbox(WorkspaceSandbox):
         """Return the ``docker run`` flags a docker-in-docker sandbox adds."""
         return ["--runtime", SYSBOX_DOCKER_RUNTIME] if self._docker_in_docker else []
 
-    def start(self) -> None:
-        """Start the Docker container."""
+    def start(self, *, output: OutputSink = DISCARD) -> None:
+        """Start the Docker container.
+
+        Every chunk ``docker run`` writes (an image pull's progress, the new
+        container's ID, a daemon error) reaches *output* as it is written.
+        ``docker.log`` still records the command and a bounded result after it
+        exits.
+        """
         if self._docker_in_docker:
             require_sysbox_runtime(self._docker)
         self._container_name = f"vibesys-{uuid.uuid4().hex[:12]}"
@@ -605,7 +611,7 @@ class DockerSandbox(WorkspaceSandbox):
         # sweep must know it if every removal below fails too.
         _live_containers[self._container_name] = self._docker
         try:
-            result = self._docker.run(cmd, timeout_seconds=self._start_timeout)
+            result = self._docker.run(cmd, timeout_seconds=self._start_timeout, output=output)
         except BaseException as exc:
             # The daemon may have created the container before the client
             # died, timed out, or was interrupted; its name is the only handle.
