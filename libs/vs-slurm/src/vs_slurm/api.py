@@ -53,7 +53,49 @@ from .connector_protocol import (
 )
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
+from .fake_ledger import FakeEvaluationLedger
 from .identity import runtime_content_identity
+from .ledger import (
+    BATCH_RESULT_LAYOUT,
+    LEDGER_FORMAT_VERSION,
+    AttachJob,
+    ClaimAttempt,
+    Leased,
+    LeaseVerdict,
+    LedgerArtifact,
+    LedgerEntry,
+    LedgerError,
+    LedgerLabels,
+    LedgerLease,
+    LedgerPolicy,
+    LedgerRecord,
+    LedgerStage,
+    LedgerState,
+    ResolveSubmission,
+    SubmitBoundJob,
+    SubmitStep,
+    Unleased,
+    decode_lease,
+    decode_record,
+    evaluation_key,
+    handle_of_job,
+    job_of_handle,
+    lease_verdict,
+    ledger_operation_id,
+    submit_step,
+    validate_holder,
+    validate_project,
+)
+from .ledger import encode as encode_ledger_document
+from .ledger_actions import (
+    NotInLedger,
+    Withdrawn,
+    WithdrawOutcome,
+    WithdrawUnknown,
+    sweep_unleased,
+    withdraw,
+)
+from .ledger_store import RemoteEvaluationLedger
 from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
 from .runner import (
     SERVICE_NOT_READY_EXIT_CODE,
@@ -124,9 +166,11 @@ from .transport_broker import (
 )
 
 __all__ = [
+    "BATCH_RESULT_LAYOUT",
     "CANCEL_REACTIONS",
     "DEFAULT_COMMAND_SECONDS",
     "INITIAL_LIFE",
+    "LEDGER_FORMAT_VERSION",
     "LIFETIMES",
     "MAX_CONNECTOR_REQUEST_BYTES",
     "MAX_CONNECTOR_RESPONSE_BYTES",
@@ -137,6 +181,8 @@ __all__ = [
     "SERVICE_NOT_READY_EXIT_CODE",
     "SLURM_CONNECTOR_REQUEST",
     "AccountingRow",
+    "AttachJob",
+    "ClaimAttempt",
     "Cluster",
     "ClusterCancelOutcome",
     "ClusterCancelRequested",
@@ -155,15 +201,31 @@ __all__ = [
     "Completing",
     "EndOutcome",
     "Ended",
+    "EvaluationLedger",
     "FakeCluster",
     "FakeConnector",
+    "FakeEvaluationLedger",
     "IssuedCommand",
     "JobLife",
+    "LeaseVerdict",
+    "Leased",
+    "LedgerArtifact",
+    "LedgerEntry",
+    "LedgerError",
+    "LedgerLabels",
+    "LedgerLease",
+    "LedgerPolicy",
+    "LedgerRecord",
+    "LedgerStage",
+    "LedgerState",
     "NoAccountingRow",
+    "NotInLedger",
     "NotInQueue",
     "Notice",
     "QueueRow",
     "Queued",
+    "RemoteEvaluationLedger",
+    "ResolveSubmission",
     "Running",
     "SchedulerReading",
     "SchedulerTrace",
@@ -206,11 +268,25 @@ __all__ = [
     "SlurmTransportRequestError",
     "SlurmTreeArtifact",
     "Step",
+    "SubmitBoundJob",
+    "SubmitStep",
     "TraceConnector",
     "TraceStep",
     "Unknown",
+    "Unleased",
+    "WithdrawOutcome",
+    "WithdrawUnknown",
+    "Withdrawn",
     "advance",
     "advance_with_notice",
+    "decode_lease",
+    "decode_record",
+    "encode_ledger_document",
+    "evaluation_key",
+    "handle_of_job",
+    "job_of_handle",
+    "lease_verdict",
+    "ledger_operation_id",
     "life_for_status",
     "load_slurm_config",
     "needs_accounting",
@@ -225,9 +301,14 @@ __all__ = [
     "slurm_transport_broker_policy",
     "split_framed_scheduler_query",
     "status_of",
+    "submit_step",
+    "sweep_unleased",
     "tree_content_identity",
     "unframed_output",
     "validate_cluster_operation_id",
+    "validate_holder",
+    "validate_project",
+    "withdraw",
 ]
 
 
@@ -261,4 +342,41 @@ class Cluster(Protocol):
         observed: ClusterObservation | None = None,
     ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown."""
+        ...
+
+
+class EvaluationLedger(Protocol):
+    """A project's durable evaluation records, shared by every process of the project.
+
+    Implementations: ``RemoteEvaluationLedger`` (the cluster's shared filesystem)
+    and ``FakeEvaluationLedger``; both pass ``tests/test_ledger_contract.py``.
+    Every method raises ``LedgerError`` when the storage cannot be read or
+    written: the request's state is then unknown, never absent.
+    """
+
+    def read(self, key: str) -> LedgerEntry | None:
+        """The request's current attempt and every lease on it, or None if never asked for."""
+        ...
+
+    def claim(self, record: LedgerRecord) -> LedgerRecord:
+        """Create ``record``'s attempt atomically unless it exists; return the stored attempt.
+
+        Of two processes claiming one attempt, exactly one gets its own record back.
+        """
+        ...
+
+    def update(self, record: LedgerRecord) -> None:
+        """Replace the state of an attempt atomically."""
+        ...
+
+    def renew(self, key: str, lease: LedgerLease) -> None:
+        """Write the holder's lease on the request; only that holder writes it."""
+        ...
+
+    def release(self, key: str, holder: str) -> None:
+        """Drop the holder's lease on the request."""
+        ...
+
+    def list_keys(self) -> tuple[str, ...]:
+        """Every request key the project's ledger holds."""
         ...
