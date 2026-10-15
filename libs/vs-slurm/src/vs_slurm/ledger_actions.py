@@ -25,6 +25,7 @@ from .ledger import (
     settlement,
     transitioned,
 )
+from .ledger_listing import entry_id
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -295,17 +296,17 @@ def sweep_unleased(
 
 def _warn_unreadable(entry: LedgerEntry) -> None:
     """Say that a lease this build cannot read holds a request, and how to free it now."""
-    key = entry.record.key
+    entry_name = entry_id(entry.record.key)
     for lease in entry.unreadable_leases:
         _LOG.warning(
             "evaluation ledger request %s has a lease from %s that this build cannot read "
             "(a newer build's, or a damaged file); it holds the request until %.0f s after "
             "its file was last written (epoch %.0f). `vibesys evals remove %s` withdraws it now",
-            key[:12],
+            entry_name,
             lease.holder,
             entry.claim_window,
             lease.written_at,
-            key[:12],
+            entry_name,
         )
 
 

@@ -146,6 +146,26 @@ def test_list_of_a_project_with_no_entries_says_so(tmp_path: Path) -> None:
     assert (code, text) == (0, "Project other-0123456789ab has no evaluations in its ledger.\n")
 
 
+def test_list_names_the_command_that_frees_an_entry_held_by_an_unreadable_lease(
+    tmp_path: Path,
+) -> None:
+    """A lease this build cannot decode is shown with the command that withdraws it now."""
+    world = _World(tmp_path)
+    attached = world.submit("cand-a", queue_s=math.inf)
+    world.ledger.store_raw_lease(
+        attached.key, "run-new", '{"format_version": 2}\n', written_at=world.clock.now()
+    )
+
+    code, text = world.evals("list")
+
+    assert code == 0
+    (line,) = [line for line in text.splitlines() if "unreadable lease from run-new" in line]
+    command = f"vibesys evals remove {entry_id(attached.key)}"
+    assert command in line
+    assert world.evals(*command.split()[2:], "--yes")[0] == 0
+    assert world.status(attached) is SlurmJobStatus.CANCELLED
+
+
 def test_removing_a_queued_entry_means_its_job_never_runs(tmp_path: Path) -> None:
     world = _World(tmp_path)
     queued = world.submit("cand-a", queue_s=100.0, run_s=100.0)
