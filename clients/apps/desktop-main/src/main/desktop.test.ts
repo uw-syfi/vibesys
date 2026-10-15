@@ -263,6 +263,7 @@ describe('Desktop welcome start ownership', () => {
       '/project',
       'spsc',
       '--rounds 2',
+      null,
       1,
     );
 
@@ -274,6 +275,7 @@ describe('Desktop welcome start ownership', () => {
       '/project',
       'spsc',
       '--rounds 3',
+      null,
       1,
     );
     await retirementStarted.promise;
