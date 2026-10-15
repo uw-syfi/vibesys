@@ -130,7 +130,7 @@ depends_on = ["server.diagnostics", "server.events", "server.journal", "vibesys.
 
 [[modules]]
 path = "server.integration"
-depends_on = ["server", "server.execution", "server.chat", "server.events", "vibesys.api", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "server.run_lifecycle", "vs_sim.api"]
+depends_on = ["server", "server.trace", "server.execution", "server.chat", "server.events", "vibesys.api", "server.read_model", "server.diagnostics", "server.journal", "server.controller", "server.run_lifecycle", "vs_sim.api"]
 
 [[modules]]
 # Light contracts for host commands and the live registry record. Pydantic and
@@ -155,6 +155,10 @@ depends_on = ["server.diagnostics", "server.host_api"]
 # Asks a live server to stop over its control socket (control envelope only).
 path = "server.instances"
 depends_on = ["vs_decode.api", "server.control_envelope", "vs_sim.api"]
+
+[[modules]]
+path = "server.trace"
+depends_on = ["server.events"]
 
 [[modules]]
 path = "server.journal"
@@ -342,7 +346,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api"]
+depends_on = ["vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_identity"

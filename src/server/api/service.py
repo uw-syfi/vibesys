@@ -495,6 +495,7 @@ class RunApi:
                     )
                     for spec in self._chat.threads_locked()
                 ],
+                spans=self._integration.trace.spans(),
             )
 
     def iterations(

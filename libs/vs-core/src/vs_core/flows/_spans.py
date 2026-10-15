@@ -10,7 +10,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field
 
 from vs_core.types.common import Seconds, Value
 
@@ -193,3 +193,12 @@ def span_changes(before: RunTrace | None, after: RunTrace) -> tuple[tuple[SpanCh
             ended = span.ended and not was.ended
             found.append((SpanChange.ENDED if ended else SpanChange.UPDATED, span))
     return tuple(found)
+
+
+def _from_data(value: object) -> object:
+    """A span decoded from JSON data: arrays stand for its tuples, strings for its enums."""
+    return Span.model_validate(value, strict=False) if isinstance(value, dict) else value
+
+
+type WireSpan = Annotated[Span, BeforeValidator(_from_data)]
+"""A ``Span`` inside a message that crosses a process (a run event): read from JSON data."""

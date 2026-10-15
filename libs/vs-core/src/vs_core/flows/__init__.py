@@ -60,6 +60,7 @@ from ._spans import (
     SpanType,
     SpanWaitKind,
     WaitingOn,
+    WireSpan,
     span_changes,
 )
 from ._state import Dropped, FlowState, JournaledEvent, Waiting
@@ -130,6 +131,7 @@ __all__ = [
     "UnknownRoleError",
     "Waiting",
     "WaitingOn",
+    "WireSpan",
     "Workspace",
     "Workspaces",
     "flow",
