@@ -27,6 +27,7 @@ from vs_slurm.api import (
     SlurmConfig,
     SlurmJobStatus,
     SlurmSshTransport,
+    Withdrawn,
     evaluation_key,
     job_of_handle,
     ledger_operation_id,
@@ -276,7 +277,9 @@ def test_an_orphan_that_starts_within_the_window_is_still_cancelled(appears_afte
         later = NOW + appears_after
         outcomes = sweep_unleased(ledger, cluster, now=later, grace_seconds=0.0, orphans=orphans)
 
-        assert [outcome.operation_id for outcome in outcomes] == [operation]
+        (outcome,) = outcomes
+        assert isinstance(outcome, Withdrawn)
+        assert outcome.operation_id == operation
         observed = cluster.inspect(operation)
         assert isinstance(observed, ClusterObservation)
         assert observed.status.terminal
