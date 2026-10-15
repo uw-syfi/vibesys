@@ -8,14 +8,18 @@ virtual clock: the server's transport and journal, the run's event loop (``run_a
 blocking calls and its leases. No real thread, socket, process or wall clock is used; the
 project and the run's state live under a temporary directory.
 
-Each seed draws faults of two kinds: up to two ``docker`` child processes die by a signal
-(any command of the run, any of three signals), and the client's first connection to the
-server meets a network fault (``LinkFault``: a drop from either side, a reset, a one-way
-partition that heals or breaks the connection after a bound, or delayed delivery) before a
-drawn send. A client whose connection broke reconnects and resumes from its cursor. Whatever
-the seed, the run reaches a defined end (it succeeds, or fails with the dead process named),
-the client is told that end exactly once, every container the run created is removed, the
-run's host lease is free again, and the server leaves no socket behind.
+Each seed draws faults of two kinds. Up to two ``docker`` client processes die by a signal:
+any command of the run, by any of three signals, whether it manages a container or is a
+``docker exec`` that runs a command in one (such as the baseline measurement's accuracy
+check and benchmark). And the client's first connection to the server meets a network fault
+(``LinkFault``: a drop from either side, a reset, a one-way partition that heals or breaks
+the connection after a bound, or delayed delivery) before a drawn send. A client whose
+connection broke reconnects and resumes from its cursor. Whatever the seed, the run reaches
+a defined end: it succeeds, or fails naming the dead process, or fails a measurement whose
+command died without blaming the candidate. A measurement command that died is never
+counted as a passed gate. The client is told the end exactly once, every container the run
+created is removed, the run's host lease is free again, and the server leaves no socket
+behind.
 
 Replay a seed with ``--sim-seed=N``; the nightly depth sweeps ``_NIGHTLY_SEEDS``.
 """
@@ -23,6 +27,7 @@ Replay a seed with ``--sim-seed=N``; the nightly depth sweeps ``_NIGHTLY_SEEDS``
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +40,7 @@ from tests.support.skeleton_strategy import (
     OPERATIONS,
     SkeletonConfig,
     SkeletonStrategy,
+    measure,
 )
 from tests.support.task_project import write_task
 
@@ -50,7 +56,7 @@ from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.run.contracts import RunRequest, RunResult
 from vs_agent.api import AgentCapabilities, reap_orphaned_agents
 from vs_agent.api.testing import FakeAgentClient, FakeConfinement, FakeDockerBuildRunner
-from vs_core.api import AttemptBudget, ItemId, WorkspaceMode, WorkspacePlan
+from vs_core.api import AttemptBudget, ItemId, MeasurementFailure, WorkspaceMode, WorkspacePlan
 from vs_core.api.search import Flow, NotOpened, NoWinner, search
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_project.api.testing import FakeGitRepositories
@@ -66,7 +72,9 @@ from vs_sim.api.testing import (
     FiredFault,
     LinkFault,
     LinkFaultKind,
+    PipedStart,
     ProcessScript,
+    ScriptedPipedProcess,
     Sim,
     SimNetwork,
     SimThreads,
@@ -84,7 +92,7 @@ _RUN_ID = "whole-run-1"
 _LEASE_S = 30.0
 _RUN_LIMIT_S = 3600.0
 """Virtual seconds a run may take; past it the run is stuck, so the test fails instead of hanging."""
-_DOCKER_COMMANDS = 16
+_DOCKER_COMMANDS = 40
 """More than a run issues, so some deaths hit no command."""
 _MAX_DEATHS = 2
 _LATEST_LINK_FAULT = 5
@@ -94,11 +102,31 @@ _LINK_FAULT_S = 10.0
 """The longest a partition holds, or delivery is delayed, in virtual seconds."""
 _MAX_CONNECTIONS = 4
 """Only the first connection meets a fault, so a client needs at most two to reach the end."""
-_RETRY_NOT_NEEDED = frozenset({"stop", "read"})
+_RETRY_NOT_NEEDED = frozenset({"stop", "read", "cleanup"})
 """Commands a run may lose without issuing them again: every ``stop`` is followed by an
-``rm -f``, whose effect the ledger does check, and a lost read of the agent user's ids
-makes the sandbox remap them anyway."""
+``rm -f``, whose effect the ledger does check, a lost read of the agent user's ids makes
+the sandbox remap them anyway, and removing the container removes a result file whose
+cleanup was lost."""
+_GATES = frozenset({"accuracy", "benchmark"})
+"""Measurement commands whose loss the run reports as a failed gate instead of retrying."""
+_MISBLAMED = frozenset({"accuracy"})
+"""Commands the drawn deaths spare, because a known bug blames their death on the candidate.
+
+The sandbox reports a ``docker exec`` client killed by signal N as exit ``128 + N``, the
+status of a command killed inside the container, so a dead accuracy client reads as the
+revision failing its correctness check. The strict xfail of
+``test_a_killed_measurement_command_is_a_failed_gate`` tracks it; empty this set with
+the fix (SYSTEM-IFACE-PROGRESS, lane A)."""
 _AGENT_IDENTITY_READ = "id -u agent && id -g agent"
+_BENCHMARK_OUTPUT = re.compile(r"run-benchmark --vs-output \S+;")
+"""The task's benchmark, as the framed benchmark command runs it."""
+_FRAMED_RESULT = (
+    b"\n__VIBESYS_FRAMEWORK_BENCHMARK_JSON__\n"
+    b'{"kind":"hello","protocol":2,"metrics":{"score":{"direction":"max","unit":"ops"}}}\n'
+    b'{"kind":"result","values":{"score":1}}\n'
+    b"\n__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__\n"
+)
+"""What the benchmark command prints: its result file, between the decoder's markers."""
 _SIGNALS = (Signals.SIGKILL, Signals.SIGSEGV, Signals.SIGTERM)
 _TERMINAL = frozenset({"run_finished", "run_failed", "run_interrupted", "configuration_failed"})
 _NIGHTLY_SEEDS = range(64)
@@ -108,8 +136,14 @@ _NO_LINK_FAULT = LinkFault(LinkFaultKind.DELAY, seconds=0.0)
 
 @search(_PLUGIN_ID, config=SkeletonConfig, operations=OPERATIONS, roles=(IMPLEMENTER_ROLE,))
 async def _one_attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
-    """Open one attempt workspace, so the run starts containers for the root and the attempt."""
-    del config
+    """Measure the baseline, then open one attempt workspace.
+
+    The run starts containers for the root and the attempt; the measurement runs its
+    accuracy check and benchmark in a container through ``docker exec``.
+    """
+    refused = await measure(ctx, config, ctx.facts.baseline, "baseline")
+    if refused is not None:
+        return refused
     async with ctx.workspaces.open(
         attempt=ATTEMPT.attempt_id,
         item=ItemId(root="item-0"),
@@ -125,8 +159,9 @@ async def _one_attempt(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
 class _Death:
     """One ``docker`` client process that dies by a signal."""
 
-    command: int
-    """The index, among the run's ``docker`` commands, of the one whose process dies."""
+    command: int | str
+    """The index, among the run's ``docker`` commands, of the one whose process dies, or the
+    kind of command (``_Command.effect[0]``) whose first one dies."""
     signal: Signals
     after_effect: bool
     """Whether the daemon applied the command before its client died."""
@@ -140,6 +175,8 @@ class _Faults:
     """Up to ``_MAX_DEATHS`` client deaths, on distinct commands."""
     link: LinkFault
     """What the network does to the client's first connection."""
+    spared: frozenset[str] = frozenset()
+    """Kinds of command no death hits, whatever its index."""
 
     @classmethod
     def draw(cls, sim: Sim) -> _Faults:
@@ -155,10 +192,21 @@ class _Faults:
             for command in commands
         )
         link = LinkFault.draw(rng, sends=_LATEST_LINK_FAULT, seconds=_LINK_FAULT_S)
-        return cls(deaths=deaths, link=link)
+        return cls(deaths=deaths, link=link, spared=_MISBLAMED)
 
-    def death_of(self, command: int) -> _Death | None:
-        return next((death for death in self.deaths if death.command == command), None)
+    def death_of(self, command: int, kind: str, earlier: Sequence[_Command]) -> _Death | None:
+        """The death of the ``command``-th command, of kind ``kind``, after ``earlier``."""
+        if kind in self.spared:
+            return None
+        first_of_kind = all(issued.effect[0] != kind for issued in earlier)
+        return next(
+            (
+                death
+                for death in self.deaths
+                if death.command == command or (death.command == kind and first_of_kind)
+            ),
+            None,
+        )
 
 
 @dataclass(frozen=True)
@@ -175,18 +223,37 @@ class _Command:
 
 @dataclass
 class _Daemon:
-    """An in-memory Docker daemon behind scripted ``docker`` client processes."""
+    """An in-memory Docker daemon behind scripted ``docker`` client processes.
+
+    It answers both kinds of ``docker`` client: the captured commands that manage
+    containers (``run``, ``stop``, ``rm``, one-shot reads) and the streamed ``docker exec``
+    that runs a command in a container. Of the latter it tells apart the commands a
+    measurement runs: the accuracy check, the benchmark (which prints its result file
+    framed for the decoder) and the result file's removal.
+    """
 
     faults: _Faults
+    threads: SimThreads
     containers: dict[str, str] = field(default_factory=dict)
     """Live containers, id to name."""
     created: list[str] = field(default_factory=list)
     ledger: list[_Command] = field(default_factory=list)
 
     def answer(self, spec: ProcessSpec) -> ProcessScript:
-        argv = tuple(spec.argv)
-        death = self.faults.death_of(len(self.ledger))
+        """Answer one captured ``docker`` command."""
+        return self._issue(tuple(spec.argv))
+
+    def start(self, request: PipedStart) -> ScriptedPipedProcess:
+        """Run one streamed ``docker exec`` to its end."""
+        script = self._issue(request.argv)
+        process = ScriptedPipedProcess(self.threads, merge_stderr=request.merge_stderr)
+        process.write(script.stdout.decode(), script.stderr.decode())
+        process.exit(script.returncode)
+        return process
+
+    def _issue(self, argv: tuple[str, ...]) -> ProcessScript:
         effect = self._effect(argv)
+        death = self.faults.death_of(len(self.ledger), effect[0], self.ledger)
         applied = death is None or death.after_effect
         self.ledger.append(_Command(argv, effect, None if death is None else death.signal, applied))
         reply = self._apply(argv) if applied else ProcessScript()
@@ -198,7 +265,7 @@ class _Daemon:
         if argv[1] in {"rm", "stop"}:
             return (argv[1], self._resolve(argv[-1]))
         if argv[1] == "exec":
-            return ("read" if argv[-1] == _AGENT_IDENTITY_READ else "exec", argv[-1])
+            return (_exec_kind(argv[-1]), argv[-1])
         return (argv[1],)
 
     def _resolve(self, reference: str) -> str:
@@ -220,19 +287,45 @@ class _Daemon:
             if self.containers.pop(container, None) is None:
                 message = f"Error response from daemon: No such container: {argv[-1]}\n"
                 return ProcessScript(returncode=1, stderr=message.encode())
-        if argv[1] == "exec" and argv[-1] == _AGENT_IDENTITY_READ:
+        if argv[1] == "exec":
+            return self._exec(self._resolve(argv[-4]), argv[-1])
+        return ProcessScript()
+
+    def _exec(self, container: str, script: str) -> ProcessScript:
+        if container not in self.containers:
+            message = f"Error response from daemon: No such container: {container}\n"
+            return ProcessScript(returncode=1, stderr=message.encode())
+        kind = _exec_kind(script)
+        if kind == "read":
             return ProcessScript(stdout=b"1000\n1000\n")
+        if kind == "benchmark":
+            return ProcessScript(stdout=_FRAMED_RESULT)
         return ProcessScript()
 
     def unretried(self) -> list[_Command]:
         """Killed commands that never took effect and were never issued again."""
         missing = []
         for index, command in enumerate(self.ledger):
-            if command.died is None or command.applied or command.effect[0] in _RETRY_NOT_NEEDED:
+            if command.died is None or command.applied:
+                continue
+            if command.effect[0] in _RETRY_NOT_NEEDED | _GATES:
                 continue
             if not any(later.effect == command.effect for later in self.ledger[index + 1 :]):
                 missing.append(command)
         return missing
+
+
+def _exec_kind(script: str) -> str:
+    """What one ``docker exec`` script does, by the shape the run gives it."""
+    if script == _AGENT_IDENTITY_READ:
+        return "read"
+    if _BENCHMARK_OUTPUT.search(script):
+        return "benchmark"
+    if script.startswith("rm -f -- "):
+        return "cleanup"
+    if script.endswith(" true"):
+        return "accuracy"
+    return "exec"
 
 
 class _Backend(FakeComputeBackend):
@@ -403,10 +496,10 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults) -> _Outcome:
     schedule = sim.seed if sim.schedule_seed is None else sim.schedule_seed
     threads = SimThreads(sim.clock, schedule_seed=schedule, trace=sim.trace)
     sim.clock.limit = sim.clock.now() + _RUN_LIMIT_S
-    daemon = _Daemon(faults)
+    daemon = _Daemon(faults, threads)
     docker = SubprocessDockerCli(
         processes=FakeProcesses(daemon.answer, pass_time=threads.sleep),
-        launcher=FakePipedProcessLauncher(),
+        launcher=FakePipedProcessLauncher(factory=daemon.start),
     )
     root = tmp_path / "project"
     _project(root)
@@ -475,7 +568,7 @@ def _run(tmp_path: Path, sim: Sim, faults: _Faults) -> _Outcome:
 
 def _assert_invariants(outcome: _Outcome, sim: Sim, faults: _Faults) -> None:
     killed = [command for command in outcome.daemon.ledger if command.died is not None]
-    context = f"seed {sim.seed}: {faults}; killed {killed}; error {outcome.error!r}"
+    context = f"seed {sim.seed}: {faults}; killed {killed}; error {outcome.error!r}; result {outcome.result!r}"
     # A defined end: success, or a failure that names how a dead process ended.
     succeeded = outcome.result is not None and outcome.result.succeeded
     if not killed:
@@ -483,12 +576,30 @@ def _assert_invariants(outcome: _Outcome, sim: Sim, faults: _Faults) -> None:
         assert succeeded, context
     elif not succeeded:
         failure = repr(outcome.error) if outcome.result is None else str(outcome.result.failure)
-        assert any(f"exit {-command.died}" in failure for command in killed if command.died), (
-            context
+        named = any(f"exit {-command.died}" in failure for command in killed if command.died)
+        # A dead measurement command fails its measurement instead, and that failure must not
+        # blame the candidate: a client's death says nothing about the revision it measured.
+        measured = any(command.effect[0] in _GATES for command in killed) and any(
+            f"measurement {kind.value}" in failure
+            for kind in MeasurementFailure
+            if kind is not MeasurementFailure.WORKLOAD
         )
+        assert named or measured, context
     else:
         # A success is earned: every killed command that never took effect was issued again.
         assert outcome.daemon.unretried() == [], context
+    # A measurement command that died is never counted as a passed gate.
+    for gate in _GATES:
+        commands = [command for command in outcome.daemon.ledger if command.effect[0] == gate]
+        passed = [
+            event
+            for event in outcome.client.events
+            if event["type"] == "gate_finished"
+            and event["data"]["gate"] == gate
+            and event["status"] == "completed"
+        ]
+        if passed:
+            assert any(command.died is None for command in commands), (context, gate)
     # The client's connection met its fault, and the client was still told that end exactly once.
     assert [fired.fault for fired in outcome.link_faults] == [faults.link], context
     terminal = [event["type"] for event in outcome.client.events if event["type"] in _TERMINAL]
@@ -547,3 +658,43 @@ def test_a_killed_container_removal_leaves_no_container(
         tmp_path / "killed", Sim(seed=0), _Faults(deaths=(death,), link=_NO_LINK_FAULT)
     )
     assert outcome.daemon.ledger[target].argv[1] == "rm"
+
+
+@pytest.mark.parametrize(
+    "gate",
+    [
+        pytest.param(
+            gate,
+            marks=[
+                pytest.mark.xfail(
+                    strict=True,
+                    reason="a dead docker exec client reads as the candidate's failure",
+                )
+            ]
+            if gate in _MISBLAMED
+            else [],
+        )
+        for gate in sorted(_GATES)
+    ],
+)
+@pytest.mark.parametrize("timing", ["before-effect", "after-effect"])
+def test_a_killed_measurement_command_is_a_failed_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, gate: str, timing: str
+) -> None:
+    """A ``docker exec`` of the accuracy check or the benchmark whose client died fails its gate.
+
+    The run kills the gate's first command, before or after it ran in the container, and
+    reports that gate failed, not passed.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    death = _Death(command=gate, signal=Signals.SIGKILL, after_effect=timing == "after-effect")
+    outcome = _check(tmp_path, Sim(seed=0), _Faults(deaths=(death,), link=_NO_LINK_FAULT))
+    assert [command.effect[0] for command in outcome.daemon.ledger if command.died] == [gate]
+    finished = [
+        event["status"]
+        for event in outcome.client.events
+        if event["type"] == "gate_finished" and event["data"]["gate"] == gate
+    ]
+    # The baseline measurement's gate failed; the run's final measurement of its winner runs
+    # the gate again, in a new container, and may pass.
+    assert finished[0] == "failed", finished
