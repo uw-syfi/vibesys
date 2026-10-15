@@ -14,12 +14,13 @@ implementations against the same cases).
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
     from types import TracebackType
 
 
@@ -156,6 +157,10 @@ class Threads(Protocol):
         """Monotonic seconds; only differences are meaningful."""
         ...
 
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        """Run ``main`` to completion on a new event loop on the calling thread."""
+        ...
+
 
 class OsThreads:
     """Operating-system threads and the standard library's primitives."""
@@ -194,6 +199,10 @@ class OsThreads:
     def now(self) -> float:
         """``time.monotonic``."""
         return time.monotonic()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        """``asyncio.run``."""
+        return asyncio.run(main)
 
 
 class OsThreadLocal[T](threading.local):

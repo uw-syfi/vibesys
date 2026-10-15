@@ -15,7 +15,8 @@ Documented differences from the CLI implementation:
 * Patches and rename similarity come from ``difflib`` (see ``_git_textdiff``).
 * ``reachable_paths`` lists every path name; the CLI lists one name per distinct object.
 * Hooks, signing, and ``core.excludesFile`` do not exist.
-* ``.git`` is an empty marker directory; linked worktrees get none.
+* ``.git`` is an empty marker directory; a linked worktree's ``.git`` is a file naming
+  an admin directory that does not exist, as Git's names one that only Git reads.
 """
 
 from __future__ import annotations
@@ -918,14 +919,18 @@ class FakeGitRepository:
                 self._refuse(command, f"fatal: '{destination}' already exists")
             snapshot = scope.repo.objects.snapshot_of(target)
             resolved.mkdir(parents=True, exist_ok=True)
+            name = self._admin_name(scope.repo, resolved)
             checkout = Checkout(
                 path=resolved,
                 repo=scope.repo,
                 head=Head(None, target),
-                name=self._admin_name(scope.repo, resolved),
+                name=name,
                 index=dict(snapshot),
             )
             try:
+                (resolved / ".git").write_text(
+                    f"gitdir: {scope.repo.git_dir / 'worktrees' / name}\n"
+                )
                 for path, entry in snapshot.items():
                     write_file(resolved, path, entry, scope.repo.objects.blob(entry.blob) or b"")
             except OSError as error:

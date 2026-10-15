@@ -50,7 +50,7 @@ from vs_sim.api import ProcessTimeoutError, Threads
 from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Coroutine, Mapping, Sequence
 
     from vs_sim.api import Condition, Event, Lock, ThreadLocal, Worker
 
@@ -167,6 +167,9 @@ class _StuckDrainThreads:
     def now(self) -> float:
         return self._threads.now()
 
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        return self._threads.run_async(main)
+
     def advance(self, seconds: float) -> None:
         self._threads.advance(seconds)
 
@@ -243,6 +246,9 @@ class _RecordingThreads:
 
     def now(self) -> float:
         return self._threads.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        return self._threads.run_async(main)
 
     def run[T](self, main: Callable[[], T]) -> T:
         return self._threads.run(main)

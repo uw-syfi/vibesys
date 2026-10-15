@@ -298,7 +298,7 @@ class ServerRuntime:
                     self.handle = None
                     self.session = None
 
-        return asyncio.run(execute())
+        return self.threads.run_async(execute())
 
     def run(self, run: Callable[[], _RunValueT]) -> _RunValueT | None:
         """Serve requests while executing ``run`` in the calling thread."""

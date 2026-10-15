@@ -33,7 +33,7 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Coroutine, Sequence
 
     from vs_sim.api import Condition, Event, Lock, ThreadLocal, Worker
 
@@ -150,6 +150,9 @@ class _StuckThreads:
 
     def now(self) -> float:
         return self._threads.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        return self._threads.run_async(main)
 
     def advance(self, seconds: float) -> None:
         self._threads.advance(seconds)

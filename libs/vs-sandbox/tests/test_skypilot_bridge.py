@@ -77,7 +77,7 @@ from .skypilot_world import MemoryTransport
 pytestmark = pytest.mark.filterwarnings("error::pytest.PytestUnhandledThreadExceptionWarning")
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Coroutine, Sequence
 
     from vs_sandbox.api.skypilot import RemoteJobInfo
     from vs_sim.api import Condition, Connection, Event, Listener, Lock, ThreadLocal, Worker
@@ -239,6 +239,9 @@ class _RecordingThreads:
 
     def now(self) -> float:
         return self._threads.now()
+
+    def run_async[T](self, main: Coroutine[object, object, T]) -> T:
+        return self._threads.run_async(main)
 
     def run[T](self, main: Callable[[], T]) -> T:
         return self._threads.run(main)
