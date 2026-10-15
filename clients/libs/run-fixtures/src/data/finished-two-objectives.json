@@ -63,8 +63,6 @@
         "search_policy": "beam",
         "benchmark_contract": true,
         "pareto_objectives": null,
-        "max_continuation_rounds": 3,
-        "max_unmeasured_turns": null,
         "source": "loop"
       }
     },

@@ -516,7 +516,7 @@ def test_dynamic_results_enrich_the_original_workstream_by_admission_sequence(
     ).state
     observation = event(
         e.CoreEventType.WORKSTREAM_FINISHED,
-        e.WorkstreamFinishedData(setup_failure=False, refunded=False, repeated_error=True),
+        e.WorkstreamFinishedData(repeated_error=True),
         round_label=f"round-{sequence}",
     )
     result = map_event(state, observation)

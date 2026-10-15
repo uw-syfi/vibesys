@@ -51,8 +51,6 @@ def test_workstream_failure_redacts_credentials_during_public_event_validation()
             "type": CoreEventType.WORKSTREAM_FINISHED,
             "data": {
                 "kind": "workstream_finished",
-                "setup_failure": False,
-                "refunded": False,
                 "repeated_error": False,
                 "last_error": {
                     "kind": "no-trusted-evidence",
@@ -91,8 +89,6 @@ def test_byte_text_is_coerced_before_every_semantic_event_redaction() -> None:
             "type": CoreEventType.WORKSTREAM_FINISHED,
             "data": {
                 "kind": "workstream_finished",
-                "setup_failure": False,
-                "refunded": False,
                 "repeated_error": False,
                 "last_error": {
                     "kind": "no-trusted-evidence",

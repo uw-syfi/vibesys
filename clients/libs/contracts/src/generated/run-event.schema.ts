@@ -1531,7 +1531,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "JudgeResultData": {
       "additionalProperties": false,
-      "description": "Verdict and feedback returned by the judge.\n\nSee ``vibesys.events.JudgeResultData`` for ``skipped``/``skip_reason``/\n``implementer_outcome``.",
+      "description": "Verdict and feedback returned by the judge.",
       "properties": {
         "kind": {
           "const": "judge_result",
@@ -1554,42 +1554,6 @@ const runEventSchema: Record<string, unknown> = {
         "attempt": {
           "title": "Attempt",
           "type": "integer"
-        },
-        "skipped": {
-          "default": false,
-          "title": "Skipped",
-          "type": "boolean"
-        },
-        "skip_reason": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Skip Reason"
-        },
-        "implementer_outcome": {
-          "anyOf": [
-            {
-              "enum": [
-                "continue",
-                "supported",
-                "nominated",
-                "disproven",
-                "implementation_failed"
-              ],
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Implementer Outcome"
         }
       },
       "required": [
@@ -2308,7 +2272,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RunConfiguredData": {
       "additionalProperties": false,
-      "description": "One per run: the resolved configuration a loop starts with.\n\nSee ``vibesys.events.RunConfiguredData`` for ``max_continuation_rounds``/\n``max_unmeasured_turns``.",
+      "description": "One per run: the resolved configuration a loop starts with.",
       "properties": {
         "kind": {
           "const": "run_configured",
@@ -2376,30 +2340,6 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Pareto Objectives"
-        },
-        "max_continuation_rounds": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Max Continuation Rounds"
-        },
-        "max_unmeasured_turns": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Max Unmeasured Turns"
         },
         "source": {
           "$ref": "#/$defs/FrameworkSource",
@@ -4237,21 +4177,13 @@ const runEventSchema: Record<string, unknown> = {
     },
     "WorkstreamFinishedData": {
       "additionalProperties": false,
-      "description": "Wire summary for one projected, recorded policy round and its typed failure, if any.\n\nSee ``vibesys.events.WorkstreamFinishedData`` for the generic producer's\nserial and dynamic behavior. Its current round projection always reports\n``setup_failure`` and ``refunded`` as ``False``; in the dynamic policy\nspecifically, profile and merge workstreams do not emit this event.",
+      "description": "Wire summary for one projected, recorded policy round and its typed failure, if any.\n\nSee ``vibesys.events.WorkstreamFinishedData`` for the generic producer's\nserial and dynamic behavior; in the dynamic policy specifically, profile\nand merge workstreams do not emit this event.",
       "properties": {
         "kind": {
           "const": "workstream_finished",
           "default": "workstream_finished",
           "title": "Kind",
           "type": "string"
-        },
-        "setup_failure": {
-          "title": "Setup Failure",
-          "type": "boolean"
-        },
-        "refunded": {
-          "title": "Refunded",
-          "type": "boolean"
         },
         "repeated_error": {
           "title": "Repeated Error",
@@ -4271,8 +4203,6 @@ const runEventSchema: Record<string, unknown> = {
       },
       "required": [
         "kind",
-        "setup_failure",
-        "refunded",
         "repeated_error"
       ],
       "title": "WorkstreamFinishedData",

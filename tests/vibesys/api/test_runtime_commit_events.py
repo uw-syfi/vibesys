@@ -161,8 +161,6 @@ def test_commit_projection_preserves_semantics_and_publication_order() -> None:
     )
     assert workstream_finished.data is not None
     assert workstream_finished.data.kind == "workstream_finished"
-    assert workstream_finished.data.setup_failure is False
-    assert workstream_finished.data.refunded is False
     assert workstream_finished.data.repeated_error is False
     assert workstream_finished.data.last_error is None
     assert workstream_finished.round_label == round_finished.round_label == "round-1"
