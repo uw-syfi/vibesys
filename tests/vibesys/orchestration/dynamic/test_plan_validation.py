@@ -287,6 +287,15 @@ def test_a_broken_rule_is_named_by_its_code_at_the_field_the_planner_must_fix(
     assert not result.valid
 
 
+def test_a_merge_is_never_a_repair_of_a_failed_plan() -> None:
+    result = check(
+        portfolio(merge_entry("m", "b")),
+        Record(hypotheses=[FINISHED_A], parents=[GOOD_PARENT], repairable=frozenset({"a"})),
+    )
+    assert codes(result) == [ViolationCode.OUTSIDE_PLAN]
+    assert _where(result.violations[0].path) == "workstreams.0"
+
+
 def test_a_plan_that_breaks_no_rule_is_accepted_whole_in_order() -> None:
     plan = portfolio(
         implement_entry("n"),

@@ -339,8 +339,8 @@ def _work_plan(entry: WorkstreamPlan | ProfilePlan | MergePlan) -> WorkPlan:
     )
 
 
-def _repairs(entry: WorkstreamPlan | ProfilePlan, repairable: frozenset[str]) -> bool:
-    """Whether ``entry`` continues one of the failed plan steps."""
+def _repairs(entry: WorkstreamPlan | ProfilePlan | MergePlan, repairable: frozenset[str]) -> bool:
+    """Whether ``entry`` continues one of the failed plan steps; a merge never does."""
     return (
         isinstance(entry, WorkstreamPlan)
         and entry.continue_hypothesis
