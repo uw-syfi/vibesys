@@ -42,7 +42,7 @@ from launch import open_run_store
 from vibesys.api.hypothesis import agent_projection
 from vs_mcp.api import ToolSpec, serve_stdio
 from vs_project.api import Git, Project
-from vs_sim.api import OsProcesses
+from vs_sim.api import OsProcesses, OsThreads
 
 if TYPE_CHECKING:
     from vibesys.api import RunStore
@@ -268,7 +268,7 @@ def main(argv: list[str] | None = None) -> None:
     """Parse args, open this run's read-model, and serve its tools over stdio."""
     args = build_parser().parse_args(argv)
     project = Project.open(args.project_root)
-    store = open_run_store(project, git=Git(OsProcesses()))
+    store = open_run_store(project, git=Git(OsProcesses()), threads=OsThreads())
     tools = build_tools(store, project, args.run_id)
     serve_stdio(tools, server_name="vibesys-run")
 

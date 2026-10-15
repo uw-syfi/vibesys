@@ -22,9 +22,9 @@ if TYPE_CHECKING:
 
 
 def open_run_store(
-    project: Project, *, registry: OrchestrationRegistry, git: Git, threads: Threads | None = None
+    project: Project, *, registry: OrchestrationRegistry, git: Git, threads: Threads
 ) -> RunStore:
-    """Open a read-only run history store for *project*; *threads* defaults to the OS's.
+    """Open a read-only run history store for *project*; *threads* makes its locks.
 
     *git* starts the Git commands that read the project's history.
     """

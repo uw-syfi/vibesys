@@ -26,6 +26,7 @@ from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -157,7 +158,12 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
             assert not agents_factory.clients[0].closed
             assert agents_factory.clients[1].closed
             assert (
-                open_run_store(Project.open(request.project_root), registry=registry, git=REAL_GIT)
+                open_run_store(
+                    Project.open(request.project_root),
+                    registry=registry,
+                    git=REAL_GIT,
+                    threads=SimThreads(),
+                )
                 .get_run(result.run_id)
                 .run_id
                 == result.run_id

@@ -464,7 +464,12 @@ def _run_ready(
     """Project private resource facts to the narrow frontend contract."""
     project = resources.project_resources
     environment = resources.environment_resources
-    store = open_run_store(project.project, registry=registry, git=implementations.git)
+    store = open_run_store(
+        project.project,
+        registry=registry,
+        git=implementations.git,
+        threads=implementations.timing.threads,
+    )
     return RunReady(
         record=store.get_record(project.state.run_id),
         log_directory=environment.request.log_dir,

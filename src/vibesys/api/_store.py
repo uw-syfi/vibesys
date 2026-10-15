@@ -18,7 +18,6 @@ from vs_project.api import (
     is_project_state_path,
     open_git_repository,
 )
-from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -141,10 +140,10 @@ def _open_run_store(
     *,
     registry: OrchestrationRegistry,
     git: Git,
-    threads: Threads | None = None,
+    threads: Threads,
 ) -> RunStore:
     """Compose a product store over one canonical project."""
-    return _LocalRunStore(project, registry=registry, git=git, threads=threads or OsThreads())
+    return _LocalRunStore(project, registry=registry, git=git, threads=threads)
 
 
 class _GitReadEvents(NullGitTrackerEvents):

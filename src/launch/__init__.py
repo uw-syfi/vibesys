@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import RunTiming
     from vs_runtime.api.infrastructure import RunState, StopTimer
     from vs_sandbox.api import ComputeBackendImpl
-    from vs_sim.api import BlockingRunner, Network, Processes
+    from vs_sim.api import BlockingRunner, Network, Processes, Threads
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,10 +202,13 @@ def validate_run_request(
 
 
 def open_run_store(
-    project: Project, *, git: Git, registry: OrchestrationRegistry | None = None
+    project: Project, *, git: Git, threads: Threads, registry: OrchestrationRegistry | None = None
 ) -> RunStore:
-    """Open recorded runs with the built-in policy projections; ``git`` reads their history."""
-    return _open_run_store(project, registry=_catalog(registry), git=git)
+    """Open recorded runs with the built-in policy projections.
+
+    ``git`` reads their history and ``threads`` makes the store's locks.
+    """
+    return _open_run_store(project, registry=_catalog(registry), git=git, threads=threads)
 
 
 __all__ = [

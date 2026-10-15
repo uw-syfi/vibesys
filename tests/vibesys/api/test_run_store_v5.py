@@ -22,6 +22,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import run_execution_record
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -70,7 +71,7 @@ def test_public_run_store_rejects_pre_v5_manifests_explicitly(
     raw["schema_version"] = schema_version
     manifest_path.write_text(json.dumps(raw), encoding="utf-8")
 
-    store = open_run_store(project, git=REAL_GIT)
+    store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
     with pytest.raises(
         ProjectStateError,
         match=rf"unsupported run schema version {schema_version}.*requires version 5",
@@ -104,7 +105,7 @@ def test_plain_v5_run_is_visible_in_run_store(tmp_path: Path) -> None:
     project.state.create_run(manifest)
     # A plain run is a core run: its state is the runtime record, and a run that committed none
     # is listed with its identity and no projection.
-    store = open_run_store(project, git=REAL_GIT)
+    store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
     direct = store.get_run(manifest.run_id)
     listed = store.list_runs()
 
@@ -140,7 +141,7 @@ def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
     )
     project.state.create_run(manifest)
 
-    store = open_run_store(project, git=REAL_GIT)
+    store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
     direct = store.get_run(manifest.run_id)
 
     assert direct.loop == "team-search"
@@ -151,7 +152,10 @@ def test_unknown_v5_run_has_generic_history_view(tmp_path: Path) -> None:
         "notes.txt", b"candidate review"
     )
     assert (
-        open_run_store(project, git=REAL_GIT).get_record(manifest.run_id).history_documents() == ()
+        open_run_store(project, git=REAL_GIT, threads=SimThreads())
+        .get_record(manifest.run_id)
+        .history_documents()
+        == ()
     )
 
 
@@ -192,7 +196,7 @@ def test_workspace_changes_hide_the_registered_plugins_memory(tmp_path: Path) ->
     )
 
     changes = (
-        open_run_store(project, registry=registry, git=REAL_GIT)
+        open_run_store(project, registry=registry, git=REAL_GIT, threads=SimThreads())
         .get_record(manifest.run_id)
         .workspace_changes(baseline, head)
     )

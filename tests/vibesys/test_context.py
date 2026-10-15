@@ -55,7 +55,7 @@ from vs_sandbox.api import HostResourceAccess
 from vs_sandbox.api.evaluator_tools import tool_install_root
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 class _PortableStateProbe(BaseModel):
@@ -732,7 +732,7 @@ def test_agent_v5_run_resumes_only_with_the_options_it_started_with(tmp_path: Pa
     assert isinstance(stored, OrchestrationRunManifest)
     assert stored.orchestration.id == "multi-agent"
     assert stored.orchestration.options["max_rounds"] == 1
-    view = open_run_store(Project.open(project), git=REAL_GIT).get_run(run_id)
+    view = open_run_store(Project.open(project), git=REAL_GIT, threads=SimThreads()).get_run(run_id)
     assert view.loop == "multi-agent"
     registration = built_in_orchestrations().resolve(stored.orchestration.id)
     assert registration.projector is not None

@@ -31,7 +31,7 @@ from vs_runtime.api.infrastructure import (
     create_run_control_channel,
 )
 from vs_sim.api import OsThreads
-from vs_sim.api.testing import ManualClock
+from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -116,7 +116,7 @@ def auxiliary_agent_providers() -> tuple[str, ...]:
 
 def run_record(project: Project, run_id: str) -> RunRecord:
     """Open the semantic record used by server-facing integration tests."""
-    return open_run_store(project, git=REAL_GIT).get_record(run_id)
+    return open_run_store(project, git=REAL_GIT, threads=SimThreads()).get_record(run_id)
 
 
 @dataclass(frozen=True)
