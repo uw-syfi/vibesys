@@ -1604,7 +1604,7 @@ def _deadline(
     state, events = _end_open_record(
         state, record, event.reason, lost=bool(signals), first=previous_block is None
     )
-    signals = (*signals, *_orphaned_jobs(context, record, event.reason))
+    signals = (*signals, *_orphaned_jobs(state, context, record, event.reason))
     observation = record.observation
     resources = []
     if (
@@ -1742,15 +1742,19 @@ def _lost_turn(
 
 
 def _orphaned_jobs(
-    context: RecordsContext, record: RequestRecord, reason: FailureReason
+    state: RecordsState, context: RecordsContext, record: RequestRecord, reason: FailureReason
 ) -> tuple[JobTerminationRequested, ...]:
     """The termination of every unfinished job a submission started, when core ends it.
 
     A strategy's ``Measure`` waits on its submission's record. Once that record ends at its
     limit or a watch, nothing waits on the job any longer: evaluation cancels it rather than
-    leave it in the scheduler's queue, holding nodes nobody will read.
+    leave it in the scheduler's queue, holding nodes nobody will read. A job an agent
+    submitted is its wait's to end (``_continuations``), and a job evaluation is already
+    cancelling (an attempt's retirement, a run's stop) keeps that cancel and its retry limit.
     """
-    if not isinstance(record.request, SubmitMeasurement):
+    if not isinstance(record.request, SubmitMeasurement) or any(
+        call.request_id == record.request_id for call in context.evaluation.agent_calls
+    ):
         return ()
     cause = "deadline" if reason == FailureReason.TIMED_OUT else "retirement"
     return tuple(
@@ -1759,6 +1763,10 @@ def _orphaned_jobs(
         if job.submission_id == record.request_id
         and job.resource_id is not None
         and not job.terminal
+        and not any(
+            isinstance(row.request, CancelOwnedJob) and row.request.resource_id == job.resource_id
+            for row in state.records
+        )
     )
 
 
