@@ -29,12 +29,14 @@ if TYPE_CHECKING:
     from vs_sim.os_platform import Platform
     from vs_sim.probes import CommandProbe, ProbeResult, SubprocessProbe
     from vs_sim.processes import (
+        DEFAULT_MAX_OUTPUT_BYTES,
         ForegroundChild,
         ForegroundLauncher,
         InheritedStdioLauncher,
         MergedOutputProcess,
         MergedOutputProcessLauncher,
         OsProcesses,
+        OutputStream,
         PipedProcess,
         PipedProcessLauncher,
         PopenFactory,
@@ -42,6 +44,7 @@ if TYPE_CHECKING:
         ProcessGroupUnreaped,
         ProcessLauncher,
         ProcessOutcome,
+        ProcessOutputTooLarge,
         ProcessRun,
         ProcessSpec,
         ProcessTimedOut,
@@ -107,7 +110,10 @@ _MODULES: dict[str, str] = {
     "ProcessOutcome": "vs_sim.processes",
     "ProcessSpec": "vs_sim.processes",
     "Processes": "vs_sim.processes",
+    "DEFAULT_MAX_OUTPUT_BYTES": "vs_sim.processes",
+    "OutputStream": "vs_sim.processes",
     "ProcessGroupUnreaped": "vs_sim.processes",
+    "ProcessOutputTooLarge": "vs_sim.processes",
     "ProcessRun": "vs_sim.processes",
     "ProcessTimedOut": "vs_sim.processes",
     "ProcessTimeoutError": "vs_sim.processes",
@@ -156,6 +162,7 @@ def __dir__() -> list[str]:
 
 
 __all__ = [
+    "DEFAULT_MAX_OUTPUT_BYTES",
     "BlockingRunner",
     "Clock",
     "CommandProbe",
@@ -177,6 +184,7 @@ __all__ = [
     "Network",
     "OsProcesses",
     "OsThreads",
+    "OutputStream",
     "PidfdProcessSignaller",
     "PipedProcess",
     "PipedProcessLauncher",
@@ -186,6 +194,7 @@ __all__ = [
     "ProcessGroupUnreaped",
     "ProcessLauncher",
     "ProcessOutcome",
+    "ProcessOutputTooLarge",
     "ProcessRun",
     "ProcessSignaller",
     "ProcessSpec",

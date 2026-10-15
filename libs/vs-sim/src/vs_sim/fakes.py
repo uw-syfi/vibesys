@@ -13,9 +13,11 @@ from vs_sim.loopback_http import HttpReply
 from vs_sim.processes import (
     ForegroundChild,
     MergedOutputProcess,
+    OutputStream,
     PipedProcess,
     ProcessGroupUnreaped,
     ProcessOutcome,
+    ProcessOutputTooLarge,
     ProcessSpec,
     ProcessTimedOut,
     RunningProcess,
@@ -248,6 +250,14 @@ class FakeProcessLauncher:
         return _ScriptedProcess(spec, self.script(spec), self.clock)
 
 
+def _too_large(limit: int, stdout: bytes, stderr: bytes) -> ProcessOutputTooLarge | None:
+    """The outcome of a scripted run that writes past *limit*, stopped as the real one is."""
+    for stream, written in ((OutputStream.STDOUT, stdout), (OutputStream.STDERR, stderr)):
+        if len(written) > limit:
+            return ProcessOutputTooLarge(limit, stream, stdout[:limit], stderr[:limit])
+    return None
+
+
 @dataclass
 class FakeProcesses:
     """Runs scripted commands to completion; records every spec it was asked to run.
@@ -274,6 +284,9 @@ class FakeProcesses:
         pid = self.first_pid + len(self.ran)
         self.ran.append(spec)
         script = self.script(spec)
+        stdout = script.stdout + (spec.input if script.echo_input else b"")
+        if too_large := _too_large(spec.max_output_bytes, stdout, script.stderr):
+            return too_large
         endless = script.runs_until_signalled
         if timeout is not None and (endless or script.duration_s > timeout):
             self._elapse(timeout)
@@ -284,7 +297,6 @@ class FakeProcesses:
             message = f"{spec.argv[0]} never ends and the caller set no timeout"
             raise AssertionError(message)
         self._elapse(script.duration_s)
-        stdout = script.stdout + (spec.input if script.echo_input else b"")
         return ProcessOutcome(script.returncode, stdout, script.stderr)
 
     def _elapse(self, seconds: float) -> None:

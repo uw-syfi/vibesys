@@ -18,7 +18,13 @@ from vs_sandbox.slurm_broker_protocol import (
     ProcessCall,
     ProcessReply,
 )
-from vs_sim.api import ProcessGroupUnreaped, ProcessOutcome, ProcessSpec, ProcessTimedOut
+from vs_sim.api import (
+    ProcessGroupUnreaped,
+    ProcessOutcome,
+    ProcessOutputTooLarge,
+    ProcessSpec,
+    ProcessTimedOut,
+)
 from vs_slurm.api import SlurmConfig, SlurmSshTransport
 
 if TYPE_CHECKING:
@@ -200,6 +206,9 @@ class SlurmProcessBroker:
             case ProcessGroupUnreaped(detail=detail):
                 message = f"{call.argv[0]} timed out after {timeout:g} seconds; {detail}"
                 raise TimeoutError(message)
+            case ProcessOutputTooLarge(limit=limit, stream=stream):
+                message = f"{call.argv[0]} wrote more than {limit} bytes to {stream}"
+                raise OSError(message)
 
     def _validate_argv(self, argv: tuple[str, ...]) -> None:
         ssh = self._transport.ssh_command

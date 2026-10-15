@@ -10,9 +10,11 @@ import selectors
 import signal
 import subprocess
 import threading
+import time
 from collections.abc import Callable
 from contextlib import ExitStack, suppress
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
@@ -26,21 +28,33 @@ if TYPE_CHECKING:
 ProcessTimeoutError = subprocess.TimeoutExpired
 type PopenFactory = Callable[..., subprocess.Popen[bytes]]
 _CLEANUP_TIMEOUT_S = 5.0
+_PIPE_CHUNK_BYTES = 64 * 1024
+
+DEFAULT_MAX_OUTPUT_BYTES = 256 * 1024 * 1024
+"""The most a run keeps of each output stream unless its spec sets a cap: 256 MiB."""
 
 
 @dataclass(frozen=True)
 class ProcessSpec:
-    """What to run: the argument vector, its working directory and environment, its input."""
+    """What to run: the argument vector, its working directory and environment, its input.
+
+    ``max_output_bytes`` caps each captured stream. :meth:`Processes.run` stops a command
+    that writes more to either one and reports :class:`ProcessOutputTooLarge`.
+    """
 
     argv: tuple[str, ...]
     cwd: Path | None = None
     env: Mapping[str, str] | None = None
     input: bytes = b""
+    max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES
 
     def __post_init__(self) -> None:
-        """Reject an empty command."""
+        """Reject an empty command and a negative output cap."""
         if not self.argv:
             message = "a process needs a program: argv is empty"
+            raise ValueError(message)
+        if self.max_output_bytes < 0:
+            message = f"max_output_bytes must not be negative, got {self.max_output_bytes}"
             raise ValueError(message)
 
 
@@ -103,18 +117,42 @@ class ProcessGroupUnreaped:
     """What failed, in words, for a log line or error message."""
 
 
-type ProcessRun = ProcessOutcome | ProcessTimedOut | ProcessGroupUnreaped
-"""How a run to completion ended: exited, timed out and cleaned up, or timed out and left behind."""
+class OutputStream(StrEnum):
+    """One of a command's two captured output streams."""
+
+    STDOUT = "stdout"
+    STDERR = "stderr"
+
+
+@dataclass(frozen=True)
+class ProcessOutputTooLarge:
+    """The command wrote more than ``limit`` bytes to ``stream``; its whole group was then killed.
+
+    The streams hold the first ``limit`` bytes of each. ``detail`` is empty when the kill
+    ended the group, and otherwise says what may still be running, as for
+    :class:`ProcessGroupUnreaped`.
+    """
+
+    limit: int
+    stream: OutputStream
+    stdout: bytes
+    stderr: bytes
+    detail: str = ""
+
+
+type ProcessRun = ProcessOutcome | ProcessTimedOut | ProcessGroupUnreaped | ProcessOutputTooLarge
+"""How a run ended: exited, timed out (cleaned up or left behind), or stopped for too much output."""
 
 
 class Processes(Protocol):
     """Runs a command to completion: the blocking counterpart of :class:`ProcessLauncher`.
 
     The command runs without a shell in a process group of its own, with ``spec.input`` as its
-    stdin and both output streams captured. Raises ``OSError`` when the program cannot be
-    started. A command that outlives ``timeout`` has its whole group killed; the result says
-    whether that ended everything (:class:`ProcessTimedOut`) or not
-    (:class:`ProcessGroupUnreaped`).
+    stdin and both output streams captured, each up to ``spec.max_output_bytes``. Raises
+    ``OSError`` when the program cannot be started. A command that outlives ``timeout`` has
+    its whole group killed; the result says whether that ended everything
+    (:class:`ProcessTimedOut`) or not (:class:`ProcessGroupUnreaped`). A command that writes
+    past the cap has its whole group killed too (:class:`ProcessOutputTooLarge`).
     """
 
     def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
@@ -146,24 +184,31 @@ class OsProcesses:
             process_group=0,
         )
         group = _OwnedProcessGroup(process)
+        captured = _Captured(spec.max_output_bytes)
+        deadline = None if timeout is None else time.monotonic() + timeout
         try:
-            stdout, stderr = process.communicate(spec.input, timeout=timeout)
-        except subprocess.TimeoutExpired as expired:
-            match self._kill(process, group):
-                case (output, errors):
-                    return ProcessTimedOut(expired.timeout, output, errors)
-                case detail:
-                    return ProcessGroupUnreaped(expired.timeout, process.pid, detail)
+            end = _pump(process, spec.input, deadline, captured, stop_at_limit=True)
         except BaseException as failure:
-            if isinstance(detail := self._kill(process, group), str):
+            if isinstance(detail := self._kill(process, group, captured), str):
                 failure.add_note(detail)
             raise
-        return ProcessOutcome(group.reap(timeout=None), stdout, stderr)
+        if end is _PumpEnd.DONE:
+            _close_pipes(process)
+            stdout, stderr = captured.streams()
+            return ProcessOutcome(group.reap(timeout=None), stdout, stderr)
+        cleanup = self._kill(process, group, captured)
+        stdout, stderr = captured.streams()
+        if end is _PumpEnd.TIMEOUT:
+            if cleanup:
+                return ProcessGroupUnreaped(timeout or 0.0, process.pid, cleanup)
+            return ProcessTimedOut(timeout or 0.0, stdout, stderr)
+        stream = OutputStream.STDOUT if end is _PumpEnd.STDOUT_FULL else OutputStream.STDERR
+        return ProcessOutputTooLarge(spec.max_output_bytes, stream, stdout, stderr, cleanup)
 
     def _kill(
-        self, process: subprocess.Popen[bytes], group: _OwnedProcessGroup
-    ) -> tuple[bytes, bytes] | str:
-        """Kill the group and drain its output within the cleanup bound; else say what failed.
+        self, process: subprocess.Popen[bytes], group: _OwnedProcessGroup, captured: _Captured
+    ) -> str:
+        """Kill the group and drain its output within the cleanup bound; say what failed, if anything.
 
         A failed kill is reported even when the output then closes: the leader may have exited
         on its own while other members of its group, which the kill did not reach, live on.
@@ -173,24 +218,131 @@ class OsProcesses:
             group.send_signal(signal.SIGKILL)
         except OSError as error:
             problems.append(f"killing process group {process.pid} failed: {error}")
-        try:
-            drained = process.communicate(timeout=self._cleanup_timeout)
-        except subprocess.TimeoutExpired:
-            problems.append(
-                f"the output of process group {process.pid} did not close within "
-                f"{self._cleanup_timeout:g} seconds of the kill"
-            )
-        else:
-            return "; ".join(problems) if problems else drained
-        for stream in (process.stdin, process.stdout, process.stderr):
-            if stream is not None:
-                with suppress(OSError):
-                    stream.close()
+        deadline = time.monotonic() + self._cleanup_timeout
+        if _pump(process, b"", deadline, captured, stop_at_limit=False) is _PumpEnd.DONE:
+            _close_pipes(process)
+            try:
+                group.reap(timeout=self._cleanup_timeout)
+            except subprocess.TimeoutExpired:
+                problems.append(f"process {process.pid} was not reaped")
+            return "; ".join(problems)
+        problems.append(
+            f"the output of process group {process.pid} did not close within "
+            f"{self._cleanup_timeout:g} seconds of the kill"
+        )
+        _close_pipes(process)
         try:
             group.reap(timeout=self._cleanup_timeout)
         except subprocess.TimeoutExpired:
             problems.append(f"process {process.pid} was not reaped")
         return "; ".join(problems)
+
+
+class _PumpEnd(StrEnum):
+    DONE = "done"
+    TIMEOUT = "timeout"
+    STDOUT_FULL = "stdout_full"
+    STDERR_FULL = "stderr_full"
+
+
+class _Captured:
+    """Both output streams of one run, each kept up to the run's cap."""
+
+    def __init__(self, limit: int) -> None:
+        self.limit = limit
+        self.stdout = bytearray()
+        self.stderr = bytearray()
+        self._input_offset = 0
+
+    def streams(self) -> tuple[bytes, bytes]:
+        return bytes(self.stdout), bytes(self.stderr)
+
+    def keep(self, stream: OutputStream, chunk: bytes) -> bool:
+        """Keep what fits under the cap; ``False`` once the stream went past it."""
+        buffer = self.stdout if stream is OutputStream.STDOUT else self.stderr
+        room = self.limit - len(buffer)
+        buffer += chunk[: max(room, 0)]
+        return len(chunk) <= room
+
+    def write_input(self, fd: int, data: bytes) -> bool:
+        """Write the next input chunk; ``True`` once all of it was written or the reader left."""
+        try:
+            self._input_offset += os.write(
+                fd, data[self._input_offset : self._input_offset + _PIPE_CHUNK_BYTES]
+            )
+        except BrokenPipeError:
+            return True
+        return self._input_offset >= len(data)
+
+
+def _pump(
+    process: subprocess.Popen[bytes],
+    data: bytes,
+    deadline: float | None,
+    captured: _Captured,
+    *,
+    stop_at_limit: bool,
+) -> _PumpEnd:
+    """Feed *data* to stdin and read both outputs until they close, the deadline, or the cap.
+
+    With *stop_at_limit*, the first stream past the cap ends the pump; without it (a drain
+    after a kill) output past the cap is read and dropped.
+    """
+    with selectors.DefaultSelector() as selector:
+        open_outputs = _register(selector, process, data)
+        while open_outputs:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                return _PumpEnd.TIMEOUT
+            for key, _events in selector.select(remaining):
+                if key.data is None:
+                    if captured.write_input(key.fd, data):
+                        selector.unregister(key.fd)
+                        _close_quietly(process.stdin)
+                    continue
+                chunk = os.read(key.fd, _PIPE_CHUNK_BYTES)
+                if not chunk:
+                    selector.unregister(key.fd)
+                    open_outputs -= 1
+                elif not captured.keep(key.data, chunk) and stop_at_limit:
+                    return _FULL[key.data]
+    return _PumpEnd.DONE
+
+
+_FULL = {OutputStream.STDOUT: _PumpEnd.STDOUT_FULL, OutputStream.STDERR: _PumpEnd.STDERR_FULL}
+
+
+def _register(
+    selector: selectors.BaseSelector, process: subprocess.Popen[bytes], data: bytes
+) -> int:
+    """Register the still-open pipes; return how many output pipes are open."""
+    stdin, stdout, stderr = process.stdin, process.stdout, process.stderr
+    if stdout is None or stderr is None:
+        message = "a captured process needs both output pipes"
+        raise RuntimeError(message)
+    if stdin is not None and not stdin.closed:
+        if data:
+            os.set_blocking(stdin.fileno(), False)
+            selector.register(stdin.fileno(), selectors.EVENT_WRITE, None)
+        else:
+            _close_quietly(stdin)
+    open_outputs = 0
+    for pipe, stream in ((stdout, OutputStream.STDOUT), (stderr, OutputStream.STDERR)):
+        if not pipe.closed:
+            selector.register(pipe.fileno(), selectors.EVENT_READ, stream)
+            open_outputs += 1
+    return open_outputs
+
+
+def _close_pipes(process: subprocess.Popen[bytes]) -> None:
+    for stream in (process.stdin, process.stdout, process.stderr):
+        _close_quietly(stream)
+
+
+def _close_quietly(stream: IO[bytes] | None) -> None:
+    if stream is not None:
+        with suppress(OSError):
+            stream.close()
 
 
 class MergedOutputProcess(Protocol):

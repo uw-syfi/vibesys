@@ -22,6 +22,7 @@ from vs_project.api.git_repository import GitCommandError
 from vs_sim.api import (
     ProcessGroupUnreaped,
     ProcessOutcome,
+    ProcessOutputTooLarge,
     ProcessSpec,
     ProcessTimedOut,
     ProcessTimeoutError,
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sim.api import Processes
+
+# The status a run stopped for too much output reports: its group was killed with SIGKILL.
+_KILLED_STATUS = -9
 
 # Variables that make Git operate on a repository other than the one at ``cwd``.
 _SELECTION_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
@@ -129,6 +133,16 @@ class Git:
             case ProcessGroupUnreaped(timeout=limit, detail=detail):
                 error = ProcessTimeoutError(list(argv), limit)
                 error.add_note(detail)
+                raise error
+            case ProcessOutputTooLarge(limit=limit, stream=stream, stderr=stderr, detail=detail):
+                error = GitCommandError(
+                    args,
+                    _KILLED_STATUS,
+                    f"git wrote more than {limit} bytes to {stream}; "
+                    f"stderr began: {stderr.decode(errors='replace')}",
+                )
+                if detail:
+                    error.add_note(detail)
                 raise error
 
     def run_text(

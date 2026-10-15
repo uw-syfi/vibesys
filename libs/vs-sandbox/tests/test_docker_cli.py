@@ -7,7 +7,13 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sandbox.api import SubprocessDockerCli
-from vs_sim.api import ProcessSpec, ProcessTimeoutError
+from vs_sim.api import (
+    OutputStream,
+    ProcessOutputTooLarge,
+    ProcessRun,
+    ProcessSpec,
+    ProcessTimeoutError,
+)
 from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
 _TIMEOUTS = st.floats(min_value=0.001, max_value=600, allow_nan=False, allow_infinity=False)
@@ -82,3 +88,33 @@ def test_a_docker_binary_that_cannot_start_raises_its_os_error() -> None:
         docker.run(["docker", "version"], timeout_seconds=30)
 
     assert raised.value is missing
+
+
+class _StoppedForOutput:
+    """Processes whose every run was stopped for writing past its cap."""
+
+    def __init__(self, stopped: ProcessOutputTooLarge) -> None:
+        self._stopped = stopped
+
+    def run(self, spec: ProcessSpec, *, timeout: float | None) -> ProcessRun:
+        del spec, timeout
+        return self._stopped
+
+
+@given(
+    limit=st.integers(min_value=0, max_value=1 << 30),
+    stream=st.sampled_from(OutputStream),
+    detail=st.sampled_from(["", "pid 7 survived"]),
+)
+def test_a_run_stopped_for_too_much_output_raises_naming_the_stream_and_cap(
+    limit: int, stream: OutputStream, detail: str
+) -> None:
+    stopped = ProcessOutputTooLarge(limit, stream, b"", b"", detail)
+    docker = SubprocessDockerCli(processes=_StoppedForOutput(stopped))
+
+    with pytest.raises(
+        OSError, match=f"docker logs wrote more than {limit} bytes to {stream}"
+    ) as raised:
+        docker.run(["docker", "logs"], timeout_seconds=30)
+
+    assert getattr(raised.value, "__notes__", []) == ([detail] if detail else [])

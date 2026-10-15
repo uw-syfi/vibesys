@@ -9,6 +9,7 @@ from vs_sandbox.process_execution import start_process_group
 from vs_sim.api import (
     ProcessGroupUnreaped,
     ProcessOutcome,
+    ProcessOutputTooLarge,
     ProcessSpec,
     ProcessTimedOut,
     ProcessTimeoutError,
@@ -85,6 +86,12 @@ class SubprocessDockerCli:
             case ProcessGroupUnreaped(detail=detail):
                 error = ProcessTimeoutError(arguments, timeout_seconds)
                 error.add_note(detail)
+                raise error
+            case ProcessOutputTooLarge(limit=limit, stream=stream, detail=detail):
+                message = f"{' '.join(arguments)} wrote more than {limit} bytes to {stream}"
+                error = OSError(message)
+                if detail:
+                    error.add_note(detail)
                 raise error
 
     def spawn(self, argv: Sequence[str]) -> subprocess.Popen[str]:

@@ -19,7 +19,14 @@ from typing import TYPE_CHECKING, Any
 from vs_sim.child import run_in_child
 from vs_sim.gate import Gate
 from vs_sim.loopback_http import HttpReply
-from vs_sim.processes import ProcessGroupUnreaped, ProcessOutcome, ProcessSpec, ProcessTimedOut
+from vs_sim.processes import (
+    OutputStream,
+    ProcessGroupUnreaped,
+    ProcessOutcome,
+    ProcessOutputTooLarge,
+    ProcessSpec,
+    ProcessTimedOut,
+)
 from vs_sim.randomness import SeededRandom
 from vs_sim.waits import HANG_GUARD_S
 
@@ -637,6 +644,47 @@ class ProcessesContract:
         assert isinstance(run, ProcessGroupUnreaped), run
         assert run.timeout == timeout
         assert run.detail
+
+    def test_output_up_to_the_cap_comes_back_and_more_is_cut_and_reported(self) -> None:
+        """Each stream is kept up to the spec's cap; a stream past it stops the run, named."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        for seed in range(_PROCESS_CASES):
+            rng = SeededRandom(seed)
+            limit = rng.randint(0, 12)
+            out, err = (_random_bytes(rng) for _ in "oe")
+            spec = ProcessSpec(subject.exit_with(3, out, err), max_output_bytes=limit)
+            run = subject.processes.run(spec, timeout=HANG_GUARD_S)
+            if len(out) <= limit and len(err) <= limit:
+                assert run == ProcessOutcome(3, out, err), seed
+                continue
+            assert isinstance(run, ProcessOutputTooLarge), (seed, run)
+            assert run.limit == limit, seed
+            assert run.stream in {
+                stream
+                for stream, written in ((OutputStream.STDOUT, out), (OutputStream.STDERR, err))
+                if len(written) > limit
+            }, seed
+            assert out[:limit].startswith(run.stdout), seed
+            assert err[:limit].startswith(run.stderr), seed
+            assert not run.detail, seed
+
+    def test_a_command_writing_past_the_cap_is_stopped_before_its_timeout(self) -> None:
+        """A writer that would never end is killed at the cap, not left to run to its timeout."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        written = b"more than four"
+        spec = ProcessSpec(subject.outlives_timeout(written), max_output_bytes=4)
+        run = subject.processes.run(spec, timeout=HANG_GUARD_S)
+        assert run == ProcessOutputTooLarge(4, OutputStream.STDOUT, written[:4], b""), run
+
+    def test_a_negative_cap_is_refused(self) -> None:
+        """A spec cannot ask for a negative output cap."""
+        subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
+        try:
+            ProcessSpec(subject.echo_stdin, max_output_bytes=-1)
+        except ValueError:
+            return
+        message = "a negative max_output_bytes was accepted"
+        raise AssertionError(message)
 
     def test_a_missing_program_fails_to_start(self) -> None:
         """A program that does not exist raises ``OSError`` instead of returning an outcome."""

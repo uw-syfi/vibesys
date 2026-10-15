@@ -22,6 +22,7 @@ from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import (
     ProcessGroupUnreaped,
     ProcessOutcome,
+    ProcessOutputTooLarge,
     ProcessSpec,
     ProcessTimedOut,
     ProcessTimeoutError,
@@ -1393,11 +1394,7 @@ class _ProcessTransport:
         return argv
 
     def _run(
-        self,
-        argv: Sequence[str],
-        *,
-        operation: str,
-        stdin: str | None = None,
+        self, argv: Sequence[str], *, operation: str, stdin: str | None = None
     ) -> _TransportResponse:
         """Run one transport program; its output is UTF-8 (``UnicodeDecodeError`` otherwise)."""
         spec = ProcessSpec(
@@ -1418,6 +1415,9 @@ class _ProcessTransport:
                 error = SlurmError.transport_timed_out(operation)
                 error.add_note(detail)
                 raise error
+            case ProcessOutputTooLarge(limit=limit):
+                message = f"Slurm transport wrote more than {limit} bytes during {operation}"
+                raise SlurmError(message)
 
 
 class _RsyncTransport(_ProcessTransport):
