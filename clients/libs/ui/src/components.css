@@ -248,7 +248,8 @@ body {
   color: var(--bg);
 }
 .vs-button[data-variant="primary"]:hover {
-  background: color-mix(in srgb, var(--text) 88%, var(--bg));
+  background: var(--text);
+  opacity: 0.88;
 }
 .vs-button[data-variant="quiet"] {
   border-color: transparent;

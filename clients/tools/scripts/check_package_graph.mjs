@@ -958,8 +958,8 @@ export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/connection': null,
   '@vibesys/settings': ['./main'],
 };
-/** A strict app imports the generated stylesheets of `@vibesys/ui` once, in its entry wiring. */
-const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css'];
+/** A strict app imports the stylesheets of `@vibesys/ui` once, in its entry wiring. */
+const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css', './components.css'];
 /**
  * The third-party packages a strict package imports and declares: no component kit, utility CSS or
  * icon package. Electron and Node builtins stay confined by `external-dependencies`.
