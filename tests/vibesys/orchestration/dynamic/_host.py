@@ -15,13 +15,15 @@ from tests.support.dynamic_script import REGISTRY
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
+    merge,
+    merged,
     plan_reply,
     reviewed,
 )
 from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.metrics import EvidenceReading
-from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
+from vibesys.orchestration.dynamic.models import ImplementerResult, MergeResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
     WRITE_HANDOFF_KIND,
     DynamicConfig,
@@ -30,6 +32,8 @@ from vibesys.orchestration.dynamic.search.api import (
     InterpretEvidence,
     MetricRow,
     ParentVerification,
+    PlannerCorrection,
+    PlannerPrompt,
     RunSnapshot,
     WriteHandoff,
     dynamic,
@@ -137,6 +141,10 @@ class World(TypedDict, total=False):
     """How the measurement of the input ends."""
     handoff_writes_open: bool
     """Leave each handoff write open for the story to answer; else the owner writes it at once."""
+    merging: bool
+    """The planner merges the mergeable candidates whenever no merge runs."""
+    merger_answers: list[int]
+    """How the merger answers its turns, in order (merged, merged, refused, failed); then any."""
 
 
 @dataclass
@@ -165,6 +173,11 @@ class Host:
     verified: bool = True
     baseline: Literal["measured", "failed-workload", "no-evidence", "lost"] = "measured"
     handoff_writes_open: bool = False
+    merging: bool = False
+    merger_answers: list[int] = field(default_factory=list)
+    merger_sessions: dict[str, set[str]] = field(default_factory=dict)
+    """The sessions the merger turns ran in, by merge ID."""
+    _merges: int = 0
 
     def __post_init__(self) -> None:
         """Have the handoff owner write each file at once, unless the story answers the writes."""
@@ -254,6 +267,8 @@ class Host:
             self._planner(asked, variant)
         elif asked.label == "implementer":
             self._implementer(asked, variant)
+        elif asked.label == "merger":
+            self._merger(asked, variant)
         else:
             self._judge(asked, variant)
 
@@ -262,8 +277,8 @@ class Host:
         match variant % 5:
             case 0 | 1:
                 size = self._portfolio_size() if variant % 5 == 0 else 1
-                entries = []
-                for _ in range(size):
+                entries = self._merge_entries(asked)
+                for _ in range(size - len(entries)):
                     self._hypotheses += 1
                     entries.append(implement(f"h{self._hypotheses}"))
                 self.run.reply_raw(asked, plan_reply(*entries))
@@ -273,6 +288,33 @@ class Host:
                 self.run.fail(asked, FailureReason.TIMED_OUT)
             case _:
                 self.run.lose(asked)
+
+    def _merge_entries(self, asked: Asked) -> list[dict[str, object]]:
+        """A merge of what is mergeable now, when the host merges and no merge runs."""
+        context = asked.context
+        assert isinstance(context, PlannerPrompt | PlannerCorrection)
+        if not self.merging or not context.mergeable or context.merge_running is not None:
+            return []
+        self._merges += 1
+        ids = dict.fromkeys(row.hypothesis_id for row in context.mergeable)
+        return [merge(f"m{self._merges}", *list(ids)[:2])]
+
+    def _merger(self, asked: Asked, variant: int) -> None:
+        request = asked.request
+        assert isinstance(request, RequestTurn)
+        merge_id = str(getattr(asked.context, "merge_id", ""))
+        self.merger_sessions.setdefault(merge_id, set()).add(request.turn.session.session_id.root)
+        if self.merger_answers:
+            variant = self.merger_answers.pop(0)
+        match variant % 4:
+            case 0 | 1:
+                result = MergeResult.model_validate_json(merged())
+                self.run.reply(asked, result, checkpoint=self._retained())
+            case 2:
+                result = MergeResult.model_validate_json(merged("refused", "they conflict"))
+                self.run.reply(asked, result)
+            case _:
+                self.run.fail_turn(asked, TurnFailureKind.PROVIDER_FAILED)
 
     def _portfolio_size(self) -> int:
         """How many workstreams fill the slots free now, within the budget left."""

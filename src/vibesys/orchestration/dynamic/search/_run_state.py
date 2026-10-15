@@ -94,6 +94,8 @@ class Running(Value):
 
     sequence: int
     plan: WorkPlan
+    parent: RevisionRef | None = None
+    """The revision it builds on, frozen when it was scheduled."""
 
 
 class RunSnapshot(Value):
@@ -430,7 +432,10 @@ class RunRecord:
             baseline=self.baseline,
             hypotheses=tuple(self.hypotheses.values()),
             finished=tuple(self.finished_work),
-            running=tuple(Running(sequence=r.sequence, plan=r.plan) for r in self.running.values()),
+            running=tuple(
+                Running(sequence=r.sequence, plan=r.plan, parent=r.parent)
+                for r in self.running.values()
+            ),
             parents=self.parents,
             unreachable=tuple(self.unreachable),
             leading=self.winner().hypothesis_id,
