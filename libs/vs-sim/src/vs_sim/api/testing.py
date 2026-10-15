@@ -65,6 +65,7 @@ from vs_sim.fakes import (
     ScriptedProbe,
     ScriptedStreamingCommand,
     StreamedRun,
+    refused_starts,
 )
 from vs_sim.faults import CallCounter, ScheduledRule, fault_stream, match_rule
 from vs_sim.file_effects import file_size_limit
@@ -236,6 +237,7 @@ __all__ = [
     "non_main_thread_ids",
     "pairwise_rows",
     "random_for",
+    "refused_starts",
     "replay_hint",
     "restart_until_done",
     "run_in_child",

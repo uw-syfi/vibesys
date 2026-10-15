@@ -7,7 +7,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_sim.api import ProcessSpec
-from vs_sim.api.testing import NO_PROCESSES, ProcessStartRefusedError
+from vs_sim.api.testing import NO_PROCESSES, ProcessStartRefusedError, refused_starts
 
 
 @given(
@@ -18,3 +18,5 @@ def test_every_run_is_refused_and_names_its_command(argv: list[str], timeout: fl
     spec = ProcessSpec(argv=tuple(argv))
     with pytest.raises(ProcessStartRefusedError, match=" ".join(argv)):
         NO_PROCESSES.run(spec, timeout=timeout)
+    assert refused_starts() == (f"this test runs no process, but ran {' '.join(argv)}",)
+    assert refused_starts() == ()

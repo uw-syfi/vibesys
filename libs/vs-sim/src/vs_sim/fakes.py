@@ -307,6 +307,23 @@ class ProcessStartRefusedError(AssertionError):
     """A test that runs no process started one."""
 
 
+_REFUSED: list[str] = []
+"""Every refused start since the last :func:`refused_starts` call, as a description."""
+
+
+def refused_starts() -> tuple[str, ...]:
+    """The process starts that refusing Fakes turned away since the last call.
+
+    A refusal raises, but product code that catches ``Exception`` swallows the raise, so
+    the raise alone cannot fail a test. The test harness calls this after each test and
+    fails the test if anything was refused. A test that checks a refusal itself calls this
+    to take what it provoked.
+    """
+    refused = tuple(_REFUSED)
+    _REFUSED.clear()
+    return refused
+
+
 class RefusingProcesses:
     """Starts nothing: any run fails the test, naming the command it tried to run.
 
@@ -318,6 +335,7 @@ class RefusingProcesses:
         """Fail: this test runs no process."""
         del timeout
         message = f"this test runs no process, but ran {' '.join(spec.argv)}"
+        _REFUSED.append(message)
         raise ProcessStartRefusedError(message)
 
 
@@ -337,6 +355,7 @@ class PipedStart:
 
 def _refuse_piped_start(request: PipedStart) -> PipedProcess:
     message = f"this test starts no piped process, but {request.argv[0]!r} was started"
+    _REFUSED.append(message)
     raise ProcessStartRefusedError(message)
 
 
