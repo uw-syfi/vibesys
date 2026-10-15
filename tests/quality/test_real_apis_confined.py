@@ -1025,6 +1025,9 @@ REAL_API_PENDING: dict[Key, Pending] = {
     ("libs/vs-slurm/src/vs_slurm/fake_cluster.py", "threading"): Pending(
         1, Owner.LANE_A, "FakeCluster's lock; takes Threads"
     ),
+    ("libs/vs-slurm/src/vs_slurm/fake_ledger.py", "threading"): Pending(
+        1, Owner.LANE_A, "FakeEvaluationLedger's lock, as FakeCluster's; takes Threads"
+    ),
     ("libs/vs-slurm/src/vs_slurm/fake_connector.py", "subprocess"): Pending(
         3, Owner.LANE_A, "the Fake connector runs commands on the host; edge or move, to classify"
     ),
@@ -1417,6 +1420,14 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.PACKAGED_RESOURCE,
         "the digest of its own source",
     ),
+    "libs/vs-slurm/src/vs_slurm/ledger.py": (
+        EdgeKind.GENERATOR,
+        "content-addresses the workspace an evaluation request submits",
+    ),
+    "libs/vs-slurm/src/vs_slurm/ledger_store.py": (
+        EdgeKind.STORE,
+        "the evaluation ledger on the cluster, published through a local scratch file",
+    ),
     "libs/vs-slurm/src/vs_slurm/remote_operations.py": (
         EdgeKind.TRANSFER,
         "file transfer adapter to the cluster",
@@ -1434,6 +1445,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/entrypoints/cli/inputs.py": (
         EdgeKind.INPUT_LOADER,
         "task inputs named on the command line",
+    ),
+    "src/entrypoints/evals.py": (
+        EdgeKind.TRANSFER,
+        "the scratch directory the ledger and cluster transports stage through",
     ),
     "src/entrypoints/example_catalog.py": (EdgeKind.PACKAGED_RESOURCE, "the example catalog"),
     "src/entrypoints/examples.py": (

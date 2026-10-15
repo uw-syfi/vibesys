@@ -37,7 +37,8 @@ from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal, assert_never
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+from vs_decode.api import Unreadable, decode_json
 
 from .runner import (
     SlurmArtifactTarget,
@@ -354,13 +355,15 @@ def decode_lease(text: str, *, path: str) -> LedgerLease:
     return _decode(text, path=path, model=LedgerLease)
 
 
+# A record or lease is a few hundred bytes; anything near this bound is not one.
+_MAX_DOCUMENT_BYTES = 1 << 20
+_DOCUMENT = TypeAdapter(dict[str, object])
+
+
 def _decode[T: BaseModel](text: str, *, path: str, model: type[T]) -> T:
-    try:
-        document = json.loads(text)
-    except json.JSONDecodeError as error:
-        raise LedgerError.unreadable(path, "not JSON") from error
-    if not isinstance(document, dict):
-        raise LedgerError.unreadable(path, "not an object")
+    document = decode_json(text, _DOCUMENT, source=path, max_bytes=_MAX_DOCUMENT_BYTES)
+    if isinstance(document, Unreadable):
+        raise LedgerError.unreadable(path, f"not a JSON object ({document.kind.value})")
     version = document.get("format_version")
     if version != LEDGER_FORMAT_VERSION:
         raise LedgerError.unsupported_version(path, version)

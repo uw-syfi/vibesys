@@ -47,7 +47,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
 
-from entrypoints import examples, instances, tasks
+from entrypoints import evals, examples, instances, tasks
 from vs_sim.api import (
     InheritedStdioLauncher,
     LoopSignalSource,
@@ -594,6 +594,7 @@ def _run_source_tui(
 #: contracts, so the command answers in the interpreter's startup time instead
 #: of paying for the engine twice (here and in a child).
 _LIGHT_COMMANDS: dict[str, Callable[[list[str]], int]] = {
+    "evals": evals.main,
     "example": examples.main,
     "instances": instances.main,
     "tasks": tasks.main,
