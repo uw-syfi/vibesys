@@ -290,6 +290,69 @@ async def test_close_attempts_every_candidate_and_aggregates_failures(tmp_path: 
     assert all(resource.closed for resource in provider.created)
 
 
+class _CloseFailedError(OSError):
+    pass
+
+
+class _FlakyResource(_Resource):
+    """A resource whose first ``failures`` closes fail, like a killed ``docker rm``."""
+
+    def __init__(self, identifier: str | None, path: Path, failures: int) -> None:
+        super().__init__(identifier, path)
+        self.failures = failures
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.close_calls <= self.failures:
+            raise _CloseFailedError
+        self.closed = True
+
+
+class _FlakyProvider(_Provider):
+    def __init__(self, path: Path, failures: int, *, root_failures: int) -> None:
+        super().__init__(path)
+        self.failures = failures
+        self.root = _FlakyResource(None, path, root_failures)
+
+    def create_candidate(self, workspace_id: str, revision: str) -> _Resource:
+        del revision
+        resource = _FlakyResource(workspace_id, self.root.path / workspace_id, self.failures)
+        self.created.append(resource)
+        return resource
+
+
+@pytest.mark.parametrize("failures", [0, 1, 2])
+@pytest.mark.parametrize("retried_by", ["discard", "close"])
+async def test_a_failed_close_is_retried_until_the_resource_closes(
+    tmp_path: Path, failures: int, retried_by: str
+) -> None:
+    """Regression: a candidate whose close failed was forgotten, so a retry reported success."""
+    root_failures = failures if retried_by == "close" else 0
+    provider = _FlakyProvider(tmp_path, failures, root_failures=root_failures)
+    workspaces = _runtime(provider).workspaces
+    candidate = await workspaces.create_candidate()
+    (resource,) = provider.created
+    assert isinstance(resource, _FlakyResource)
+    root = provider.root
+    assert isinstance(root, _FlakyResource)
+
+    retry = candidate.discard if retried_by == "discard" else workspaces.close
+    for _ in range(failures):
+        with pytest.raises(BaseExceptionGroup):
+            await retry()
+    if retried_by == "discard":
+        await candidate.discard()
+    await workspaces.close()
+    await candidate.discard()
+    await workspaces.close()
+
+    assert resource.closed
+    assert resource.close_calls == failures + 1
+    assert root.closed
+    assert root.close_calls == root_failures + 1
+
+
 async def test_workspace_mutations_are_serialized(tmp_path: Path) -> None:
     provider = _Provider(tmp_path)
     runner = GatedBlockingRunner(held=True)
