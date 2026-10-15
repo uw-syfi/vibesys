@@ -53,7 +53,7 @@ from .connector_protocol import (
     SlurmConnectorResponse,
     SlurmConnectorSyncToRequest,
 )
-from .errors import SlurmError, SlurmSubmissionRejectedError
+from .errors import SlurmError, SlurmSubmissionRejectedError, SlurmTransferInterruptedError
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
 from .fake_ledger import FakeEvaluationLedger
@@ -318,6 +318,7 @@ __all__ = [
     "SlurmStatus",
     "SlurmSubmissionRejectedError",
     "SlurmTimingProfile",
+    "SlurmTransferInterruptedError",
     "SlurmTransport",
     "SlurmTransportBrokerPolicy",
     "SlurmTransportRequestError",

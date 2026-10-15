@@ -167,6 +167,11 @@ _DEFAULT_CANCEL_CONFIRMATION_SECONDS = 120.0
 # This is intentionally independent of the much longer allocation teardown
 # budget: there is no known allocation whose termination needs waiting for.
 _SUBMISSION_ABSENCE_CONFIRMATIONS = 3
+# How long an evaluation keeps collecting an ended batch whose collection read no
+# result (a download cut short, a scheduler that did not answer), one try per poll
+# interval. Its result files may be whole; past this, the evaluation ends with an
+# unknown outcome, and its ledger attempt stays collectable for the next ask.
+_COLLECTION_RETRY_SECONDS = 120.0
 
 
 class SlurmTargetLifecycle(StrEnum):
@@ -411,6 +416,9 @@ class SlurmEvaluationExecutor:
         self._cancel_confirmations = max(
             1, math.ceil(cancel_confirmation_seconds / config.poll_interval_seconds)
         )
+        self._collection_tries = 1 + math.ceil(
+            _COLLECTION_RETRY_SECONDS / config.poll_interval_seconds
+        )
         self._clock = clock
         self._job_timeout_seconds = config.job_timeout_seconds
         self._queue_timeout_seconds = config.queue_timeout_seconds
@@ -613,6 +621,9 @@ class SlurmEvaluationExecutor:
             functools.partial(self._cluster.collect, handle, observed=inspected)
         )
         await self._ledger_settle(handle_id, durable, inspected.status, collected)
+        if isinstance(collected, ClusterUnknown) and collected.result is None:
+            # Nothing was read (a download cut short): the next poll collects again.
+            return ExecutorPoll(phase=PollPhase.UNKNOWN, detail=collected.reason)
         try:
             terminal = self._collected_observation(handle_id, durable.request, handle, collected)
         except SlurmError as error:
@@ -1062,6 +1073,30 @@ class SlurmEvaluationExecutor:
                 await self._ledger_settle(handle_id, durable, status, None)
                 self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
                 return
+            collected = await self._collect_ended(handle_id, handle)
+        except BaseException:
+            follower.abort()
+            raise
+        follower.settle(_collected_stages(request, collected))
+        await self._ledger_settle(handle_id, durable, status, collected)
+        self._publish(handle_id, self._collected_observation(handle_id, request, handle, collected))
+
+    async def _collect_ended(
+        self, handle_id: str, handle: SlurmBatchHandle
+    ) -> ClusterCollectOutcome:
+        """Collect the ended batch, trying again each poll interval while a try reads no result.
+
+        A try that read no result (``ClusterUnknown`` without one: a download cut
+        short, a scheduler that did not answer) says nothing about the result
+        files, which may be whole. Tries are bounded by ``_COLLECTION_RETRY_SECONDS``;
+        when none read a result, ``SlurmOutcomeUnknownError`` ends the evaluation
+        with no stage scored, and its ledger attempt is not settled, so the next
+        ask collects the same job again. Each try is shielded: a cancel waits for
+        the try in flight to finish.
+        """
+        tries = 0
+        while True:
+            tries += 1
             collection = asyncio.create_task(self._in_thread(self._cluster.collect, handle))
             try:
                 collected = await asyncio.shield(collection)
@@ -1069,12 +1104,11 @@ class SlurmEvaluationExecutor:
                 with contextlib.suppress(Exception):
                     await collection
                 raise
-        except BaseException:
-            follower.abort()
-            raise
-        follower.settle(_collected_stages(request, collected))
-        await self._ledger_settle(handle_id, durable, status, collected)
-        self._publish(handle_id, self._collected_observation(handle_id, request, handle, collected))
+            if not isinstance(collected, ClusterUnknown) or collected.result is not None:
+                return collected
+            if tries >= self._collection_tries:
+                raise SlurmOutcomeUnknownError.observation(handle_id, collected.reason)
+            await self._sleeper.sleep(self._poll_interval)
 
     def _follower(
         self, handle_id: str, handle: SlurmBatchHandle, request: EvaluationRequest

@@ -11,7 +11,6 @@ import shlex
 import tempfile
 import uuid
 from collections.abc import Mapping
-from contextlib import suppress
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
@@ -41,7 +40,7 @@ from .config import (
     SlurmSshTransport,
     shell_join_with_port,
 )
-from .errors import SlurmError, SlurmSubmissionRejectedError
+from .errors import SlurmError, SlurmSubmissionRejectedError, SlurmTransferInterruptedError
 from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
 from .remote_file import SlurmFileSource
 from .remote_operations import (
@@ -673,7 +672,9 @@ class SlurmJobRunner:
         """Collect ordered stage outcomes and only artifacts from passed stages.
 
         ``observed`` is the terminal status the caller just read; it saves a second
-        scheduler query (two remote commands).
+        scheduler query (two remote commands). A download that did not complete
+        raises ``SlurmTransferInterruptedError`` (``_fetch``): no result is read
+        from a partial copy.
         """
         self._validate_batch_handle(handle)
         collection_started = self._clock.now()
@@ -692,14 +693,12 @@ class SlurmJobRunner:
             temporary_path = Path(temporary)
             results_root = temporary_path / "results"
             results_root.mkdir()
-            try:
-                self._transport.get(
-                    PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT,
-                    results_root,
-                    kind="tree",
-                )
-            except (SlurmError, OSError) as exc:
-                collection_failure = str(exc)
+            absent = self._fetch(
+                PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT,
+                results_root,
+                kind="tree",
+            )
+            collection_failure = collection_failure or absent
             for index, stage in enumerate(handle.stages):
                 local_root = results_root / f"{index:04d}"
                 if not local_root.exists() and job_result.exit_code != 0:
@@ -759,11 +758,11 @@ class SlurmJobRunner:
         artifacts: list[SlurmArtifactTarget] = []
         if exit_code == 0:
             for artifact in (*stage.file_artifacts, *stage.tree_artifacts):
-                try:
-                    self._collect_stage_artifact(job, artifact)
+                absent = self._collect_stage_artifact(job, artifact)
+                if absent is None:
                     artifacts.append(artifact)
-                except (SlurmError, OSError) as exc:
-                    failures.append(f"{artifact.remote_path}: {exc}")
+                else:
+                    failures.append(f"{artifact.remote_path}: {absent}")
         return SlurmBatchStageResult(
             name=stage.name,
             exit_code=exit_code,
@@ -775,17 +774,69 @@ class SlurmJobRunner:
             collection_failure="; ".join(failures) or None,
         )
 
-    def _collect_stage_artifact(self, job: SlurmJobHandle, artifact: SlurmArtifactTarget) -> None:
+    def _collect_stage_artifact(
+        self, job: SlurmJobHandle, artifact: SlurmArtifactTarget
+    ) -> str | None:
+        """Download one artifact (``_fetch``); why it is missing, None when it arrived whole.
+
+        A local destination that cannot be made is the request's own problem, not a
+        download cut short: it is recorded like a missing artifact.
+        """
         local_path = artifact.local_path
-        if artifact.kind == "file":
-            local_path.parent.mkdir(parents=True, exist_ok=True)
-        else:
-            local_path.mkdir(parents=True, exist_ok=True)
-        self._transport.get(
+        try:
+            if artifact.kind == "file":
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+            else:
+                local_path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            return str(exc)
+        return self._fetch(
             PurePosixPath(job.remote_workspace) / artifact.remote_path,
             local_path,
             kind=artifact.kind,
         )
+
+    def _fetch(
+        self, remote: PurePosixPath, local: Path, *, kind: Literal["file", "tree"]
+    ) -> str | None:
+        """Download ``remote`` whole; why it is absent when the cluster proved so, else None.
+
+        A failed download says nothing about the remote files: the connection may
+        have dropped before any file, mid-tree, or after the last file. So a failure
+        is a missing result only when the cluster then answers, whole, that the path
+        does not exist; otherwise it raises ``SlurmTransferInterruptedError``, and
+        the caller reads nothing from the partial copy.
+        """
+        try:
+            self._transport.get(remote, local, kind=kind)
+        except (SlurmError, OSError, UnicodeError) as exc:
+            if self._proven_absent(remote):
+                return str(SlurmError.remote_path_absent(remote.as_posix()))
+            raise SlurmTransferInterruptedError.of(remote.as_posix(), exc) from exc
+        return None
+
+    def _read_fetched[T](
+        self, remote: PurePosixPath, local: Path, read: Callable[[Path], T], failures: list[str]
+    ) -> T | None:
+        """``read`` of the downloaded ``remote`` file; None, with why in ``failures``, if absent or malformed."""
+        absent = self._fetch(remote, local, kind="file")
+        if absent is not None:
+            failures.append(absent)
+            return None
+        try:
+            return read(local)
+        except SlurmError as exc:
+            failures.append(str(exc))
+            return None
+
+    def _proven_absent(self, remote: PurePosixPath) -> bool:
+        """Whether the cluster answers, whole, that ``remote`` does not exist."""
+        path = shlex.quote(remote.as_posix())
+        probe = f"if test -e {path}; then printf '%s\\n' present; else printf '%s\\n' absent; fi"
+        try:
+            return self._whole_reading(probe) == "absent"
+        except (SlurmError, OSError, UnicodeError, ProcessTimeoutError):
+            return False
 
     def poll(self, handle: SlurmJobHandle) -> SlurmJobStatus:
         """Read the scheduler state for a submitted or recovered handle."""
@@ -911,9 +962,9 @@ class SlurmJobRunner:
                 if succeeded:
                     self._transport.get(remote_path, local_path, kind=artifact.kind)
                     continue
-                # A failed job need not have written it; absent stays absent.
-                with suppress(SlurmError):
-                    self._transport.get(remote_path, local_path, kind=artifact.kind)
+                # A failed job need not have written it; absent stays absent, and a
+                # download cut short raises rather than leave a partial artifact.
+                self._fetch(remote_path, local_path, kind=artifact.kind)
             return SlurmJobResult(
                 job_id=handle.job_id,
                 exit_code=exit_code,
@@ -1080,41 +1131,34 @@ class SlurmJobRunner:
         """Preserve available evidence even when terminal status artifacts are absent.
 
         ``observed`` is a terminal status the caller just read; without it the scheduler
-        is queried.
+        is queried. A download that did not complete raises
+        ``SlurmTransferInterruptedError`` (``_fetch``).
         """
         self._validate_handle(handle)
         status = observed if observed is not None else self.poll(handle)
         if not status.terminal:
             raise SlurmError.job_not_terminal(handle.job_id)
         failures: list[str] = []
-        exit_code = None
-        output = ""
         with tempfile.TemporaryDirectory(
             prefix="vs-slurm-evidence-", dir=self._scratch_root
         ) as temporary:
             root = Path(temporary)
-            try:
-                self._transport.get(
-                    PurePosixPath(handle.remote_status_path), root / "status", kind="file"
+            exit_code = self._read_fetched(
+                PurePosixPath(handle.remote_status_path), root / "status", _read_exit_code, failures
+            )
+            output = (
+                self._read_fetched(
+                    PurePosixPath(handle.remote_log_path), root / "log", _read_text, failures
                 )
-                exit_code = _read_exit_code(root / "status")
-            except (SlurmError, OSError) as exc:
-                failures.append(str(exc))
-            try:
-                self._transport.get(
-                    PurePosixPath(handle.remote_log_path), root / "log", kind="file"
-                )
-                output = _read_text(root / "log")
-            except (SlurmError, OSError) as exc:
-                failures.append(str(exc))
+                or ""
+            )
             for artifact in handle.artifacts:
                 if (
                     exit_code == 0 and status == SlurmJobStatus.COMPLETED
                 ) or artifact.collect_on_failure:
-                    try:
-                        self._collect_stage_artifact(handle, artifact)
-                    except (SlurmError, OSError) as exc:
-                        failures.append(str(exc))
+                    absent = self._collect_stage_artifact(handle, artifact)
+                    if absent is not None:
+                        failures.append(absent)
         return SlurmJobResult(
             job_id=handle.job_id,
             exit_code=exit_code,

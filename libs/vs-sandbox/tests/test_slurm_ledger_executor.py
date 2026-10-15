@@ -34,8 +34,11 @@ from vs_sandbox.api.slurm import (
 from vs_sim.api import yield_now
 from vs_sim.api.testing import ManualClock
 from vs_slurm.api import (
+    ClusterCollectOutcome,
     ClusterObservation,
     ClusterSubmitOutcome,
+    ClusterTarget,
+    ClusterUnknown,
     FakeCluster,
     FakeEvaluationLedger,
     LedgerLabels,
@@ -116,6 +119,9 @@ class _Scheduler(FakeCluster):
         self.on_staging: Callable[[], None] | None = None
         # The last batch request submitted, as another run of the same content asks for it.
         self.staged: SlurmBatchRequest | None = None
+        # How many collections read nothing, as when the connection drops mid-download.
+        self.dropped_collections = 0
+        self.collections = 0
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
@@ -156,6 +162,22 @@ class _Scheduler(FakeCluster):
                 ),
             )
         return super().submit(request, operation_id=operation_id)
+
+    def collect(
+        self,
+        target: ClusterTarget,
+        *,
+        by_job_id: bool = False,
+        observed: ClusterObservation | None = None,
+    ) -> ClusterCollectOutcome:
+        self.collections += 1
+        if self.dropped_collections:
+            self.dropped_collections -= 1
+            return ClusterUnknown(
+                operation_id=target if isinstance(target, str) else None,
+                reason="download of the results did not complete: connection reset by peer",
+            )
+        return super().collect(target, by_job_id=by_job_id, observed=observed)
 
     def status(self, operation_id: str) -> SlurmJobStatus:
         observed = self.inspect(operation_id)
@@ -470,6 +492,44 @@ async def test_a_finished_job_is_reused_only_if_every_stage_left_its_own_result(
             ledger_operation_id(world.only_key(), 0),
             ledger_operation_id(world.only_key(), 1),
         }
+    await second.executor.close()
+
+
+@pytest.mark.parametrize("drops", ["one", "every"])
+async def test_a_collection_that_read_nothing_is_tried_again_and_never_settles_or_scores(
+    tmp_path: Path, drops: str
+) -> None:
+    """A finished job whose download was cut short is collected again, never run again.
+
+    One cut collection is tried again a poll interval later within the same run.
+    When every try of a run is cut, that run's evaluation ends with an unknown
+    outcome and no stage result, and its ledger attempt stays submitted: the next
+    ask collects the same job instead of running it for another half hour.
+    """
+    world = _World()
+    world.scheduler.dropped_collections = 1 if drops == "one" else 10**6
+    first = world.run(tmp_path / "run-1", "run-1", sleeper=_ClockSleeper(world.clock))
+    await first.executor.submit(_request(), handle_id="eval-1")
+    ended = await _finished(first.executor, "eval-1")
+    await first.executor.close()
+
+    if drops == "one":
+        assert ended.state is EvaluationState.SUCCEEDED
+        assert world.scheduler.collections == 2
+        assert world.entry_state() is LedgerState.COMPLETED
+        return
+    assert ended.state is EvaluationState.FAILED
+    assert ended.stage_results == ()
+    assert ended.failure is not None
+    assert "unknown outcome" in ended.failure
+    assert world.entry_state() is LedgerState.SUBMITTED
+
+    world.scheduler.dropped_collections = 0
+    second = world.run(tmp_path / "run-2", "run-2", sleeper=_ClockSleeper(world.clock))
+    await second.executor.submit(_request(), handle_id="eval-2")
+    assert (await _finished(second.executor, "eval-2")).state is EvaluationState.SUCCEEDED
+    assert len(world.scheduler.jobs) == 1
+    assert world.entry_state() is LedgerState.COMPLETED
     await second.executor.close()
 
 
