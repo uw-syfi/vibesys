@@ -7,6 +7,7 @@ the stage, while it runs; and each evaluator tool build's output to one ``ToolBu
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -51,7 +52,7 @@ from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.evaluator_tools import CargoGitToolSpec, EvaluatorToolError
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
-from vs_sim.api.testing import ManualClock, SimThreads, yield_until
+from vs_sim.api.testing import ManualClock, SimThreads, arrival, yield_until
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -109,8 +110,9 @@ class _Hooks:
     earlier_host: _EarlierHost | None = None
     """Runs first with the request, the retry wrapper's namespace and the workspaces,
     as a host that stopped before this one resumed."""
-    while_running: Callable[[], Awaitable[None]] | None = None
-    """Runs right after the measurement is submitted."""
+    while_running: Callable[[asyncio.Future[object]], Awaitable[None]] | None = None
+    """Runs right after the measurement is submitted, with the task that waits for it
+    to end (so a wait in the hook ends if the measurement does)."""
 
 
 def _store() -> MemoryLogStore[LogOwner]:
@@ -153,13 +155,16 @@ async def _measure(
         tries=tries,
     )
     await executor.submit(request, handle_id=_HANDLE)
-    if hooks.while_running is not None:
-        await hooks.while_running()
-    await yield_until(
-        lambda: executor.poll(_HANDLE),
-        lambda polled: polled.phase is PollPhase.ENDED,
-        "the measurement to end",
+    ended: asyncio.Future[object] = asyncio.ensure_future(
+        yield_until(
+            lambda: executor.poll(_HANDLE),
+            lambda polled: polled.phase is PollPhase.ENDED,
+            "the measurement to end",
+        )
     )
+    if hooks.while_running is not None:
+        await hooks.while_running(ended)
+    await ended
     await executor.close()
 
 
@@ -170,8 +175,8 @@ async def test_each_gate_stage_writes_to_its_gate_stream_before_it_settles() -> 
     gate = evaluation.gate("accuracy", 0)
     live: list[tuple[list[tuple[LogOwner, StreamOutcome | None]], bytes]] = []
 
-    async def look_while_accuracy_runs() -> None:
-        await gate.entered.wait()
+    async def look_while_accuracy_runs(ended: asyncio.Future[object]) -> None:
+        await arrival(gate.entered.wait(), ended)
         reader = reader_of(store, LOG_OWNER)
         (accuracy,) = reader.list_streams()
         live.append((_owners(store), _read(reader, accuracy)))

@@ -6,6 +6,7 @@ settles, and the stream is closed when the stage ends, however it ends.
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import contextmanager
 from enum import StrEnum
 from pathlib import Path
@@ -27,7 +28,7 @@ from vs_runtime.api import AccuracyEvaluation, BenchmarkFailureKind, PollingEval
 from vs_runtime.api.core import StageRun
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 from vs_sim.api import Capture
-from vs_sim.api.testing import ManualClock, yield_until
+from vs_sim.api.testing import ManualClock, arrival, yield_until
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -116,10 +117,11 @@ async def test_a_stage_writes_its_output_to_its_own_stream_before_it_settles() -
     gate = evaluation.gate("accuracy", 0)
     executor, streams = await _start(evaluation)
 
-    await gate.entered.wait()
+    ended = asyncio.create_task(_terminal(executor))
+    await arrival(gate.entered.wait(), ended)
     live = (list(streams.opened), list(streams.closed), streams.written(_ACCURACY))
     gate.release()
-    observed = await _terminal(executor)
+    observed = await ended
 
     assert live == ([_ACCURACY], [], _PRINTED["accuracy"])
     assert observed.state is EvaluationState.SUCCEEDED
@@ -150,10 +152,11 @@ async def test_a_stage_that_ends_early_closes_its_stream_with_what_it_wrote(
     gate = evaluation.gate("accuracy", 0) if ending is _Ending.CANCELLED else None
     executor, streams = await _start(evaluation)
 
+    ended = asyncio.create_task(_terminal(executor))
     if gate is not None:
-        await gate.entered.wait()
+        await arrival(gate.entered.wait(), ended)
         await executor.cancel(_HANDLE)
-    observed = await _terminal(executor)
+    observed = await ended
 
     assert observed.state is not EvaluationState.SUCCEEDED
     assert streams.opened == streams.closed == [_ACCURACY]

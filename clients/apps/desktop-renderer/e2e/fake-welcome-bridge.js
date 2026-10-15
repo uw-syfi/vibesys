@@ -139,6 +139,7 @@ Object.defineProperty(window, 'vibesysWelcome', {
     cancelInspection: async () => ok(null),
     signIn: async () => ok(null),
     tasks: async () => ok(['queue']),
+    harnesses: async () => ok({kind: 'unsupported'}),
     complete: async (_host, directory) =>
       ok({directory, entries: [], truncated: false}),
     attach: async () => ok(null),

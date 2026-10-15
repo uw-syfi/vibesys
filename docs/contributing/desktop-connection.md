@@ -215,7 +215,8 @@ either the method's result, whose `type` is the request's, or `HelperError` (`ty
 | `instances.unwatch` | `watch_id` | `watch_id` | Ends a watch; no push for it follows. `unknown_watch` when none is open. |
 | `tasks.list` | `project` | `TaskList` | Replaces `vibesys tasks --json`. Errors are typed: `project_missing`, `project_uninitialized`, `task_invalid`, each with the path. |
 | `runs.list` | `project` | the project's runs (`run_id`, `task`, `display_name`, `created_at`) with the `phase` of the server on this host that drives or last drove each, and its `instance_id` while live | Gives Recent rows status and lets resume name a concrete run. A run whose server left no record here has no phase; reading the run's own journal for it needs a light journal reader and is not built. |
-| `run.start` | `project`, `task`, `args: [str]`, `resume: {run_id} \| {latest: true} \| null` | `{instance_id, run_id, socket_path, phase}` or `DetachedLaunchFailure` | Allocates or resolves `run_id` before detaching (see [Run identity](#run-identity)); returns once the record is published, not when the run is ready. |
+| `run.start` | `project`, `task`, `args: [str]`, `resume: {run_id} \| {latest: true} \| null`, `harness: {provider, model} \| null` | `{instance_id, run_id, socket_path, phase}` or `DetachedLaunchFailure` | Allocates or resolves `run_id` before detaching (see [Run identity](#run-identity)); returns once the record is published, not when the run is ready. `args` holding `--allow-unvetted-model`, or any abbreviation argparse accepts, is `invalid_request`: a run started here never opts out of the vetted harnesses. `harness` (gated by feature `harnesses`; absent or null keeps the project's configuration) must be a pair `harnesses.list` offers, else `unvetted_harness` naming the provider's vetted models; it becomes `--cli-provider` and `--model`, so `args` may then hold neither. |
+| `harnesses.list` | none | `harnesses: [{provider, model, default}]`, each provider's default first | The vetted provider and model pairs (`vs_agent`'s `HARNESSES`), for the start sheet's model picker. Gated by feature `harnesses`. The helper loads the agent library only when this or a `run.start` with `harness` arrives, so `hello` stays light. |
 | `run.stop` | `instance_id`, `force` | `InstanceStopResult` | Same outcomes as `vibesys instances stop`. |
 | `run.connect` | `instance_id`, `role: control \| subscribe \| chat` | `{run_id, protocol_version}` then relay | Run channels only; `channel_busy` while another request or watch is open. The run's `run_id` comes back here, so the page never derives it. Bytes the client sends before the reply are relayed after it. A failed connect (`run_gone`, `connect_denied`, `connect_failed`) leaves the channel a request channel. |
 | `ping` | none | an empty reply | Control channel liveness for the supervisor. |
@@ -246,7 +247,11 @@ The rules:
    negotiated version's schema. An unknown field is a bug and fails loudly, naming the field.
 2. **Additive evolution through features.** A new optional field or method ships behind a new
    feature. A sender includes the field or calls the method only if `hello` returned the feature,
-   so a strict peer never sees what it does not know. This replaces probe-by-rejection
+   so a strict peer never sees what it does not know. `HELPER_REQUEST_FEATURES` (methods) and
+   `HELPER_FIELD_FEATURES` (optional fields, gated when set) in `server.host_api` are the gates;
+   the generated schema exports both, and the helper, the client channel, and the `FakeHelper`
+   each refuse an ungated use as `feature_not_negotiated`. An error code only a gated request can
+   produce (`unvetted_harness`) needs no version bump either. This replaces probe-by-rejection
    (`WP-CAPABILITY-PROBE`) for the helper protocol; the run protocol keeps its probe until it gains
    a `hello` of its own.
 3. **Breaking changes bump the version.** Removing or retyping a field, or changing a method's

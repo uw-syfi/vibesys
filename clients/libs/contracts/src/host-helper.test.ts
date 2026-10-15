@@ -1,6 +1,6 @@
 import {describe, it} from 'node:test';
 import {BackendClientError} from './errors.js';
-import {parseChannelEnd, parseHelperMessage} from './host-helper.js';
+import {helperFeaturesForRequest, parseChannelEnd, parseHelperMessage} from './host-helper.js';
 import {expect} from './test-support/expect.js';
 
 const RECORD = {
@@ -57,6 +57,14 @@ const VALID: readonly Record<string, unknown>[] = [
       },
     ],
     truncated: false,
+  },
+  {
+    type: 'harnesses.list',
+    request_id: 'l',
+    harnesses: [
+      {provider: 'codex', model: 'gpt-a', default: true},
+      {provider: 'codex', model: 'gpt-b', default: false},
+    ],
   },
   {
     type: 'error',
@@ -120,6 +128,17 @@ describe('parseHelperMessage', () => {
     rejects(JSON.stringify({...hello, features: ['teleport']}), parseHelperMessage);
     rejects(JSON.stringify({...hello, protocol_version: 0}), parseHelperMessage);
     rejects('{"type": "ping"', parseHelperMessage);
+  });
+
+  it('gates a request on its method and on each gated field it sets', () => {
+    const start = {type: 'run.start', project: '/p'};
+    const unset = {...start, harness: null};
+    const chosen = {...start, harness: {provider: 'codex', model: 'gpt-a'}};
+    expect(helperFeaturesForRequest(start)).toEqual([]);
+    expect(helperFeaturesForRequest(unset)).toEqual([]);
+    expect(helperFeaturesForRequest(chosen)).toEqual(['harnesses']);
+    expect(helperFeaturesForRequest({type: 'harnesses.list'})).toEqual(['harnesses']);
+    expect(helperFeaturesForRequest({type: 'ping'})).toEqual([]);
   });
 
   it('reads a relayed channel end and rejects an unknown outcome', () => {

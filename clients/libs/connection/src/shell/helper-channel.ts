@@ -16,12 +16,14 @@ import {Duplex} from 'node:stream';
 import {
   type ChannelEndOutcome,
   HELPER_CLIENT_VERSIONS,
+  HELPER_FEATURE_BY_FIELD,
   HELPER_FEATURE_BY_REQUEST,
   type HelloReply,
   type HelperError,
   type HelperFeature,
   type HelperMessage,
   helperFeatureForRequest,
+  helperFeaturesForRequest,
   type InstancesChanged,
   parseChannelEnd,
   parseHelperMessage,
@@ -152,7 +154,12 @@ export type Body = {readonly type: string} & Record<string, unknown>;
 /** The reply type of each request type. */
 export type ReplyOf<T extends string> = Extract<HelperMessage, {type: T}>;
 
-const FEATURES: readonly HelperFeature[] = [...new Set(Object.values(HELPER_FEATURE_BY_REQUEST))];
+const FEATURES: readonly HelperFeature[] = [
+  ...new Set([
+    ...Object.values(HELPER_FEATURE_BY_REQUEST),
+    ...Object.values(HELPER_FEATURE_BY_FIELD).flatMap(fields => Object.values(fields ?? {})),
+  ]),
+];
 /** How long past its own deadline a request may take before this side gives up on it. */
 const DEADLINE_SLACK_MS = 2_000;
 const STDERR_TAIL = 8192;
@@ -267,8 +274,11 @@ export class HelperChannel implements AsyncDisposable {
   ): Promise<Result> {
     const terminal = this.#failure ?? this.#inputFailure;
     if (terminal !== null) return Promise.reject(terminal);
-    const required = helperFeatureForRequest(body.type);
-    if (this.hello !== null && required !== null && !this.hello.features.includes(required)) {
+    const hello = this.hello;
+    const required = helperFeaturesForRequest(body).find(
+      feature => hello !== null && !hello.features.includes(feature),
+    );
+    if (required !== undefined) {
       return Promise.reject(
         new HelperRequestError({
           type: 'error',

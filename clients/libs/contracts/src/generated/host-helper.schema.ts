@@ -201,6 +201,114 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "FailureReason",
       "type": "object"
     },
+    "HarnessChoice": {
+      "additionalProperties": false,
+      "description": "One agent CLI provider and one model it runs.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "title": "HarnessChoice",
+      "type": "object"
+    },
+    "HarnessOption": {
+      "additionalProperties": false,
+      "description": "A vetted provider and model pair a run may start with.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "default": {
+          "type": "boolean",
+          "title": "Default"
+        }
+      },
+      "required": [
+        "provider",
+        "model",
+        "default"
+      ],
+      "title": "HarnessOption",
+      "type": "object"
+    },
+    "HarnessesListReply": {
+      "additionalProperties": false,
+      "description": "The vetted pairs, grouped by provider with each provider's default first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "harnesses.list",
+          "default": "harnesses.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "harnesses": {
+          "items": {
+            "$ref": "#/$defs/HarnessOption"
+          },
+          "title": "Harnesses",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "harnesses"
+      ],
+      "title": "HarnessesListReply",
+      "type": "object"
+    },
+    "HarnessesListRequest": {
+      "additionalProperties": false,
+      "description": "The vetted provider and model pairs ``run.start``'s ``harness`` accepts.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "harnesses.list",
+          "default": "harnesses.list",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "HarnessesListRequest",
+      "type": "object"
+    },
     "HelloReply": {
       "additionalProperties": false,
       "description": "The negotiated version and features, and what will start runs on this host.",
@@ -424,6 +532,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "run_gone",
         "connect_denied",
         "connect_failed",
+        "unvetted_harness",
         "internal"
       ],
       "title": "HelperErrorCode",
@@ -434,7 +543,8 @@ const hostHelperSchema: Record<string, unknown> = {
       "enum": [
         "instances_watch",
         "paths_complete",
-        "instances_inspect"
+        "instances_inspect",
+        "harnesses"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -1546,7 +1656,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "RunStartRequest": {
       "additionalProperties": false,
-      "description": "Start a detached run (``vibesys --detach``) in ``project``.",
+      "description": "Start a detached run (``vibesys --detach``) in ``project``.\n\n``args`` never carry ``UNVETTED_MODEL_FLAG`` (or an abbreviation of it): a run\nstarted through the helper uses only vetted harnesses. With ``harness``, they\ncarry neither ``CLI_PROVIDER_FLAG`` nor ``MODEL_FLAG``, so the pair has one source.",
       "properties": {
         "request_id": {
           "maxLength": 128,
@@ -1604,6 +1714,17 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Resume"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessChoice"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -2035,6 +2156,7 @@ const hostHelperSchema: Record<string, unknown> = {
     "request": {
       "discriminator": {
         "mapping": {
+          "harnesses.list": "#/$defs/HarnessesListRequest",
           "hello": "#/$defs/HelloRequest",
           "instances.inspect": "#/$defs/InstancesInspectRequest",
           "instances.list": "#/$defs/InstancesListRequest",
@@ -2086,6 +2208,9 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         {
           "$ref": "#/$defs/PathsCompleteRequest"
+        },
+        {
+          "$ref": "#/$defs/HarnessesListRequest"
         }
       ],
       "title": "Request"
@@ -2094,6 +2219,7 @@ const hostHelperSchema: Record<string, unknown> = {
       "discriminator": {
         "mapping": {
           "error": "#/$defs/HelperError",
+          "harnesses.list": "#/$defs/HarnessesListReply",
           "hello": "#/$defs/HelloReply",
           "instances.changed": "#/$defs/InstancesChanged",
           "instances.inspect": "#/$defs/InstancesInspectReply",
@@ -2148,6 +2274,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/PathsCompleteReply"
         },
         {
+          "$ref": "#/$defs/HarnessesListReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -2171,7 +2300,13 @@ const hostHelperSchema: Record<string, unknown> = {
     "instances.inspect": "instances_inspect",
     "instances.watch": "instances_watch",
     "instances.unwatch": "instances_watch",
-    "paths.complete": "paths_complete"
+    "paths.complete": "paths_complete",
+    "harnesses.list": "harnesses"
+  },
+  "x-vibesys-feature-by-field": {
+    "run.start": {
+      "harness": "harnesses"
+    }
   }
 };
 

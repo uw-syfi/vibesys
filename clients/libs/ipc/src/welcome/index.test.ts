@@ -27,6 +27,10 @@ const VALUES: readonly unknown[] = [
   '--rounds 2',
   {},
   [],
+  {provider: 'codex', model: 'gpt-a'},
+  {provider: 'codex', model: 'gpt-a', extra: true},
+  {provider: 'codex'},
+  {provider: '', model: 'gpt-a'},
 ];
 
 /** One valid argument vector for every privileged welcome request. */
@@ -43,7 +47,8 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.complete]: ['local', '/project/'],
   [WELCOME_CHANNELS.inspect]: ['local', '0123456789ab', false, 1],
   [WELCOME_CHANNELS.tasks]: ['local', '/project'],
-  [WELCOME_CHANNELS.start]: ['local', '/project', 'spsc', '', 1],
+  [WELCOME_CHANNELS.harnesses]: ['local'],
+  [WELCOME_CHANNELS.start]: ['local', '/project', 'spsc', '', null, 1],
   [WELCOME_CHANNELS.cancelStart]: [1],
   [WELCOME_CHANNELS.attach]: ['local', '0123456789ab'],
   [WELCOME_CHANNELS.resume]: ['local', '/project', 'run-1'],
@@ -60,6 +65,11 @@ function checkAccepted(request: WelcomeRequest): void {
     expect(isTaskName(request.task)).toBe(true);
     expect(typeof request.args).toBe('string');
     expect(Number.isSafeInteger(request.start) && request.start > 0).toBe(true);
+    if (request.harness !== null) {
+      expect(Object.keys(request.harness).sort()).toEqual(['model', 'provider']);
+      expect(request.harness.provider).not.toBe('');
+      expect(request.harness.model).not.toBe('');
+    }
   }
   if (request.kind === 'set-checkout' || request.kind === 'cancel-checkout') {
     expect(Number.isSafeInteger(request.change) && request.change > 0).toBe(true);
@@ -91,19 +101,29 @@ describe('parseWelcomeRequest', () => {
     }
   });
 
-  test('a start carries the task, the run arguments as typed, and its token', () => {
+  test('a start carries the task, the run arguments as typed, its harness, and its token', () => {
     expect(
-      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', '--rounds 2', 3]),
+      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', '--rounds 2', null, 3]),
     ).toEqual({
       kind: 'start',
       host: {kind: 'local'},
       project: '/p',
       task: 'spsc',
       args: '--rounds 2',
+      harness: null,
       start: 3,
     });
+    const harness = {provider: 'claude', model: 'claude-a'};
+    expect(
+      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', '', harness, 3]),
+    ).toMatchObject({kind: 'start', harness});
+    for (const bad of ['claude-a', {...harness, allow_unvetted: true}, {model: 'm'}]) {
+      expect(() =>
+        parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', '', bad, 3]),
+      ).toThrow('pick one of the vetted models, or the project default');
+    }
     expect(() =>
-      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', ['--rounds'], 3]),
+      parseWelcomeRequest(WELCOME_CHANNELS.start, ['local', '/p', 'spsc', ['--rounds'], null, 3]),
     ).toThrow('the run arguments must be text');
     expect(() =>
       parseWelcomeRequest(WELCOME_CHANNELS.resume, ['local', '/p', '-oProxyCommand']),

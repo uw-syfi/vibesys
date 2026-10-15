@@ -128,10 +128,23 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "instances.watch": "instances_watch",
         "instances.unwatch": "instances_watch",
         "paths.complete": "paths_complete",
+        "harnesses.list": "harnesses",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()
     assert set(gates.values()) == {feature.value for feature in HelperFeature}
+
+
+def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> None:
+    document = host_helper_json_schema()
+    gates = document["x-vibesys-feature-by-field"]
+
+    assert gates == {"run.start": {"harness": "harnesses"}}
+    request_refs = document["properties"]["request"]["discriminator"]["mapping"]
+    for tag, fields in gates.items():
+        request = document["$defs"][request_refs[tag].rsplit("/", 1)[1]]
+        assert fields.keys() <= request["properties"].keys()
+        assert fields.keys().isdisjoint(request.get("required", ()))
 
 
 @pytest.mark.parametrize(
