@@ -132,11 +132,15 @@ function ok<T>(value: T): WelcomeResult<T> {
 
 /**
  * The welcome bridge's hosts requests: inspections answer at once, a listing names `STREAMS`, a
- * tail read answers its stream's bytes, and a read that follows waits until the test ends it.
+ * tail read answers its stream's bytes, a read that follows waits until the test ends it, and a
+ * withdrawal is recorded by the token it names.
  */
 class FakeHostsBridge implements HostsBridge {
   readonly inspections: unknown[][] = [];
   readonly reads: {readonly host: HostKey; readonly stream: string; readonly tail: boolean}[] = [];
+  /** The token of each read that follows, in order. */
+  readonly following: string[] = [];
+  readonly withdrawals: string[] = [];
   releases = 0;
 
   hosts = async () => ok<string[]>([]);
@@ -152,13 +156,20 @@ class FakeHostsBridge implements HostsBridge {
     return ok(inspection());
   };
   logs = (host: HostKey, instance: string, request: RunLogsRequest) => {
+    if (request.kind === 'withdraw') {
+      this.withdrawals.push(request.token);
+      return Promise.resolve(ok<LogListOutcome | LogReadOutcome | null>(null));
+    }
     if (request.kind === 'list') {
       const listing: LogListOutcome = {ok: true, instanceId: instance, streams: STREAMS};
       return Promise.resolve(ok<LogListOutcome | LogReadOutcome>(listing));
     }
     const tail = 'tail_bytes' in request.read.start;
     this.reads.push({host, stream: request.read.stream_id, tail});
-    if (!tail) return new Promise<WelcomeResult<LogListOutcome | LogReadOutcome>>(() => {});
+    if (!tail) {
+      this.following.push(request.token);
+      return new Promise<WelcomeResult<LogListOutcome | LogReadOutcome>>(() => {});
+    }
     const data =
       request.read.stream_id === '000002'
         ? chunk(NARRATION, [{offset: 0, length: encoder.encode(NARRATION).length, pipe: 'stdout'}])
@@ -240,6 +251,10 @@ test('picking a raw stream follows it instead, with its stderr marked', async ()
     {host: 'local', stream: '000001', tail: true},
     {host: 'local', stream: '000001', tail: false},
   ]);
+  // The narration's read in flight was withdrawn by its token when the view left it.
+  expect(bridge.following).toHaveLength(2);
+  expect(new Set(bridge.following).size).toBe(2);
+  expect(bridge.withdrawals).toEqual(bridge.following.slice(0, 1));
   const raw = container.ownerDocument.querySelector('[data-testid="log-raw"]');
   expect(raw?.textContent).toBe('step 1\nno space left\n');
   expect([...(raw?.querySelectorAll('mark.stderr') ?? [])].map(mark => mark.textContent)).toEqual([
@@ -270,6 +285,7 @@ test('the sheet asks for no server log, and closing it lets the logs go', async 
   expect(bridge.releases).toBe(1);
   expect(container.ownerDocument.querySelector('[data-testid="inspection-logs"]')).toBeNull();
   expect(bridge.reads).toHaveLength(reads);
+  expect(bridge.withdrawals).toEqual(bridge.following);
 
   await act(async () => root.unmount());
   container.remove();

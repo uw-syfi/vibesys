@@ -102,12 +102,16 @@ def test_a_lost_planner_turn_is_asked_again_with_the_same_request_and_no_complai
     *, restarting: bool
 ) -> None:
     host = start(restarting=restarting)
+    assert isinstance(planner_context(host), PlannerPrompt)
+    # The first ask went out while the input was being measured; the asks after it show the
+    # measurement, and each is the one before it again.
+    host.run.lose(host.run.expect_turn(role=PLANNER_LABEL))
+    answer_all_but_the_planner(host)
     first = planner_context(host)
-    assert isinstance(first, PlannerPrompt)
+    assert isinstance(first, PlannerCorrection)
 
-    for _ in range(2):
-        host.run.lose(host.run.expect_turn(role=PLANNER_LABEL))
-        answer_all_but_the_planner(host)
+    host.run.lose(host.run.expect_turn(role=PLANNER_LABEL))
+    answer_all_but_the_planner(host)
 
     again = planner_context(host)
     assert isinstance(again, PlannerCorrection)

@@ -135,6 +135,8 @@ class _Planning(RolePromptContext):
     older_ids: tuple[str, ...] = ()
     baseline: tuple[MetricRow, ...] = ()
     input_failure: InputFailure | None = None
+    baseline_pending: bool = False
+    """The input is still being measured: what is scheduled now starts when its reading lands."""
     profiling: bool = False
     profile_fields: tuple[str, ...] = ()
     """The measurement fields a profile workstream may require: what the capture supplies."""
@@ -181,6 +183,10 @@ class ImplementPrompt(RolePromptContext):
     last_blocker: Blocker | None = None
     """The latest turn of this workstream that ended without a candidate."""
     turns_without_candidate: int = Field(default=0, ge=0)
+    baseline_pending: bool = False
+    """The input's own measurement had not landed when the turn was asked."""
+    input_failure: InputFailure | None = None
+    """Why the input's own measurement failed, when it had when the turn was asked."""
 
 
 class ReviewPrompt(RolePromptContext):

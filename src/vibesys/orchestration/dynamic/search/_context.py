@@ -191,7 +191,8 @@ class PlanWorld:
 
     config: DynamicConfig
     base: RevisionRef
-    baseline: Baseline
+    baseline: Baseline | None
+    """The input's measurement; None while it is still being measured."""
     hypotheses: tuple[HypothesisRecord, ...]
     running: tuple[RunningWork, ...]
     finished: tuple[FinishedWork, ...]
@@ -261,7 +262,7 @@ class PlanWorld:
         history = tuple(sorted((*rows, *profiles), key=lambda row: row.sequence))
         shown = history[-_HISTORY_ROWS:]
         shown_sequences = {row.sequence for row in shown}
-        seen = reading(self.baseline)
+        seen = None if self.baseline is None else reading(self.baseline)
         prompt = PlannerPrompt(
             capacity=self.capacity,
             in_flight=len(running),
@@ -277,7 +278,8 @@ class PlanWorld:
                 if isinstance(row, HistoryRow) and row.sequence not in shown_sequences
             ),
             baseline=() if seen is None else seen.metrics,
-            input_failure=failure(self.baseline),
+            input_failure=None if self.baseline is None else failure(self.baseline),
+            baseline_pending=self.baseline is None,
             profiling=self.offer is not None,
             profile_fields=() if self.offer is None else tuple(str(f) for f in self.offer.fields),
             handoff_paths=self.handoffs,

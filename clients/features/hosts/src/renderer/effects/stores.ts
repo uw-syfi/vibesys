@@ -90,18 +90,34 @@ function isOutcome(value: unknown): value is LogsAnswer {
   );
 }
 
+/** The last read token this document named; each read takes the next, so none repeats here. */
+let lastLogRead = 0;
+
+function nextLogReadToken(): string {
+  lastLogRead += 1;
+  return `l${lastLogRead}`;
+}
+
+/** Call `ask` and settle its answer, a synchronous throw included, as a `WelcomeResult`. */
+function settledCall<T>(ask: () => Promise<WelcomeResult<T>>): Promise<WelcomeResult<T>> {
+  return settled(new Promise<WelcomeResult<T>>(answer => answer(ask())));
+}
+
 /**
  * Ask the main process one logs question about `target`, resolving a refusal as a `transport`
- * failure. An IPC request cannot be withdrawn, so an aborted request rejects at once and its late
- * answer is dropped; the main process's own read ends by its wait bound or when the logs are
- * released.
+ * failure. An IPC request cannot be withdrawn itself, so an aborted request rejects at once, its
+ * late answer is dropped, and `withdraw` (a read's) tells the main process to abort its read.
  */
 function askLogs<T extends LogsAnswer>(
-  ask: () => Promise<WelcomeResult<LogsAnswer>>,
+  ask: () => Promise<WelcomeResult<LogsAnswer | null>>,
   signal: AbortSignal,
+  withdraw?: () => void,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const aborted = (): void => reject(signal.reason);
+    const aborted = (): void => {
+      reject(signal.reason);
+      withdraw?.();
+    };
     if (signal.aborted) {
       aborted();
       return;
@@ -109,12 +125,31 @@ function askLogs<T extends LogsAnswer>(
     signal.addEventListener('abort', aborted, {once: true});
     const failed = (message: string): T =>
       ({ok: false, failure: {code: 'transport', message}}) as T;
-    void settled(new Promise<WelcomeResult<LogsAnswer>>(answer => answer(ask()))).then(result => {
+    void settledCall(ask).then(result => {
       signal.removeEventListener('abort', aborted);
       if (!result.ok) resolve(failed(result.error));
       else resolve(isOutcome(result.value) ? (result.value as T) : failed('no log answer'));
     });
   });
+}
+
+/**
+ * The followers' reads over `bridge`, each to the host of the run on screen (`host`), named by a
+ * token so that aborting one withdraws it in the main process too.
+ */
+function logTransport(bridge: HostsBridge, host: () => HostKey | undefined): LogTransport {
+  return {
+    read: (input: LogReadInput, signal) => {
+      const on = host();
+      if (on === undefined) return Promise.reject(new Error('no run is inspected'));
+      const token = nextLogReadToken();
+      return askLogs<LogReadOutcome>(
+        () => bridge.logs(on, input.instance_id, {kind: 'read', token, read: input}),
+        signal as AbortSignal,
+        () => void settledCall(() => bridge.logs(on, input.instance_id, {kind: 'withdraw', token})),
+      );
+    },
+  };
 }
 
 function followerView(ref: AnyActorRef | undefined): LogFollowerView | null {
@@ -143,16 +178,7 @@ export function createInspectorStore(
   });
   // A read goes to the host of the run on screen: opening another run restarts the follower.
   let target: InspectorLogsTarget | null = null;
-  const transport: LogTransport = {
-    read: (input: LogReadInput, signal) => {
-      const host = target?.host;
-      if (host === undefined) return Promise.reject(new Error('no run is inspected'));
-      return askLogs<LogReadOutcome>(
-        () => bridge.logs(host, input.instance_id, {kind: 'read', read: input}),
-        signal as AbortSignal,
-      );
-    },
-  };
+  const transport = logTransport(bridge, () => target?.host);
   const logsMachine = inspectorLogsMachine.provide({
     actors: {
       list: fromPromise<LogListOutcome, InspectorLogsTarget>(({input, signal}) =>

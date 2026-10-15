@@ -14,6 +14,7 @@ import type {
   HelperFeature,
   Message,
   Request,
+  RunStartCompensationFailure,
 } from './generated/host-helper.generated.js';
 import hostHelperSchema from './generated/host-helper.schema.js';
 import {type Schema, type SchemaWalk, validateSchema} from './schema-walker.js';
@@ -56,6 +57,7 @@ export type {
   RunList,
   RunPhase,
   RunRole,
+  RunStartCompensationFailure,
   RunStartReply,
   RunStatus,
   RunSummary,
@@ -68,6 +70,7 @@ const STRICT: SchemaWalk = {documents: [hostHelperSchema], strict: true};
 const properties = hostHelperSchema['properties'] as Record<string, Schema>;
 const MESSAGE = properties['message'] as Schema;
 const CHANNEL_END = properties['channel_end'] as Schema;
+const COMPENSATION_FAILURE = properties['compensation_failure'] as Schema;
 const REQUEST = properties['request'] as Schema;
 const definitions = hostHelperSchema['$defs'] as Record<string, Schema>;
 const featureByRequest = hostHelperSchema['x-vibesys-feature-by-request'] as Readonly<
@@ -144,6 +147,13 @@ export function parseChannelEnd(line: string): ChannelEnd {
   const value = parseJson(line, 'channel end');
   validateSchema(value, CHANNEL_END, 'channel end', STRICT);
   return value as ChannelEnd;
+}
+
+/** Parse the typed stderr report for an undisclosed start whose cleanup failed. */
+export function parseRunStartCompensationFailure(line: string): RunStartCompensationFailure {
+  const value = parseJson(line, 'run start compensation failure');
+  validateSchema(value, COMPENSATION_FAILURE, 'run start compensation failure', STRICT);
+  return value as RunStartCompensationFailure;
 }
 
 function parseJson(line: string, path: string): unknown {

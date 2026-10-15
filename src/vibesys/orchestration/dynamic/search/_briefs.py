@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from vibesys.candidates.api import failure
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
@@ -19,7 +20,7 @@ from vibesys.orchestration.dynamic.search._prompts import (
 from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
 
 if TYPE_CHECKING:
-    from vibesys.candidates.api import ReviewEvaluation
+    from vibesys.candidates.api import Baseline, ReviewEvaluation
     from vibesys.orchestration.dynamic.search._values import RoundRecord, WorkPlan
     from vs_core.api.search import RevisionRef
 
@@ -67,11 +68,15 @@ def implement_prompt(
     parent: RevisionRef,
     prior: RoundRecord | None,
     blockers: tuple[Blocker, ...],
+    *,
+    baseline: Baseline | None,
 ) -> ImplementPrompt:
     """One isolated implementation request for a scheduled workstream.
 
     ``prior`` is the previous round of the same hypothesis, when this workstream continues it;
-    ``blockers`` are the turns of this workstream that ended without a measurable candidate.
+    ``blockers`` are the turns of this workstream that ended without a measurable candidate;
+    ``baseline`` is the input's measurement as known now: None while it has not landed, and an
+    unmeasurable one is shown with why it failed.
     """
     latest = blockers[-1] if blockers else None
     stuck = next(
@@ -93,6 +98,8 @@ def implement_prompt(
             else None
         ),
         prior_failure_tail=prior_tail,
+        baseline_pending=baseline is None,
+        input_failure=None if baseline is None else failure(baseline),
         prior_failure_fence=fence(prior_tail),
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),

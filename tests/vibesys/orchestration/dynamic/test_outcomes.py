@@ -238,7 +238,8 @@ def test_a_candidate_is_eligible_exactly_when_the_task_the_review_and_the_input_
         evidence=evidence_of(accuracy=accuracy, benchmark=benchmark, throughput=case.throughput),
         cause=case.cause,
     )
-    settle = assertion(workstream_start(), closing, TERMS)
+    start = workstream_start()
+    settle = assertion(start, closing, TERMS, start.baseline)
 
     # TERMS measures accuracy and benchmark, so both gates need a passed reading.
     expected = (
@@ -272,7 +273,7 @@ def test_a_profile_workstream_settles_ineligible_and_discarded_whatever_it_measu
         evidence=Evidence(readings=(reading,), proof=Proof(refs=(ref,))),
         cause=Failure(kind=FailureKind.OUT_OF_BUDGET) if failed_workstream else None,
     )
-    settle = assertion(workstream_start(WorkKind.PROFILE), closing, TERMS)
+    settle = assertion(workstream_start(WorkKind.PROFILE), closing, TERMS, None)
     assert (settle.eligible, settle.retention, settle.candidate) == (False, "discard", None)
     assert settle.outcome == ("failed" if failed_workstream else "succeeded")
 

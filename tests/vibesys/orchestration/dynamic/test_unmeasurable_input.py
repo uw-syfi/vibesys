@@ -5,7 +5,8 @@ input's own workload cannot run (a typed benchmark failure), end without any evi
 evaluation infrastructure failed, or be lost. The infrastructure case once made the run ask for
 evidence again after every empty answer, forever. Whatever the outcome, the search proceeds on the
 planner's turns, and the run ends as a success only when it holds a trusted result: a retained
-candidate, or an input that was measured.
+candidate, or an input that was measured. The planner is asked while the input is measured, so
+each story is played with the measurement landing before and after the planner's first reply.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
+from vibesys.orchestration.dynamic.search.api import PlannerPrompt
 from vs_core.api import Finish, Measure, ProposeWinner, Retained, RevisionRef, StartAttempt, Wait
 
 MODES = across_restarts
@@ -37,9 +39,20 @@ MAX_INPUT_MEASUREMENTS = 3
 
 
 def run_to_its_end(host: Host, *, candidate_found: bool) -> None:
-    """Plan one hypothesis; its candidate passes review, or the judge rejects every turn."""
+    """Plan one hypothesis; its candidate passes review, or the judge rejects every turn.
+
+    The first plan answers a prompt asked while the input was being measured, and starts at once.
+    When the input fails its measurement before that plan arrives, the plan is dropped and the
+    planner, asked again with the failure in view, plans the same hypothesis.
+    """
     host.drain_until_turn(PLANNER_LABEL)
     host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("h1")))
+    host.measure_input()
+    if not host.open(StartAttempt):
+        again = host.run.expect_turn(role=PLANNER_LABEL)
+        assert isinstance(again.context, PlannerPrompt)
+        assert again.context.input_failure is not None
+        host.run.reply_raw(again, plan_reply(implement("h1")))
     host.answer(host.run.expect(StartAttempt, label="start"))
     for _ in range(1 if candidate_found else 2):  # the default bound is two unmeasured turns
         result = ImplementerResult.model_validate_json(implemented())
@@ -56,12 +69,18 @@ def run_to_its_end(host: Host, *, candidate_found: bool) -> None:
 
 
 @MODES
+@pytest.mark.parametrize("input_first", [True, False])
 @pytest.mark.parametrize("candidate_found", [True, False])
 @pytest.mark.parametrize("measurement", ["measured", "failed-workload", "no-evidence", "lost"])
 def test_every_input_measurement_outcome_ends_the_run_with_its_status(
-    *, restarting: bool, measurement: str, candidate_found: bool
+    *, restarting: bool, measurement: str, candidate_found: bool, input_first: bool
 ) -> None:
-    host = begin(config(), restarting=restarting, baseline=measurement)  # ty: ignore[invalid-argument-type]
+    host = begin(
+        config(),
+        restarting=restarting,
+        input_first=input_first,
+        baseline=measurement,  # ty: ignore[invalid-argument-type]
+    )
     run_to_its_end(host, candidate_found=candidate_found)
 
     decisions = host.run.decisions

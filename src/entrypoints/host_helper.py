@@ -114,7 +114,7 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
         checkout=GitCheckoutProbe(source_checkout_root(), SubprocessProbe()),
         dialer=network,
         vibesys_version=host_facts()[1],
-        logs=HelperLogs(logs, threads, threads.sleep),
+        logs=HelperLogs(logs, threads),
         harnesses=vetted_harnesses,
     )
 

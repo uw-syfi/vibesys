@@ -93,6 +93,7 @@ def start(
     cfg = config(max_rounds=3, max_in_flight=1)
     run = FlowRun.start(dynamic, cfg, facts=FACTS, restarting=restarting)
     host = WarmupHost(run, cfg, reached_rounds, baseline)
+    host.measure_input()
     host.drain_until_turn(PLANNER_LABEL)
     return host
 
@@ -153,11 +154,13 @@ def test_no_candidate_is_adopted_for_a_benchmark_it_failed_however_far_it_got(
         reached_rounds={"c1": 14, "c2": 38},
         baseline="failed-workload",
     )
-    # The input misses the bar too, and the planner is told so rather than shown a baseline.
-    first = planned(host)
-    assert first.input_failure is not None
-    assert first.baseline == ()
+    # The first plan was made while the input was being measured; the input missed the bar too,
+    # so that plan is dropped and the planner is told so rather than shown a baseline.
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement("A")))
     for hypothesis, candidate in (("A", "c1"), ("B", "c2")):
+        told = planned(host)
+        assert told.input_failure is not None
+        assert told.baseline == ()
         host.run.reply_raw(
             host.run.expect_turn(role=PLANNER_LABEL), plan_reply(implement(hypothesis))
         )

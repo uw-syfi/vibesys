@@ -278,6 +278,7 @@ def representative_context() -> dict[str, object]:
     # True renders the optional evaluation section of the core-policy prompts.
     context["agent_evaluation"] = True
     for name in [
+        "baseline_pending",
         "framework_benchmark_enabled",
         "framework_revert_applied",
         "gate_revalidation_pending",

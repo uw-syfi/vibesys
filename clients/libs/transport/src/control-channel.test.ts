@@ -643,6 +643,260 @@ describe('ControlChannel', () => {
     expect(channel.connected).toBe(false);
   });
 
+  it('recovers again after a redial scheduler fires before returning its handle', async () => {
+    const openings: Array<{
+      readonly handlers: ControlConnectionHandlers;
+      readonly resolve: () => void;
+    }> = [];
+    let initialHandlers: ControlConnectionHandlers | undefined;
+    let scheduleCalls = 0;
+    let cancellationCalls = 0;
+    const firstRecovery = deferred();
+    const secondRecovery = deferred();
+    let connectedReports = 0;
+    const channel = new ControlChannel(
+      {
+        open: handlers =>
+          new Promise<ControlConnection>(resolve => {
+            openings.push({
+              handlers,
+              resolve: () => resolve({send: () => undefined, close: async () => undefined}),
+            });
+          }),
+        runDedicated: async () => {
+          throw new Error('no test here routes a request onto its own connection');
+        },
+      },
+      {
+        clientId: 'test-client',
+        reconnectDelaysMs: [10],
+        scheduleTimeout: callback => {
+          scheduleCalls += 1;
+          callback();
+          return () => {
+            cancellationCalls += 1;
+          };
+        },
+        onConnectionState: state => {
+          if (state.status !== 'connected') return;
+          connectedReports += 1;
+          if (connectedReports === 1) firstRecovery.resolve();
+          if (connectedReports === 2) secondRecovery.resolve();
+        },
+      },
+    );
+    channel.adopt(handlers => {
+      initialHandlers = handlers;
+      return {send: () => undefined, close: async () => undefined};
+    });
+
+    if (initialHandlers === undefined) throw new Error('The adopted connection has no handlers');
+    initialHandlers.onDrop(new BackendClientError('disconnected', 'initial connection closed'));
+    const firstOpening = openings[0];
+    if (firstOpening === undefined) throw new Error('The synchronous redial did not open');
+    firstOpening.resolve();
+    await firstRecovery.promise;
+
+    expect(openings).toHaveLength(1);
+    expect(channel.connected).toBe(true);
+    firstOpening.handlers.onDrop(
+      new BackendClientError('disconnected', 'replacement connection closed'),
+    );
+    const secondOpening = openings[1];
+    if (secondOpening === undefined) throw new Error('The second synchronous redial did not open');
+    secondOpening.resolve();
+    await secondRecovery.promise;
+
+    expect(openings).toHaveLength(2);
+    expect(scheduleCalls).toBe(2);
+    expect(cancellationCalls).toBe(2);
+    expect(channel.connected).toBe(true);
+    await channel.close();
+  });
+
+  it('settles a dropped connection when its redial scheduler throws', async () => {
+    const schedulerError = new Error('redial timer unavailable');
+    const reports: ControlChannelState[] = [];
+    let handlers: ControlConnectionHandlers | undefined;
+    const channel = new ControlChannel(new FakeConnector([]), {
+      clientId: 'test-client',
+      reconnectDelaysMs: [10],
+      scheduleTimeout: (_callback, delayMs) => {
+        if (delayMs === 10) throw schedulerError;
+        return () => undefined;
+      },
+      onConnectionState: state => reports.push(state),
+    });
+    channel.adopt(bound => {
+      handlers = bound;
+      return {send: () => undefined, close: async () => undefined};
+    });
+    const request = channel.request({type: 'query.snapshot'});
+    void request.catch(() => undefined);
+
+    const boundHandlers = handlers;
+    if (boundHandlers === undefined) throw new Error('The adopted connection has no handlers');
+    expect(() =>
+      boundHandlers.onDrop(new BackendClientError('disconnected', 'connection closed')),
+    ).not.toThrow();
+
+    await expect(request).rejects.toMatchObject({kind: 'disconnected'});
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      status: 'disconnected',
+      error: {kind: 'disconnected', message: schedulerError.message},
+      retrying: false,
+    });
+    await channel.close();
+  });
+
+  it('settles a failed dial when scheduling its retry throws', async () => {
+    const schedulerError = new Error('retry timer unavailable');
+    const reported = deferred();
+    let state: ControlChannelState | undefined;
+    const channel = new ControlChannel(new FakeConnector(['rejects']), {
+      clientId: 'test-client',
+      reconnectDelaysMs: [10],
+      scheduleTimeout: () => {
+        throw schedulerError;
+      },
+      onConnectionState: next => {
+        state = next;
+        reported.resolve();
+      },
+    });
+    const request = channel.request({type: 'query.snapshot'});
+    void request.catch(() => undefined);
+
+    await reported.promise;
+    await expect(request).rejects.toMatchObject({kind: 'disconnected'});
+    expect(state).toMatchObject({
+      status: 'disconnected',
+      error: {kind: 'disconnected', message: schedulerError.message},
+      retrying: false,
+    });
+    await channel.close();
+  });
+
+  it('keeps a redial that fires before its scheduler throws', async () => {
+    const schedulerError = new Error('scheduler threw after delivery');
+    const connected = deferred();
+    let initialHandlers: ControlConnectionHandlers | undefined;
+    let resolveOpening: (() => void) | undefined;
+    const channel = new ControlChannel(
+      {
+        open: handlers =>
+          new Promise<ControlConnection>(resolve => {
+            resolveOpening = () => resolve({send: () => undefined, close: async () => undefined});
+            expect(typeof handlers.onDrop).toBe('function');
+          }),
+        runDedicated: async () => {
+          throw new Error('no test here routes a request onto its own connection');
+        },
+      },
+      {
+        clientId: 'test-client',
+        reconnectDelaysMs: [10],
+        scheduleTimeout: callback => {
+          callback();
+          throw schedulerError;
+        },
+        onConnectionState: state => {
+          if (state.status === 'connected') connected.resolve();
+        },
+      },
+    );
+    channel.adopt(handlers => {
+      initialHandlers = handlers;
+      return {send: () => undefined, close: async () => undefined};
+    });
+
+    const boundHandlers = initialHandlers;
+    if (boundHandlers === undefined) throw new Error('The adopted connection has no handlers');
+    expect(() =>
+      boundHandlers.onDrop(new BackendClientError('disconnected', 'connection closed')),
+    ).not.toThrow();
+    if (resolveOpening === undefined) throw new Error('The synchronous callback did not redial');
+    resolveOpening();
+    await connected.promise;
+
+    expect(channel.connected).toBe(true);
+    await channel.close();
+  });
+
+  it('fences a late redial callback after close re-enters its acquisition', async () => {
+    const connector = new FakeConnector([]);
+    let handlers: ControlConnectionHandlers | undefined;
+    let lateCallback: (() => void) | undefined;
+    let closing: Promise<void> | undefined;
+    let cancellationCalls = 0;
+    let channel: ControlChannel;
+    channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [10],
+      scheduleTimeout: callback => {
+        lateCallback = callback;
+        closing = channel.close();
+        return () => {
+          cancellationCalls += 1;
+        };
+      },
+    });
+    channel.adopt(bound => {
+      handlers = bound;
+      return {send: () => undefined, close: async () => undefined};
+    });
+
+    if (handlers === undefined) throw new Error('The adopted connection has no handlers');
+    handlers.onDrop(new BackendClientError('disconnected', 'connection closed'));
+    if (lateCallback === undefined) throw new Error('The redial callback was not acquired');
+    lateCallback();
+    if (closing === undefined) throw new Error('The scheduler did not re-enter close');
+    await closing;
+
+    expect(connector.opened).toEqual([]);
+    expect(cancellationCalls).toBe(1);
+    expect(channel.connected).toBe(false);
+  });
+
+  it('fences a late redial callback after reconnect re-enters its acquisition', async () => {
+    const connector = new FakeConnector(['answers']);
+    const connected = deferred();
+    let handlers: ControlConnectionHandlers | undefined;
+    let lateCallback: (() => void) | undefined;
+    let cancellationCalls = 0;
+    let channel: ControlChannel;
+    channel = new ControlChannel(connector, {
+      clientId: 'test-client',
+      reconnectDelaysMs: [10],
+      scheduleTimeout: callback => {
+        lateCallback = callback;
+        channel.reconnect();
+        return () => {
+          cancellationCalls += 1;
+        };
+      },
+      onConnectionState: state => {
+        if (state.status === 'connected') connected.resolve();
+      },
+    });
+    channel.adopt(bound => {
+      handlers = bound;
+      return {send: () => undefined, close: async () => undefined};
+    });
+
+    if (handlers === undefined) throw new Error('The adopted connection has no handlers');
+    handlers.onDrop(new BackendClientError('disconnected', 'connection closed'));
+    await connected.promise;
+    if (lateCallback === undefined) throw new Error('The redial callback was not acquired');
+    lateCallback();
+
+    expect(connector.opened).toEqual(['answers']);
+    expect(cancellationCalls).toBe(1);
+    expect(channel.connected).toBe(true);
+    await channel.close();
+  });
+
   it('does not install a connection that failed before the dial returned', async () => {
     // Two attempts: the first connection dies in the window between the
     // handlers being bound and `open()` resolving, the second works.

@@ -53,6 +53,7 @@ from .connector_protocol import (
     SlurmConnectorResponse,
     SlurmConnectorSyncToRequest,
 )
+from .errors import SlurmError, SlurmSubmissionRejectedError
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
 from .identity import runtime_content_identity
@@ -80,14 +81,12 @@ from .runner import (
     SlurmBatchStage,
     SlurmBatchStageResult,
     SlurmBatchWaitResult,
-    SlurmError,
     SlurmFileArtifact,
     SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobRunner,
     SlurmJobWaitResult,
-    SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
 from .scheduler_read import READ_END as SCHEDULER_READ_END
