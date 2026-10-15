@@ -4,6 +4,7 @@ import type {LogListOutcome} from '@vibesys/logs';
 import {checkMachine} from '@vibesys/machine/testing';
 import {
   groupedStreams,
+  type InspectorLogsSnapshot,
   inspectorLogsMachine,
   inspectorLogsNotice,
   inspectorLogsView,
@@ -56,9 +57,11 @@ describe('inspector log streams', () => {
       ['Slurm jobs', ['Slurm job 4242 (running)']],
       ['Other', ['from a newer writer (running)']],
     ]);
-    expect(inspectorStreams(STREAMS).filter(entry => entry.narration).map(entry => entry.id)).toEqual(
-      ['000002'],
-    );
+    expect(
+      inspectorStreams(STREAMS)
+        .filter(entry => entry.narration)
+        .map(entry => entry.id),
+    ).toEqual(['000002']);
   });
 
   test("show the user's pick while it is listed, else the narration, else the newest", () => {
@@ -79,6 +82,23 @@ describe('inspector log streams', () => {
     expect(shownStream({...context, streams: []})).toBeNull();
   });
 });
+
+function followerProblems(snapshot: InspectorLogsSnapshot): string[] {
+  if (!snapshot.matches({open: {follow: 'following'}})) return [];
+  const problems: string[] = [];
+  if (snapshot.context.target === null) problems.push('a follower runs with no run inspected');
+  if (snapshot.context.followed !== shownStream(snapshot.context))
+    problems.push('the follower reads a stream that is not on screen');
+  return problems;
+}
+
+function closedProblems(snapshot: InspectorLogsSnapshot): string[] {
+  if (!snapshot.matches('closed')) return [];
+  const problems: string[] = [];
+  if (snapshot.context.streams.length > 0) problems.push('a closed inspector still lists streams');
+  if (inspectorLogsView(snapshot, null).open) problems.push('a closed inspector shows logs');
+  return problems;
+}
 
 describe('inspectorLogsMachine', () => {
   test('model: work runs only while open, and the follower reads only the stream on screen', () => {
@@ -103,19 +123,7 @@ describe('inspectorLogsMachine', () => {
           ...fire,
         ]);
       },
-      invariants: snapshot => {
-        const problems: string[] = [];
-        const following = snapshot.matches({open: {follow: 'following'}});
-        if (following && snapshot.context.target === null)
-          problems.push('a follower runs with no run inspected');
-        if (following && snapshot.context.followed !== shownStream(snapshot.context))
-          problems.push('the follower reads a stream that is not on screen');
-        if (snapshot.matches('closed') && snapshot.context.streams.length > 0)
-          problems.push('a closed inspector still lists streams');
-        if (!snapshot.matches('open') && inspectorLogsView(snapshot, null).open)
-          problems.push('a closed inspector shows logs');
-        return problems;
-      },
+      invariants: snapshot => [...followerProblems(snapshot), ...closedProblems(snapshot)],
     });
   });
 
