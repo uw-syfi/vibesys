@@ -14,9 +14,10 @@ from vs_sim.sim_threads import SimBlockingRunner, SimThreads
 from vs_sim.virtual import VirtualClock, WallClockView, run_virtual
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
+    from collections.abc import Callable, Coroutine, Sequence
 
     from vs_sim.processes import Processes
+    from vs_sim.sim_network import LinkFault
     from vs_sim.signals import ProcessSignaller
     from vs_sim.trace import EventTrace
 
@@ -102,20 +103,25 @@ class Sim:
         return WallClockView(self.clock)
 
     def platform(
-        self, threads: SimThreads, *, processes: Processes, signaller: ProcessSignaller
+        self,
+        threads: SimThreads,
+        *,
+        processes: Processes,
+        signaller: ProcessSignaller,
+        network_faults: Sequence[LinkFault] = (),
     ) -> Platform:
         """A :class:`Platform` on this simulation's timeline, over ``threads`` (from :meth:`threads`).
 
         Its clock is :attr:`wall_clock`; ``threads.now()`` is the monotonic reading of the same
         timeline. Blocking calls and sockets run on ``threads``; processes and signals are the
-        Fakes given.
+        Fakes given. The network fires ``network_faults`` (see :class:`SimNetwork`).
         """
         return Platform(
             clock=self.wall_clock,
             threads=threads,
             blocking=SimBlockingRunner(threads),
             processes=processes,
-            network=SimNetwork(threads),
+            network=SimNetwork(threads, faults=network_faults),
             signaller=signaller,
         )
 

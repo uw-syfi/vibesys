@@ -85,7 +85,7 @@ from vs_sim.signal_relay_contracts import (
     SignalRelayContract,
 )
 from vs_sim.sim import WORLDS, Sim, UnknownWorldError, WorldFactory, WorldRegistry
-from vs_sim.sim_network import SimNetwork
+from vs_sim.sim_network import End, FiredFault, LinkFault, LinkFaultKind, SimNetwork
 from vs_sim.sim_threads import (
     SimBlockingRunner,
     SimDeadlockError,
@@ -138,6 +138,7 @@ __all__ = [
     "CommandProbeContract",
     "CrashableClock",
     "Depth",
+    "End",
     "EventTrace",
     "FakeForegroundChild",
     "FakeForegroundLauncher",
@@ -150,6 +151,7 @@ __all__ = [
     "FakeProcesses",
     "FakeSignalRelay",
     "FakeSignalSource",
+    "FiredFault",
     "ForegroundLauncherContract",
     "ForegroundScript",
     "ForegroundUnderTest",
@@ -157,6 +159,8 @@ __all__ = [
     "GatedBlockingRunner",
     "HostCrashedError",
     "IdleDriver",
+    "LinkFault",
+    "LinkFaultKind",
     "InlineBlockingRunner",
     "LoopbackHttpContract",
     "LoopbackHttpUnderTest",
