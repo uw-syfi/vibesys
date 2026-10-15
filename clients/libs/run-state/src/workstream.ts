@@ -17,8 +17,14 @@ import {type RoundKey, roundKeyFor, roundNumberFor} from './round-key.js';
 type WorkstreamFinishedData = Extract<NonNullable<RunEvent['data']>, {kind: 'workstream_finished'}>;
 type TurnUsageData = Extract<NonNullable<RunEvent['data']>, {kind: 'turn_usage_recorded'}>;
 
-/** One workstream's typed account of why it ended without a measured candidate. */
-export interface WorkstreamFailure {
+/**
+ * One workstream's typed account of why it ended without a measured candidate.
+ *
+ * Not exported by name: a consumer outside this module reads it structurally off
+ * `CoreState['workstreams']` (the same precedent `BenchmarkRecord`'s neighbors follow), so there is
+ * no public symbol to keep in sync here.
+ */
+interface WorkstreamFailure {
   readonly kind: NonNullable<WorkstreamFinishedData['last_error']>['kind'];
   readonly role: string | null;
   readonly turns: number | null;
@@ -27,7 +33,7 @@ export interface WorkstreamFailure {
 }
 
 /** Settled token and cost accounting, summed over every turn folded for the workstream. */
-export interface WorkstreamUsage {
+interface WorkstreamUsage {
   readonly inputTokens: number;
   readonly cacheCreationInputTokens: number;
   readonly cacheReadInputTokens: number;
@@ -36,7 +42,7 @@ export interface WorkstreamUsage {
 }
 
 /** One workstream as `workstream_finished`/`turn_usage_recorded` alone describe it. */
-export interface WorkstreamRecord {
+interface WorkstreamRecord {
   readonly roundKey: RoundKey;
   readonly roundNumber: number | null;
   /** Raw backend `round_label` the identity was derived from. */
