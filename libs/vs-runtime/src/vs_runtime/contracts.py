@@ -21,7 +21,6 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, 
 from vs_core.api import EvidenceRequirements
 from vs_evaluation.api import EvidenceFailureKind
 from vs_evaluator_protocol.api import PartialMeasurement
-from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -630,7 +629,7 @@ class Evaluation(Protocol):
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> AccuracyEvaluation:
         """Evaluate correctness, optionally reusing an exact-candidate pass.
 
@@ -643,7 +642,7 @@ class Evaluation(Protocol):
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> BenchmarkEvaluation:
         """Measure one live workspace against policy-selected objectives.
 

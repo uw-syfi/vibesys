@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_agent.images import DockerBuildResult, DockerCommandResult
-from vs_sim.api import DISCARD, OutputStream
+from vs_sim.api import OutputStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -49,7 +49,7 @@ class FakeDockerBuildRunner:
         *,
         cwd: Path,
         timeout: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> DockerBuildResult:
         """Record the command and return the scripted outcome for its kind."""
         normalized = tuple(argv)

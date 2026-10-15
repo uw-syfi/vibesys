@@ -93,7 +93,7 @@ class PrebuiltImageRunner:
         *,
         cwd: Path,
         timeout: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         """Return the scripted outcome for ``docker build`` or ``docker image inspect``."""
         del cwd, timeout, output
@@ -116,7 +116,7 @@ class OpenRun:
         self, command: str, *, cancel: threading.Event | None = None, timeout: int | None = None
     ) -> CommandResult:
         """Run a scripted *command* as the agent, in the container, and return its result."""
-        return self.session.sandbox.execute(command, timeout=timeout, cancel=cancel)
+        return self.session.sandbox.execute(command, timeout=timeout, cancel=cancel, output=DISCARD)
 
     @property
     def has_gpu_commands(self) -> bool:

@@ -28,6 +28,7 @@ from vs_decode.api import decode_json
 
 if TYPE_CHECKING:
     from vs_sandbox.docker_cli import DockerCli
+from vs_sim.api import DISCARD
 
 #: The ``docker run --runtime`` name Sysbox registers with the host daemon.
 SYSBOX_DOCKER_RUNTIME = "sysbox-runc"
@@ -130,6 +131,7 @@ def require_sysbox_runtime(docker: DockerCli) -> None:
         result = docker.run(
             ["docker", "info", "--format", "{{json .Runtimes}}"],
             timeout_seconds=_RUNTIME_PROBE_TIMEOUT_S,
+            output=DISCARD,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ContainerRuntimeUnavailableError.runtime_unreadable(str(exc)) from exc
@@ -172,7 +174,7 @@ def start_nested_daemon(
         "-c",
         NESTED_DAEMON_START_SCRIPT,
     ]
-    started = docker.run(start, timeout_seconds=_RUNTIME_PROBE_TIMEOUT_S)
+    started = docker.run(start, timeout_seconds=_RUNTIME_PROBE_TIMEOUT_S, output=DISCARD)
     if started.returncode != 0:
         message = (
             f"could not start the nested Docker daemon (exit {started.returncode}): "
@@ -184,7 +186,9 @@ def start_nested_daemon(
         NESTED_DAEMON_READY_SCRIPT, "sh", str(ready_timeout_seconds),
     ]  # fmt: skip
     try:
-        result = docker.run(ready, timeout_seconds=ready_timeout_seconds + _READY_OUTER_SLACK_S)
+        result = docker.run(
+            ready, timeout_seconds=ready_timeout_seconds + _READY_OUTER_SLACK_S, output=DISCARD
+        )
     except subprocess.TimeoutExpired as exc:
         message = f"nested Docker daemon readiness check timed out after {exc.timeout}s"
         raise NestedDaemonError(message) from exc

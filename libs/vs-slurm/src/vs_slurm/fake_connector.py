@@ -62,7 +62,6 @@ from typing import TYPE_CHECKING, TypedDict, Unpack
 
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_sim.api import (
-    DISCARD,
     OutputStream,
     ProcessOutcome,
     ProcessOutputTooLarge,
@@ -613,9 +612,7 @@ class FakeConnector:
         """
         self._intercept = intercept
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Answer a connector request without a transport subprocess; it takes no time."""
         del timeout
         request = _decode_connector_request(spec.input)

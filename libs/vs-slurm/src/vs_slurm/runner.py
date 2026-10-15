@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from vs_decode.api import Unreadable, decode_json
 from vs_sim.api import (
+    DISCARD,
     ProcessGroupUnreaped,
     ProcessOutcome,
     ProcessOutputTooLarge,
@@ -1396,13 +1397,11 @@ class _ProcessTransport:
         max_output_bytes: int | None = None,
     ) -> _TransportResponse:
         """Run one transport program; its output is UTF-8 (``UnicodeDecodeError`` otherwise)."""
-        spec = ProcessSpec(
-            tuple(self._launch(argv)), input=b"" if stdin is None else stdin.encode()
-        )
+        spec = ProcessSpec(tuple(self._launch(argv)), input=(stdin or "").encode())
         if max_output_bytes is not None:
             spec = replace(spec, max_output_bytes=max_output_bytes)
         try:
-            run = self._processes.run(spec, timeout=self._timeout)
+            run = self._processes.run(spec, timeout=self._timeout, output=DISCARD)
         except FileNotFoundError as exc:
             raise SlurmError.transport_unavailable(operation) from exc
         match run:

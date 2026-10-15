@@ -16,7 +16,7 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sim.api import DISCARD, OutputStream, ProcessTimeoutError
+from vs_sim.api import OutputStream, ProcessTimeoutError
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -145,9 +145,7 @@ class PipedStoppableProcess:
     whatever the wait later returns, before and after a stop alike.
     """
 
-    def __init__(
-        self, process: PipedProcess, *, threads: Threads, output: OutputSink = DISCARD
-    ) -> None:
+    def __init__(self, process: PipedProcess, *, threads: Threads, output: OutputSink) -> None:
         """Take ownership of *process* and start draining its pipes on *threads* into *output*."""
         self._process = process
         self._threads = threads

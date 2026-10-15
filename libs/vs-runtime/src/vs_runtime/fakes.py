@@ -130,7 +130,7 @@ class FakeTrustedEvaluationExecutor:
         self._benchmark_results = list(results)
 
     async def accuracy(
-        self, *, command_override: str | None = None, output: OutputSink = DISCARD
+        self, *, command_override: str | None = None, output: OutputSink
     ) -> TrustedAccuracyResult:
         """Record one call and return the next scripted outcome; it prints nothing."""
         del output
@@ -144,7 +144,7 @@ class FakeTrustedEvaluationExecutor:
         *,
         command_override: str | None = None,
         required_metrics: frozenset[str] = frozenset(),
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> TrustedBenchmarkResult:
         """Record one call and return the next scripted outcome; it prints nothing."""
         del output
@@ -996,7 +996,7 @@ class FakeEvaluation:
         kind: FakeEvaluationKind,
         call: int,
         workspace: Workspace,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> None:
         stdout, stderr = self.printed.get(kind, (b"", b""))
         output.write(OutputStream.STDOUT, stdout)
@@ -1010,7 +1010,7 @@ class FakeEvaluation:
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> AccuracyEvaluation:
         """Record the request, print the scripted output, and return the next scripted result."""
         self.accuracy_calls.append(FakeAccuracyCall(workspace, reuse))
@@ -1049,7 +1049,7 @@ class FakeEvaluation:
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> BenchmarkEvaluation:
         """Record the request, print the scripted output, and return the next scripted result."""
         validate_objectives(objectives)

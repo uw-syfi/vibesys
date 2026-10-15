@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 
 from vs_sandbox.command_execution import execute_command
 from vs_sandbox.process_execution import PipedStoppableProcess
-from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from vs_sandbox.execution import CommandResult
@@ -76,7 +75,7 @@ class LocalShellRunner:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> CommandResult:
         """Run *command* under ``/bin/sh -c`` and return its bounded result.
 

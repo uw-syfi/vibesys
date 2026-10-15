@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from vs_sim.processes import ForegroundLauncher, PipedProcess, Processes, ProcessLauncher
     from vs_sim.signals import ProcessSignaller, SignalSource
     from vs_sim.streaming import StreamingCommand
+from vs_sim.output import DISCARD
 
 type Run = Callable[[Coroutine[Any, Any, Any]], Any]
 """Run a coroutine to completion on the loop the implementation under test belongs to."""
@@ -581,7 +582,9 @@ class ProcessesContract:
             status = rng.randint(0, 100)
             out, err = (_random_bytes(rng) for _ in "oe")
             outcome = subject.processes.run(
-                ProcessSpec(subject.exit_with(status, out, err)), timeout=HANG_GUARD_S
+                ProcessSpec(subject.exit_with(status, out, err)),
+                timeout=HANG_GUARD_S,
+                output=DISCARD,
             )
             assert outcome == ProcessOutcome(status, out, err), seed
 
@@ -622,9 +625,9 @@ class ProcessesContract:
         for seed in range(_PROCESS_CASES):
             data = _random_bytes(SeededRandom(seed))
             spec = ProcessSpec(subject.echo_stdin, input=data)
-            assert subject.processes.run(spec, timeout=HANG_GUARD_S) == ProcessOutcome(
-                0, data, b""
-            ), seed
+            assert subject.processes.run(
+                spec, timeout=HANG_GUARD_S, output=DISCARD
+            ) == ProcessOutcome(0, data, b""), seed
 
     def test_the_command_runs_in_the_given_directory_and_environment(self) -> None:
         """``cwd`` and ``env`` are the process's directory and its whole environment."""
@@ -633,7 +636,7 @@ class ProcessesContract:
         spec = ProcessSpec(
             subject.print_cwd_and_env("VS_SIM_CONTRACT"), cwd=cwd, env={"VS_SIM_CONTRACT": "x y"}
         )
-        outcome = subject.processes.run(spec, timeout=HANG_GUARD_S)
+        outcome = subject.processes.run(spec, timeout=HANG_GUARD_S, output=DISCARD)
         assert outcome == ProcessOutcome(0, f"{cwd}\nx y".encode(), b"")
 
     def test_a_command_that_outlives_the_timeout_times_out_once_its_group_is_gone(self) -> None:
@@ -641,7 +644,9 @@ class ProcessesContract:
         subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
         written = b"partial"
         run = subject.processes.run(
-            ProcessSpec(subject.outlives_timeout(written)), timeout=_SHORT_TIMEOUT_S
+            ProcessSpec(subject.outlives_timeout(written)),
+            timeout=_SHORT_TIMEOUT_S,
+            output=DISCARD,
         )
         assert isinstance(run, ProcessTimedOut), run
         assert run.timeout == _SHORT_TIMEOUT_S
@@ -652,7 +657,9 @@ class ProcessesContract:
         subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
         started = subject.now()
         run = subject.processes.run(
-            ProcessSpec(subject.outlives_timeout(b"")), timeout=_SHORT_TIMEOUT_S
+            ProcessSpec(subject.outlives_timeout(b"")),
+            timeout=_SHORT_TIMEOUT_S,
+            output=DISCARD,
         )
         elapsed = subject.now() - started
         assert isinstance(run, ProcessTimedOut), run
@@ -666,10 +673,14 @@ class ProcessesContract:
         """
         subject = self.processes_under_test(cleanup_timeout=_SHORT_TIMEOUT_S)
         timeout = _SHORT_TIMEOUT_S
-        run = subject.processes.run(ProcessSpec(subject.survives_kill), timeout=timeout)
+        run = subject.processes.run(
+            ProcessSpec(subject.survives_kill), timeout=timeout, output=DISCARD
+        )
         while isinstance(run, ProcessTimedOut) and timeout < HANG_GUARD_S:
             timeout *= 2
-            run = subject.processes.run(ProcessSpec(subject.survives_kill), timeout=timeout)
+            run = subject.processes.run(
+                ProcessSpec(subject.survives_kill), timeout=timeout, output=DISCARD
+            )
         if isinstance(run, ProcessGroupUnreaped):
             subject.release()
         assert isinstance(run, ProcessGroupUnreaped), run
@@ -684,7 +695,7 @@ class ProcessesContract:
             limit = rng.randint(0, 12)
             out, err = (_random_bytes(rng) for _ in "oe")
             spec = ProcessSpec(subject.exit_with(3, out, err), max_output_bytes=limit)
-            run = subject.processes.run(spec, timeout=HANG_GUARD_S)
+            run = subject.processes.run(spec, timeout=HANG_GUARD_S, output=DISCARD)
             if len(out) <= limit and len(err) <= limit:
                 assert run == ProcessOutcome(3, out, err), seed
                 continue
@@ -704,7 +715,7 @@ class ProcessesContract:
         subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
         written = b"more than four"
         spec = ProcessSpec(subject.outlives_timeout(written), max_output_bytes=4)
-        run = subject.processes.run(spec, timeout=HANG_GUARD_S)
+        run = subject.processes.run(spec, timeout=HANG_GUARD_S, output=DISCARD)
         assert run == ProcessOutputTooLarge(4, OutputStream.STDOUT, written[:4], b""), run
 
     def test_a_negative_cap_is_refused(self) -> None:
@@ -721,7 +732,9 @@ class ProcessesContract:
         """A program that does not exist raises ``OSError`` instead of returning an outcome."""
         subject = self.processes_under_test(cleanup_timeout=HANG_GUARD_S)
         try:
-            subject.processes.run(ProcessSpec(subject.missing_program), timeout=HANG_GUARD_S)
+            subject.processes.run(
+                ProcessSpec(subject.missing_program), timeout=HANG_GUARD_S, output=DISCARD
+            )
         except OSError:
             return
         message = "running a missing program did not raise OSError"
@@ -1037,6 +1050,7 @@ class StreamingCommandContract:
             subject.prints_cwd,
             cwd=subject.cwd,
             timeout_seconds=30,
+            output=DISCARD,
         )
         assert result.returncode == 0
         assert Path(result.stdout).resolve() == subject.cwd.resolve()
@@ -1050,6 +1064,7 @@ class StreamingCommandContract:
                 subject.missing_program,
                 cwd=subject.cwd,
                 timeout_seconds=30,
+                output=DISCARD,
             )
         except FileNotFoundError:
             raised = True
@@ -1064,6 +1079,7 @@ class StreamingCommandContract:
                 subject.blocks_forever,
                 cwd=subject.cwd,
                 timeout_seconds=0.2,
+                output=DISCARD,
             )
         except subprocess.TimeoutExpired as error:
             raised = error

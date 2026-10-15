@@ -50,6 +50,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_sim.api import Event, Threads
+from vs_sim.api import DISCARD
 
 CAP = 200
 TIMEOUT_SECONDS = 2
@@ -163,7 +164,7 @@ class CommandRunnerContract:
         assert harness.sandbox.id == harness.sandbox.id
 
     def test_streams_and_status_of_a_normal_exit_are_kept_apart(self, harness: Harness) -> None:
-        result = harness.sandbox.execute(harness.emit("hello\n", "warn\n", 0))
+        result = harness.sandbox.execute(harness.emit("hello\n", "warn\n", 0), output=DISCARD)
 
         assert isinstance(result, CommandResult)
         assert (result.exit_code, result.stdout, result.stderr) == (0, "hello\n", "warn\n")
@@ -172,7 +173,7 @@ class CommandRunnerContract:
         _assert_streams_compose_output(result)
 
     def test_a_nonzero_status_is_reported_unchanged(self, harness: Harness) -> None:
-        result = harness.sandbox.execute(harness.emit("out", "err", _NONZERO))
+        result = harness.sandbox.execute(harness.emit("out", "err", _NONZERO), output=DISCARD)
 
         assert result.exit_code == _NONZERO
         assert (result.stdout, result.stderr) == ("out", "err")
@@ -184,14 +185,14 @@ class CommandRunnerContract:
     def test_a_signalled_command_reports_128_plus_the_signal(
         self, harness: Harness, signal_number: int, status: int
     ) -> None:
-        result = harness.sandbox.execute(harness.killed_by(signal_number))
+        result = harness.sandbox.execute(harness.killed_by(signal_number), output=DISCARD)
 
         assert result.exit_code == status
         assert not result.cancelled
         _assert_streams_compose_output(result)
 
     def test_an_empty_command_is_rejected_with_exit_code_one(self, harness: Harness) -> None:
-        result = harness.sandbox.execute("")
+        result = harness.sandbox.execute("", output=DISCARD)
 
         assert result.exit_code == 1
         assert result.stdout == ""
@@ -202,17 +203,19 @@ class CommandRunnerContract:
     @pytest.mark.parametrize("timeout", [0, -1])
     def test_a_non_positive_timeout_is_rejected(self, harness: Harness, timeout: int) -> None:
         with pytest.raises(ValueError, match="timeout must be positive"):
-            harness.sandbox.execute(harness.emit("x", "", 0), timeout=timeout)
+            harness.sandbox.execute(harness.emit("x", "", 0), timeout=timeout, output=DISCARD)
 
     def test_output_within_the_cap_is_not_truncated(self, harness: Harness) -> None:
-        result = harness.sandbox.execute(harness.emit("a" * (CAP // 2), "b" * (CAP // 2), 0))
+        result = harness.sandbox.execute(
+            harness.emit("a" * (CAP // 2), "b" * (CAP // 2), 0), output=DISCARD
+        )
 
         assert not result.truncated
         assert (len(result.stdout), len(result.stderr)) == (CAP // 2, CAP // 2)
         _assert_streams_compose_output(result)
 
     def test_output_past_the_cap_is_cut_marked_and_flagged(self, harness: Harness) -> None:
-        result = harness.sandbox.execute(harness.emit("a" * (CAP * 3), "", 0))
+        result = harness.sandbox.execute(harness.emit("a" * (CAP * 3), "", 0), output=DISCARD)
 
         assert result.truncated
         assert len(result.output) <= CAP
@@ -224,7 +227,7 @@ class CommandRunnerContract:
         self, harness: Harness
     ) -> None:
         diagnostics = "".join(f"line {number}\n" for number in range(CAP))
-        result = harness.sandbox.execute(harness.emit("", diagnostics, 1))
+        result = harness.sandbox.execute(harness.emit("", diagnostics, 1), output=DISCARD)
 
         assert result.truncated
         assert len(result.output) <= CAP
@@ -233,7 +236,9 @@ class CommandRunnerContract:
 
     def test_an_unset_cancel_event_leaves_the_command_alone(self, harness: Harness) -> None:
         result = harness.sandbox.execute(
-            harness.emit("done", "", 0), cancel=harness.threads.event()
+            harness.emit("done", "", 0),
+            cancel=harness.threads.event(),
+            output=DISCARD,
         )
 
         assert result.exit_code == 0
@@ -243,7 +248,9 @@ class CommandRunnerContract:
     def test_a_timeout_stops_the_process_tree_and_keeps_partial_output(
         self, harness: Harness
     ) -> None:
-        result = harness.sandbox.execute(harness.hang(announce=False), timeout=TIMEOUT_SECONDS)
+        result = harness.sandbox.execute(
+            harness.hang(announce=False), timeout=TIMEOUT_SECONDS, output=DISCARD
+        )
 
         assert result.exit_code == 124
         assert not result.cancelled
@@ -278,7 +285,9 @@ class CommandRunnerContract:
         cancel = harness.threads.event()
         cancel.set()
 
-        result = harness.sandbox.execute(harness.hang(announce=False), timeout=3600, cancel=cancel)
+        result = harness.sandbox.execute(
+            harness.hang(announce=False), timeout=3600, cancel=cancel, output=DISCARD
+        )
 
         assert result.cancelled
         _assert_streams_compose_output(result)
@@ -291,7 +300,7 @@ class CommandRunnerContract:
         output = _everything()
 
         streamed = harness.sandbox.execute(command, output=output)
-        unstreamed = harness.sandbox.execute(command)
+        unstreamed = harness.sandbox.execute(command, output=DISCARD)
 
         assert (output.stdout, output.stderr) == (b"hello\nworld\n", b"warn\n")
         assert streamed == unstreamed

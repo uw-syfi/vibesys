@@ -24,7 +24,6 @@ from vs_runtime.contracts import (
     validate_trusted_shell_command,
     validate_workspace_writable_paths,
 )
-from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -213,7 +212,7 @@ class RuntimeWorkspaceEvaluation:
         *,
         reuse: AccuracyReceipt | None = None,
         release: bool = False,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> RuntimeAccuracyRun:
         """Run accuracy or validate explicit reuse for the current candidate.
 
@@ -261,7 +260,7 @@ class RuntimeWorkspaceEvaluation:
         workspace: Workspace,
         *,
         required_metrics: frozenset[str],
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> RuntimeBenchmarkRun:
         """Snapshot and benchmark the exact submitted candidate revision.
 

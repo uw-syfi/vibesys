@@ -887,13 +887,13 @@ def test_local_rejection_survives_lost_remote_rejection_publication(tmp_path: Pa
 
     class _LosesRejectionPublication:
         def run(
-            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
+            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink
         ) -> ProcessRun:
             del output
             if b"rejected.json.pending." in spec.input:
                 message = "rejection publication unavailable"
                 raise OSError(message)
-            return connector.run(spec, timeout=timeout)
+            return connector.run(spec, timeout=timeout, output=DISCARD)
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -935,7 +935,7 @@ def test_fresh_operation_transport_failures_are_typed_unknown(
 ) -> None:
     class _Fails:
         def run(
-            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
+            self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink
         ) -> ProcessRun:
             del spec, timeout, output
             if isinstance(error, ProcessTimedOut):

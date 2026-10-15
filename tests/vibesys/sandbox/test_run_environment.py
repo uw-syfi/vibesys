@@ -651,7 +651,7 @@ rsync_command = ["/bin/true"]
             "test-cluster:/remote/vibesys/test-cluster/job/",
         )
         processes = BrokeredProcesses(socket, token, network=UnixNetwork())
-        run = processes.run(ProcessSpec(argv), timeout=5)
+        run = processes.run(ProcessSpec(argv), timeout=5, output=DISCARD)
         assert isinstance(run, ProcessOutcome)
         return run.returncode
 

@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource, SandboxKind
+from vs_sim.api import DISCARD
 
 _PLUGIN_ID = "container-exit"
 
@@ -323,5 +324,7 @@ def test_resuming_a_run_ends_only_the_containers_its_dead_host_left_behind(
 
 def _plant_container(engine: FakeDockerEngine, run_id: str) -> str:
     label = f"{RUN_ID_LABEL}={run_id}"
-    result = engine.run(["docker", "run", "-d", "--label", label, "agent-image"], timeout_seconds=1)
+    result = engine.run(
+        ["docker", "run", "-d", "--label", label, "agent-image"], timeout_seconds=1, output=DISCARD
+    )
     return result.stdout.strip()

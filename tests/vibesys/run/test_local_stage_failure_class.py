@@ -72,7 +72,6 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
-from vs_sim.api import DISCARD
 from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
@@ -115,7 +114,7 @@ class _LosesStageCommands(FakeCommandRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> CommandResult:
         del cancel  # no stage of this test is cancelled
         result = super().execute(command, timeout=timeout, output=output)

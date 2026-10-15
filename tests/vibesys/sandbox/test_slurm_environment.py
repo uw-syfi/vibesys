@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_runtime.api.infrastructure import RunEnvironmentSession
+from vs_sim.api import DISCARD
 
 _SLURM_CONFIG = """[slurm]
 name = "test-cluster"
@@ -253,9 +254,11 @@ def test_a_gpu_command_from_the_container_runs_in_a_slurm_job_within_the_operato
     _backend, _, session = _open(tmp_path, "slurm+gpu")
     try:
         client = str(tmp_path / "logs" / "slurm-gpu" / "vibesys-gpu")
-        ran = session.sandbox.execute(f"{client} --gpus 3 --time 45 -- echo from-the-job")
-        refused = session.sandbox.execute(f"{client} --gpus 5 -- echo too-many")
-        too_long = session.sandbox.execute(f"{client} --time 91 -- echo too-long")
+        ran = session.sandbox.execute(
+            f"{client} --gpus 3 --time 45 -- echo from-the-job", output=DISCARD
+        )
+        refused = session.sandbox.execute(f"{client} --gpus 5 -- echo too-many", output=DISCARD)
+        too_long = session.sandbox.execute(f"{client} --time 91 -- echo too-long", output=DISCARD)
 
         assert ran.exit_code == 0, ran.output
         assert "from-the-job" in ran.output
@@ -414,8 +417,10 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
     try:
         client = str(tmp_path / "logs" / "slurm-gpu" / "vibesys-gpu")
 
-        read = session.sandbox.execute(f"{client} -- cat {tools}/interpreter.txt")
-        write = session.sandbox.execute(f"{client} -- sh -c 'echo x > {tools}/written.txt'")
+        read = session.sandbox.execute(f"{client} -- cat {tools}/interpreter.txt", output=DISCARD)
+        write = session.sandbox.execute(
+            f"{client} -- sh -c 'echo x > {tools}/written.txt'", output=DISCARD
+        )
 
         assert (read.exit_code == 0) is exposed, read.output
         assert ("operator interpreter" in read.output) is exposed
@@ -480,7 +485,7 @@ def test_a_gpu_job_runs_an_interpreter_reached_through_a_link_chain_once_the_ali
     try:
         client = str(tmp_path / "logs" / "slurm-gpu" / "vibesys-gpu")
 
-        result = session.sandbox.execute(f"{client} -- {venv}/bin/python")
+        result = session.sandbox.execute(f"{client} -- {venv}/bin/python", output=DISCARD)
 
         assert result.exit_code == 0, result.output
         assert "interpreter ran" in result.output

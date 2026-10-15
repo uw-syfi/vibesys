@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from vs_sim.api import DISCARD, ProcessOutcome, forward_output
+from vs_sim.api import ProcessOutcome, forward_output
 
 from .fake_connector import (
     REQUESTS_FILE,
@@ -213,9 +213,7 @@ class TraceConnector:
         """How many ``scancel`` commands were received."""
         return sum(1 for command in self.commands() if command.startswith("scancel "))
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Answer one connector request; scheduler commands come from the traces."""
         request = _decode_connector_request(spec.input)
         query, end = split_framed(str(request.get("command", "")))

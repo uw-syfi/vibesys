@@ -175,16 +175,14 @@ class _Faults:
         """Fail the ``index``-th command from now (0 is the next one) with a transport error."""
         self._countdown = index
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         del output
         if self._countdown is not None:
             if self._countdown == 0:
                 self._countdown = None
                 return ProcessOutcome(255, b"", b"connection lost")
             self._countdown -= 1
-        return self._inner.run(spec, timeout=timeout)
+        return self._inner.run(spec, timeout=timeout, output=DISCARD)
 
 
 @dataclass
