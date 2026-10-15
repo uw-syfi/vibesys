@@ -16,10 +16,11 @@ from tests.support.task_project import write_task
 
 from entrypoints.production import production_timing
 from entrypoints.run import supervise
-from launch import LaunchSettings, default_runs
+from launch import LaunchSettings, create_session, default_runs
 from vibesys.api import (
     ComputeBackend,
     Config,
+    CoreEvent,
     CoreEventType,
     OrchestrationDescriptor,
     OrchestrationRegistry,
@@ -37,10 +38,20 @@ from vs_agent.api.testing import FakeAgentClient, FakeInvocation
 from vs_project.api import GitFaultSink, GitRepository, Project, ProjectStateError, validate_run_id
 from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api import AgentRole
+from vs_runtime.api.core import RunTiming
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
-from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
-from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
+from vs_sim.api import OsThreads, ProcessSpec, ThreadBlockingRunner, UnixNetwork
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    FakeProcesses,
+    InlineBlockingRunner,
+    ProcessScript,
+    Sim,
+    SimNetwork,
+    SimThreads,
+    examples,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -76,7 +87,9 @@ def _fake_agent(**_kwargs: object) -> FakeAgentClient:
     )
 
 
-def _candidate_agent(git: FakeGitRepositories, revisions: list[str]) -> FakeAgentClient:
+def _candidate_agent(
+    git: FakeGitRepositories, revisions: list[str], threads: SimThreads
+) -> FakeAgentClient:
     def commit(invocation: FakeInvocation) -> dict[str, object]:
         candidate = invocation.workspace
         (candidate / "queue.py").write_text("VALUE = 2\n", encoding="utf-8")
@@ -89,7 +102,7 @@ def _candidate_agent(git: FakeGitRepositories, revisions: list[str]) -> FakeAgen
         return {"commit": revision}
 
     return FakeAgentClient(
-        capabilities=AgentCapabilities(provider_session_resume=True), threads=OsThreads()
+        capabilities=AgentCapabilities(provider_session_resume=True), threads=threads
     ).set_response(IMPLEMENTER.root, commit)
 
 
@@ -231,9 +244,9 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     assert all(event.type is not CoreEventType.RUN_FAILED for event in events)
 
 
-@pytest.mark.asyncio
-async def test_a_failed_public_run_reports_its_verified_adopted_candidate(
-    request_template: RunRequest,
+@pytest.mark.parametrize("schedule_seed", range(examples(pr=8, nightly=50)))
+def test_a_failed_public_run_reports_its_verified_adopted_candidate(
+    request_template: RunRequest, schedule_seed: int, sim: Sim
 ) -> None:
     write_task(
         request_template.project_root,
@@ -260,7 +273,10 @@ async def test_a_failed_public_run_reports_its_verified_adopted_candidate(
         '{"kind":"result","values":{"throughput":2}}\n'
         "__VIBESYS_FRAMEWORK_BENCHMARK_JSON_END__\n"
     )
-    backend = FakeComputeBackend()
+    candidate_revisions: list[str] = []
+    sim.schedule_seed = schedule_seed
+    threads = sim.threads()
+    backend = FakeComputeBackend(threads=threads)
     backend.script_sandbox_for_kind(
         SandboxKind.DOCKER,
         FakeLifecycleRunner(
@@ -272,24 +288,45 @@ async def test_a_failed_public_run_reports_its_verified_adopted_candidate(
             )
         ),
     )
-    candidate_revisions: list[str] = []
-    runs = default_runs(
-        LaunchSettings(
-            blocking=ThreadBlockingRunner(),
-            network=UnixNetwork(),
-            timing=real_timing(),
-            processes=REAL_PROCESSES,
-            registry=registry,
-            agent_client_factory=lambda **_kwargs: _candidate_agent(git.disk, candidate_revisions),
+
+    def no_origin(spec: ProcessSpec) -> ProcessScript:
+        assert spec.argv[-3:] == ("remote", "get-url", "origin")
+        return ProcessScript(returncode=128, stderr=b"fatal: no origin")
+
+    processes = FakeProcesses(no_origin, pass_time=threads.sleep)
+    events: list[CoreEvent] = []
+
+    def record(event: CoreEvent) -> None:
+        events.append(event)
+
+    session = create_session(
+        request,
+        sink=record,
+        registry=registry,
+        settings=LaunchSettings(
+            blocking=InlineBlockingRunner(),
+            network=SimNetwork(threads),
+            timing=RunTiming(sim.clock, 60.0, threads),
+            processes=processes,
+            piped_processes=FakePipedProcessLauncher(),
+            agent_client_factory=lambda **_kwargs: _candidate_agent(
+                git.disk, candidate_revisions, threads
+            ),
             backend_factory=lambda *_args, **_kwargs: backend,
             git_repository=git.repository,
-        )
+        ),
     )
 
-    handle = runs.start(request)
-    result = await handle.result()
-    events = [event async for event in handle.events()]
+    async def exercise() -> RunResult:
+        session.start()
+        try:
+            return await session.await_result()
+        finally:
+            session.close()
 
+    result = sim.run(exercise(), threads=threads)
+
+    assert len(processes.ran) == 1
     assert not result.succeeded
     assert result.failure is not None
     assert result.failure.kind is RunFailureKind.BUDGET_EXHAUSTED
