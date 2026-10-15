@@ -11,7 +11,12 @@ Every command also runs no program the repository names: hooks (``core.hooksPath
 ``/dev/null``), the file-system monitor (``core.fsmonitor``) and commit or tag signing
 (``gpg.program``). The repository's config, hooks and worktree are agent-writable in a
 workspace, so any of them would run agent-chosen code on the host, unconfined, at the
-next snapshot.
+next snapshot. Git never enters a nested repository (``diff.ignoreSubmodules``,
+``submodule.recurse``), whose config would name programs too; ``_nested_repositories``
+refuses such a work tree outright, since ``git add`` checks a gitlink regardless. Only the
+work tree's own ``.gitattributes`` and ``.git/info/attributes`` assign attributes: the
+user's global and the system attributes files are off, so attributes that select a
+driver come from the repository alone.
 
 ``tests/architecture/test_git_invocation_boundary.py`` fails when code under
 ``src/`` or ``libs/`` starts Git without going through this module.
@@ -57,6 +62,9 @@ _NO_REPOSITORY_PROGRAMS: tuple[tuple[str, str], ...] = (
     ("core.fsmonitor", "false"),
     ("commit.gpgSign", "false"),
     ("tag.gpgSign", "false"),
+    ("diff.ignoreSubmodules", "all"),
+    ("submodule.recurse", "false"),
+    ("core.attributesFile", "/dev/null"),
 )
 
 
@@ -84,8 +92,9 @@ def git_environment(
     """Return the process environment for one Git command.
 
     Starts from ``os.environ`` without the repository-selection variables and with terminal
-    prompts off, then applies ``overrides`` (which may set them again on purpose), then the Git
-    config that trusts ``safe_directory`` and disables background maintenance.
+    prompts off, then applies ``overrides`` (which may set them again on purpose), then turns
+    off the system attributes file and adds the Git config that trusts ``safe_directory``
+    and carries the host Git policy.
     ``overrides`` cannot set ``GIT_CONFIG_*``: the config is owned here.
     """
     env = {key: value for key, value in os.environ.items() if key not in _SELECTION_VARIABLES}
@@ -93,6 +102,7 @@ def git_environment(
     # reading a credential prompt from the terminal would stop it; it fails instead.
     env["GIT_TERMINAL_PROMPT"] = "0"
     env.update(overrides or {})
+    env["GIT_ATTR_NOSYSTEM"] = "1"
     env = {key: value for key, value in env.items() if not key.startswith("GIT_CONFIG_")}
     safe = (("safe.directory", str(safe_directory)),) if safe_directory is not None else ()
     env.update(git_config_env(safe))

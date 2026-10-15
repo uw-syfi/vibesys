@@ -457,6 +457,39 @@ def test_snapshot_replay_makes_one_commit_and_binds_the_receipt(tmp_path: Path) 
         asyncio.run(exercise(workspaces))
 
 
+@pytest.mark.parametrize("kind", ["directory", "file"])
+def test_a_snapshot_of_a_workspace_holding_a_nested_repository_fails_and_names_it(
+    tmp_path: Path, kind: str
+) -> None:
+    """Host Git never reads a nested repository the agent made; the snapshot says why."""
+
+    async def exercise(workspaces: RuntimeWorkspaces) -> None:
+        executor, _ = _executor(workspaces)
+        attempt = _attempt()
+        await _run(executor, _ensure(workspaces, attempt, "ensure-1"))
+        candidate_path = _candidate_path(workspaces)
+        commits = _commits(workspaces)
+        nested = candidate_path / "vendor" / "lib" / ".git"
+        nested.parent.mkdir(parents=True)
+        if kind == "directory":
+            nested.mkdir()
+        else:
+            nested.write_text("gitdir: /elsewhere\n", encoding="utf-8")
+        request = SnapshotAndRetain(**_common(attempt, "snap-1"), attempt=attempt, retention="wip")
+
+        refused = await _run(executor, request)
+
+        observation = refused.observation.observation
+        assert observation.status is ObservationStatus.FAILED
+        assert observation.terminal
+        assert "vendor/lib/.git" in observation.diagnostic
+        assert refused.observation.revision is None
+        assert _commits(workspaces) == commits
+
+    with _workspaces(tmp_path) as workspaces:
+        asyncio.run(exercise(workspaces))
+
+
 class _FailingStore(ReceiptStore):
     """A real store whose chosen writes fail, as when a host dies at that point."""
 

@@ -261,6 +261,49 @@ class WorkspaceTree:
                         pending.append(child)
         return tuple(PurePosixPath(*parts).as_posix() for parts in sorted(links))
 
+    def entries_named(
+        self,
+        name: str,
+        *,
+        limit: int,
+        below: str = "",
+        skip: Collection[str] = frozenset(),
+    ) -> tuple[str, ...]:
+        """Every entry of any kind called ``name`` below the directory ``below``, sorted.
+
+        Each is named relative to the tree root. No symlink is followed, and neither an
+        entry called ``name`` nor a directory in ``skip`` (root-relative) is entered.
+        Nothing is found when ``below`` is not a directory. A directory removed or
+        replaced while the walk runs is skipped, as if the walk had passed it a moment
+        later, and so is one the host cannot read, which Git cannot read either. Raises
+        ``TreeLimitError`` as soon as the walk has seen more than ``limit`` entries,
+        without looking at the rest.
+        """
+        pending: list[tuple[str, ...]] = [relative_parts(below)]
+        found: list[tuple[str, ...]] = []
+        seen = 0
+        while pending:
+            parts = pending.pop()
+            try:
+                with (
+                    self._directory(parts, create=False) as directory,
+                    os.scandir(directory) as it,
+                ):
+                    entries = [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in it]
+            except (FileNotFoundError, NotADirectoryError, PermissionError, WorkspacePathError):
+                continue
+            seen += len(entries)
+            if seen > limit:
+                message = f"the tree holds more than {limit} entries"
+                raise TreeLimitError(message)
+            for entry_name, is_directory in entries:
+                child = (*parts, entry_name)
+                if entry_name == name:
+                    found.append(child)
+                elif is_directory and PurePosixPath(*child).as_posix() not in skip:
+                    pending.append(child)
+        return tuple(PurePosixPath(*parts).as_posix() for parts in sorted(found))
+
     def read_link(self, relative: str) -> str:
         """The contents of the symlink ``relative``."""
         parts = _file_parts(relative)

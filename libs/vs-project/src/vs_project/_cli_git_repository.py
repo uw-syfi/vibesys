@@ -16,12 +16,14 @@ from typing import TYPE_CHECKING, ClassVar
 
 from vs_project._exclude_file import append_excludes
 from vs_project._git_process import git_environment
+from vs_project._nested_repositories import GITLINK_MODE, require_no_nested_repository
 from vs_project.api.git_repository import (
     COMMIT_IDENTITY_EMAIL,
     COMMIT_IDENTITY_NAME,
     CommitSubject,
     GitCommandError,
     GitTimeoutError,
+    NestedRepositoryError,
     PatchStyle,
     RepositoryLocation,
     StagingError,
@@ -39,8 +41,17 @@ if TYPE_CHECKING:
 _BRANCH_PREFIX = "refs/heads/"
 
 
+_LIST_INDEX = ("ls-files", "--stage", "-z")
+
+
 def _text(data: bytes) -> str:
     return data.decode(errors="replace")
+
+
+def _gitlinks(listing: bytes) -> tuple[str, ...]:
+    """The paths ``git ls-files --stage -z`` output records as nested repositories."""
+    records = (record.partition("\t") for record in _text(listing).split("\0"))
+    return tuple(path for metadata, _, path in records if metadata[:6] == GITLINK_MODE)
 
 
 class CliGitRepository:
@@ -126,6 +137,27 @@ class CliGitRepository:
             )
             raise error
         return result
+
+    def require_plain_work_tree(
+        self, pathspecs: Sequence[Pathspec], index_file: Path | None = None
+    ) -> None:
+        """Refuse before Git reads ``pathspecs`` of a work tree holding a nested repository.
+
+        See ``_nested_repositories``. An index or a worktree list Git cannot read fails
+        the guarded command the same way, before it reads the work tree.
+        """
+        listing = self._run(_LIST_INDEX, index_file=index_file)
+        worktrees = self._run(["worktree", "list", "--porcelain", "-z"])
+        require_no_nested_repository(
+            self._work_tree or self._root,
+            pathspecs,
+            gitlinks=_gitlinks(listing.stdout) if listing.returncode == 0 else (),
+            linked_worktrees=(
+                Path(record.removeprefix("worktree "))
+                for record in _text(worktrees.stdout).split("\0")
+                if worktrees.returncode == 0 and record.startswith("worktree ")
+            ),
+        )
 
     def _prefix(self) -> str:
         return _text(self._run_checked(["rev-parse", "--show-prefix"]).stdout).strip()
@@ -273,6 +305,9 @@ class CliGitRepository:
         args = [
             "diff",
             "--no-ext-diff",
+            # A textconv driver is a program the user configured; agent-written
+            # attributes choose which file it runs on, and the patch reaches agents.
+            "--no-textconv",
             *(
                 ["--no-renames", "--full-index"]
                 if style is PatchStyle.EXACT
@@ -298,11 +333,13 @@ class CliGitRepository:
         return _text(result.stdout)
 
     def tracked_changes_since_head(self, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
+        self.require_plain_work_tree(pathspecs)
         # ``-z``: without it Git quotes names with non-ASCII characters.
         output = self._run_checked(["diff", "--name-only", "-z", "HEAD", "--", *pathspecs]).stdout
         return tuple(sorted(path for path in _text(output).split("\0") if path))
 
     def uncommitted_paths(self, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
+        self.require_plain_work_tree(pathspecs)
         status = self._run_checked(
             ["status", "--porcelain=v1", "--untracked-files=all", "--", *pathspecs]
         )
@@ -320,6 +357,7 @@ class CliGitRepository:
         return tuple(sorted(found))
 
     def changed_since(self, commit: Revision, pathspecs: Sequence[Pathspec]) -> tuple[str, ...]:
+        self.require_plain_work_tree(pathspecs)
         committed = self._run_checked(["diff", "--name-only", f"{commit}..HEAD", "--", *pathspecs])
         pending = self._run_checked(
             ["status", "--porcelain=v1", "--untracked-files=all", "--", *pathspecs]
@@ -362,6 +400,7 @@ class CliGitRepository:
             index = Path(scratch) / "index"
             if self._run(["read-tree", revision], index_file=index).returncode != 0:
                 return False
+            self.require_plain_work_tree(pathspecs, index)
             add = ["add", "--all", *(["--force"] if include_ignored else []), "--", *pathspecs]
             if self._run(add, index_file=index).returncode != 0:
                 return False
@@ -371,9 +410,18 @@ class CliGitRepository:
     # -- index and commits ---------------------------------------------------
 
     def stage_all(self, pathspecs: Sequence[Pathspec], *, force: bool = False) -> None:
+        self.require_plain_work_tree(pathspecs)
         args = ["add", *(["--force"] if force else []), "-A", "--", *pathspecs]
         result = self._run(args)
         if result.returncode == 0:
+            # A repository nested after the check above was staged as a gitlink: take it
+            # out again, so no commit records it and no later command checks inside it.
+            listing = self._run(_LIST_INDEX)
+            if listing.returncode != 0:
+                raise self._failure(_LIST_INDEX, listing)
+            if gitlinks := _gitlinks(listing.stdout):
+                self.unstage([f":(literal){path}" for path in gitlinks])
+                raise NestedRepositoryError(gitlinks)
             return
         stderr = _text(result.stderr)
         offenders = self._unreadable_from_stderr(stderr)
@@ -406,6 +454,8 @@ class CliGitRepository:
     def commit(
         self, message: str, *, only: Sequence[Pathspec] = (), allow_empty: bool = False
     ) -> None:
+        if only:
+            self.require_plain_work_tree(only)
         args = [
             "commit",
             *(["--allow-empty"] if allow_empty else []),
