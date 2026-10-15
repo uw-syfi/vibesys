@@ -58,10 +58,18 @@ class FakeSshConfigFilesystem implements SshConfigFilesystem {
 
   constructor(readonly result: {readonly text: string} | {readonly error: unknown}) {}
 
-  async readText(path: string): Promise<string> {
+  async readText(path: string, _maximumBytes: number): Promise<string> {
     this.reads.push(path);
     if ('error' in this.result) throw this.result.error;
     return this.result.text;
+  }
+
+  async realPath(path: string): Promise<string> {
+    return path;
+  }
+
+  async *directoryEntries(_path: string): AsyncIterable<string> {
+    // This focused Fake has no included files.
   }
 }
 
