@@ -90,6 +90,8 @@ commands = [
   ["uv", "run", "python", "../scripts/check_test_isolation.py", "--root", ".."],
   ["pnpm", "check:ts"],
   ["pnpm", "check:ts-architecture"],
+  # Compares against the merge base with origin/main (rule F1: the old UI gets fixes only).
+  ["pnpm", "check:frozen-ui", "--base-ref", "origin/main"],
   ["pnpm", "check:knip"],
   ["pnpm", "--dir", "libs/contracts", "generate:protocol"],
   ["git", "diff", "--exit-code", "--", "libs/contracts/src/generated/"],

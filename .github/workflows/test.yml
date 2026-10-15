@@ -202,7 +202,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Full history without blobs: `check_frozen_ui` compares against the merge base with
+      # origin/main and reads only the frozen packages' files there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Set up the TUI workspace
         uses: ./.github/actions/setup-tui
