@@ -420,7 +420,7 @@ describe('ServerClient subscription startup ownership', () => {
     await client.close();
   });
 
-  it('contains a close-listener failure while retiring a completed dedicated request', async () => {
+  it('retains a completed dedicated retirement failure for terminal close', async () => {
     const network = new FakeClientNetwork();
     const clock = new StartupClock();
     const client = await connectedClient(network, clock);
@@ -439,7 +439,7 @@ describe('ServerClient subscription startup ownership', () => {
     expect(retiredSocket.closed).toBe(true);
     expect(retiredSocket.activeListenerCount).toBe(0);
     expect(network.liveConnections).toEqual([network.connections[0]]);
-    await client.close();
+    await expect(client.close()).rejects.toBe(listenerError);
   });
 
   it('publishes a redial owner before its scheduler can close the client reentrantly', async () => {

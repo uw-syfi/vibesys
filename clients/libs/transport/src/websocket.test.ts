@@ -43,6 +43,12 @@ class FakeSocket implements WebSocketLike {
     this.onmessage?.({data: JSON.stringify(message)});
   }
 
+  /** Snapshot a message callback the runtime queued before its handler was cleared. */
+  queueResponse(message: unknown): () => void {
+    const pending = this.onmessage;
+    return () => pending?.({data: JSON.stringify(message)});
+  }
+
   receive(data: unknown): void {
     this.onmessage?.({data});
   }
@@ -397,6 +403,168 @@ describe('WebSocketTransport', () => {
     expect(disconnects[0]).toMatchObject({kind: 'parse'});
     expect(socket.closeCalls).toBe(1);
     await transport.close();
+  });
+
+  it('contains both subscription observers and joins retirement before terminal failure', async () => {
+    const socket = new DelayedCloseSocket();
+    const clock = new FakeClock();
+    const messageFailure = new Error('message observer failed');
+    const disconnectFailure = new Error('disconnect observer failed');
+    const transport = new WebSocketTransport(URL, {
+      closeGraceMs: 50,
+      scheduleTimeout: clock.schedule,
+      webSocket: () => {
+        queueMicrotask(() => socket.open());
+        return socket;
+      },
+    });
+    let reentrantClose: Promise<void> | undefined;
+    const subscription = transport.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') throw messageFailure;
+      },
+      () => {
+        reentrantClose = transport.close();
+        throw disconnectFailure;
+      },
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+
+    let escaped: unknown;
+    try {
+      socket.respond({type: 'event_batch', events: [], history_after_sequence: 0});
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    expect(socket.closeCalls).toBe(1);
+    expect(socket.readyState).toBe(2);
+    expect(clock.pendingDelays()).toEqual([50]);
+    if (reentrantClose === undefined) throw new Error('The disconnect observer did not close');
+    expect(transport.close()).toBe(reentrantClose);
+    let settled = false;
+    void reentrantClose.catch(() => {
+      settled = true;
+    });
+    await tick();
+    expect(settled).toBe(false);
+
+    socket.finishClose();
+    const failure = await reentrantClose.catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([messageFailure, disconnectFailure]);
+    await expect(transport.close()).rejects.toBe(failure);
+    expect(socket.closeCalls).toBe(1);
+    expect(clock.pending).toBe(0);
+  });
+
+  it('suppresses a subscription message callback queued before terminal close', async () => {
+    const socket = new FakeSocket();
+    const transport = transportFor(socket);
+    const delivered: EventBatchMessage[] = [];
+    const subscription = transport.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') delivered.push(message);
+      },
+      () => undefined,
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+    const deliverQueued = socket.queueResponse({
+      type: 'event_batch',
+      events: [],
+      history_after_sequence: 0,
+    });
+
+    const closing = transport.close();
+    let escaped: unknown;
+    try {
+      deliverQueued();
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    expect(delivered).toEqual([]);
+    expect(socket.closeCalls).toBe(1);
+    await closing;
+  });
+
+  it('contains a disconnect observer and preserves its failure by identity', async () => {
+    const socket = new FakeSocket();
+    const observerFailure = new Error('disconnect observer failed');
+    const transport = transportFor(socket);
+    const subscription = transport.subscribe(
+      0,
+      () => {},
+      () => {
+        throw observerFailure;
+      },
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+
+    let escaped: unknown;
+    try {
+      socket.drop();
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    await expect(transport.close()).rejects.toBe(observerFailure);
+    expect(socket.closeCalls).toBe(0);
+  });
+
+  it('retires on message observer failure without relabeling valid peer data', async () => {
+    const socket = new FakeSocket();
+    const observerFailure = new Error('message observer failed');
+    const disconnects: Error[] = [];
+    const transport = transportFor(socket);
+    const subscription = transport.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') throw observerFailure;
+      },
+      error => disconnects.push(error),
+    );
+    await tick();
+    socket.respond({
+      type: 'subscribed',
+      request_id: 'subscribe-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    await subscription;
+
+    socket.respond({type: 'event_batch', events: [], history_after_sequence: 0});
+
+    expect(disconnects).toEqual([observerFailure]);
+    expect(disconnects[0]).not.toBeInstanceOf(BackendClientError);
+    expect(socket.closeCalls).toBe(1);
+    await expect(transport.close()).rejects.toBe(observerFailure);
   });
 
   it('closes a corrupted control socket before redialing', async () => {

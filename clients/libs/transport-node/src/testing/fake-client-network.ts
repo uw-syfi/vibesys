@@ -19,6 +19,8 @@ type ConnectListenerPlan =
 export class FakeClientSocket implements ClientSocket {
   readonly path: string;
   readonly writes: string[] = [];
+  endCalls = 0;
+  destroyCalls = 0;
   readonly #connectListeners = new Set<Listener<[]>>();
   readonly #dataListeners = new Set<Listener<[string]>>();
   readonly #errorListeners = new Set<Listener<[Error]>>();
@@ -76,6 +78,15 @@ export class FakeClientSocket implements ClientSocket {
     this.#emit(this.#dataListeners, chunk);
   }
 
+  /** Snapshot a data callback the runtime queued before its listener was removed. */
+  queueReceive(chunk: string): () => void {
+    if (!this.#connected || this.#closed) throw new Error('FakeClientSocket is not connected');
+    const pending = [...this.#dataListeners];
+    return () => {
+      for (const listener of pending) listener(chunk);
+    };
+  }
+
   /** Deliver one transport failure without deciding whether the peer closes. */
   fail(error: Error): void {
     this.#emit(this.#errorListeners, error);
@@ -103,10 +114,12 @@ export class FakeClientSocket implements ClientSocket {
   }
 
   end(): void {
+    this.endCalls += 1;
     if (!this.#holdGracefulEnd) this.#close();
   }
 
   destroy(): void {
+    this.destroyCalls += 1;
     this.#close();
   }
 

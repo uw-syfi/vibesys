@@ -19,6 +19,7 @@ import {
   type EventSubscription,
   type IssuedRequest,
   NewlineFramer,
+  ObserverFailureBoundary,
   type RequestOptions,
   registerAbort,
   type ScheduleTimeout,
@@ -126,12 +127,13 @@ export class ServerClient {
    */
   readonly #secondarySockets = new Map<ClientSocket, () => void>();
   /**
-   * Graceful teardowns that have released their operation ownership but have
-   * not reached the socket's terminal close event. Keeping them here lets a
-   * client-wide close join the same teardown instead of losing the socket or
-   * starting a second FIN/grace sequence.
+   * Physical retirements that have released operation ownership. Keeping them
+   * here lets terminal close join in-progress work without starting a second
+   * teardown, and retain failed work until its mandatory error boundary.
    */
   readonly #retiringSockets = new Map<ClientSocket, Promise<void>>();
+  /** Subscription callbacks retained until the client's terminal join. */
+  readonly #subscriptionObservers = new ObserverFailureBoundary();
   /** Control dials created by a reconnect but not yet handed to the channel. */
   readonly #openingControlDials = new Map<ClientSocket, SocketDial>();
   readonly #channel: ControlChannel;
@@ -266,12 +268,18 @@ export class ServerClient {
       let protocolErrorReceived = false;
       let cancelHandshakeTimeout = (): void => {};
       let removeSocketListeners = (): void => {};
-      const disconnect = (error: Error): void => {
+      const disconnect = (error: Error, physicallyClosed = false): void => {
         if (disconnected || closing) return;
         disconnected = true;
         cancelHandshakeTimeout();
+        removeSocketListeners();
+        // Publish retirement before notifying external code. A disconnect
+        // observer may call close() reentrantly, and that close must join this
+        // exact owner rather than seeing an already-forgotten live socket.
+        if (!physicallyClosed) void this.#destroySocket(socket);
+        this.#secondarySockets.delete(socket);
         if (subscribed && protocolErrorReceived) return;
-        if (subscribed) onDisconnect(error);
+        if (subscribed) this.#subscriptionObservers.capture(() => onDisconnect(error));
         else reject(error);
       };
       const rejectStartup = (error: unknown): void => {
@@ -280,15 +288,7 @@ export class ServerClient {
         cancelHandshakeTimeout();
         reject(error);
       };
-      const failOwnedSocket = (error: Error): void => {
-        if (disconnected || closing) return;
-        // Socket errors need not produce a later peer-end event: fail closed now.
-        this.#secondarySockets.delete(socket);
-        cancelHandshakeTimeout();
-        removeSocketListeners();
-        socket.destroy();
-        disconnect(error);
-      };
+      const failOwnedSocket = (error: Error): void => disconnect(error);
       const handleStreamMessage = (message: ServerMessage): boolean => {
         if (message.type === 'protocol_error') {
           protocolErrorReceived = true;
@@ -298,7 +298,6 @@ export class ServerClient {
             // dial rejects with the refusal rather than with whatever the
             // ensuing close would say.
             disconnect(new ServerError(message.message, message.diagnostic ?? null));
-            socket.destroy();
             return false;
           }
         }
@@ -316,8 +315,25 @@ export class ServerClient {
         }
         return true;
       };
-      const handleSubscriptionLine = (line: string): boolean =>
-        readSubscriptionLine(line, onMessage, handleStreamMessage, failOwnedSocket);
+      const handleSubscriptionLine = (line: string): boolean => {
+        // Fence callbacks queued before close() removed their listener from settled observers.
+        if (disconnected || closing) return false;
+        const parsed = parseSubscriptionLine(line);
+        if (!parsed.ok) {
+          failOwnedSocket(parsed.error);
+          return false;
+        }
+        if (parsed.message === null) return true;
+        const message = parsed.message;
+        const delivery = this.#subscriptionObservers.capture(() => onMessage(message));
+        if (!delivery.ok) {
+          // Valid peer data does not become a parse failure because local
+          // delivery failed. The exact observer failure retires the stream.
+          failOwnedSocket(toError(delivery.reason));
+          return false;
+        }
+        return handleStreamMessage(message);
+      };
       // Track the socket so close() can settle a pending handshake or suppress
       // the disconnect callback of a subscription that is already live.
       this.#secondarySockets.set(socket, () => {
@@ -339,9 +355,7 @@ export class ServerClient {
           onLine: handleSubscriptionLine,
           onError: error => failOwnedSocket(transportFailure(error)),
           onPeerEnd: () => {
-            this.#secondarySockets.delete(socket);
-            removeSocketListeners();
-            disconnect(finishFraming(frames) ?? subscriptionEnded(subscribed));
+            disconnect(finishFraming(frames) ?? subscriptionEnded(subscribed), true);
           },
           isSettled: () => disconnected || closing,
           releaseOperation: () => this.#secondarySockets.delete(socket),
@@ -425,25 +439,44 @@ export class ServerClient {
     // this terminal close joins all teardown that can start synchronously.
     const retiring = new Set([...secondaryRetirements, ...this.#retiringSockets.values()]);
     return settleAll(
-      [channelClosed, ...openingControls.map(dial => dial.close()), ...retiring],
+      [
+        channelClosed,
+        this.#subscriptionObservers.settle(),
+        ...openingControls.map(dial => dial.close()),
+        ...retiring,
+      ],
       'could not close every server client connection',
     );
   }
 
   /** Begin or join the one bounded graceful retirement for a socket. */
   #retireSocket(socket: ClientSocket): Promise<void> {
+    return this.#trackSocketRetirement(socket, () =>
+      closeSocketWithin(socket, this.#closeGraceMs, this.#clock.scheduleTimeout),
+    );
+  }
+
+  /** Begin or join one immediate retirement for a failed socket. */
+  #destroySocket(socket: ClientSocket): Promise<void> {
+    return this.#trackSocketRetirement(socket, () => destroySocket(socket));
+  }
+
+  /** Keep one physical retirement owned until success or terminal error reporting. */
+  #trackSocketRetirement(socket: ClientSocket, begin: () => Promise<void>): Promise<void> {
     const existing = this.#retiringSockets.get(socket);
     if (existing !== undefined) return existing;
-    const retiring = closeSocketWithin(
-      socket,
-      this.#closeGraceMs,
-      this.#clock.scheduleTimeout,
-    ).finally(() => {
-      if (this.#retiringSockets.get(socket) === retiring) {
-        this.#retiringSockets.delete(socket);
-      }
-    });
+    const retiring = begin();
     this.#retiringSockets.set(socket, retiring);
+    void retiring.then(
+      () => {
+        if (this.#retiringSockets.get(socket) === retiring) {
+          this.#retiringSockets.delete(socket);
+        }
+      },
+      // A fire-and-forget retirement has no local consumer for a structural
+      // close failure. Retain the rejected settlement for terminal close().
+      () => undefined,
+    );
     return retiring;
   }
 
@@ -865,21 +898,17 @@ interface SubscriptionSocketCallbacks {
   onPeerEnd(): void;
 }
 
-/** Parse and deliver one event-stream line without throwing from socket I/O. */
-function readSubscriptionLine(
-  line: string,
-  onMessage: (message: ServerMessage) => void,
-  handleMessage: (message: ServerMessage) => boolean,
-  fail: (error: Error) => void,
-): boolean {
-  if (!line) return true;
+type ParsedSubscriptionLine =
+  | {readonly ok: true; readonly message: ServerMessage | null}
+  | {readonly ok: false; readonly error: BackendClientError};
+
+/** Parse peer data without classifying a local delivery failure as malformed input. */
+function parseSubscriptionLine(line: string): ParsedSubscriptionLine {
+  if (!line) return {ok: true, message: null};
   try {
-    const message = parseServerMessage(line);
-    onMessage(message);
-    return handleMessage(message);
+    return {ok: true, message: parseServerMessage(line)};
   } catch (error) {
-    fail(streamFailure(error));
-    return false;
+    return {ok: false, error: streamFailure(error)};
   }
 }
 
@@ -918,12 +947,7 @@ function startSubscriptionSocket(startup: SubscriptionSocketStartup): void {
     socket.destroy();
     return;
   }
-  const deadline = scheduleSubscriptionDeadline(
-    socket,
-    timeoutMs,
-    scheduleTimeout,
-    callbacks.disconnect,
-  );
+  const deadline = scheduleSubscriptionDeadline(timeoutMs, scheduleTimeout, callbacks.disconnect);
   if (!deadline.ok) {
     callbacks.releaseOperation();
     listeners.remove();
@@ -1130,7 +1154,6 @@ function acquireSocketListeners(
 
 /** Acquire the subscription deadline after its socket has one terminal owner. */
 function scheduleSubscriptionDeadline(
-  socket: ClientSocket,
   timeoutMs: number,
   scheduleTimeout: ScheduleTimeout,
   disconnect: (error: Error) => void,
@@ -1139,7 +1162,6 @@ function scheduleSubscriptionDeadline(
     disconnect(
       new BackendClientError('timeout', `Server subscription timed out after ${timeoutMs}ms`),
     );
-    socket.destroy();
   });
 }
 

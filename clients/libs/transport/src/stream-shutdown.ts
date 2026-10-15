@@ -3,6 +3,69 @@ interface AsyncCloseable {
   close(): Promise<void>;
 }
 
+/** The outcome of one observer delivery; the boundary itself never throws. */
+export type ObserverDelivery = {readonly ok: true} | {readonly ok: false; readonly reason: unknown};
+
+/**
+ * Contain notification callbacks until their owner's mandatory terminal join.
+ *
+ * An observer does not own the transport transition that calls it, so its
+ * failure cannot interrupt socket fencing or retirement. `capture` records the
+ * exact thrown value and returns it to the owner when that failure also means
+ * the current operation must retire. `settle` is the asynchronous error
+ * boundary: it waits for every callback already in progress (including one
+ * that calls terminal close reentrantly), preserves one failure by identity,
+ * and aggregates several in delivery order. Repeated settlement shares one
+ * promise and therefore one aggregate identity.
+ */
+export class ObserverFailureBoundary {
+  readonly #failures: unknown[] = [];
+  #active = 0;
+  #settling: Promise<void> | null = null;
+  #resolve = (): void => {};
+  #reject = (_reason: unknown): void => {};
+
+  capture(callback: () => void): ObserverDelivery {
+    this.#active += 1;
+    try {
+      callback();
+      return {ok: true};
+    } catch (reason) {
+      this.#failures.push(reason);
+      return {ok: false, reason};
+    } finally {
+      this.#active -= 1;
+      this.#finish();
+    }
+  }
+
+  /** Join active deliveries, then expose their retained failures exactly once. */
+  settle(): Promise<void> {
+    if (this.#settling !== null) return this.#settling;
+    this.#settling = new Promise<void>((resolve, reject) => {
+      this.#resolve = resolve;
+      this.#reject = reject;
+    });
+    this.#finish();
+    return this.#settling;
+  }
+
+  #finish(): void {
+    if (this.#settling === null || this.#active !== 0) return;
+    if (this.#failures.length === 0) {
+      this.#resolve();
+      return;
+    }
+    if (this.#failures.length === 1) {
+      this.#reject(this.#failures[0]);
+      return;
+    }
+    this.#reject(
+      new AggregateError(this.#failures, 'multiple transport observer callbacks failed'),
+    );
+  }
+}
+
 /** Begin one close without letting a synchronous throw prevent the peer close from starting. */
 function beginClose(resource: AsyncCloseable): Promise<void> {
   try {
