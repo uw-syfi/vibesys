@@ -32,5 +32,6 @@ class CoreGpuContentionEvents:
                 detail=detail,
                 source=FrameworkSource.GPU,
                 source_label=gpu_uuid,
+                new_process_count=new_process_count,
             ),
         )

@@ -795,6 +795,18 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Source Label"
+        },
+        "new_process_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "New Process Count"
         }
       },
       "required": [

@@ -595,6 +595,7 @@ class FrameworkWarningData(EventPayload):
     detail: str | None = None
     source: FrameworkSource = FrameworkSource.OTHER
     source_label: str | None = None
+    new_process_count: int | None = None
 
 
 class WinnerSelectedData(EventPayload):

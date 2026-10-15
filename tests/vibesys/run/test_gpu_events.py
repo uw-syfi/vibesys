@@ -39,6 +39,7 @@ def test_a_contention_observation_is_published_as_a_gpu_framework_warning(
         detail="2 new process(es) on GPU 0",
         source=FrameworkSource.GPU,
         source_label="GPU-1234",
+        new_process_count=2,
     )
 
 

@@ -3,5 +3,19 @@
   "type": "workstream_finished",
   "sequence": 43,
   "run_id": "run-conformance",
-  "timestamp": "2026-01-01T00:00:00Z"
+  "timestamp": "2026-01-01T00:00:00Z",
+  "round_label": "round 1",
+  "data": {
+    "kind": "workstream_finished",
+    "setup_failure": false,
+    "refunded": false,
+    "repeated_error": true,
+    "last_error": {
+      "kind": "turn-limit",
+      "role": "implementer",
+      "turns": 12,
+      "limit": 10,
+      "text": "exceeded the per-workstream turn budget"
+    }
+  }
 }

@@ -3,5 +3,15 @@
   "type": "turn_usage_recorded",
   "sequence": 42,
   "run_id": "run-conformance",
-  "timestamp": "2026-01-01T00:00:00Z"
+  "timestamp": "2026-01-01T00:00:00Z",
+  "round_label": "round 1",
+  "data": {
+    "kind": "turn_usage_recorded",
+    "input_tokens": 1200,
+    "cache_creation_input_tokens": 300,
+    "cache_read_input_tokens": 450,
+    "output_tokens": 180,
+    "total_cost_usd": 0.0421,
+    "duration_ms": 8475
+  }
 }
