@@ -17,7 +17,7 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING, Protocol, cast, runtime_checkable
 
-from vs_sim.output import DISCARD, Capture, OutputStream, tee
+from vs_sim.output import Capture, OutputStream, tee
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -166,9 +166,7 @@ class Processes(Protocol):
     cap too, before ``run`` returns; the result is the same whatever ``output`` is.
     """
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Run ``spec`` until it exits or ``timeout`` seconds pass (``None``: no limit)."""
         ...
 
@@ -180,9 +178,7 @@ class OsProcesses:
         """Wait at most ``cleanup_timeout`` seconds for a killed group to release its output."""
         self._cleanup_timeout = cleanup_timeout
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Start ``spec`` as a group leader, feed its input, and collect and forward its output."""
         if os.name != "posix":
             message = "owned process groups require a POSIX host"

@@ -37,7 +37,6 @@ from vs_sandbox.api import (
     SandboxKind,
 )
 from vs_sandbox.api.testing import FakeDockerEngine, FakeGpuTelemetry, ScriptedDockerCli
-from vs_sim.api import DISCARD
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
     ManualClock,
@@ -72,7 +71,7 @@ class _RecordingBuildRunner:
         *,
         cwd: Path,
         timeout: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         del cwd, timeout, output
         self.argvs.append(tuple(argv))

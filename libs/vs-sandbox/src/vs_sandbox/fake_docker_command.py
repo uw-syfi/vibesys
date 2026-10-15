@@ -7,7 +7,7 @@ from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NoReturn
 
-from vs_sim.api import DISCARD, OutputStream
+from vs_sim.api import OutputStream
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -148,7 +148,7 @@ class ScriptedDockerCli:
         self._fallback = None
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink = DISCARD
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> DockerResult:
         """Return or raise the scripted outcome for *argv*, writing its output to *output*."""
         call = DockerCliCall(tuple(argv), timeout_seconds)

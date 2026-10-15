@@ -18,7 +18,7 @@ from vs_sandbox.slurm_broker_protocol import (
     BrokerRefused,
     ProcessCall,
 )
-from vs_sim.api import DISCARD, ProcessOutcome, ProcessTimedOut, forward_output
+from vs_sim.api import ProcessOutcome, ProcessTimedOut, forward_output
 from vs_slurm.api import MAX_TRANSPORT_STREAM_BYTES
 
 if TYPE_CHECKING:
@@ -66,9 +66,7 @@ class BrokeredProcesses:
     token: str = field(repr=False)
     network: DeadlineNetwork
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Ask the broker to run ``spec.argv`` with ``spec.input`` as its stdin.
 
         The broker replies once the program ended, so ``output`` gets its streams then.

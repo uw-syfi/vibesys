@@ -80,7 +80,7 @@ class _BlockingEvaluationSandbox(FakeLifecycleRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> CommandResult:
         del cancel  # the test releases the held command itself
         if not self.started.is_set():
@@ -206,7 +206,7 @@ def _run_project(
 
 def test_adapter_preserves_failure_feedback(tmp_path: Path) -> None:
     async def body(ctx: CoreHost) -> AccuracyEvaluation:
-        return await ctx.evaluation.accuracy(ctx.workspaces.root)
+        return await ctx.evaluation.accuracy(ctx.workspaces.root, output=DISCARD)
 
     result, integration = _run(tmp_path, body, accuracy_command="false")
     try:
@@ -245,7 +245,7 @@ def test_each_gate_writes_its_command_output_to_the_sink_it_was_given(tmp_path: 
 
 def test_multiple_metrics_without_objectives_have_no_implicit_headline(tmp_path: Path) -> None:
     async def body(ctx: CoreHost) -> BenchmarkEvaluation:
-        return await ctx.evaluation.benchmark(ctx.workspaces.root)
+        return await ctx.evaluation.benchmark(ctx.workspaces.root, output=DISCARD)
 
     row = {"latency": 8.0, "throughput": 42.0}
     project_root = tmp_path / "project"
@@ -264,7 +264,7 @@ def test_multiple_metrics_without_objectives_have_no_implicit_headline(tmp_path:
 
 def test_executed_benchmark_failure_has_policy_feedback(tmp_path: Path) -> None:
     async def body(ctx: CoreHost) -> BenchmarkEvaluation:
-        return await ctx.evaluation.benchmark(ctx.workspaces.root)
+        return await ctx.evaluation.benchmark(ctx.workspaces.root, output=DISCARD)
 
     project_root = tmp_path / "project"
     _write_project(project_root, benchmark_command=("false",))
@@ -311,10 +311,11 @@ async def _accuracy_and_benchmark(
     ctx: CoreHost, root: Workspace, gates: _Gates
 ) -> AccuracyEvaluation:
     # Accuracy and a benchmark with a declared objective: results and a started/finished pair each.
-    accuracy = await ctx.evaluation.accuracy(root)
+    accuracy = await ctx.evaluation.accuracy(root, output=DISCARD)
     benchmark = await ctx.evaluation.benchmark(
         root,
         objectives=(BenchmarkObjective(name="throughput", direction=MetricDirection.MAXIMIZE),),
+        output=DISCARD,
     )
     assert accuracy.passed
     assert accuracy.receipt is not None
@@ -340,7 +341,7 @@ async def _receipt_reuse(
     note.parent.mkdir(parents=True, exist_ok=True)
     note.write_text("{}\n")
     await root.snapshot("incidental framework metadata")
-    reused = await ctx.evaluation.accuracy(root, reuse=restored)
+    reused = await ctx.evaluation.accuracy(root, reuse=restored, output=DISCARD)
     assert accuracy.executed
     assert not reused.executed
     assert reused.receipt == accuracy.receipt
@@ -349,7 +350,7 @@ async def _receipt_reuse(
 
 async def _scalar_benchmark(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
     # A single metric without objectives takes the scalar contract's direction.
-    scalar = await ctx.evaluation.benchmark(root)
+    scalar = await ctx.evaluation.benchmark(root, output=DISCARD)
     assert scalar.passed
     assert (scalar.metric_name, scalar.metric_value) == ("throughput", 42.0)
     assert scalar.metric_direction is MetricDirection.MAXIMIZE
@@ -403,18 +404,19 @@ async def _duplicate_objectives(ctx: CoreHost, root: Workspace, gates: _Gates) -
     # Two objectives of one name are refused before anything runs.
     objective = BenchmarkObjective(name="latency", direction=MetricDirection.MINIMIZE)
     with pytest.raises(ValueError, match="objective names must be unique"):
-        await ctx.evaluation.benchmark(root, objectives=(objective, objective))
+        await ctx.evaluation.benchmark(root, objectives=(objective, objective), output=DISCARD)
     assert gates.new() == []
 
 
 async def _refused_requests(ctx: CoreHost, root: Workspace, gates: _Gates) -> None:
     # A foreign handle is refused before a gate opens; a foreign receipt opens one and fails it.
     with pytest.raises(TypeError, match="live handle"):
-        await ctx.evaluation.accuracy(FakeWorkspace(path=root.path))
+        await ctx.evaluation.accuracy(FakeWorkspace(path=root.path), output=DISCARD)
     with pytest.raises(RuntimeContractError, match="another run"):
         await ctx.evaluation.accuracy(
             root,
             reuse=AccuracyReceipt(run_id="foreign", workspace_id=None, revision="revision"),
+            output=DISCARD,
         )
     refused_start, refused_end = gates.new()
     assert isinstance(refused_start.data, GateStartedData)
@@ -467,8 +469,8 @@ def test_the_adapter_evaluates_a_task_and_reports_each_gate_as_events(tmp_path: 
 def test_stub_backend_skips_trusted_execution(tmp_path: Path) -> None:
     async def body(ctx: CoreHost) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
         return (
-            await ctx.evaluation.accuracy(ctx.workspaces.root),
-            await ctx.evaluation.benchmark(ctx.workspaces.root),
+            await ctx.evaluation.accuracy(ctx.workspaces.root, output=DISCARD),
+            await ctx.evaluation.benchmark(ctx.workspaces.root, output=DISCARD),
         )
 
     (accuracy, benchmark), integration = _run(tmp_path, body, agent_backend="stub")
@@ -498,7 +500,7 @@ def test_a_docker_gate_runs_in_a_throwaway_candidate_not_the_live_root(tmp_path:
             backend_factory=lambda *_args, **_kwargs: backend,
         ) as ctx:
             seen = {c.host_workspace for c in backend.creations}
-            await ctx.evaluation.accuracy(ctx.workspaces.root)
+            await ctx.evaluation.accuracy(ctx.workspaces.root, output=DISCARD)
             return {c.host_workspace for c in backend.creations} > seen
 
     try:
@@ -533,9 +535,9 @@ def test_gate_starts_before_execution_and_finishes_on_cancellation(
             backend_factory=lambda *_args, **_kwargs: backend,
         ) as ctx:
             operation = (
-                ctx.evaluation.accuracy(ctx.workspaces.root)
+                ctx.evaluation.accuracy(ctx.workspaces.root, output=DISCARD)
                 if gate is GateKind.ACCURACY
-                else ctx.evaluation.benchmark(ctx.workspaces.root)
+                else ctx.evaluation.benchmark(ctx.workspaces.root, output=DISCARD)
             )
             evaluation = asyncio.create_task(operation)
             await wait_until_started(sandbox.started, evaluation)

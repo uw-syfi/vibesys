@@ -114,21 +114,86 @@ export class AppLifecycle {
   #perform(effect: QuitEffect): void {
     switch (effect.kind) {
       case 'release':
-        void this.#deps
-          .release()
-          .catch(() => {})
-          .then(() => this.#dispatch({type: 'released'}));
+        this.#beginRelease();
         return;
       case 'start-bound':
-        this.#cancelBound = this.#deps.scheduleTimeout(
-          () => this.#dispatch({type: 'bound-elapsed'}),
-          this.#deps.releaseBoundMs,
-        );
+        this.#startBound();
         return;
       case 'exit':
-        this.#cancelBound();
-        this.#deps.exit(effect.code);
+        this.#exit(effect.code);
         return;
+    }
+  }
+
+  #beginRelease(): void {
+    let release: Promise<void>;
+    try {
+      release = this.#deps.release();
+    } catch {
+      this.#dispatch({type: 'released'});
+      return;
+    }
+    void Promise.resolve(release)
+      .catch(() => {})
+      .then(() => this.#dispatch({type: 'released'}));
+  }
+
+  #startBound(): void {
+    // A synchronous release failure can exit while the original effect list is still being
+    // performed. Do not acquire a timer after that exit.
+    if (this.#state.kind !== 'releasing') return;
+    let fired = false;
+    let acquiring = true;
+    const callbackFailures: unknown[] = [];
+    let cancel: () => void;
+    try {
+      cancel = this.#deps.scheduleTimeout(() => {
+        fired = true;
+        try {
+          this.#dispatch({type: 'bound-elapsed'});
+        } catch (cause) {
+          // Some schedulers may invoke the callback before returning its handle. Capture the
+          // callback's failure so acquisition can still publish or retire that handle first.
+          if (acquiring) callbackFailures.push(cause);
+          else throw cause;
+        }
+      }, this.#deps.releaseBoundMs);
+    } catch (cause) {
+      acquiring = false;
+      // A scheduler may call back and then fail before returning a handle. Preserve the callback's
+      // earlier failure; if the callback completed exit, preserve the scheduler's later failure.
+      if (callbackFailures.length > 0) throw callbackFailures[0];
+      // Without an acquired bound, waiting for release could strand the process forever.
+      if (this.#state.kind === 'releasing') {
+        this.#dispatch({type: 'bound-elapsed'});
+        return;
+      }
+      throw cause;
+    }
+    acquiring = false;
+    // A scheduler may call back before returning ownership of its handle. In that case exit
+    // could not cancel the not-yet-published handle, so retire it here instead.
+    if (fired || this.#state.kind !== 'releasing') this.#cancel(cancel);
+    else this.#cancelBound = cancel;
+    if (callbackFailures.length > 0) throw callbackFailures[0];
+  }
+
+  #exit(code: number): void {
+    try {
+      this.#cancelBound();
+    } catch {
+      // A failed cleanup callback must not prevent the process's authoritative exit effect.
+    } finally {
+      this.#cancelBound = () => {};
+      this.#deps.exit(code);
+    }
+  }
+
+  #cancel(cancel: () => void): void {
+    try {
+      cancel();
+    } catch {
+      // The lifecycle is already exited; timer cleanup cannot be allowed to undo that.
     }
   }
 }

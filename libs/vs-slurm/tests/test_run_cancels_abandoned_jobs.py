@@ -15,7 +15,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from vs_sim.api import DISCARD, OutputSink, ProcessOutcome, ProcessRun, ProcessSpec, ProcessTimedOut
+from vs_sim.api import OutputSink, ProcessOutcome, ProcessRun, ProcessSpec, ProcessTimedOut
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     SlurmConfig,
@@ -65,9 +65,7 @@ class _Cluster:
         self.fail_scancel = False
         self._down = False
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         del output
         stdin = spec.input.decode() or None
         del timeout

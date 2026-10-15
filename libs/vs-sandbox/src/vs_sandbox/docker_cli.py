@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vs_sim.api import (
-    DISCARD,
     ProcessGroupUnreaped,
     ProcessOutcome,
     ProcessOutputTooLarge,
@@ -130,7 +129,7 @@ class DockerCli(Protocol):
     """Run ``docker`` commands on behalf of :class:`~vs_sandbox.docker_sandbox.DockerSandbox`."""
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink = DISCARD
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> subprocess.CompletedProcess[str]:
         """Run *argv* to completion with captured text streams.
 
@@ -160,7 +159,7 @@ class SubprocessDockerCli:
         self._launcher = launcher
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink = DISCARD
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> subprocess.CompletedProcess[str]:
         """Run *argv* with captured output, in a process group of its own.
 

@@ -186,6 +186,8 @@ class FakeLogReader:
 
     threads: Threads
     instances: dict[str, dict[str, _FakeStream]] = field(default_factory=dict)
+    opened: list[str] = field(default_factory=list)
+    """Each instance ``instance`` opened, in order: one per logs request."""
 
     def __post_init__(self) -> None:
         self._lock = self.threads.lock()
@@ -264,10 +266,31 @@ class FakeLogReader:
                 closed=stream.outcome is not None,
             )
 
+    def instance(self, instance_id: str) -> FakeOpenedLogs:
+        """The ``LogReader`` role: ``instance_id``'s logs, opened; each read sees later writes."""
+        with self._lock:
+            self._instance(instance_id)
+            self.opened.append(instance_id)
+        return FakeOpenedLogs(self, instance_id)
+
     def _instance(self, instance_id: str) -> dict[str, _FakeStream]:
         if instance_id not in self.instances:
             raise UnknownInstanceError(instance_id)
         return self.instances[instance_id]
+
+
+@dataclass(frozen=True)
+class FakeOpenedLogs:
+    """``FakeLogReader``'s ``InstanceLogs``: one instance's streams in the shared Fake."""
+
+    store: FakeLogReader
+    instance_id: str
+
+    def streams(self) -> tuple[LogStream, ...]:
+        return self.store.streams(self.instance_id)
+
+    def read(self, stream_id: str, start: LogOffset | LogTail, max_bytes: int) -> StoredBytes:
+        return self.store.read(self.instance_id, stream_id, start, max_bytes)
 
 
 def failed_launch(_: Path, __: tuple[str, ...]) -> DetachedLaunchFailure:
@@ -314,7 +337,7 @@ def fake_host(
 
 def with_logs(host: HelperHost, logs: FakeLogReader, threads: Threads) -> HelperHost:
     """``host`` with ``logs`` as its log store, waited on with ``threads``' clock: it offers ``logs``."""
-    return replace(host, logs=HelperLogs(logs, threads, threads.sleep))
+    return replace(host, logs=HelperLogs(logs, threads))
 
 
 @dataclass

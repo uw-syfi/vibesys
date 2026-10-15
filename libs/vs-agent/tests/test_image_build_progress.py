@@ -36,6 +36,7 @@ def _build(stderr: str, *, returncode: int = 0) -> list[ImageBuildProgress]:
         command_runner=runner,
         on_progress=observed.append,
         clock=ManualClock(),
+        output=DISCARD,
     )
     return observed
 
@@ -99,6 +100,7 @@ def test_a_failed_build_still_reports_the_steps_it_reached() -> None:
             command_runner=runner,
             on_progress=observed.append,
             clock=ManualClock(),
+            output=DISCARD,
         )
 
     assert observed == [ImageBuildProgress(done=1, total=3, label="RUN npm install")]
@@ -110,7 +112,10 @@ def test_a_build_with_no_sink_streams_nothing() -> None:
     )
 
     assert agent_image(
-        "python:3.12-bookworm", command_runner=runner, clock=ManualClock()
+        "python:3.12-bookworm",
+        command_runner=runner,
+        clock=ManualClock(),
+        output=DISCARD,
     ).startswith("sha256:")
 
 
@@ -144,7 +149,7 @@ class _ChunkingRunner:
         self.written = {stream: bytearray() for stream in OutputStream}
 
     def run(
-        self, argv: Sequence[str], *, cwd: Path, timeout: float, output: OutputSink = DISCARD
+        self, argv: Sequence[str], *, cwd: Path, timeout: float, output: OutputSink
     ) -> DockerBuildResult:
         scripted = Capture(limit=1 << 20)
         result = self._inner.run(argv, cwd=cwd, timeout=timeout, output=scripted)

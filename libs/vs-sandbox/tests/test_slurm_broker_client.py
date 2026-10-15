@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_sim.api import Connection
+from vs_sim.api import DISCARD
 
 ADDRESS = "slurm-broker.sock"
 TIMEOUT_S = 30.0
@@ -101,7 +102,9 @@ def _call(
         worker = threads.spawn(respond, name="broker") if serve else None
         try:
             run = BrokeredProcesses(Path(ADDRESS), "token", network=network).run(
-                ProcessSpec(("ssh", "--", "cluster", "hostname")), timeout=TIMEOUT_S
+                ProcessSpec(("ssh", "--", "cluster", "hostname")),
+                timeout=TIMEOUT_S,
+                output=DISCARD,
             )
         except OSError as error:
             # Anything else escapes and fails the test.

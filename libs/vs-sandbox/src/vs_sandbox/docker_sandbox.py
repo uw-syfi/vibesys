@@ -142,7 +142,7 @@ def _cleanup_containers() -> None:
     """Stop and remove all tracked containers, each through the Docker CLI that started it."""
     for container_id, docker in list(_live_containers.items()):
         with suppress(OSError, subprocess.TimeoutExpired):
-            docker.run(["docker", "stop", container_id], timeout_seconds=30)
+            docker.run(["docker", "stop", container_id], timeout_seconds=30, output=DISCARD)
         if _remove_container(docker, container_id, timeout_seconds=10).released:
             _live_containers.pop(container_id, None)
 
@@ -188,7 +188,7 @@ def _remove_container(
     failure: Exception | None = None
     for _ in range(_REMOVE_ATTEMPTS):
         try:
-            result = docker.run(cmd, timeout_seconds=timeout_seconds)
+            result = docker.run(cmd, timeout_seconds=timeout_seconds, output=DISCARD)
         except (OSError, ProcessTimeoutError) as exc:
             failure = exc
             if log is not None:
@@ -598,7 +598,7 @@ class DockerSandbox(WorkspaceSandbox):
         """Return the ``docker run`` flags a docker-in-docker sandbox adds."""
         return ["--runtime", SYSBOX_DOCKER_RUNTIME] if self._docker_in_docker else []
 
-    def start(self, *, output: OutputSink = DISCARD) -> None:
+    def start(self, *, output: OutputSink) -> None:
         """Start the Docker container.
 
         Every chunk ``docker run`` writes (an image pull's progress, the new
@@ -716,7 +716,7 @@ class DockerSandbox(WorkspaceSandbox):
         cmd = ["docker", "exec", "-u", "root", container_id, "bash", "-c", script]
         self._log_cmd(cmd)
         try:
-            result = self._docker.run(cmd, timeout_seconds=_ROOT_SETUP_TIMEOUT_S)
+            result = self._docker.run(cmd, timeout_seconds=_ROOT_SETUP_TIMEOUT_S, output=DISCARD)
         except subprocess.TimeoutExpired as exc:
             self._log_cmd(cmd, error=f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s")
             message = f"{what} timed out after {_ROOT_SETUP_TIMEOUT_S}s"
@@ -742,6 +742,7 @@ class DockerSandbox(WorkspaceSandbox):
                 f"id -u {_AGENT_USER} && id -g {_AGENT_USER}",
             ],
             timeout_seconds=_ROOT_SETUP_TIMEOUT_S,
+            output=DISCARD,
         )
         if result.returncode != 0:
             return None
@@ -860,7 +861,7 @@ class DockerSandbox(WorkspaceSandbox):
         """Stop and remove a container; the caller keeps ownership unless it is released."""
         stop = ["docker", "stop", container_id]
         try:
-            self._log_cmd(stop, self._docker.run(stop, timeout_seconds=30))
+            self._log_cmd(stop, self._docker.run(stop, timeout_seconds=30, output=DISCARD))
         except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-009067 [BLE001]; cleanup must record failures but not replace an earlier startup or shutdown error.
             with suppress(Exception):
                 self._log_cmd(stop, error=f"container cleanup failed: {exc}")
@@ -909,7 +910,7 @@ class DockerSandbox(WorkspaceSandbox):
             return
         self.stop()
         self._gpus = gpus
-        self.start()
+        self.start(output=DISCARD)
 
     @property
     def container_id(self) -> str:
@@ -973,7 +974,7 @@ class DockerSandbox(WorkspaceSandbox):
         """Read the running container's PATH via a one-shot ``docker exec``."""
         cmd = ["docker", "exec", container_id, "sh", "-c", "echo $PATH"]
         self._log_cmd(cmd)
-        result = self._docker.run(cmd, timeout_seconds=_ROOT_SETUP_TIMEOUT_S)
+        result = self._docker.run(cmd, timeout_seconds=_ROOT_SETUP_TIMEOUT_S, output=DISCARD)
         self._log_cmd(cmd, result)
         path = result.stdout.strip()
         if result.returncode != 0 or not path:
@@ -1013,7 +1014,7 @@ class DockerSandbox(WorkspaceSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> CommandResult:
         """Execute *command* as root inside the started container.
 
@@ -1029,7 +1030,7 @@ class DockerSandbox(WorkspaceSandbox):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> CommandResult:
         """Execute a command inside the Docker container.
 
@@ -1091,7 +1092,7 @@ class DockerSandbox(WorkspaceSandbox):
 
     def __enter__(self) -> DockerSandbox:
         """Start the sandbox and return it as a context manager."""
-        self.start()
+        self.start(output=DISCARD)
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -1142,7 +1143,9 @@ class _ExecStop:
                 since,
             ]
             try:
-                result = self._docker.run(argv, timeout_seconds=_EXEC_STOP_TIMEOUT_S)
+                result = self._docker.run(
+                    argv, timeout_seconds=_EXEC_STOP_TIMEOUT_S, output=DISCARD
+                )
             except (OSError, subprocess.SubprocessError):
                 continue
             reply = parse_exec_stop_reply(result.stdout) if result.returncode == 0 else None

@@ -25,7 +25,7 @@ from vs_runtime.api.testing import (
     FakeStopTimer,
     FakeWorkspace,
 )
-from vs_sim.api import yield_now
+from vs_sim.api import DISCARD, yield_now
 from vs_sim.api.testing import SimThreads, arrival, yield_until
 
 _GRACE_S = 60.0
@@ -223,13 +223,13 @@ async def test_gated_evaluation_refuses_new_work_after_a_stop() -> None:
     inner = FakeEvaluation()
     evaluation = stop_gated_evaluation(inner, channel)
     workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
-    await evaluation.accuracy(workspace)
+    await evaluation.accuracy(workspace, output=DISCARD)
 
     channel.request_stop(StopMode.DRAIN)
     with pytest.raises(RunStopped):
-        await evaluation.accuracy(workspace)
+        await evaluation.accuracy(workspace, output=DISCARD)
     with pytest.raises(RunStopped):
-        await evaluation.benchmark(workspace)
+        await evaluation.benchmark(workspace, output=DISCARD)
     with pytest.raises(RunStopped):
         await evaluation.validate_local(
             workspace, recipe_artifact="recipe.sh", report_location="report.md"
@@ -248,7 +248,7 @@ async def test_gated_evaluation_cancels_a_running_evaluation_at_the_stop() -> No
     evaluation = stop_gated_evaluation(inner, channel)
     workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
 
-    running = asyncio.create_task(evaluation.benchmark(workspace))
+    running = asyncio.create_task(evaluation.benchmark(workspace, output=DISCARD))
     await arrival(gate.entered.wait(), running)
     channel.request_stop(StopMode.DRAIN)
 
@@ -265,7 +265,7 @@ async def test_gated_evaluation_returns_a_result_that_finishes_before_any_stop()
     evaluation = stop_gated_evaluation(inner, channel)
     workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
 
-    result = await evaluation.benchmark(workspace)
+    result = await evaluation.benchmark(workspace, output=DISCARD)
 
     assert result == inner.default_benchmark
 

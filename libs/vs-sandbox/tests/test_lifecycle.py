@@ -22,6 +22,7 @@ from vs_sandbox.api.testing import FakeCommandRunner, FakeLifecycleRunner
 
 if TYPE_CHECKING:
     from vs_sandbox.execution import CommandRunner
+from vs_sim.api import DISCARD
 
 
 @dataclass
@@ -97,7 +98,7 @@ def test_failure_names_hooks_provider_preserves_cause_and_stops_dispatch() -> No
 def test_owned_session_starts_and_stops_sandbox_once() -> None:
     sandbox = FakeLifecycleRunner()
 
-    session = SandboxSession.start(sandbox, {"location": "container"})
+    session = SandboxSession.start(sandbox, {"location": "container"}, output=DISCARD)
 
     assert session.sandbox is sandbox
     assert session.view == {"location": "container"}
@@ -116,7 +117,7 @@ def test_owned_session_context_exit_stops_after_an_error() -> None:
 
     with (
         pytest.raises(ValueError, match=failure_message),
-        SandboxSession.start(sandbox, "container"),
+        SandboxSession.start(sandbox, "container", output=DISCARD),
     ):
         raise ValueError(failure_message)
 
@@ -139,7 +140,7 @@ def test_start_sandbox_rejects_sandbox_without_lifecycle() -> None:
     sandbox = FakeCommandRunner()
 
     with pytest.raises(TypeError, match="FakeCommandRunner has no execution environment to start"):
-        start_sandbox(sandbox)
+        start_sandbox(sandbox, output=DISCARD)
 
 
 def test_stop_sandbox_ignores_sandbox_without_lifecycle() -> None:
@@ -152,7 +153,7 @@ def test_an_owned_session_stops_again_after_a_failed_stop_until_one_returns(
 ) -> None:
     """Regression: a stop that raised latched the session closed, so a retry stopped nothing."""
     sandbox = FakeLifecycleRunner()
-    session = SandboxSession.start(sandbox, "container")
+    session = SandboxSession.start(sandbox, "container", output=DISCARD)
     sandbox.stop_error = RuntimeError("docker rm -f was killed")
     for _ in range(failures):
         with pytest.raises(RuntimeError, match="killed"):

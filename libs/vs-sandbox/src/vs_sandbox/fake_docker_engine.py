@@ -22,7 +22,7 @@ from vs_sandbox.container_runtime import (
 )
 from vs_sandbox.docker_cli import EXEC_MARKER_ENV, SIGNAL_EXEC_SCRIPT
 from vs_sandbox.process_execution import shell_exit_status
-from vs_sim.api import DISCARD, OutputStream
+from vs_sim.api import OutputStream
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -369,7 +369,7 @@ class FakeDockerEngine:
         self._signal_requests_unreadable = count
 
     def run(
-        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink = DISCARD
+        self, argv: Sequence[str], *, timeout_seconds: float, output: OutputSink
     ) -> subprocess.CompletedProcess[str]:
         """Run one ``docker`` subcommand to completion, writing what it printed to *output*."""
         result = self._answer(tuple(argv), timeout_seconds)

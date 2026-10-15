@@ -16,7 +16,7 @@ from ._evaluation import Evaluation
 from ._kit import Kit
 from ._owners import Owners
 from ._retry import Again, GaveUp, RetryPolicy, Tries
-from ._sources import First, Source, StopSource, Task, Timer
+from ._sources import First, Latch, LatchKey, Source, StopSource, Task, Timer
 from ._winner import INPUT, Input, Kept
 from ._workspaces import Workspaces
 
@@ -96,6 +96,14 @@ class Flow:
     def timer(self, at: Seconds) -> Timer:
         """A source that fires once, when the run clock reaches ``at``."""
         return self._kit.timer(at)
+
+    def latch[T](self, key: LatchKey[T]) -> Latch[T]:
+        """A handle on the run-wide latch ``key``: ``set`` it once, or wait for its value.
+
+        For a fact one flow learns and the flows beside it wait for, such as a measurement every
+        later step builds on. Each handle yields the value once; take one per wait.
+        """
+        return self._run.latch(key)
 
     @property
     def path(self) -> str:

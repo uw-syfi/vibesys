@@ -5,6 +5,7 @@ model; `plan` validates it against what the run has recorded, asks for a correct
 `MAX_CORRECTIONS` times, and when the corrections do not fix the plan keeps the best valid
 outcome: a held underfilled plan, else the valid part of the last reply, else a fresh question,
 else a typed give-up. A lost turn is asked again, a few times, after a backoff on the run clock.
+A call that schedules a plan has its handoff file written before it ends (see `_handoff`).
 
 The planner's role has core's own corrections and re-asks off: every ask carries a prompt built
 from the run at that moment, and every correction names the problem as typed data.
@@ -12,8 +13,11 @@ from the run at that moment, and every correction names the problem as typed dat
 
 from dataclasses import dataclass
 
+from pydantic import BaseModel
+
 from vibesys.orchestration.dynamic.models import PortfolioPlan
 from vibesys.orchestration.dynamic.search._context import PlanWorld
+from vibesys.orchestration.dynamic.search._handoff import HandoffWritten, handoff_request
 from vibesys.orchestration.dynamic.search._plan import PlanCheck, validate
 from vibesys.orchestration.dynamic.search._roles import LOST_TURN_BACKOFF, PLANNER
 from vibesys.orchestration.dynamic.search._run_state import (
@@ -50,6 +54,8 @@ LOST_TURNS = RetryPolicy(max_tries=3, backoff=LOST_TURN_BACKOFF)
 class Call:
     """What one planning call has spent and kept, which its asks and judgments read."""
 
+    number: int
+    """The planning call's number, counted from 1: its handoff file's identity."""
     capacity: int
     """The slots that were free when the call began; a reply should fill them."""
     problem: PlanProblem | None
@@ -60,6 +66,8 @@ class Call:
     fresh: int = 0
     held: PlanCheck | None = None
     """The first valid plan that left slots free, kept in case a correction does not improve it."""
+    held_blind: bool = False
+    """The held plan answered a prompt asked before the input's measurement landed."""
 
 
 @dataclass(frozen=True)
@@ -70,6 +78,8 @@ class Reply:
     problem: PlanProblem | None
     turn: InvocationRef | None
     world: PlanWorld
+    blind: bool = False
+    """The prompt it answered was asked before the input's measurement landed."""
 
 
 async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
@@ -78,7 +88,7 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
     A planning call is not restartable from a snapshot: after a code change the root plans again.
     """
     planner = ctx.agents.session(PLANNER)
-    call = Call(capacity=run.capacity(), problem=run.gate.last_error)
+    call = Call(number=run.calls, capacity=run.capacity(), problem=run.gate.last_error)
 
     async def ask(tries: Tries[Failed]) -> Reply | NoPlan | Again[Failed]:
         return await ask_planner(planner, run, call, tries.reasons)
@@ -91,7 +101,40 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
                 return outcome
             case Reply() as reply:
                 if (outcome := _judge(call, reply)) is not None:
-                    return outcome
+                    return await _handed_off(ctx, call.number, outcome)
+
+
+async def _handed_off(ctx: Flow, number: int, outcome: PlanOutcome) -> PlanOutcome:
+    """A scheduled plan with its handoff file written; a call that planned nothing writes none.
+
+    A write whose wait timed out or was lost may have landed, so it is sent again (the write is
+    keyed, so the same bytes land). One that still fails leaves the plan standing without a new
+    listing: the plan is what the run needs, and the next successful write lists every file the
+    owner holds, this one included if its bytes landed.
+    """
+    if not isinstance(outcome, Scheduled):
+        return outcome
+    request = handoff_request(number, outcome.check)
+
+    async def write(tries: Tries[Failed]) -> BaseModel | Failed | Again[Failed]:
+        del tries
+        written = await ctx.owners.perform(request, within=ctx.task.terms.operation_seconds)
+        if isinstance(written, Failed) and written.reason in _UNKNOWN_WRITE:
+            return Again(reason=written)
+        return written
+
+    match await ctx.retry(write, HANDOFF_TRIES):
+        case HandoffWritten() as written:
+            return Scheduled(outcome.check, blind=outcome.blind, handoff=written)
+        case _:
+            return outcome
+
+
+HANDOFF_TRIES = RetryPolicy(max_tries=2)
+"""A handoff write whose outcome is unknown is sent once more."""
+
+_UNKNOWN_WRITE = frozenset({FailureReason.TIMED_OUT, FailureReason.LOST})
+"""The failures after which the write may have landed."""
 
 
 async def ask_planner(
@@ -99,11 +142,12 @@ async def ask_planner(
 ) -> Reply | NoPlan | Again[Failed]:
     """One ask: the planner's reply, a plan-less end, or a lost turn to ask again."""
     asked_of = lost[-1].turn if lost else call.again
-    event = await planner.turn(run.world().prompt(call.problem, again=asked_of))
+    asked = run.world()
+    event = await planner.turn(asked.prompt(call.problem, again=asked_of))
     world = run.world()  # the run as it is when the reply arrives
     match event:
         case TurnFinished(reply=PortfolioPlan() as given, invocation=turn):
-            return Reply(_check(given, world), None, turn, world)
+            return Reply(_check(given, world), None, turn, world, blind=asked.baseline is None)
         case Failed(reason=FailureReason.INVALID_REPLY, errors=errors, turn=turn):
             unparsed = PlanProblem(kind=ProblemKind.UNPARSEABLE, errors=errors)
             return Reply(None, unparsed, turn, world)
@@ -128,16 +172,17 @@ def _judge(call: Call, reply: Reply) -> PlanOutcome | None:
     # planner was never offered.
     want = min(call.capacity, world.capacity) if call.capacity else world.capacity
     if check is not None and check.valid and len(check.accepted) >= want:
-        return Scheduled(check)
+        return Scheduled(check, blind=reply.blind)
     call.problem = _problem(check, reply.problem, want)
     if reply.turn is not None and call.corrections < MAX_CORRECTIONS:
         call.corrections += 1
-        call.held = _held(check) or call.held
+        if (held := _held(check)) is not None:
+            call.held, call.held_blind = held, reply.blind
         call.again = reply.turn
         return None
     chosen = _final_choice(call, world, check)
     if chosen is not None:
-        return Scheduled(chosen)
+        return Scheduled(chosen, blind=reply.blind if chosen is check else call.held_blind)
     if world.active == 0 and call.fresh < MAX_FRESH_ASKS:
         call.fresh += 1
         call.held = None
@@ -162,7 +207,13 @@ def _no_reply(event: Failed) -> PlanProblem:
 
 
 def _no_plan(world: PlanWorld, problem: PlanProblem | None) -> NoPlan:
-    return NoPlan(problem=problem, stuck=world.active == 0, blocked_at_done=world.done)
+    """A call that ended empty; it is stuck only when nothing is in flight to wait for.
+
+    The input's measurement still running is something to wait for: planning is asked again
+    when it lands.
+    """
+    stuck = world.active == 0 and world.baseline is not None
+    return NoPlan(problem=problem, stuck=stuck, blocked_at_done=world.done)
 
 
 def _problem(check: PlanCheck | None, found: PlanProblem | None, wanted: int) -> PlanProblem:

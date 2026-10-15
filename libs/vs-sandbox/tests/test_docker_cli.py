@@ -59,7 +59,7 @@ def test_a_finished_command_keeps_its_status_streams_and_arguments(
     script = ProcessScript(returncode, stdout.encode(), stderr.encode(), duration_s=2)
     docker, processes = _docker(script, clock)
 
-    result = docker.run(["docker", "version"], timeout_seconds=30)
+    result = docker.run(["docker", "version"], timeout_seconds=30, output=DISCARD)
 
     assert result.args == ["docker", "version"]
     assert result.returncode == returncode
@@ -98,7 +98,7 @@ def test_a_timeout_raises_after_the_timeout_with_the_partial_output(
     docker, _ = _docker(script, clock)
 
     with pytest.raises(ProcessTimeoutError) as raised:
-        docker.run(["docker", "info"], timeout_seconds=timeout)
+        docker.run(["docker", "info"], timeout_seconds=timeout, output=DISCARD)
 
     assert raised.value.cmd == ["docker", "info"]
     assert raised.value.timeout == timeout
@@ -113,7 +113,7 @@ def test_a_group_the_kill_left_behind_is_a_timeout_that_says_so() -> None:
     docker, _ = _docker(script, clock)
 
     with pytest.raises(ProcessTimeoutError) as raised:
-        docker.run(["docker", "rm", "-f", "c"], timeout_seconds=3)
+        docker.run(["docker", "rm", "-f", "c"], timeout_seconds=3, output=DISCARD)
 
     assert raised.value.timeout == 3
     assert raised.value.__notes__ == ["process 1000 survived the kill"]
@@ -130,7 +130,7 @@ def test_a_docker_binary_that_cannot_start_raises_its_os_error() -> None:
     )
 
     with pytest.raises(FileNotFoundError) as raised:
-        docker.run(["docker", "version"], timeout_seconds=30)
+        docker.run(["docker", "version"], timeout_seconds=30, output=DISCARD)
 
     assert raised.value is missing
 
@@ -141,9 +141,7 @@ class _StoppedForOutput:
     def __init__(self, stopped: ProcessOutputTooLarge) -> None:
         self._stopped = stopped
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         del spec, timeout, output
         return self._stopped
 
@@ -164,7 +162,7 @@ def test_a_run_stopped_for_too_much_output_raises_naming_the_stream_and_cap(
     with pytest.raises(
         OSError, match=f"docker logs wrote more than {limit} bytes to {stream}"
     ) as raised:
-        docker.run(["docker", "logs"], timeout_seconds=30)
+        docker.run(["docker", "logs"], timeout_seconds=30, output=DISCARD)
 
     assert getattr(raised.value, "__notes__", []) == ([detail] if detail else [])
 

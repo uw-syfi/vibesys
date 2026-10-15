@@ -155,6 +155,7 @@ means the chunk reaches the final end. Every byte is read through `ByteSource`.
 | Unknown owner keys and kinds are rejected | `extra="forbid"` and the discriminated union, `tests/vibesys/run/test_run_logs.py` |
 | Our own processes' output is never parsed for facts | Not lintable: a parse at a foreign tool's call site looks the same. Review. |
 | Every store implementation behaves alike | `vs_logs.api.testing.LogStoreContract` against `FileLogStore` and `MemoryLogStore` |
+| Every runner call chooses where its output goes | The type checker: `output: OutputSink` has no default on `Processes.run`, `StreamingCommand.run`, `DockerCli.run`, `DockerBuildRunner.run`, `CommandRunner.execute` and `start`. `DISCARD` is the explicit opt-out for a probe whose output is parsed or only shown in an error. |
 
 ## Status
 
@@ -162,12 +163,26 @@ means the chunk reaches the final end. Every byte is read through `ByteSource`.
 | --- | --- |
 | `vs_sim` sinks and `ByteSource` | built |
 | `vs_logs` store, scope, reader, follow; `LogOwner` and its TypeScript | built |
-| Startup producers (image build, container start) | not built |
-| Host helper `logs` feature and the client logs lib | not built |
+| Startup producers (image build, container start) | built |
+| Host helper `logs` feature and the client logs lib | built |
 | Narration handler and excepthook | built |
-| `NarrationLine` in the generated protocol types | not built (with the client logs lib) |
-| Exit status or signal of a hard death on the tombstone | not built: the detached server is reparented to init, so no vibesys process waits on it and can read its status |
+| `NarrationLine` in the generated protocol types | built |
+| Run view Startup log panel and Inspect log sheet | built |
 | Gate stage and tool build openers in the libraries | built |
-| `vibesys` openers for gate stages and tool builds | built (in-process stages; the host environment's hook-driven tool install still discards) |
-| Slurm stage output, live per poll | built |
-| Remote followers (SkyPilot, dockerd) | not built |
+| `vibesys` openers for gate stages and tool builds | built for in-process stages; the host environment's hook-driven tool install still discards |
+| SkyPilot stage output | built: streams through the command runner sink |
+| Slurm stage output | built: live per poll |
+| Explicit `output` on every runner call | built: the argument has no default, so the type checker rejects a call that omits it; the long-running calls that still pass `DISCARD` are the places to give an owner next |
+
+Known gaps:
+
+- The CLI `build_task_image` is unlogged.
+- `DockerSandbox` restart discards its output.
+- `job.log` and the in-container dockerd log are not followed.
+- A hard death's exit status or signal is not recorded on the tombstone. The detached
+  server is reparented to init, so no vibesys process waits on it; recording it needs a
+  supervisor.
+- The `run-*.log` files and the stderr tee are not yet retired.
+- The deprecated inspect `include_log` tail is removed at helper protocol v2.
+- The Slurm `service_log_tail` is still pasted into failure text. It should become a log
+  reference.

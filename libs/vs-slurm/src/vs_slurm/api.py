@@ -11,7 +11,7 @@ from typing import Protocol
 
 from vs_sim.api import ByteSource, OutputStream
 
-from .cluster import SlurmCluster
+from .cluster import SlurmCluster, recorded_job_ids
 from .cluster_types import (
     ClusterCancelOutcome,
     ClusterCancelRequested,
@@ -53,6 +53,7 @@ from .connector_protocol import (
     SlurmConnectorResponse,
     SlurmConnectorSyncToRequest,
 )
+from .errors import SlurmError, SlurmSubmissionRejectedError
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
 from .fake_ledger import FakeEvaluationLedger
@@ -119,6 +120,17 @@ from .ledger_listing import (
     resolve_entries,
 )
 from .ledger_store import RemoteEvaluationLedger
+from .queue_view import (
+    NodeGpus,
+    OwnJob,
+    QueuedJob,
+    QueueSnapshot,
+    QueueViewError,
+    gpu_count,
+    parse_queue_snapshot,
+    queue_snapshot_command,
+    sbatch_partitions,
+)
 from .recorded_traces import CANCEL_REACTIONS, LIFETIMES
 from .remote_file import MAX_READ_BYTES as MAX_REMOTE_READ_BYTES
 from .remote_file import RemoteFileAnswerError, SlurmFileSource
@@ -133,14 +145,12 @@ from .runner import (
     SlurmBatchStage,
     SlurmBatchStageResult,
     SlurmBatchWaitResult,
-    SlurmError,
     SlurmFileArtifact,
     SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobRunner,
     SlurmJobWaitResult,
-    SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
 )
 from .scheduler_read import READ_END as SCHEDULER_READ_END
@@ -253,17 +263,23 @@ __all__ = [
     "LedgerStage",
     "LedgerState",
     "NoAccountingRow",
+    "NodeGpus",
     "NotInLedger",
     "NotInQueue",
     "Notice",
     "OrphanChecks",
+    "OwnJob",
     "QueueRow",
+    "QueueSnapshot",
+    "QueueViewError",
     "Queued",
+    "QueuedJob",
     "RemoteEvaluationLedger",
     "RemoteFileAnswerError",
     "ResolveSubmission",
     "Resolved",
     "Running",
+    "SchedulerQueue",
     "SchedulerReading",
     "SchedulerTrace",
     "SecondsRange",
@@ -327,6 +343,7 @@ __all__ = [
     "encode_ledger_document",
     "entry_id",
     "evaluation_key",
+    "gpu_count",
     "handle_of_job",
     "job_of_handle",
     "lease_verdict",
@@ -339,9 +356,13 @@ __all__ = [
     "observe_with_notice",
     "parse_accounting_row",
     "parse_queue_row",
+    "parse_queue_snapshot",
     "phase_of",
+    "queue_snapshot_command",
+    "recorded_job_ids",
     "resolve_entries",
     "runtime_content_identity",
+    "sbatch_partitions",
     "settle",
     "settlement",
     "shell_join_with_port",
@@ -359,6 +380,14 @@ __all__ = [
     "validate_project",
     "withdraw",
 ]
+
+
+class SchedulerQueue(Protocol):
+    """Reads the queue this user's jobs wait in; ``SlurmJobRunner`` is the real one."""
+
+    def read_queue(self) -> QueueSnapshot:
+        """One read-only reading; raises ``SlurmError`` or ``QueueViewError`` when it fails."""
+        ...
 
 
 class Cluster(Protocol):

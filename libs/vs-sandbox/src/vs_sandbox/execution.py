@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vs_sim.api import DISCARD
-
 if TYPE_CHECKING:
     from vs_sim.api import Event, OutputSink
 
@@ -65,7 +63,7 @@ class CommandRunner(Protocol):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> CommandResult:
         """Run a shell command and return its bounded result.
 

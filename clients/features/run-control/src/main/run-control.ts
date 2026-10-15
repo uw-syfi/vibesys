@@ -94,6 +94,8 @@ interface Binding {
    * released with the binding.
    */
   logs: LogsLease | null;
+  /** The page's log reads in flight, by the token it named each with, for its `withdraw`. */
+  readonly reads: Map<string, AbortController>;
   /** Retire this binding's connection lease once and report when cleanup settles. */
   readonly release: () => PromiseLike<void>;
 }
@@ -101,10 +103,41 @@ interface Binding {
 /** Release a binding's connection lease and, when its page asked for logs, its logs lease. */
 function releaseLeases(lease: ConnectionLease, binding: Binding | null): PromiseLike<void> {
   const logs = binding?.logs ?? null;
-  if (binding !== null) binding.logs = null;
+  if (binding !== null) {
+    binding.logs = null;
+    for (const read of binding.reads.values()) read.abort(new Error('the run page was released'));
+    binding.reads.clear();
+  }
   const released = lease[Symbol.asyncDispose]();
   if (logs === null) return released;
   return Promise.all([logs[Symbol.asyncDispose](), released]).then(() => undefined);
+}
+
+/** What a page's log read answers. */
+type LogReadReply = RunLogsReply<Extract<RunLogsRequest, {readonly kind: 'read'}>>;
+
+/**
+ * Run the page's read named `token` under a signal its `withdraw` aborts. A withdrawn read answers a
+ * `transport` failure: the page stopped waiting for it, so this only settles the invoke.
+ */
+async function withdrawableRead(
+  reads: Map<string, AbortController>,
+  token: string,
+  read: (signal: AbortSignal) => Promise<LogReadReply>,
+): Promise<LogReadReply> {
+  if (reads.has(token)) {
+    return {ok: false, failure: {code: 'transport', message: `read ${token} is already in flight`}};
+  }
+  const controller = new AbortController();
+  reads.set(token, controller);
+  try {
+    return await read(controller.signal);
+  } catch (error) {
+    if (!controller.signal.aborted) throw error;
+    return {ok: false, failure: {code: 'transport', message: 'the page withdrew the read'}};
+  } finally {
+    if (reads.get(token) === controller) reads.delete(token);
+  }
 }
 
 /** One target (host, instance) a call is navigating toward, from claim to bind or abandonment. */
@@ -354,11 +387,17 @@ export class RunControl {
   /**
    * Answer one logs request from `runId`'s run page, over its host's logs channel. The run's
    * instance id comes from the binding, which took it from the record the app attached to: a
-   * listing names it, and a read that names another instance is refused.
+   * listing names it, and a read that names another instance is refused. A `withdraw` aborts the
+   * page's read in flight with that token, which withdraws the helper's long poll; a token naming
+   * no read in flight (it already answered) is a no-op.
    */
   logs<R extends RunLogsRequest>(runId: string, request: R): Promise<RunLogsReply<R>>;
   async logs(runId: string, request: RunLogsRequest): Promise<RunLogsReply<RunLogsRequest>> {
     const run = this.#bindings.get(runId);
+    if (request.kind === 'withdraw') {
+      run?.reads.get(request.token)?.abort(new Error('the page withdrew the read'));
+      return null;
+    }
     if (run === undefined) {
       return {
         ok: false,
@@ -376,7 +415,8 @@ export class RunControl {
         },
       };
     }
-    return run.logs.read(request.read);
+    const logs = run.logs;
+    return withdrawableRead(run.reads, request.token, signal => logs.read(request.read, signal));
   }
 
   /** End `runId`'s page; the run itself keeps going on its host. Safe when `runId` is not bound. */
@@ -615,6 +655,7 @@ export class RunControl {
         status: connectionStatus(connection.phase),
         seenLive: false,
         logs: null,
+        reads: new Map(),
         release,
       };
       binding = provisional;

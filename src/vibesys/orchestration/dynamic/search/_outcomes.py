@@ -75,7 +75,8 @@ class WorkstreamStart(Value):
     prior: RoundRecord | None
     """The previous round of the same hypothesis, when this workstream continues it."""
     config: DynamicConfig
-    baseline: Baseline
+    baseline: Baseline | None
+    """The input's measurement when the workstream started; None while it was still being measured."""
 
     @property
     def attempt(self) -> AttemptId:
@@ -181,6 +182,15 @@ class Closing(Value):
         return None if self.result is None else self.result.candidate.revision
 
     @property
+    def scored(self) -> bool:
+        """Whether settling it compares a candidate with the input, so needs its measurement.
+
+        A closing with a failure cause is ineligible however its candidate measured, so it
+        settles at once and frees its slot, without waiting for the input's measurement.
+        """
+        return self.candidate is not None and self.cause is None
+
+    @property
     def review_passed(self) -> bool | None:
         """The judge's verdict, or None when no review ran."""
         verdict = None if self.result is None else self.result.verdict
@@ -213,6 +223,8 @@ class Work:
     """The latest candidate the implementer made, reviewed or not."""
     workspace: Workspace | None = None
     """The workspace once it opened; None before, and when the workstream never got one."""
+    baseline: Baseline | None = None
+    """The input's measurement once the workstream has it (see `_measure.the_input`)."""
 
     def ended(self, ended: "WorkEndedError") -> Closing:
         """The closing of work that did not finish: what it carried, with the failure."""
@@ -301,11 +313,14 @@ class WorkstreamDone:
 # -- what a workstream asserts when it closes ----------------------------------------------------------
 
 
-def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
+def assertion(
+    w: WorkstreamStart, closing: Closing, terms: TaskTerms, baseline: Baseline | None
+) -> Settle:
     """The assessments, eligibility and retention the closing proposes for the workspace.
 
     A profile workstream measures a revision without proposing one, so it settles as ineligible
-    and discarded. A candidate is eligible when it passed the task's gates and beats the input.
+    and discarded. A candidate is eligible when it passed the task's gates and beats the input,
+    so a closing that is scored (`Closing.scored`) needs the input's measurement (``baseline``).
     """
     if w.plan.kind is WorkKind.PROFILE:
         profile = reading_of(closing.readings, EvidenceKind.PROFILING)
@@ -316,9 +331,12 @@ def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
             outcome="failed" if closing.cause is not None else "succeeded",
             candidate=None,
         )
+    if closing.scored and baseline is None:
+        message = "a candidate is scored only once the input's measurement is known"
+        raise ValueError(message)
     space = space_of(terms)
     benchmark = reading_of(closing.readings, EvidenceKind.BENCHMARK)
-    seen = w.baseline.reading if isinstance(w.baseline, Measured) else None
+    seen = baseline.reading if isinstance(baseline, Measured) else None
     beats = improves_on(
         measurement(None if benchmark is None else benchmark.headline()),
         measurement(seen.metrics[0] if seen is not None and seen.metrics else None),

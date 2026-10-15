@@ -13,7 +13,7 @@ import signal
 from pathlib import Path
 
 from vs_sandbox.api.testing import FakeDockerEngine
-from vs_sim.api import SubprocessPipedProcessLauncher
+from vs_sim.api import DISCARD, SubprocessPipedProcessLauncher
 from vs_sim.api.testing import HANG_GUARD_S
 
 
@@ -28,6 +28,7 @@ def test_a_stop_delivers_output_written_before_the_client_read_it(tmp_path: Path
     created = engine.run(
         ("docker", "run", "-d", "-v", f"{workspace}:/w", "--workdir", "/w", "image"),
         timeout_seconds=30,
+        output=DISCARD,
     )
     container = created.stdout.strip()
     script = "echo up > started; read _ < go; printf out; printf err >&2; echo done > written; sleep 1000"
@@ -46,7 +47,7 @@ def test_a_stop_delivers_output_written_before_the_client_read_it(tmp_path: Path
     stdout = client.stdout.read()
     stderr = client.stderr.read()
     status = client.wait(HANG_GUARD_S)
-    engine.run(("docker", "rm", "-f", container), timeout_seconds=30)
+    engine.run(("docker", "rm", "-f", container), timeout_seconds=30, output=DISCARD)
 
     assert (stdout, stderr) == ("out", "err")
     assert status == -signal.SIGTERM

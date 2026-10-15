@@ -1,4 +1,4 @@
-"""The ``LogReader`` contract the host helper's ``logs`` feature relies on, for every implementation.
+"""The ``LogReader`` and ``InstanceLogs`` contract the host helper's ``logs`` feature relies on, for every implementation.
 
 ``FakeLogReader`` (the in-memory Fake the helper's tests use) and ``StoreLogReader`` (the
 real reader over a run's ``vs_logs`` store, in a temporary directory) run the same cases.
@@ -58,7 +58,7 @@ class LogReaderContract:
         subject = self.subject()
         stream = subject.open()
         subject.write(stream, b"0123456789", LogPipe.STDOUT)
-        stored = subject.reader.read(_INSTANCE, stream, LogOffset(offset=3), 4)
+        stored = subject.reader.instance(_INSTANCE).read(stream, LogOffset(offset=3), 4)
         assert (stored.offset, stored.data, stored.eof, stored.closed) == (3, b"3456", False, False)
         assert not stored.truncated_before
 
@@ -66,7 +66,7 @@ class LogReaderContract:
         subject = self.subject()
         stream = subject.open()
         subject.write(stream, b"abc", LogPipe.STDOUT)
-        stored = subject.reader.read(_INSTANCE, stream, LogOffset(offset=3), 4)
+        stored = subject.reader.instance(_INSTANCE).read(stream, LogOffset(offset=3), 4)
         assert (stored.offset, stored.data, stored.eof) == (3, b"", True)
 
     def test_a_tail_reads_the_last_bytes_and_says_when_the_stream_closed(self) -> None:
@@ -74,7 +74,7 @@ class LogReaderContract:
         stream = subject.open()
         subject.write(stream, b"0123456789", LogPipe.STDOUT)
         subject.close(stream, LogStreamOutcome.ENDED)
-        tail = subject.reader.read(_INSTANCE, stream, LogTail(tail_bytes=3), 64)
+        tail = subject.reader.instance(_INSTANCE).read(stream, LogTail(tail_bytes=3), 64)
         assert (tail.offset, tail.data, tail.eof, tail.closed) == (7, b"789", True, True)
 
     def test_reads_of_evicted_bytes_start_at_the_oldest_held(self) -> None:
@@ -83,12 +83,12 @@ class LogReaderContract:
         written = b"".join(b"line %03d\n" % line for line in range(40))
         for start in range(0, len(written), 9):
             subject.write(stream, written[start : start + 9], LogPipe.STDOUT)
-        (listed,) = subject.reader.streams(_INSTANCE)
+        (listed,) = subject.reader.instance(_INSTANCE).streams()
         assert 0 < listed.retained_start < listed.size == len(written)
-        stored = subject.reader.read(_INSTANCE, stream, LogOffset(offset=0), 16)
+        stored = subject.reader.instance(_INSTANCE).read(stream, LogOffset(offset=0), 16)
         assert (stored.offset, stored.truncated_before) == (listed.retained_start, True)
         assert stored.data == written[stored.offset : stored.offset + 16]
-        tail = subject.reader.read(_INSTANCE, stream, LogTail(tail_bytes=10), 64)
+        tail = subject.reader.instance(_INSTANCE).read(stream, LogTail(tail_bytes=10), 64)
         assert (tail.offset, tail.data, tail.truncated_before) == (
             len(written) - 10,
             written[-10:],
@@ -101,7 +101,7 @@ class LogReaderContract:
         second = subject.open()
         subject.write(second, b"xy", LogPipe.STDERR)
         subject.close(first, LogStreamOutcome.FAILED)
-        listed = subject.reader.streams(_INSTANCE)
+        listed = subject.reader.instance(_INSTANCE).streams()
         assert [(s.id, s.owner, s.size, s.outcome) for s in listed] == [
             (first, _OWNER, 0, LogStreamOutcome.FAILED),
             (second, _OWNER, 2, None),
@@ -112,21 +112,30 @@ class LogReaderContract:
         stream = subject.open()
         subject.write(stream, b"out\n", LogPipe.STDOUT)
         subject.write(stream, b"err\n", LogPipe.STDERR)
-        stored = subject.reader.read(_INSTANCE, stream, LogOffset(offset=2), 64)
+        stored = subject.reader.instance(_INSTANCE).read(stream, LogOffset(offset=2), 64)
         assert stored.pipes == (
             LogPipeSpan(offset=2, length=2, pipe=LogPipe.STDOUT),
             LogPipeSpan(offset=4, length=4, pipe=LogPipe.STDERR),
         )
 
-    def test_unknown_instances_and_streams_raise(self) -> None:
+    def test_logs_opened_once_see_every_later_write_and_the_close(self) -> None:
         subject = self.subject()
         stream = subject.open()
+        opened = subject.reader.instance(_INSTANCE)
+        assert opened.read(stream, LogOffset(offset=0), 64).data == b""
+        subject.write(stream, b"late\n", LogPipe.STDOUT)
+        subject.close(stream, LogStreamOutcome.ENDED)
+        stored = opened.read(stream, LogOffset(offset=0), 64)
+        assert (stored.data, stored.eof, stored.closed) == (b"late\n", True, True)
+        assert [listed.size for listed in opened.streams()] == [5]
+
+    def test_unknown_instances_and_streams_raise(self) -> None:
+        subject = self.subject()
+        subject.open()
         with pytest.raises(UnknownInstanceError):
-            subject.reader.streams(_UNKNOWN)
-        with pytest.raises(UnknownInstanceError):
-            subject.reader.read(_UNKNOWN, stream, LogOffset(offset=0), 4)
+            subject.reader.instance(_UNKNOWN)
         with pytest.raises(UnknownLogStreamError):
-            subject.reader.read(_INSTANCE, "000099", LogOffset(offset=0), 4)
+            subject.reader.instance(_INSTANCE).read("000099", LogOffset(offset=0), 4)
 
 
 class TestFakeLogReader(LogReaderContract):

@@ -165,6 +165,14 @@ def _buildable(draw: st.DrawFn) -> list[dict[str, object]]:
     ]
 
 
+INPUT_FAILURES = (
+    st.none()
+    | st.just({"kind": "benchmark-failed", "output": "bench-output"})
+    | st.just({"kind": "readings-undecodable"})
+)
+"""Why the input is unmeasurable, or None: one kind with the evaluator's output, one without."""
+
+
 @st.composite
 def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, object]:
     """The fields a planning request and its correction share."""
@@ -182,11 +190,7 @@ def planner_fields(draw: st.DrawFn, *, problem: object = None) -> dict[str, obje
         "history": draw(_history()),
         "older_ids": tuple(draw(st.lists(tokens("old"), max_size=2, unique=True))),
         "baseline": draw(METRICS),
-        "input_failure": draw(
-            st.none()
-            | st.just({"kind": "benchmark-failed", "output": "bench-output"})
-            | st.just({"kind": "readings-undecodable"})
-        ),
+        "input_failure": draw(INPUT_FAILURES),
         "profiling": draw(st.booleans()),
         "profile_fields": fields,
         "problem": problem,
@@ -248,6 +252,8 @@ IMPLEMENT_PROMPTS = st.builds(
     prior_failure_tail=st.just("") | tokens("tail"),
     last_blocker=st.none() | BLOCKERS,
     turns_without_candidate=st.integers(0, 3),
+    baseline_pending=st.booleans(),
+    input_failure=INPUT_FAILURES,
 )
 EVALUATIONS = st.lists(
     st.builds(

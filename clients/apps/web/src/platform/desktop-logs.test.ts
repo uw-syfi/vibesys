@@ -38,7 +38,7 @@ describe('desktopLogSource', () => {
     const {source, asked} = shell(async () => LISTED);
     expect(await source.list(NEVER)).toEqual(LISTED);
     await source.read(READ, NEVER);
-    expect(asked).toEqual([{kind: 'list'}, {kind: 'read', read: READ}]);
+    expect(asked).toEqual([{kind: 'list'}, {kind: 'read', token: expect.any(String), read: READ}]);
   });
 
   test('a refused or malformed answer is a transport failure, not a rejection', async () => {
@@ -64,5 +64,36 @@ describe('desktopLogSource', () => {
     abort.abort(new Error('the panel collapsed'));
     answer({ok: true, chunk: {}});
     await expect(reading).rejects.toThrow('the panel collapsed');
+  });
+
+  test('aborting a read withdraws it by its token; an answered read sends none', async () => {
+    const answers: ((value: unknown) => void)[] = [];
+    const {source, asked} = shell(request =>
+      request.kind === 'withdraw'
+        ? Promise.reject(new Error('the window closed'))
+        : new Promise(resolve => answers.push(resolve)),
+    );
+    const reads = 4;
+    const aborts = Array.from({length: reads}, () => new AbortController());
+    const reading = aborts.map(abort => source.read(READ, abort.signal));
+    answers[0]?.({ok: true, chunk: {}});
+    expect(await reading[0]).toMatchObject({ok: true});
+    for (const abort of aborts) abort.abort(new Error('the panel collapsed'));
+    for (const read of reading.slice(1)) await expect(read).rejects.toThrow('the panel collapsed');
+
+    const tokens = asked.flatMap(request => (request.kind === 'read' ? [request.token] : []));
+    expect(new Set(tokens).size).toBe(reads);
+    const withdrawn = asked.flatMap(request =>
+      request.kind === 'withdraw' ? [request.token] : [],
+    );
+    expect(withdrawn).toEqual(tokens.slice(1));
+  });
+
+  test('a read aborted before it was asked sends neither it nor a withdrawal', async () => {
+    const {source, asked} = shell(async () => LISTED);
+    const abort = new AbortController();
+    abort.abort(new Error('gone'));
+    await expect(source.read(READ, abort.signal)).rejects.toThrow('gone');
+    expect(asked).toEqual([]);
   });
 });

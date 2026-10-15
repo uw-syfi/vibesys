@@ -43,6 +43,7 @@ from server.host_api import (
     LogStreamOutcome,
     LogTail,
 )
+from server.host_helper import MAX_EXECUTING_REQUESTS
 from server.host_helper_logs import (
     POLL_INTERVAL_SECONDS,
     REPLY_MARGIN_MS,
@@ -74,9 +75,19 @@ def _store() -> FakeLogReader:
     return store
 
 
+@dataclass(frozen=True)
+class _NeverWithdrawn:
+    """A ``Withdrawal`` nobody sets: each wait lets its whole timeout pass on ``clock``."""
+
+    clock: ManualClock
+
+    def wait(self, timeout: float) -> bool:
+        self.clock.advance(timeout)
+        return False
+
+
 def _logs(store: FakeLogReader) -> HelperLogs:
-    clock = ManualClock()
-    return HelperLogs(store, clock, clock.advance)
+    return HelperLogs(store, ManualClock())
 
 
 def _read(
@@ -95,7 +106,8 @@ def _read(
         start=start,
         max_bytes=max_bytes,
     )
-    return read_log(request, logs)
+    assert isinstance(logs.clock, ManualClock)
+    return read_log(request, logs, _NeverWithdrawn(logs.clock))
 
 
 def _chunk(reply: LogsReadReply | HelperError) -> LogChunk:
@@ -264,13 +276,20 @@ def _hello() -> dict[str, Any]:
     }
 
 
-def _read_frame(offset: int, *, wait_ms: int, deadline_ms: int) -> dict[str, Any]:
+def _read_frame(
+    offset: int,
+    *,
+    wait_ms: int,
+    deadline_ms: int,
+    request_id: str = "r",
+    stream_id: str = _STREAM,
+) -> dict[str, Any]:
     return {
         "type": "logs.read",
-        "request_id": "r",
+        "request_id": request_id,
         "deadline_ms": deadline_ms,
         "instance_id": _INSTANCE,
-        "stream_id": _STREAM,
+        "stream_id": stream_id,
         "start": {"offset": offset},
         "max_bytes": LOGS_READ_MAX_BYTES,
         "wait_ms": wait_ms,
@@ -361,6 +380,147 @@ def test_a_read_at_the_end_of_a_closed_stream_does_not_wait(seed: int) -> None:
     )
     assert followed.reply["chunk"]["closed"] is True
     assert followed.waited < POLL_INTERVAL_SECONDS
+
+
+def test_a_waiting_read_opens_the_instances_logs_once() -> None:
+    store: list[FakeLogReader] = []
+
+    def write_later(threads: SimThreads, written: FakeLogReader) -> None:
+        store.append(written)
+        threads.sleep(10 * POLL_INTERVAL_SECONDS)
+        written.write(_INSTANCE, _STREAM, b"c\n")
+
+    followed = _follow_on_channel(
+        0, _read_frame(2, wait_ms=20_000, deadline_ms=30_000), write_later
+    )
+    assert followed.reply["chunk"]["data"] == "c\n"
+    assert store[0].opened == [_INSTANCE]
+
+
+# ----- withdrawing a waiting read (logs.cancel) -----
+
+_FOLLOW_WAIT_MS = 25_000
+"""The wait a follower asks for, as the desktop app's follower does."""
+
+
+def _cancel_frame(request_id: str, read_id: str) -> dict[str, Any]:
+    return {
+        "type": "logs.cancel",
+        "request_id": request_id,
+        "deadline_ms": 5000,
+        "read_id": read_id,
+    }
+
+
+def _on_cancel_channel[T](
+    seed: int, exchange: Callable[[SimThreads, ChannelClient], T], *, features: list[str]
+) -> T:
+    """Serve one channel over two open streams at their end; run ``exchange`` after ``hello``."""
+    threads = SimThreads(schedule_seed=seed)
+    network = SimNetwork(threads)
+    store = FakeLogReader(threads)
+    for stream_id in (_STREAM, _OTHER):
+        store.open(_INSTANCE, stream_id, _OWNER, "docker build .")
+        store.write(_INSTANCE, stream_id, b"ab")
+
+    def main() -> T:
+        client = ChannelClient(threads)
+        host = with_logs(fake_host(threads, network), store, threads)
+        worker = serve_on(threads, client, ByteBuffer(), host)
+        client.send({**_hello(), "features": features})
+        assert client.receive()["features"] == features
+        result = exchange(threads, client)
+        client.close()
+        worker.join(HANG_GUARD_S)
+        return result
+
+    return threads.run(main)
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_a_withdrawn_read_answers_at_once_and_frees_its_worker(seed: int) -> None:
+    def exchange(threads: SimThreads, client: ChannelClient) -> list[dict[str, Any]]:
+        for index in range(MAX_EXECUTING_REQUESTS):
+            client.send(
+                _read_frame(2, wait_ms=_FOLLOW_WAIT_MS, deadline_ms=30_000, request_id=f"r{index}")
+            )
+        client.send(_read_frame(2, wait_ms=0, deadline_ms=30_000, request_id="busy"))
+        refused = client.receive()
+        sent = threads.now()
+        client.send(_cancel_frame("c", "r0"))
+        answered = [client.receive(), client.receive()]
+        assert threads.now() == sent
+        client.send(_read_frame(2, wait_ms=0, deadline_ms=30_000, request_id="next"))
+        return [refused, *answered, client.receive()]
+
+    refused, read, cancel, admitted = _on_cancel_channel(
+        seed, exchange, features=["logs", "logs_cancel"]
+    )
+    assert (refused["request_id"], refused["code"]) == ("busy", "channel_busy")
+    assert (read["type"], read["request_id"], read["chunk"]["data"]) == ("logs.read", "r0", "")
+    assert cancel == {"type": "logs.cancel", "request_id": "c", "read_id": "r0"}
+    assert (admitted["type"], admitted["request_id"]) == ("logs.read", "next")
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_flipping_streams_past_the_worker_limit_is_never_busy(seed: int) -> None:
+    """A follower that switches streams withdraws the read it leaves; no flip is refused.
+
+    Each flip sends the new stream's read once the last withdrawal was answered, which
+    says the withdrawn read's worker returned; no virtual time passes for any of it.
+    """
+    flips = 2 * MAX_EXECUTING_REQUESTS + 1
+
+    def exchange(threads: SimThreads, client: ChannelClient) -> tuple[list[dict[str, Any]], float]:
+        started = threads.now()
+        replies = []
+        for flip in range(flips):
+            stream_id = (_STREAM, _OTHER)[flip % 2]
+            client.send(
+                _read_frame(
+                    2,
+                    wait_ms=_FOLLOW_WAIT_MS,
+                    deadline_ms=30_000,
+                    request_id=f"f{flip}",
+                    stream_id=stream_id,
+                )
+            )
+            client.send(_cancel_frame(f"c{flip}", f"f{flip}"))
+            replies += [client.receive(), client.receive()]
+        return replies, threads.now() - started
+
+    replies, took = _on_cancel_channel(seed, exchange, features=["logs", "logs_cancel"])
+    assert [(r["type"], r["request_id"]) for r in replies] == [
+        pair
+        for flip in range(flips)
+        for pair in (("logs.read", f"f{flip}"), ("logs.cancel", f"c{flip}"))
+    ]
+    assert took == 0
+
+
+@pytest.mark.parametrize("seed", range(3))
+def test_withdrawing_no_waiting_read_is_answered_at_once(seed: int) -> None:
+    def exchange(_threads: SimThreads, client: ChannelClient) -> list[dict[str, Any]]:
+        client.send(_cancel_frame("c0", "never-sent"))
+        first = client.receive()
+        client.send(_read_frame(0, wait_ms=0, deadline_ms=30_000, request_id="done"))
+        read = client.receive()
+        client.send(_cancel_frame("c1", "done"))
+        return [first, read, client.receive()]
+
+    first, read, late = _on_cancel_channel(seed, exchange, features=["logs", "logs_cancel"])
+    assert first == {"type": "logs.cancel", "request_id": "c0", "read_id": "never-sent"}
+    assert read["type"] == "logs.read"
+    assert late == {"type": "logs.cancel", "request_id": "c1", "read_id": "done"}
+
+
+def test_withdrawal_needs_its_feature() -> None:
+    def exchange(_threads: SimThreads, client: ChannelClient) -> dict[str, Any]:
+        client.send(_cancel_frame("c", "r"))
+        return client.receive()
+
+    refused = _on_cancel_channel(0, exchange, features=["logs"])
+    assert (refused["type"], refused["code"]) == ("error", "feature_not_negotiated")
 
 
 def test_a_host_without_a_log_store_does_not_offer_logs() -> None:

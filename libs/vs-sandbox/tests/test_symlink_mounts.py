@@ -38,7 +38,7 @@ class _RecordingSandbox:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> CommandResult:
         assert timeout is None
         assert cancel is None
@@ -54,7 +54,7 @@ def test_lifecycle_hook_installs_and_records_quoted_commands() -> None:
     sandbox = _RecordingSandbox(CommandResult(output="", exit_code=0))
     hooks = symlink_lifecycle_hooks([("/workspace/model link", "/workspace/_mounts/model target")])
 
-    hooks[0].before_ready(BeforeReadyContext(sandbox=sandbox))
+    hooks[0].before_ready(BeforeReadyContext(sandbox=sandbox, output=DISCARD))
 
     command = "ln -sfn '/workspace/_mounts/model target' '/workspace/model link'"
     assert sandbox.commands == [command]
@@ -66,7 +66,7 @@ def test_lifecycle_hook_rejects_failed_setup() -> None:
     hooks = symlink_lifecycle_hooks([("/workspace/model", "/mount/model")])
 
     with pytest.raises(RuntimeError, match="permission denied"):
-        hooks[0].before_ready(BeforeReadyContext(sandbox=sandbox))
+        hooks[0].before_ready(BeforeReadyContext(sandbox=sandbox, output=DISCARD))
 
     assert sandbox.saved_symlink_commands is None
 

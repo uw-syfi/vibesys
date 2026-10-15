@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from vs_sim.concurrency import WorkerStartRefusedError
 from vs_sim.gate import arrival
 from vs_sim.loopback_http import HttpReply
-from vs_sim.output import DISCARD, OutputStream
+from vs_sim.output import OutputStream
 from vs_sim.processes import (
     ForegroundChild,
     PipedProcess,
@@ -335,9 +335,7 @@ class FakeProcesses:
     first_pid: int = 1000
     """The process ID of the first run; each later run gets the next one."""
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Record ``spec``, let its running time pass, and end it the way its script says."""
         pid = self.first_pid + len(self.ran)
         self.ran.append(spec)
@@ -392,9 +390,7 @@ class RefusingProcesses:
     A test that does need a command to run scripts it with :class:`FakeProcesses` instead.
     """
 
-    def run(
-        self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink = DISCARD
-    ) -> ProcessRun:
+    def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
         """Fail: this test runs no process."""
         del timeout, output
         message = f"this test runs no process, but ran {' '.join(spec.argv)}"
@@ -583,7 +579,7 @@ class ScriptedStreamingCommand:
         *,
         cwd: Path,
         timeout_seconds: float,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
         """Record the call and play the scripted command."""
         command = tuple(argv)

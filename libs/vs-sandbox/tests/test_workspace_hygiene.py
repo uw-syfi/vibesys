@@ -20,6 +20,7 @@ from vs_project.api import GitTracker, NullGitTrackerEvents
 from vs_project.api.testing import FakeGitRepositories
 from vs_sandbox.api import DockerSandbox
 from vs_sandbox.api.testing import ScriptedDockerCli, docker_result
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import SimThreads, examples
 
 if TYPE_CHECKING:
@@ -62,7 +63,7 @@ def test_snapshot_after_sandbox_run_commits_only_project_files(
         threads=SimThreads(),
         log_path=base / "logs" / "docker.log" if logged else None,
     )
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     sandbox.save_symlink_commands(symlink_commands)
     sandbox.stop()
     (workspace / "a.txt").write_text("2\n")

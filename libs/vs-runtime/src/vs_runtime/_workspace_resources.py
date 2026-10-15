@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     )
     from vs_sandbox.api import CommandRunner
     from vs_sim.api import BlockingRunner, OutputSink, Threads
+from vs_sim.api import DISCARD
 
 
 @dataclass(frozen=True, slots=True)
@@ -426,7 +427,9 @@ class RuntimeWorkspaceResource:
         return entry_kind(self.path, path) is EntryKind.DIRECTORY
 
     def execute(self, command: str, timeout_seconds: int | None) -> CommandExecutionResult:
-        return self._environment.session.sandbox.execute(command, timeout=timeout_seconds)
+        return self._environment.session.sandbox.execute(
+            command, timeout=timeout_seconds, output=DISCARD
+        )
 
     def agent_sandbox(self) -> CommandRunner | None:
         environment = self._environment

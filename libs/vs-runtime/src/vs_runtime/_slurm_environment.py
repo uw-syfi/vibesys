@@ -236,11 +236,14 @@ class _AgentGpuMode:
     def gpu_commands(
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
     ) -> GpuCommands:
+        # The launcher names each job, so it takes the run's configuration too: the
+        # queue status tells this run's jobs apart by the run's job name prefix.
+        config = self.config.for_run(request.run_id)
         return agent_gpu_commands(
-            self.config,
+            config,
             workspace=request.workspace,
             project_path_policy=request.project_path_policy,
-            launcher=agent_gpu_launcher(self.config, self.shell_command, request.system),
+            launcher=agent_gpu_launcher(config, self.shell_command, request.system),
             confinement=confinement,
         )
 

@@ -44,6 +44,8 @@ class AgentToolContext:
 
     profiler_id: str
     profiler_env: tuple[tuple[str, str], ...] = ()
+    queue_status_socket: str | None = None
+    """The run's queue status socket, valid on the host and in every agent container."""
 
 
 def prepare_domain_model_artifacts(

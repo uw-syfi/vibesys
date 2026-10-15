@@ -121,12 +121,12 @@ def _read_result_file(sandbox: CommandRunner, output_path: str) -> tuple[str, st
     and otherwise read back in bounded chunks. A file that cannot be read
     whole returns the truncated framing with a reason naming its size.
     """
-    whole = sandbox.execute(_framed_result_command(output_path))
+    whole = sandbox.execute(_framed_result_command(output_path), output=DISCARD)
     if not whole.truncated:
         return whole.output, None
     path = shlex.quote(output_path)
     try:
-        size = int(sandbox.execute(f"wc -c < {path}").output.strip())
+        size = int(sandbox.execute(f"wc -c < {path}", output=DISCARD).output.strip())
     except ValueError:
         return whole.output, "benchmark result file size could not be read"
     if size > _MAX_RESULT_BYTES:
@@ -148,7 +148,8 @@ def _read_chunks(sandbox: CommandRunner, path: str, size: int) -> bytes | None:
     data = bytearray()
     for offset in range(0, size, _RESULT_CHUNK_BYTES):
         chunk = sandbox.execute(
-            f"tail -c +{offset + 1} {path} | head -c {_RESULT_CHUNK_BYTES} | base64 | tr -d '\\n'"
+            f"tail -c +{offset + 1} {path} | head -c {_RESULT_CHUNK_BYTES} | base64 | tr -d '\\n'",
+            output=DISCARD,
         )
         if chunk.exit_code != 0 or chunk.truncated:
             return None
@@ -335,7 +336,7 @@ class TrustedEvaluationExecutor(Protocol):
     """Serialize trusted evaluation effects for one workspace."""
 
     async def accuracy(
-        self, *, command_override: str | None = None, output: OutputSink = DISCARD
+        self, *, command_override: str | None = None, output: OutputSink
     ) -> TrustedAccuracyResult:
         """Run the configured accuracy command and enforce input integrity.
 
@@ -348,7 +349,7 @@ class TrustedEvaluationExecutor(Protocol):
         *,
         command_override: str | None = None,
         required_metrics: frozenset[str] = frozenset(),
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> TrustedBenchmarkResult:
         """Run and decode the configured benchmark result contract.
 
@@ -394,7 +395,7 @@ class RuntimeTrustedEvaluation:
         self._lock = asyncio.Lock()
 
     async def accuracy(
-        self, *, command_override: str | None = None, output: OutputSink = DISCARD
+        self, *, command_override: str | None = None, output: OutputSink
     ) -> TrustedAccuracyResult:
         """Run one accuracy operation without overlapping workspace mutation."""
         async with self._lock:
@@ -405,7 +406,7 @@ class RuntimeTrustedEvaluation:
         *,
         command_override: str | None = None,
         required_metrics: frozenset[str] = frozenset(),
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> TrustedBenchmarkResult:
         """Run one benchmark operation without overlapping workspace mutation."""
         async with self._lock:
@@ -613,7 +614,7 @@ class RuntimeTrustedEvaluation:
             )
         finally:
             with contextlib.suppress(Exception):
-                self._sandbox.execute(f"rm -f -- {shlex.quote(output_path)}")
+                self._sandbox.execute(f"rm -f -- {shlex.quote(output_path)}", output=DISCARD)
 
     def _execute(
         self,

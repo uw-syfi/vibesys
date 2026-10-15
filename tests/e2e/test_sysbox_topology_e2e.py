@@ -38,6 +38,7 @@ from vs_sim.api import MonotonicClock, OsProcesses, OsThreads, SubprocessPipedPr
 if TYPE_CHECKING:
     import subprocess
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 pytestmark = pytest.mark.e2e
 
@@ -97,6 +98,7 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
             features=image_features({CONTAINER_RUNTIME_TOOLCHAIN}),
             timeout=_BUILD_TIMEOUT_S,
             clock=MonotonicClock(),
+            output=DISCARD,
         ),
         docker_in_docker=True,
         docker=SubprocessDockerCli(
@@ -113,7 +115,7 @@ def test_hotel_reservation_sandbox_runs_compose_and_containers_on_its_own_daemon
             timeout=_EXEC_TIMEOUT_S,
         )
 
-    sandbox.start()
+    sandbox.start(output=DISCARD)
     try:
         assert (
             inside(

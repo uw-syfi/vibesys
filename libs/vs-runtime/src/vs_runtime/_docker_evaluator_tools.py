@@ -179,6 +179,7 @@ def _build_evaluator_tools(
                     )
                 ),
                 timeout=120,
+                output=DISCARD,
             )
             if ownership.exit_code != 0:
                 detail = (ownership.output or "chown failed").strip()

@@ -30,18 +30,17 @@ from .cluster_types import (
     collection_problem,
     validate_operation_id,
 )
+from .errors import SlurmError, SlurmSubmissionRejectedError
 from .runner import (
     SlurmArtifactTarget,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmBatchStageResult,
-    SlurmError,
     SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobResult,
     SlurmJobStatus,
-    SlurmSubmissionRejectedError,
     _safe_relative_path,
     batch_stage_handles,
 )

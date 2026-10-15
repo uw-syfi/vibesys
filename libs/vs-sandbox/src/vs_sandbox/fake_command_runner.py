@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 from vs_sandbox.command_execution import rejected_result, result_of, validate_timeout
 from vs_sandbox.execution import CommandResult
 from vs_sandbox.process_execution import ProcessOutcome, ProcessStop
-from vs_sim.api import DISCARD, OsThreads, OutputStream, Threads
+from vs_sim.api import OsThreads, OutputStream, Threads
 
 if TYPE_CHECKING:
     from vs_sim.api import Event, OutputSink
@@ -130,7 +130,7 @@ class FakeCommandRunner:
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> CommandResult:
         """Return the scripted result for *command*, or the default result.
 
@@ -186,7 +186,7 @@ class FakeLifecycleRunner(FakeCommandRunner):
     start_error: Exception | None = None
     stop_error: Exception | None = None
 
-    def start(self, *, output: OutputSink = DISCARD) -> None:
+    def start(self, *, output: OutputSink) -> None:
         """Record one lifecycle start attempt and raise a scripted error; it prints nothing."""
         del output
         self.start_count += 1
@@ -194,7 +194,7 @@ class FakeLifecycleRunner(FakeCommandRunner):
             raise self.start_error
 
     def execute_as_root(
-        self, command: str, *, timeout: int | None = None, output: OutputSink = DISCARD
+        self, command: str, *, timeout: int | None = None, output: OutputSink
     ) -> CommandResult:
         """Run *command* like :meth:`execute` and record it as a root execution."""
         before = len(self.calls)

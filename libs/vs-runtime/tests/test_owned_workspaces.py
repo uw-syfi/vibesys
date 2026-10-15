@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration
     from vs_sandbox.api import CommandRunner
     from vs_sim.api import OutputSink
+from vs_sim.api import DISCARD
 
 
 class _Resource:
@@ -485,7 +486,7 @@ async def test_gate_stages_the_submitted_revision_while_the_live_workspace_chang
 
     provider.content_root.edit_while_staging = implementer_edits
     runtime = _runtime(provider)
-    accuracy = await runtime.evaluation.accuracy("run-a", runtime.workspaces.root)
+    accuracy = await runtime.evaluation.accuracy("run-a", runtime.workspaces.root, output=DISCARD)
 
     assert accuracy.result is not None
     assert accuracy.result.passed
@@ -509,10 +510,12 @@ async def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(
         "run-a",
         workspace,
         release=True,
+        output=DISCARD,
     )
     benchmark = await runtime.evaluation.benchmark(
         workspace,
         required_metrics=frozenset({"throughput"}),
+        output=DISCARD,
     )
 
     assert accuracy.result is not None
@@ -534,6 +537,7 @@ async def test_runtime_evaluation_owns_snapshots_receipts_and_command_binding(
             "run-b",
             workspace,
             reuse=accuracy.receipt,
+            output=DISCARD,
         )
     # An agent-reported artifact path that is not a workspace file is
     # repairable feedback, including recipe JSON inlined in its place.

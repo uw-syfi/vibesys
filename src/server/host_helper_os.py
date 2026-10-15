@@ -283,10 +283,10 @@ class StoreLogReader:
     """The helper's ``LogReader`` over each run's ``vs_logs`` store on this host.
 
     ``locate`` names the run an instance drives or drove (``None`` when the host knows
-    nothing of it); ``directory_for`` names that run's store. Each call opens the store
-    afresh, so the helper keeps no state between requests. ``vs_logs.read`` is imported
-    on the first logs request, so a channel that never asks for logs, and every
-    ``hello``, loads none of it (``tests/e2e/test_host_helper.py`` holds the ceiling).
+    nothing of it); ``directory_for`` names that run's store. Each request opens the
+    store afresh (``instance``), so the helper keeps no state between requests.
+    ``vs_logs.read`` is imported on the first logs request, so a channel that never asks
+    for logs, and every ``hello``, loads none of it (``tests/e2e/test_host_helper.py`` holds the ceiling).
     """
 
     def __init__(
@@ -298,7 +298,26 @@ class StoreLogReader:
         self._locate = locate
         self._directory_for = directory_for
 
-    def streams(self, instance_id: str) -> tuple[LogStream, ...]:
+    def instance(self, instance_id: str) -> _StoreInstanceLogs:
+        """The instance's run's store, opened; ``UnknownInstanceError`` for an unknown run."""
+        location = self._locate(instance_id)
+        if location is None:
+            raise UnknownInstanceError(instance_id)
+        # lint-waiver: LW-640282 [PLC0415]; logs cost the helper nothing until a client reads one.
+        # > The same deferral as in `read`: `hello` must not load vs_logs.read, and an import
+        # > tach can see keeps its visibility rule enforced.
+        from vs_logs.read import open_log_directory  # noqa: PLC0415
+
+        return _StoreInstanceLogs(open_log_directory(self._directory_for(location), _OWNER))
+
+
+class _StoreInstanceLogs:
+    """One run's ``vs_logs`` store, opened: each read sees what was written since."""
+
+    def __init__(self, reader: StoreReader[LogOwner]) -> None:
+        self._reader = reader
+
+    def streams(self) -> tuple[LogStream, ...]:
         """The instance's streams, oldest first; none when its run recorded no logs."""
         return tuple(
             LogStream(
@@ -309,12 +328,10 @@ class StoreLogReader:
                 size=info.size,
                 outcome=None if info.outcome is None else LogStreamOutcome(info.outcome.value),
             )
-            for info in self._reader(instance_id).list_streams()
+            for info in self._reader.list_streams()
         )
 
-    def read(
-        self, instance_id: str, stream_id: str, start: LogOffset | LogTail, max_bytes: int
-    ) -> StoredBytes:
+    def read(self, stream_id: str, start: LogOffset | LogTail, max_bytes: int) -> StoredBytes:
         """At most ``max_bytes`` of the stream from ``start``."""
         # lint-waiver: LW-640281 [PLC0415]; logs cost the helper nothing until a client reads one.
         # > At module level every channel would load vs_logs.read before `hello`, which the
@@ -322,7 +339,7 @@ class StoreLogReader:
         # > the import from tach, which keeps vs_logs.read visible to the host helper only.
         from vs_logs.read import FromOffset, Tail, UnknownStreamError  # noqa: PLC0415
 
-        reader = self._reader(instance_id)
+        reader = self._reader
         origin = (
             FromOffset(start.offset) if isinstance(start, LogOffset) else Tail(start.tail_bytes)
         )
@@ -342,14 +359,3 @@ class StoreLogReader:
             eof=chunk.eof,
             closed=chunk.closed,
         )
-
-    def _reader(self, instance_id: str) -> StoreReader[LogOwner]:
-        location = self._locate(instance_id)
-        if location is None:
-            raise UnknownInstanceError(instance_id)
-        # lint-waiver: LW-640282 [PLC0415]; logs cost the helper nothing until a client reads one.
-        # > The same deferral as in `read`: `hello` must not load vs_logs.read, and an import
-        # > tach can see keeps its visibility rule enforced.
-        from vs_logs.read import open_log_directory  # noqa: PLC0415
-
-        return open_log_directory(self._directory_for(location), _OWNER)

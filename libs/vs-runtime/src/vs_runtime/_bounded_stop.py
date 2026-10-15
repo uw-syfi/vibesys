@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 
 from vs_async_ops.api import drain
 from vs_runtime._run_control import RunStopped
-from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
@@ -173,7 +172,7 @@ class _StopGatedEvaluation:
         workspace: Workspace,
         *,
         reuse: AccuracyReceipt | None = None,
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> AccuracyEvaluation:
         return await self.until_stop(self._inner.accuracy(workspace, reuse=reuse, output=output))
 
@@ -182,7 +181,7 @@ class _StopGatedEvaluation:
         workspace: Workspace,
         *,
         objectives: tuple[BenchmarkObjective, ...] = (),
-        output: OutputSink = DISCARD,
+        output: OutputSink,
     ) -> BenchmarkEvaluation:
         return await self.until_stop(
             self._inner.benchmark(workspace, objectives=objectives, output=output)

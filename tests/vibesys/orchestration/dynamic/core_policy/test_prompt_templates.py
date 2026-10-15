@@ -186,6 +186,10 @@ def test_the_implementer_is_given_its_hypothesis_and_what_the_last_turn_left(
         context.prior_failure_tail
     )
     assert ("ended without a candidate" in text) is (context.last_blocker is not None)
+    assert ("still queued or running" in text) is context.baseline_pending
+    assert ("trusted measurement failed" in text) is (context.input_failure is not None)
+    if context.input_failure is not None and context.input_failure.output:
+        assert context.input_failure.output in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

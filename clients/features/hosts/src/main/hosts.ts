@@ -314,15 +314,21 @@ export class Hosts {
    * Answer one logs request from `owner`'s inspector about `instanceId` on `id`, over the host's
    * logs channel (`docs/contributing/desktop-connection.md`, "Logs"). The first request takes a
    * connection lease and a logs lease, which `owner` keeps while it asks about that host; asking
-   * about another host, `releaseLogs`, or the owner going away lets them go. The parser already
-   * held a read to `instanceId`.
+   * about another host, `releaseLogs`, or the owner going away lets them go, aborting the reads
+   * still in flight. The parser already held a read to `instanceId`. A `withdraw` aborts `owner`'s
+   * read in flight with that token, which withdraws the helper's long poll; a token naming no read
+   * in flight (it already answered) is a no-op.
    */
   async logs(
     id: HostId,
     instanceId: string,
     request: RunLogsRequest,
     owner: string,
-  ): Promise<LogListOutcome | LogReadOutcome> {
+  ): Promise<LogListOutcome | LogReadOutcome | null> {
+    if (request.kind === 'withdraw') {
+      this.#logs.get(owner)?.withdraw(request.token);
+      return null;
+    }
     if (this.#retiredInspectionOwners.has(owner)) {
       throw new Error('the inspection owner was retired');
     }
@@ -342,7 +348,7 @@ export class Hosts {
       throw error;
     }
     if (request.kind === 'list') return logs.list(instanceId);
-    return logs.read(request.read);
+    return held.read(request.token, signal => logs.read(request.read, signal));
   }
 
   /** Let `owner`'s logs channel go; the channel closes once no other holder uses it. */
@@ -545,6 +551,8 @@ export class Hosts {
 class InspectorLogs {
   readonly host: HostKey;
   readonly #held: Promise<{readonly connection: ConnectionLease; readonly logs: LogsLease}>;
+  /** The view's reads in flight, by the token it named each with, for its `withdraw`. */
+  readonly #reads = new Map<string, AbortController>();
 
   constructor(host: HostKey, connection: Promise<ConnectionLease>) {
     this.host = host;
@@ -555,8 +563,44 @@ class InspectorLogs {
     return (await this.#held).logs;
   }
 
-  /** Release the logs lease, then the connection; a hold that never connected has nothing to free. */
+  /**
+   * Run the view's read named `token` under a signal `withdraw` aborts. A withdrawn read answers a
+   * `transport` failure: the view stopped waiting for it, so this only settles the invoke.
+   */
+  async read(
+    token: string,
+    read: (signal: AbortSignal) => Promise<LogReadOutcome>,
+  ): Promise<LogReadOutcome> {
+    if (this.#reads.has(token)) {
+      return {
+        ok: false,
+        failure: {code: 'transport', message: `read ${token} is already in flight`},
+      };
+    }
+    const controller = new AbortController();
+    this.#reads.set(token, controller);
+    try {
+      return await read(controller.signal);
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+      return {ok: false, failure: {code: 'transport', message: 'the view withdrew the read'}};
+    } finally {
+      if (this.#reads.get(token) === controller) this.#reads.delete(token);
+    }
+  }
+
+  /** Abort the view's read in flight named `token`, if there is one. */
+  withdraw(token: string): void {
+    this.#reads.get(token)?.abort(new Error('the view withdrew the read'));
+  }
+
+  /**
+   * Abort the reads still in flight, then release the logs lease, then the connection; a hold that
+   * never connected has nothing to free.
+   */
   async release(): Promise<void> {
+    for (const read of this.#reads.values()) read.abort(new Error('the logs were released'));
+    this.#reads.clear();
     let held: {readonly connection: ConnectionLease; readonly logs: LogsLease};
     try {
       held = await this.#held;
