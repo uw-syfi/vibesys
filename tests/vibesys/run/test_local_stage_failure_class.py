@@ -72,6 +72,7 @@ from vs_runtime.api.infrastructure import (
 from vs_runtime.api.testing import MemoryValidationPasses, idle_environment_system
 from vs_sandbox.api import CommandResult, CommandRunner, ProjectPathPolicy
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
 if TYPE_CHECKING:
@@ -82,7 +83,7 @@ if TYPE_CHECKING:
     from vs_project.api import OrchestrationRunManifest
     from vs_runtime.api import AgentRole, OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import AgentExecutionConfiguration
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
 _RUN_ID = "lost-stage"
 _HANDLE = "handle-1"
@@ -114,9 +115,10 @@ class _LosesStageCommands(FakeCommandRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
         del cancel  # no stage of this test is cancelled
-        result = super().execute(command, timeout=timeout)
+        result = super().execute(command, timeout=timeout, output=output)
         if _ACCURACY in command or _BENCHMARK in command:
             return self.lost
         return result

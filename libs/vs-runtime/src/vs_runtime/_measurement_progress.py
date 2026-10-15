@@ -4,6 +4,9 @@
 ``MeasurementProgress`` turns those polls into one ``stage_started`` and one ``stage_settled``
 per stage of a job, in this process. A restarted host may repeat a report; the reports carry
 data only, and the host that formats them decides what a repeat looks like.
+
+The raw output of a stage's command is not a report: an executor that runs stages in this
+process writes it, while the stage runs, to a stream a ``StageOutputOpener`` opens for it.
 """
 
 from __future__ import annotations
@@ -14,7 +17,11 @@ from typing import TYPE_CHECKING, Protocol
 from vs_evaluation.api import EvidenceOutcome, PollPhase, StageState, TrustedEvidence
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from contextlib import AbstractContextManager
+
     from vs_evaluation.api import ExecutorPoll
+    from vs_sim.api import OutputSink
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +31,29 @@ class StageStarted:
     handle_id: str
     purpose: str
     stage_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class StageRun:
+    """One run of one stage of a measurement job, as the executor running it names it.
+
+    ``handle_id`` and ``stage_id`` are the ones :class:`StageStarted` reports for the same
+    stage; the job's purpose is on that report, since an executor does not know it.
+    """
+
+    handle_id: str
+    stage_id: str
+
+
+type StageOutputOpener = Callable[[StageRun], AbstractContextManager[OutputSink]]
+"""Opens the stream one stage's command writes its raw stdout and stderr to.
+
+Called once each time an executor starts running a stage, before its command starts.
+The executor writes the command's output chunks to the entered sink while the stage
+runs, and exits the context when the stage has ended (passed, failed, or been
+cancelled) on every path; after exit nothing more is written. The stream carries output
+only: what the stage measured is reported through :class:`StageSettled`.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -134,6 +164,8 @@ __all__ = [
     "MeasurementObserver",
     "MeasurementProgress",
     "StageMetric",
+    "StageOutputOpener",
+    "StageRun",
     "StageSettled",
     "StageStarted",
 ]

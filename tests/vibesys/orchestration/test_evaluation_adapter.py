@@ -43,7 +43,7 @@ from vs_runtime.api import (
 from vs_runtime.api.testing import FakeWorkspace, idle_environment_system
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
-from vs_sim.api import OsThreads
+from vs_sim.api import DISCARD, Capture, OsThreads
 from vs_sim.api.testing import (
     ManualClock,
     SimThreads,
@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from typing import TypeVar
 
     from vibesys.run.host import CoreHost
-    from vs_sim.api import Event
+    from vs_sim.api import Event, OutputSink
 
     _Result = TypeVar("_Result")
 
@@ -80,12 +80,13 @@ class _BlockingEvaluationSandbox(FakeLifecycleRunner):
         *,
         timeout: int | None = None,
         cancel: Event | None = None,
+        output: OutputSink = DISCARD,
     ) -> CommandResult:
         del cancel  # the test releases the held command itself
         if not self.started.is_set():
             self.started.set()
             wait_or_fail(self.release, "the held trusted command to be released")
-        return super().execute(command, timeout=timeout)
+        return super().execute(command, timeout=timeout, output=output)
 
 
 def _write_project(
@@ -212,6 +213,32 @@ def test_adapter_preserves_failure_feedback(tmp_path: Path) -> None:
         assert not result.passed
         assert result.feedback is not None
         assert result.feedback.startswith("Framework accuracy gate failed.")
+    finally:
+        integration.close()
+
+
+def test_each_gate_writes_its_command_output_to_the_sink_it_was_given(tmp_path: Path) -> None:
+    accuracy_output, benchmark_output = Capture(1 << 16), Capture(1 << 16)
+
+    async def body(ctx: CoreHost) -> tuple[AccuracyEvaluation, BenchmarkEvaluation]:
+        root = ctx.workspaces.root
+        return (
+            await ctx.evaluation.accuracy(root, output=accuracy_output),
+            await ctx.evaluation.benchmark(root, output=benchmark_output),
+        )
+
+    project_root = tmp_path / "project"
+    _write_project(
+        project_root,
+        accuracy_command="pwd",
+        benchmark_command=("sh", "-c", 'echo warmup; python benchmark.py "$@"', "sh"),
+    )
+    (accuracy, benchmark), integration = _run_project(project_root, body)
+    try:
+        assert accuracy.passed
+        assert benchmark.passed
+        assert accuracy_output.stdout.strip()
+        assert benchmark_output.stdout.startswith(b"warmup\n")
     finally:
         integration.close()
 

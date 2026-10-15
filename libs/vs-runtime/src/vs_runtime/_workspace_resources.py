@@ -36,7 +36,7 @@ if TYPE_CHECKING:
         TrustedEvaluationExecutor,
     )
     from vs_sandbox.api import CommandRunner
-    from vs_sim.api import BlockingRunner, Threads
+    from vs_sim.api import BlockingRunner, OutputSink, Threads
 
 
 @dataclass(frozen=True, slots=True)
@@ -480,17 +480,21 @@ class RuntimeWorkspaceResource:
             deployment_release_env_var=view.deployment_release_env_var,
         )
 
-    async def trusted_accuracy(self, command_override: str | None) -> TrustedAccuracyResult:
-        return await self._evaluation.accuracy(command_override=command_override)
+    async def trusted_accuracy(
+        self, command_override: str | None, output: OutputSink
+    ) -> TrustedAccuracyResult:
+        return await self._evaluation.accuracy(command_override=command_override, output=output)
 
     async def trusted_benchmark(
         self,
         command_override: str | None,
         required_metrics: frozenset[str],
+        output: OutputSink,
     ) -> TrustedBenchmarkResult:
         return await self._evaluation.benchmark(
             command_override=command_override,
             required_metrics=required_metrics,
+            output=output,
         )
 
     def close(self) -> None:
