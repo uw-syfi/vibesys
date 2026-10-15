@@ -482,6 +482,17 @@ _PLAN = {
             "pass_criteria": "Accuracy passes and throughput improves.",
         }
     ],
+    "handoff": {
+        "expectations": [
+            {
+                "work_id": "raise-value",
+                "expected": "Throughput rises with VALUE.",
+                "if_it_succeeds": "Raise it further.",
+                "if_it_fails": "Look elsewhere.",
+            }
+        ],
+        "doubts": [],
+    },
 }
 _IMPLEMENTED = {
     "summary": "Raised VALUE.",

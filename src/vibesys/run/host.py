@@ -465,6 +465,8 @@ class _ProductHostFactory:
             queue_allowance_seconds=config.evaluation.queue_allowance_seconds,
             observe_interval_seconds=config.evaluation.observe_interval_seconds,
             observe_backoff_cap_seconds=config.evaluation.observe_backoff_cap_seconds,
+            queue_wait_budget_seconds=config.evaluation.queue_wait_budget_seconds,
+            queue_notice_interval_seconds=config.evaluation.queue_notice_interval_seconds,
             request_retries=config.evaluation.request_retries(),
             max_run_seconds=config.run.max_run_seconds,
             cancellation_bound_seconds=config.run.cancellation_bound_seconds,

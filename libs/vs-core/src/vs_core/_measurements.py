@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from . import _wait_clock
 from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
 from ._proofs import (
@@ -63,6 +64,7 @@ from .types.evaluation import (
     EvidenceAcceptanceReceipt,
     InspectOwnedJob,
     JobObserved,
+    JobQueued,
     JobsDrainRequested,
     JobTerminationRequested,
     JobWaitLapsed,
@@ -1253,6 +1255,9 @@ def _job_observed(
             "released": observation.released,
             "children": tuple(dict.fromkeys((*job.children, *observation.children))),
             "evidence": tuple(accepted),
+            "queue_credit": _wait_clock.credited(
+                job, observation, context.run.limits, context.records.hosts
+            ),
             **_next_poll(job, observation, context),
         }
     )
@@ -1277,7 +1282,7 @@ def _job_observed(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
     requests: tuple[Outbound, ...] = ()
-    events: tuple[MeasurementResult, ...] = ()
+    events: tuple[MeasurementResult | JobQueued, ...] = _queued_notice(updated, job, context)
     source_id = updated.submission_id if isinstance(updated, OwnedJob) else updated.request_id
     reported = _reported_to_strategy(context, job)
     if _conclusive(observation):
@@ -1286,6 +1291,7 @@ def _job_observed(
         failure = MeasurementFailure.UNKNOWN if refused else claim
         if reported and not _conclusive(job.observation):
             events = (
+                *events,
                 MeasurementResult(
                     scope=job.scope,
                     source_request=source_id,
@@ -1298,6 +1304,7 @@ def _job_observed(
         elif reported and (newly or refused):
             # Late evidence is published once, as the delta, never replayed or dropped.
             events = (
+                *events,
                 MeasurementResult(
                     scope=job.scope,
                     source_request=source_id,
@@ -1330,6 +1337,31 @@ def _job_observed(
         signals=closing or (*_history_unless_awaited(state, context, job, event), wake),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
         events=events,
+    )
+
+
+def _queued_notice(
+    updated: OwnedJob | RegisteredOwnedJob,
+    job: OwnedJob | RegisteredOwnedJob,
+    context: EvaluationContext,
+) -> tuple[JobQueued, ...]:
+    """A ``JobQueued`` report each time a pending job's queue credit passes another interval.
+
+    It carries the executor's pending reason as given, or none when the executor gave none.
+    """
+    limits = context.run.limits
+    if updated.resource_id is None or not _wait_clock.notice_due(updated, job.queue_credit, limits):
+        return ()
+    progress = updated.progress
+    return (
+        JobQueued(
+            scope=updated.scope,
+            resource_id=updated.resource_id,
+            source_request=_wait_clock.source(updated),
+            queued_s=updated.queue_credit,
+            budget_left_s=_wait_clock.queue_budget_left(updated, limits),
+            pending_reason=None if progress is None else progress.pending_reason,
+        ),
     )
 
 

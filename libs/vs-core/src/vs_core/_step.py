@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, assert_never
 
 from pydantic import TypeAdapter
 
-from . import _wait_clock, attempts, evaluation, records, scheduling, sessions, settlement
+from . import attempts, evaluation, records, scheduling, sessions, settlement
 from ._continuations import SuspensionRefusal, exhausted, paid_prefix_refusal, wait_refusal_in
 from ._deadlines import queued_until, resolve_until
 from ._dispatch_episode import (
@@ -18,6 +18,7 @@ from ._dispatch_episode import (
     retirement_dispatch,
     scope_admission,
 )
+from ._host_epochs import downtime
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._proofs import (
@@ -728,18 +729,6 @@ def _stall_entries(
     ]
 
 
-def _applied(state: CoreState, area: Area, change: AreaChange) -> CoreState:
-    """``state`` with ``area``'s new state, and the queue time an evaluation change ended charged.
-
-    A job fact that ends a queued interval moves every limit its job counts against: its
-    agent calls (evaluation) and the record that started it (records), so both move here.
-    """
-    changed = state.model_copy(update={area.value: change.state})
-    if area == Area.EVALUATION:
-        changed = _wait_clock.charge_queue_time(state, changed)
-    return changed
-
-
 def propagate(
     state: CoreState,
     initial: tuple[Signal, ...],
@@ -793,7 +782,7 @@ def propagate(
         expected = type(getattr(state, area.value))
         if type(change.state) is not expected:
             raise ContractError((area.value, "state"), "reducer returned another area state")
-        state = _applied(state, area, change)
+        state = state.model_copy(update={area.value: change.state})
         pending.extend((child, cause, admission_id) for child in change.signals)
         _validate_area_outputs(state, area, change, cause)
         requests.extend(
@@ -1615,7 +1604,11 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
         if isinstance(event, RecoveryStarted):
             # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
             opened = records.open_host_epoch(state.records, state.run, event)
-            state = state.model_copy(update={"records": opened})
+            # The downtime the new epoch proves moves open waits' limits as it moves open
+            # records' limits, so the two agree.
+            credit = downtime(opened.hosts) if opened.hosts != state.records.hosts else 0.0
+            waits = evaluation.credit_downtime(state.evaluation, state.run, credit)
+            state = state.model_copy(update={"records": opened, "evaluation": waits})
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))
     unmet = unmet_waits(given, result.state)

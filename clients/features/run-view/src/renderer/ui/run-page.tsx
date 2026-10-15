@@ -38,6 +38,11 @@ export interface RunPageProps {
   readonly onRetryReplay: () => void;
   /** Null for replay, which has no command channel by contract. */
   readonly onCommand: ((input: RunCommand) => Promise<RunCommandOutcome>) | null;
+  /**
+   * The current time in epoch milliseconds, for the starting label's elapsed time. The page owner
+   * ticks it (see `apps/web`), since presentational code schedules no timers.
+   */
+  readonly now: number;
 }
 
 export function RunPage({
@@ -46,11 +51,12 @@ export function RunPage({
   session,
   replayFailure,
   headerAction,
+  now,
   ...events
 }: RunPageProps): JSX.Element {
   const [requestedIterationId, setRequestedIterationId] = useState<string | null>(null);
   const banners = connectionBanners(run, session ?? REPLAY_SESSION);
-  const header = pageHeader(run, session);
+  const header = pageHeader(run, session, now);
   const roots = iterationRoots(iterations, run);
   const selectedIterationId = roots.some(root => root.id === requestedIterationId)
     ? requestedIterationId

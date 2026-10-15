@@ -407,11 +407,23 @@ def workstream(
 def portfolio(
     *workstreams: Mapping[str, object], updates: Iterable[Mapping[str, object]] = ()
 ) -> dict[str, object]:
-    """Return one planner reply."""
+    """Return one planner reply, with a handoff note expecting something of each workstream."""
     return {
         "reasoning": "Independent mechanisms limit throughput.",
         "workstreams": list(workstreams),
         "hypothesis_updates": list(updates),
+        "handoff": {
+            "expectations": [
+                {
+                    "work_id": item.get("hypothesis_id", item.get("profile_id")),
+                    "expected": "Throughput improves.",
+                    "if_it_succeeds": "Build on it.",
+                    "if_it_fails": "Try another mechanism.",
+                }
+                for item in workstreams
+            ],
+            "doubts": [],
+        },
     }
 
 

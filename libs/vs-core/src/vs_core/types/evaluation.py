@@ -36,7 +36,7 @@ from .evaluation_history import (
     EvaluationTerminalFacts,
     RepeatedFailureGuidance,
 )
-from .job_observations import JobProgress, MeasurementFailure, TimedOut
+from .job_observations import JobProgress, JobTimeout, MeasurementFailure, TimedOut
 from .until import Within
 from .waits import WaitOn
 
@@ -265,6 +265,13 @@ class OwnedJob(Value):
     wait: WaitOn | None = None
     """What the live job waits on: its next poll's timer, or the poll in flight. A terminal
     job waits on nothing."""
+    queue_credit: Seconds = 0
+    """Seconds of queue time this job's facts earned: its limit counts from its start.
+
+    Each interval from a fact that says the job is pending to its next fact earns its length,
+    but at most ``observe_backoff_cap``: a poll that answers that often keeps the credit
+    exact, and a pending fact nobody refreshes (the scheduler stopped answering) stops
+    earning (``_wait_clock``)."""
 
     @model_validator(mode="after")
     def waits_while_live(self) -> OwnedJob:
@@ -300,6 +307,13 @@ class RegisteredOwnedJob(Value):
     wait: WaitOn | None = None
     """What the live job waits on: its operation request until that names the job, then
     its next poll's timer or the poll in flight. A terminal job waits on nothing."""
+    queue_credit: Seconds = 0
+    """Seconds of queue time this job's facts earned: its limit counts from its start.
+
+    Each interval from a fact that says the job is pending to its next fact earns its length,
+    but at most ``observe_backoff_cap``: a poll that answers that often keeps the credit
+    exact, and a pending fact nobody refreshes (the scheduler stopped answering) stops
+    earning (``_wait_clock``)."""
 
     @model_validator(mode="after")
     def waits_while_live(self) -> RegisteredOwnedJob:
@@ -368,6 +382,13 @@ class Continuation(Value):
     deadline_at: Seconds
     phase: ContinuationPhase
     timeout: TimedOut | None = None
+    spent: tuple[JobTimeout, ...] = ()
+    """Jobs whose own queue budget ran out while the wait went on, in the order they ran
+    out: core cancelled each, and the wait goes on with its other jobs. Each is reported
+    unfinished, ``by`` ``QUEUE_BUDGET``, when the wait ends."""
+    downtime_credit: Seconds = 0
+    """Host downtime credited to the wait's limit while it was open, as an open request
+    record's limit is moved past it (``open_host_epoch``): while no host runs nothing waits."""
     park_authority: RequestId | None = None
     reopen_authority: RequestId | None = None
     cancelled_resolutions: tuple[ResourceId, ...] = ()
@@ -390,6 +411,9 @@ class Continuation(Value):
             raise ContractValidationError(
                 "authorization_receipt.timeout", "differs from frozen timeout"
             )
+        spent = tuple(job.resource_id for job in self.spent)
+        if len(set(spent)) != len(spent) or not set(spent) <= set(self.jobs):
+            raise ContractValidationError("spent", "names each of the wait's own jobs at most once")
         return self
 
 
@@ -626,10 +650,11 @@ class AgentCall(Value):
     request_id: RequestId | None = None
     """The submission it names, or None when core rejected the call."""
     deadline_at: Seconds | None = None
-    """The named submission's deadline, bounded by the run's; None when rejected.
+    """The named submission's stated deadline, bounded by the run's; None when rejected.
 
-    Answered as the call time plus the limit; each interval its job then spends queued moves
-    it later by that interval, so the limit counts from the job's start (``_wait_clock``)."""
+    Answered as the call time plus the limit, and never moved: it is what the agent was told.
+    A wait on the job reads the limit from the submission's record, which a host restart
+    moves past its downtime, and adds the job's queue credit (``_wait_clock``)."""
     repeat: bool = False
     """Whether the call named a submission an earlier call (or a Measure) had allocated."""
     rejection: AgentRejection | None = None
@@ -829,6 +854,26 @@ class MeasurementResult(Value):
     It is the only account of a failure that left no evidence, such as a benchmark that
     died without a result record, so the strategy can tell the agent why it was given up.
     """
+
+
+class JobQueued(Value):
+    """A job still waits in its executor's queue: core reports it each ``queue_notice_interval``.
+
+    Published for operators; a search does not receive it. ``pending_reason`` is the
+    executor's own reason code (Slurm's ``Priority``, ``Resources``, ``ReqNodeNotAvail``),
+    or None when the executor gave none: core never invents one.
+    """
+
+    kind: Literal["job_queued"] = "job_queued"
+    scope: Scope
+    resource_id: ResourceId
+    source_request: RequestId
+    """The request that started the job: its submission, or its registered operation."""
+    queued_s: Seconds
+    """Queue time the job has been credited so far."""
+    budget_left_s: Seconds
+    """Queue time left before core ends the measurement with ``QUEUE_BUDGET_SPENT``."""
+    pending_reason: str | None = None
 
 
 class SubmitMeasurement(RequestBase):

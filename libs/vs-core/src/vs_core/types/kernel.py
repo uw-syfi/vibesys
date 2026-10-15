@@ -39,6 +39,7 @@ from .evaluation import (
     EvaluationEvent,
     EvaluationState,
     EvidenceRef,
+    JobQueued,
     MeasurementResult,
     ResumeAuthorized,
     TurnSuspended,
@@ -269,6 +270,7 @@ type StrategyEvent = Annotated[
     | CheckpointResolved
     | InterruptCompleted
     | MeasurementResult
+    | JobQueued
     | ResumeAuthorized
     | TurnSuspended
     | YieldPublicationFailed

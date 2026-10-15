@@ -14,7 +14,7 @@ from ._deadlines import bound_to_run, cleanup, limit_to, time_remains
 from ._evaluation_history import attempt_settled, produce_history
 from ._registry import ContractError
 from ._session_scope import dispatching_request
-from ._wait_clock import queued, submission_deadline
+from ._wait_clock import Bound, wait_bounds
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
     AttemptPhase,
@@ -51,7 +51,7 @@ from .types.evaluation import (
     TurnSuspended,
 )
 from .types.evaluation_history import EvaluationHistoryAvailability
-from .types.job_observations import JobTimeout, TimedOut
+from .types.job_observations import JobTimeout, TimedOut, WaitEnd
 from .types.kernel import AreaChange, EvaluationContext
 from .types.records import InspectRequest, Outbound, RequestPhase, within
 from .types.scope_reopen import ScopedAdmissionReopenOutcome
@@ -229,8 +229,7 @@ def commit_refusal_in(
         matching = tuple(row for row in owned if row.resource_id == identity)
         if len(matching) != 1 or matching[0].scope != invocation.scope:
             return SuspensionRefusal.JOB_NOT_OWNED
-    deadline = wait_deadline(state, wait)
-    if not time_remains(context.run, context.run.deadline_at if deadline is None else deadline):
+    if not time_remains(context.run, wait_deadline(state, context, wait).at):
         return SuspensionRefusal.DEADLINE_EXCEEDED
     return None
 
@@ -243,30 +242,50 @@ def _inspection(context: EvaluationContext, request: Request) -> Outbound:
 def _until_wait_ends(
     state: EvaluationState, context: EvaluationContext, continuation: Continuation, request: Request
 ) -> Outbound:
-    """A poll of a job an agent waits on ends when that wait's deadline passes.
+    """A poll of a job an agent waits on ends when that wait's bound passes."""
+    deadline = wait_deadline(state, context, continuation)
+    return within(request, limit_to(context.run, deadline.at))
 
-    While a job of the wait is queued the wait has no deadline, so the run's bounds the poll.
-    """
-    deadline = wait_deadline(state, continuation)
-    return within(
-        request, limit_to(context.run, context.run.deadline_at if deadline is None else deadline)
+
+def _live(state: EvaluationState, wait: Continuation) -> tuple[OwnedJob | RegisteredOwnedJob, ...]:
+    """``wait``'s jobs it still waits on: neither settled nor ended by their queue budget."""
+    spent = {job.resource_id for job in wait.spent}
+    return tuple(
+        job for job in _jobs(state, wait) if not _settled(job) and job.resource_id not in spent
     )
 
 
-def wait_deadline(state: EvaluationState, wait: Continuation) -> float | None:
-    """When ``wait`` times out, counting its limit from its jobs' start; None while one is queued.
+def wait_deadline(state: EvaluationState, context: EvaluationContext, wait: Continuation) -> Bound:
+    """When ``wait`` next changes, and why: at the earliest bound of the jobs it waits on.
 
-    Each unfinished job's limit is its submission's deadline, which ``charge_queue_time``
-    moves later by the job's queue time; a job no agent call submitted has the deadline the
-    wait states. The wait times out at the earliest of these, never before its stated deadline.
-    While any unfinished job is queued it does not time out at all (see ``_wait_clock``).
+    Each job's limit counts from its own start, and its queue budget bounds how long it may
+    wait to start (``_wait_clock``). A job's queue budget ends that job alone; any other
+    bound ends the wait. The bound is always a time; past the run deadline the run's end is
+    the bound.
     """
-    unfinished = tuple(job for job in _jobs(state, wait) if not _settled(job))
-    if any(queued(job) for job in unfinished):
-        return None
-    limits = (submission_deadline(state, job) for job in unfinished)
-    earliest = min((wait.deadline_at if at is None else at for at in limits), default=None)
-    return wait.deadline_at if earliest is None else max(wait.deadline_at, earliest)
+    bounds = wait_bounds(state, context.records, context.run, wait, _live(state, wait))
+    return min(bounds, key=lambda bound: bound.at, default=Bound(wait.deadline_at, WaitEnd.LIMIT))
+
+
+def credit_downtime(state: EvaluationState, run: RunState, credit: float) -> EvaluationState:
+    """Every open wait (waiting or parked, not frozen) credited ``credit`` seconds of downtime.
+
+    While no host runs nothing waits, so a wait's limit moves past the downtime exactly as an
+    open request record's does (``open_host_epoch``); ``_wait_clock`` caps it at the run
+    deadline the same way. A terminal run's waits are already ended.
+    """
+    if credit <= 0 or run.status == RunStatus.TERMINAL:
+        return state
+    open_phases = (ContinuationPhase.WAITING, ContinuationPhase.PARKED)
+    continuations = tuple(
+        row.model_copy(update={"downtime_credit": row.downtime_credit + credit})
+        if row.phase in open_phases and row.timeout is None
+        else row
+        for row in state.continuations
+    )
+    if continuations == state.continuations:
+        return state
+    return state.model_copy(update={"continuations": continuations})
 
 
 def bounded_wait(run: RunState, wait: Continuation) -> Continuation:
@@ -508,37 +527,31 @@ def _released_dependencies(
         )
 
 
-def _deadline_proof(state: EvaluationState, continuation: Continuation) -> None:
-    if continuation.timeout is not None and (
-        continuation.timeout.deadline_at < continuation.deadline_at
-        or any(
-            item.resource_id not in continuation.jobs for item in continuation.timeout.unfinished
-        )
+def _timeout_proof(continuation: Continuation) -> None:
+    """A frozen timeout names only the wait's own jobs, and never precedes the stated deadline.
+
+    Only a job's queue budget may end a wait before the deadline its agent stated.
+    """
+    timeout = continuation.timeout
+    if timeout is not None and (
+        (timeout.by != WaitEnd.QUEUE_BUDGET and timeout.deadline_at < continuation.deadline_at)
+        or any(item.resource_id not in continuation.jobs for item in timeout.unfinished)
+        or any(item not in timeout.unfinished for item in continuation.spent)
     ):
         raise ContractError(
             ("continuation", "timeout"),
             "frozen timeout must not precede its stated deadline and names owned dependencies",
         )
-    deadline = None if continuation.timeout is not None else wait_deadline(state, continuation)
-    if deadline is not None and any(
-        not _settled(job)
-        and job.observation is not None
-        and job.observation.observed_at >= deadline
-        for job in _jobs(state, continuation)
-    ):
-        # ``reach_deadlines`` freezes a wait before any fact at or past its deadline is
-        # applied, so an unfinished job observed that late means the freeze was skipped:
-        # the progress it had at the deadline is gone and cannot be invented. A job that
-        # settled before the deadline may still report later facts (its release).
-        raise ContractError(
-            ("continuation", "timeout"),
-            "deadline must freeze before job facts; prior progress is unavailable",
-        )
 
 
 def _ready(state: EvaluationState, continuation: Continuation) -> bool:
-    return continuation.timeout is not None or all(
-        _settled(job) for job in _jobs(state, continuation)
+    """Whether the wait has ended: it froze, or every job settled and none ran out of budget.
+
+    A wait one of whose jobs spent its queue budget ends by freezing (``_deadline``), so the
+    agent hears which job ran out.
+    """
+    return continuation.timeout is not None or (
+        not continuation.spent and all(_settled(job) for job in _jobs(state, continuation))
     )
 
 
@@ -563,7 +576,7 @@ def _authorize(
     _job_ownership(state, context, continuation)
     if continuation.phase != ContinuationPhase.WAITING or not _ready(state, continuation):
         return AreaChange(state=state)
-    _deadline_proof(state, continuation)
+    _timeout_proof(continuation)
     invocation = _invocation(context, continuation)
     if not _active(context, invocation.scope):
         return AreaChange(state=state)
@@ -660,6 +673,8 @@ def _validate_new(
     if (
         continuation.phase != ContinuationPhase.WAITING
         or continuation.timeout is not None
+        or continuation.spent
+        or continuation.downtime_credit
         or continuation.evidence
         or continuation.park_authority is not None
         or continuation.reopen_authority is not None
@@ -1033,7 +1048,7 @@ def _suspend(
         for row in state.continuations
     )
     updated = state.model_copy(update={"continuations": (*history, continuation)})
-    _deadline_proof(updated, continuation)
+    _timeout_proof(continuation)
     # The strategy learns of the suspension exactly once, when the continuation is
     # first recorded; a replay returns above without events.
     notice: tuple[StrategyEvent, ...] = (TurnSuspended(continuation=continuation),)
@@ -1061,26 +1076,83 @@ def _suspend(
 def _deadline(
     state: EvaluationState, context: EvaluationContext, continuation: Continuation, now_at: float
 ) -> AreaChange[EvaluationState]:
+    """Apply every bound of ``continuation`` the clock has reached at ``now_at``.
+
+    A job whose queue budget ran out ends alone: it joins ``spent`` and core cancels it, and
+    the wait goes on with the jobs it still waits on. Any other bound of a job it waits on
+    ends the whole wait, freezing every unfinished job. A wait left with no job to wait on
+    after one spent its budget ends at once, by that budget.
+    """
     if (
         continuation.phase not in (ContinuationPhase.WAITING, ContinuationPhase.PARKED)
         or continuation.timeout is not None
     ):
         return AreaChange(state=state)
     _job_ownership(state, context, continuation)
-    deadline = wait_deadline(state, continuation)
-    if deadline is None or now_at < deadline:
-        return AreaChange(state=state)
-    _deadline_proof(state, continuation)
-    if _ready(state, continuation):
-        return AreaChange(state=state)
-    unfinished = tuple(
-        JobTimeout(resource_id=_resource(job), progress=job.progress)
-        for job in _jobs(state, continuation)
-        if not _settled(job)
+    live = _live(state, continuation)
+    bounds = dict(
+        zip(
+            (_resource(job) for job in live),
+            wait_bounds(state, context.records, context.run, continuation, live),
+            strict=True,
+        )
     )
-    frozen = continuation.model_copy(
+    ends = tuple(
+        bound
+        for bound in bounds.values()
+        if bound.by != WaitEnd.QUEUE_BUDGET and bound.at <= now_at
+    )
+    ending = min(ends, key=lambda bound: bound.at, default=None)
+    # A budget that ran out before the wait ended ends its job alone; one the wait's end
+    # came first for is that end's.
+    spends_until = now_at if ending is None else ending.at
+    spending = tuple(
+        job
+        for job in live
+        if bounds[_resource(job)].by == WaitEnd.QUEUE_BUDGET
+        and bounds[_resource(job)].at <= spends_until
+    )
+    spent = (
+        *continuation.spent,
+        *(
+            JobTimeout(
+                resource_id=_resource(job),
+                progress=job.progress,
+                by=WaitEnd.QUEUE_BUDGET,
+                at=bounds[_resource(job)].at,
+            )
+            for job in spending
+        ),
+    )
+    cancels = tuple(
+        JobTerminationRequested(resource_id=_resource(job), cause="deadline") for job in spending
+    )
+    updated = continuation.model_copy(update={"spent": spent})
+    still = tuple(job for job in live if job not in spending)
+    if ending is not None:
+        deadline = ending
+    elif spent and not still:
+        deadline = Bound(at=max(item.at for item in spent), by=WaitEnd.QUEUE_BUDGET)
+    elif spending:
+        return AreaChange(state=_store(state, updated), signals=cancels)
+    else:
+        return AreaChange(state=state)
+    by_resource = {item.resource_id: item for item in spent}
+    unfinished = tuple(
+        by_resource.get(
+            _resource(job),
+            JobTimeout(
+                resource_id=_resource(job), progress=job.progress, by=deadline.by, at=deadline.at
+            ),
+        )
+        for job in _jobs(state, continuation)
+        if _resource(job) in by_resource or job in still
+    )
+    frozen = updated.model_copy(
         update={
-            "timeout": TimedOut(deadline_at=deadline, reached_at=now_at, unfinished=unfinished),
+            "timeout": TimedOut(
+                deadline_at=deadline.at, reached_at=now_at, unfinished=unfinished, by=deadline.by
+            ),
             "evidence": _feedback_evidence(
                 tuple(
                     item
@@ -1096,9 +1168,10 @@ def _deadline(
         update={
             "signals": (
                 *change.signals,
+                *cancels,
                 *tuple(
-                    JobTerminationRequested(resource_id=job.resource_id, cause="deadline")
-                    for job in unfinished
+                    JobTerminationRequested(resource_id=_resource(job), cause="deadline")
+                    for job in still
                 ),
             )
         }
@@ -1114,13 +1187,14 @@ def reach_deadlines(
     a wait's deadline is often a fact about the very job the wait is on: the next poll of a
     job still queued. The timeout must record the jobs as they were at the deadline, so the
     evaluation area runs this before it applies any event, while the jobs still hold the
-    facts they had then.
+    facts they had then. A job's new fact can also move its bound earlier (a job that was
+    pending starts, so the credit its pending fact could still earn is gone), so the area
+    runs this again after the event: a wait whose bound already passed freezes at once.
     """
     change: AreaChange[EvaluationState] = AreaChange(state=state)
     for identity in tuple(row.continuation_id for row in state.continuations):
         row = next(r for r in change.state.continuations if r.continuation_id == identity)
-        if row.timeout is not None or row.deadline_at > context.run.now_at:
-            # A wait's limit never ends before its stated deadline (``wait_deadline``).
+        if row.timeout is not None:
             continue
         reached = _deadline(change.state, context, row, context.run.now_at)
         change = AreaChange(
@@ -1150,7 +1224,7 @@ def _changed(
         if job.observation != event.observation:
             continue
         _job_ownership(state, context, continuation)
-        _deadline_proof(state, continuation)
+        _timeout_proof(continuation)
         if job.status == ObservationStatus.UNKNOWN:
             requests.append(
                 _until_wait_ends(
@@ -1288,7 +1362,7 @@ def _reopen(
     if decision is None or decision.registered_scope_reopen != normalization:
         raise ContractError(("normalization",), "requires canonical registered reopening proof")
     _job_ownership(state, context, continuation)
-    _deadline_proof(state, continuation)
+    _timeout_proof(continuation)
     if (
         continuation.phase == ContinuationPhase.REOPENING
         and continuation.reopen_authority == event.request.request_id

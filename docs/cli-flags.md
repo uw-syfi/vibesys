@@ -50,11 +50,22 @@ Set the queue allowance in `agent.toml`:
 queue_allowance_seconds = 900
 observe_interval_seconds = 10
 observe_backoff_cap_seconds = 120
+queue_wait_budget_seconds = 43200
+queue_notice_interval_seconds = 600
 ```
 
 `observe_interval_seconds` (default 10) is how often the core polls a running
 evaluation job. `observe_backoff_cap_seconds` (default 120, at least the
 interval) caps the poll delay after the job's state could not be read.
+
+Time a measurement job spends waiting in the executor's queue (Slurm `PENDING`)
+does not count against the measurement's limit: each job is credited the queue
+time its polls observe, at most `observe_backoff_cap_seconds` per poll interval,
+so a scheduler that stops answering is not credited. `queue_wait_budget_seconds`
+(default 43200, 12 hours) bounds that queue time: a job still queued after it
+ends the measurement as `queue-budget-spent`. Every
+`queue_notice_interval_seconds` (default 600) of queue time the run reports the
+job as still queued, with the executor's pending reason when it gave one.
 
 The value must be a positive integer and defaults to 900 seconds. A suspended
 continuation's absolute deadline is its evaluation submit time plus this

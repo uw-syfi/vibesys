@@ -292,6 +292,7 @@ def representative_context() -> dict[str, object]:
         "official_eval_cadence_due",
         "official_evaluation_due",
         "profiling",
+        "queue_budget_spent",
         "repair_seed",
         "require_unseen_id",
         "searched",
@@ -317,11 +318,11 @@ def representative_context() -> dict[str, object]:
         "campaign",
         "cap",
         "checkpoint",
+        "ended_by",
         "input_failure",
         "invalid_type",
         "omitted",
         "portfolio_view",
-        "timed_out",
     ]:
         context[name] = None
     issue = Issue(

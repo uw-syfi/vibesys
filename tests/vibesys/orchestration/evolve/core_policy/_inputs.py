@@ -122,6 +122,8 @@ def context_of(
         queue_allowance_seconds=queue_allowance_seconds,
         observe_interval_seconds=observe[0],
         observe_backoff_cap_seconds=observe[1],
+        queue_wait_budget_seconds=43_200,
+        queue_notice_interval_seconds=600,
         request_retries=RequestRetries(limit=2, backoff=1.0, backoff_cap=8.0),
         max_run_seconds=max_run_seconds,
         cancellation_bound_seconds=60,

@@ -694,6 +694,10 @@ class CoreRunContext:
     """How often a running evaluation job is polled."""
     observe_backoff_cap_seconds: int
     """The longest wait after a poll that could not read the job."""
+    queue_wait_budget_seconds: int
+    """How long one measurement's job may wait in its executor's queue."""
+    queue_notice_interval_seconds: int
+    """How often a job still queued is reported, in seconds of queue time."""
     request_retries: RequestRetries
     """How the backend wants a request its executor did not run re-sent; a fact, not a choice."""
     max_run_seconds: int | None

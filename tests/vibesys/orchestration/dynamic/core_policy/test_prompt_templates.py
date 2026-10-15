@@ -36,6 +36,7 @@ from vibesys.orchestration.dynamic.search.api import (
     ReviewPrompt,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR, CoreProtocolTemplate
+from vs_core.api import WaitEnd
 from vs_core.api.search import ReplyCorrection, ResumeFacts, WaitUnrecorded
 from vs_sim.api.testing import examples
 
@@ -321,8 +322,16 @@ def test_a_resumed_turn_says_whether_its_wait_timed_out_and_what_was_retained(
     text = render(CoreProtocolTemplate.RESUME, context)
 
     assert f"suspended {context.agent} turn" in text
-    assert ("The suspension deadline expired" in text) is context.timed_out
-    assert ("Every evaluation you awaited is terminal" in text) is not context.timed_out
+    deadline = context.ended_by in {WaitEnd.LIMIT, WaitEnd.RUN_END}
+    assert ("The suspension deadline expired" in text) is deadline
+    assert ("Evaluations may still be running" in text) is deadline
+    assert ("Every evaluation you awaited is terminal" in text) is (context.ended_by is None)
+    assert ("Every other evaluation you awaited is terminal" in text) is (
+        context.ended_by is WaitEnd.QUEUE_BUDGET
+    )
+    # A job core cancelled for its queue budget never ran, and the agent is told so.
+    cancelled = "it never ran, so this says nothing about your candidate"
+    assert (cancelled in text) is context.queue_budget_spent
     assert ("The retained workspace revision" in text) is (context.retained is not None)
     if context.retained is not None:
         assert context.retained.revision_id.root in text

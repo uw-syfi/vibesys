@@ -136,6 +136,14 @@ export interface RunStartupState {
   readonly stage: RunStartupProgressData['stage'];
   /** `null` while the stage reports no progress of its own (resolving, say). */
   readonly progress: Readonly<{done: number; total: number | null; label: string}> | null;
+  /**
+   * The envelope timestamp of the first startup event of the current stage; it resets when the
+   * stage changes. A consumer subtracts it from its own clock to say how long the stage has run,
+   * so the fold stays free of wall-clock reads.
+   */
+  readonly stageSince: string;
+  /** The envelope timestamp of the latest startup event: the last time the backend was heard. */
+  readonly lastActivityAt: string;
 }
 
 /** Thread id used for chat events recorded without one. */

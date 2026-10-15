@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test';
-import {event} from '@vibesys/contracts/testing';
+import {event, timestamp} from '@vibesys/contracts/testing';
 import {runStep} from '@vibesys/run-session';
 import {
   initialCoreState,
@@ -8,6 +8,9 @@ import {
 } from '@vibesys/run-state';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {RunPage} from '../index.js';
+
+/** Any instant; tests that are not about startup timing ignore it. */
+const NOW = Date.parse('2026-09-12T10:20:00Z');
 
 test('surfaces a server-truncated event beside its retained payload', () => {
   const run = runStep(initialCoreState(), {
@@ -30,6 +33,7 @@ test('surfaces a server-truncated event beside its retained payload', () => {
       onReconnectControls={() => undefined}
       onRetryReplay={() => undefined}
       onCommand={null}
+      now={NOW}
     />,
   );
 
@@ -58,6 +62,7 @@ ${'A'.repeat(256)}
       onReconnectControls={() => undefined}
       onRetryReplay={() => undefined}
       onCommand={null}
+      now={NOW}
     />,
   );
 
@@ -78,6 +83,7 @@ test('names the run result once winner_selected reports it, not before', () => {
       onReconnectControls={() => undefined}
       onRetryReplay={() => undefined}
       onCommand={null}
+      now={NOW}
     />,
   );
   expect(pending).toContain('<span>Result</span><strong>Pending</strong>');
@@ -105,6 +111,7 @@ test('names the run result once winner_selected reports it, not before', () => {
       onReconnectControls={() => undefined}
       onRetryReplay={() => undefined}
       onCommand={null}
+      now={NOW}
     />,
   );
   expect(html).toContain('<span>Result</span><strong>Candidate abc1234 · settlement-7</strong>');
@@ -152,6 +159,7 @@ test('does not present a round budget as a limit on non-round iterations', () =>
       onReconnectControls={() => undefined}
       onRetryReplay={() => undefined}
       onCommand={null}
+      now={NOW}
     />,
   );
 
@@ -191,6 +199,7 @@ test('does not infer round semantics from an empty policy projection', () => {
       onReconnectControls={() => undefined}
       onRetryReplay={() => undefined}
       onCommand={null}
+      now={NOW}
     />,
   );
 
@@ -214,6 +223,7 @@ test('windows a large folded transcript and exposes replay controls as read-only
       onReconnectControls={() => undefined}
       onRetryReplay={() => undefined}
       onCommand={null}
+      now={NOW}
     />,
   );
 
@@ -249,6 +259,7 @@ test('renders typed tool data as a card instead of reparsing its display text', 
       onReconnectControls={() => undefined}
       onRetryReplay={() => undefined}
       onCommand={null}
+      now={NOW}
     />,
   );
 
@@ -284,9 +295,46 @@ test('narrates a starting run environment progress in the status chip', () => {
       onReconnectControls={() => undefined}
       onRetryReplay={() => undefined}
       onCommand={null}
+      now={Date.parse(timestamp(1)) + 3_000}
     />,
   );
 
   expect(html).toContain('class="status status-starting"');
-  expect(html).toContain('Building image 12/30: RUN pip install');
+  expect(html).toContain('Building image 12/30: RUN pip install · 3s');
+});
+
+test('shows how long the starting stage has run, and that it has gone quiet', () => {
+  const run = runStep(
+    {...initialCoreState(), status: 'starting'},
+    {
+      type: 'events',
+      events: [
+        event(1, 'run_startup_progress', {
+          data: {
+            kind: 'run_startup_progress',
+            stage: 'building_image',
+            progress: {done: 7, total: 8, label: 'WORKDIR'},
+          },
+        }),
+      ],
+    },
+  ).state;
+  const at = Date.parse(timestamp(1));
+  const render = (now: number): string =>
+    renderToStaticMarkup(
+      <RunPage
+        run={run}
+        iterations={initialIterationNavigation()}
+        session={null}
+        replayFailure={null}
+        onReattach={() => undefined}
+        onReconnectControls={() => undefined}
+        onRetryReplay={() => undefined}
+        onCommand={null}
+        now={now}
+      />,
+    );
+
+  expect(render(at + 252_000)).toContain('Building image 7/8: WORKDIR · 4m12s · quiet for 4m12s');
+  expect(render(at + 5_000)).toContain('Building image 7/8: WORKDIR · 5s</span>');
 });

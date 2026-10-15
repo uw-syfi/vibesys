@@ -1,53 +1,76 @@
-"""A limit on measurement work counts from its job's start: time a job spends queued is free.
+"""A limit on measurement work counts from its job's start: queue time is data, never charged.
 
 Measurement work has a limit. An agent that waits on its own measurement states it when it
-submits: core answers the call with the submission's deadline (``AgentCall.deadline_at``,
-the call time plus the limit, capped at the run deadline), and the agent's wait
-(``Continuation.deadline_at``) names it. A strategy's ``Measure`` counts its limit from the
-submission's dispatch, and the submission's record (``RequestRecord.until``) stays open
-until the job ends; a record whose limit passes is ended and its job cancelled. On a
-contended cluster the job may then wait hours in a scheduler queue before it runs. That
-time is the cluster's, not the work's, so neither limit charges it:
+submits: core answers the call with the submission's deadline (``AgentCall.deadline_at``),
+and the agent's wait (``Continuation.deadline_at``) names a deadline. A strategy's
+``Measure`` counts its limit from the submission's dispatch (``RequestRecord.until``), and a
+registered operation from its own. On a contended cluster the job may then wait hours in a
+scheduler queue before it runs. That time is the cluster's, not the work's.
 
-- A job is *queued* while its latest fact says it is pending in a queue and it has not
-  ended (``queued``). The interval from such a fact to the job's next fact is queue time,
-  however the next fact reads: the job started somewhere inside it, and the interval is
-  given to the queue so that no queue time is ever charged.
-- Each queue interval moves the limit of the work that started the job later by its
-  length (``charge_queue_time``), still capped at the run deadline: the deadline of every
-  agent call that names the job's submission, and the ``until`` of the open record that
-  started the job (a submission, or a registered operation). Each limit is therefore the
-  stated one counted from the job's start, plus the few seconds before the job's first fact.
-- While a job is queued, nothing it started has a limit: a wait on it cannot time out
-  (``wait_deadline`` in ``_continuations``), nor can its record (``record_limit``). Only the
-  run's own deadline and stop end it, by closing the scope and cancelling its jobs.
+Every stated limit stays as it was stated. Each job instead records the queue time its facts
+earned (``queue_credit``), and every limit on work tied to the job is derived from it here:
 
-Only these values move; no persisted shape changes. A job no agent call submitted (a
-registered job) keeps the deadline its wait states once it runs.
+- **Credit.** The interval from a fact that says the job is pending (``pending``) to the
+  job's next fact earns its length, but never more than ``observe_backoff_cap``, the longest
+  delay between two polls (``credited``). A pending fact that keeps being refreshed earns all
+  its queue time; a stale one (the scheduler stopped answering) earns at most that much, so a
+  poll outage is never credited as queue time and cannot extend a limit.
+- **Downtime.** While no host runs, nothing waits: host downtime (``_host_epochs``) moves an
+  open record's limit (``open_host_epoch``) and an open wait's (``downtime_credit``) by the
+  same amount, so the two agree. It is never also queue time: the part of an interval that
+  overlaps a downtime earns no credit and spends no queue budget.
+- **Bound.** A job's work ends at its stated limit plus its credit. While its latest fact is
+  pending it may still earn up to the cap, so its bound is that much later; and its queue
+  budget (``queue_wait_budget``) ends it once its credit and its current pending interval
+  reach the budget. A limit that queue credit carries past the run deadline ends with the
+  run (``job_bound``).
+- **Waits and records.** Each unfinished job of a wait or a record has its own bound. A
+  record ends at the earliest one (``record_bound``). A wait ends a job whose queue budget
+  ran out on its own and goes on with the rest; it ends at the earliest other bound, or once
+  every job has ended (``wait_bounds``, ``_continuations``).
+
+Every bound is a time (``Bound``), never absent, so an unbounded wait cannot be represented.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from itertools import pairwise
 from typing import TYPE_CHECKING
 
+from ._registry import ContractError
 from .types.evaluation import OwnedJob, RegisteredOwnedJob
-from .types.records import RequestPhase
+from .types.job_observations import WaitEnd
 
 if TYPE_CHECKING:
-    from .types.common import RequestId, ResourceId
-    from .types.evaluation import AgentCall, EvaluationState
-    from .types.kernel import CoreState, RunState
-    from .types.records import RequestRecord
+    from collections.abc import Sequence
 
-_OPEN = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
+    from .types.common import Limits, Observation, RequestId
+    from .types.evaluation import Continuation, EvaluationState
+    from .types.kernel import RunState
+    from .types.records import HostEpoch, RecordsState, RequestRecord
+
+type Job = OwnedJob | RegisteredOwnedJob
 
 
-def queued(job: OwnedJob | RegisteredOwnedJob) -> bool:
+@dataclass(frozen=True)
+class Bound:
+    """When a wait on a job ends, and which rule set that time. Never absent."""
+
+    at: float
+    by: WaitEnd
+
+
+def _earliest(bounds: tuple[Bound, ...], default: Bound) -> Bound:
+    return min(bounds, key=lambda bound: bound.at, default=default)
+
+
+def pending(job: Job) -> bool:
     """Whether the job's latest fact says it waits in a queue: it has not started running.
 
     A fact that carries no progress leaves the earlier progress in place, so only progress
     of the latest observation counts; a job whose latest fact says nothing about its queue
-    is charged, which keeps every wait bounded.
+    earns no credit, which keeps every wait bounded.
     """
     progress, observation = job.progress, job.observation
     return (
@@ -59,92 +82,136 @@ def queued(job: OwnedJob | RegisteredOwnedJob) -> bool:
     )
 
 
-def submission_deadline(state: EvaluationState, job: OwnedJob | RegisteredOwnedJob) -> float | None:
-    """The deadline of the agent call that allocated ``job``'s submission, or None."""
-    if not isinstance(job, OwnedJob):
-        return None
-    return next(
-        (
-            call.deadline_at
-            for call in state.agent_calls
-            if call.request_id == job.submission_id and not call.repeat
-        ),
-        None,
+def _downtime_within(hosts: Sequence[HostEpoch], start: float, end: float) -> float:
+    """The part of ``[start, end]`` no host was alive, from the host log (``_host_epochs``)."""
+    return sum(
+        max(min(later.started_at, end) - max(earlier.alive_at, start), 0.0)
+        for earlier, later in pairwise(hosts)
     )
 
 
-def _source(job: OwnedJob | RegisteredOwnedJob) -> RequestId:
+def credited(
+    job: Job, observation: Observation, limits: Limits, hosts: Sequence[HostEpoch]
+) -> float:
+    """``job``'s queue credit once it takes ``observation``, its next fact.
+
+    The interval since a pending fact earns its length, capped at ``observe_backoff_cap``:
+    a scheduler that answers polls never leaves a longer gap, so a longer one is an outage,
+    not queue time. Host downtime in the interval earns nothing: the wait's or record's
+    limit is already moved past it.
+    """
+    previous = job.observation
+    if not pending(job) or previous is None or observation.observed_at <= previous.observed_at:
+        return job.queue_credit
+    start, end = previous.observed_at, observation.observed_at
+    queued = end - start - _downtime_within(hosts, start, end)
+    return job.queue_credit + min(max(queued, 0.0), limits.observe_backoff_cap)
+
+
+def source(job: Job) -> RequestId:
     """The request that started ``job``: its submission, or its registered operation."""
     return job.submission_id if isinstance(job, OwnedJob) else job.request_id
 
 
-def _all_jobs(state: EvaluationState) -> tuple[OwnedJob | RegisteredOwnedJob, ...]:
-    return (*state.jobs, *state.registered_jobs)
+def queue_budget_left(job: Job, limits: Limits) -> float:
+    """Queue time ``job`` may still be credited before its queue budget is spent."""
+    return max(limits.queue_wait_budget - job.queue_credit, 0.0)
 
 
-def record_limit(record: RequestRecord, evaluation: EvaluationState) -> float | None:
-    """When ``record``'s limit ends it, or None while a job it started is queued."""
-    if any(_source(job) == record.request_id and queued(job) for job in _all_jobs(evaluation)):
+def job_bound(job: Job, stated: float, run: RunState, hosts: Sequence[HostEpoch]) -> Bound:
+    """When work on ``job`` with the stated limit ``stated`` ends, from the job's facts.
+
+    The limit plus the job's credit; while its latest fact is pending, plus what that fact
+    may still earn (the cap), or sooner when its queue budget runs out. Host downtime since
+    the pending fact spends no budget. A limit that queue credit carries past the run
+    deadline ends with the run.
+    """
+    limits = run.limits
+    bound = Bound(at=stated + job.queue_credit, by=WaitEnd.LIMIT)
+    if pending(job) and job.observation is not None and bound.at > job.observation.observed_at:
+        # The pending fact came before the limit passed, so the time since it is queue time,
+        # up to the cap; one that came after it cannot revive the limit.
+        queued_since = job.observation.observed_at
+        down = _downtime_within(hosts, queued_since, run.now_at)
+        bound = _earliest(
+            (
+                Bound(at=bound.at + limits.observe_backoff_cap, by=WaitEnd.LIMIT),
+                # When the budget is (or was) spent: a fact after that instant leaves it put.
+                Bound(
+                    at=queued_since + down + limits.queue_wait_budget - job.queue_credit,
+                    by=WaitEnd.QUEUE_BUDGET,
+                ),
+            ),
+            bound,
+        )
+    ceiling = max(run.deadline_at, stated)
+    return bound if bound.at <= ceiling else Bound(at=ceiling, by=WaitEnd.RUN_END)
+
+
+def _submission_limit(evaluation: EvaluationState, records: RecordsState, job: Job) -> float | None:
+    """The limit of ``job``'s submission when an agent's call allocated it, else None.
+
+    The submission's record holds that limit (``until``): the call answered the agent with
+    the same value, and only the record's is moved when a host restart credits downtime
+    (``open_host_epoch``). So a wait opened after a restart counts from the moved limit, as
+    the record does.
+    """
+    if not isinstance(job, OwnedJob) or not any(
+        call.request_id == job.submission_id and not call.repeat for call in evaluation.agent_calls
+    ):
         return None
+    record = records.record(job.submission_id)
+    if record is None:
+        raise ContractError(("jobs", "submission_id"), "an agent's submission has no record")
     return record.until.at
 
 
-def _queue_time(before: EvaluationState, after: EvaluationState) -> dict[RequestId, float]:
-    """Seconds of queue time each job ended in this change, by the request that started it."""
-    earlier: dict[tuple[type, ResourceId], OwnedJob | RegisteredOwnedJob] = {
-        (type(job), job.resource_id): job
-        for job in _all_jobs(before)
-        if job.resource_id is not None
-    }
-    charged: dict[RequestId, float] = {}
-    for job in _all_jobs(after):
-        previous = None if job.resource_id is None else earlier.get((type(job), job.resource_id))
-        if previous is None or not queued(previous) or previous.observation is None:
-            continue
-        if (
-            job.observation is None
-            or job.observation.observed_at <= previous.observation.observed_at
-        ):
-            continue
-        charged[_source(job)] = job.observation.observed_at - previous.observation.observed_at
-    return charged
+def wait_bounds(
+    evaluation: EvaluationState,
+    records: RecordsState,
+    run: RunState,
+    wait: Continuation,
+    jobs: tuple[Job, ...],
+) -> tuple[Bound, ...]:
+    """The bound of each of ``wait``'s ``jobs``, in order: when the wait is done with it.
 
-
-def _later(at: float, shift: float, run: RunState) -> float:
-    """``at`` moved ``shift`` later, capped at the run deadline unless it was already past it."""
-    return min(at + shift, max(run.deadline_at, at))
-
-
-def charge_queue_time(before: CoreState, after: CoreState) -> CoreState:
-    """``after`` with every limit moved later by the queue time this evaluation change ended.
-
-    The kernel runs it after every evaluation change, so it sees each new fact about a job
-    exactly once: a job that was queued at its previous fact spent the time up to this one
-    in the queue. The agent calls and the open record that name the job's source move
-    together, by the same interval.
+    Each job's stated limit is the later of two. One is the wait's deadline, moved past the
+    host downtime the wait was credited (capped at the run deadline, as a record's moved
+    limit is). The other is the limit of the job's submission when an agent's call allocated
+    it, read from the submission's record, which a restart moves the same way. Each job adds
+    its own queue credit, so a sibling's queue time never extends a running job's limit.
     """
-    charged = _queue_time(before.evaluation, after.evaluation)
-    if not charged:
-        return after
-    run = after.run
+    moved = wait.deadline_at + wait.downtime_credit
+    own = min(moved, run.deadline_at) if wait.deadline_at <= run.deadline_at else moved
 
-    def call(row: AgentCall) -> AgentCall:
-        shift = None if row.request_id is None else charged.get(row.request_id)
-        if shift is None or row.deadline_at is None:
-            return row
-        return row.model_copy(update={"deadline_at": _later(row.deadline_at, shift, run)})
+    def stated(job: Job) -> float:
+        return max(own, _submission_limit(evaluation, records, job) or 0.0)
 
-    def record(row: RequestRecord) -> RequestRecord:
-        shift = charged.get(row.request_id)
-        if shift is None or row.phase not in _OPEN:
-            return row
-        until = row.until.model_copy(update={"at": _later(row.until.at, shift, run)})
-        return row.model_copy(update={"until": until})
+    return tuple(job_bound(job, stated(job), run, records.hosts) for job in jobs)
 
-    evaluation = after.evaluation.model_copy(
-        update={"agent_calls": tuple(call(row) for row in after.evaluation.agent_calls)}
+
+def record_bound(
+    record: RequestRecord,
+    evaluation: EvaluationState,
+    run: RunState,
+    hosts: Sequence[HostEpoch],
+) -> Bound:
+    """When ``record``'s limit ends it: at the earliest bound of an unfinished job it started.
+
+    A record that started no job (or whose jobs all ended) ends at its stated ``until``.
+    """
+    bounds = tuple(
+        job_bound(job, record.until.at, run, hosts)
+        for job in (*evaluation.jobs, *evaluation.registered_jobs)
+        if source(job) == record.request_id and not job.terminal
     )
-    records = after.records.model_copy(
-        update={"records": tuple(record(row) for row in after.records.records)}
-    )
-    return after.model_copy(update={"evaluation": evaluation, "records": records})
+    return _earliest(bounds, Bound(at=record.until.at, by=WaitEnd.LIMIT))
+
+
+def notice_due(job: Job, before: float, limits: Limits) -> bool:
+    """Whether pending ``job``'s credit crossed a multiple of ``queue_notice_interval``.
+
+    ``before`` is its credit before its latest fact, so each interval is reported once.
+    """
+    interval = limits.queue_notice_interval
+    return pending(job) and job.queue_credit // interval > before // interval

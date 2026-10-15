@@ -73,6 +73,7 @@ async function mountRun(
         onReconnectControls={() => undefined}
         onRetryReplay={() => undefined}
         onCommand={command}
+        now={0}
       />,
     );
   };
