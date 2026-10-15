@@ -87,6 +87,66 @@
       },
       "type": "array"
     },
+    "ActiveExecutionsChunkMessage": {
+      "additionalProperties": false,
+      "description": "One bounded piece of an atomically replaced execution checkpoint.\n\nThe payload pieces concatenate to the JSON encoding of ``ActiveExecutions``.\nA client stages one transfer and publishes the decoded list only after all\npieces arrive in order. The metadata is copied from the batch whose\ncheckpoint this replaces, so the final publication remains in the same\nsequence space even when the batch itself was split into event frames.",
+      "properties": {
+        "type": {
+          "const": "active_executions_chunk",
+          "default": "active_executions_chunk",
+          "title": "Type",
+          "type": "string"
+        },
+        "checkpoint_id": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Checkpoint Id",
+          "type": "string"
+        },
+        "chunk_index": {
+          "exclusiveMaximum": 256,
+          "minimum": 0,
+          "title": "Chunk Index",
+          "type": "integer"
+        },
+        "chunk_count": {
+          "maximum": 256,
+          "minimum": 1,
+          "title": "Chunk Count",
+          "type": "integer"
+        },
+        "payload": {
+          "maxLength": 65536,
+          "title": "Payload",
+          "type": "string"
+        },
+        "through_sequence": {
+          "minimum": 0,
+          "title": "Through Sequence",
+          "type": "integer"
+        },
+        "store_id": {
+          "title": "Store Id",
+          "type": "string"
+        },
+        "history_after_sequence": {
+          "minimum": 0,
+          "title": "History After Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "checkpoint_id",
+        "chunk_index",
+        "chunk_count",
+        "payload",
+        "through_sequence",
+        "store_id",
+        "history_after_sequence"
+      ],
+      "title": "ActiveExecutionsChunkMessage",
+      "type": "object"
+    },
     "AgentExecutionActivityData": {
       "additionalProperties": false,
       "description": "Complete current activity for an active agent execution.",
@@ -1298,6 +1358,119 @@
     "EventBatchMessage": {
       "additionalProperties": false,
       "description": "Event batch and cursor metadata sent to subscribers.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "Event batch and cursor metadata sent to subscribers.",
+          "properties": {
+            "type": {
+              "const": "event_batch",
+              "default": "event_batch",
+              "title": "Type",
+              "type": "string"
+            },
+            "events": {
+              "items": {
+                "$ref": "#/$defs/RunEvent"
+              },
+              "title": "Events",
+              "type": "array"
+            },
+            "through_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Through Sequence",
+              "type": "integer"
+            },
+            "active_executions": {
+              "$ref": "#/$defs/ActiveExecutions"
+            },
+            "active_executions_checkpoint_id": {
+              "default": null,
+              "title": "Active Executions Checkpoint Id",
+              "type": "null"
+            },
+            "store_id": {
+              "default": "",
+              "title": "Store Id",
+              "type": "string"
+            },
+            "history_after_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "History After Sequence",
+              "type": "integer"
+            },
+            "rebootstrap": {
+              "default": false,
+              "title": "Rebootstrap",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "events",
+            "type"
+          ],
+          "title": "EventBatchMessage",
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Event batch and cursor metadata sent to subscribers.",
+          "properties": {
+            "type": {
+              "const": "event_batch",
+              "default": "event_batch",
+              "title": "Type",
+              "type": "string"
+            },
+            "events": {
+              "items": {
+                "$ref": "#/$defs/RunEvent"
+              },
+              "title": "Events",
+              "type": "array"
+            },
+            "through_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Through Sequence",
+              "type": "integer"
+            },
+            "active_executions": {
+              "type": "null"
+            },
+            "active_executions_checkpoint_id": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "store_id": {
+              "default": "",
+              "title": "Store Id",
+              "type": "string"
+            },
+            "history_after_sequence": {
+              "default": 0,
+              "minimum": 0,
+              "title": "History After Sequence",
+              "type": "integer"
+            },
+            "rebootstrap": {
+              "default": false,
+              "title": "Rebootstrap",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "events",
+            "type",
+            "active_executions",
+            "active_executions_checkpoint_id"
+          ],
+          "title": "EventBatchMessage",
+          "type": "object"
+        }
+      ],
       "properties": {
         "type": {
           "const": "event_batch",
@@ -1319,7 +1492,27 @@
           "type": "integer"
         },
         "active_executions": {
-          "$ref": "#/$defs/ActiveExecutions"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActiveExecutions"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "active_executions_checkpoint_id": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Active Executions Checkpoint Id"
         },
         "store_id": {
           "default": "",
@@ -5386,6 +5579,7 @@
     "server_message": {
       "discriminator": {
         "mapping": {
+          "active_executions_chunk": "#/$defs/ActiveExecutionsChunkMessage",
           "event": "#/$defs/EventMessage",
           "event_batch": "#/$defs/EventBatchMessage",
           "protocol_error": "#/$defs/ProtocolErrorMessage",
@@ -5402,6 +5596,9 @@
         },
         {
           "$ref": "#/$defs/EventBatchMessage"
+        },
+        {
+          "$ref": "#/$defs/ActiveExecutionsChunkMessage"
         },
         {
           "$ref": "#/$defs/ProtocolErrorMessage"

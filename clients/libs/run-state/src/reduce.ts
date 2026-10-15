@@ -106,7 +106,7 @@ export function reduceSnapshot(state: CoreState, snapshot: RunSnapshot): CoreSta
 export function reduceEventBatch(
   state: CoreState,
   events: readonly RunEvent[],
-  activeExecutions?: ActiveExecutionCheckpoint,
+  activeExecutions?: ActiveExecutionCheckpoint | null,
   throughSequence?: number,
   historyAfterSequence?: number,
 ): CoreState {
@@ -118,7 +118,7 @@ export function reduceEventBatch(
       ? retained
       : cloneCoreStateWith(retained, {historyAfterSequence});
   return publishCoreState(
-    activeExecutions === undefined
+    activeExecutions == null
       ? reduced
       : reconcileActiveExecutions(reduced, activeExecutions, throughSequence),
   );
@@ -142,16 +142,27 @@ export function reduceEventBatch(
 export function reduceEventRebootstrap(
   state: CoreState,
   events: readonly RunEvent[],
-  activeExecutions: ActiveExecutionCheckpoint | undefined,
+  activeExecutions: ActiveExecutionCheckpoint | null | undefined,
   throughSequence: number | undefined,
   historyAfterSequence: number,
 ): CoreState {
-  const empty = initialCoreState();
+  // Null is the wire's explicit "authoritative checkpoint follows in
+  // fragments" marker. Seed the fresh replay with the last complete
+  // checkpoint so its event prefix may update that state without exposing a
+  // transient empty list. Omitted legacy data retains the old fresh-fold
+  // behavior; a list, including [], replaces after the replay.
+  const empty =
+    activeExecutions === null
+      ? cloneCoreStateWith(initialCoreState(), {
+          activeExecutions: state.activeExecutions,
+          executionStatuses: state.executionStatuses,
+        })
+      : initialCoreState();
   const batch = foldIdentityAwareBatch(empty, events);
   let reduced = retainReplayDeliveries(empty, batch.state, batch.retainedDeliveries);
   if (batch.acceptsMetadata) {
     reduced = cloneCoreStateWith(reduced, {historyAfterSequence});
-    if (activeExecutions !== undefined) {
+    if (activeExecutions !== undefined && activeExecutions !== null) {
       reduced = reconcileActiveExecutions(reduced, activeExecutions, throughSequence);
     }
   }

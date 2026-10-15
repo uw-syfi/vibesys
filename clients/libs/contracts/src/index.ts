@@ -11,6 +11,8 @@ export {
   ServerError,
 } from './errors.js';
 export type {
+  ActiveExecutions,
+  ActiveExecutionsChunkMessage,
   AgentStatusData,
   ChatModelOption,
   ChatOptions,
@@ -40,6 +42,7 @@ export type {
 } from './protocol.js';
 export {PROTOCOL_VERSION} from './protocol.js';
 export {
+  parseActiveExecutionsCheckpoint,
   parseProtocolResponse,
   parseServerMessage,
   responseError,

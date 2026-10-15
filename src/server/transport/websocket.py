@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Protocol
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from server.api.protocol import (
+    MAX_SERVER_MESSAGE_BYTES,
     EventBatchMessage,
     ProtocolErrorMessage,
     Response,
@@ -152,7 +153,7 @@ _KEEPALIVE_SECONDS = 20.0
 # so a dependency bump cannot move either direction;
 # `test_the_frame_caps_default_to_the_websockets_value_they_state` fails if the
 # installed library's default no longer agrees with it.
-_FRAME_BYTES = 1024 * 1024
+_FRAME_BYTES = MAX_SERVER_MESSAGE_BYTES
 
 
 class WebSocketBindError(RuntimeError):
@@ -271,7 +272,8 @@ class WebSocketLimits:
     and is what this gateway refuses to receive. ``send_frame_bytes`` is a
     statement about *peers*: ``max_size`` applies to received messages on each
     side, so naming it here cannot change what a peer accepts, and the send
-    side is bounded by chunking instead (``EventBatchMessage.split_within``).
+    side is bounded by chunking instead
+    (``EventBatchMessage.stream_messages_within``).
     Its value is therefore chosen against the smallest cap a supported client imposes, not
     against this gateway's own: browsers impose no receive limit, so the
     binding client is the Python ``websockets`` client, whose default is the
@@ -622,7 +624,7 @@ class WebSocketGateway:
                 # does ``max_size``: it is the cap on what this gateway will
                 # *receive*, and says nothing about what a peer will accept from
                 # it. The send side is bounded by chunking instead
-                # (``EventBatchMessage.split_within``).
+                # (``EventBatchMessage.stream_messages_within``).
                 ping_interval=self.limits.ping_interval_seconds,
                 ping_timeout=self.limits.ping_timeout_seconds,
                 close_timeout=self.limits.close_timeout_seconds,
@@ -1348,8 +1350,8 @@ class WebSocketGateway:
         supplies ``tail`` only if it has one, so the batch is otherwise sized by
         the run's entire history.
         """
-        for chunk in batch.split_within(self.limits.send_frame_bytes):
-            await self._send(websocket, chunk.model_dump_json())
+        for message in batch.stream_messages_within(self.limits.send_frame_bytes):
+            await self._send(websocket, message.model_dump_json())
 
 
 def browser_origin(value: str) -> str:

@@ -11,6 +11,7 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from server.api.protocol import (
+    MAX_SERVER_MESSAGE_BYTES,
     EventBatchMessage,
     ProtocolErrorMessage,
     Response,
@@ -258,7 +259,7 @@ class _ClientSession:
                 cursor, reported_floor, store_id = self._rebootstrap(request, cursor, store_id)
                 delivery.delivered(cursor)
                 continue
-            self._write_message(
+            self._write_event_batch(
                 EventBatchMessage(
                     events=checkpoint.events,
                     through_sequence=checkpoint.through_sequence,
@@ -322,7 +323,7 @@ class _ClientSession:
         clients see the field's default.
         """
         reported_floor = 0 if request.tail is None else bootstrap.floor
-        self._write_message(
+        self._write_event_batch(
             EventBatchMessage(
                 events=bootstrap.events,
                 through_sequence=bootstrap.through_sequence,
@@ -333,6 +334,11 @@ class _ClientSession:
             )
         )
         return bootstrap.through_sequence, reported_floor, bootstrap.store_id
+
+    def _write_event_batch(self, batch: EventBatchMessage) -> None:
+        """Write the same bounded stream-message sequence as the WebSocket gateway."""
+        for message in batch.stream_messages_within(MAX_SERVER_MESSAGE_BYTES):
+            self._write_message(message)
 
     def _write_stream_error(self, request_id: str, client_id: str, error: Exception) -> None:
         """Report a replay or stream failure without hiding a live connection."""

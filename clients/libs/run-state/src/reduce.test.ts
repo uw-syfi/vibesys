@@ -9,7 +9,6 @@ import {
 import {
   type CoreRunStatus,
   type CoreState,
-  executionStatusFor,
   hasRunEnded,
   initialCoreState,
   latestDiagnosticChange,
@@ -537,7 +536,7 @@ describe('core state projection', () => {
     );
     const restarted = state.activeExecutions['second'];
     if (restarted === undefined) throw new Error('checkpoint dropped its active execution');
-    expect(executionStatusFor(state.executionStatuses, restarted)).toBeUndefined();
+    expect(state.executionStatuses).toEqual({});
 
     state = reduceEvent(state, outputEvent(4, 'legacy after checkpoint', 'second'));
     expect(state.executionStatuses).toEqual({});

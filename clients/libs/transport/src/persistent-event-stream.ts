@@ -1,5 +1,6 @@
 import type {ServerMessage} from '@vibesys/contracts';
 import {BackendClientError, isServerRejection} from '@vibesys/contracts';
+import {ActiveExecutionCheckpointAssembler} from './active-execution-checkpoint.js';
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 import {defaultScheduleTimeout, type ScheduleTimeout} from './control-channel.js';
 import type {EventSubscription, SubscribeOptions} from './transport.js';
@@ -18,6 +19,9 @@ export interface StreamTransport {
     options?: SubscribeOptions,
   ): Promise<EventSubscription>;
 }
+
+/** Messages delivered after transport-only checkpoint fragments are assembled. */
+export type PersistentStreamMessage = Exclude<ServerMessage, {type: 'active_executions_chunk'}>;
 
 /** Whether the stream currently holds a live subscription. */
 export type StreamConnectionState =
@@ -74,14 +78,15 @@ export interface PersistentEventStreamCallbacks {
    */
   shouldReconnect(): boolean;
   /**
-   * Every `ServerMessage` the subscription delivers, tagged with whether it
-   * came from a resume (from the caller's cursor) or a bootstrap (a fresh tail).
+   * Every semantic stream message, after transport-only checkpoint fragments
+   * are assembled, tagged with whether it came from a resume (from the caller's
+   * cursor) or a bootstrap (a fresh tail).
    * The dial normally decides the flag, including a batch delivered
    * synchronously before `subscribe` resolves. An in-loop server rebootstrap
    * explicitly overrides a resumed dial for that batch, because it supersedes
    * the cursor even though its socket never disconnected.
    */
-  onMessage(message: ServerMessage, context: StreamMessageContext): void;
+  onMessage(message: PersistentStreamMessage, context: StreamMessageContext): void;
   /**
    * `disconnected` when a live stream drops or a dial fails outright;
    * `connected` when a reconnect recovers. Not emitted on the first successful
@@ -144,6 +149,7 @@ export class PersistentEventStream {
   readonly #tail: number | undefined;
   readonly #backoff: BackoffSchedule;
   readonly #scheduleTimeout: ScheduleTimeout;
+  readonly #activeExecutionCheckpoints = new ActiveExecutionCheckpointAssembler();
 
   #callbacks: PersistentEventStreamCallbacks | null = null;
   #subscription: EventSubscription | null = null;
@@ -238,6 +244,7 @@ export class PersistentEventStream {
    */
   async close(): Promise<void> {
     this.#closed = true;
+    this.#activeExecutionCheckpoints.reset();
     this.#queuedRecovery = null;
     if (this.#cancelReconnect !== null) {
       this.#cancelReconnect();
@@ -387,6 +394,7 @@ export class PersistentEventStream {
     options?: SubscribeOptions,
   ): Promise<boolean> {
     const token = ++this.#connectionSeq;
+    this.#activeExecutionCheckpoints.reset();
     let settleDial: () => void = () => undefined;
     const pendingDial = new Promise<void>(resolve => {
       settleDial = resolve;
@@ -418,8 +426,10 @@ export class PersistentEventStream {
     }
   }
 
-  #deliver(message: ServerMessage, resumed: boolean, token: number): void {
+  #deliver(delivered: ServerMessage, resumed: boolean, token: number): void {
     if (this.#closed || token !== this.#connectionSeq) return;
+    const message = this.#activeExecutionCheckpoints.accept(delivered);
+    if (message === null) return;
     // A protocol error is the terminal frame for this stream generation.
     // Fence it before calling outward so neither another synchronous frame nor
     // a reentrant recovery can mistake this socket for a current generation.
@@ -462,6 +472,7 @@ export class PersistentEventStream {
   #handleDisconnect(error: Error, token: number): void {
     // A stale subscription's late close is not this stream's outage.
     if (this.#closed || token !== this.#connectionSeq) return;
+    this.#activeExecutionCheckpoints.reset();
     if (this.#recovery !== 'idle') this.#recoveryFailed = true;
     this.#disconnectError = error;
     const redialing = this.#active().shouldReconnect();

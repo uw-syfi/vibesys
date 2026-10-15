@@ -284,6 +284,11 @@ export class StreamReconciler {
   reconcileBatch(message: EventBatchMessage, context: BatchContext): BatchReconciliation {
     const declared = declaredFloorOf(message);
     const store = message.store_id ?? '';
+    // The stream protocol uses this marker when an already-open subscription
+    // replays its authoritative bootstrap. A fragmented checkpoint repeats it
+    // on the completed synthetic batch so consumers rebuild once the atomic
+    // checkpoint is available, even though store and floor are unchanged.
+    if (message.rebootstrap === true) return this.#rebootstrap(store, declared, message.events);
     if (context.resumed) {
       // A changed store invalidates the cursor and its folded state. The
       // resumed batch is therefore a fresh bootstrap, including spine tracking.

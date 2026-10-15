@@ -687,20 +687,40 @@ export type Path2 = string;
 export type RenamedFrom1 = string | null;
 export type Patch = string | null;
 export type Truncated1 = boolean;
-export type ServerMessage = SubscribedMessage | EventMessage | EventBatchMessage | ProtocolErrorMessage;
+export type ServerMessage =
+  SubscribedMessage | EventMessage | EventBatchMessage | ActiveExecutionsChunkMessage | ProtocolErrorMessage;
 export type Type17 = "subscribed";
 export type RequestId18 = string;
 export type ClientId18 = string;
 export type RunId5 = string;
 export type LatestSequence = number;
 export type Type18 = "event";
+/**
+ * Event batch and cursor metadata sent to subscribers.
+ */
+export type EventBatchMessage = EventBatchMessage1 | EventBatchMessage2;
 export type Type19 = "event_batch";
 export type Events1 = RunEvent[];
 export type ThroughSequence = number;
+export type ActiveExecutionsCheckpointId = null;
 export type StoreId1 = string;
 export type HistoryAfterSequence = number;
 export type Rebootstrap = boolean;
-export type Type20 = "protocol_error";
+export type Type20 = "event_batch";
+export type Events2 = RunEvent[];
+export type ThroughSequence1 = number;
+export type StoreId2 = string;
+export type HistoryAfterSequence1 = number;
+export type Rebootstrap1 = boolean;
+export type Type21 = "active_executions_chunk";
+export type CheckpointId = string;
+export type ChunkIndex = number;
+export type ChunkCount = number;
+export type Payload1 = string;
+export type ThroughSequence2 = number;
+export type StoreId3 = string;
+export type HistoryAfterSequence2 = number;
+export type Type22 = "protocol_error";
 export type RequestId19 = string | null;
 export type ClientId19 = string;
 export type Code2 = string;
@@ -1804,20 +1824,53 @@ export interface EventMessage {
 /**
  * Event batch and cursor metadata sent to subscribers.
  */
-export interface EventBatchMessage {
+export interface EventBatchMessage1 {
   type: Type19;
   events: Events1;
   through_sequence?: ThroughSequence;
   active_executions?: ActiveExecutions;
+  active_executions_checkpoint_id?: ActiveExecutionsCheckpointId;
   store_id?: StoreId1;
   history_after_sequence?: HistoryAfterSequence;
   rebootstrap?: Rebootstrap;
 }
 /**
+ * Event batch and cursor metadata sent to subscribers.
+ */
+export interface EventBatchMessage2 {
+  type: Type20;
+  events: Events2;
+  through_sequence?: ThroughSequence1;
+  active_executions: null;
+  active_executions_checkpoint_id: string;
+  store_id?: StoreId2;
+  history_after_sequence?: HistoryAfterSequence1;
+  rebootstrap?: Rebootstrap1;
+}
+/**
+ * One bounded piece of an atomically replaced execution checkpoint.
+ *
+ * The payload pieces concatenate to the JSON encoding of ``ActiveExecutions``.
+ * A client stages one transfer and publishes the decoded list only after all
+ * pieces arrive in order. The metadata is copied from the batch whose
+ * checkpoint this replaces, so the final publication remains in the same
+ * sequence space even when the batch itself was split into event frames.
+ */
+export interface ActiveExecutionsChunkMessage {
+  type: Type21;
+  checkpoint_id: CheckpointId;
+  chunk_index: ChunkIndex;
+  chunk_count: ChunkCount;
+  payload: Payload1;
+  through_sequence: ThroughSequence2;
+  store_id: StoreId3;
+  history_after_sequence: HistoryAfterSequence2;
+}
+/**
  * Structured error envelope for protocol failures.
  */
 export interface ProtocolErrorMessage {
-  type: Type20;
+  type: Type22;
   request_id?: RequestId19;
   client_id?: ClientId19;
   code: Code2;

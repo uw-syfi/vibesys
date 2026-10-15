@@ -14,6 +14,7 @@ export {
   PersistentEventStream,
   type PersistentEventStreamCallbacks,
   type PersistentEventStreamOptions,
+  type PersistentStreamMessage,
   type StreamConnectionState,
   type StreamMessageContext,
   type StreamRebootstrapDisposition,

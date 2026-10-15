@@ -5,7 +5,6 @@ import {
   type RunEvent,
   type RunSnapshot,
   ServerError,
-  type ServerMessage,
 } from '@vibesys/contracts';
 import {
   hasRunEnded,
@@ -19,6 +18,7 @@ import {
   closeStreamAndTransport,
   DEFAULT_RECONNECT_DELAYS_MS,
   PersistentEventStream,
+  type PersistentStreamMessage,
   type ScheduleTimeout,
   type ServerTransport,
   type StreamConnectionState,
@@ -1571,7 +1571,7 @@ export class SocketSessionController implements SessionController {
     }
   }
 
-  #onMessage(message: ServerMessage, resumed: boolean): void {
+  #onMessage(message: PersistentStreamMessage, resumed: boolean): void {
     const dispatched = this.#dispatchMessage(message, resumed);
     if (dispatched === null) return;
     const {events, iterationStoreReplaced} = dispatched;
@@ -1583,7 +1583,7 @@ export class SocketSessionController implements SessionController {
   }
 
   #dispatchMessage(
-    message: ServerMessage,
+    message: PersistentStreamMessage,
     resumed: boolean,
   ): {readonly events: readonly RunEvent[]; readonly iterationStoreReplaced: boolean} | null {
     switch (message.type) {

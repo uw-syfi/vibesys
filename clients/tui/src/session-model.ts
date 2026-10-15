@@ -1143,7 +1143,7 @@ export function applyResponseEvents(
 export function applyEventBatch(
   state: SessionState,
   events: readonly RunEvent[],
-  activeExecutions?: ActiveExecutionCheckpoint,
+  activeExecutions?: ActiveExecutionCheckpoint | null,
   throughSequence?: number,
   historyAfterSequence?: number,
 ): SessionState {
@@ -1162,7 +1162,7 @@ export function applyEventBatch(
 export function applyEventRebootstrap(
   state: SessionState,
   events: readonly RunEvent[],
-  activeExecutions: ActiveExecutionCheckpoint | undefined,
+  activeExecutions: ActiveExecutionCheckpoint | null | undefined,
   throughSequence: number | undefined,
   historyAfterSequence: number,
 ): SessionState {

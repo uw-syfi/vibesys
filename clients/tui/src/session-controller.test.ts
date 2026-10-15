@@ -11,7 +11,7 @@ import {
   ServerError,
   type ServerMessage,
 } from '@vibesys/contracts';
-import {chatEvent, event} from '@vibesys/contracts/testing';
+import {chatEvent, event, statusEvent} from '@vibesys/contracts/testing';
 import type {
   EventSubscription,
   ScheduleTimeout,
@@ -698,6 +698,67 @@ describe('session controller', () => {
     expect(controller.state.core.sequence).toBe(2);
     expect(controller.state.core.transcript.at(-1)?.content).toBe('persisted output\n');
     expect(controller.state.core.activeExecutions).toEqual({});
+  });
+
+  it('keeps the last complete execution checkpoint when a fragmented rebootstrap disconnects', async () => {
+    const transport = new FakeTransport();
+    const controller = new SocketSessionController(transport, undefined, undefined, []);
+    await controller.start();
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(1, 'agent_execution_started'),
+        execution_id: 'previous',
+        agent_kind: 'implementer',
+        round_label: 'round-1-implementer',
+        data: {
+          kind: 'agent_execution_started',
+          stage: 'implementation',
+          attempt: 1,
+          system_prompt: '',
+          user_prompt: 'Keep this visible',
+          activity: {
+            kind: 'agent_execution_activity_changed',
+            mode: 'thinking',
+            summary: 'Working',
+            tool: null,
+          },
+        },
+      },
+    });
+    transport.emit({
+      type: 'event',
+      event: statusEvent(2, 'previous', 'agent_output_chunk', {progress: 'Still working'}),
+    });
+    const checkpointId = 'a'.repeat(64);
+    transport.emit({
+      type: 'event_batch',
+      events: [event(1, 'server_ready')],
+      through_sequence: 1,
+      active_executions: null,
+      active_executions_checkpoint_id: checkpointId,
+      store_id: 'replacement-store',
+      history_after_sequence: 0,
+      rebootstrap: true,
+    });
+    expect(Object.keys(controller.state.core.activeExecutions)).toEqual(['previous']);
+    transport.emit({
+      type: 'active_executions_chunk',
+      checkpoint_id: checkpointId,
+      chunk_index: 0,
+      chunk_count: 2,
+      payload: '[',
+      through_sequence: 1,
+      store_id: 'replacement-store',
+      history_after_sequence: 0,
+    });
+
+    transport.disconnect(new Error('Server event stream disconnected'));
+
+    expect(Object.keys(controller.state.core.activeExecutions)).toEqual(['previous']);
+    expect(controller.state.core.executionStatuses['previous']?.progress).toBe('Still working');
+    expect(controller.state.eventStreamAvailable).toBe(false);
+    await controller.stop();
   });
 
   it('does not surface an old failure banner when a replay batch resumes running', async () => {
