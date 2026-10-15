@@ -63,9 +63,20 @@ EVENT_TO_SUBAREA: Mapping[type[EvaluationEvent], Reducer] = MappingProxyType(
 def advance_evaluation(
     state: EvaluationState, context: EvaluationContext, event: EvaluationEvent
 ) -> AreaChange[EvaluationState]:
-    """Route each closed event variant to its sole owning subarea."""
+    """Route each closed event variant to its sole owning subarea.
+
+    The event's time has already moved the run clock. Waits whose deadline it reached
+    freeze first, on the job facts they had at the deadline, before the event changes them.
+    """
+    due = _continuations.reach_deadlines(state, context)
     reducer: Reducer = EVENT_TO_SUBAREA[type(event)]
-    change = reducer(state, context, event)
+    change = reducer(due.state, context, event)
     # A job's release is announced to its closing attempt here, whichever subarea recorded it.
     announced = _job_releases.job_release_signals(state, change.state, context)
-    return change.model_copy(update={"signals": (*change.signals, *announced)})
+    return change.model_copy(
+        update={
+            "signals": (*due.signals, *change.signals, *announced),
+            "requests": (*due.requests, *change.requests),
+            "events": (*due.events, *change.events),
+        }
+    )

@@ -496,11 +496,15 @@ def _deadline_proof(state: EvaluationState, continuation: Continuation) -> None:
             "frozen timeout must match its deadline and owned dependencies",
         )
     if continuation.timeout is None and any(
-        job.observation is not None and job.observation.observed_at >= continuation.deadline_at
+        not _settled(job)
+        and job.observation is not None
+        and job.observation.observed_at >= continuation.deadline_at
         for job in _jobs(state, continuation)
     ):
-        # A post-update wakeup has lost the previous progress needed to freeze
-        # before the observation. It cannot stand in for the missing proof.
+        # ``reach_deadlines`` freezes a wait before any fact at or past its deadline is
+        # applied, so an unfinished job observed that late means the freeze was skipped:
+        # the progress it had at the deadline is gone and cannot be invented. A job that
+        # settled before the deadline may still report later facts (its release).
         raise ContractError(
             ("continuation", "timeout"),
             "deadline must freeze before job facts; prior progress is unavailable",
@@ -1073,6 +1077,32 @@ def _deadline(
             )
         }
     )
+
+
+def reach_deadlines(
+    state: EvaluationState, context: EvaluationContext
+) -> AreaChange[EvaluationState]:
+    """Freeze every wait whose deadline the run clock has reached, as ``DeadlineReached`` does.
+
+    Run time moves only with the events core consumes, and the event that carries it past
+    a wait's deadline is often a fact about the very job the wait is on: the next poll of a
+    job still queued. The timeout must record the jobs as they were at the deadline, so the
+    evaluation area runs this before it applies any event, while the jobs still hold the
+    facts they had then.
+    """
+    change: AreaChange[EvaluationState] = AreaChange(state=state)
+    for identity in tuple(row.continuation_id for row in state.continuations):
+        row = next(r for r in change.state.continuations if r.continuation_id == identity)
+        if row.timeout is not None or row.deadline_at > context.run.now_at:
+            continue
+        reached = _deadline(change.state, context, row, context.run.now_at)
+        change = AreaChange(
+            state=reached.state,
+            signals=(*change.signals, *reached.signals),
+            requests=(*change.requests, *reached.requests),
+            events=(*change.events, *reached.events),
+        )
+    return change
 
 
 def _changed(
