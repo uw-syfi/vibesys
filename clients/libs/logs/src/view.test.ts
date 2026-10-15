@@ -28,6 +28,7 @@ function chunked(random: Seeded, whole: string, start = 0, closed = true): LogCh
       eof: last,
       closed: last && closed,
       truncated_before: false,
+      pipes: next === offset ? [] : [{offset, length: next - offset, pipe: 'stdout'}],
     });
     offset = next;
   }
@@ -100,6 +101,7 @@ describe('foldChunk', () => {
       eof: true,
       closed: false,
       truncated_before: false,
+      pipes: [{offset: 0, length: 3, pipe: 'stdout'}],
     });
     view = foldChunk(view, {
       offset: 10,
@@ -108,6 +110,7 @@ describe('foldChunk', () => {
       eof: true,
       closed: true,
       truncated_before: true,
+      pipes: [{offset: 10, length: 4, pipe: 'stdout'}],
     });
     expect(logViewLines(view)).toEqual(['abc', 'xyz']);
     expect(view.skippedBytes).toBe(7);
@@ -122,6 +125,7 @@ describe('foldChunk', () => {
       eof: true,
       closed: false,
       truncated_before: true,
+      pipes: [{offset: 40, length: 5, pipe: 'stdout'}],
     });
     expect([view.start, view.truncatedBefore, view.lines]).toEqual([40, true, ['last']]);
   });

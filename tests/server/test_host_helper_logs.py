@@ -32,10 +32,13 @@ from server.host_api import (
     HelperErrorCode,
     LogChunk,
     LogOffset,
+    LogPipe,
+    LogPipeSpan,
     LogsListReply,
     LogsListRequest,
     LogsReadReply,
     LogsReadRequest,
+    LogStreamOutcome,
     LogTail,
 )
 from server.host_helper_logs import (
@@ -54,7 +57,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _INSTANCE = "0123456789ab"
-_STREAM = "build"
+_STREAM = "000001"
+_OTHER = "000002"
+_MISSING = "000099"
 _OWNER: dict[str, Any] = {"kind": "startup_step", "step": "image_build"}
 
 # Text with one-, two-, three- and four-byte characters and line ends.
@@ -63,8 +68,7 @@ _READ_SIZES = st.integers(LOGS_READ_MIN_BYTES, 64)
 
 
 def _store() -> FakeLogReader:
-    clock = ManualClock(1_700_000_000.0)
-    store = FakeLogReader(clock, SimThreads(schedule_seed=0))
+    store = FakeLogReader(SimThreads(schedule_seed=0))
     store.open(_INSTANCE, _STREAM, _OWNER, "docker build .")
     return store
 
@@ -116,18 +120,24 @@ def _follow(logs: HelperLogs, offset: int, max_bytes: int) -> tuple[str, int, li
 
 
 @settings(max_examples=examples(pr=200, nightly=2000))
-@given(st.lists(st.binary(max_size=40), max_size=8), _READ_SIZES)
+@given(
+    st.lists(st.tuples(st.binary(max_size=40), st.sampled_from(list(LogPipe))), max_size=8),
+    _READ_SIZES,
+)
 def test_reading_a_closed_stream_in_chunks_decodes_like_reading_it_whole(
-    writes: list[bytes], max_bytes: int
+    writes: list[tuple[bytes, LogPipe]], max_bytes: int
 ) -> None:
     store = _store()
-    for data in writes:
-        store.write(_INSTANCE, _STREAM, data)
+    for data, pipe in writes:
+        store.write(_INSTANCE, _STREAM, data, pipe)
     store.close(_INSTANCE, _STREAM)
     text, end, chunks = _follow(_logs(store), 0, max_bytes)
-    whole = b"".join(writes)
+    whole = b"".join(data for data, _ in writes)
     assert text == whole.decode("utf-8", errors="replace")
     assert end == len(whole)
+    labels = [pipe for data, pipe in writes for _ in data]
+    seen = [span.pipe for chunk in chunks for span in chunk.pipes for _ in range(span.length)]
+    assert seen == labels
     for chunk in chunks:
         assert chunk.next_offset - chunk.offset <= max_bytes
         assert chunk.eof or chunk.next_offset > chunk.offset
@@ -217,7 +227,7 @@ def test_unknown_instances_and_streams_are_typed_errors() -> None:
     assert listed.code is HelperErrorCode.UNKNOWN_INSTANCE
     for instance_id, stream_id, code in (
         ("f" * 12, _STREAM, HelperErrorCode.UNKNOWN_INSTANCE),
-        (_INSTANCE, "missing", HelperErrorCode.UNKNOWN_LOG_STREAM),
+        (_INSTANCE, _MISSING, HelperErrorCode.UNKNOWN_LOG_STREAM),
     ):
         reply = _read(logs, LogOffset(offset=0), 64, stream_id=stream_id, instance_id=instance_id)
         assert isinstance(reply, HelperError)
@@ -227,15 +237,15 @@ def test_unknown_instances_and_streams_are_typed_errors() -> None:
 def test_list_names_each_stream_with_its_size_and_state() -> None:
     store = _store()
     store.write(_INSTANCE, _STREAM, b"abc")
-    store.open(_INSTANCE, "server", {"kind": "server_process"})
-    store.close(_INSTANCE, "server")
+    store.open(_INSTANCE, _OTHER, {"kind": "server_process"}, "vibesys")
+    store.close(_INSTANCE, _OTHER, LogStreamOutcome.FAILED)
     reply = list_logs(
         LogsListRequest(request_id="l", deadline_ms=1, instance_id=_INSTANCE), _logs(store)
     )
     assert isinstance(reply, LogsListReply)
-    assert [(s.id, s.size, s.closed, s.command) for s in reply.streams] == [
-        (_STREAM, 3, False, "docker build ."),
-        ("server", 0, True, None),
+    assert [(s.id, s.size, s.outcome, s.command) for s in reply.streams] == [
+        (_STREAM, 3, None, "docker build ."),
+        (_OTHER, 0, LogStreamOutcome.FAILED, "vibesys"),
     ]
 
 
@@ -282,8 +292,8 @@ def _follow_on_channel(
     """Serve one channel with an open stream holding ``ab``; send ``request``; run ``meanwhile``."""
     threads = SimThreads(schedule_seed=seed)
     network = SimNetwork(threads)
-    store = FakeLogReader(threads, threads)
-    store.open(_INSTANCE, _STREAM, _OWNER)
+    store = FakeLogReader(threads)
+    store.open(_INSTANCE, _STREAM, _OWNER, "docker build .")
     store.write(_INSTANCE, _STREAM, b"ab")
     if closed:
         store.close(_INSTANCE, _STREAM)
@@ -334,6 +344,7 @@ def test_a_waiting_read_answers_before_its_deadline(seed: int) -> None:
         "eof": True,
         "closed": False,
         "truncated_before": False,
+        "pipes": [],
     }
     assert followed.waited < deadline_ms / 1000
     assert followed.waited >= (deadline_ms - REPLY_MARGIN_MS) / 1000
@@ -381,6 +392,7 @@ class LogReaderUnderTest:
     reader: LogReader
     open: Callable[[str, str], None]
     write: Callable[[str, str, bytes], None]
+    write_pipe: Callable[[str, str, bytes, LogPipe], None]
     close: Callable[[str, str], None]
     evict: Callable[[str, str, int], None]
     """Drop a stream's bytes before an offset, as the store's retention would."""
@@ -397,7 +409,7 @@ class LogReaderContract:
         subject.open(_INSTANCE, _STREAM)
         subject.write(_INSTANCE, _STREAM, b"0123456789")
         stored = subject.reader.read(_INSTANCE, _STREAM, LogOffset(offset=3), 4)
-        assert (stored.offset, stored.data, stored.end) == (3, b"3456", 10)
+        assert (stored.offset, stored.data, stored.eof) == (3, b"3456", False)
         assert not stored.closed
         assert not stored.truncated_before
 
@@ -406,7 +418,7 @@ class LogReaderContract:
         subject.open(_INSTANCE, _STREAM)
         subject.write(_INSTANCE, _STREAM, b"abc")
         stored = subject.reader.read(_INSTANCE, _STREAM, LogOffset(offset=9), 4)
-        assert (stored.offset, stored.data, stored.end) == (9, b"", 3)
+        assert (stored.offset, stored.data, stored.eof) == (9, b"", True)
 
     def test_reads_the_tail_from_the_oldest_byte_held(self) -> None:
         subject = self.subject()
@@ -417,7 +429,7 @@ class LogReaderContract:
         assert (tail.offset, tail.data, tail.closed) == (7, b"789", True)
         subject.evict(_INSTANCE, _STREAM, 8)
         tail = subject.reader.read(_INSTANCE, _STREAM, LogTail(tail_bytes=3), 64)
-        assert (tail.offset, tail.data, tail.truncated_before) == (8, b"89", False)
+        assert (tail.offset, tail.data, tail.truncated_before) == (8, b"89", True)
 
     def test_reads_of_evicted_bytes_start_at_the_oldest_held(self) -> None:
         subject = self.subject()
@@ -429,14 +441,14 @@ class LogReaderContract:
 
     def test_lists_streams_oldest_first(self) -> None:
         subject = self.subject()
-        subject.open(_INSTANCE, "first")
-        subject.open(_INSTANCE, "second")
-        subject.write(_INSTANCE, "second", b"xy")
-        subject.close(_INSTANCE, "first")
+        subject.open(_INSTANCE, _STREAM)
+        subject.open(_INSTANCE, _OTHER)
+        subject.write(_INSTANCE, _OTHER, b"xy")
+        subject.close(_INSTANCE, _STREAM)
         listed = subject.reader.streams(_INSTANCE)
-        assert [(s.id, s.size, s.closed) for s in listed] == [
-            ("first", 0, True),
-            ("second", 2, False),
+        assert [(s.id, s.size, s.outcome is None) for s in listed] == [
+            (_STREAM, 0, False),
+            (_OTHER, 2, True),
         ]
         json.loads(listed[0].model_dump_json())
 
@@ -448,15 +460,27 @@ class LogReaderContract:
         with pytest.raises(UnknownInstanceError):
             subject.reader.read("f" * 12, _STREAM, LogOffset(offset=0), 4)
         with pytest.raises(UnknownLogStreamError):
-            subject.reader.read(_INSTANCE, "missing", LogOffset(offset=0), 4)
+            subject.reader.read(_INSTANCE, _MISSING, LogOffset(offset=0), 4)
+
+    def test_labels_each_byte_with_the_pipe_that_wrote_it(self) -> None:
+        subject = self.subject()
+        subject.open(_INSTANCE, _STREAM)
+        subject.write_pipe(_INSTANCE, _STREAM, b"out\n", LogPipe.STDOUT)
+        subject.write_pipe(_INSTANCE, _STREAM, b"err\n", LogPipe.STDERR)
+        stored = subject.reader.read(_INSTANCE, _STREAM, LogOffset(offset=2), 64)
+        assert stored.pipes == (
+            LogPipeSpan(offset=2, length=2, pipe=LogPipe.STDOUT),
+            LogPipeSpan(offset=4, length=4, pipe=LogPipe.STDERR),
+        )
 
 
 class TestFakeLogReader(LogReaderContract):
     def subject(self) -> LogReaderUnderTest:
-        store = FakeLogReader(ManualClock(), SimThreads(schedule_seed=0))
+        store = FakeLogReader(SimThreads(schedule_seed=0))
         return LogReaderUnderTest(
             reader=store,
-            open=lambda instance, stream: store.open(instance, stream, _OWNER),
+            open=lambda instance, stream: store.open(instance, stream, _OWNER, "make"),
+            write_pipe=store.write,
             write=store.write,
             close=store.close,
             evict=store.evict,

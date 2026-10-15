@@ -17,7 +17,7 @@ Light like the rest of the helper: the standard library, Pydantic, and
 ``server.host_api``.
 
 Public surface: ``LogReader``, ``StoredBytes``, ``UnknownInstanceError``,
-``UnknownLogStreamError``, ``HelperLogs``, ``cut_chunk``, ``list_logs``,
+``UnknownLogStreamError``, ``HelperLogs``, ``cut_chunk``, ``clip_pipes``, ``list_logs``,
 ``read_log``, and the limits ``POLL_INTERVAL_SECONDS`` and ``REPLY_MARGIN_MS``.
 """
 
@@ -31,6 +31,7 @@ from server.host_api import (
     HelperErrorCode,
     LogChunk,
     LogOffset,
+    LogPipeSpan,
     LogsListReply,
     LogsListRequest,
     LogsReadReply,
@@ -71,11 +72,14 @@ class StoredBytes:
 
     offset: int
     data: bytes
-    end: int
-    """How many bytes the stream holds now: the offset its next byte will have."""
-    closed: bool
+    pipes: tuple[LogPipeSpan, ...]
+    """Which pipe wrote each byte of ``data``, covering it exactly, in stream offsets."""
     truncated_before: bool
     """The read asked for bytes before ``offset`` that were evicted."""
+    eof: bool
+    """Nothing after ``data`` was there when it was read."""
+    closed: bool
+    """The stream was closed before the read began: with ``eof``, no byte will follow."""
 
 
 class LogReader(Protocol):
@@ -86,7 +90,8 @@ class LogReader(Protocol):
     blocks: from ``LogOffset`` it starts at that offset, or at the oldest byte
     still held when that offset was evicted (``truncated_before``), or returns no
     bytes at that offset when it is at or past the end; from ``LogTail`` it starts
-    ``tail_bytes`` before the end, or at the oldest byte held. Both raise
+    ``min(tail_bytes, max_bytes)`` before the end, or at the oldest byte held
+    (``truncated_before`` again). ``pipes`` covers the bytes returned. Both raise
     ``UnknownInstanceError`` for an instance with no logs, and ``read`` raises
     ``UnknownLogStreamError`` for a stream the instance does not have.
     """
@@ -154,7 +159,7 @@ def cut_chunk(stored: StoredBytes, *, tail: bool) -> LogChunk:
         skip = _line_start(data)
         data = data[skip:]
         offset += skip
-    more = offset + len(data) < stored.end
+    more = not stored.eof
     if more and _NEWLINE in data:
         data = data[: data.rfind(_NEWLINE) + 1]
     elif more or not stored.closed:
@@ -166,7 +171,19 @@ def cut_chunk(stored: StoredBytes, *, tail: bool) -> LogChunk:
         eof=not more,
         closed=stored.closed,
         truncated_before=stored.truncated_before,
+        pipes=clip_pipes(stored.pipes, offset, offset + len(data)),
     )
+
+
+def clip_pipes(pipes: tuple[LogPipeSpan, ...], start: int, end: int) -> tuple[LogPipeSpan, ...]:
+    """The parts of ``pipes`` inside ``[start, end)``."""
+    clipped = []
+    for span in pipes:
+        low = max(span.offset, start)
+        high = min(span.offset + span.length, end)
+        if high > low:
+            clipped.append(LogPipeSpan(offset=low, length=high - low, pipe=span.pipe))
+    return tuple(clipped)
 
 
 def list_logs(request: LogsListRequest, logs: HelperLogs) -> LogsListReply | HelperError:

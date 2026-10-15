@@ -123,7 +123,7 @@
         "request_id": "lr",
         "deadline_ms": 10000,
         "instance_id": "0123456789ab",
-        "stream_id": "image_build",
+        "stream_id": "000001",
         "start": {
           "tail_bytes": 1024
         },

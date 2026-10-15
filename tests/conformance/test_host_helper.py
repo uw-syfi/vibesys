@@ -23,7 +23,8 @@ from tests.server.host_helper_support import (
     with_logs,
 )
 
-from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimNetwork, SimThreads
+from server.host_api import LogPipe, LogStreamOutcome
+from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -41,22 +42,21 @@ _INSTANCE = "0123456789ab"
 
 
 def _seeded_logs(threads: SimThreads) -> FakeLogReader:
-    """An open 66-byte image build, and a closed 42-byte server stream evicted before 14.
-
-    Writes are stamped on an epoch clock fixed at 1_700_000_000, as the scenarios expect.
-    """
-    logs = FakeLogReader(ManualClock(1_700_000_000.0), threads)
+    """Stream 000001: an open 66-byte image build on stdout. Stream 000002: a failed
+    42-byte server stream on stderr, evicted before offset 14."""
+    logs = FakeLogReader(threads)
     build_owner: dict[str, JsonValue] = {"kind": "startup_step", "step": "image_build"}
-    logs.open(_INSTANCE, "image_build", build_owner, "docker build .")
+    logs.open(_INSTANCE, "000001", build_owner, "docker build .")
     logs.write(
         _INSTANCE,
-        "image_build",
+        "000001",
         b"Step 1/8 : FROM python\nStep 2/8 : WORKDIR /app\nStep 3/8 : RUN make",
     )
-    logs.open(_INSTANCE, "server", {"kind": "server_process"})
-    logs.write(_INSTANCE, "server", b"".join(b"line %d\n" % line for line in range(6)))
-    logs.evict(_INSTANCE, "server", 14)
-    logs.close(_INSTANCE, "server")
+    logs.open(_INSTANCE, "000002", {"kind": "server_process"}, "vibesys")
+    server = b"".join(b"line %d\n" % line for line in range(6))
+    logs.write(_INSTANCE, "000002", server, LogPipe.STDERR)
+    logs.evict(_INSTANCE, "000002", 14)
+    logs.close(_INSTANCE, "000002", LogStreamOutcome.FAILED)
     return logs
 
 

@@ -2,7 +2,7 @@
   "id": "helper-logs-list",
   "protocol": "host-helper",
   "title": "List an instance's log streams",
-  "description": "After negotiating logs, logs.list names the instance's recorded streams, oldest first, with owner, command, size and whether each is closed.",
+  "description": "After negotiating logs, logs.list names the instance's recorded streams, oldest first, with owner, command, retained range and how each was closed.",
   "role": "logs",
   "transports": [
     "stdio"
@@ -51,25 +51,25 @@
         "request_id": "l",
         "streams": [
           {
-            "id": "image_build",
+            "id": "000001",
             "owner": {
               "kind": "startup_step",
               "step": "image_build"
             },
             "command": "docker build .",
+            "retained_start": 0,
             "size": 66,
-            "closed": false,
-            "last_activity": 1700000000.0
+            "outcome": null
           },
           {
-            "id": "server",
+            "id": "000002",
             "owner": {
               "kind": "server_process"
             },
-            "command": null,
+            "command": "vibesys",
+            "retained_start": 14,
             "size": 42,
-            "closed": true,
-            "last_activity": 1700000000.0
+            "outcome": "failed"
           }
         ]
       }

@@ -2,7 +2,7 @@
   "id": "helper-logs-unknown",
   "protocol": "host-helper",
   "title": "Read logs of an unknown instance or stream",
-  "description": "logs.list and logs.read answer unknown_instance for an instance with no recorded logs, and logs.read answers unknown_log_stream for a stream the instance does not have.",
+  "description": "logs.list and logs.read answer unknown_instance for an instance this host knows nothing of, and logs.read answers unknown_log_stream for a stream the instance does not have.",
   "role": "logs",
   "transports": [
     "stdio"
@@ -59,7 +59,7 @@
         "request_id": "r",
         "deadline_ms": 10000,
         "instance_id": "0123456789ab",
-        "stream_id": "missing",
+        "stream_id": "000099",
         "start": {
           "offset": 0
         },

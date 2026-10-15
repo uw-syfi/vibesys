@@ -1167,6 +1167,13 @@ const hostHelperSchema: Record<string, unknown> = {
         "truncated_before": {
           "title": "Truncated Before",
           "type": "boolean"
+        },
+        "pipes": {
+          "items": {
+            "$ref": "#/$defs/LogPipeSpan"
+          },
+          "title": "Pipes",
+          "type": "array"
         }
       },
       "required": [
@@ -1175,7 +1182,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "next_offset",
         "eof",
         "closed",
-        "truncated_before"
+        "truncated_before",
+        "pipes"
       ],
       "title": "LogChunk",
       "type": "object"
@@ -1196,13 +1204,47 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "LogOffset",
       "type": "object"
     },
+    "LogPipe": {
+      "description": "Which of a command's output pipes wrote some bytes.",
+      "enum": [
+        "stdout",
+        "stderr"
+      ],
+      "title": "LogPipe",
+      "type": "string"
+    },
+    "LogPipeSpan": {
+      "additionalProperties": false,
+      "description": "Bytes ``[offset, offset + length)`` of a stream were written by ``pipe``.",
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "length": {
+          "exclusiveMinimum": 0,
+          "title": "Length",
+          "type": "integer"
+        },
+        "pipe": {
+          "$ref": "#/$defs/LogPipe"
+        }
+      },
+      "required": [
+        "offset",
+        "length",
+        "pipe"
+      ],
+      "title": "LogPipeSpan",
+      "type": "object"
+    },
     "LogStream": {
       "additionalProperties": false,
       "description": "One recorded log stream of an instance, as its store indexes it.",
       "properties": {
         "id": {
-          "maxLength": 255,
-          "minLength": 1,
+          "pattern": "^[0-9]{6,12}$",
           "title": "Id",
           "type": "string"
         },
@@ -1214,42 +1256,50 @@ const hostHelperSchema: Record<string, unknown> = {
           "type": "object"
         },
         "command": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Command"
+          "title": "Command",
+          "type": "string"
+        },
+        "retained_start": {
+          "minimum": 0,
+          "title": "Retained Start",
+          "type": "integer"
         },
         "size": {
           "minimum": 0,
           "title": "Size",
           "type": "integer"
         },
-        "closed": {
-          "title": "Closed",
-          "type": "boolean"
-        },
-        "last_activity": {
-          "maximum": 8640000000000,
-          "minimum": 0,
-          "title": "Last Activity",
-          "type": "number"
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LogStreamOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
         "id",
         "owner",
         "command",
+        "retained_start",
         "size",
-        "closed",
-        "last_activity"
+        "outcome"
       ],
       "title": "LogStream",
       "type": "object"
+    },
+    "LogStreamOutcome": {
+      "description": "How a stream was closed.",
+      "enum": [
+        "ended",
+        "failed",
+        "abandoned"
+      ],
+      "title": "LogStreamOutcome",
+      "type": "string"
     },
     "LogTail": {
       "additionalProperties": false,
@@ -1393,8 +1443,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "type": "string"
         },
         "stream_id": {
-          "maxLength": 255,
-          "minLength": 1,
+          "pattern": "^[0-9]{6,12}$",
           "title": "Stream Id",
           "type": "string"
         },

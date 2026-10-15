@@ -42,7 +42,7 @@
         "request_id": "f",
         "deadline_ms": 10000,
         "instance_id": "0123456789ab",
-        "stream_id": "image_build",
+        "stream_id": "000001",
         "start": {
           "offset": 66
         },
@@ -61,7 +61,8 @@
           "next_offset": 66,
           "eof": true,
           "closed": false,
-          "truncated_before": false
+          "truncated_before": false,
+          "pipes": []
         }
       }
     }

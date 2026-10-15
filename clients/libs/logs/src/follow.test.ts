@@ -26,13 +26,15 @@ const CONFIG: LogFollowConfig = {
 const INPUT = {instanceId: '0123456789ab', streamId: '7', config: CONFIG};
 
 function chunk(offset: number, data: string, {eof = true, closed = false} = {}): LogChunk {
+  const length = new TextEncoder().encode(data).length;
   return {
     offset,
     data,
-    next_offset: offset + new TextEncoder().encode(data).length,
+    next_offset: offset + length,
     eof,
     closed,
     truncated_before: false,
+    pipes: length === 0 ? [] : [{offset, length, pipe: 'stdout'}],
   };
 }
 

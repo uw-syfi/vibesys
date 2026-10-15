@@ -42,7 +42,7 @@
         "request_id": "r",
         "deadline_ms": 10000,
         "instance_id": "0123456789ab",
-        "stream_id": "server",
+        "stream_id": "000002",
         "start": {
           "offset": 0
         },
@@ -61,7 +61,14 @@
           "next_offset": 42,
           "eof": true,
           "closed": true,
-          "truncated_before": true
+          "truncated_before": true,
+          "pipes": [
+            {
+              "offset": 14,
+              "length": 28,
+              "pipe": "stderr"
+            }
+          ]
         }
       }
     }

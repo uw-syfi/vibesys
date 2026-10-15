@@ -266,10 +266,13 @@ export type RequestId26 = string;
 export type Type26 = "logs.list";
 export type Id5 = string;
 export type JsonValue = unknown;
-export type Command = string | null;
+export type Command = string;
+export type RetainedStart = number;
 export type Size = number;
-export type Closed = boolean;
-export type LastActivity = number;
+/**
+ * How a stream was closed.
+ */
+export type LogStreamOutcome = "ended" | "failed" | "abandoned";
 export type Streams = LogStream[];
 export type RequestId27 = string;
 export type Type27 = "logs.read";
@@ -277,8 +280,15 @@ export type Offset1 = number;
 export type Data = string;
 export type NextOffset = number;
 export type Eof = boolean;
-export type Closed1 = boolean;
+export type Closed = boolean;
 export type TruncatedBefore = boolean;
+export type Offset2 = number;
+export type Length = number;
+/**
+ * Which of a command's output pipes wrote some bytes.
+ */
+export type LogPipe = "stdout" | "stderr";
+export type Pipes = LogPipeSpan[];
 export type Type28 = "instances.changed";
 export type WatchId3 = string;
 export type Type29 = "error";
@@ -818,9 +828,9 @@ export interface LogStream {
   id: Id5;
   owner: Owner;
   command: Command;
+  retained_start: RetainedStart;
   size: Size;
-  closed: Closed;
-  last_activity: LastActivity;
+  outcome: LogStreamOutcome | null;
 }
 export interface Owner {
   [k: string]: JsonValue;
@@ -846,8 +856,17 @@ export interface LogChunk {
   data: Data;
   next_offset: NextOffset;
   eof: Eof;
-  closed: Closed1;
+  closed: Closed;
   truncated_before: TruncatedBefore;
+  pipes: Pipes;
+}
+/**
+ * Bytes ``[offset, offset + length)`` of a stream were written by ``pipe``.
+ */
+export interface LogPipeSpan {
+  offset: Offset2;
+  length: Length;
+  pipe: LogPipe;
 }
 /**
  * A push on a watch: the listing as it is now, sent first and then on each change.

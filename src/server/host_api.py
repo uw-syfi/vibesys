@@ -22,7 +22,8 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
 ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
 ``TaskList``, the inspection documents, and the host helper's messages:
-the log streams' ``LogStream``, ``LogChunk``, ``LogOffset``, ``LogTail`` and limits
+the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpan``,
+``LogPipe``, ``LogOffset``, ``LogTail`` and limits
 (``LOGS_READ_MAX_BYTES``, ``LOGS_READ_MIN_BYTES``, ``LOGS_WAIT_MAX_MS``),
 ``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
 ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
@@ -754,15 +755,34 @@ available bytes makes progress."""
 LOGS_WAIT_MAX_MS: Final = 30_000
 """The longest a ``logs.read`` waits at the end of an open stream for more bytes."""
 
-LogStreamId = Annotated[str, StringConstraints(min_length=1, max_length=255)]
-"""A recorded stream's id, unique within its instance; opaque to the client."""
+LogStreamId = Annotated[str, StringConstraints(pattern=r"^[0-9]{6,12}$")]
+"""A recorded stream's id in its run's log store (``vs_logs``): digits, unique within the run."""
 
 LogOwner = dict[str, JsonValue]
 """What a stream is for (a startup step, a gate stage, an agent invocation, ...).
 
-TODO(live-log-visibility PR 2): replace this opaque JSON object with the owner
-union vibesys defines there, so clients get the generated discriminated type.
+The writer validated it against vibesys's ``LogOwner`` union, whose generated TypeScript
+is ``LogOwner`` in the run protocol's bindings; the helper passes it through as JSON so it
+never imports vibesys, and a client narrows it with that union.
 """
+
+
+class LogPipe(StrEnum):
+    """Which of a command's output pipes wrote some bytes."""
+
+    STDOUT = "stdout"
+    STDERR = "stderr"
+
+
+class LogStreamOutcome(StrEnum):
+    """How a stream was closed."""
+
+    ENDED = "ended"
+    """Its writer closed it normally."""
+    FAILED = "failed"
+    """Its writer closed it because the work it records failed."""
+    ABANDONED = "abandoned"
+    """Its writer stopped without closing it; a later store found it open."""
 
 
 class LogOffset(BaseModel):
@@ -1017,14 +1037,32 @@ class LogStream(BaseModel):
 
     id: LogStreamId
     owner: LogOwner
-    command: str | None
-    """The command whose output the stream holds, for display; ``None`` for narration."""
+    command: str
+    """What wrote the stream, for display: a command line, or the narration's name."""
+    retained_start: NonNegativeInt
+    """The oldest offset the store still holds; bytes before it were evicted."""
     size: NonNegativeInt
     """How many bytes were ever written: the offset the next byte will have."""
-    closed: bool
-    """No byte will be written after ``bytes``."""
-    last_activity: _StartedAt
-    """When the stream was last written or closed, in seconds since the epoch."""
+    outcome: LogStreamOutcome | None
+    """How the stream was closed; ``None`` while it is open."""
+
+    @model_validator(mode="after")
+    def _retained(self) -> LogStream:
+        if self.retained_start > self.size:
+            message = "retained_start must not pass size"
+            raise ValueError(message)
+        return self
+
+
+class LogPipeSpan(BaseModel):
+    """Bytes ``[offset, offset + length)`` of a stream were written by ``pipe``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    offset: NonNegativeInt
+    """A stream offset, like ``LogChunk.offset``."""
+    length: PositiveInt
+    pipe: LogPipe
 
 
 class LogsListReply(_HelperReply):
@@ -1058,12 +1096,24 @@ class LogChunk(BaseModel):
     """The stream is closed: once ``eof``, no more bytes will come."""
     truncated_before: bool
     """Bytes the read asked for, before ``offset``, were evicted and are gone."""
+    pipes: tuple[LogPipeSpan, ...]
+    """Which pipe wrote each byte of ``[offset, next_offset)``: adjacent spans, in order,
+    in stream offsets (the coordinates of ``offset``), covering the chunk exactly."""
 
     @model_validator(mode="after")
     def _ordered(self) -> LogChunk:
         span = self.next_offset - self.offset
         if span < 0 or span > LOGS_READ_MAX_BYTES:
             message = "next_offset must follow offset by at most LOGS_READ_MAX_BYTES"
+            raise ValueError(message)
+        cursor = self.offset
+        for pipe in self.pipes:
+            if pipe.offset != cursor:
+                message = "pipe spans must be adjacent and start at offset"
+                raise ValueError(message)
+            cursor += pipe.length
+        if cursor != self.next_offset:
+            message = "pipe spans must cover offset to next_offset exactly"
             raise ValueError(message)
         return self
 

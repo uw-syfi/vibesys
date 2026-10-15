@@ -2,7 +2,7 @@
   "id": "helper-logs-read-tail",
   "protocol": "host-helper",
   "title": "Read a stream's tail, then whole lines from an offset",
-  "description": "A tail read starts at the first line start in its window and, at the end of the open stream, keeps the unfinished last line. A read whose window more bytes follow ends after its last line end.",
+  "description": "A tail read starts at the first line start in its window and, at the end of the open stream, keeps the unfinished last line. A read whose window more bytes follow ends after its last line end. Each chunk says which pipe wrote its bytes.",
   "role": "logs",
   "transports": [
     "stdio"
@@ -42,7 +42,7 @@
         "request_id": "t",
         "deadline_ms": 10000,
         "instance_id": "0123456789ab",
-        "stream_id": "image_build",
+        "stream_id": "000001",
         "start": {
           "tail_bytes": 30
         },
@@ -61,7 +61,14 @@
           "next_offset": 66,
           "eof": true,
           "closed": false,
-          "truncated_before": false
+          "truncated_before": false,
+          "pipes": [
+            {
+              "offset": 47,
+              "length": 19,
+              "pipe": "stdout"
+            }
+          ]
         }
       }
     },
@@ -72,7 +79,7 @@
         "request_id": "o",
         "deadline_ms": 10000,
         "instance_id": "0123456789ab",
-        "stream_id": "image_build",
+        "stream_id": "000001",
         "start": {
           "offset": 0
         },
@@ -91,7 +98,14 @@
           "next_offset": 23,
           "eof": false,
           "closed": false,
-          "truncated_before": false
+          "truncated_before": false,
+          "pipes": [
+            {
+              "offset": 0,
+              "length": 23,
+              "pipe": "stdout"
+            }
+          ]
         }
       }
     }

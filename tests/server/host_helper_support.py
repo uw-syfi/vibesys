@@ -19,7 +19,10 @@ from server.host_api import (
     InstanceStatus,
     LiveInstanceRecord,
     LogOffset,
+    LogPipe,
+    LogPipeSpan,
     LogStream,
+    LogStreamOutcome,
     LogTail,
     RunPhase,
     RunStatus,
@@ -31,6 +34,7 @@ from server.host_helper_logs import (
     StoredBytes,
     UnknownInstanceError,
     UnknownLogStreamError,
+    clip_pipes,
 )
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import HelperHost, PathHints, Scan, ScannedEntry
@@ -53,7 +57,7 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
-    from vs_sim.api import Clock, Network, Threads, Worker
+    from vs_sim.api import Network, Threads, Worker
     from vs_sim.api.testing import SimThreads
 
 HOME = "/home/user"
@@ -152,12 +156,12 @@ def record(
 @dataclass
 class _FakeStream:
     owner: dict[str, JsonValue]
-    command: str | None
+    command: str
     held: bytearray = field(default_factory=bytearray)
     oldest: int = 0
     """The offset of ``held[0]``; bytes before it were evicted."""
-    closed: bool = False
-    last_activity: float = 0.0
+    pipes: list[LogPipeSpan] = field(default_factory=list)
+    outcome: LogStreamOutcome | None = None
 
     @property
     def end(self) -> int:
@@ -168,12 +172,11 @@ class _FakeStream:
 class FakeLogReader:
     """An in-memory log store with the ``LogReader`` contract, and the writes a test makes to it.
 
-    Writes stamp ``last_activity`` from ``clock``; ``evict`` drops a stream's oldest
-    bytes the way a capped store does. Callers on several simulated threads share it
-    under ``threads``' lock, as the real store's index is shared.
+    ``evict`` drops a stream's oldest bytes the way a capped store does. Callers on
+    several simulated threads share it under ``threads``' lock, as the real store's
+    files are shared.
     """
 
-    clock: Clock
     threads: Threads
     instances: dict[str, dict[str, _FakeStream]] = field(default_factory=dict)
 
@@ -181,28 +184,31 @@ class FakeLogReader:
         self._lock = self.threads.lock()
 
     def open(
-        self,
-        instance_id: str,
-        stream_id: str,
-        owner: dict[str, JsonValue],
-        command: str | None = None,
+        self, instance_id: str, stream_id: str, owner: dict[str, JsonValue], command: str
     ) -> None:
         with self._lock:
-            streams = self.instances.setdefault(instance_id, {})
-            streams[stream_id] = _FakeStream(owner, command, last_activity=self.clock.now())
+            self.instances.setdefault(instance_id, {})[stream_id] = _FakeStream(owner, command)
 
-    def write(self, instance_id: str, stream_id: str, data: bytes) -> None:
+    def write(
+        self, instance_id: str, stream_id: str, data: bytes, pipe: LogPipe = LogPipe.STDOUT
+    ) -> None:
         with self._lock:
             stream = self.instances[instance_id][stream_id]
-            assert not stream.closed
+            assert stream.outcome is None
+            if not data:
+                return
+            last = stream.pipes[-1] if stream.pipes else None
+            if last is not None and last.pipe is pipe:
+                stream.pipes[-1] = last.model_copy(update={"length": last.length + len(data)})
+            else:
+                stream.pipes.append(LogPipeSpan(offset=stream.end, length=len(data), pipe=pipe))
             stream.held += data
-            stream.last_activity = self.clock.now()
 
-    def close(self, instance_id: str, stream_id: str) -> None:
+    def close(
+        self, instance_id: str, stream_id: str, outcome: LogStreamOutcome = LogStreamOutcome.ENDED
+    ) -> None:
         with self._lock:
-            stream = self.instances[instance_id][stream_id]
-            stream.closed = True
-            stream.last_activity = self.clock.now()
+            self.instances[instance_id][stream_id].outcome = outcome
 
     def evict(self, instance_id: str, stream_id: str, before: int) -> None:
         with self._lock:
@@ -210,20 +216,20 @@ class FakeLogReader:
             drop = max(0, min(before, stream.end) - stream.oldest)
             del stream.held[:drop]
             stream.oldest += drop
+            stream.pipes = list(clip_pipes(tuple(stream.pipes), stream.oldest, stream.end))
 
     def streams(self, instance_id: str) -> tuple[LogStream, ...]:
         with self._lock:
-            streams = self._instance(instance_id)
             return tuple(
                 LogStream(
                     id=stream_id,
                     owner=stream.owner,
                     command=stream.command,
+                    retained_start=stream.oldest,
                     size=stream.end,
-                    closed=stream.closed,
-                    last_activity=stream.last_activity,
+                    outcome=stream.outcome,
                 )
-                for stream_id, stream in streams.items()
+                for stream_id, stream in self._instance(instance_id).items()
             )
 
     def read(
@@ -236,18 +242,19 @@ class FakeLogReader:
             stream = streams[stream_id]
             match start:
                 case LogOffset(offset=offset):
-                    first = max(offset, stream.oldest)
-                    truncated = offset < stream.oldest
+                    wanted = offset
                 case LogTail(tail_bytes=tail_bytes):
-                    first = max(stream.end - tail_bytes, stream.oldest)
-                    truncated = False
+                    wanted = max(stream.end - min(tail_bytes, max_bytes), 0)
+            first = max(wanted, stream.oldest)
             index = first - stream.oldest
+            data = bytes(stream.held[index : index + max_bytes])
             return StoredBytes(
                 offset=first,
-                data=bytes(stream.held[index : index + max_bytes]),
-                end=stream.end,
-                closed=stream.closed,
-                truncated_before=truncated,
+                data=data,
+                pipes=clip_pipes(tuple(stream.pipes), first, first + len(data)),
+                truncated_before=wanted < stream.oldest,
+                eof=first + len(data) >= stream.end,
+                closed=stream.outcome is not None,
             )
 
     def _instance(self, instance_id: str) -> dict[str, _FakeStream]:
