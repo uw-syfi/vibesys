@@ -50,6 +50,10 @@ export function parseReplayScenario(value: unknown): ReplayScenario {
 
 function decodeReplayScenario(value: unknown): ReplayScenario {
   const root = objectAt(value, '$');
+  // The schema version is the record's compatibility gate, so it is checked before the field shape:
+  // a record on the wrong version is rejected for that reason rather than for whichever field
+  // happens to be absent or renamed across versions.
+  if (root.schemaVersion !== 1) fail('$.schemaVersion', 'expected 1');
   exactKeys(root, '$', [
     'schemaVersion',
     'id',
@@ -64,7 +68,6 @@ function decodeReplayScenario(value: unknown): ReplayScenario {
     'measurements',
     'trajectories',
   ]);
-  if (root.schemaVersion !== 1) fail('$.schemaVersion', 'expected 1');
   const header = parseCampaignHeader(
     {
       id: root.id,

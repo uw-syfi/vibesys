@@ -73,6 +73,14 @@ test('rejects unknown keys at the fixture boundary with their path', () => {
   expect(() => parseReplayScenario(invalid)).toThrow('$.objective.shadowTarget: unknown key');
 });
 
+test('reports a wrong schema version as the compatibility gate before any missing field', () => {
+  // A record carrying only a wrong version is rejected for the version, not for the first field it
+  // happens to lack: the version gate is checked before the field shape.
+  expect(() => parseReplayScenario({schemaVersion: 99})).toThrow(
+    'Invalid replay scenario at $.schemaVersion: expected 1',
+  );
+});
+
 test('rejects measurements attributed to the wrong benchmark side of the boundary', () => {
   const invalid = cloneFixture();
   const campaign = parseReplayScenario(fixture);
