@@ -28,6 +28,7 @@ import {
 } from 'electron';
 import {APP_ENTRY_URL, WELCOME_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
+import {RunBinding} from './run-binding.js';
 import {type PendingRunPort, RunIpcRegistry} from './run-ipc.js';
 import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
 import type {WelcomeDocument} from './welcome-ipc.js';
@@ -106,8 +107,8 @@ export class AppWindow {
   /** Stable welcome-document authority across the one allowed WebContentsView recreation. */
   readonly welcome: WelcomeDocument;
   #mode: ChromeState['mode'] = 'welcome';
-  /** The run bound to the current run page, if any; null before one ever opened. */
-  #currentRunId: string | null = null;
+  /** Which run the current run page is for, if any; detaches whatever it replaces. */
+  readonly #runBinding: RunBinding;
   /** Withdraws this window's admission claim from the shared run-connect registry. */
   readonly #unregisterRunIpc: () => void;
 
@@ -124,8 +125,9 @@ export class AppWindow {
     this.#runPages = new RunPageLifecycle({
       retire: view => this.#retireRunPage(view),
       showWelcome: () => this.#showWelcome(),
-      currentPageLost: () => this.#detachCurrentRun(),
+      currentPageLost: () => this.#runBinding.detachCurrent(),
     });
+    this.#runBinding = new RunBinding({detached: runId => this.#deps.closed(runId)});
     this.#welcomePages = new WelcomePageLifecycle({
       recreate: () => sandboxedView('welcome.cjs'),
       activate: (view, lost) => this.#activateWelcomePage(view, lost),
@@ -146,16 +148,16 @@ export class AppWindow {
       this.#runPages.abandon();
       this.#welcomePages.abandon();
       for (const listener of [...this.#welcomeDestroyed]) listener();
-      this.#detachCurrentRun();
+      this.#runBinding.detachCurrent();
       this.#unregisterRunIpc();
     });
     this.#welcomePages.start(sandboxedView('welcome.cjs'));
     this.#unregisterRunIpc = runIpcRegistry(deps.log).register({
       currentSenderId: () => this.#runPages.current?.webContents.id ?? null,
       // The registry only admits a port whose sender is this window's current run page, so
-      // `#currentRunId` names the same run this port's connection is for.
+      // `#runBinding.current` names the same run this port's connection is for.
       connect: port => {
-        const runId = this.#currentRunId;
+        const runId = this.#runBinding.current;
         if (runId === null) {
           port.close();
           return;
@@ -183,8 +185,9 @@ export class AppWindow {
   /**
    * Replace the run page with a new one for `runId`, and show it.
    *
-   * This app shows one run page at a time: opening a second run's page here always replaces the
-   * first, the same way it always has. `runId` lets this window tell IPC admission and the
+   * This app shows one run page at a time: opening a second run's page here always takes over
+   * immediately, then detaches whatever run it replaces (`RunBinding.rebind`), the same way it
+   * always has shown one run at a time. `runId` lets this window tell IPC admission and the
    * `closed`/`connect` callbacks which run its one page is for, so run-control's binding for a run
    * that is not the one currently shown is never reached by this window's events.
    */
@@ -197,7 +200,7 @@ export class AppWindow {
   } {
     const view = sandboxedView('run.cjs');
     this.#runPages.replace(view);
-    this.#currentRunId = runId;
+    this.#runBinding.rebind(runId);
     this.#window.contentView.addChildView(view);
     this.#window.setTitle(`VibeSys · ${title.hostLabel}`);
     void observeRunPage(
@@ -212,7 +215,7 @@ export class AppWindow {
         if (!view.webContents.isDestroyed()) view.webContents.send(WAKE_CHANNEL);
       },
       close: () => {
-        if (this.#currentRunId === runId) this.#currentRunId = null;
+        this.#runBinding.release(runId);
         this.#runPages.close(view);
       },
     };
@@ -273,14 +276,6 @@ export class AppWindow {
   #retireWelcomePage(view: WebContentsView): void {
     if (!this.#window.isDestroyed()) this.#window.contentView.removeChildView(view);
     if (!view.webContents.isDestroyed()) view.webContents.close();
-  }
-
-  /** Report the current run page's loss, if it has one; safe before any run page ever opened. */
-  #detachCurrentRun(): void {
-    const runId = this.#currentRunId;
-    if (runId === null) return;
-    this.#currentRunId = null;
-    this.#deps.closed(runId);
   }
 
   #showWelcome(): void {

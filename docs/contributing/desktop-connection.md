@@ -517,15 +517,16 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 ## Multiple run windows
 
 Each `AppWindow` holds one `#run` view and binds to at most one run at a time (`openRunPage`
-always replaces whatever the window showed before). `RunControl` and `RunIpcRegistry` key every
-binding, navigation claim, and IPC admission by `run_id` rather than by one shared slot
-(`clients/features/run-control/src/main/run-control.ts`, `clients/apps/desktop-main/src/main/
-run-ipc.ts`), so two independent `AppWindow`s attached to two different runs cannot cross-detach or
-cross-admit each other's connection: a window's close detaches only the binding for the run it
-showed, and a window's IPC connect is admitted only for the run its own current page named. A
-Playwright spec (`clients/apps/desktop-main/e2e/two-windows.spec.ts`) constructs two `AppWindow`s
-directly against a fixture host connection and asserts no cross-run bleed on attach, content, or
-close.
+always replaces its page immediately, then detaches whatever run the window showed before).
+`RunControl` and `RunIpcRegistry` key every binding, navigation claim, and IPC admission by
+`run_id` rather than by one shared slot (`clients/features/run-control/src/main/run-control.ts`,
+`clients/apps/desktop-main/src/main/run-ipc.ts`), so two independent `AppWindow`s attached to two
+different runs cannot cross-detach or cross-admit each other's connection: a window's close
+detaches only the binding for the run it showed, and a window's IPC connect is admitted only for
+the run its own current page named. Two Playwright specs cover this: `two-windows.spec.ts`
+constructs two `AppWindow`s directly against a fixture host connection and asserts no cross-run
+bleed on attach, content, or close; `run-page-navigation.spec.ts` drives one `AppWindow` through
+two runs in turn and asserts the first is detached as part of the second taking over.
 
 This keying is the safety prerequisite for concurrent windows, not the feature itself: the app does
 not yet construct more than one `AppWindow`. `index.ts`'s `openWindow()` creates exactly one at
