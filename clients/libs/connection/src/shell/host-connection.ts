@@ -82,8 +82,9 @@ type GuardedRequestResult<T> =
  * abort reason and its reply is dropped. Releasing the last lease closes the channel.
  */
 export interface LogsLease extends AsyncDisposable {
-  list(instanceId: string, signal: AbortSignalLike): Promise<LogListOutcome>;
-  read(input: LogReadInput, signal: AbortSignalLike): Promise<LogReadOutcome>;
+  /** Without `signal`, the request lives until it settles or the lease's channel closes. */
+  list(instanceId: string, signal?: AbortSignalLike): Promise<LogListOutcome>;
+  read(input: LogReadInput, signal?: AbortSignalLike): Promise<LogReadOutcome>;
 }
 
 /** A logs request's failure as a follower reads it: the helper's code, or `transport`. */
@@ -93,7 +94,8 @@ function logFailure(error: unknown): LogReadFailure {
 }
 
 /** Settle with `work`, or reject with the abort reason once `signal` aborts; nothing is undone. */
-function untilAborted<T>(work: Promise<T>, signal: AbortSignalLike): Promise<T> {
+function untilAborted<T>(work: Promise<T>, signal: AbortSignalLike | undefined): Promise<T> {
+  if (signal === undefined) return work;
   return new Promise<T>((resolve, reject) => {
     const registration = registerAbort(signal, () => reject(abortReason(signal)));
     if (registration.aborted) {
@@ -437,14 +439,14 @@ export class HostConnection implements AsyncDisposable {
     let released = false;
     const request = async <T extends 'logs.list' | 'logs.read'>(
       body: Body & {readonly type: T},
-      signal: AbortSignalLike,
+      signal: AbortSignalLike | undefined,
     ): Promise<ReplyOf<T>> => {
       if (released) throw new ConnectionError('link', 'the logs lease was released');
       const channel = await untilAborted(this.#logsChannel(), signal);
       return untilAborted(channel.request(body), signal);
     };
     const settle = async <T>(
-      signal: AbortSignalLike,
+      signal: AbortSignalLike | undefined,
       work: () => Promise<T>,
     ): Promise<
       | {readonly ok: true; readonly value: T}
@@ -453,7 +455,7 @@ export class HostConnection implements AsyncDisposable {
       try {
         return {ok: true, value: await work()};
       } catch (error) {
-        if (signal.aborted) throw abortReason(signal);
+        if (signal?.aborted === true) throw abortReason(signal);
         return {ok: false, failure: logFailure(error)};
       }
     };

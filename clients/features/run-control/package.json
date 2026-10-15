@@ -53,6 +53,7 @@
     "@vibesys/contracts": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/logs": "workspace:*",
     "@vibesys/machine": "workspace:*",
     "@vibesys/runs": "workspace:*",
     "@vibesys/settings": "workspace:*",
