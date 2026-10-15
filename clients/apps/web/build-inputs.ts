@@ -14,6 +14,7 @@ export const WEB_BUNDLE_PACKAGES = [
   'features/web-theme',
   'libs/hosts',
   'libs/ipc',
+  'libs/logs',
   'libs/machine',
   'libs/run-session',
   'libs/run-state',
