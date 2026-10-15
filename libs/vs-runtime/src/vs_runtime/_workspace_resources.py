@@ -147,11 +147,16 @@ class WorkspaceResourceFactory:
                 )
             )
             ownership.callback(environment.close)
+            # A host stop releases the sandbox and the logger but keeps the worktree.
+            detachment = ReleaseStack()
+            detachment.callback(project.detach)
+            detachment.callback(environment.close)
             return self._resource(
                 project,
                 environment,
                 workspace_id=workspace_id,
                 ownership=ownership,
+                detachment=detachment,
             )
         except BaseException as construction_error:
             _close_after_construction_failure(ownership, construction_error)
@@ -164,6 +169,7 @@ class WorkspaceResourceFactory:
         *,
         workspace_id: str | None,
         ownership: ReleaseStack | None = None,
+        detachment: ReleaseStack | None = None,
     ) -> RuntimeWorkspaceResource:
         plan = self._evaluation_plan.model_copy(
             update={
@@ -208,6 +214,7 @@ class WorkspaceResourceFactory:
             host_resources=host_resources,
             events=self._events,
             ownership=ownership,
+            detachment=detachment,
             root_agent_environment_opener=(
                 self._root_agent_environment_opener if workspace_id is None else None
             ),
@@ -232,6 +239,7 @@ class RuntimeWorkspaceResource:
         host_resources: tuple[HostResource, ...],
         events: WorkspaceResourceEventSink,
         ownership: ReleaseStack | None,
+        detachment: ReleaseStack | None = None,
         root_agent_environment_opener: (
             Callable[[AgentExecutionConfiguration], AgentExecutionEnvironment] | None
         ),
@@ -249,6 +257,7 @@ class RuntimeWorkspaceResource:
         self._host_resources = host_resources
         self._events = events
         self._ownership = ownership
+        self._detachment = detachment
         self._root_agent_environment_opener = root_agent_environment_opener
         self._close = CloseOnce()
 
@@ -480,6 +489,15 @@ class RuntimeWorkspaceResource:
         """Release what this workspace owns; a step that failed runs again on the next call."""
         if self._ownership is not None:
             self._close.run(self._ownership.close)
+
+    def detach(self) -> None:
+        """Release this host's live handles and keep the content on disk for a later host.
+
+        A candidate's sandbox and logger close and its worktree stays, so the next host's
+        ``reattach_candidate`` reopens it with the work in it. The root owns nothing here.
+        """
+        if self._detachment is not None:
+            self._close.run(self._detachment.close)
 
 
 def _close_after_construction_failure(

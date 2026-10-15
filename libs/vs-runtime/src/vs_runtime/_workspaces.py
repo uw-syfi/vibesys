@@ -105,7 +105,13 @@ class WorkspaceResource(Protocol):
         required_metrics: frozenset[str],
     ) -> TrustedBenchmarkResult: ...
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        """Discard: release what this workspace owns, a candidate's content included."""
+        ...
+
+    def detach(self) -> None:
+        """Release this host's live handles and keep the content for ``reattach_candidate``."""
+        ...
 
 
 class WorkspaceResourceProvider(Protocol):
@@ -356,6 +362,8 @@ class RuntimeWorkspaces:
         self._lifecycle_lock = asyncio.Lock()
         self._candidate_locks: dict[str, asyncio.Lock] = {}
         self._candidates: dict[str, RuntimeCandidateWorkspace] = {}
+        self._members: set[str] = set()
+        """Member-keyed candidates: core holds them, so a host stop keeps them on disk."""
         self._closed = False
         self._close = AsyncCloseOnce()
         self._root_release = AsyncCloseOnce()
@@ -417,6 +425,8 @@ class RuntimeWorkspaces:
                     else:
                         await run_sync(self._runner, task.result().close)
                     raise
+                if member_id is not None:
+                    self._members.add(workspace_id)
                 return self._register(workspace_id, resource)
 
     def _open_candidate(self, workspace_id: str, revision: str) -> WorkspaceResource:
@@ -461,6 +471,7 @@ class RuntimeWorkspaces:
                 )
                 if resource is None:
                     return None
+                self._members.add(workspace_id)
                 return self._register(workspace_id, resource)
 
     def live_candidate(self, member_id: str) -> RuntimeCandidateWorkspace | None:
@@ -570,10 +581,29 @@ class RuntimeWorkspaces:
                     # or the run's close tries again. Callers read the failure as a group.
                     message = "candidate workspace cleanup failed"
                     raise ExceptionGroup(message, [error]) from error
-                self._candidates.pop(resource.id or "", None)
-                self._candidate_locks.pop(resource.id or "", None)
-                candidate._closed = True  # noqa: SLF001  # lint-waiver: LW-228417 [SLF001]; the owning collection terminates its handle after cleanup.
+                self._forget(resource, candidate)
         return proof
+
+    async def _detach(self, candidate: RuntimeCandidateWorkspace) -> None:
+        """Release a member's live handles at a host stop and keep its worktree on disk.
+
+        Core still holds a member's workspace (its attempt is open, its access may be unjudged),
+        so the stop of this host is not its release: the next host reattaches it with its work.
+        Only a discard, which core asks for when it releases the attempt, removes it.
+        """
+        async with self._lifecycle_lock:
+            resource = self.resource_for(candidate)
+            lock = self._candidate_locks[resource.id or ""]
+            async with lock, self._root_lock:
+                await run_sync(self._runner, resource.detach)
+                self._forget(resource, candidate)
+
+    def _forget(self, resource: WorkspaceResource, candidate: RuntimeCandidateWorkspace) -> None:
+        """Drop a released or detached candidate and end its handle."""
+        self._candidates.pop(resource.id or "", None)
+        self._candidate_locks.pop(resource.id or "", None)
+        self._members.discard(resource.id or "")
+        candidate._closed = True  # noqa: SLF001  # lint-waiver: LW-228417 [SLF001]; the owning collection terminates its handle after cleanup.
 
     def begin_close(self) -> None:
         """Reject new work and cancel in-flight trusted evaluations before teardown."""
@@ -594,7 +624,10 @@ class RuntimeWorkspaces:
             candidates = tuple(self._candidates.values())
         for candidate in reversed(candidates):
             try:
-                await candidate.discard()
+                if candidate.id in self._members:
+                    await self._detach(candidate)
+                else:
+                    await candidate.discard()
             except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-228410 [BLE001]; run cleanup attempts every candidate in reverse creation order.
                 errors.append(error)
         self.root._closed = True  # noqa: SLF001  # lint-waiver: LW-228418 [SLF001]; collection close terminates its root handle with the run.

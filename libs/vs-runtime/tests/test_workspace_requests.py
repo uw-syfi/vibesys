@@ -1307,6 +1307,71 @@ def test_f3_restart_after_a_recorded_result_still_serves_the_attempt(tmp_path: P
         asyncio.run(exercise())
 
 
+@settings(
+    max_examples=examples(pr=3, nightly=10),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    edits=st.lists(st.booleans(), min_size=1, max_size=3),
+    scratch=st.booleans(),
+    root_moved=st.booleans(),
+)
+def test_a_clean_host_stop_keeps_every_attempt_workspace_for_the_next_host(
+    tmp_path_factory: pytest.TempPathFactory, edits: list[bool], *, scratch: bool, root_moved: bool
+) -> None:
+    """A stop while attempts implement must not discard their worktrees.
+
+    Core still holds each attempt across a stop (its cancel and access settlement run on the
+    next host), so the next host must reopen every attempt workspace with its work in it.
+    Only scratch candidates, which no attempt holds, go with the host. Regression: a clean
+    stop removed every attempt worktree, so each resumed cancel's settlement found no
+    workspace, never became terminal, and left recovery blocked.
+    """
+    with _env(tmp_path_factory.mktemp("stop")) as env:
+
+        async def exercise() -> None:
+            first_host = env.hosts[0]
+            executor, _ = _executor(first_host)
+            attempts = [_attempt(f"a{index}") for index in range(len(edits))]
+            paths = [
+                await _ensure_at(executor, first_host, attempt, f"e-{attempt.attempt_id.root}")
+                for attempt in attempts
+            ]
+            for path, edited in zip(paths, edits, strict=True):
+                if edited:
+                    (path / "work.txt").write_text(f"in progress {path.name}\n", encoding="utf-8")
+            expected = [_visible_files(path) for path in paths]
+            if scratch:
+                await first_host.create_candidate()
+            root = first_host.root.path
+            await first_host.close()
+            if root_moved:
+                # A resume over changed code: the root has moved on since the attempts began.
+                (root / "candidate.py").write_text("VALUE = 3\n", encoding="utf-8")
+                _git(root, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qam", "change")
+
+            second_host = env.start_host()
+            assert _worktree_paths(second_host) == set(paths)
+            restarted, _ = _executor(second_host)
+            for attempt, path, files in zip(attempts, paths, expected, strict=True):
+                name = attempt.attempt_id.root
+                revision = await _snapshot_of(restarted, attempt, f"s-{name}", "wip", epoch=2)
+                assert _visible_files(path) == files
+                restored = await _run(
+                    restarted,
+                    RestoreRevision(
+                        **_common(attempt, f"r-{name}"), attempt=attempt, revision=revision
+                    ),
+                    epoch=2,
+                )
+                assert _status(restored) is ObservationStatus.SUCCEEDED
+                assert _visible_files(path) == files
+            assert _worktree_paths(second_host) == set(paths)
+
+        asyncio.run(exercise())
+
+
 def test_f4_exclusive_root_is_held_by_one_attempt_generation(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)

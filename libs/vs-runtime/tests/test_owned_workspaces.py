@@ -45,6 +45,7 @@ class _Resource:
         self.revision: str | None = revision
         self.trusted_input_baseline: str | None = revision
         self.closed = False
+        self.detached = False
         self.executions: list[tuple[str, int | None]] = []
         self.scripted: deque[CommandResult] = deque()
         self.unavailable_revisions: set[str] = set()
@@ -156,6 +157,9 @@ class _Resource:
 
     def close(self) -> None:
         self.closed = True
+
+    def detach(self) -> None:
+        self.detached = True
 
 
 class _Provider:
@@ -288,6 +292,22 @@ async def test_close_attempts_every_candidate_and_aggregates_failures(tmp_path: 
         await workspaces.close()
     assert len(captured.value.exceptions) == 2
     assert all(resource.closed for resource in provider.created)
+
+
+async def test_close_keeps_member_candidates_and_discards_scratch_ones(tmp_path: Path) -> None:
+    """A run close detaches what core holds (attempt members) and discards the rest."""
+    provider = _Provider(tmp_path)
+    runtime = _runtime(provider)
+    workspaces = runtime.workspaces
+    await workspaces.create_candidate(member_id="attempt-1")
+    await workspaces.create_candidate()
+    await workspaces.create_candidate(member_id="attempt-2")
+    await workspaces.close()
+    member, scratch, second = provider.created
+    assert (member.detached, member.closed) == (True, False)
+    assert (second.detached, second.closed) == (True, False)
+    assert (scratch.detached, scratch.closed) == (False, True)
+    assert provider.root.closed
 
 
 class _CloseFailedError(OSError):

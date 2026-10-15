@@ -267,6 +267,16 @@ class _ProjectWorkspaceResources:
         """Release the logger and linked worktree; a failed step runs again on the next call."""
         self._close.run(self.teardown_stack.close)
 
+    def detach(self) -> None:
+        """Release the logger and keep the linked worktree, its content included, on disk.
+
+        A host that stops while core still holds this candidate leaves it where
+        ``reattach_candidate`` reopens it; only ``close`` (a discard) removes it.
+        """
+        logger = ReleaseStack()
+        logger.callback(self.logger.close)
+        self._close.run(logger.close)
+
     def __enter__(self) -> _ProjectWorkspaceResources:
         return self
 
