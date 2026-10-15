@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vs_agent import provider_profiles
-from vs_agent.auth_policy import plan_cli_auth
+from vs_agent.auth_policy import HostAuthUnplannable, plan_cli_auth, plan_host_cli_auth
 from vs_agent.provider_policy import DOCKER_PROVIDER_ENV
 from vs_sandbox.api import AGENT_HOME
 
@@ -164,28 +164,39 @@ def auth_copy_paths(provider: str) -> list[tuple[str, str]]:
 
 @dataclass(frozen=True)
 class CliAuthDelivery:
-    """Everything a container is given to log its CLI in.
+    """What a CLI agent's container is given to log in with.
 
     ``env`` is set with ``docker run -e``; ``bind_mounts`` are
     ``(host, container, read_only)``; ``copy_paths`` are the staged copies made
-    at container start (see :func:`auth_copy_paths`). ``plan`` is the auth
-    policy's plan, or ``None`` when the run has no policy and forwards whatever
-    credentials the host has.
+    at container start (see :func:`auth_copy_paths`). ``login`` is the plan the
+    container gets exactly, from the run's auth policy or, without one, from
+    how the CLI logs in on the host; or why the host's login cannot be
+    planned, when the host's auth state is forwarded as it is.
     """
 
     env: Mapping[str, str]
     bind_mounts: tuple[tuple[str, str, bool], ...]
     copy_paths: tuple[tuple[str, str], ...]
-    plan: CliAuthPlan | None
+    login: CliAuthPlan | HostAuthUnplannable
+
+    def describe(self) -> str:
+        """One log line naming where the container's CLI logs in from, never a value."""
+        return self.login.describe()
 
 
 def cli_auth_delivery(provider: str, policy: AgentAuthPolicy | None) -> CliAuthDelivery:
     """Return the credentials a container for *provider* gets, under *policy*.
 
-    Without a policy every credential the host has is forwarded: each set
-    auth variable and each existing auth file (see :func:`auth_paths`). With
-    one, the container gets exactly the plan's variables and files and nothing
-    else of the provider's auth state, settings files included.
+    With a policy, the container gets exactly the plan's variables and files
+    and nothing else of the provider's auth state, settings files included.
+
+    Without one, agentshim plans what the container needs to log in the way
+    the CLI does on this host (:func:`plan_host_cli_auth`), and the container
+    gets exactly that: the operator's other logins are not lent out beside the
+    one the CLI uses, and the host's settings (hooks, plugins, helper commands
+    naming host paths) do not reach the agent. Only when agentshim cannot plan
+    the host's login is every set auth variable and every existing auth file
+    forwarded (see :func:`auth_paths`).
 
     Raises:
         ValueError: without a policy, when the host has no credential at all.
@@ -193,6 +204,13 @@ def cli_auth_delivery(provider: str, policy: AgentAuthPolicy | None) -> CliAuthD
     """
     if policy is not None:
         return _planned_delivery(plan_cli_auth(provider, policy, env=os.environ, home=Path.home()))
+    host_login = plan_host_cli_auth(provider, env=os.environ, home=Path.home())
+    if isinstance(host_login, HostAuthUnplannable):
+        return _host_state_delivery(provider, host_login)
+    return _planned_delivery(host_login)
+
+
+def _host_state_delivery(provider: str, reason: HostAuthUnplannable) -> CliAuthDelivery:
     env = auth_env_passthrough(provider)
     mounts = tuple(auth_bind_mounts(provider))
     if not mounts and not env:
@@ -208,7 +226,7 @@ def cli_auth_delivery(provider: str, policy: AgentAuthPolicy | None) -> CliAuthD
             "before running in an isolated environment."
         )
         raise ValueError(message)
-    return CliAuthDelivery(env, mounts, tuple(auth_copy_paths(provider)), plan=None)
+    return CliAuthDelivery(env, mounts, tuple(auth_copy_paths(provider)), login=reason)
 
 
 def _planned_delivery(plan: CliAuthPlan) -> CliAuthDelivery:
@@ -222,4 +240,4 @@ def _planned_delivery(plan: CliAuthPlan) -> CliAuthDelivery:
             source = f"/opt/vibesys-auth/plan-{index}"
             mounts.append((str(staged.host_path), source, True))
             copies.append((source, destination))
-    return CliAuthDelivery(dict(plan.env), tuple(mounts), tuple(copies), plan=plan)
+    return CliAuthDelivery(dict(plan.env), tuple(mounts), tuple(copies), login=plan)

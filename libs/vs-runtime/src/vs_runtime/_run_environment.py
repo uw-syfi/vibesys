@@ -1859,10 +1859,10 @@ def _reference_container_path(request: RunEnvironmentRequest, *, same_path: bool
 
 
 def _cli_container_auth(request: RunEnvironmentRequest) -> CliContainerAuth | None:
-    """Return the CLI agent's container auth, logging the plan when a policy chose it."""
+    """Return the CLI agent's container auth, logging where its CLI logs in from."""
     cli_auth = cli_container_auth(request.agent_backend, request.cli_provider, request.agent_auth)
-    if cli_auth is not None and cli_auth.delivery.plan is not None and request.log is not None:
-        request.log(f"[agent-auth] {cli_auth.delivery.plan.describe()}")
+    if cli_auth is not None and request.log is not None:
+        request.log(f"[agent-auth] {cli_auth.delivery.describe()}")
     return cli_auth
 
 

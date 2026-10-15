@@ -23,6 +23,7 @@ from vs_agent.auth_policy import (
     AgentAuthPolicy,
     CliAuthPlan,
     CredentialKind,
+    HostAuthUnplannable,
     PlannedCredentialFile,
 )
 from vs_agent.container_python import containerize_server
@@ -192,6 +193,21 @@ def plan_auth(
     except (agentshim.AuthUnavailableError, ValueError) as error:
         message = f"agent.auth cannot be met: {error}"
         raise AgentAuthError(message) from error
+    return _cli_auth_plan(plan)
+
+
+def plan_host_auth(
+    profile: agentshim.ProviderProfile, *, env: Mapping[str, str], home: Path
+) -> CliAuthPlan | HostAuthUnplannable:
+    """Ask agentshim how *profile*'s CLI logs in on this host, as a plan."""
+    try:
+        plan = agentshim.host_auth_plan(profile, env=env, home=home)
+    except agentshim.HostAuthUnplannableError as error:
+        return HostAuthUnplannable(profile.name, str(error))
+    return _cli_auth_plan(plan)
+
+
+def _cli_auth_plan(plan: agentshim.AuthPlan) -> CliAuthPlan:
     return CliAuthPlan(
         provider=plan.provider,
         credential=_CREDENTIAL_KIND[plan.credential],

@@ -300,7 +300,7 @@ class AgentCfg(_Strict):
         default=None,
         description=(
             "[agent.auth] — the credential kinds and endpoint the CLI agent may use. "
-            "Omitted forwards every credential the host has."
+            "Omitted, the agent gets the one credential its CLI would log in with on this host."
         ),
     )
     quota: QuotaCfg = Field(

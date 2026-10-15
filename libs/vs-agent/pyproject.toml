@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Agent sessions, drivers, skills and structured turns"
 requires-python = ">=3.12"
 dependencies = [
-    "agentshim>=0.16.0,<0.17",
+    "agentshim>=0.17.0,<0.18",
     "pydantic>=2",
     "vs-faults",
     "vs-mcp",

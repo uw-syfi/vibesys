@@ -121,3 +121,45 @@ def plan_cli_auth(
     return shim_translation.plan_auth(
         provider_profiles.provider_profile(provider), policy, env=env, home=home
     )
+
+
+@dataclass(frozen=True)
+class HostAuthUnplannable:
+    """agentshim cannot reproduce how *provider*'s CLI logs in on this host.
+
+    ``detail`` is agentshim's reason; it names variables and files, never a
+    value. The container then gets the host's auth state as it is.
+    """
+
+    provider: str
+    detail: str
+
+    def describe(self) -> str:
+        """One log line saying the host's auth state is forwarded, and why."""
+        return (
+            f"{self.provider} gets the host's auth variables and files as they are, "
+            f"because its login cannot be planned: {self.detail}"
+        )
+
+
+def plan_host_cli_auth(
+    provider: str, *, env: Mapping[str, str], home: Path
+) -> CliAuthPlan | HostAuthUnplannable:
+    """Return the plan that logs *provider*'s CLI in the way it would on this host.
+
+    A run without ``[agent.auth]`` lets the CLI log in the way the launching
+    shell configured it. agentshim knows how the CLI chooses its credential
+    and endpoint, so it plans exactly what a confined copy needs to do the
+    same, and the caller delivers that plan and nothing else of the host's
+    auth state. When agentshim cannot reproduce the host's login, the result
+    says why.
+    """
+    # lint-waiver: LW-994812 [PLC0415]; load agentshim only when a run plans its auth.
+    # > Same constraint as plan_cli_auth above: vs_agent.api must import without
+    # > agentshim and shim_translation imports it at module scope. A shared loader
+    # > returning the module would erase its types at both call sites.
+    from vs_agent import shim_translation  # noqa: PLC0415
+
+    return shim_translation.plan_host_auth(
+        provider_profiles.provider_profile(provider), env=env, home=home
+    )

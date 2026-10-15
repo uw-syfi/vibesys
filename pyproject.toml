@@ -17,7 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
-    "agentshim>=0.16.0,<0.17",
+    "agentshim>=0.17.0,<0.18",
     "cbor2<6",
     "cryptography<50",
     "jinja2>=3.1",
