@@ -132,7 +132,7 @@ class _Scheduler(FakeCluster):
             staging, self.on_staging = self.on_staging, None
             self.script(
                 operation_id,
-                on_dispatch=staging,
+                on_dispatch=staging or (lambda: None),
                 queue_wait_s=self.queue_s,
                 run_s=self.run_s,
                 completing_s=0.0,
