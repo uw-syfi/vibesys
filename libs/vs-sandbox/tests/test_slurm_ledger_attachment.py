@@ -11,6 +11,7 @@ import dataclasses
 import math
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given, settings
@@ -32,6 +33,7 @@ from vs_slurm.api import (
     LedgerPolicy,
     LedgerRecord,
     LedgerState,
+    SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
     SlurmBatchStage,
@@ -42,9 +44,16 @@ from vs_slurm.api import (
     SlurmSshTransport,
     SlurmSubmissionRejectedError,
     SlurmTreeArtifact,
+    job_of_handle,
     ledger_operation_id,
+    transitioned,
     withdraw,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vs_slurm.api import ClusterInspectOutcome, ClusterTarget
 
 PROJECT = "demo-0123456789ab"
 CONFIG = SlurmConfig(
@@ -387,3 +396,117 @@ def test_an_operator_removal_racing_a_submitter_is_never_overwritten(remove_at: 
         assert entry.record.reason == "removed by operator"
         observed = world.cluster.inspect(operation)
         assert not isinstance(observed, ClusterObservation) or not observed.status.active
+
+
+def _active(world: _World, operation: str) -> bool:
+    observed = world.cluster.inspect(operation)
+    return isinstance(observed, ClusterObservation) and observed.status.active
+
+
+_STAGING = st.lists(
+    st.tuples(st.floats(min_value=0, max_value=1000, allow_nan=False), st.booleans()),
+    min_size=1,
+    max_size=5,
+)
+
+
+@given(staging=_STAGING)
+@settings(max_examples=examples(pr=40, nightly=400), deadline=None)
+def test_a_waiter_takes_a_claim_over_only_once_it_expired_on_its_latest_renewal(
+    staging: list[tuple[float, bool]],
+) -> None:
+    """A slow submitter stages its job while a waiter asks, again and again.
+
+    Staging passes in steps; after each, the submitter renews its claim or does
+    not (as one that hangs or died), and the waiter asks. The waiter takes over
+    exactly when the claim has run out on its latest renewal; a submitter that
+    keeps renewing keeps its claim and its job. Either way one job runs.
+    """
+    with TemporaryDirectory() as directory:
+        world = _World(Path(directory))
+        submitter, waiter = world.attachment("run-a"), world.attachment("run-b")
+        request = world.request("run-a")
+        key = submitter.key(request)
+        first, second = ledger_operation_id(key, 0), ledger_operation_id(key, 1)
+        window = LedgerPolicy().claim_seconds
+        renewed = world.clock.now()  # the claim is its first renewal
+        took_over = False
+
+        def stage_slowly() -> None:
+            nonlocal renewed, took_over
+            for gap, renews in staging:
+                world.clock.advance(gap)
+                if renews:
+                    submitter.renew(key)
+                    renewed = world.clock.now()
+                expired = world.clock.now() > renewed + window
+                asked = waiter.attach(world.cluster, world.request("run-b"), labels=LedgerLabels())
+                if took_over:
+                    continue
+                if expired:
+                    took_over = True
+                    assert isinstance(asked, Attached)
+                    assert asked.operation_id == second
+                else:
+                    assert isinstance(asked, AttachPending)
+
+        world.cluster.script(first, queue_wait_s=math.inf, on_dispatch=stage_slowly)
+        world.cluster.script(second, queue_wait_s=math.inf)
+        outcome = submitter.attach(world.cluster, request, labels=LedgerLabels())
+
+        entry = world.ledger.read(key)
+        assert entry is not None
+        assert entry.record.state is LedgerState.SUBMITTED
+        assert isinstance(outcome, Attached)
+        kept = second if took_over else first
+        assert (entry.record.operation_id, outcome.operation_id) == (kept, kept)
+        assert _active(world, kept)
+        assert not _active(world, first if took_over else second)
+
+
+class _InterleavingCluster(FakeCluster):
+    """A cluster that runs one step of another process right after its next inspection."""
+
+    def __init__(self, clock: ManualClock) -> None:
+        super().__init__(clock=clock)
+        self.after_inspect: list[Callable[[], None]] = []
+
+    def inspect(self, target: ClusterTarget, *, by_job_id: bool = False) -> ClusterInspectOutcome:
+        observed = super().inspect(target, by_job_id=by_job_id)
+        if self.after_inspect:
+            self.after_inspect.pop()()
+        return observed
+
+
+def test_a_waiter_never_cancels_a_job_its_submitter_recorded_during_the_takeover(
+    tmp_path: Path,
+) -> None:
+    """The waiter finds no job under the expired claim; the submitter then sbatches and
+    records it before the waiter's swap. The swap loses, and the job runs on."""
+    world = _World(tmp_path)
+    world.cluster = _InterleavingCluster(world.clock)
+    request = world.request("run-a")
+    key = world.attachment("run-a").key(request)
+    operation = ledger_operation_id(key, 0)
+    record = world.claim("run-a", key)
+    world.cluster.script(operation, queue_wait_s=math.inf)
+    world.clock.advance(LedgerPolicy().claim_seconds + 1)
+
+    def submitter_records_its_job() -> None:
+        submitted = world.cluster.submit(request, operation_id=operation)
+        assert isinstance(submitted, ClusterSubmitted)
+        assert isinstance(submitted.handle, SlurmBatchHandle)
+        entry = world.ledger.read(key)
+        assert entry is not None
+        job = job_of_handle(submitted.handle)
+        assert world.ledger.replace(entry, transitioned(record, LedgerState.SUBMITTED, job=job))
+
+    world.cluster.after_inspect.append(submitter_records_its_job)
+    asked = world.attachment("run-b").attach(
+        world.cluster, world.request("run-b"), labels=LedgerLabels()
+    )
+
+    assert isinstance(asked, Attached)
+    assert asked.operation_id == operation
+    assert world.state(key) is LedgerState.SUBMITTED
+    assert _active(world, operation)

@@ -26,6 +26,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_sandbox.api.slurm import (
+    AttachPending,
     SlurmEvaluationExecutor,
     SlurmLedgerAttachment,
     SlurmStagePayload,
@@ -37,6 +38,7 @@ from vs_slurm.api import (
     ClusterSubmitOutcome,
     FakeCluster,
     FakeEvaluationLedger,
+    LedgerLabels,
     LedgerPolicy,
     LedgerState,
     SlurmBatchRequest,
@@ -52,6 +54,7 @@ from vs_slurm.api import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 pytestmark = pytest.mark.asyncio
@@ -69,15 +72,24 @@ CONFIG = SlurmConfig(
 )
 
 
+def _is_poll_pause(seconds: float) -> bool:
+    """Whether a sleep is a wait loop's pause between polls, not the lease keeper's period."""
+    return seconds <= CONFIG.poll_interval_seconds
+
+
 class _ParkingSleeper:
-    """The first sleep of a run's wait loop parks until the run closes."""
+    """The first sleep of a run's wait loop parks until the run closes.
+
+    The lease keeper's longer sleeps park too, without counting: no renewal
+    happens behind the test's back.
+    """
 
     def __init__(self) -> None:
         self.parked = asyncio.Event()
 
     async def sleep(self, seconds: float) -> None:
-        del seconds
-        self.parked.set()
+        if _is_poll_pause(seconds):
+            self.parked.set()
         await asyncio.Event().wait()
 
 
@@ -100,6 +112,10 @@ class _Scheduler(FakeCluster):
         self.crash_submits = 0
         # Each stage's exit code; None leaves the stage no result file.
         self.stage_exit: int | None = 0
+        # Runs inside the next batch submission, before sbatch: a slow staging step.
+        self.on_staging: Callable[[], None] | None = None
+        # The last batch request submitted, as another run of the same content asks for it.
+        self.staged: SlurmBatchRequest | None = None
 
     def submit(
         self, request: SlurmBatchRequest | SlurmJobRequest, *, operation_id: str
@@ -112,8 +128,11 @@ class _Scheduler(FakeCluster):
             return super().submit(request, operation_id=operation_id)
         if isinstance(request, SlurmBatchRequest) and operation_id not in self.jobs:
             self.jobs.add(operation_id)
+            self.staged = request
+            staging, self.on_staging = self.on_staging, None
             self.script(
                 operation_id,
+                on_dispatch=staging,
                 queue_wait_s=self.queue_s,
                 run_s=self.run_s,
                 completing_s=0.0,
@@ -145,13 +164,15 @@ class _Scheduler(FakeCluster):
 
 
 class _ClockSleeper:
-    """Every sleep moves the shared clock on by its length: time passes only by waiting."""
+    """Every poll pause moves the shared clock on by its length: time passes only by waiting."""
 
     def __init__(self, clock: ManualClock) -> None:
         self.parked = asyncio.Event()
         self._clock = clock
 
     async def sleep(self, seconds: float) -> None:
+        if not _is_poll_pause(seconds):
+            await asyncio.Event().wait()  # the lease keeper's period: never ends here
         self._clock.advance(max(seconds, 0.0))
         await yield_now()
 
@@ -450,3 +471,72 @@ async def test_a_finished_job_is_reused_only_if_every_stage_left_its_own_result(
             ledger_operation_id(world.only_key(), 1),
         }
     await second.executor.close()
+
+
+class _SteppedKeeperSleeper(_ParkingSleeper):
+    """Poll pauses park; each lease-keeper period ends only when the test steps it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.keeper_waiting = asyncio.Event()
+        self._step = asyncio.Event()
+
+    async def sleep(self, seconds: float) -> None:
+        if _is_poll_pause(seconds):
+            await super().sleep(seconds)
+            return
+        self.keeper_waiting.set()
+        await self._step.wait()
+        self._step.clear()
+
+    async def step(self) -> None:
+        """End the keeper's current period and wait until it renewed and sleeps again."""
+        self.keeper_waiting.clear()
+        self._step.set()
+        await asyncio.wait_for(self.keeper_waiting.wait(), _BOUND_S)
+
+
+async def test_a_slow_submission_keeps_its_claim_by_renewing_it(tmp_path: Path) -> None:
+    """Staging outlasts the claim window; the run's lease keeper renews the claim meanwhile,
+    so another run asking for the request waits instead of taking it over."""
+    world = _World()
+    claim_s = 120.0
+    sleeper = _SteppedKeeperSleeper()
+    run = world.run(tmp_path / "run-1", "run-1", sleeper=sleeper, claim_seconds=claim_s)
+    loop = asyncio.get_running_loop()
+    waited: list[object] = []
+
+    async def stage_for_three_lease_thirds() -> None:
+        await asyncio.wait_for(sleeper.keeper_waiting.wait(), _BOUND_S)
+        for _ in range(3):
+            world.clock.advance(LEASE_S / 3)
+            await sleeper.step()
+        assert world.clock.now() - 1000.0 > claim_s  # the claim's first window ran out
+        ledger = SlurmLedgerAttachment(
+            ledger=world.ledger.reopen(),
+            config=CONFIG,
+            project=PROJECT,
+            holder="run-2",
+            policy=LedgerPolicy(lease_seconds=LEASE_S, claim_seconds=claim_s),
+            clock=world.clock,
+        )
+        batch = world.scheduler.staged
+        assert batch is not None
+        waited.append(ledger.attach(world.scheduler, batch, labels=LedgerLabels()))
+
+    def staging() -> None:
+        # Runs on the submitting worker thread, inside the submission, before sbatch.
+        asyncio.run_coroutine_threadsafe(stage_for_three_lease_thirds(), loop).result(
+            timeout=_BOUND_S
+        )
+
+    world.scheduler.on_staging = staging
+    await _attached(run, "eval-1")
+
+    assert len(waited) == 1
+    assert isinstance(waited[0], AttachPending)
+    (operation,) = world.scheduler.jobs
+    assert operation == ledger_operation_id(world.only_key(), 0)
+    assert world.entry_state() is LedgerState.SUBMITTED
+    assert world.scheduler.status(operation) is SlurmJobStatus.PENDING
+    await run.executor.close()

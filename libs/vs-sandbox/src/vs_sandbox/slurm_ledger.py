@@ -148,14 +148,20 @@ class SlurmLedgerAttachment:
         request: SlurmBatchRequest,
         *,
         labels: LedgerLabels,
+        key: str | None = None,
     ) -> AttachOutcome:
         """Attach to the request's job, submitting it only when the ledger holds no usable one.
+
+        ``key`` is the request's key when the caller computed it already. The
+        call blocks while it stages and submits a job; meanwhile the caller
+        keeps this run's claim alive with ``renew`` every third of a lease
+        period, so no other process takes the claim over (``claim_expired``).
 
         Raises ``LedgerWithdrawnError`` when an operator withdrew the attempt this
         call was submitting, and ``SlurmSubmissionRejectedError`` when the cluster
         refused it.
         """
-        key = self.key(request)
+        key = key if key is not None else self.key(request)
         for _ in range(_ATTACH_ROUNDS):
             step = submit_step(self.ledger.read(key), now=self.clock.now())
             outcome: AttachOutcome | None
@@ -294,21 +300,20 @@ class SlurmLedgerAttachment:
             return self._record_job(cluster, entry, request, observed.handle)
         if not expired:
             return AttachPending(record.key, "another process is submitting the request's job")
-        # The submitter died before sbatch, or is still on its way: a tombstone keeps it
-        # from starting a job under this name, and the attempt fails so the next read
-        # claims a new one. A submitter that does get through loses its record write.
-        tombstone = cluster.cancel(record.operation_id)
-        if isinstance(tombstone, ClusterUnknown):
-            return AttachPending(record.key, tombstone.reason)
-        self.ledger.replace(
-            entry,
-            transitioned(
-                record,
-                LedgerState.FAILED,
-                reason="its submitter's claim expired before it recorded a job",
-            ),
+        # The submitter stopped renewing its claim: it died before sbatch, or hangs.
+        # The attempt fails first, by compare-and-swap, so a submitter that recorded
+        # its job meanwhile wins and its job is never cancelled here. Only after the
+        # swap won does a tombstone keep a late submitter from starting a job under
+        # this name; one that gets through loses its record write and cancels its
+        # job, and one that dies first leaves it to the sweep (``sweep_unleased``).
+        failed = transitioned(
+            record,
+            LedgerState.FAILED,
+            reason="its submitter's claim expired before it recorded a job",
         )
-        return None
+        if self.ledger.replace(entry, failed):
+            cluster.cancel(record.operation_id)
+        return None  # read again: a new attempt, or the job the submitter recorded
 
     def _claim(
         self,

@@ -734,11 +734,34 @@ class ResolveSubmission:
     Its submitter may have crashed between sbatch and the record write, so the
     job is looked up by the attempt's operation identity. With no job found,
     a live claim (``expired`` false) is waited on; an expired one is taken over:
-    the attempt fails and the next read claims a new one.
+    the attempt fails and the next read claims a new one. ``expired`` is
+    ``claim_expired``: the claim holds while its submitter renews it.
     """
 
     entry: LedgerEntry
     expired: bool
+
+
+def claim_expired(entry: LedgerEntry, *, now: float) -> bool:
+    """Whether a ``submitting`` attempt's claim has run out on its latest renewal. Pure.
+
+    A submitter renews its claim as it renews a lease: while it stages and
+    submits the job, it keeps its own lease on the request (the claim's
+    ``owner``) current, and each renewal extends the claim by the claim's own
+    window (``claim_expires_at - created_at``) from ``renewed_at``. So a slow
+    but live submitter is never taken over, and a dead one is taken over one
+    window after its last renewal. An owner lease this build cannot read holds
+    the claim indefinitely.
+    """
+    record = entry.record
+    if record.owner in entry.unreadable_leases:
+        return False
+    window = record.claim_expires_at - record.created_at
+    renewed = max(
+        (lease.renewed_at for lease in entry.leases if lease.holder == record.owner),
+        default=record.created_at,
+    )
+    return now > max(record.claim_expires_at, renewed + window)
 
 
 @dataclass(frozen=True, slots=True)
@@ -766,7 +789,7 @@ def submit_step(entry: LedgerEntry | None, *, now: float) -> SubmitStep:
         case LedgerState.SUBMITTED:
             return CheckJob(entry)
         case LedgerState.SUBMITTING:
-            return ResolveSubmission(entry, expired=now > record.claim_expires_at)
+            return ResolveSubmission(entry, expired=claim_expired(entry, now=now))
         case LedgerState.FAILED | LedgerState.WITHDRAWN:
             return ClaimAttempt(record.attempt + 1)
         case _:
@@ -796,6 +819,7 @@ __all__ = [
     "SubmitStep",
     "Unleased",
     "check_transition",
+    "claim_expired",
     "content_digest",
     "decode_lease",
     "decode_record",

@@ -915,10 +915,14 @@ class SlurmEvaluationExecutor:
         batch = self._batch_request(request, stages)
         labels = LedgerLabels(candidate=self._ledger_candidate, workstream=request.owner_scope)
         deadline = self._clock.now() + self._job_timeout_seconds
+        key = await self._in_thread(ledger.key, batch)
         while True:
             step = asyncio.ensure_future(
-                self._in_thread(ledger.attach, self._cluster, batch, labels=labels)
+                self._in_thread(ledger.attach, self._cluster, batch, labels=labels, key=key)
             )
+            # A step may stage and submit the job for a long time: renewing this run's
+            # lease meanwhile keeps its claim from being taken over (``claim_expired``).
+            keeper = asyncio.create_task(self._keep_leased(ledger, key))
             try:
                 outcome = await asyncio.shield(step)
             except asyncio.CancelledError:
@@ -931,6 +935,10 @@ class SlurmEvaluationExecutor:
                 raise
             except LedgerWithdrawnError as error:
                 raise ExecutorRejectedError(str(error)) from error
+            finally:
+                keeper.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await keeper
             if isinstance(outcome, Attached):
                 break
             remaining = deadline - self._clock.now()
@@ -939,6 +947,20 @@ class SlurmEvaluationExecutor:
             _LOG.info("evaluation %s waits on the ledger: %s", handle_id, outcome.reason)
             await self._sleeper.sleep(min(self._poll_interval, remaining))
         self._save_attached(handle_id, request, outcome)
+
+    async def _keep_leased(self, ledger: SlurmLedgerAttachment, key: str) -> None:
+        """Renew this run's lease on ``key`` every third of a lease period, until cancelled.
+
+        A renewal that fails is logged and retried at the next period: the lease
+        outlasts several missed renewals.
+        """
+        period = ledger.policy.lease_seconds / 3
+        while True:
+            await self._sleeper.sleep(period)
+            try:
+                await self._in_thread(ledger.renew, key)
+            except LedgerError:
+                _LOG.exception("could not renew the ledger lease on request %s", key[:12])
 
     def _save_attached(
         self, handle_id: str, request: EvaluationRequest, attached: Attached
