@@ -69,14 +69,14 @@ class World:
 
 def limits(**overrides: object) -> core.Limits:
     """Run limits small enough for a test to reach every bound before the run deadline."""
-    return sample_limits(
-        observe_interval=10.0,
-        observe_backoff_cap=30.0,
-        reconciliation_bound=20.0,
-        queue_wait_budget=400.0,
-        queue_notice_interval=100.0,
-        **overrides,
-    )
+    chosen: dict[str, object] = {
+        "observe_interval": 10.0,
+        "observe_backoff_cap": 30.0,
+        "reconciliation_bound": 20.0,
+        "queue_wait_budget": 400.0,
+        "queue_notice_interval": 100.0,
+    }
+    return sample_limits(**{**chosen, **overrides})
 
 
 def _with_limits(state: core.CoreState, run_limits: core.Limits) -> core.CoreState:

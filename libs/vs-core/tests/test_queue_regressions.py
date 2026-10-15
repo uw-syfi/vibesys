@@ -63,3 +63,123 @@ def test_a_wait_whose_job_queued_past_its_deadline_runs_its_limit_from_its_start
     (wait,) = ended.evaluation.continuations
     assert wait.timeout is not None
     assert wait.timeout.deadline_at == ends_at
+
+
+def _events(world: World, events: tuple[core.CoreEvent, ...]) -> tuple[World, list[object]]:
+    heard: list[object] = []
+    for event in events:
+        result = core.step(world.state, event)
+        world = replace(world, state=result.state)
+        heard.extend(result.events)
+    return world, heard
+
+
+def test_a_jobs_spent_queue_budget_ends_it_alone_and_its_running_sibling_is_delivered() -> None:
+    """Regression (M1): one job's spent queue budget froze its whole wait and cancelled a
+    sibling that was running within its own limit. Now only the job that ran out ends."""
+    world = BUILDERS[Source.MULTI](limits(queue_wait_budget=40.0))
+    running, queued = world.jobs
+    # A starts at 11 and runs within its limit; B queues until its budget runs out at 41.
+    world, _ = _events(world, fact(world, 0, 11.0, state="running")[1])
+    world = replace(world, jobs=(replace(running, sequence=2), queued))
+    at = 1.0
+    heard: list[object] = []
+    while at + POLL <= 51.0:
+        at += POLL
+        world, events = fact(world, 1, at, state="pending")
+        world, more = _events(world, events)
+        heard.extend(more)
+    (wait,) = world.state.evaluation.continuations
+    assert wait.timeout is None
+    assert [job.resource_id for job in wait.spent] == [queued.resource_id]
+    (spent,) = wait.spent
+    assert spent.by is core.WaitEnd.QUEUE_BUDGET
+    assert spent.at == 1.0 + 40.0
+    # A is still running, and nothing has asked to cancel it.
+    assert not world.state.evaluation.jobs[0].terminal
+    cancelled = {
+        record.request.resource_id
+        for record in world.state.records.records
+        if isinstance(record.request, core.CancelOwnedJob)
+    }
+    assert cancelled == {queued.resource_id}
+    # A ends within its limit: its result is delivered, and B is reported ended by its budget.
+    world, events = fact(world, 0, 55.0, state="ended", status=core.ObservationStatus.SUCCEEDED)
+    world, more = _events(world, events)
+    heard.extend(more)
+    (wait,) = world.state.evaluation.continuations
+    assert wait.timeout is not None
+    assert wait.timeout.by is core.WaitEnd.QUEUE_BUDGET
+    assert wait.timeout.unfinished == (spent,)
+    assert wait.timeout.reached_at == 55.0
+    # The agent resumes once the executor confirms B's cancel.
+    world, events = fact(world, 1, 56.0, state="ended", status=core.ObservationStatus.CANCELLED)
+    world, more = _events(world, events)
+    heard.extend(more)
+    (resumed,) = [event for event in heard if isinstance(event, core.ResumeAuthorized)]
+    assert resumed.timeout == wait.timeout
+
+
+DOWN = 500.0
+"""A host outage longer than the job's remaining limit and its whole queue budget."""
+
+
+@pytest.mark.parametrize("source", list(Source))
+def test_a_restart_while_a_job_queues_credits_the_downtime_to_its_wait_as_to_its_record(
+    source: Source,
+) -> None:
+    """Regression (M2): an open record's limit moved past host downtime, but a wait's did not.
+
+    A wait on a job queued across a long restart froze at its limit and cancelled the job,
+    while the job's record was still live. Downtime now moves both, and is never also queue
+    credit (L2).
+    """
+    world = BUILDERS[source](limits())
+    first = core.HostEpoch(epoch=0, started_at=0.0, alive_at=0.0)
+    world = replace(
+        world,
+        state=world.state.model_copy(
+            update={"records": world.state.records.model_copy(update={"hosts": (first,)})}
+        ),
+    )
+    heard: list[object] = []
+    for at in (11.0, 21.0):
+        for index in range(len(world.jobs)):
+            world, events = fact(world, index, at, state="pending")
+            world, more = _events(world, events)
+            heard.extend(more)
+    # The host dies after its commit at 21; the next one starts DOWN seconds later.
+    restart = 21.0 + DOWN
+    world, more = _events(world, (core.RecoveryStarted(epoch=1, now_at=restart),))
+    heard.extend(more)
+    for index in range(len(world.jobs)):
+        world, events = fact(world, index, restart + 10.0, state="pending")
+        world, more = _events(world, events)
+        heard.extend(more)
+        # 20 s queued before the outage and 10 s after it: the outage itself earns nothing.
+        assert world.state.evaluation.jobs or world.state.evaluation.registered_jobs
+    jobs = (*world.state.evaluation.jobs, *world.state.evaluation.registered_jobs)
+    assert all(job.queue_credit == 30.0 for job in jobs)
+    for index in range(len(world.jobs)):
+        world, events = fact(world, index, restart + 20.0, state="running")
+        world, more = _events(world, events)
+        heard.extend(more)
+    # The earliest stated limit (60) plus the downtime plus 40 s of queue: the work may run
+    # until 600.
+    ends = LIMIT + DOWN + 40.0
+    world, more = _events(world, (core.ClockAdvanced(now_at=ends - 1.0),))
+    heard.extend(more)
+    assert not [event for event in heard if isinstance(event, core.Failed)]
+    for wait in world.state.evaluation.continuations:
+        assert wait.timeout is None
+        assert not wait.spent
+    for index in range(len(world.jobs)):
+        world, events = fact(
+            world, index, ends - 1.0, state="ended", status=core.ObservationStatus.SUCCEEDED
+        )
+        world, more = _events(world, events)
+        heard.extend(more)
+    if world.waits:
+        (resumed,) = [event for event in heard if isinstance(event, core.ResumeAuthorized)]
+        assert resumed.timeout is None
+    assert not [event for event in heard if isinstance(event, core.Failed)]
