@@ -17,6 +17,16 @@ export interface RecentRun {
   readonly attachedAt: number;
 }
 
+/**
+ * Stable identity of one logical recent run.
+ *
+ * Run IDs are scoped to a project, not to a host. JSON tuple encoding keeps the three validated
+ * fields unambiguous and gives both persistence and renderers one spelling of that fact.
+ */
+export function recentRunKey(run: Pick<RecentRun, 'host' | 'project' | 'runId'>): string {
+  return JSON.stringify([run.host, run.project, run.runId]);
+}
+
 /** What the views say about a recent run. */
 export type RecentStatus =
   /** A live server drives it; attach to `instanceId`. */

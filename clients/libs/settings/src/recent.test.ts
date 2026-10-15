@@ -1,4 +1,6 @@
 import {describe, expect, test} from 'bun:test';
+import {recentRunKey} from '@vibesys/runs';
+import {remember as rememberRecentRun} from '@vibesys/settings';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
   EMPTY_RECENT,
@@ -31,17 +33,41 @@ describe('recent runs', () => {
       for (let index = 0; index < 12; index += 1) {
         const run = arbitraryRun(random, index);
         const previous = file.runs.find(
-          entry => entry.host === run.host && entry.runId === run.runId,
+          entry =>
+            entry.host === run.host && entry.project === run.project && entry.runId === run.runId,
         );
         file = remember(file, run, 4);
         const [first] = file.runs;
         expect(first).toEqual({...run, task: run.task ?? previous?.task ?? null});
-        const keys = file.runs.map(entry => `${entry.host}\n${entry.runId}`);
+        const keys = file.runs.map(recentRunKey);
         expect(new Set(keys).size).toBe(keys.length);
         expect(file.runs.length).toBeLessThanOrEqual(4);
       }
       expect(parseRecent(JSON.parse(JSON.stringify(file)))).toEqual(file);
     }
+  });
+
+  test('same-host projects may reuse a run id without replacing or contaminating each other', () => {
+    const first: StoredRecentRun = {
+      host: 'local',
+      project: '/projects/a',
+      task: 'spsc',
+      runId: 'shared',
+      instanceId: '00000000000a',
+      attachedAt: 1,
+    };
+    const second: StoredRecentRun = {
+      host: 'local',
+      project: '/projects/b',
+      task: null,
+      runId: 'shared',
+      instanceId: null,
+      attachedAt: 2,
+    };
+
+    const remembered = rememberRecentRun(rememberRecentRun(EMPTY_RECENT, first), second);
+
+    expect(remembered.runs).toEqual([second, first]);
   });
 
   test('parsing rejects unknown keys and unusable values, naming the path', () => {
