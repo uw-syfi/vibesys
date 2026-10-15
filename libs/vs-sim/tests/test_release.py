@@ -34,6 +34,7 @@ class _Effect:
         return Released(f"attempt {self.runs}")
 
     async def run_async(self) -> Released:
+        # test-isolation: virtual time under run_virtual; costs no wall time.
         await asyncio.sleep(1.0)
         return self()
 
@@ -111,8 +112,10 @@ def test_a_cancelled_caller_does_not_cancel_the_release() -> None:
 
     async def main() -> Released | None:
         caller = asyncio.create_task(latch.run(effect.run_async))
+        # test-isolation: virtual time under run_virtual; costs no wall time.
         await asyncio.sleep(0.5)
         caller.cancel()
+        # test-isolation: virtual time under run_virtual; costs no wall time.
         await asyncio.sleep(1.0)
         return latch.released
 
