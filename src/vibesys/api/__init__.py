@@ -92,7 +92,6 @@ from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
 from vs_agent.api import AgentBackend, AgentSpec
-from vs_project.api import RunLogText, read_latest_run_log
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import RunStopped
 
@@ -149,7 +148,6 @@ __all__ = [
     "RunFailure",
     "RunFailureKind",
     "RunHandle",
-    "RunLogText",
     "RunReady",
     "RunRecord",
     "RunRecordFacts",
@@ -177,5 +175,4 @@ __all__ = [
     "domain_modalities",
     "load_config",
     "open_run_store",
-    "read_latest_run_log",
 ]
