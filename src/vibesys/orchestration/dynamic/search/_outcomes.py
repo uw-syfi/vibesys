@@ -31,6 +31,8 @@ from vibesys.orchestration.dynamic.search._values import (
     BlockerKind,
     Failure,
     FailureKind,
+    MergeOutcome,
+    MergeSource,
     Proof,
     RoundRecord,
     Unreachable,
@@ -76,6 +78,10 @@ class WorkstreamStart(Value):
     """The previous round of the same hypothesis, when this workstream continues it."""
     config: DynamicConfig
     baseline: Baseline
+    merge: tuple[MergeSource, ...] = ()
+    """For a merge: the candidates to merge into ``parent`` (main), in order."""
+    rebase_onto: RevisionRef | None = None
+    """The run's main, when it advanced past the base of the hypothesis this continues."""
 
     @property
     def attempt(self) -> AttemptId:
@@ -89,13 +95,14 @@ class WorkstreamStart(Value):
 
     @property
     def implements(self) -> bool:
-        """Whether the workstream makes a candidate, rather than looking at the parent."""
+        """Whether the workstream implements a hypothesis, rather than merging or looking."""
         return self.plan.kind is WorkKind.IMPLEMENT
 
     @property
     def workspace(self) -> WorkspacePlan:
-        """An implementer works in an isolated child of the parent; others only read it."""
-        mode = WorkspaceMode.ISOLATED_CHILD if self.implements else WorkspaceMode.READ_ONLY_REVISION
+        """An implementer or a merger works in an isolated child of the parent; a profiler reads it."""
+        writes = self.plan.kind in {WorkKind.IMPLEMENT, WorkKind.MERGE}
+        mode = WorkspaceMode.ISOLATED_CHILD if writes else WorkspaceMode.READ_ONLY_REVISION
         return WorkspacePlan(mode=mode, base=self.parent)
 
     @property
@@ -152,6 +159,15 @@ class Unmeasured(Value):
     result: Result | None = None
 
 
+class MergeReport(Value):
+    """What the merger answered, with the commit core checkpointed when it merged."""
+
+    outcome: MergeOutcome
+    summary: str = ""
+    reason: str = ""
+    revision: RevisionRef | None = None
+
+
 class Evidence(Value):
     """The trusted readings of a candidate, and the evidence they were decoded from."""
 
@@ -169,6 +185,8 @@ class Closing(Value):
     evidence: Evidence = Evidence()
     cause: Failure | None = None
     unreachable: Unreachable | None = None
+    merge: MergeReport | None = None
+    """What a merge workstream's merger answered."""
 
     @property
     def readings(self) -> tuple[AcceptedReading, ...]:
@@ -177,7 +195,9 @@ class Closing(Value):
 
     @property
     def candidate(self) -> RevisionRef | None:
-        """The revision the attempt retained, if any."""
+        """The revision the attempt retained, if any: a merge's commit, else the candidate's."""
+        if self.merge is not None:
+            return self.merge.revision
         return None if self.result is None else self.result.candidate.revision
 
     @property
@@ -267,6 +287,7 @@ class WorkstreamDone:
     result: Result | None = None
     evidence: Evidence = field(default_factory=Evidence)
     unreachable: Unreachable | None = None
+    merge: MergeReport | None = None
 
     @classmethod
     def stopped(cls, start: WorkstreamStart) -> "WorkstreamDone":
@@ -295,6 +316,7 @@ class WorkstreamDone:
             result=closing.result,
             evidence=closing.evidence,
             unreachable=closing.unreachable,
+            merge=closing.merge,
         )
 
 
@@ -307,6 +329,8 @@ def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
     A profile workstream measures a revision without proposing one, so it settles as ineligible
     and discarded. A candidate is eligible when it passed the task's gates and beats the input.
     """
+    if w.plan.kind is WorkKind.MERGE:
+        return merge_assertion(closing)
     if w.plan.kind is WorkKind.PROFILE:
         profile = reading_of(closing.readings, EvidenceKind.PROFILING)
         return Settle(
@@ -330,6 +354,21 @@ def assertion(w: WorkstreamStart, closing: Closing, terms: TaskTerms) -> Settle:
         gates=gates_of(terms),
         beats_input=beats,
         unsettled=UNSETTLED,
+    )
+
+
+def merge_assertion(closing: Closing) -> Settle:
+    """A merge keeps its commit as the new main, unmeasured, so it is not yet winner-eligible.
+
+    Main's own trusted measurement, in a workspace of its own, is what can make it eligible.
+    """
+    merged = closing.cause is None and closing.candidate is not None
+    return Settle(
+        assessments=(),
+        eligible=False,
+        retention="candidate" if merged else "discard",
+        outcome="succeeded" if merged else "failed",
+        candidate=closing.candidate if merged else None,
     )
 
 

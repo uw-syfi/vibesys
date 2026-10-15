@@ -12,6 +12,7 @@ is then, so core's own corrections and re-asks are off for it.
 
 from vibesys.orchestration.dynamic.models import (
     ImplementerResult,
+    MergeResult,
     PortfolioPlan,
     ProfilerResult,
     ReviewResult,
@@ -98,4 +99,22 @@ PROFILER = Role(
 )
 """Looks at a revision to inform later plans; produces no candidate."""
 
-ROLES = (PLANNER, IMPLEMENTER, JUDGE, PROFILER)
+CORRECTION = Exchanges(correction="reply_correction.j2")
+"""The only exchange core starts with an agent that never waits: asking it to fix its reply."""
+
+MERGER = Role(
+    name=AgentName.MERGER.value,
+    prompt="merge.j2",
+    reply=MergeResult,
+    workspace=WorkspaceMode.ISOLATED_CHILD,
+    access=Access.WRITE_CANDIDATE,
+    turn_time=hours(1),
+    corrections=1,
+    lost_turns=2,
+    lost_turn_backoff=LOST_TURN_BACKOFF,
+    charge=Charge.ATTEMPT,
+    exchanges=CORRECTION,
+)
+"""Merges candidates into main on a checkout of main: a new session for every merge."""
+
+ROLES = (PLANNER, IMPLEMENTER, JUDGE, PROFILER, MERGER)

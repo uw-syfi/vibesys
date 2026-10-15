@@ -10,6 +10,7 @@ from typing import Literal
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.models import (
+    MergePlan,
     PortfolioPlan,
     ProfileOffer,
     ProfilePlan,
@@ -71,11 +72,17 @@ class PlanCheck(Value):
 
 @dataclass(frozen=True)
 class PlanLedger:
-    """What validation reads of the search: hypotheses, what is running and which IDs are profiles."""
+    """What validation reads of the search: hypotheses, what is running and which IDs are taken.
+
+    ``merge_ids`` are the IDs merges were scheduled under; ``merging`` says a merge is running or
+    accepted and not yet started, so another one would start from a main about to move.
+    """
 
     hypotheses: tuple[HypothesisRecord, ...]
     running: frozenset[str]
     profile_ids: frozenset[str]
+    merge_ids: frozenset[str] = frozenset()
+    merging: bool = False
 
     def hypothesis(self, identifier: str) -> HypothesisRecord | None:
         """The record of a hypothesis ID, if one exists."""
@@ -144,7 +151,7 @@ def _implement_identity(
     path: tuple[str | int, ...] = ("workstreams", position, "hypothesis_id")
     prior = ledger.hypothesis(identifier)
     code: ViolationCode | None = None
-    if identifier in ledger.profile_ids:
+    if identifier in ledger.profile_ids | ledger.merge_ids:
         code = ViolationCode.HYPOTHESIS_ID_USED
     elif identifier in abandoned or (
         prior is not None and prior.strategy is HypothesisStrategy.ABANDONED
@@ -201,7 +208,7 @@ def _profile_violation(
             supplied=tuple(str(item) for item in offer.fields),
         )
     used = {item.hypothesis_id for item in ledger.hypotheses} | ledger.profile_ids
-    if plan.profile_id in used:
+    if plan.profile_id in used | ledger.merge_ids:
         return PlanViolation(
             path=(*path, "profile_id"), code=ViolationCode.PROFILE_ID_USED, subject=plan.profile_id
         )
@@ -214,6 +221,40 @@ def _profile_violation(
             code=ViolationCode.PARENT_NOT_BUILDABLE,
             subject=target,
         )
+    return None
+
+
+def _merge_violation(
+    position: int,
+    plan: MergePlan,
+    ledger: PlanLedger,
+    offered: tuple[ParentOption, ...],
+    *,
+    merging: bool,
+) -> PlanViolation | None:
+    """A merge needs a new ID, no other merge under way, and distinct buildable candidates."""
+    path: tuple[str | int, ...] = ("workstreams", position)
+    used = {item.hypothesis_id for item in ledger.hypotheses} | ledger.profile_ids
+    if plan.merge_id in used | ledger.merge_ids:
+        return PlanViolation(
+            path=(*path, "merge_id"), code=ViolationCode.MERGE_ID_USED, subject=plan.merge_id
+        )
+    if merging:
+        return PlanViolation(path=(*path, "kind"), code=ViolationCode.MERGE_IN_FLIGHT)
+    seen: set[str] = set()
+    for index, candidate in enumerate(plan.candidates):
+        field = (*path, "candidates", index)
+        if candidate in seen:
+            return PlanViolation(
+                path=field, code=ViolationCode.MERGE_CANDIDATE_REPEATED, subject=candidate
+            )
+        seen.add(candidate)
+        if not any(
+            item.snapshot.hypothesis_id == candidate and item.latest_verified for item in offered
+        ):
+            return PlanViolation(
+                path=field, code=ViolationCode.PARENT_NOT_BUILDABLE, subject=candidate
+            )
     return None
 
 
@@ -249,7 +290,15 @@ def _updates(
     return tuple(kept), tuple(bad)
 
 
-def _work_plan(entry: WorkstreamPlan | ProfilePlan) -> WorkPlan:
+def _work_plan(entry: WorkstreamPlan | ProfilePlan | MergePlan) -> WorkPlan:
+    if isinstance(entry, MergePlan):
+        return WorkPlan(
+            kind=WorkKind.MERGE,
+            work_id=entry.merge_id,
+            candidates=entry.candidates,
+            instructions=entry.instructions,
+            watch_for=entry.watch_for,
+        )
     if isinstance(entry, ProfilePlan):
         return WorkPlan(
             kind=WorkKind.PROFILE,
@@ -296,6 +345,7 @@ def validate(
         )
     accepted: list[WorkPlan] = []
     seen: set[str] = set()
+    merging = ledger.merging
     for position, entry in enumerate(plan.workstreams):
         identifier = planned_id(entry)
         violation: PlanViolation | None
@@ -307,6 +357,9 @@ def validate(
             )
         elif isinstance(entry, ProfilePlan):
             violation = _profile_violation(position, entry, ledger, offered, offer)
+        elif isinstance(entry, MergePlan):
+            violation = _merge_violation(position, entry, ledger, offered, merging=merging)
+            merging = merging or violation is None  # one merge at a time: main moves once
         else:
             violation = _implement_identity(
                 position, entry, ledger, abandoned=abandoned

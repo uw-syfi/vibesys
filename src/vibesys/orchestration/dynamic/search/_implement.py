@@ -95,7 +95,7 @@ async def implementer_turn(
     implementer: Session, w: WorkstreamStart, work: Work, blockers: tuple[Blocker, ...]
 ) -> Result | Unmeasured:
     """One implementer turn: the candidate it made, or what kept it from making one."""
-    prompt = implement_prompt(w.plan, w.parent, w.prior, blockers)
+    prompt = implement_prompt(w.plan, w.parent, w.prior, blockers, rebase_onto=w.rebase_onto)
     match await implementer.turn(prompt):
         case TurnFinished(reply=ImplementerResult() as reply, checkpoint=checkpoint):
             return _candidate_of(w, work, reply, checkpoint)

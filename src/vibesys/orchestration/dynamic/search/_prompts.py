@@ -14,7 +14,14 @@ from pydantic import Field
 from vibesys.candidates.api import InputFailure, ReviewEvaluation
 from vibesys.metrics import MetricRow, PartialRow
 from vibesys.orchestration.dynamic.search import _roles as roles
-from vibesys.orchestration.dynamic.search._values import Blocker, Failure, PlanProblem
+from vibesys.orchestration.dynamic.search._values import (
+    Blocker,
+    Failure,
+    MainMeasurement,
+    MergeRecord,
+    MergeSource,
+    PlanProblem,
+)
 from vs_core.api.search import (
     Correction,
     EvidenceId,
@@ -33,6 +40,7 @@ class PromptTemplate(StrEnum):
     IMPLEMENT = "implement"
     REVIEW = "review"
     PROFILE_REQUEST = "profile_request"
+    MERGE = "merge"
 
 
 class EvidenceCitation(Value):
@@ -56,6 +64,14 @@ class BuildableRow(Value):
     best_partial: bool
     metric: MetricRow | None = None
     partial: PartialRow | None = None
+
+
+class MergeableRow(Value):
+    """A buildable candidate that passes accuracy and beats main's latest measurement."""
+
+    hypothesis_id: str
+    revision: RevisionRef
+    metric: MetricRow | None = None
 
 
 class HistoryRow(Value):
@@ -130,6 +146,15 @@ class _Planning(RolePromptContext):
     base_revision: RevisionRef
     base_accuracy_passed: bool | None
     offer_snapshot: str
+    main_revision: RevisionRef
+    """The run's main: where a new workstream that names no parent starts."""
+    main_measurement: MainMeasurement | None = None
+    """The latest trusted measurement of a merged main; None while main is the input."""
+    main_measuring: bool = False
+    """The current main is queued for, or in, its trusted measurement."""
+    mergeable: tuple[MergeableRow, ...] = ()
+    merges: tuple[MergeRecord, ...] = ()
+    """Every finished merge, oldest first."""
     buildable: tuple[BuildableRow, ...] = ()
     history: tuple[WorkstreamHistoryRow, ...] = ()
     older_ids: tuple[str, ...] = ()
@@ -181,6 +206,8 @@ class ImplementPrompt(RolePromptContext):
     last_blocker: Blocker | None = None
     """The latest turn of this workstream that ended without a candidate."""
     turns_without_candidate: int = Field(default=0, ge=0)
+    rebase_onto: RevisionRef | None = None
+    """The run's main, when it advanced past this hypothesis's work: rebase onto it first."""
 
 
 class ReviewPrompt(RolePromptContext):
@@ -210,8 +237,26 @@ class ProfilePrompt(RolePromptContext):
     target: RevisionRef
 
 
+class MergePrompt(RolePromptContext):
+    """One merge of candidates into the run's main revision, on a checkout of main."""
+
+    reply_schema: ClassVar[SchemaRef | None] = roles.MERGER.reply_schema
+
+    template: Literal[PromptTemplate.MERGE] = PromptTemplate.MERGE
+    merge_id: str
+    main_revision: RevisionRef
+    candidates: tuple[MergeSource, ...]
+    instructions: str
+    watch_for: str
+
+
 type PromptContext = Annotated[
-    PlannerPrompt | PlannerCorrection | ImplementPrompt | ReviewPrompt | ProfilePrompt,
+    PlannerPrompt
+    | PlannerCorrection
+    | ImplementPrompt
+    | ReviewPrompt
+    | ProfilePrompt
+    | MergePrompt,
     Field(discriminator="template"),
 ]
 """The union the render operation carries; the exchanges core starts are core's own contexts."""

@@ -75,6 +75,8 @@ class WorkstreamKind(StrEnum):
     IMPLEMENT = "implement"
     # Profile an existing candidate revision to inform later plans.
     PROFILE = "profile"
+    # Merge candidates into the run's main revision.
+    MERGE = "merge"
 
 
 class WorkstreamPlan(BaseModel):
@@ -204,6 +206,56 @@ class ProfileDecision(ProfilePlan):
     )
 
 
+MAX_MERGE_CANDIDATES = 8
+"""The most candidates one merge may combine."""
+
+
+class MergePlan(BaseModel):
+    """Merge buildable candidates into the run's main revision, in the order given.
+
+    A merge agent applies them on a checkout of main, resolves conflicts and runs the CPU-level
+    tests; on success main advances to its commit and is then measured. It may not redesign:
+    when the instructions cannot be followed it stops and says why.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal[WorkstreamKind.MERGE] = Field(
+        description="Use merge to combine buildable candidates into the run's main revision."
+    )
+    merge_id: AgentId = Field(
+        description="A new ID for this merge, distinct from every hypothesis, profile and merge ID."
+    )
+    candidates: tuple[AgentId, ...] = Field(
+        min_length=1,
+        max_length=MAX_MERGE_CANDIDATES,
+        description=(
+            "Hypothesis IDs of listed buildable candidates, in the order to merge them; each "
+            "is merged at its latest verified revision."
+        ),
+    )
+    instructions: str = Field(
+        min_length=1,
+        description=(
+            "How to merge them: which changes add up, which of two alternatives to take, which "
+            "parts duplicate main and are dropped."
+        ),
+    )
+    watch_for: str = Field(
+        min_length=1,
+        description="What the merger must check or be careful of while merging.",
+    )
+
+    @field_validator("instructions", "watch_for")
+    @classmethod
+    def _nonblank_intent(cls, value: str) -> str:
+        """Require meaningful merge instructions without rewriting the planner's text."""
+        if not value.strip():
+            message = "merge instructions must not be blank"
+            raise ValueError(message)
+        return value
+
+
 def _workstream_kind(value: object) -> str:
     """Return a planned workstream's kind; an entry without one is an implement workstream."""
     if isinstance(value, dict):
@@ -217,7 +269,8 @@ def _workstream_kind(value: object) -> str:
 # workstreams existed still validate.
 type PlannedWorkstream = Annotated[
     Annotated[WorkstreamPlan, Tag(WorkstreamKind.IMPLEMENT.value)]
-    | Annotated[ProfilePlan, Tag(WorkstreamKind.PROFILE.value)],
+    | Annotated[ProfilePlan, Tag(WorkstreamKind.PROFILE.value)]
+    | Annotated[MergePlan, Tag(WorkstreamKind.MERGE.value)],
     Discriminator(_workstream_kind),
 ]
 
@@ -225,7 +278,8 @@ type PlannedWorkstream = Annotated[
 # original contract so a resume never invents intent for an older profile.
 type PlannerWorkstream = Annotated[
     Annotated[WorkstreamPlan, Tag(WorkstreamKind.IMPLEMENT.value)]
-    | Annotated[ProfileDecision, Tag(WorkstreamKind.PROFILE.value)],
+    | Annotated[ProfileDecision, Tag(WorkstreamKind.PROFILE.value)]
+    | Annotated[MergePlan, Tag(WorkstreamKind.MERGE.value)],
     Discriminator(_workstream_kind),
 ]
 
@@ -252,6 +306,8 @@ def planned_id(plan: PlannedWorkstream) -> str:
     """Return the ID a planned workstream is scheduled and tracked under."""
     if isinstance(plan, ProfilePlan):
         return plan.profile_id
+    if isinstance(plan, MergePlan):
+        return plan.merge_id
     return plan.hypothesis_id
 
 
@@ -319,8 +375,8 @@ class PortfolioPlan(BaseModel):
         min_length=1,
         max_length=32,
         description=(
-            "The new workstreams to start: one entry per hypothesis (kind implement) "
-            "or per profile (kind profile)."
+            "The new workstreams to start: one entry per hypothesis (kind implement), "
+            "per profile (kind profile) or per merge (kind merge)."
         ),
     )
     hypothesis_updates: tuple[PlannerHypothesisUpdate, ...] = Field(
@@ -384,7 +440,7 @@ class ImplementPortfolioPlan(PortfolioPlan):
         *,
         union_format: Literal["any_of", "primitive_type_array"] = "any_of",
     ) -> dict[str, Any]:
-        """Return the portfolio schema with implement workstreams as the only entry kind."""
+        """Return the portfolio schema with implement and merge workstreams as the entry kinds."""
         schema = super().model_json_schema(
             by_alias=by_alias,
             ref_template=ref_template,
@@ -397,8 +453,16 @@ class ImplementPortfolioPlan(PortfolioPlan):
         definitions = schema["$defs"]
         del definitions["PlannerWorkstream"], definitions["ProfileDecision"]
         workstreams = schema["properties"]["workstreams"]
-        workstreams["items"] = {"$ref": ref_template.format(model="WorkstreamPlan")}
-        workstreams["description"] = "The new workstreams to start: one entry per hypothesis."
+        workstreams["items"] = {
+            "anyOf": [
+                {"$ref": ref_template.format(model="WorkstreamPlan")},
+                {"$ref": ref_template.format(model="MergePlan")},
+            ]
+        }
+        workstreams["description"] = (
+            "The new workstreams to start: one entry per hypothesis (kind implement) or per "
+            "merge (kind merge)."
+        )
         return schema
 
 
@@ -525,6 +589,37 @@ class ImplementerResult(WorkResult, RevisionReply):
         return self.outcome is not HypothesisOutcome.BLOCKED
 
 
+class MergeOutcomeKind(StrEnum):
+    """How a merger ends its merge."""
+
+    MERGED = "merged"
+    REFUSED = "refused"
+
+
+class MergeResult(RevisionReply):
+    """What a merger answers: the merge it committed, or why it stopped without one."""
+
+    outcome: MergeOutcomeKind = Field(
+        description=(
+            "merged when every candidate is merged as instructed and the CPU-level tests pass; "
+            "refused when the instructions cannot be followed without redesigning."
+        )
+    )
+    summary: str = Field(min_length=1, description="What you merged, in order, and how.")
+    tests: str = Field(
+        min_length=1, description="The CPU-level tests you ran on the merged tree, and their result."
+    )
+    reason: str = Field(
+        default="",
+        description="For refused: which instruction could not be followed, and why. Else empty.",
+    )
+
+    @override
+    def produces_revision(self) -> bool:
+        """Only a merge that merged leaves a commit for core to checkpoint."""
+        return self.outcome is MergeOutcomeKind.MERGED
+
+
 class ProfilerResult(WorkResult):
     """What a profiler answers: it measures a revision and never produces one."""
 
@@ -545,6 +640,9 @@ __all__ = [
     "EvidenceReference",
     "ImplementPortfolioPlan",
     "ImplementerResult",
+    "MergeOutcomeKind",
+    "MergePlan",
+    "MergeResult",
     "PlannedWorkstream",
     "PlannerHandoff",
     "PlannerHypothesisUpdate",

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
+    MergePrompt,
     ProfilePrompt,
     ReviewPrompt,
 )
@@ -20,7 +21,7 @@ from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
 
 if TYPE_CHECKING:
     from vibesys.candidates.api import ReviewEvaluation
-    from vibesys.orchestration.dynamic.search._values import RoundRecord, WorkPlan
+    from vibesys.orchestration.dynamic.search._values import MergeSource, RoundRecord, WorkPlan
     from vs_core.api.search import RevisionRef
 
 CUT = " [cut]"
@@ -67,11 +68,14 @@ def implement_prompt(
     parent: RevisionRef,
     prior: RoundRecord | None,
     blockers: tuple[Blocker, ...],
+    *,
+    rebase_onto: RevisionRef | None = None,
 ) -> ImplementPrompt:
     """One isolated implementation request for a scheduled workstream.
 
     ``prior`` is the previous round of the same hypothesis, when this workstream continues it;
-    ``blockers`` are the turns of this workstream that ended without a measurable candidate.
+    ``blockers`` are the turns of this workstream that ended without a measurable candidate;
+    ``rebase_onto`` is the run's main when it advanced past this hypothesis's work.
     """
     latest = blockers[-1] if blockers else None
     stuck = next(
@@ -96,6 +100,7 @@ def implement_prompt(
         prior_failure_fence=fence(prior_tail),
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),
+        rebase_onto=rebase_onto,
     )
 
 
@@ -121,4 +126,17 @@ def profile_prompt(plan: WorkPlan, target: RevisionRef) -> ProfilePrompt:
     """Measurement-only request against the frozen target revision."""
     return ProfilePrompt(
         question=plan.question, required_fields=plan.required_fields, target=target
+    )
+
+
+def merge_prompt(
+    plan: WorkPlan, main: RevisionRef, candidates: tuple[MergeSource, ...]
+) -> MergePrompt:
+    """One merge of the scheduled candidates into ``main``, as the planner instructed it."""
+    return MergePrompt(
+        merge_id=plan.work_id,
+        main_revision=main,
+        candidates=candidates,
+        instructions=plan.instructions,
+        watch_for=plan.watch_for,
     )
