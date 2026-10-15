@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
+from ._registry import ContractError
 from .types.evaluation import OwnedJob, RegisteredOwnedJob
 from .types.job_observations import WaitEnd
 
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from .types.common import Limits, Observation, RequestId
     from .types.evaluation import Continuation, EvaluationState
     from .types.kernel import RunState
-    from .types.records import HostEpoch, RequestRecord
+    from .types.records import HostEpoch, RecordsState, RequestRecord
 
 type Job = OwnedJob | RegisteredOwnedJob
 
@@ -147,41 +148,46 @@ def job_bound(job: Job, stated: float, run: RunState, hosts: Sequence[HostEpoch]
     return bound if bound.at <= ceiling else Bound(at=ceiling, by=WaitEnd.RUN_END)
 
 
-def _call_deadline(state: EvaluationState, job: Job) -> float | None:
-    """The deadline of the agent call that allocated ``job``'s submission, or None."""
-    if not isinstance(job, OwnedJob):
+def _submission_limit(evaluation: EvaluationState, records: RecordsState, job: Job) -> float | None:
+    """The limit of ``job``'s submission when an agent's call allocated it, else None.
+
+    The submission's record holds that limit (``until``): the call answered the agent with
+    the same value, and only the record's is moved when a host restart credits downtime
+    (``open_host_epoch``). So a wait opened after a restart counts from the moved limit, as
+    the record does.
+    """
+    if not isinstance(job, OwnedJob) or not any(
+        call.request_id == job.submission_id and not call.repeat for call in evaluation.agent_calls
+    ):
         return None
-    return next(
-        (
-            call.deadline_at
-            for call in state.agent_calls
-            if call.request_id == job.submission_id and not call.repeat
-        ),
-        None,
-    )
+    record = records.record(job.submission_id)
+    if record is None:
+        raise ContractError(("jobs", "submission_id"), "an agent's submission has no record")
+    return record.until.at
 
 
 def wait_bounds(
-    state: EvaluationState,
+    evaluation: EvaluationState,
+    records: RecordsState,
     run: RunState,
     wait: Continuation,
     jobs: tuple[Job, ...],
-    hosts: Sequence[HostEpoch],
 ) -> tuple[Bound, ...]:
     """The bound of each of ``wait``'s ``jobs``, in order: when the wait is done with it.
 
-    Each job's stated limit is the wait's deadline, or the deadline of the agent call that
-    allocated the job's submission when that is later, moved past the host downtime the
-    wait was credited (capped at the run deadline, as a record's moved limit is); each job
-    adds its own queue credit, so a sibling's queue time never extends a running job's limit.
+    Each job's stated limit is the later of two. One is the wait's deadline, moved past the
+    host downtime the wait was credited (capped at the run deadline, as a record's moved
+    limit is). The other is the limit of the job's submission when an agent's call allocated
+    it, read from the submission's record, which a restart moves the same way. Each job adds
+    its own queue credit, so a sibling's queue time never extends a running job's limit.
     """
+    moved = wait.deadline_at + wait.downtime_credit
+    own = min(moved, run.deadline_at) if wait.deadline_at <= run.deadline_at else moved
 
     def stated(job: Job) -> float:
-        limit = max(wait.deadline_at, _call_deadline(state, job) or 0.0)
-        moved = limit + wait.downtime_credit
-        return min(moved, run.deadline_at) if limit <= run.deadline_at else moved
+        return max(own, _submission_limit(evaluation, records, job) or 0.0)
 
-    return tuple(job_bound(job, stated(job), run, hosts) for job in jobs)
+    return tuple(job_bound(job, stated(job), run, records.hosts) for job in jobs)
 
 
 def record_bound(

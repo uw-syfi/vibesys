@@ -263,7 +263,7 @@ def wait_deadline(state: EvaluationState, context: EvaluationContext, wait: Cont
     bound ends the wait. The bound is always a time; past the run deadline the run's end is
     the bound.
     """
-    bounds = wait_bounds(state, context.run, wait, _live(state, wait), context.records.hosts)
+    bounds = wait_bounds(state, context.records, context.run, wait, _live(state, wait))
     return min(bounds, key=lambda bound: bound.at, default=Bound(wait.deadline_at, WaitEnd.LIMIT))
 
 
@@ -1093,7 +1093,7 @@ def _deadline(
     bounds = dict(
         zip(
             (_resource(job) for job in live),
-            wait_bounds(state, context.run, continuation, live, context.records.hosts),
+            wait_bounds(state, context.records, context.run, continuation, live),
             strict=True,
         )
     )

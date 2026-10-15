@@ -652,8 +652,9 @@ class AgentCall(Value):
     deadline_at: Seconds | None = None
     """The named submission's stated deadline, bounded by the run's; None when rejected.
 
-    Answered as the call time plus the limit, and never moved: a wait on the job adds the
-    job's queue credit to it (``_wait_clock``)."""
+    Answered as the call time plus the limit, and never moved: it is what the agent was told.
+    A wait on the job reads the limit from the submission's record, which a host restart
+    moves past its downtime, and adds the job's queue credit (``_wait_clock``)."""
     repeat: bool = False
     """Whether the call named a submission an earlier call (or a Measure) had allocated."""
     rejection: AgentRejection | None = None

@@ -136,7 +136,7 @@ def fact(
     return moved, (core.RequestObserved(observation=observed, progress=progress),)
 
 
-def _first_fact(
+def first_fact(
     state: core.CoreState, submit: core.SubmitMeasurement, job: core.ResourceId
 ) -> core.CoreState:
     assert submit.request_id is not None
@@ -151,7 +151,7 @@ def _first_fact(
     ).state
 
 
-def _agent_call(
+def agent_call(
     state: core.CoreState, measurement: core.MeasurementPlan, call_id: str
 ) -> tuple[core.CoreState, core.SubmitMeasurement | None, core.AgentCall]:
     scope = core.Scope(owner=state.run.run_id, generation=state.run.generation)
@@ -167,7 +167,7 @@ def _agent_call(
     return called.state, (submits[0] if submits else None), call
 
 
-def _suspend(
+def suspend(
     state: core.CoreState, template: core.Continuation, jobs: tuple[core.ResourceId, ...], at: float
 ) -> core.CoreState:
     wait = template.model_copy(update={"jobs": jobs, "deadline_at": at})
@@ -177,7 +177,7 @@ def _suspend(
     return state
 
 
-def _base(run_limits: core.Limits) -> tuple[core.CoreState, core.Continuation]:
+def base(run_limits: core.Limits) -> tuple[core.CoreState, core.Continuation]:
     state, template = fixture(run_owned=True)
     state = state.model_copy(update={"evaluation": core.EvaluationState()})
     return _with_limits(state, run_limits), template
@@ -185,30 +185,30 @@ def _base(run_limits: core.Limits) -> tuple[core.CoreState, core.Continuation]:
 
 def agent(run_limits: core.Limits) -> World:
     """An agent's wait on the one submission its call allocated."""
-    state, template = _base(run_limits)
+    state, template = base(run_limits)
     job = core.ResourceId(root="job")
-    state, submit, call = _agent_call(state, plan(), "call")
+    state, submit, call = agent_call(state, plan(), "call")
     assert submit is not None
     assert call.deadline_at is not None
-    state = _first_fact(state, submit, job)
-    state = _suspend(state, template, (job,), call.deadline_at)
+    state = first_fact(state, submit, job)
+    state = suspend(state, template, (job,), call.deadline_at)
     return World(Source.AGENT, state, (Job(job, submit=submit),), call.deadline_at)
 
 
 def multi(run_limits: core.Limits) -> World:
     """One agent wait on two submissions of two different candidates."""
-    state, template = _base(run_limits)
+    state, template = base(run_limits)
     jobs: list[Job] = []
     deadline = 0.0
     for index, purpose in enumerate(("baseline", "official")):
         resource = core.ResourceId(root=f"job-{index}")
-        state, submit, call = _agent_call(state, plan(purpose=purpose), f"call-{index}")
+        state, submit, call = agent_call(state, plan(purpose=purpose), f"call-{index}")
         assert submit is not None
         assert call.deadline_at is not None
-        state = _first_fact(state, submit, resource)
+        state = first_fact(state, submit, resource)
         jobs.append(Job(resource, submit=submit))
         deadline = call.deadline_at
-    state = _suspend(state, template, tuple(job.resource_id for job in jobs), deadline)
+    state = suspend(state, template, tuple(job.resource_id for job in jobs), deadline)
     return World(Source.MULTI, state, tuple(jobs), deadline)
 
 
@@ -234,7 +234,7 @@ def measure(run_limits: core.Limits) -> World:
     state = _with_limits(core.initial_state(), run_limits)
     state, submit = _measured(state)
     job = core.ResourceId(root="job")
-    state = _first_fact(state, submit, job)
+    state = first_fact(state, submit, job)
     assert submit.request_id is not None
     record = state.records.record(submit.request_id)
     assert record is not None
@@ -249,16 +249,16 @@ def measure(run_limits: core.Limits) -> World:
 
 def agent_repeat(run_limits: core.Limits) -> World:
     """An agent's wait on a submission a strategy's ``Measure`` allocated: a repeat call."""
-    state, template = _base(run_limits)
+    state, template = base(run_limits)
     state, submit = _measured(state)
     job = core.ResourceId(root="job")
-    state = _first_fact(state, submit, job)
-    state, allocated, call = _agent_call(state, plan(), "repeat")
+    state = first_fact(state, submit, job)
+    state, allocated, call = agent_call(state, plan(), "repeat")
     assert allocated is None
     assert call.repeat
     assert call.request_id == submit.request_id
     assert call.deadline_at is not None
-    state = _suspend(state, template, (job,), call.deadline_at)
+    state = suspend(state, template, (job,), call.deadline_at)
     return World(
         Source.AGENT_REPEAT,
         state,
@@ -270,7 +270,7 @@ def agent_repeat(run_limits: core.Limits) -> World:
 
 def registered(run_limits: core.Limits) -> World:
     """An agent's wait on the job of a registered operation."""
-    state, template = _base(run_limits)
+    state, template = base(run_limits)
     codec = measurement_codec(normalized=True)
     scope = core.Scope(owner=state.run.run_id, generation=state.run.generation)
     identity = expected_identity("evaluator")
@@ -329,7 +329,7 @@ def registered(run_limits: core.Limits) -> World:
     world, events = fact(world, 0, 1.0, state="pending")
     for event in events:
         world = replace(world, state=core.step(world.state, event).state)
-    state = _suspend(world.state, template, (job,), LIMIT)
+    state = suspend(world.state, template, (job,), LIMIT)
     return replace(world, state=state)
 
 

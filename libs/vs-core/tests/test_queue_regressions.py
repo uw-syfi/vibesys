@@ -16,7 +16,9 @@ import pytest
 
 import vs_core.api as core
 
-from .queue_worlds import BUILDERS, LIMIT, Source, World, fact, limits
+from . import queue_worlds
+from .queue_worlds import BUILDERS, LIMIT, Job, Source, World, fact, limits
+from .test_measurements import plan
 
 POLL = 10.0
 """A fresh poll cadence: the job's queue time is credited in full."""
@@ -183,3 +185,51 @@ def test_a_restart_while_a_job_queues_credits_the_downtime_to_its_wait_as_to_its
         (resumed,) = [event for event in heard if isinstance(event, core.ResumeAuthorized)]
         assert resumed.timeout is None
     assert not [event for event in heard if isinstance(event, core.Failed)]
+
+
+def test_a_wait_opened_after_a_restart_counts_from_its_submissions_moved_limit() -> None:
+    """Regression (M-a): a wait read its submission's limit from the agent call, which a
+    restart never moves, while the restart moved the submission record's limit. A wait the
+    agent opened after a restart froze and cancelled its job DOWN seconds before the record's
+    bound. The wait now reads the record's limit, so the two end together.
+    """
+    state, template = queue_worlds.base(limits())
+    first = core.HostEpoch(epoch=0, started_at=0.0, alive_at=0.0)
+    state = state.model_copy(
+        update={"records": state.records.model_copy(update={"hosts": (first,)})}
+    )
+    resource = core.ResourceId(root="job")
+    state, submit, call = queue_worlds.agent_call(state, plan(), "call")
+    assert submit is not None
+    assert call.deadline_at == LIMIT
+    state = queue_worlds.first_fact(state, submit, resource)
+    world = World(Source.AGENT, state, (Job(resource, submit=submit),), LIMIT)
+    for at in (11.0, 21.0):
+        world, events = fact(world, 0, at, state="pending")
+        world, _ = _events(world, events)
+    restart = 21.0 + DOWN
+    world, _ = _events(world, (core.RecoveryStarted(epoch=1, now_at=restart),))
+    # The agent waits on its job after the restart, with the deadline its call was told.
+    world = replace(world, state=queue_worlds.suspend(world.state, template, (resource,), LIMIT))
+    world, events = fact(world, 0, restart + 10.0, state="pending")
+    world, _ = _events(world, events)
+    world, events = fact(world, 0, restart + 20.0, state="running")
+    world, heard = _events(world, events)
+    # The record's bound: its limit moved past the downtime, plus 40 s of queue credit.
+    ends = LIMIT + DOWN + 40.0
+    world, more = _events(world, (core.ClockAdvanced(now_at=ends - 1.0),))
+    heard.extend(more)
+    (wait,) = world.state.evaluation.continuations
+    assert wait.timeout is None
+    cancels = [
+        record
+        for record in world.state.records.records
+        if isinstance(record.request, core.CancelOwnedJob)
+    ]
+    assert not cancels
+    assert not [event for event in heard if isinstance(event, core.Failed)]
+    # At the record's bound the wait ends with it.
+    world, _ = _events(world, (core.ClockAdvanced(now_at=ends),))
+    (wait,) = world.state.evaluation.continuations
+    assert wait.timeout is not None
+    assert (wait.timeout.deadline_at, wait.timeout.by) == (ends, core.WaitEnd.LIMIT)
