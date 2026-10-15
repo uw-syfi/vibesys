@@ -14,6 +14,7 @@ from vibesys.run.logs import startup_output_opener
 from vs_agent.api.images import ImageBuildProgress, TaskImageBuildError
 from vs_agent.api.testing import FakeDockerBuildRunner, docker_result
 from vs_logs.api import MemoryLogStore, StreamOutcome
+from vs_logs.api.testing import no_warning
 from vs_logs.read import Tail, reader_of
 from vs_runtime.api.infrastructure import (
     DockerEnvironment,
@@ -208,7 +209,7 @@ def _read_all(reader: LogReader[LogOwner], info: StreamInfo[LogOwner]) -> bytes:
 
 def test_startup_output_reaches_the_run_log_store_under_its_step(tmp_path: Path) -> None:
     runner = FakeDockerBuildRunner(build_result=docker_result(stderr=_BUILD_OUTPUT))
-    store = MemoryLogStore(LOG_OWNER, threads=SimThreads())
+    store = MemoryLogStore(LOG_OWNER, threads=SimThreads(), warn=no_warning)
     engine = daemon_engine(tmp_path, launcher=FakePipedProcessLauncher())
     engine.pulls_on_run(_PULL)
 
@@ -235,7 +236,7 @@ def test_a_failed_build_leaves_a_failed_stream_in_the_run_log_store(tmp_path: Pa
     runner = FakeDockerBuildRunner(
         build_result=docker_result(returncode=1, stderr="#6 [2/3] RUN npm install -g\nnpm ERR!")
     )
-    store = MemoryLogStore(LOG_OWNER, threads=SimThreads())
+    store = MemoryLogStore(LOG_OWNER, threads=SimThreads(), warn=no_warning)
 
     with pytest.raises(TaskImageBuildError, match="npm ERR!"):
         _open(tmp_path, runner, [], startup_output=startup_output_opener(store))

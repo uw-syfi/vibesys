@@ -24,6 +24,7 @@ from server.host_helper_logs import (
 )
 from server.host_helper_os import StoreLogReader
 from vs_logs.api import FileLogStore, LogLimits, LogStream, StreamOutcome
+from vs_logs.api.testing import no_warning
 from vs_sim.api import OutputStream
 from vs_sim.api.testing import SimThreads
 
@@ -167,6 +168,7 @@ class TestStoreLogReader(LogReaderContract):
             directory,
             TypeAdapter(dict[str, JsonValue]),
             threads=SimThreads(schedule_seed=0),
+            warn=no_warning,
             limits=limits,
         )
         location = RunLocation(project_root="/project", run_id="run-1")

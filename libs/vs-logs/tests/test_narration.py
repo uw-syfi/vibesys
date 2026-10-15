@@ -20,7 +20,7 @@ from vs_logs.api import (
     uncaught_hook,
     uncaught_thread_hook,
 )
-from vs_logs.api.testing import CONTRACT_OWNER, ContractOwner, read_everything
+from vs_logs.api.testing import CONTRACT_OWNER, ContractOwner, no_warning, read_everything
 from vs_logs.read import reader_of
 from vs_sim.api.testing import SimThreads
 
@@ -71,7 +71,7 @@ class _Subject:
 def _subject(name: str, *, buffered_records: int = 1000) -> _Subject:
     warnings: list[str] = []
     handler = NarrationHandler(warn=warnings.append, buffered_records=buffered_records)
-    store = MemoryLogStore(CONTRACT_OWNER, threads=SimThreads())
+    store = MemoryLogStore(CONTRACT_OWNER, threads=SimThreads(), warn=no_warning)
     return _Subject(store, handler, _Producer(name, handler), warnings)
 
 
@@ -217,13 +217,17 @@ def test_a_failing_stream_never_raises_into_the_caller_and_warns_once() -> None:
     assert not subject.handler.waiting
 
 
-def test_a_stream_closed_under_the_handler_degrades_instead_of_raising() -> None:
+def test_a_stream_closed_under_the_handler_drops_later_records_quietly() -> None:
     subject = _subject("closed")
     with subject.store.open(ContractOwner(name="narration"), "vibesys") as stream:
         subject.handler.attach(stream)
+        subject.logger.info("in time")
         stream.close(StreamOutcome.FAILED)
         subject.logger.info("too late")
-    assert len(subject.warnings) == 1
+    data = read_everything(reader_of(subject.store, CONTRACT_OWNER), stream.stream_id, 1 << 16)
+    assert b"in time" in data.data
+    assert b"too late" not in data.data
+    assert subject.warnings == []
 
 
 def test_records_after_close_are_dropped_and_attach_is_refused() -> None:

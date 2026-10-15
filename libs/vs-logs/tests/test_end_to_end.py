@@ -8,7 +8,13 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_logs.api import FileLogStore, LogLimits, LogScope, StreamOutcome
-from vs_logs.api.testing import CONTRACT_OWNER, ContractOwner, bytes_by_pipe, read_everything
+from vs_logs.api.testing import (
+    CONTRACT_OWNER,
+    ContractOwner,
+    bytes_by_pipe,
+    no_warning,
+    read_everything,
+)
 from vs_logs.read import Tail, open_log_directory
 from vs_sim.api import OutputStream
 from vs_sim.api.testing import HANG_GUARD_S, SimThreads
@@ -40,7 +46,9 @@ def test_two_drain_threads_write_one_stream_that_reads_back_per_pipe(
 ) -> None:
     directory = tmp_path_factory.mktemp("run-logs")
     threads = SimThreads(schedule_seed=schedule_seed)
-    store = FileLogStore(directory, CONTRACT_OWNER, threads=threads, limits=LogLimits(1 << 20, 16))
+    store = FileLogStore(
+        directory, CONTRACT_OWNER, threads=threads, warn=no_warning, limits=LogLimits(1 << 20, 16)
+    )
 
     stream_id = threads.run(lambda: _produce(store, threads, lines=12))
 

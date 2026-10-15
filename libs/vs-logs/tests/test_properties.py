@@ -6,7 +6,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_logs.api import LogLimits, MemoryLogStore, StreamOutcome
-from vs_logs.api.testing import CONTRACT_OWNER, ContractOwner
+from vs_logs.api.testing import CONTRACT_OWNER, ContractOwner, no_warning
 from vs_logs.read import FromOffset, Tail, reader_of
 from vs_sim.api import OutputStream
 from vs_sim.api.testing import SimThreads
@@ -32,7 +32,7 @@ def test_any_windows_read_exactly_the_retained_bytes_at_their_offsets(
     limits: LogLimits,
     windows: list[tuple[int, int]],
 ) -> None:
-    store = MemoryLogStore(CONTRACT_OWNER, threads=SimThreads(), limits=limits)
+    store = MemoryLogStore(CONTRACT_OWNER, threads=SimThreads(), warn=no_warning, limits=limits)
     reader = reader_of(store, CONTRACT_OWNER)
     written = b""
     retained_start = 0
@@ -58,7 +58,7 @@ def test_any_windows_read_exactly_the_retained_bytes_at_their_offsets(
 def test_any_chunking_of_reads_reassembles_the_stream(
     writes: list[tuple[OutputStream, bytes]], chunk_sizes: list[int]
 ) -> None:
-    store = MemoryLogStore(CONTRACT_OWNER, threads=SimThreads())
+    store = MemoryLogStore(CONTRACT_OWNER, threads=SimThreads(), warn=no_warning)
     reader = reader_of(store, CONTRACT_OWNER)
     stream = store.open(ContractOwner(name="p"), "cmd")
     for pipe, data in writes:
@@ -83,7 +83,7 @@ def test_any_chunking_of_reads_reassembles_the_stream(
 def test_a_tail_is_the_last_bytes_and_reaches_eof(
     writes: list[tuple[OutputStream, bytes]], tail: int, max_bytes: int
 ) -> None:
-    store = MemoryLogStore(CONTRACT_OWNER, threads=SimThreads())
+    store = MemoryLogStore(CONTRACT_OWNER, threads=SimThreads(), warn=no_warning)
     reader = reader_of(store, CONTRACT_OWNER)
     with store.open(ContractOwner(name="p"), "cmd") as stream:
         for pipe, data in writes:

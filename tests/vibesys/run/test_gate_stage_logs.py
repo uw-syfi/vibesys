@@ -35,6 +35,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import InMemoryEvaluationNamespace
 from vs_logs.api import MemoryLogStore, StreamOutcome
+from vs_logs.api.testing import no_warning
 from vs_logs.read import Tail, reader_of
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -117,7 +118,7 @@ class _Hooks:
 
 
 def _store() -> MemoryLogStore[LogOwner]:
-    return MemoryLogStore(LOG_OWNER, threads=SimThreads())
+    return MemoryLogStore(LOG_OWNER, threads=SimThreads(), warn=no_warning)
 
 
 def _read(reader: LogReader[LogOwner], info: StreamInfo[LogOwner]) -> bytes:
