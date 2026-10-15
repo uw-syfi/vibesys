@@ -127,8 +127,6 @@ class _Daemon:
     """An in-memory Docker daemon behind scripted ``docker`` client processes."""
 
     faults: _Faults
-    kills_removals: bool = False
-    """Whether the drawn death may hit a ``docker rm``; see the expected failure below."""
     containers: dict[str, str] = field(default_factory=dict)
     """Live containers, id to name."""
     created: list[str] = field(default_factory=list)
@@ -139,7 +137,7 @@ class _Daemon:
         argv = spec.argv
         index = self.commands
         self.commands += 1
-        dies = index == self.faults.killed_command and (argv[1] != "rm" or self.kills_removals)
+        dies = index == self.faults.killed_command
         if dies:
             self.killed = argv
         if argv[1] == "run":
@@ -310,12 +308,12 @@ class _Outcome:
     root: Path
 
 
-def _run(tmp_path: Path, sim: Sim, *, kills_removals: bool = False) -> _Outcome:
+def _run(tmp_path: Path, sim: Sim) -> _Outcome:
     faults = _Faults.draw(sim)
     schedule = sim.seed if sim.schedule_seed is None else sim.schedule_seed
     threads = SimThreads(sim.clock, schedule_seed=schedule, trace=sim.trace)
     sim.clock.limit = sim.clock.now() + _RUN_LIMIT_S
-    daemon = _Daemon(faults, kills_removals=kills_removals)
+    daemon = _Daemon(faults)
     docker = SubprocessDockerCli(processes=FakeProcesses(daemon.answer, pass_time=threads.sleep))
     root = tmp_path / "project"
     _project(root)
@@ -416,14 +414,6 @@ def test_the_whole_run_sweep(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, se
     _assert_invariants(_run(tmp_path, sim), sim)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "a docker rm whose client dies is not retried: the container stays until interpreter "
-        "exit, and an attempt workspace's failed removal is forgotten, so its retried discard "
-        "reports success"
-    ),
-)
 @pytest.mark.parametrize(
     "seed",
     [
@@ -434,9 +424,10 @@ def test_the_whole_run_sweep(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, se
 def test_a_killed_container_removal_leaves_no_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, seed: int
 ) -> None:
+    """Regression: a ``docker rm -f`` whose client died was not retried, so the container leaked."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     sim = Sim(seed=seed)
-    outcome = _run(tmp_path, sim, kills_removals=True)
+    outcome = _run(tmp_path, sim)
     assert outcome.daemon.killed is not None
     assert outcome.daemon.killed[1] == "rm"
     _assert_invariants(outcome, sim)
