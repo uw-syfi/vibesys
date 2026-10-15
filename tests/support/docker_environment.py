@@ -48,12 +48,13 @@ def host_container_backend(
     log: Callable[[str], None] | None = None,
     image: str | None = None,
     clock: Clock,
+    events: object | None = None,
 ) -> HostExecutedContainerBackend:
     """Build the ``backend_factory`` product: a CPU backend with host-executing containers.
 
     Its commands run as real host processes, so it takes the real launcher and threads.
     """
-    del clock  # the fake backend records no timestamps
+    del clock, events  # the fake backend records no timestamps and has no device to watch
     return HostExecutedContainerBackend(
         log_dir,
         log=log,

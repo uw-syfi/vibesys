@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_mcp.api import ToolServerDescriptor
+from vs_sim.api import DISCARD
 
 #: The label ``DockerSandbox`` puts on its containers (``vs_sandbox.docker_sandbox.RUN_ID_LABEL``).
 RUN_ID_LABEL = "vibesys.run-id"
@@ -170,7 +171,7 @@ class Editor:
 
     def run(self, command: str) -> tuple[int, str]:
         """Run a shell *command* as the agent; return its exit status and output."""
-        result = self.sandbox.execute(command, timeout=300)
+        result = self.sandbox.execute(command, timeout=300, output=DISCARD)
         assert result.exit_code is not None, result.output
         return result.exit_code, result.output
 

@@ -19,6 +19,7 @@ from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
     EVALUATION_CAPACITY,
     OPTIONS,
     candidate_environment,
+    handoff,
     launch_of,
     plan_of,
     ports,
@@ -79,7 +80,7 @@ def _config(plan: CorePlan) -> DynamicConfig:
 
 def _started(plan: CorePlan, root: Path, run: ResolvedRun) -> CoreState:
     """The state a shell builds from the plan on the production catalog: what core accepts."""
-    catalog = dynamic_operation_catalog(ports(root, run))
+    catalog = dynamic_operation_catalog(ports(root, run), handoff())
     catalog.require_owned(plan.search.declaration)
     return new_core_state(
         "policy",

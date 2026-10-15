@@ -66,6 +66,8 @@ describe('webBuildInputs', () => {
         'clients/apps/web/index.html',
         'clients/apps/web/tsconfig.lib.json',
         'clients/apps/web/vite.config.ts',
+        'clients/apps/web/campaign-stream.ts',
+        'clients/apps/web/dev/fixtures/trajectory-replay.json',
         'clients/package.json',
         'clients/pnpm-lock.yaml',
         'clients/pnpm-workspace.yaml',

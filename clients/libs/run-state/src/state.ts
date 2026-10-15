@@ -21,6 +21,7 @@ import {
   rehydrateRunMapProvenance,
 } from './run-map.js';
 import type {TranscriptEntry} from './transcript-fold.js';
+import type {WorkstreamMap} from './workstream.js';
 
 export type AgentExecutionMode = 'thinking' | 'responding' | 'tool' | 'waiting';
 
@@ -77,14 +78,45 @@ export interface QuotaPause {
 }
 
 /**
+ * One provider replaced by its fallback, folded from `provider_switched`.
+ *
+ * `sequence` is that event's own folded sequence, so a consumer can tell this is still the fact
+ * that settled the current `pause` (`sequence === QuotaState.sequence`) rather than a switch an
+ * intervening pause/resume/abandon has since superseded.
+ */
+export interface ProviderSwitch {
+  readonly sequence: number;
+  readonly fromProvider: string;
+  readonly toProvider: string;
+  readonly toModel: string;
+  readonly reason: 'policy' | 'operator';
+  readonly detail: string;
+}
+
+/**
  * The latest capacity stop fact. `sequence` is the newest quota event folded,
  * `0` before any; `pause` is `null` once that event settled the stop (resumed,
  * abandoned or switched). Whether the run is still parked is the run status's
  * to say, so a consumer shows `pause` only while the status is pausing or paused.
+ *
+ * `lastSwitch` is sticky: a provider switch is a fact about the run's history, not a transient
+ * stop, so it survives later pauses and resumes once set. `null` before the run's first switch.
  */
 export interface QuotaState {
   readonly sequence: number;
   readonly pause: QuotaPause | null;
+  readonly lastSwitch: ProviderSwitch | null;
+}
+
+/**
+ * The run's chosen result, folded from `winner_selected`. `selection` says whether a candidate
+ * beat the trusted input or it was kept unchanged; `settlementId` names the settled attempt that
+ * produced a candidate, `null` for the baseline. `null` before that once-per-run event.
+ */
+export interface WinnerSelection {
+  readonly selection: 'candidate' | 'baseline';
+  readonly revision: string;
+  readonly settlementId: string | null;
 }
 
 type RunStartupProgressData = Extract<
@@ -104,6 +136,14 @@ export interface RunStartupState {
   readonly stage: RunStartupProgressData['stage'];
   /** `null` while the stage reports no progress of its own (resolving, say). */
   readonly progress: Readonly<{done: number; total: number | null; label: string}> | null;
+  /**
+   * The envelope timestamp of the first startup event of the current stage; it resets when the
+   * stage changes. A consumer subtracts it from its own clock to say how long the stage has run,
+   * so the fold stays free of wall-clock reads.
+   */
+  readonly stageSince: string;
+  /** The envelope timestamp of the latest startup event: the last time the backend was heard. */
+  readonly lastActivityAt: string;
 }
 
 /** Thread id used for chat events recorded without one. */
@@ -254,7 +294,15 @@ export interface CoreState {
   readonly todos: readonly ExecutionTodos[];
   readonly usage: UsageMeter | null;
   readonly quota: QuotaState;
+  readonly winner: WinnerSelection | null;
   readonly benchmarks: readonly BenchmarkRecord[];
+  /**
+   * Per-workstream (round) terminal facts folded from `workstream_finished` and
+   * `turn_usage_recorded`, keyed internally by the event's `round_label`. Join with `rounds` by
+   * `RoundKey` (see `sameRoundKey`) for a round's lifecycle timing; a round with neither event yet
+   * has no entry here.
+   */
+  readonly workstreams: WorkstreamMap;
   readonly diagnostics: readonly CoreDiagnostic[];
   /** Sequence of the latest semantic experiment invalidation. */
   readonly experimentsRevision: number;
@@ -304,8 +352,10 @@ export function initialCoreState(): CoreState {
     chatThreads: [{id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null}],
     todos: [],
     usage: null,
-    quota: {sequence: 0, pause: null},
+    quota: {sequence: 0, pause: null, lastSwitch: null},
+    winner: null,
     benchmarks: [],
+    workstreams: {},
     diagnostics: [],
     experimentsRevision: 0,
     typedToolEvents: false,

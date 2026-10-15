@@ -13,6 +13,8 @@ import pytest
 
 from entrypoints.host_helper import real_host
 from server.host_api import (
+    HarnessesListReply,
+    HarnessesListRequest,
     InstanceList,
     InstancesListReply,
     InstancesListRequest,
@@ -28,6 +30,7 @@ from server.host_api import (
 )
 from server.host_helper_requests import answer
 from server.registry import FileInstanceStore, instance_root
+from vibesys.api import HARNESSES
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
@@ -38,18 +41,41 @@ def test_the_real_host_reads_this_users_registry_and_filesystem(tmp_path: Path) 
     runtime = tmp_path / "runtime"
     runtime.mkdir(mode=0o700)
     (tmp_path / "projects" / "alpha").mkdir(parents=True)
-    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), SimThreads())
+    threads = SimThreads()
+    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), threads)
 
-    listing = answer(InstancesListRequest(request_id="l", deadline_ms=1), host)
+    listing = answer(InstancesListRequest(request_id="l", deadline_ms=1), host, threads.event())
     prefix = f"{tmp_path}/projects/a"
-    completed = answer(PathsCompleteRequest(request_id="c", deadline_ms=1, prefix=prefix), host)
-    stopped = answer(RunStopRequest(request_id="s", deadline_ms=1, instance_id="0" * 12), host)
+    completed = answer(
+        PathsCompleteRequest(request_id="c", deadline_ms=1, prefix=prefix), host, threads.event()
+    )
+    stopped = answer(
+        RunStopRequest(request_id="s", deadline_ms=1, instance_id="0" * 12), host, threads.event()
+    )
 
     assert listing == InstancesListReply(request_id="l", listing=InstanceList(instances=()))
     assert isinstance(completed, PathsCompleteReply)
     assert [entry.name for entry in completed.entries] == ["alpha"]
     assert isinstance(stopped, RunStopReply)
     assert stopped.result.outcome is StopOutcome.NOT_RUNNING
+
+
+def test_the_real_host_offers_the_vetted_harnesses_with_one_default_per_provider(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    threads = SimThreads()
+    host = real_host({"XDG_RUNTIME_DIR": str(runtime)}, os.getuid(), threads)
+
+    reply = answer(HarnessesListRequest(request_id="h", deadline_ms=1), host, threads.event())
+
+    assert isinstance(reply, HarnessesListReply)
+    offered = reply.harnesses
+    assert [(o.provider, o.model) for o in offered] == [(h.provider, h.model) for h in HARNESSES]
+    for provider in {option.provider for option in offered}:
+        models = [option for option in offered if option.provider == provider]
+        assert [option.default for option in models] == [True] + [False] * (len(models) - 1)
 
 
 def test_an_unsafe_registry_root_is_refused(tmp_path: Path) -> None:

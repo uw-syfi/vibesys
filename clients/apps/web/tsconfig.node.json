@@ -10,6 +10,7 @@
   },
   "include": [
     "build-inputs.ts",
+    "campaign-stream.ts",
     "build-manifest.ts",
     "playwright.config.ts",
     "vite.config.ts",

@@ -10,6 +10,7 @@ export {
   CONNECT_CHANNEL,
   DESKTOP_PLATFORMS,
   type DesktopBridge,
+  type DesktopLogs,
   type DesktopPlatform,
   type DesktopPreload,
   type DesktopSocket,
@@ -20,7 +21,16 @@ export {
   WAKE_CHANNEL,
 } from './bridge.js';
 export {
+  LOGS_CHANNEL,
+  parseRunLogsRequest,
+  type RunLogsReply,
+  type RunLogsRequest,
+} from './run-logs.js';
+export {
   type ChromeState,
+  type HarnessChoice,
+  type HarnessListing,
+  type HarnessOffer,
   type HostsWelcomeBridge,
   type PathCompletion,
   parseWelcomeRequest,

@@ -36,7 +36,11 @@ from vs_runtime.api.testing import (
     daemon_engine,
 )
 from vs_sandbox.api import DockerSandbox, SandboxKind
-from vs_sandbox.api.slurm import SlurmPolicyError, load_slurm_operator_settings
+from vs_sandbox.api.slurm import (
+    AgentGpuConfig,
+    SlurmPolicyError,
+    load_slurm_operator_settings,
+)
 from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
 from vs_sim.api.testing import NO_PROCESSES, ManualClock
 
@@ -44,6 +48,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_runtime.api.infrastructure import RunEnvironmentSession
+from vs_sim.api import DISCARD
 
 _SLURM_CONFIG = """[slurm]
 name = "test-cluster"
@@ -253,15 +258,24 @@ def test_a_gpu_command_from_the_container_runs_in_a_slurm_job_within_the_operato
     _backend, _, session = _open(tmp_path, "slurm+gpu")
     try:
         client = str(tmp_path / "logs" / "slurm-gpu" / "vibesys-gpu")
-        ran = session.sandbox.execute(f"{client} --gpus 3 --time 45 -- echo from-the-job")
-        refused = session.sandbox.execute(f"{client} --gpus 5 -- echo too-many")
-        too_long = session.sandbox.execute(f"{client} --time 91 -- echo too-long")
+        ran = session.sandbox.execute(
+            f"{client} --gpus 3 --time 45 -- echo from-the-job", output=DISCARD
+        )
+        refused = session.sandbox.execute(f"{client} --gpus 5 -- echo too-many", output=DISCARD)
+        too_long = session.sandbox.execute(f"{client} --time 91 -- echo too-long", output=DISCARD)
 
         assert ran.exit_code == 0, ran.output
         assert "from-the-job" in ran.output
         recorded = (tmp_path / "srun.log").read_text(encoding="utf-8")
         assert "--gres=gpu:3" in recorded
         assert "--time=45" in recorded
+        # The job carries the run's own prefix, which the queue status counts it by.
+        run_prefix = (
+            AgentGpuConfig(partitions=("main",), max_gpus=4, max_time_minutes=90)
+            .for_run("run-1")
+            .job_name_prefix
+        )
+        assert f"--job-name={run_prefix}-" in recorded
         # A request above the operator's limits never reaches srun.
         assert "too-many" not in recorded
         assert "too-long" not in recorded
@@ -414,8 +428,10 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
     try:
         client = str(tmp_path / "logs" / "slurm-gpu" / "vibesys-gpu")
 
-        read = session.sandbox.execute(f"{client} -- cat {tools}/interpreter.txt")
-        write = session.sandbox.execute(f"{client} -- sh -c 'echo x > {tools}/written.txt'")
+        read = session.sandbox.execute(f"{client} -- cat {tools}/interpreter.txt", output=DISCARD)
+        write = session.sandbox.execute(
+            f"{client} -- sh -c 'echo x > {tools}/written.txt'", output=DISCARD
+        )
 
         assert (read.exit_code == 0) is exposed, read.output
         assert ("operator interpreter" in read.output) is exposed
@@ -480,7 +496,7 @@ def test_a_gpu_job_runs_an_interpreter_reached_through_a_link_chain_once_the_ali
     try:
         client = str(tmp_path / "logs" / "slurm-gpu" / "vibesys-gpu")
 
-        result = session.sandbox.execute(f"{client} -- {venv}/bin/python")
+        result = session.sandbox.execute(f"{client} -- {venv}/bin/python", output=DISCARD)
 
         assert result.exit_code == 0, result.output
         assert "interpreter ran" in result.output

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from vs_sim.api import Processes, ProcessRun, ProcessSpec
+from vs_sim.api import DISCARD
 
 _SSH_SUFFIX_LENGTH = 3
 _RSYNC_OPERAND_COUNT = 2
@@ -242,7 +243,7 @@ def _run_bounded(spec: ProcessSpec, *, processes: Processes, timeout: float) -> 
         spec,
         max_output_bytes=min(spec.max_output_bytes, MAX_TRANSPORT_STREAM_BYTES),
     )
-    return processes.run(bounded, timeout=timeout)
+    return processes.run(bounded, timeout=timeout, output=DISCARD)
 
 
 def _connector_with_local_path(request: SlurmConnectorRequest, local: str) -> SlurmConnectorRequest:

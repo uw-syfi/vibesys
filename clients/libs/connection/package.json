@@ -34,6 +34,7 @@
   "dependencies": {
     "@vibesys/contracts": "workspace:*",
     "@vibesys/hosts": "workspace:*",
+    "@vibesys/logs": "workspace:*",
     "@vibesys/machine": "workspace:*",
     "@vibesys/transport": "workspace:*",
     "xstate": "5.33.2"

@@ -352,6 +352,7 @@ from vs_core.types.evaluation import (
     InspectOwnedJob,
     JobFactsBeforeObservation,
     JobObserved,
+    JobQueued,
     JobsDrainRequested,
     JobTerminationRequested,
     JobWaitLapsed,
@@ -398,6 +399,7 @@ from vs_core.types.job_observations import (
     JobTimeout,
     MeasurementFailure,
     TimedOut,
+    WaitEnd,
 )
 from vs_core.types.kernel import (
     AreaChange,
@@ -961,6 +963,7 @@ __all__ = [
     "JobFactsBeforeObservation",
     "JobObserved",
     "JobProgress",
+    "JobQueued",
     "JobTerminationRequested",
     "JobTimeout",
     "JobWaitLapsed",
@@ -1231,6 +1234,7 @@ __all__ = [
     "VerifyAdoption",
     "VerifyParentRevisionBase",
     "Wait",
+    "WaitEnd",
     "WaitKind",
     "WaitOn",
     "WaitRefusal",

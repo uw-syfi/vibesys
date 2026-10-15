@@ -77,7 +77,9 @@ def test_the_stop_request_carries_the_time_its_clock_reads(start: float) -> None
 
     def scenario() -> bool:
         threads.spawn(serve, name="server", daemon=True)
-        return ControlSocketStopRequester(network, clock=clock).request_stop("control")
+        return ControlSocketStopRequester(
+            network, clock=clock, deadline_clock=threads
+        ).request_stop("control")
 
     assert threads.run(scenario) is True
     assert [request.timestamp for request in sent] == [utc_datetime(clock)]

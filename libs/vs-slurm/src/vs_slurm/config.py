@@ -201,7 +201,10 @@ class SlurmConfig(BaseModel):
     sbatch_command: tuple[str, ...] = ("sbatch",)
     sbatch_arguments: tuple[str, ...] = ()
     poll_interval_seconds: Annotated[float, Field(gt=0)] = 5.0
+    # Bounds a job's run, from when it is first seen running; queue wait is not counted.
     job_timeout_seconds: Annotated[int, Field(gt=0)] = 3600
+    # Bounds a job's wait in the queue, per scheduler attempt; None leaves it unbounded.
+    queue_timeout_seconds: Annotated[int, Field(gt=0)] | None = None
     transport_timeout_seconds: Annotated[int, Field(gt=0)] = 110
     evaluation_capacity: Annotated[int, Field(gt=0)] = 1
 

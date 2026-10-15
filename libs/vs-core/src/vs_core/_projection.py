@@ -161,7 +161,7 @@ def project(state: CoreState) -> CoreView:
         adoption=adoption_view(state.settlement, state.records),
         next_observe_at=_earliest(
             next_observe_at(state.evaluation),
-            next_reconciliation_at(state.records),
+            next_reconciliation_at(state.records, state.evaluation, run),
             next_retry_at(state.records),
         ),
     )

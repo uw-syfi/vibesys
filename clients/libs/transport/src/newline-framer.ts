@@ -27,4 +27,21 @@ export class NewlineFramer {
     }
     return lines;
   }
+
+  /**
+   * Finish the byte stream, rejecting a suffix that never became a delimited frame.
+   *
+   * EOF is part of newline framing: accepting a non-empty remainder would turn a
+   * transport-truncated prefix into a complete message, while dropping it would
+   * hide a protocol fault as an ordinary disconnect. Clear before throwing so a
+   * terminal observer cannot retain the peer-controlled buffer.
+   */
+  finish(): void {
+    if (this.#remainder.length === 0) return;
+    this.#remainder = '';
+    throw new BackendClientError(
+      'parse',
+      'Server stream ended with an incomplete newline-delimited frame',
+    );
+  }
 }

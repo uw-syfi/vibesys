@@ -3,7 +3,7 @@
  * stream, placed by the stream reconciler. Runtime-neutral: the app supplies the transport (a
  * WebSocket, or the desktop shell's bridge shaped as one).
  */
-import {isServerRejection, ServerError} from '@vibesys/contracts';
+import {ServerError} from '@vibesys/contracts';
 import {
   type ControlChannelState,
   type ControlTransport,
@@ -14,8 +14,8 @@ import {
   StreamReconciler,
   sameControlChannelState,
 } from '@vibesys/transport';
-import {isIterationStoreReplaced} from './connection.js';
-import type {RunConnection, TransportHooks} from './ports.js';
+import {isIterationStoreReplaced, isLegacyUnsupportedRequest} from './connection.js';
+import type {ChatResponse, RunConnection, TransportHooks, WebChatOptions} from './ports.js';
 
 /** The event stream's tail and its redial timing; the defaults are the transport's. */
 export interface RunConnectionOptions {
@@ -97,7 +97,7 @@ function openRunConnection(
       } catch (error) {
         if (
           iterationCapability === 'unknown' &&
-          isServerRejection(error) &&
+          isLegacyUnsupportedRequest(error) &&
           !isIterationStoreReplaced(error)
         ) {
           iterationCapability = 'unsupported';
@@ -106,6 +106,7 @@ function openRunConnection(
         throw error;
       }
     },
+    ask: (text, options = {}) => askRun(transport, text, options),
     async command(input) {
       const response = await transport.request(input);
       const acknowledgement = response.ack;
@@ -146,4 +147,26 @@ function openRunConnection(
       return closing;
     },
   };
+}
+
+async function askRun(
+  transport: ControlTransport,
+  text: string,
+  options: WebChatOptions,
+): Promise<ChatResponse> {
+  const response = await transport.request(
+    {
+      type: 'query.chat',
+      text,
+      ...(options.threadId === undefined ? {} : {thread_id: options.threadId}),
+    },
+    options.signal === undefined ? undefined : {signal: options.signal},
+  );
+  if (response.ok !== true || response.chat == null) {
+    throw new ServerError(
+      response.error ?? 'Server did not return a chat answer',
+      response.diagnostic ?? null,
+    );
+  }
+  return {chat: response.chat, events: response.events ?? []};
 }

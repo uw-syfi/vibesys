@@ -9,7 +9,10 @@ from typing import overload
 
 from vibesys.composition import (
     _vibesys_runtime_host_resources,
+    domain_model_copy_excludes,
     prepare_domain_model_artifacts,
+    resolve_model,
+    resolve_provider,
 )
 from vibesys.config import BUNDLED_RESOURCES, as_config
 from vibesys.constants import (
@@ -45,7 +48,14 @@ from vibesys.run.evaluation import trusted_evaluation_plan
 from vibesys.run.evaluation_socket import evaluation_socket_mount, remove_evaluation_socket
 from vibesys.run.experiment_repo import ExperimentRepository
 from vibesys.run.git_events import CoreGitTrackerEvents
+from vibesys.run.gpu_events import CoreGpuContentionEvents
 from vibesys.run.integration import LocalRunIntegration, RunResources, run_log_emitter
+from vibesys.run.logs import (
+    open_run_logs,
+    stage_output_opener,
+    startup_output_opener,
+    tool_build_output_opener,
+)
 from vibesys.run.profilers import (
     ProfilerPreflight,
     resolve_run_profiler,
@@ -71,11 +81,11 @@ from vibesys.run.workspace_policy import (
     materialized_skill_dirs,
 )
 from vs_agent.api import (
-    DEFAULT_CLI_PROVIDER,
     AgentBackend,
     AgentSpec,
     task_agent_host_resources,
 )
+from vs_logs.api import installed_narration
 from vs_project.api import (
     AgentRoleExecutionRecord,
     OrchestrationDescriptor,
@@ -91,6 +101,7 @@ from vs_runtime.api import (
     WorkspaceSourceFact,
     boot_trace,
 )
+from vs_runtime.api.core import StageOutputOpener
 from vs_runtime.api.infrastructure import (
     EnvironmentStartup,
     ModelArtifactRequest,
@@ -311,8 +322,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 log=buffered_logs.append,
                 image=environment.backend_image,
                 clock=clock,
+                events=CoreGpuContentionEvents(integration.events),
             )
-            model_name = config.model.name
+            model_name = resolve_model(config, resolve_provider(config, request.cli_provider))
         with boot_trace.span("execution_record"):
             skill_source_paths = resolve_skill_source_paths(skills_dirs)
             agent_objective = resolve_agent_resource_paths(
@@ -323,11 +335,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             resolved_backend = str(
                 request.agent_backend or config.agent.backend or AgentBackend.CLI
             )
-            resolved_cli_provider = (
-                request.cli_provider or config.agent.cli_provider or DEFAULT_CLI_PROVIDER
-            )
+            resolved_cli_provider = resolve_provider(config, request.cli_provider)
             execution_record = RunExecutionRecord(
-                model=config.model.name,
+                model=model_name,
                 agent_backend=resolved_backend,
                 cli_provider=resolved_cli_provider,
                 cli_timeout=config.agent.cli_timeout,
@@ -338,7 +348,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 thinking_budget=config.thinking.budget,
                 agent_roles={
                     role_id: AgentRoleExecutionRecord(
-                        model=spec.model if spec.model is not None else config.model.name,
+                        model=spec.model if spec.model is not None else model_name,
                         reasoning_effort=spec.reasoning_effort,
                     )
                     for role_id, spec in agent_specs.items()
@@ -360,7 +370,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
 
             input_project_dir = input_dir if (input_dir / "pyproject.toml").is_file() else None
 
-            model_artifacts = None
+            model_copy_excludes = domain_model_copy_excludes(
+                bundle.domain, isolated=environment.isolated
+            )
 
             workspace_files = create_project_materializer(
                 project_root,
@@ -370,18 +382,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 git=integration.git,
             )
             if copied_project:
-                source_reference = task_root / "reference"
-                model_artifacts = prepare_domain_model_artifacts(
-                    bundle.domain,
-                    ModelArtifactRequest(
-                        reference_dir=source_reference,
-                        model_cache_dir=collection_root / ".cache" / "huggingface",
-                        runtime_artifact_dir=collection_root / ".cache" / "llm-serving" / run_id,
-                        log=buffered_logs.append,
-                    ),
-                    isolated=environment.isolated,
-                    materialize_local_weights=environment.materialize_local_model_weights,
-                )
                 provision_project(
                     input_dir,
                     project_root,
@@ -390,7 +390,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                         workspace_sources=workspace_sources,
                         task_name=task_name,
                         input_project_dir=input_project_dir,
-                        input_excludes=model_artifacts.copy_excludes,
+                        input_excludes=model_copy_excludes,
                     ),
                 )
                 if evaluator_source is not None:
@@ -482,6 +482,17 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         log_dir = project_resources.logger.log_dir
         logger = project_resources.logger
         git = project_resources.git
+        # The run's one log store, open until the run's resources close. Its scope is what
+        # the run's producers (startup steps, gate stages) are handed.
+        log_scope = ownership.enter_context(
+            open_run_logs(
+                project_root,
+                run_id,
+                threads=integration.threads,
+                warn=sys.stderr.write,
+                narration=installed_narration(),
+            )
+        )
 
         prepared_evaluator = prepare_trusted_evaluator(
             evaluator_package_root,
@@ -519,18 +530,25 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             else:
                 ref_name = "."
 
-            if model_artifacts is None:
-                model_artifacts = prepare_domain_model_artifacts(
-                    bundle.domain,
-                    ModelArtifactRequest(
-                        reference_dir=project_ref_dir,
-                        model_cache_dir=project_state.model_cache_directory("huggingface"),
-                        runtime_artifact_dir=project_state.model_cache_directory("llm-serving"),
-                        log=logger.lprint,
+            # The one place a run's model is resolved, on a fresh launch and on
+            # every resume. The task reference that authors it is the input on a
+            # fresh copied launch; the run's record in its local state is what a
+            # resume reads, because the project copy holds no external weights.
+            model_artifacts = prepare_domain_model_artifacts(
+                bundle.domain,
+                ModelArtifactRequest(
+                    reference_dir=(task_root / "reference" if copied_project else project_ref_dir),
+                    model_cache_dir=(
+                        collection_root / ".cache" / "huggingface"
+                        if collection_root is not None
+                        else project_state.model_cache_directory("huggingface")
                     ),
-                    isolated=environment.isolated,
-                    materialize_local_weights=environment.materialize_local_model_weights,
-                )
+                    runtime_artifact_dir=project_state.model_cache_directory("llm-serving"),
+                    log=logger.lprint,
+                ),
+                isolated=environment.isolated,
+                materialize_local_weights=environment.materialize_local_model_weights,
+            )
 
             plan = build_workspace_materialization_plan(
                 project_root,
@@ -543,7 +561,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 profiler_support_name=profiler_support_name,
                 skill_excluded_relative_paths=platform_skill_excluded_paths(backend),
                 workspace_sources=(),
-                extra_input_excludes=model_artifacts.copy_excludes,
+                extra_input_excludes=model_copy_excludes,
                 profiler_support_extra=profiler_support_extra,
             )
             workspace_files.materialize(plan, existing=True)
@@ -612,6 +630,8 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     *evaluation_socket_mounts,
                 ),
                 log=logger.lprint,
+                startup_output=startup_output_opener(log_scope),
+                tool_build_output=tool_build_output_opener(log_scope),
                 framework_root=PROJECT_ROOT,
                 project_path_policy=project_path_policy,
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
@@ -659,6 +679,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             project_resources=project_resources,
             agent_host_resources=agent_host_resources,
             profiler_agent_resources=session.view.profiler_mcp_resources,
+            stage_output=stage_output_opener(log_scope),
         )
         integration.publish_resources(
             RunResources(
@@ -673,6 +694,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     if spec.model is not None and spec.model != model_name
                 ),
                 config=config,
+                allow_unvetted_model=request.allow_unvetted_model,
                 backend=backend,
                 skill_source_dirs=tuple(skill_source_paths),
                 host_resources=agent_host_resources,
@@ -769,3 +791,5 @@ class _PreparedRun:
     evaluation_plan: TrustedEvaluationPlan
     agent_host_resources: tuple[HostResource, ...]
     profiler_agent_resources: tuple[HostResource, ...]
+    stage_output: StageOutputOpener
+    """Opens each evaluation stage's output stream in the run's log store."""

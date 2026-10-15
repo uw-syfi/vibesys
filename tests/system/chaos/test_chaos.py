@@ -129,7 +129,7 @@ _CLUSTER_FAULTS = {
     # The baseline's job is submitted and then dies, so there is no baseline to compare with.
     ClusterFault.KILLED: ClusterOperation.SBATCH,
     ClusterFault.WRONG_STATE: ClusterOperation.SACCT,
-    # The baseline's job never leaves the queue; the job deadline cancels it and it fails.
+    # The baseline's job never leaves the queue; the queue deadline cancels it and it fails.
     ClusterFault.PENDING_FOREVER: ClusterOperation.SBATCH,
     ClusterFault.ACCOUNTING_GAP: ClusterOperation.SACCT,
     ClusterFault.REQUEUED: ClusterOperation.SQUEUE,

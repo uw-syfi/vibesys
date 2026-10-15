@@ -37,6 +37,14 @@ from vs_evaluation.api import (
     is_finished,
 )
 from vs_project.api import atomic_write_bytes
+from vs_sandbox.slurm_deadlines import (
+    DeadlineLimits,
+    DeadlinePhase,
+    WaitDeadlines,
+    first_deadlines,
+)
+from vs_sandbox.slurm_deadlines import observe as observe_deadlines
+from vs_sandbox.slurm_stage_output import CollectedStage, StageOutputFollower
 from vs_sandbox.slurm_wiring import make_cluster
 from vs_slurm.api import (
     INITIAL_LIFE,
@@ -63,6 +71,7 @@ from vs_slurm.api import (
     SlurmTreeArtifact,
     Unknown,
     advance_with_notice,
+    recorded_job_ids,
     validate_cluster_operation_id,
 )
 
@@ -70,6 +79,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
     from pathlib import Path
 
+    from vs_sandbox.slurm_stage_output import SlurmStageOutputOpener
     from vs_sim.api import Clock, Processes, Sleeper
     from vs_slurm.api import (
         Cluster,
@@ -80,6 +90,7 @@ if TYPE_CHECKING:
     )
 
 _UNRESOLVED_JOB_ID = "0"  # the placeholder id of a submission whose acceptance is unresolved
+_CLUSTER_STATE = "cluster"  # under the handle root: the cluster's operation records
 _LOG = logging.getLogger(__name__)
 
 
@@ -283,7 +294,14 @@ class _DurableSlurmEvaluation(BaseModel):
 
     handle: SlurmBatchHandle | None
     request: EvaluationRequest
+    # The deadlines of the job's current scheduler attempt (``slurm_deadlines``):
+    # ``wait_deadline_epoch_s`` bounds its queue wait (None: unbounded),
+    # ``run_deadline_epoch_s`` its run from when it was first seen running.
+    # ``deadline_attempt`` is None until the deadlines were first saved; a record
+    # from before the split has only ``wait_deadline_epoch_s``, read as attempt 0.
     wait_deadline_epoch_s: float | None = None
+    run_deadline_epoch_s: float | None = None
+    deadline_attempt: int | None = None
     # Legacy records always contained an accepted handle. Missing dispatch
     # evidence is conservative: never authorize a replay from its absence.
     dispatch_started: bool = True
@@ -314,6 +332,15 @@ class _DurableSlurmEvaluation(BaseModel):
         return self
 
 
+def evaluation_job_ids(handle_root: Path) -> frozenset[str]:
+    """The scheduler job ids of the evaluations an executor over ``handle_root`` submitted.
+
+    Reads the records the executor's own cluster keeps, so it never names another run's
+    job; it only reads them, so it is safe beside a running executor.
+    """
+    return recorded_job_ids(handle_root / _CLUSTER_STATE)
+
+
 class SlurmEvaluationExecutor:
     """Run ordered stages in one recoverable Slurm allocation."""
 
@@ -333,6 +360,7 @@ class SlurmEvaluationExecutor:
         clock: Clock,
         sleeper: Sleeper,
         cancel_confirmation_seconds: float = _DEFAULT_CANCEL_CONFIRMATION_SECONDS,
+        stage_output: SlurmStageOutputOpener | None = None,
     ) -> None:
         """Bind scheduler policy, durable intent, and the cluster interface.
 
@@ -340,15 +368,19 @@ class SlurmEvaluationExecutor:
         persisted, so a production clock is :class:`vs_sim.api.SystemClock`.
         ``sleeper`` paces the polls of a running job and of a cancel's confirmation. The
         executor uses ``cluster``, or reaches the configured cluster by starting ``processes``.
+        ``stage_output`` opens one stream per stage, which the stage's output reaches while
+        the job runs, read at each scheduler poll (``StageOutputFollower``); without it the
+        output reaches only the collected result.
         """
         if cluster is None:
             if processes is None:
                 message = "a Slurm executor needs a cluster or the processes that reach one"
                 raise ValueError(message)
             cluster = make_cluster(
-                config, state_root=handle_root / "cluster", processes=processes, clock=clock
+                config, state_root=handle_root / _CLUSTER_STATE, processes=processes, clock=clock
             )
         self._cluster = cluster
+        self._stage_output = stage_output
         self._sleeper = sleeper
         self._poll_interval = config.poll_interval_seconds
         # Confirmation is bounded by an inspection count so that it follows the
@@ -358,6 +390,10 @@ class SlurmEvaluationExecutor:
         )
         self._clock = clock
         self._job_timeout_seconds = config.job_timeout_seconds
+        self._queue_timeout_seconds = config.queue_timeout_seconds
+        self._deadline_limits = DeadlineLimits(
+            queue_seconds=config.queue_timeout_seconds, run_seconds=config.job_timeout_seconds
+        )
         self._workspace = workspace
         self._setup_script = setup_script
         self._service = service
@@ -815,21 +851,38 @@ class SlurmEvaluationExecutor:
         handle = self._handles.get(handle_id) or (durable.handle if durable is not None else None)
         if handle is None:
             raise _SlurmExecutionError.not_accepted()
-        status = await self._wait_for_batch(handle_id, handle, request, durable)
-        if status is SlurmJobStatus.CANCELLED:
-            # A cancelled job ends CANCELED however its allocation exit code reads,
-            # as poll() reports it. Collecting would let a recorded "0:0" exit
-            # contradict the scheduler and turn a requested stop into a failure.
-            self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
-            return
-        collection = asyncio.create_task(self._in_thread(self._cluster.collect, handle))
+        follower = self._follower(handle_id, handle, request)
         try:
-            collected = await asyncio.shield(collection)
-        except asyncio.CancelledError:
-            with contextlib.suppress(Exception):
-                await collection
+            status = await self._wait_for_batch(handle_id, handle, request, durable, follower)
+            if status is SlurmJobStatus.CANCELLED:
+                # A cancelled job ends CANCELED however its allocation exit code reads,
+                # as poll() reports it. Collecting would let a recorded "0:0" exit
+                # contradict the scheduler and turn a requested stop into a failure.
+                follower.abort()
+                self._publish(handle_id, ExecutorObservation(state=EvaluationState.CANCELED))
+                return
+            collection = asyncio.create_task(self._in_thread(self._cluster.collect, handle))
+            try:
+                collected = await asyncio.shield(collection)
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await collection
+                raise
+        except BaseException:
+            follower.abort()
             raise
+        follower.settle(_collected_stages(request, collected))
         self._publish(handle_id, self._collected_observation(handle_id, request, handle, collected))
+
+    def _follower(
+        self, handle_id: str, handle: SlurmBatchHandle, request: EvaluationRequest
+    ) -> StageOutputFollower:
+        return StageOutputFollower(
+            self._stage_output,
+            handle_id,
+            tuple(step.name for step in request.stages),
+            functools.partial(self._cluster.stage_output, handle),
+        )
 
     @staticmethod
     def _collected_observation(
@@ -933,34 +986,80 @@ class SlurmEvaluationExecutor:
         handle: SlurmBatchHandle,
         request: EvaluationRequest,
         durable: _DurableSlurmEvaluation | None,
+        follower: StageOutputFollower,
     ) -> SlurmJobStatus:
-        """Persist and enforce the scheduler observation deadline; return the terminal status."""
-        wait_deadline_epoch_s = durable.wait_deadline_epoch_s if durable is not None else None
-        if wait_deadline_epoch_s is None:
-            remaining = self._job_timeout_seconds - handle.waited_seconds
-            wait_deadline_epoch_s = self._clock.now() + remaining
-            self._write_evaluation(
-                handle_id,
-                handle,
-                request,
-                wait_deadline_epoch_s=wait_deadline_epoch_s,
+        """Persist and enforce the queue and run deadlines; return the terminal status.
+
+        Queue wait and run time are bounded separately (``slurm_deadlines``): a job
+        that starts late still gets its whole run budget. Each poll that finds a
+        stage running also copies its new output (``follower``).
+        """
+        deadlines = None if durable is None else _deadlines_of(durable)
+        if deadlines is None:
+            deadlines = first_deadlines(
+                now=self._clock.now(),
+                queued_seconds=handle.waited_seconds,
+                limits=self._deadline_limits,
             )
-        else:
-            remaining = wait_deadline_epoch_s - self._clock.now()
-        if remaining <= 0:
-            raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
+            self._save_deadlines(handle_id, handle, request, deadlines)
         while True:
+            self._check_deadline(deadlines)
             observed = await self._inspect_cancellation_safe(handle_id, handle)
             if isinstance(observed, ClusterObservation):
                 if observed.status.terminal:
                     return observed.status
+                folded = observe_deadlines(
+                    deadlines,
+                    attempt=observed.attempt,
+                    running=observed.status is SlurmJobStatus.RUNNING,
+                    now=self._clock.now(),
+                    limits=self._deadline_limits,
+                )
+                if folded != deadlines:
+                    deadlines = folded
+                    self._save_deadlines(handle_id, handle, request, deadlines)
                 active = self._lifecycle_observation(handle_id, observed, request)
                 if active is not None:
                     self._publish(handle_id, active)
-            remaining = wait_deadline_epoch_s - self._clock.now()
-            if remaining <= 0:
-                raise _SlurmExecutionError.deadline_exceeded(self._job_timeout_seconds)
-            await self._sleeper.sleep(min(self._poll_interval, remaining))
+                    await self._follow(follower, request, active)
+            self._check_deadline(deadlines)
+            until = deadlines.active_epoch_s
+            pause = self._poll_interval
+            if until is not None:
+                pause = min(pause, until - self._clock.now())
+            await self._sleeper.sleep(pause)
+
+    def _check_deadline(self, deadlines: WaitDeadlines) -> None:
+        until = deadlines.active_epoch_s
+        if until is None or until - self._clock.now() > 0:
+            return
+        if deadlines.phase is DeadlinePhase.RUN:
+            raise _SlurmExecutionError.run_deadline_exceeded(self._job_timeout_seconds)
+        raise _SlurmExecutionError.queue_deadline_exceeded(self._queue_timeout_seconds or 0)
+
+    def _save_deadlines(
+        self,
+        handle_id: str,
+        handle: SlurmBatchHandle,
+        request: EvaluationRequest,
+        deadlines: WaitDeadlines,
+    ) -> None:
+        """Persist the deadlines before acting on them, so a restart enforces the same ones."""
+        self._write_evaluation(handle_id, handle, request, deadlines=deadlines)
+
+    async def _follow(
+        self,
+        follower: StageOutputFollower,
+        request: EvaluationRequest,
+        active: ExecutorObservation,
+    ) -> None:
+        """Copy the running stage's new output; the read finishes before a cancel lands."""
+        if active.state is not EvaluationState.RUNNING or active.current_stage is None:
+            return
+        names = [step.name for step in request.stages]
+        running = names.index(active.current_stage)
+        follower.open_through(running)
+        await self._finish_in_thread(follower.follow, running)
 
     def _scheduler_view(
         self, handle_id: str, observed: ClusterObservation
@@ -1282,7 +1381,7 @@ class SlurmEvaluationExecutor:
         handle: SlurmBatchHandle | None,
         request: EvaluationRequest,
         *,
-        wait_deadline_epoch_s: float | None = None,
+        deadlines: WaitDeadlines | None = None,
         dispatch_started: bool = True,
     ) -> None:
         path = self._handle_root / f"{handle_id}.json"
@@ -1290,7 +1389,9 @@ class SlurmEvaluationExecutor:
             _DurableSlurmEvaluation(
                 handle=handle,
                 request=request,
-                wait_deadline_epoch_s=wait_deadline_epoch_s,
+                wait_deadline_epoch_s=None if deadlines is None else deadlines.queue_epoch_s,
+                run_deadline_epoch_s=None if deadlines is None else deadlines.run_epoch_s,
+                deadline_attempt=None if deadlines is None else deadlines.attempt,
                 dispatch_started=dispatch_started,
             ).model_dump_json()
             + "\n"
@@ -1319,10 +1420,41 @@ class _SlurmStagePayloadError(ValueError):
         return cls(f"Slurm stage {name!r} requires a nonempty configured command")
 
 
+def _deadlines_of(record: _DurableSlurmEvaluation) -> WaitDeadlines | None:
+    """The saved deadlines, or None when the record has never saved any."""
+    if record.deadline_attempt is None and record.wait_deadline_epoch_s is None:
+        return None
+    return WaitDeadlines(
+        attempt=record.deadline_attempt or 0,
+        queue_epoch_s=record.wait_deadline_epoch_s,
+        run_epoch_s=record.run_deadline_epoch_s,
+    )
+
+
 def _stage_command(name: str, command: str | None) -> tuple[str, ...]:
     if command is None or not command.strip():
         raise _SlurmStagePayloadError.missing_command(name)
     return ("bash", "-c", command)
+
+
+def _collected_stages(
+    request: EvaluationRequest, collected: ClusterCollectOutcome
+) -> dict[int, CollectedStage]:
+    """Each collected stage's whole output, by its index in the request."""
+    if not isinstance(collected, (ClusterCollected, ClusterUnknown)) or not isinstance(
+        collected.result, SlurmBatchResult
+    ):
+        return {}
+    by_name = {item.name: item for item in collected.result.stages}
+    return {
+        index: CollectedStage(
+            stdout=item.stdout.encode(),
+            stderr=item.stderr.encode(),
+            ran=not item.skipped and item.exit_code is not None,
+        )
+        for index, step in enumerate(request.stages)
+        if (item := by_name.get(step.name)) is not None
+    }
 
 
 def _collected_batch(collected: ClusterCollectOutcome, job_id: str) -> SlurmBatchResult:
@@ -1383,6 +1515,16 @@ class _SlurmExecutionError(RuntimeError):
     @classmethod
     def missing_durable_evaluation(cls, handle_id: str) -> _SlurmExecutionError:
         return cls(f"Slurm evaluation {handle_id!r} lost its durable lifecycle record")
+
+    @classmethod
+    def run_deadline_exceeded(cls, timeout_seconds: int) -> _SlurmExecutionError:
+        return cls(f"Slurm evaluation ran past its {timeout_seconds}-second run deadline")
+
+    @classmethod
+    def queue_deadline_exceeded(cls, timeout_seconds: int) -> _SlurmExecutionError:
+        return cls(
+            f"Slurm evaluation waited in the queue past its {timeout_seconds}-second queue deadline"
+        )
 
     @classmethod
     def deadline_exceeded(cls, timeout_seconds: int) -> _SlurmExecutionError:

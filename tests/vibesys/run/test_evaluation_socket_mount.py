@@ -45,9 +45,15 @@ def _containers_that_reach_the_socket(root: Path, candidates: int) -> list[bool]
     engine = FakeDockerEngine(root / "engine", launcher=FakePipedProcessLauncher())
 
     def backend_factory(
-        _name: object, *, log_dir: Path, log: object = None, image: str | None = None, clock: object
+        _name: object,
+        *,
+        log_dir: Path,
+        log: object = None,
+        image: str | None = None,
+        clock: object,
+        events: object | None = None,
     ) -> _DaemonBackend:
-        del clock  # the fake backend records no timestamps
+        del clock, events  # the fake backend records no timestamps and has no device to watch
         made = _DaemonBackend(
             log_dir,
             log=log,  # ty: ignore[invalid-argument-type]

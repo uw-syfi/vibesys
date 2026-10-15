@@ -141,11 +141,17 @@ const FEATURE_STYLESHEET = {'./styles.css': 'dom'};
 /**
  * The packages that own effects and run control-state machines outside a feature
  * (docs/contributing/clients-architecture.md, "State"): the machine glue and its test kit, and the
- * desktop connection manager (its host connection machine), and the live run session (its session
- * machine). Folds (`store`, `run-state`), models (`hosts`, `runs`), primitives
- * (`ui`), and the wire packages (`contracts`, `transport`, `ipc`) never import XState.
+ * desktop connection manager (its host connection machine), the live run session (its session
+ * machine), and the log follower (one machine per stream on screen). Folds (`store`,
+ * `run-state`), models (`hosts`, `runs`), primitives (`ui`), and the wire packages (`contracts`,
+ * `transport`, `ipc`) never import XState.
  */
-export const MACHINE_PACKAGES = ['@vibesys/machine', '@vibesys/connection', '@vibesys/run-session'];
+export const MACHINE_PACKAGES = [
+  '@vibesys/machine',
+  '@vibesys/connection',
+  '@vibesys/run-session',
+  '@vibesys/logs',
+];
 const ALL_RUNTIMES = Object.keys(RUNTIMES);
 
 /**

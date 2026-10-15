@@ -732,7 +732,7 @@ def test_a_test_whose_product_code_swallows_a_refused_process_start_still_fails(
         """
         from pathlib import Path
 
-        from vs_sim.api import ProcessSpec
+        from vs_sim.api import DISCARD, ProcessSpec
         from vs_sim.api.testing import NO_PROCESSES, FakePipedProcessLauncher
 
         def best_effort_cleanup(run):
@@ -744,7 +744,7 @@ def test_a_test_whose_product_code_swallows_a_refused_process_start_still_fails(
 
         def test_swallowed_run_refusal():
             spec = ProcessSpec(argv=("docker", "rm", "x"))
-            assert best_effort_cleanup(lambda: NO_PROCESSES.run(spec, timeout=None)) == "cleanup skipped"
+            assert best_effort_cleanup(lambda: NO_PROCESSES.run(spec, timeout=None, output=DISCARD)) == "cleanup skipped"
 
         def test_swallowed_piped_refusal():
             launcher = FakePipedProcessLauncher()

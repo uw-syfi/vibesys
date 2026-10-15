@@ -15,6 +15,7 @@ import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
@@ -34,8 +35,10 @@ from vs_runtime.api.core import (
     StoreWorkspaceReceipts,
 )
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
+from vs_sim.api import WorkerStartRefusedError
 from vs_sim.api.testing import (
     HANG_GUARD_S,
+    RefusingThreads,
     SimBlockingRunner,
     SimNetwork,
     SimThreads,
@@ -46,10 +49,10 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    import pytest
+    from collections.abc import Callable
 
     from vs_runtime.api.infrastructure import RuntimeWorkspaces
-    from vs_sim.api import Connection
+    from vs_sim.api import Connection, Threads
 
 ADDRESS = "evaluation.sock"
 REPLY = TypeAdapter(SocketSuccess | SocketFailure)
@@ -59,7 +62,12 @@ _LARGEST_FRAME = 1 << 16
 """The bridge's line bound; only a frame past it may go unanswered."""
 
 
-def _bridge(root: Path, network: SimNetwork, threads: SimThreads) -> AgentEvaluationBridge:
+def _bridge(
+    root: Path,
+    network: SimNetwork,
+    threads: Threads,
+    diagnostics: Callable[[str], None] | None = None,
+) -> AgentEvaluationBridge:
     namespace = Project.open(root).state.state_store_namespace("transport")
     policy = AgentEvaluationPolicy(
         evaluator_digest=DIGEST,
@@ -81,6 +89,7 @@ def _bridge(root: Path, network: SimNetwork, threads: SimThreads) -> AgentEvalua
         AgentEvaluationRecords(
             OwedSubmissions(ReceiptStore(namespace, threads=SimThreads())), SynthesizedEvidence()
         ),
+        diagnostics=diagnostics or (lambda _message: None),
         network=network,
         threads=threads,
     )
@@ -105,6 +114,65 @@ def _call(network: SimNetwork, frame: bytes) -> bytes:
         return _reply_line(connection)
     finally:
         connection.close()
+
+
+def test_a_refused_call_worker_drops_only_that_connection(tmp_path: Path) -> None:
+    """One transient worker-start refusal does not kill the bridge's accept loop."""
+    clock = VirtualClock()
+    simulator = SimThreads(clock)
+    threads = RefusingThreads(simulator, {"agent-evaluation-call": 1})
+    network = SimNetwork(simulator)
+    diagnostics: list[str] = []
+    bridge = _bridge(tmp_path, network, threads, diagnostics.append)
+    runner = SimBlockingRunner(simulator)
+
+    def open_call() -> Connection:
+        connection = network.connect(ADDRESS, HANG_GUARD_S)
+        connection.send(_FOREIGN_CALL + b"\n", HANG_GUARD_S)
+        return connection
+
+    def finish_call(connection: Connection) -> bytes:
+        try:
+            return _reply_line(connection)
+        finally:
+            connection.close()
+
+    async def main() -> tuple[bytes, bytes]:
+        await bridge.serve()
+        try:
+            first = await runner.run(open_call)
+            refused = await runner.run(finish_call, first)
+            served = await runner.run(_call, network, _FOREIGN_CALL + b"\n")
+            return refused, served
+        finally:
+            await bridge.close()
+
+    refused, served = simulator.run(lambda: simulator.run_async(main()))
+
+    assert refused == b""
+    assert isinstance(REPLY.validate_json(served), SocketFailure)
+    assert any("call worker did not start" in line for line in diagnostics)
+
+
+def test_a_refused_accept_worker_releases_the_listener_address(tmp_path: Path) -> None:
+    """A bridge that cannot start its acceptor leaves no partially owned listener behind."""
+    clock = VirtualClock()
+    simulator = SimThreads(clock)
+    network = SimNetwork(simulator)
+    bridge = _bridge(
+        tmp_path,
+        network,
+        RefusingThreads(simulator, {"agent-evaluation-bridge": 1}),
+    )
+
+    async def main() -> None:
+        with pytest.raises(WorkerStartRefusedError, match="agent-evaluation-bridge"):
+            await bridge.serve()
+        replacement = network.listen(ADDRESS)
+        replacement.close()
+        await bridge.close()
+
+    simulator.run(lambda: simulator.run_async(main()))
 
 
 @settings(deadline=None, max_examples=examples(pr=8, nightly=300))

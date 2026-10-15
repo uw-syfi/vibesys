@@ -184,30 +184,27 @@ a close (a slept laptop, a killed tab) leaves the server with no FIN to read. Th
   it. That case is handled by the send-side write deadline below, and by the optional client
   heartbeat (`WP-HEARTBEAT`).
 
-The bounds are stated, not inherited. The `src/server/transport/websocket.py:WebSocketLimits` dataclass
-names every one of them and `src/server/transport/websocket.py:WebSocketGateway._serve_until_stopped`
-passes them all to `serve()`, so a `websockets` upgrade cannot move a bound a subscriber depends on.
-Three of them compose into the liveness ceiling:
+The bounds are stated, not inherited. The `src/server/transport/websocket.py:WebSocketLimits`
+dataclass names every one of them. The gateway owns the keepalive schedule and deadlines; its
+`src/server/transport/websocket.py:WebSocketGateway._serve_until_stopped` disables the dependency's
+automatic keepalive and passes the remaining library bounds explicitly to `serve()`, so a
+`websockets` upgrade cannot move a bound a subscriber depends on. Three gateway-owned bounds
+compose into the keepalive ceiling:
 
 | Bound | Value | Role |
 | --- | --- | --- |
 | `ping_interval_seconds` | 20s | Idle period before the server probes the peer |
+| `write_deadline_seconds` | 40s | Maximum time for the Ping write to pass flow control |
 | `ping_timeout_seconds` | 20s | How long a pong may be outstanding before the peer fails |
-| `close_timeout_seconds` | 10s | How long the server waits for the peer to echo its close frame |
+| `close_timeout_seconds` | 10s | Library bound for an ordinary closing handshake after handler teardown |
 
-A peer that stops answering is sent a close frame after 40s, and its socket is aborted at 50s when
-that close is never echoed. Only the abort moves the connection to `CLOSED`, which is what the
-stream loop polls for, so the subscription is released about 50.1s after the peer went silent (one
-`_DISCONNECT_POLL_SECONDS`), and a non-detached run may then finish after
-`RECONNECT_SETTLE_SECONDS`. Those are nominal bounds derived from the three values in the table, not
-three independently measured constants. A peer that sends a FIN without a close frame needs none of
-this and is released in 0.15s (measured).
-
-That chain is not unconditional. `websockets` writes its own keepalive ping through the same
-transport and outside the gateway's `_send`, so no write deadline covers it, and it can only go out
-while the transport is below its low-water mark. It always is in practice, because a `_send` that
-returns has drained below the mark and one that does not has aborted the transport, but the bound
-above is a consequence of the send-side deadline holding rather than independent of it.
+A peer that stops answering is aborted after at most 80s: 20s before the probe, at most 40s for its
+Ping write, then at most 20s for the Pong. When the Ping write drains promptly, the nominal bound is
+40s. The abort moves the connection to `CLOSED`, which is what the stream loop polls for, so the
+subscription is released one `_DISCONNECT_POLL_SECONDS` later and a non-detached run may then finish
+after `RECONNECT_SETTLE_SECONDS`. A peer that sends a FIN needs none of this. The separate close
+timeout still governs graceful handler teardown; the keepalive deadline aborts directly because a
+close frame is another write and cannot safely be the escape hatch for a blocked Ping write.
 
 Flow control has two separate bounds in opposite directions, and conflating them is the easy
 mistake. `max_queue`, `(32, 8)`, bounds frames arriving *from* the peer. `write_limit`, 32 KiB, is
@@ -222,14 +219,14 @@ reading the journal, so the next `subscription_checkpoint` coalesces the whole b
 `event_batch` instead of one frame per event. Slow consumers get fewer, larger batches rather than
 lost events.
 
-The stall is bounded. A single frame may stall for `write_deadline_seconds`, one full keepalive
-reaping window (40s) by default; past that the peer is treated as gone and its socket is aborted.
-That bound is not optional decoration. `websockets` ends *every* write in `drain()`, including its
-own keepalive ping and close frames, so a peer that neither drains its socket nor answers pings
-blocks the very keepalive that was supposed to reap it. Without the deadline such a peer was never
-reaped at all, its subscription was never released, and a non-detached run never exited: measured,
-still counted as active after 90s. The socket is aborted rather than closed because a close frame is
-itself a write and would re-enter the same stalled `drain()`.
+The stall is bounded. A single frame may stall for `write_deadline_seconds`, the nominal keepalive
+response window (40s) by default; past that the peer is treated as gone and its socket is aborted.
+That bound is not optional decoration. `websockets` ends *every* write in `drain()`. The gateway
+therefore applies the same deadline to application frames, its owned Ping, and its final close. A
+peer that neither drains its socket nor answers pings cannot block the very keepalive that reaps it.
+Without the Ping-write deadline such a peer was never reaped at all, its subscription was never
+released, and a non-detached run never exited. The socket is aborted rather than closed on deadline
+because a close frame is itself a write and would re-enter the same stalled `drain()`.
 
 The Unix path has no equivalent deadline: its blocking write stalls the handler thread
 indefinitely, which is pre-existing behavior this contract records rather than changes. Its
@@ -342,6 +339,7 @@ scenarios through a real helper's run channel to hold it to that.
 | 8 | `client_stalled` | A write toward stdout made no progress within the write deadline. |
 | 9 | `server_failed` | A socket read or write failed with an error other than a close. |
 | 10 | `client_failed` | A stdin read or stdout write failed with an error other than a close. |
+| 11 | `server_unresponsive` | The socket sent nothing within the read deadline: the server is wedged. |
 
 Status 1 stays an uncaught error and 2 a usage error. So a client can tell "the run is gone" (4)
 from "the transport is broken" (5, 6, and the stalls) from "the server ended this connection" (3)
@@ -361,14 +359,28 @@ socket read reaches end of stream, after relaying that frame.
 | --- | --- | --- |
 | `write_deadline_seconds` | 40s | How long one write toward either the server or stdout may make no progress |
 | `connect_timeout_seconds` | 5s | How long connecting to the socket may take |
+| `read_deadline_seconds` | 7d | How long the socket may send nothing before the relay ends |
 
 The write deadline is the hop's answer to the Unix path having none. A half-open ssh hop (a slept
 laptop, a partition) stops draining the channel; once ssh's window and the pipe fill, the relay's
 stdout write stops progressing, and after 40s the relay closes the socket and exits with
 `client_stalled`. The server then sees an ordinary client FIN, so a dead remote client pins server
 resources for no longer than the WebSocket gateway's `write_deadline_seconds`, which has the same
-value. A hop that is idle (no frame to write) is reaped by ssh's own liveness instead: when sshd
-closes the channel the relay reads end of stream on stdin.
+value. The client-facing hop is idle-reaped by ssh's own liveness instead: when sshd closes the
+channel the relay reads end of stream on stdin.
+
+The server-facing hop (the Unix socket) has no such liveness: `AF_UNIX` has no keepalive, so a
+wedged server that neither sends nor closes would hang the relay forever without its own bound. The
+read deadline is that bound, checked only against the socket's read (not stdin's, which ssh already
+reaps): after `read_deadline_seconds` of nothing read from the socket, the relay exits with
+`server_unresponsive`. A provider capacity pause can leave the socket legitimately silent for
+*unbounded* time: `[agent.quota]`'s shipped default policy (`pause`) waits for the operator with no
+bound at all, and the self-resuming policies wait without a bound too unless `wait_seconds` is set
+(`vibesys.config.QuotaCfg`). No finite deadline is "longer than every legitimate wait" the way the
+write deadline is, so this one instead draws the line at a week: long enough that an operator who
+left a run paused past it is unlikely to still be waiting on this particular connection, short
+enough to eventually recover a genuinely wedged server. Tearing down a relay that outlives it only
+ends one viewer's connection, not the run itself.
 
 ## The conformance corpus
 

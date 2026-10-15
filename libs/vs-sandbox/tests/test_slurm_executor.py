@@ -972,14 +972,15 @@ async def test_recovered_evaluation_never_reports_starting_after_running(tmp_pat
     assert (await _terminal(resumed, "eval-monotonic")).state is EvaluationState.SUCCEEDED
 
 
-@pytest.mark.parametrize("state", [SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING])
 @pytest.mark.asyncio
-async def test_executor_enforces_one_persisted_wait_deadline(
-    tmp_path: Path, state: SlurmJobStatus
-) -> None:
-    """A job still queued or running at its deadline, on the injected clock, is cancelled and fails."""
-    config = _config().model_copy(update={"job_timeout_seconds": 10})
-    runner = _TimedOutCluster(config, already_waited=4.0, state=state)
+async def test_executor_enforces_one_persisted_queue_deadline(tmp_path: Path) -> None:
+    """A job still queued at its queue deadline, on the injected clock, is cancelled and fails.
+
+    The run deadline, which counts from the job's start, is covered in
+    ``test_slurm_executor_deadlines.py``.
+    """
+    config = _config().model_copy(update={"job_timeout_seconds": 10, "queue_timeout_seconds": 10})
+    runner = _TimedOutCluster(config, already_waited=4.0, state=SlurmJobStatus.PENDING)
     handle_root = tmp_path / "handles"
     executor = SlurmEvaluationExecutor(
         config,
@@ -997,8 +998,9 @@ async def test_executor_enforces_one_persisted_wait_deadline(
     observed = await _terminal(executor, "eval-timeout")
 
     assert observed.state is EvaluationState.FAILED
-    assert (
-        observed.failure == "_SlurmExecutionError: Slurm evaluation exceeded its 10-second deadline"
+    assert observed.failure == (
+        "_SlurmExecutionError: Slurm evaluation waited in the queue past its "
+        "10-second queue deadline"
     )
     assert runner.wait_timeouts == [6.0]
     assert runner.cancellations == 1
@@ -1025,7 +1027,8 @@ async def test_executor_enforces_one_persisted_wait_deadline(
 async def test_executor_recovers_deadline_persisted_before_interrupted_wait(
     tmp_path: Path,
 ) -> None:
-    config = _config().model_copy(update={"job_timeout_seconds": 10})
+    # The queue deadline is saved before the first scheduler reading, which the crash interrupts.
+    config = _config().model_copy(update={"job_timeout_seconds": 10, "queue_timeout_seconds": 10})
     runner = _BlockingCluster(config)
     clock = ManualClock(1_000)
     handle_root = tmp_path / "handles"

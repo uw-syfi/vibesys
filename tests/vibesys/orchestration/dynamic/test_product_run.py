@@ -15,6 +15,7 @@ from collections import Counter
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from tests.support.dynamic_script import REGISTRY
 from tests.vibesys.dynamic_world import DynamicWorld
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
@@ -23,7 +24,7 @@ from tests.vibesys.orchestration.dynamic._replies import (
     reviewed,
 )
 
-from vibesys.orchestration.dynamic.search.api import OPERATIONS, RenderRoleArtifacts
+from vibesys.orchestration.dynamic.search.api import RenderRoleArtifacts
 from vs_core.api import DispatchTurn, ExecuteRegisteredOperation, ResumeSessionTurn
 from vs_core.testing.liveness import Journal, spin_violations
 from vs_dst.api import simulate
@@ -77,7 +78,7 @@ def test_a_clean_run_ends_live_and_asks_each_turn_a_rendered_prompt_within_the_d
     assert result.selection is not None
     assert result.selection.kind == "retained_candidate"
 
-    registry = OPERATIONS.registry()
+    registry = REGISTRY
     records = run.core.records.records
     renders = {
         f"prompt:{record.request.operation_id.root}"

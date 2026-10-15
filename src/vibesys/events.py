@@ -63,6 +63,18 @@ class CoreEventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
+    WORKSTREAM_FINISHED = "workstream_finished"
+    TURN_USAGE_RECORDED = "turn_usage_recorded"
+
+    # No TURN_RETRY_WAITING member: a retry wait has no correlating identity to
+    # carry yet. `_Ask._lost` (`vs_core.flows._agents`) appends a bare
+    # `WakeAt(time=...)` (`vs_core.types.strategy.WakeAt`, one field, no
+    # decision id) to the run's timer list, and `_search_run.py` collapses
+    # every task's wait into one undifferentiated list before core ever sees
+    # it. Publishing this event needs an additive `WakeAt.decision_id` (or
+    # equivalent) in vs_core first, which is a core-library change out of
+    # scope here, not a `vibesys.run` wiring change like the rest of this
+    # table.
 
     # Run-control transitions (see `vs_runtime.api.infrastructure.RunControlChannel`):
     # request-time events (`*_REQUESTED`, `STEER_QUEUED`, `RESUMED`) come from
@@ -431,12 +443,33 @@ class SubprocessOutputData(EventPayload):
 
 
 class JudgeResultData(EventPayload):
-    """Verdict and feedback returned by the judge."""
+    """Verdict and feedback returned by the judge.
+
+    ``skipped``/``skip_reason`` cover a round that never reached review
+    (``RoundFinishedData.judge_verdict == "skipped"`` is the existing
+    round-level fact this mirrors at the judge layer). ``implementer_outcome``
+    is the implementer's own self-assessed status shown in the judge's place
+    when review was skipped, using ``HypothesisOutcome``'s closed vocabulary
+    (``vibesys.hypothesis.history.HypothesisOutcome``) since that is the
+    existing record of it (``RoundRecord.outcome``).
+
+    No code in this tree constructs ``JUDGE_RESULT`` today (verified by a
+    repo-wide search): a judge verdict currently reaches the wire only as
+    ``RoundFinishedData.judge_verdict``. These three fields are additive and
+    safe to declare regardless, but, like ``RunConfiguredData``'s new fields
+    above, they carry no data until a producer exists; a separate,
+    pre-existing gap.
+    """
 
     kind: Literal["judge_result"] = "judge_result"
     verdict: Literal["pass", "fail"]
     feedback: str
     attempt: int
+    skipped: bool = False
+    skip_reason: str | None = None
+    implementer_outcome: (
+        Literal["continue", "supported", "nominated", "disproven", "implementation_failed"] | None
+    ) = None
 
 
 class BenchmarkResultData(EventPayload):
@@ -484,7 +517,9 @@ class GateFinishedData(EventPayload):
     ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
     ``unit`` keeps the historical fallback of the metric name when the
     contract declares no unit. ``output_tail`` carries the trailing command
-    output on failure.
+    output on failure. ``round_label`` groups the per-recipe local-validation
+    gates of one attempt back together, so a client folds them into a
+    pass-fraction itself rather than the backend aggregating one.
     """
 
     kind: Literal["gate_finished"] = "gate_finished"
@@ -497,6 +532,7 @@ class GateFinishedData(EventPayload):
     value: FiniteFloat | None = None
     unit: str | None = None
     output_tail: str | None = None
+    round_label: str | None = None
     source: FrameworkSource = FrameworkSource.GATES
     source_label: str | None = None
 
@@ -519,7 +555,23 @@ class WorkspaceSnapshotData(EventPayload):
 
 
 class RunConfiguredData(EventPayload):
-    """One per run: the resolved configuration a loop starts with."""
+    """One per run: the resolved configuration a loop starts with.
+
+    ``max_continuation_rounds`` and ``max_unmeasured_turns`` are Hypothesis-
+    and Workstream-granularity limits (``DynamicConfig.max_continuation_rounds``
+    and ``DynamicConfig.max_unmeasured_turns``); they are run-config facts set
+    once, so they live here rather than on the narrower event that interprets
+    them. ``None`` for a policy that declares no such limit. The specific
+    limit value in force when a limit actually triggers survives separately
+    as ``WorkstreamFailureData.limit`` on ``WorkstreamFinishedData``.
+
+    No code in this tree constructs ``RUN_CONFIGURED`` today (verified by a
+    repo-wide search): the emitter that `src/headless/framework_events.py`
+    already renders for was removed in a past refactor and never replaced.
+    These two fields are additive and safe to declare regardless, but they
+    will carry no data until a run-startup producer is restored; that is a
+    separate, pre-existing gap, not introduced here.
+    """
 
     kind: Literal["run_configured"] = "run_configured"
     run_log_path: str
@@ -530,6 +582,8 @@ class RunConfiguredData(EventPayload):
     search_policy: str | None = None
     benchmark_contract: bool = False
     pareto_objectives: str | None = None
+    max_continuation_rounds: int | None = None
+    max_unmeasured_turns: int | None = None
     source: FrameworkSource = FrameworkSource.LOOP
 
 
@@ -555,6 +609,86 @@ class WinnerSelectedData(EventPayload):
     selection: Literal["candidate", "baseline"]
     revision: str
     settlement_id: str | None = None
+
+
+class WorkstreamFailureKind(StrEnum):
+    """Why a workstream ended without a measured candidate. Closed.
+
+    Mirrors ``dynamic.search.api.FailureKind`` member-for-member: a frozen
+    wire vocabulary core's own enum can't silently rename underneath.
+    """
+
+    STOPPED = "stopped"
+    PARENT_UNVERIFIED = "parent-unverified"
+    REFUSED = "refused"
+    ENDED = "ended"
+    OUT_OF_BUDGET = "out-of-budget"
+    TURN_FAILED = "turn-failed"
+    INVALID_REPLY = "invalid-reply"
+    RENDER_FAILED = "render-failed"
+    WAIT_REFUSED = "wait-refused"
+    CHECKPOINT_DECLINED = "checkpoint-declined"
+    NO_CHANGED_CANDIDATE = "no-changed-candidate"
+    IMPLEMENTATION_FAILED = "implementation-failed"
+    REVIEW_REJECTED = "review-rejected"
+    NO_TRUSTED_EVIDENCE = "no-trusted-evidence"
+    EVIDENCE_REFUSED = "evidence-refused"
+    EVIDENCE_UNDECODABLE = "evidence-undecodable"
+    PROFILE_CAPTURE_UNAVAILABLE = "profile-capture-unavailable"
+    TURN_LIMIT = "turn-limit"
+    REPEATED_TURN = "repeated-turn"
+
+
+class WorkstreamFailureData(BaseModel):
+    """One workstream's typed account of why it ended without a measured candidate."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: WorkstreamFailureKind
+    role: str | None = None
+    turns: int | None = None
+    limit: int | None = None
+    text: str = ""
+
+
+class WorkstreamFinishedData(EventPayload):
+    """One workstream (one dynamic-run round) ended; its typed failure, if any.
+
+    ``setup_failure`` and ``refunded`` are both always ``False`` from this
+    event's only current producer: a workstream whose workspace never opened
+    (``WorkstreamDone.not_opened``, refunded to the planner) never produces
+    the ``RoundRecord`` this event reads from
+    (``RunRecord.finished``/``_hypotheses.with_round`` only keep a round once
+    its workspace has a settlement, which ``not_opened`` never has), so the
+    only workstreams this event is ever emitted for already cleared setup.
+    Both fields are declared for a future producer that also covers setup
+    failures (none exists yet, since a refunded workstream's slot is tallied
+    only as an aggregate run-level count today, not a per-attempt fact).
+    """
+
+    kind: Literal["workstream_finished"] = "workstream_finished"
+    setup_failure: bool
+    refunded: bool
+    repeated_error: bool
+    last_error: WorkstreamFailureData | None = None
+
+
+class TurnUsageData(EventPayload):
+    """Settled token and cost accounting for one finished agent turn.
+
+    Field names and nullability mirror ``vs_agent.contracts.AgentUsage``
+    exactly. Kept separate from ``UsageUpdateData``/``USAGE_UPDATE``: that one
+    is a live, overwritten in-flight snapshot (progress), this one is the
+    settled per-turn accounting (a durable record), emitted once per turn.
+    """
+
+    kind: Literal["turn_usage_recorded"] = "turn_usage_recorded"
+    input_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_cost_usd: float | None = None
+    duration_ms: int | None = None
 
 
 CoreEventData = Annotated[
@@ -588,7 +722,9 @@ CoreEventData = Annotated[
     | WorkspaceSnapshotData
     | RunConfiguredData
     | FrameworkWarningData
-    | WinnerSelectedData,
+    | WinnerSelectedData
+    | WorkstreamFinishedData
+    | TurnUsageData,
     Field(discriminator="kind"),
 ]
 

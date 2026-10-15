@@ -26,6 +26,7 @@ from vs_project.api import PrivateDirectoryError, ensure_private_directory
 from vs_sandbox.api import EnvironmentBindMount
 
 _SOCKET_NAME = "evaluation.sock"
+_QUEUE_STATUS_SOCKET_NAME = "queue-status.sock"
 
 
 class EvaluationSocketDirectoryError(PermissionError):
@@ -71,6 +72,15 @@ def prepare_evaluation_socket(project_root: Path, run_id: str, *, owner: int | N
     return directory / _SOCKET_NAME
 
 
+def prepare_queue_status_socket(project_root: Path, run_id: str) -> Path:
+    """Create the private directory as ``prepare_evaluation_socket`` does; the queue socket.
+
+    The run's read-only queue status service listens beside the evaluation service, so
+    the one mounted directory reaches both from every agent container.
+    """
+    return prepare_evaluation_socket(project_root, run_id).with_name(_QUEUE_STATUS_SOCKET_NAME)
+
+
 def evaluation_socket_mount(
     project_root: Path, run_id: str, *, owner: int | None = None
 ) -> EnvironmentBindMount:
@@ -94,5 +104,6 @@ __all__ = [
     "evaluation_socket_mount",
     "evaluation_socket_path",
     "prepare_evaluation_socket",
+    "prepare_queue_status_socket",
     "remove_evaluation_socket",
 ]
