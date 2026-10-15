@@ -400,3 +400,10 @@ class EvaluationLedger(Protocol):
     def list_keys(self) -> tuple[str, ...]:
         """Every request key the project's ledger holds."""
         ...
+
+    def operator_file_sha256(self, path: str) -> str | None:
+        """The SHA-256 of a file on the cluster's filesystem (a setup script), None if absent.
+
+        A job reads such a file at run time, so its content is part of the key.
+        """
+        ...

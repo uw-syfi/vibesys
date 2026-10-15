@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -43,12 +44,19 @@ class _Case:
     ledger: EvaluationLedger
     reopen: Callable[[], EvaluationLedger]
     plant: Callable[[str, int, str], None]
+    put_file: Callable[[str, bytes], str]
 
 
 def _make(implementation: str, root: Path) -> _Case:
     if implementation == "fake":
         fake = FakeEvaluationLedger(project=PROJECT)
-        return _Case(fake, fake.reopen, fake.store_raw)
+
+        def put_fake(name: str, content: bytes) -> str:
+            path = f"/site/{name}"
+            fake.put_operator_file(path, content)
+            return path
+
+        return _Case(fake, fake.reopen, fake.store_raw, put_fake)
     remote = root / "remote"
     remote.mkdir()
     config = SlurmConfig(
@@ -70,7 +78,13 @@ def _make(implementation: str, root: Path) -> _Case:
         directory.mkdir(parents=True, exist_ok=True)
         (directory / f"attempt-{attempt}.json").write_text(document, encoding="utf-8")
 
-    return _Case(open_ledger(), open_ledger, plant)
+    def put_file(name: str, content: bytes) -> str:
+        path = root / "site" / name
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(content)
+        return path.as_posix()
+
+    return _Case(open_ledger(), open_ledger, plant, put_file)
 
 
 IMPLEMENTATIONS = ("fake", "remote")
@@ -201,3 +215,15 @@ def test_a_record_this_build_cannot_read_is_an_error_not_an_absence(
 def test_a_key_that_is_not_a_digest_is_refused(case: _Case, name: str) -> None:
     with pytest.raises(LedgerError):
         case.ledger.read(name)
+
+
+@given(content=st.binary(max_size=64))
+@settings(max_examples=examples(pr=5, nightly=50), deadline=None)
+def test_an_operator_file_digest_is_its_content_hash_and_absence_is_none(content: bytes) -> None:
+    for implementation in IMPLEMENTATIONS:
+        with TemporaryDirectory() as directory:
+            case = _make(implementation, Path(directory))
+            path = case.put_file("setup.sh", content)
+            assert case.reopen().operator_file_sha256(path) == hashlib.sha256(content).hexdigest()
+            missing = path.replace("setup.sh", "missing.sh")
+            assert case.reopen().operator_file_sha256(missing) is None

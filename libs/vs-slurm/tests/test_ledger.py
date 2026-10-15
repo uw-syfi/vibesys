@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -66,6 +68,10 @@ def _request(workspace: Path, command: str = "true") -> SlurmBatchRequest:
     )
 
 
+def _key(project: str, request: SlurmBatchRequest, config: SlurmConfig) -> str:
+    return evaluation_key(project, request, config, setup_script_sha256=None)
+
+
 def _write_tree(root: Path, files: dict[str, str]) -> None:
     root.mkdir(parents=True, exist_ok=True)
     for name, content in files.items():
@@ -87,15 +93,62 @@ def test_the_key_follows_content_and_spec_and_never_the_workspace_path(
         first, second = Path(directory) / "run-1" / "wt", Path(directory) / "run-2" / "other"
         _write_tree(first, files)
         _write_tree(second, files)
-        key = evaluation_key(PROJECT, _request(first, command), CONFIG)
-        assert key == evaluation_key(PROJECT, _request(second, command), CONFIG)
-        assert key != evaluation_key("other-project", _request(first, command), CONFIG)
-        assert key != evaluation_key(PROJECT, _request(first, command + " --x"), CONFIG)
+        key = _key(PROJECT, _request(first, command), CONFIG)
+        assert key == _key(PROJECT, _request(second, command), CONFIG)
+        assert key != _key("other-project", _request(first, command), CONFIG)
+        assert key != _key(PROJECT, _request(first, command + " --x"), CONFIG)
         (second / "a.py").write_text("changed content", encoding="utf-8")
         if files.get("a.py") != "changed content":
-            assert key != evaluation_key(PROJECT, _request(second, command), CONFIG)
+            assert key != _key(PROJECT, _request(second, command), CONFIG)
         resized = CONFIG.model_copy(update={"sbatch_arguments": ("--gpus=2",)})
-        assert key != evaluation_key(PROJECT, _request(first, command), resized)
+        assert key != _key(PROJECT, _request(first, command), resized)
+
+
+@given(
+    files=_FILES,
+    modes=st.lists(st.sampled_from((0o600, 0o644, 0o664, 0o640)), min_size=2, max_size=2),
+    executable=st.booleans(),
+)
+@settings(max_examples=examples(pr=10, nightly=100), deadline=None)
+def test_the_key_sees_the_executable_bit_and_no_other_mode_bit(
+    files: dict[str, str], modes: list[int], *, executable: bool
+) -> None:
+    """A checkout under another umask asks for the same key; making a file executable does not."""
+    with TemporaryDirectory() as directory:
+        first, second = Path(directory) / "a", Path(directory) / "b"
+        _write_tree(first, files)
+        _write_tree(second, files)
+        name = sorted(files)[0]
+        exec_bits = 0o111 if executable else 0
+        (first / name).chmod(modes[0] | exec_bits)
+        (second / name).chmod(modes[1] | exec_bits)
+        key = _key(PROJECT, _request(first), CONFIG)
+        assert key == _key(PROJECT, _request(second), CONFIG)
+        (second / name).chmod(modes[1] | (0 if executable else 0o100))
+        assert key != _key(PROJECT, _request(second), CONFIG)
+
+
+@given(
+    script=st.sampled_from(("/opt/site/setup.sh", "/home/op/env.sh")),
+    contents=st.lists(st.binary(max_size=16), min_size=2, max_size=2),
+)
+@settings(max_examples=examples(pr=10, nightly=100), deadline=None)
+def test_the_key_follows_the_setup_script_content_the_job_sources(
+    script: str, contents: list[bytes]
+) -> None:
+    """The job sources the setup script at run time, so an edited script is another request."""
+    with TemporaryDirectory() as directory:
+        workspace = Path(directory) / "wt"
+        _write_tree(workspace, {"a.py": "x"})
+        request = dataclasses.replace(_request(workspace), setup_script=script)
+        digests = [hashlib.sha256(content).hexdigest() for content in contents]
+        keys = [
+            evaluation_key(PROJECT, request, CONFIG, setup_script_sha256=digest)
+            for digest in (*digests, None)
+        ]
+        assert (keys[0] == keys[1]) == (contents[0] == contents[1])
+        assert keys[2] not in keys[:2]  # a missing script is not any script
+        assert _key(PROJECT, _request(workspace), CONFIG) not in keys
 
 
 def _record(
@@ -211,7 +264,7 @@ class _World:
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         request = _request(workspace)
-        self.key = evaluation_key(PROJECT, request, CONFIG)
+        self.key = evaluation_key(PROJECT, request, CONFIG, setup_script_sha256=None)
         operation = ledger_operation_id(self.key, 0)
         self.cluster.script(operation, states=(status,))
         submitted = self.cluster.submit(request, operation_id=operation)

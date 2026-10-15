@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -33,6 +34,7 @@ if TYPE_CHECKING:
 
 _LEDGER_DIRECTORY = "ledger"
 _END = "VS-LEDGER-END"
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 class RemoteEvaluationLedger:
@@ -123,6 +125,24 @@ class RemoteEvaluationLedger:
         """Drop this holder's lease, so only the others' and the grace period keep the job."""
         path = self._key_directory(key) / "leases" / f"{validate_holder(holder)}.json"
         self._exec(f"rm -f {shlex.quote(path.as_posix())}")
+
+    def operator_file_sha256(self, path: str) -> str | None:
+        """The SHA-256 of a file on the cluster's filesystem, or None when there is no such file."""
+        quoted = shlex.quote(PurePosixPath(path).as_posix())
+        lines = self._exec(
+            f"if test -f {quoted}; then sha256sum < {quoted}; else printf '%s\\n' ABSENT; fi; "
+            f"printf '%s\\n' {_END}"
+        ).splitlines()
+        match lines:
+            case ["ABSENT", end] if end == _END:
+                return None
+            case [reply, end] if end == _END:
+                digest = reply.split(" ", 1)[0]
+            case _:
+                raise LedgerError.malformed_reply("sha256sum")
+        if _SHA256.fullmatch(digest) is None:
+            raise LedgerError.malformed_reply("sha256sum")
+        return digest
 
     def list_keys(self) -> tuple[str, ...]:
         """Every request the project's ledger holds."""

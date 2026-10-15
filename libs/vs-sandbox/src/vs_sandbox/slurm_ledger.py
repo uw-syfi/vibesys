@@ -126,8 +126,14 @@ class SlurmLedgerAttachment:
         validate_holder(self.holder)
 
     def key(self, request: SlurmBatchRequest) -> str:
-        """The request's idempotency key."""
-        return evaluation_key(self.project, request, self.config)
+        """The request's idempotency key, over the setup script's content on the cluster too."""
+        setup = request.setup_script
+        return evaluation_key(
+            self.project,
+            request,
+            self.config,
+            setup_script_sha256=None if setup is None else self.ledger.operator_file_sha256(setup),
+        )
 
     def attach(
         self,

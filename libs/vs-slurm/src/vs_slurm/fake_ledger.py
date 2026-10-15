@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from threading import RLock
 
 from .ledger import (
@@ -26,6 +27,8 @@ class _Store:
         # (project, key) -> attempt -> encoded record; (project, key) -> holder -> encoded lease
         self.records: dict[tuple[str, str], dict[int, str]] = {}
         self.leases: dict[tuple[str, str], dict[str, str]] = {}
+        # The cluster's filesystem outside the ledger: absolute path -> bytes.
+        self.operator_files: dict[str, bytes] = {}
 
 
 class FakeEvaluationLedger:
@@ -103,6 +106,15 @@ class FakeEvaluationLedger:
         slot = (self._project, validate_key(key))
         with self._store.lock:
             self._store.leases.get(slot, {}).pop(validate_holder(holder), None)
+
+    def put_operator_file(self, path: str, content: bytes) -> None:
+        """Place a file on the cluster's filesystem, as an operator would (a setup script)."""
+        self._store.operator_files[path] = content
+
+    def operator_file_sha256(self, path: str) -> str | None:
+        """The SHA-256 of a file on the cluster's filesystem, or None when there is no such file."""
+        content = self._store.operator_files.get(path)
+        return None if content is None else hashlib.sha256(content).hexdigest()
 
     def list_keys(self) -> tuple[str, ...]:
         """Every request the project's ledger holds."""

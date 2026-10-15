@@ -129,16 +129,34 @@ def validate_holder(value: str) -> str:
     return value
 
 
-def evaluation_key(project: str, request: SlurmBatchRequest, config: SlurmConfig) -> str:
-    """The idempotency key: a hash of the project, the staged content and the evaluation spec.
+def evaluation_key(
+    project: str,
+    request: SlurmBatchRequest,
+    config: SlurmConfig,
+    *,
+    setup_script_sha256: str | None,
+) -> str:
+    """The idempotency key: a hash of the project, the content the job reads and its spec.
 
-    The staged content is the content identity of the candidate workspace and of
-    every support tree, the same identity staging uploads under. The spec is what
-    shapes the job: each stage's name, command, time limit and declared artifacts,
-    the stop policy, setup script and service, and the cluster settings that
-    choose where and how the job is submitted. Local paths are not part of it, so
-    a fresh relaunch, whose candidate worktree has a new path, asks for the same
-    key. The key names nothing a run owns.
+    What the key covers, so that two requests with one key run the same job:
+
+    - the project;
+    - the staged content: the candidate workspace (without ``.git``) and every
+      support tree, by relative path, file kind, executable bit and bytes;
+    - the setup script the job sources on the cluster: its path and the SHA-256
+      of its bytes when the key is computed (``setup_script_sha256``, read from
+      the cluster by the caller; None when the file is absent there);
+    - the spec: each stage's name, command, time limit and declared artifacts,
+      the stop policy, the service (command, readiness URL, startup bound), and
+      the cluster settings that choose where and how the job is submitted (name,
+      staging root, transport, sbatch command and arguments).
+
+    It does not cover files outside these that a command or the setup script
+    reads on the cluster by absolute path (site modules, datasets), nor the
+    environment ``sbatch`` passes to the job; an operator who changes those
+    must remove the affected entries (``vibesys evals remove``). Local paths
+    are not part of the key, so a fresh relaunch, whose candidate worktree has
+    a new path, asks for the same key. The key names nothing a run owns.
     """
     validate_project(project)
     stages = _validate_batch_request(request)
@@ -156,7 +174,11 @@ def evaluation_key(project: str, request: SlurmBatchRequest, config: SlurmConfig
             for stage in stages
         ],
         "stop_on_failure": request.stop_on_failure,
-        "setup_script": request.setup_script,
+        "setup_script": (
+            None
+            if request.setup_script is None
+            else {"path": request.setup_script, "sha256": setup_script_sha256}
+        ),
         "service": None if request.service is None else request.service.model_dump(mode="json"),
         "cluster": {
             "name": config.name,
@@ -175,17 +197,22 @@ def evaluation_key(project: str, request: SlurmBatchRequest, config: SlurmConfig
             for name, path in sorted((request.support_trees or {}).items())
         },
     }
-    document = {"key_format": 1, "project": project, "content": content, "spec": spec}
+    document = {"key_format": 2, "project": project, "content": content, "spec": spec}
     encoded = json.dumps(document, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
-def content_digest(root: Path, *, exclude: str | None = None) -> str:
-    """A digest of a tree's content: each entry's relative path, kind, mode, and bytes or target.
+_EXECUTABLE = stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
 
-    Unlike the staging cache identity, it ignores modification times, so a new
-    checkout of the same revision has the same digest. ``exclude`` names one
-    top-level entry to leave out (the candidate's ``.git``).
+
+def content_digest(root: Path, *, exclude: str | None = None) -> str:
+    """A digest of a tree's content: each entry's relative path, kind, and bytes or target.
+
+    Of a file's mode only the executable bit counts, so the same checkout under
+    another umask has the same digest. Unlike the staging cache identity, it
+    ignores modification times, so a new checkout of the same revision has the
+    same digest. File contents are streamed, never read whole. ``exclude`` names
+    one top-level entry to leave out (the candidate's ``.git``).
     """
     normalized = root.resolve(strict=True)
     digest = hashlib.sha256()
@@ -199,16 +226,19 @@ def content_digest(root: Path, *, exclude: str | None = None) -> str:
     )
     for path in entries:
         metadata = path.lstat()
+        executable = False
         if stat.S_ISLNK(metadata.st_mode):
-            kind, payload = "link", os.fsencode(path.readlink())
+            kind, payload = "link", hashlib.sha256(os.fsencode(path.readlink())).digest()
         elif stat.S_ISDIR(metadata.st_mode):
-            kind, payload = "dir", b""
+            kind, payload = "dir", hashlib.sha256(b"").digest()
         else:
-            kind, payload = "file", path.read_bytes()
-        header = json.dumps(
-            [path.relative_to(normalized).as_posix(), kind, stat.S_IMODE(metadata.st_mode)]
-        ).encode("utf-8", errors="surrogateescape")
-        for field in (header, hashlib.sha256(payload).digest()):
+            kind, executable = "file", bool(metadata.st_mode & _EXECUTABLE)
+            with path.open("rb") as stream:
+                payload = hashlib.file_digest(stream, "sha256").digest()
+        header = json.dumps([path.relative_to(normalized).as_posix(), kind, executable]).encode(
+            "utf-8", errors="surrogateescape"
+        )
+        for field in (header, payload):
             digest.update(len(field).to_bytes(8, "big"))
             digest.update(field)
     return digest.hexdigest()
