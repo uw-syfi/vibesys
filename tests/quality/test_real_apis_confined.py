@@ -52,8 +52,9 @@ bare string such as ``"python3"``, and ``eval``/``exec``.
 
 Product code is ``src/`` and ``libs/*/src``; ``libs/vs-sim`` is exempt as the owner of the
 real adapters. ``REAL_API_EDGES`` exempts a rule in one product file, with its reason: a
-separate program that runs where ``vs_sim`` cannot be imported, or a file that only names
-the interpreter's path. A module whose only logic is the call itself is listed there rather
+separate program that runs where ``vs_sim`` cannot be imported, a file that only names
+the interpreter's path, a syscall-only wrapper, a store's own fsync or flock in the module
+that owns the store, or a real system no ``vs_sim`` interface yet stands in for. A module whose only logic is the call itself is listed there rather
 than wrapped to clear the scan; a module with policy over the primitive (when to kill,
 escalate, reap or retry) moves onto ``vs_sim``. Existing uses are recorded with exact counts in
 ``real_api_baseline.jsonl``. The check fails when a count grows, when a new file appears,
@@ -790,6 +791,10 @@ def test_deterministic_tests_use_no_real_time_threads_processes_or_sockets(
 
 
 _SEPARATE_PROGRAM = "a separate program that runs where vs_sim cannot be imported"
+_OWN_STORE = (
+    "durable storage: fsync or flock on the files of the store this module owns, the "
+    "mechanism of the store itself"
+)
 
 # The product files that may use one real API, each with its reason. Keep one line per
 # (file, rule).
@@ -850,6 +855,36 @@ REAL_API_EDGES: dict[Key, str] = {
     ("src/entrypoints/web.py", "interpreter"): (
         "entrypoint: names the interpreter in the server command it starts"
     ),
+    **{
+        ("src/entrypoints/server.py", rule): (
+            "entrypoint: starts the detached web gateway in its own session with the log "
+            "descriptor inherited, then stops it by pid; no vs_sim launcher starts a detached "
+            "child or exposes a started child's pid"
+        )
+        for rule in ("process", "signal", "subprocess")
+    },
+    ("libs/vs-runtime/src/vs_runtime/_macos_cpu_profiler.py", "subprocess"): (
+        "starts the profiled command and hands its pid and its descendants' pids to macOS "
+        "`sample`; no vs_sim launcher exposes a started child's pid"
+    ),
+    ("src/server/transport/websocket.py", "socket_io"): (
+        "the browser transport: the websockets library's server owns the listening socket "
+        "and its event loop, which vs_sim's Network cannot stand in for"
+    ),
+    **{
+        (relative, "fs_sync"): f"{_OWN_STORE}: {what}"
+        for relative, what in (
+            ("libs/vs-project/src/vs_project/_state.py", "the project state lock file"),
+            ("libs/vs-project/src/vs_project/_state_io.py", "atomic state file replacement"),
+            ("libs/vs-project/src/vs_project/_state_store.py", "LocalStateStore's lock file"),
+            ("libs/vs-runtime/src/vs_runtime/_artifact_store.py", "artifact files and receipts"),
+            ("libs/vs-runtime/src/vs_runtime/_receipt_store.py", "the receipt namespace lock"),
+            ("libs/vs-runtime/src/vs_runtime/_slot_meter.py", "the lease ledger"),
+            ("libs/vs-evaluation/src/vs_evaluation/filesystem_store.py", "the lifecycle store"),
+            ("src/server/event_index.py", "the event journal's index"),
+            ("src/server/registry.py", "each live server's registry record lock"),
+        )
+    },
 }
 
 
