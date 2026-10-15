@@ -60,19 +60,25 @@ def test_a_deadline_cancels_only_a_registered_operations_resource(owner: str) ->
     assert blocked.phase == core.RequestPhase.BLOCKED
 
 
-def _command(kind: str, root: core.RequestRecord) -> core.Request:
-    common = {
-        "request_id": core.RequestId(root=f"{kind}-of-root"),
-        "scope": root.request.scope,
-        "target": root.request_id,
-    }
+def _command(kind: str, root: core.RequestRecord, request_id: core.RequestId) -> core.Request:
+    scope, target = root.request.scope, root.request_id
     match kind:
         case "inspect":
-            return core.InspectRequest(**common)
+            return core.InspectRequest(request_id=request_id, scope=scope, target=target)
         case "cancel":
-            return core.CancelOwnedResource(**common, resource_id=core.ResourceId(root="physical"))
+            return core.CancelOwnedResource(
+                request_id=request_id,
+                scope=scope,
+                target=target,
+                resource_id=core.ResourceId(root="physical"),
+            )
         case _:
-            return core.BlockRequest(**common, reason=core.FailureReason.TIMED_OUT)
+            return core.BlockRequest(
+                request_id=request_id,
+                scope=scope,
+                target=target,
+                reason=core.FailureReason.TIMED_OUT,
+            )
 
 
 @given(
@@ -94,13 +100,14 @@ def test_an_open_reconciliation_command_ends_at_its_limit_and_not_before(
     """An unanswered or inconclusively answered command is live until its limit, then blocked."""
     state, root = state_with_root()
     root = root.model_copy(update={"phase": core.RequestPhase.BLOCKED})
-    request = _command(kind, root)
+    request_id = core.RequestId(root=f"{kind}-of-root")
+    request = _command(kind, root, request_id)
     observation = (
         None
         if answer is None
         else core.Observation(
             event_id=core.EventId(root="command-answer"),
-            request_id=request.request_id,
+            request_id=request_id,
             scope=request.scope,
             sequence=1,
             observed_at=10.0,
@@ -156,14 +163,13 @@ def _closing_with(*commands: core.RequestRecord) -> tuple[core.CoreState, core.R
 def _sent(
     kind: str, target: core.RequestRecord, phase: core.RequestPhase, epoch: int
 ) -> core.RequestRecord:
-    request = _command(kind, target).model_copy(
-        update={"request_id": core.RequestId(root=f"{kind}-of-{target.request_id.root}")}
-    )
+    request_id = core.RequestId(root=f"{kind}-of-{target.request_id.root}")
+    request = _command(kind, target, request_id)
     return target.model_copy(
         update={
-            "request_id": request.request_id,
+            "request_id": request_id,
             "request": request,
-            "payload_digest": request.request_id.root,
+            "payload_digest": request_id.root,
             "phase": phase,
             "observation": None,
             "lifecycle": core.LifecycleClass.IDEMPOTENT_WRITE,

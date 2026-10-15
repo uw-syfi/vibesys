@@ -333,8 +333,9 @@ def test_a_blocked_record_is_carried_only_by_the_commands_it_names(*, named: boo
     observation = record.observation.model_copy(
         update={"accepted": True, "resource_id": core.ResourceId(root="job")}
     )
+    cancel_id = core.RequestId(root="cancel")
     cancel = core.CancelOwnedResource(
-        request_id=core.RequestId(root="cancel"),
+        request_id=cancel_id,
         scope=record.request.scope,
         admission_id=record.request.admission_id,
         resource_id=core.ResourceId(root="job"),
@@ -381,8 +382,9 @@ def test_a_cancellation_answered_unknown_does_not_hold_a_closing_run_open_for_go
     state = _silent(core.RequestPhase.BLOCKED, core.ObservationStatus.UNKNOWN, terminal=False)
     record = state.records.records[0]
     assert record.observation is not None
+    cancel_id = core.RequestId(root="cancel")
     cancel = core.CancelOwnedResource(
-        request_id=core.RequestId(root="cancel"),
+        request_id=cancel_id,
         scope=record.request.scope,
         admission_id=record.request.admission_id,
         resource_id=core.ResourceId(root="job"),
@@ -390,7 +392,7 @@ def test_a_cancellation_answered_unknown_does_not_hold_a_closing_run_open_for_go
     )
     answered = core.Observation(
         event_id=core.EventId(root="cancel-unknown"),
-        request_id=cancel.request_id,
+        request_id=cancel_id,
         scope=cancel.scope,
         sequence=1,
         observed_at=1.0,
