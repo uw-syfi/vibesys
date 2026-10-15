@@ -19,7 +19,7 @@ import itertools
 import os
 import shutil
 import stat
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
@@ -74,7 +74,7 @@ def relative_parts(relative: str) -> tuple[str, ...]:
     return path.parts
 
 
-type CopyIgnore = Callable[[str, list[str]], set[str]]
+type CopyIgnore = Callable[[str, list[str]], Collection[str]]
 """Like ``shutil.copytree``'s ``ignore``: a source directory and names, to the names to skip."""
 
 
@@ -208,6 +208,42 @@ class WorkspaceTree:
         parts = _file_parts(relative)
         with self._parent(parts, create=False) as parent:
             os.symlink(target, parts[-1], dir_fd=parent)
+
+    def names(self, relative: str) -> tuple[str, ...]:
+        """The entry names of the directory ``relative``, sorted."""
+        parts = relative_parts(relative)
+        with self._directory(parts, create=False) as directory, os.scandir(directory) as entries:
+            return tuple(sorted(entry.name for entry in entries))
+
+    def symlinks_below(self, relative: str) -> tuple[str, ...]:
+        """The symlinks at any depth below the directory ``relative``, sorted.
+
+        Each is named relative to the tree root; no symlink is followed.
+        """
+        pending = [relative_parts(relative)]
+        links: list[tuple[str, ...]] = []
+        while pending:
+            parts = pending.pop()
+            with self._directory(parts, create=False) as directory, os.scandir(directory) as it:
+                for entry in it:
+                    child = (*parts, entry.name)
+                    if entry.is_symlink():
+                        links.append(child)
+                    elif entry.is_dir(follow_symlinks=False):
+                        pending.append(child)
+        return tuple(PurePosixPath(*parts).as_posix() for parts in sorted(links))
+
+    def read_link(self, relative: str) -> str:
+        """The contents of the symlink ``relative``."""
+        parts = _file_parts(relative)
+        with self._parent(parts, create=False) as parent:
+            return os.readlink(parts[-1], dir_fd=parent)
+
+    def copy_file_in(self, source: Path, relative: str) -> None:
+        """Copy the host file ``source`` to the new file ``relative``, keeping its mode."""
+        parts = _file_parts(relative)
+        with self._parent(parts, create=False) as parent:
+            _copy_file(source, parent, parts[-1])
 
     def copy_in(self, source: Path, relative: str, *, ignore: CopyIgnore) -> CopiedTree:
         """Copy the host directory ``source`` to the new directory ``relative``.

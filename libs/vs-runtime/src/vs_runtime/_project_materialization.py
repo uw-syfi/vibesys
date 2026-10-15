@@ -17,12 +17,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from vs_project.api import atomic_write_bytes
+from vs_project.api.workspace_tree import EntryKind, open_workspace_tree
 from vs_runtime._input_project import materialize_input_project
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator, Sequence
 
     from vs_project.api import Git
+    from vs_project.api.workspace_tree import WorkspaceTree
     from vs_runtime._sdk_paths import SDKRoots
 
 
@@ -210,13 +212,14 @@ class ProjectMaterializer:
             return
         if not root.exists():
             return
-        for child in tuple(root.iterdir()):
-            try:
-                self._remove_path(child)
-            except PermissionError:
-                if not self._effects.remove_child(root, child.name):
-                    message = f"could not remove project child during rollback: {child}"
-                    raise OSError(message) from None
+        with open_workspace_tree(root) as tree:
+            for name in tree.names("."):
+                try:
+                    tree.remove(name)
+                except PermissionError:
+                    if not self._effects.remove_child(root, name):
+                        message = f"could not remove project child during rollback: {root / name}"
+                        raise OSError(message) from None
         root.rmdir()
 
     def materialize(
@@ -226,11 +229,10 @@ class ProjectMaterializer:
         existing: bool,
     ) -> None:
         """Execute an ordered materialization plan."""
-        if not existing:
-            for excluded in self.excluded_dirs:
-                d = self.root / excluded
-                if d.exists():
-                    shutil.rmtree(d)
+        if not existing and self.root.is_dir():
+            with open_workspace_tree(self.root) as tree:
+                for excluded in self.excluded_dirs:
+                    tree.remove(excluded)
 
         for step in plan:
             if isinstance(step, InputProjectMaterialization):
@@ -342,40 +344,40 @@ class ProjectMaterializer:
                 message = f"project cleanup path escapes project root: {path}"
                 raise ValueError(message)
             selected.append(candidate)
-        for path in sorted(selected, key=lambda item: len(item.parts), reverse=True):
-            self._remove_path(path)
+        with open_workspace_tree(root) as tree:
+            for path in sorted(selected, key=lambda item: len(item.parts), reverse=True):
+                tree.remove(path.relative_to(root).as_posix())
 
     # -- copy machinery -------------------------------------------------------
 
-    @staticmethod
-    def _remove_external_symlinks(root: Path) -> None:
-        """Remove symlinks pointing outside *root* (Docker bind mounts replace them)."""
-        resolved_root = root.resolve()
-        for path in list(root.rglob("*")):
-            if path.is_symlink():
-                target = path.resolve()
-                try:
-                    target.relative_to(resolved_root)
-                except ValueError:
-                    path.unlink()
+    def _relative(self, path: Path) -> str:
+        """``path`` relative to the project root, which every copy writes below."""
+        root = self.root.expanduser().absolute()
+        try:
+            return path.expanduser().absolute().relative_to(root).as_posix()
+        except ValueError:
+            message = f"copy destination escapes the project root: {path}"
+            raise ValueError(message) from None
 
-    @staticmethod
-    def _replace_external_symlinks(root: Path) -> None:
-        """Replace symlinks pointing outside *root* with `<name>.symlink_target` files."""
-        resolved_root = root.resolve()
-        for path in list(root.rglob("*")):
-            if path.is_symlink():
-                target = path.resolve()
-                try:
-                    target.relative_to(resolved_root)
-                except ValueError:
-                    # Symlink points outside root — replace it
-                    marker = path.parent / f"{path.name}.symlink_target"
-                    path.unlink()
-                    marker.write_text(str(target))
+    def _normalize_external_symlinks(self, tree: WorkspaceTree, dst: Path, dst_rel: str) -> None:
+        """Drop symlinks below ``dst`` that point outside it, leaving a marker on the host.
+
+        In an isolated environment external links become bind mounts (Docker) or volume
+        uploads (Modal), so the link is only removed; on the host it is replaced by a
+        ``<name>.symlink_target`` file naming the resolved target.
+        """
+        resolved_root = dst.resolve()
+        for link in tree.symlinks_below(dst_rel):
+            target = (self.root / link).resolve()
+            if target.is_relative_to(resolved_root):
+                continue
+            tree.remove(link)
+            if not self._effects.isolated:
+                tree.write_bytes(f"{link}.symlink_target", str(target).encode())
 
     def _prepare_copy_destination(
         self,
+        tree: WorkspaceTree,
         children: list[Path],
         dst: Path,
         skip: set[str],
@@ -383,47 +385,48 @@ class ProjectMaterializer:
         reject_collisions: bool,
     ) -> None:
         """Validate collisions or clear replaceable destination children."""
+        dst_rel = self._relative(dst)
         if reject_collisions:
             collisions = sorted(
-                child.name
-                for child in children
-                if (dst / child.name).exists() or (dst / child.name).is_symlink()
+                child.name for child in children if tree.kind(f"{dst_rel}/{child.name}") is not None
             )
             if collisions:
                 paths = ", ".join(collisions)
                 message = f"workspace source and input bundle contain the same paths: {paths}"
                 raise ValueError(message)
-        if not dst.exists() or reject_collisions:
+            return
+        kind = tree.kind(dst_rel)
+        if kind is None:
+            return
+        if kind is not EntryKind.DIRECTORY:
+            # A link or file where the destination directory goes is replaced, never
+            # followed.
+            tree.remove(dst_rel)
             return
         # Remove children individually so we can skip mount points and
         # tolerate permission errors (e.g. root-owned dirs left by Docker).
-        for child in list(dst.iterdir()):
-            if child.name in skip:
+        for name in tree.names(dst_rel):
+            if name in skip:
                 continue
             try:
-                if child.is_dir() and not child.is_symlink():
-                    shutil.rmtree(child)
-                else:
-                    child.unlink()
+                tree.remove(f"{dst_rel}/{name}")
             except PermissionError:
-                if not self._effects.remove_child(dst, child.name):
-                    self._log(f"[warn] copy_dir: could not remove {child.name} from {dst}")
+                if not self._effects.remove_child(dst, name):
+                    self._log(f"[warn] copy_dir: could not remove {name} from {dst}")
 
     def _copy_workspace_child(
         self,
+        tree: WorkspaceTree,
         child: Path,
         dst: Path,
         ignore: Callable[[str, list[str]], list[str]],
     ) -> None:
         """Replace one destination child with its source counterpart."""
-        child_dst = dst / child.name
-        if child_dst.exists() or child_dst.is_symlink():
+        child_rel = f"{self._relative(dst)}/{child.name}"
+        if tree.kind(child_rel) is not None:
             # Stale leftover — try once more to remove before copying.
             try:
-                if child_dst.is_dir() and not child_dst.is_symlink():
-                    shutil.rmtree(child_dst)
-                else:
-                    child_dst.unlink()
+                tree.remove(child_rel)
             except PermissionError:
                 self._log(
                     f"[warn] copy_dir: {child.name} in {dst} is stale and could not be replaced"
@@ -431,11 +434,13 @@ class ProjectMaterializer:
                 return
         try:
             if child.is_symlink():
-                child_dst.symlink_to(child.readlink())
+                tree.symlink(child_rel, str(child.readlink()))
             elif child.is_dir():
-                shutil.copytree(child, child_dst, symlinks=True, ignore=ignore)
+                copy = tree.copy_in(child, child_rel, ignore=ignore)
+                for link in copy.links:
+                    tree.symlink(f"{child_rel}/{link}", str((child / link).readlink()))
             else:
-                shutil.copy2(child, child_dst)
+                tree.copy_file_in(child, child_rel)
         except PermissionError:
             self._log(f"[warn] copy_dir: could not copy {child.name} to {dst}")
 
@@ -475,22 +480,19 @@ class ProjectMaterializer:
             child for child in src.iterdir() if child.name not in skip and not _is_ignored(child)
         ]
 
-        self._prepare_copy_destination(
-            children,
-            dst,
-            skip,
-            reject_collisions=reject_collisions,
-        )
-        dst.mkdir(parents=True, exist_ok=True)
-        for child in children:
-            self._copy_workspace_child(child, dst, _ignore)
-        if self._effects.isolated:
-            # In containerized mode, external symlinks become bind mounts
-            # (Docker) or volume uploads (Modal). Remove the broken symlinks
-            # so the mount point / volume path can host the resolved contents.
-            self._remove_external_symlinks(dst)
-        else:
-            self._replace_external_symlinks(dst)
+        self.root.mkdir(parents=True, exist_ok=True)
+        with open_workspace_tree(self.root) as tree:
+            self._prepare_copy_destination(
+                tree,
+                children,
+                dst,
+                skip,
+                reject_collisions=reject_collisions,
+            )
+            tree.make_directories(self._relative(dst))
+            for child in children:
+                self._copy_workspace_child(tree, child, dst, _ignore)
+            self._normalize_external_symlinks(tree, dst, self._relative(dst))
 
     def _source_gitignored_paths(self, src: Path) -> frozenset[tuple[str, ...]]:
         """Return untracked paths ignored by Git below ``src``."""
@@ -528,13 +530,6 @@ class ProjectMaterializer:
             message = f"git {' '.join(args)} failed: {detail}"
             raise RuntimeError(message)
         return result.stdout
-
-    @staticmethod
-    def _remove_path(path: Path) -> None:
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path)
-        elif path.exists() or path.is_symlink():
-            path.unlink()
 
 
 def copy_support_directories(project_root: Path, workspace: Path, names: Iterable[str]) -> None:
