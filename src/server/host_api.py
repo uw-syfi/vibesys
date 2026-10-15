@@ -23,9 +23,12 @@ Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
 ``TaskList``, the inspection documents, and the host helper's messages:
 ``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
-``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
-members, ``HelperMessage`` and its members, ``HelperErrorCode``, and a relayed
-channel's end: ``ChannelEndOutcome``, ``ChannelEnd``.
+``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
+``HelperRequest`` (``parse_helper_request``) and its members, ``HelperMessage``
+and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
+``HarnessChoice``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
+``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
+``ChannelEnd``.
 
 The helper's messages follow ``docs/contributing/desktop-connection.md``
 ("Handshake and versioning"): strict within a negotiated version, additive
@@ -603,6 +606,16 @@ class HelperFeature(StrEnum):
     """``paths.complete``: directory completion for a typed path on the host."""
     INSTANCES_INSPECT = "instances_inspect"
     """``instances.inspect``: retained metadata and an optional bounded log tail."""
+    HARNESSES = "harnesses"
+    """``harnesses.list`` and ``run.start``'s ``harness``: start a run on a vetted provider and model."""
+
+
+CLI_PROVIDER_FLAG: Final = "--cli-provider"
+"""The run option that names the agent CLI provider; ``run.start`` emits it for ``harness``."""
+MODEL_FLAG: Final = "--model"
+"""The run option that names the agent model; ``run.start`` emits it for ``harness``."""
+UNVETTED_MODEL_FLAG: Final = "--allow-unvetted-model"
+"""The terminal's opt-out from the vetted harness list; ``run.start`` refuses it in ``args``."""
 
 
 RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -692,8 +705,39 @@ class ResumeLatest(BaseModel):
     latest: Literal[True]
 
 
+class HarnessChoice(BaseModel):
+    """One agent CLI provider and one model it runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: str
+    model: str
+
+
+class HarnessOption(BaseModel):
+    """A vetted provider and model pair a run may start with."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider: str
+    model: str
+    default: bool
+    """The model a run on ``provider`` uses when nothing names one."""
+
+
+class HarnessesListRequest(_HelperRequest):
+    """The vetted provider and model pairs ``run.start``'s ``harness`` accepts."""
+
+    type: Literal["harnesses.list"] = "harnesses.list"
+
+
 class RunStartRequest(_HelperRequest):
-    """Start a detached run (``vibesys --detach``) in ``project``."""
+    """Start a detached run (``vibesys --detach``) in ``project``.
+
+    ``args`` never carry ``UNVETTED_MODEL_FLAG`` (or an abbreviation of it): a run
+    started through the helper uses only vetted harnesses. With ``harness``, they
+    carry neither ``CLI_PROVIDER_FLAG`` nor ``MODEL_FLAG``, so the pair has one source.
+    """
 
     type: Literal["run.start"] = "run.start"
     project: str
@@ -701,6 +745,9 @@ class RunStartRequest(_HelperRequest):
     args: tuple[str, ...] = ()
     """Further run options, one argument per item; never parsed by a shell."""
     resume: ResumeRun | ResumeLatest | None = None
+    harness: HarnessChoice | None = None
+    """A pair ``harnesses.list`` offered; ``None`` keeps the project's configuration.
+    Sent only after ``hello`` returned ``harnesses``."""
 
 
 class RunStopRequest(_HelperRequest):
@@ -747,8 +794,24 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
     InstancesUnwatchRequest: HelperFeature.INSTANCES_WATCH,
     PathsCompleteRequest: HelperFeature.PATHS_COMPLETE,
+    HarnessesListRequest: HelperFeature.HARNESSES,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
+
+HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFeature]]] = {
+    RunStartRequest: {"harness": HelperFeature.HARNESSES},
+}
+"""The feature each gated optional field needs when it is set (not ``None``), exported too."""
+
+
+def request_features(request: _HelperRequest) -> tuple[HelperFeature, ...]:
+    """The features ``hello`` must have returned for ``request``: its method's and its set fields'."""
+    method = HELPER_REQUEST_FEATURES.get(type(request))
+    features = [] if method is None else [method]
+    for name, feature in HELPER_FIELD_FEATURES.get(type(request), {}).items():
+        if getattr(request, name) is not None and feature not in features:
+            features.append(feature)
+    return tuple(features)
 
 
 HelperRequest = Annotated[
@@ -763,7 +826,8 @@ HelperRequest = Annotated[
     | RunStopRequest
     | RunConnectRequest
     | PingRequest
-    | PathsCompleteRequest,
+    | PathsCompleteRequest
+    | HarnessesListRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -945,6 +1009,13 @@ class PathsCompleteReply(_HelperReply):
     """More directories match than were returned, or the directory was too large to read whole."""
 
 
+class HarnessesListReply(_HelperReply):
+    """The vetted pairs, grouped by provider with each provider's default first."""
+
+    type: Literal["harnesses.list"] = "harnesses.list"
+    harnesses: tuple[HarnessOption, ...]
+
+
 class HelperErrorCode(StrEnum):
     """Why a request failed; a closed set."""
 
@@ -982,6 +1053,8 @@ class HelperErrorCode(StrEnum):
     """The run's socket exists but this user may not connect to it."""
     CONNECT_FAILED = "connect_failed"
     """Connecting to the run's socket failed another way."""
+    UNVETTED_HARNESS = "unvetted_harness"
+    """``run.start``'s ``harness`` is not one ``harnesses.list`` offers; only sent with ``harnesses``."""
     INTERNAL = "internal"
     """The helper failed; ``message`` says how."""
 
@@ -1016,6 +1089,7 @@ HelperReply = (
     | RunConnectReply
     | PingReply
     | PathsCompleteReply
+    | HarnessesListReply
 )
 """A request's result; its ``type`` is the request's."""
 

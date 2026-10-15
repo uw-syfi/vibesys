@@ -7,7 +7,8 @@
       "helper-handshake-required",
       "helper-incompatible",
       "helper-invalid-request",
-      "helper-feature-gated"
+      "helper-feature-gated",
+      "helper-harnesses"
     ],
     "registry": [
       "helper-instances-empty",

@@ -24,6 +24,9 @@ export type {
   Checkout,
   DetachedLaunchFailure,
   FailureReason,
+  HarnessChoice,
+  HarnessesListReply,
+  HarnessOption,
   HelloReply,
   HelperError,
   HelperErrorCode,
@@ -72,6 +75,32 @@ export function helperFeatureForRequest(type: string): HelperFeature | null {
   return Object.hasOwn(featureByRequest, type)
     ? (featureByRequest[type as Request['type']] ?? null)
     : null;
+}
+
+const featureByField = hostHelperSchema['x-vibesys-feature-by-field'] as Readonly<
+  Partial<Record<Request['type'], Readonly<Record<string, HelperFeature>>>>
+>;
+
+/** The generated feature gate for each gated optional field, by request type then field name. */
+export const HELPER_FEATURE_BY_FIELD = featureByField;
+
+/**
+ * Every feature `request` needs: its method's, and those of the gated optional fields it sets
+ * (present and not null). A sender sends it only when `hello` returned them all.
+ */
+export function helperFeaturesForRequest(request: {
+  readonly type: string;
+}): readonly HelperFeature[] {
+  const features = new Set<HelperFeature>();
+  const method = helperFeatureForRequest(request.type);
+  if (method !== null) features.add(method);
+  const fields = Object.hasOwn(featureByField, request.type)
+    ? featureByField[request.type as Request['type']]
+    : undefined;
+  for (const [name, feature] of Object.entries(fields ?? {})) {
+    if ((request as Readonly<Record<string, unknown>>)[name] != null) features.add(feature);
+  }
+  return [...features];
 }
 
 /** Maximum UTF-8 bytes in an available instance log tail, generated from Python's contract. */

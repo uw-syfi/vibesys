@@ -24,7 +24,7 @@ import {
   inspectionReply,
   validHostPath,
 } from '@vibesys/hosts';
-import type {PathCompletion, WelcomeInspection} from '@vibesys/ipc';
+import type {HarnessListing, PathCompletion, WelcomeInspection} from '@vibesys/ipc';
 import {
   rememberInstance,
   type SettingsStore,
@@ -214,6 +214,27 @@ export class Hosts {
       return reply.tasks.tasks.map(task => task.name);
     } catch (error) {
       throw plain(error, `Could not read the tasks of ${path}`);
+    }
+  }
+
+  /** The vetted provider and model pairs runs on `id` may start with; `unsupported` on an older helper. */
+  async harnesses(id: HostId): Promise<HarnessListing> {
+    await using lease = await this.connection(id);
+    try {
+      const reply = await lease.connection.request({type: 'harnesses.list'});
+      return {
+        kind: 'listed',
+        harnesses: reply.harnesses.map(({provider, model, default: isDefault}) => ({
+          provider,
+          model,
+          default: isDefault,
+        })),
+      };
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `Could not read the vetted models of ${hostLabel(id)}`);
     }
   }
 

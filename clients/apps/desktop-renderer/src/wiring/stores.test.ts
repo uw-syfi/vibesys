@@ -78,6 +78,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
   };
   signIn = (host: HostKey) => this.#ask(`sign-in ${host}`, null);
   tasks = (host: HostKey, project: string) => this.#ask(`tasks ${host} ${project}`, ['spsc']);
+  harnesses = (host: HostKey) => this.#ask(`harnesses ${host}`, {kind: 'unsupported' as const});
   complete = (host: HostKey, directory: string) =>
     this.#ask(`complete ${host} ${directory}`, {
       kind: 'listed' as const,

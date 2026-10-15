@@ -2,7 +2,7 @@
   "id": "helper-feature-gated",
   "protocol": "host-helper",
   "title": "A gated method needs its feature",
-  "description": "After a hello that negotiated no features, every feature-gated method is answered feature_not_negotiated.",
+  "description": "After a hello that negotiated no features, every feature-gated method, and run.start with a feature-gated field set, is answered feature_not_negotiated.",
   "role": "control",
   "transports": [
     "stdio"
@@ -96,6 +96,43 @@
       "expect": {
         "type": "error",
         "request_id": "c",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "harnesses.list",
+        "request_id": "l",
+        "deadline_ms": 10000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "l",
+        "code": "feature_not_negotiated"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "run.start",
+        "request_id": "s",
+        "deadline_ms": 10000,
+        "project": "/nonexistent/vibesys-conformance-project",
+        "harness": {
+          "provider": "codex",
+          "model": "gpt-5.5"
+        }
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "s",
         "code": "feature_not_negotiated"
       }
     }

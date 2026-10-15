@@ -14,9 +14,10 @@
  */
 import {
   type ChannelEndOutcome,
+  type HarnessOption,
   type HelperFeature,
   type HelperRequest,
-  helperFeatureForRequest,
+  helperFeaturesForRequest,
   type InstanceList,
   type LiveInstanceRecord,
   type PathEntry,
@@ -100,6 +101,39 @@ export interface FakeHost {
   readonly denied: Set<string>;
   /** Retained bounded diagnostic tails, by instance id. */
   readonly logs: Map<string, {readonly text: string; readonly truncated: boolean}>;
+  /** The vetted provider and model pairs (`harnesses.list`), each provider's default first. */
+  readonly harnesses: HarnessOption[];
+}
+
+/** The pairs a new `FakeHelper` offers: two providers, each default first. */
+export const FAKE_HARNESSES: readonly HarnessOption[] = [
+  {provider: 'codex', model: 'gpt-a', default: true},
+  {provider: 'codex', model: 'gpt-b', default: false},
+  {provider: 'claude', model: 'claude-a', default: true},
+];
+
+/**
+ * The run options `server.host_api` names (`UNVETTED_MODEL_FLAG`, `CLI_PROVIDER_FLAG`,
+ * `MODEL_FLAG`): the wire contract carries no constants, so this Fake repeats them.
+ */
+const UNVETTED_MODEL_FLAG = '--allow-unvetted-model';
+const HARNESS_FLAGS = ['--cli-provider', '--model'] as const;
+
+/** Whether argparse reads `token` (`--name` or `--name=value`) as `flag`, as the helper decides. */
+function abbreviates(token: string, flag: string): boolean {
+  const name = token.split('=', 1)[0] ?? '';
+  return name.startsWith('--') && name.length > 2 && flag.startsWith(name);
+}
+
+/** Why the helper refuses `start`'s arguments, or null when it accepts them. */
+function refusedArgument(start: Extract<HelperRequest, {type: 'run.start'}>): string | null {
+  const refused =
+    start.harness == null ? [UNVETTED_MODEL_FLAG] : [UNVETTED_MODEL_FLAG, ...HARNESS_FLAGS];
+  for (const token of start.args ?? []) {
+    const flag = refused.find(candidate => abbreviates(token, candidate));
+    if (flag !== undefined) return `${token} selects ${flag}`;
+  }
+  return null;
 }
 
 export function record(id: string, runId: string, project = '/p'): LiveInstanceRecord {
@@ -133,6 +167,7 @@ export class FakeHelper {
     runs: new Map(),
     denied: new Set(),
     logs: new Map(),
+    harnesses: [...FAKE_HARNESSES],
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
@@ -163,6 +198,7 @@ export class FakeHelper {
     'instances_watch',
     'paths_complete',
     'instances_inspect',
+    'harnesses',
   ]);
   readonly #pendingAnswers = new Map<HelperRequest['type'], PendingAnswer[]>();
   /** How many of them have exited. */
@@ -413,12 +449,10 @@ class HelperSession {
       this.#send(this.#error(request.request_id, 'handshake_required', 'hello first'));
       return;
     }
-    const required = helperFeatureForRequest(request.type);
-    if (
-      request.type !== 'hello' &&
-      required !== null &&
-      this.#features?.includes(required) !== true
-    ) {
+    const required = helperFeaturesForRequest(request).find(
+      feature => this.#features?.includes(feature) !== true,
+    );
+    if (request.type !== 'hello' && required !== undefined) {
       this.#send(this.#error(request.request_id, 'feature_not_negotiated', required));
       return;
     }
@@ -460,8 +494,17 @@ class HelperSession {
         return;
       case 'tasks.list':
       case 'runs.list':
-      case 'run.start':
         this.#project(request);
+        return;
+      case 'run.start':
+        this.#start(request);
+        return;
+      case 'harnesses.list':
+        this.#send({
+          type: 'harnesses.list',
+          request_id: id,
+          harnesses: [...this.#helper.host.harnesses],
+        });
         return;
       case 'run.stop':
         this.#stop(request);
@@ -565,6 +608,32 @@ class HelperSession {
         route: null,
       },
     });
+  }
+
+  /** `run.start`: its arguments and harness are checked before its project, as the helper does. */
+  #start(request: Extract<HelperRequest, {type: 'run.start'}>): void {
+    const id = request.request_id;
+    const refused = refusedArgument(request);
+    if (refused !== null) {
+      this.#send(this.#error(id, 'invalid_request', refused));
+      return;
+    }
+    const harness = request.harness;
+    if (harness != null) {
+      const offered = this.#helper.host.harnesses;
+      const vetted = offered.some(
+        option => option.provider === harness.provider && option.model === harness.model,
+      );
+      if (!vetted) {
+        const allowed = offered
+          .filter(option => option.provider === harness.provider)
+          .map(option => option.model);
+        const models = allowed.length === 0 ? 'none' : allowed.join(', ');
+        this.#send(this.#error(id, 'unvetted_harness', `vetted models: ${models}`));
+        return;
+      }
+    }
+    this.#project(request);
   }
 
   #project(
