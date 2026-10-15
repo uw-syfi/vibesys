@@ -262,15 +262,21 @@ async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires
         stack.executor, _RETRIES, InMemoryEvaluationNamespace(), tries=tries
     )
 
+    settled: asyncio.Future[None] | None = None
     try:
         await executor.submit(_request(stack.snapshot, "official", _STAGES), handle_id=_HANDLE)
-        await pacing.entered.wait()  # the task saw the job running and paused
+        # The execution task is the producer; it lives inside the executor, so follow it
+        # through the executor's settled state: if it ends without pausing, fail with that.
+        settled = asyncio.ensure_future(_execution_ended(executor))
+        await arrival(pacing.entered.wait(), settled)  # the task saw the job running, paused
         polled = await executor.poll(_HANDLE)  # the job has completed; the poll collects it
         assert polled.phase is PollPhase.ENDED
         pacing.release.open()
-        await _execution_ended(executor)
+        await settled
     finally:
         pacing.release.open()
+        if settled is not None:
+            settled.cancel()
         await executor.close()
 
     reader = reader_of(store, LOG_OWNER)
