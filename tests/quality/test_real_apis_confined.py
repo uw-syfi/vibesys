@@ -939,9 +939,6 @@ REAL_API_PENDING: dict[Key, Pending] = {
         Owner.LANE_A,
         "the fault connector runs the real command; a separate program, to classify",
     ),
-    ("libs/vs-faults/src/vs_faults/tools.py", "threading"): Pending(
-        1, Owner.LANE_A, "fault tool lock; takes Threads"
-    ),
     ("libs/vs-project/src/vs_project/_fake_git_state.py", "threading"): Pending(
         1, Owner.BAN_SWEEP, "FakeGitRepositories' disk lock; takes Threads from its callers"
     ),
