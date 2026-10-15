@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_sandbox.api import DockerCli
+from vs_sim.api import DISCARD
 
 _DOCKER_TIMEOUT_SECONDS = 60.0
 
@@ -95,7 +96,7 @@ def _run(
 ) -> subprocess.CompletedProcess[str]:
     """Run *argv*; a client that cannot finish, or (when *check*) a failure, is an error."""
     try:
-        result = docker.run(argv, timeout_seconds=_DOCKER_TIMEOUT_SECONDS)
+        result = docker.run(argv, timeout_seconds=_DOCKER_TIMEOUT_SECONDS, output=DISCARD)
     except (OSError, subprocess.TimeoutExpired) as exc:
         msg = f"could not {what}: {exc}"
         raise OrphanReapError(msg) from exc

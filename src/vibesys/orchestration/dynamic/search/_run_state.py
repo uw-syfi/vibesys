@@ -23,6 +23,7 @@ from vibesys.orchestration.dynamic.search._context import (
     offered_parents,
     remaining,
 )
+from vibesys.orchestration.dynamic.search._handoff import HandoffWritten
 from vibesys.orchestration.dynamic.search._ids import INPUT_KEY, planning_key, workstream_key
 from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamDone,
@@ -77,13 +78,15 @@ _DROPPED_SHOWN = 8
 
 @dataclass(frozen=True)
 class Scheduled:
-    """A planning call ended with a plan to schedule.
+    """A planning call ended with a plan to schedule, and the handoff file it left.
 
     ``blind`` says the plan answered a prompt asked before the input's measurement landed.
     """
 
     check: PlanCheck
     blind: bool = False
+    handoff: HandoffWritten | None = None
+    """The call's handoff file and every one the owner holds; None when its write failed."""
 
 
 @dataclass(frozen=True)
@@ -171,6 +174,7 @@ class RecordState(Value):
     gate_blocked_at_done: int | None
     gate_last_error: PlanProblem | None
     calls: int
+    handoffs: tuple[str, ...]
     kept: tuple[tuple[str, Kept], ...]
     outline: tuple[Step, ...] | None
     submitted: tuple[Submission, ...]
@@ -217,6 +221,8 @@ class RunRecord:
     gate: PlannerGate = field(default_factory=PlannerGate)
     calls: int = 0
     """Planning calls begun; the next call's key is numbered by it."""
+    handoffs: tuple[str, ...] = ()
+    """The paths of the planning calls' handoff files, oldest first, as the owner last listed them."""
     kept: dict[str, Kept] = field(default_factory=dict)
     """The candidates closed workspaces retained that were winner-eligible, by settlement."""
     outline: tuple[Step, ...] | None = None
@@ -261,6 +267,7 @@ class RunRecord:
             gate_blocked_at_done=self.gate.blocked_at_done,
             gate_last_error=self.gate.last_error,
             calls=self.calls,
+            handoffs=self.handoffs,
             kept=tuple(self.kept.items()),
             outline=self.outline,
             submitted=tuple(self.submitted.values()),
@@ -292,6 +299,7 @@ class RunRecord:
                 last_error=state.gate_last_error,
             ),
             calls=state.calls,
+            handoffs=state.handoffs,
             kept=dict(state.kept),
             submitted={item.key: item for item in state.submitted},
             input_overdue=state.input_overdue,
@@ -487,6 +495,7 @@ class RunRecord:
             finished=tuple(self.finished_work),
             refunded=self.refunded,
             offered=self.offered(),
+            handoffs=tuple(reversed(self.handoffs)),
             offer=ProfileOffer(
                 fields=tuple(ProfileField(item) for item in self.terms.profile_fields)
             )
@@ -557,12 +566,16 @@ class RunRecord:
         untrusted (see `measured`); planning is asked again.
         """
         match outcome:
-            case Scheduled(blind=True) if self._input_failed():
+            case Scheduled(blind=True, handoff=handoff) if self._input_failed():
+                if handoff is not None:
+                    self.handoffs = handoff.listed
                 self.gate.blocked_at_done = None
             case Outlined(steps=steps):
                 self.outline = steps
                 self.gate.last_error = None
-            case Scheduled(check=check):
+            case Scheduled(check=check, handoff=handoff):
+                if handoff is not None:
+                    self.handoffs = handoff.listed
                 for change in check.updates:
                     known = self.hypotheses[change.hypothesis_id]
                     self.hypotheses[change.hypothesis_id] = _hypotheses.with_disposition(

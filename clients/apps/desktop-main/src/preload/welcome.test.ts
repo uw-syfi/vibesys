@@ -70,6 +70,7 @@ function cases(random: Seeded): Case[] {
   const token = 1 + random.int(1_000_000);
   const words = random.pick(['', '--rounds 2', "--note 'two words'"]);
   const force = random.pick([true, false]);
+  const harness = random.pick([null, {provider: 'claude', model: 'claude-a'}]);
   const directory = path.endsWith('/') ? path : `${path}/`;
   return [
     [bridge => bridge.overview(), {kind: 'overview'}],
@@ -84,13 +85,19 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.signIn(key), {kind: 'sign-in', host}],
     [bridge => bridge.complete(key, directory), {kind: 'complete', host, directory}],
     [
-      bridge => bridge.inspect(key, instance, true, token),
-      {kind: 'inspect', host, instance, includeLog: true, inspection: token},
+      bridge => bridge.inspect(key, instance, token),
+      {kind: 'inspect', host, instance, inspection: token},
     ],
-    [bridge => bridge.tasks(key, path), {kind: 'tasks', host, project: path}],
     [
-      bridge => bridge.start(key, path, name, words, token),
-      {kind: 'start', host, project: path, task: name, args: words, start: token},
+      bridge => bridge.logs(key, instance, {kind: 'list'}),
+      {kind: 'logs', host, instance, request: {kind: 'list'}},
+    ],
+    [bridge => bridge.releaseLogs(), {kind: 'release-logs'}],
+    [bridge => bridge.tasks(key, path), {kind: 'tasks', host, project: path}],
+    [bridge => bridge.harnesses(key), {kind: 'harnesses', host}],
+    [
+      bridge => bridge.start(key, path, name, words, harness, token),
+      {kind: 'start', host, project: path, task: name, args: words, harness, start: token},
     ],
     [bridge => bridge.cancelStart(token), {kind: 'cancel-start', start: token}],
     [bridge => bridge.attach(key, instance), {kind: 'attach', host, instance}],

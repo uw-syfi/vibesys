@@ -75,6 +75,7 @@ class BuiltInSessionAgents:
             backend=resources.agent_backend,
             provider=launch.provider,
             model=launch.model,
+            allow_unvetted_model=resources.allow_unvetted_model,
         )
         with ExitStack() as pending_environment:
             opened = self.open_environment(

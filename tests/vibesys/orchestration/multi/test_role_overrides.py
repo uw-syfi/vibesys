@@ -16,11 +16,13 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from vibesys.api import vetted_models
 from vibesys.composition import resolve_agent_specs
 from vibesys.config import Config
 from vibesys.errors import ConfigurationError
 from vibesys.orchestration.multi.plugin import PLUGIN, PROFILE_GUIDED_PLUGIN
 from vibesys.orchestration.multi.search.api import multi
+from vs_agent.api import DEFAULT_CLI_PROVIDER
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -36,7 +38,7 @@ LEGACY_ROLES = ("orchestrator", "profiler", "implementer", "judge")
 
 
 def _config(roles: dict[str, dict[str, str]]) -> Config:
-    return Config.model_validate({"model": {"name": "base-model"}, "agent": {"roles": roles}})
+    return Config.model_validate({"model": {"name": "gpt-5.5"}, "agent": {"roles": roles}})
 
 
 @pytest.mark.parametrize("plugin", [PLUGIN, PROFILE_GUIDED_PLUGIN])
@@ -48,14 +50,14 @@ def test_each_preset_declares_the_prefixed_role_ids(plugin: OrchestrationPlugin)
 @given(
     overrides=st.dictionaries(
         st.sampled_from(MULTI_ROLES),
-        st.text(alphabet="abcdefghij-", min_size=1, max_size=12),
+        st.sampled_from(vetted_models(DEFAULT_CLI_PROVIDER)),
     )
 )
 def test_an_override_changes_only_the_role_it_names(overrides: dict[str, str]) -> None:
     config = _config({role: {"model": model} for role, model in overrides.items()})
     specs = resolve_agent_specs(config, PLUGIN.agents)
     assert {role: spec.model for role, spec in specs.items()} == {
-        role: overrides.get(role, "base-model") for role in MULTI_ROLES
+        role: overrides.get(role, "gpt-5.5") for role in MULTI_ROLES
     }
 
 

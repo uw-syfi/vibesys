@@ -17,6 +17,11 @@ export type RunSnapshot = ProtocolDocument['snapshot'];
 /** Run lifecycle statuses the backend reports. Source: `RunStatus` in `src/server/run_lifecycle.py`. */
 export type RunStatus = RunSnapshot['status'];
 export type ServerMessage = ProtocolDocument['server_message'];
+/** What a run's log stream is for. Source: `LogOwner` in `src/vibesys/log_owners.py`. */
+export type LogOwner = ProtocolDocument['log_owner'];
+/** One JSON line of a `run_narration` stream. Source: `NarrationLine` in `vs_logs`. */
+export type NarrationLine = ProtocolDocument['narration_line'];
+export type NarrationLevel = NarrationLine['level'];
 /** The complete authoritative list staged from active-execution checkpoint chunks. */
 export type ActiveExecutions = NonNullable<RunSnapshot['active_executions']>;
 /** The `event_batch` arm of `ServerMessage`: a run of events plus cursor metadata. */

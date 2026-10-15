@@ -371,7 +371,7 @@ def _request(root: Path, docker: SubprocessDockerCli) -> RunRequest:
     return RunRequest(
         project_root=root,
         orchestration=OrchestrationDescriptor(id=_PLUGIN_ID, config_version=1, options={}),
-        config=Config.model_validate({"model": {"name": _PLUGIN_ID}}),
+        config=Config.model_validate({"model": {"name": "claude-sonnet-5"}}),
         input_bundle=load_task(root),
         objective="Improve the queue.",
         exp_name=_PLUGIN_ID,

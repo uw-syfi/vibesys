@@ -19,6 +19,7 @@ from vs_sim.api import PipedProcess, PipedProcessLauncher, SubprocessPipedProces
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 pytestmark = pytest.mark.real_contract
 
@@ -64,6 +65,7 @@ def test_real_runner_drains_large_multiline_and_unterminated_streams_into_bounde
         (sys.executable, "-c", program),
         cwd=tmp_path,
         timeout=30,
+        output=DISCARD,
     )
 
     assert result.returncode == 23
@@ -102,4 +104,5 @@ def test_timeout_kills_descendant_that_inherits_both_output_pipes(tmp_path: Path
             (sys.executable, "-c", parent),
             cwd=tmp_path,
             timeout=0,
+            output=DISCARD,
         )

@@ -45,9 +45,10 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Sequence
 
     from vs_sandbox.api import CommandRunner, HostResource
+    from vs_sim.api import OutputSink
 
 _IMAGE_ID = "sha256:" + "c" * 64
 
@@ -70,9 +71,9 @@ class _RecordingBuildRunner:
         *,
         cwd: Path,
         timeout: float,
-        on_stderr_line: Callable[[str], None] | None = None,
+        output: OutputSink,
     ) -> subprocess.CompletedProcess[str]:
-        del cwd, timeout, on_stderr_line
+        del cwd, timeout, output
         self.argvs.append(tuple(argv))
         if argv[1] == "build":
             dockerfile = Path(argv[list(argv).index("--file") + 1]).read_text()

@@ -340,6 +340,36 @@ describe('relay', () => {
     ]);
   });
 
+  test('a truncated final host frame becomes a protocol fault before close', async () => {
+    const subscribed = JSON.stringify({
+      type: 'subscribed',
+      request_id: 'request-1',
+      client_id: 'client-1',
+      run_id: 'run-1',
+      latest_sequence: 0,
+    });
+    const {port, done} = await connected(connection =>
+      connection.end(`${subscribed}\n{"type":"event_batch"`),
+    );
+
+    await done;
+    expect(frames(port.posted).map(frame => JSON.parse(frame))).toEqual([
+      {
+        type: 'subscribed',
+        request_id: 'request-1',
+        client_id: 'client-1',
+        run_id: 'run-1',
+        latest_sequence: 0,
+      },
+      {
+        type: 'protocol_error',
+        code: 'invalid_frame',
+        message: 'Server stream ended with an incomplete newline-delimited frame',
+      },
+    ]);
+    expect(port.posted.at(-1)).toEqual({type: 'close'});
+  });
+
   test('a clean host EOF whose page credit never arrives ends the relay at a bounded deadline', async () => {
     const clock = new FakeClock();
     const {port, done} = await connected(

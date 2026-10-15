@@ -103,7 +103,7 @@ _BUNDLE = Path(__file__).parent / "dynamic_smoke" / "bundle"
 _PROVIDERS = {
     "claude": (
         "claude",
-        '[model]\nname = "claude-haiku-4-5-20251001"\n[agent]\ncli_provider = "claude"\n',
+        '[model]\nname = "claude-haiku-4-5"\n[agent]\ncli_provider = "claude"\n',
     ),
     "codex": (
         "codex",
@@ -482,6 +482,17 @@ _PLAN = {
             "pass_criteria": "Accuracy passes and throughput improves.",
         }
     ],
+    "handoff": {
+        "expectations": [
+            {
+                "work_id": "raise-value",
+                "expected": "Throughput rises with VALUE.",
+                "if_it_succeeds": "Raise it further.",
+                "if_it_fails": "Look elsewhere.",
+            }
+        ],
+        "doubts": [],
+    },
 }
 _IMPLEMENTED = {
     "summary": "Raised VALUE.",
@@ -776,8 +787,7 @@ def test_core_path_runs_the_fake_slurm_search(
     """
     loop_input = _executing_cluster_input(tmp_path)
     (tmp_path / "agent.toml").write_text(
-        '[model]\nname = "scripted"\n[evaluation]\n'
-        "observe_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n",
+        "[evaluation]\nobserve_interval_seconds = 1\nobserve_backoff_cap_seconds = 1\n",
         encoding="utf-8",
     )
     request = build_run_request(

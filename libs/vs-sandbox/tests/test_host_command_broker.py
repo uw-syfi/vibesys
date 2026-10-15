@@ -36,13 +36,13 @@ from vs_sandbox.api.slurm import (
 
 # test-isolation: the client is a single-file CLI that is intentionally absent from the library API.
 from vs_sandbox.host_command_client import Stop, execute
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
+from vs_sim.api.testing import HANG_GUARD_S, RefusingThreads, SimNetwork, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Mapping, Sequence
     from pathlib import Path
 
-    from vs_sim.api import Connection, Event
+    from vs_sim.api import Connection, Event, Threads
     from vs_sim.api.testing import Sim
 
 SEEDS = st.one_of(st.none(), st.integers(0, 2**32))
@@ -54,7 +54,7 @@ _FRAMEWORK_RESULT = "/tmp/vibesys-framework-benchmark-0123456789abcdef.json"  # 
 class _RecordingLauncher:
     """Fake launcher: records the job and optionally blocks until it is cancelled."""
 
-    def __init__(self, threads: SimThreads, *, block: bool = False) -> None:
+    def __init__(self, threads: Threads, *, block: bool = False) -> None:
         self.commands: list[GpuCommand] = []
         self.requests: list[GpuJobRequest] = []
         self.cancelled = threads.event()
@@ -112,7 +112,7 @@ _SIGINT = 2
 class _Network:
     """The simulated network the broker listens on and the clients dial."""
 
-    threads: SimThreads
+    threads: Threads
     network: SimNetwork
 
     @property
@@ -123,7 +123,7 @@ class _Network:
         return self.network.connect(address, HANG_GUARD_S)
 
 
-def _network(threads: SimThreads) -> _Network:
+def _network(threads: Threads) -> _Network:
     return _Network(threads, SimNetwork(threads))
 
 
@@ -203,6 +203,28 @@ def _simulate[T](sim: Sim, program: Callable[[_Network], T]) -> T:
     threads = sim.threads()
     net = _network(threads)
     return threads.run(lambda: program(net))
+
+
+def test_a_refused_client_worker_drops_only_that_connection(
+    tmp_path: Path, workspace: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One transient worker-start refusal does not kill the broker's accept loop."""
+    simulator = SimThreads()
+    threads = RefusingThreads(simulator, {"vibesys-command-job": 1})
+    net = _network(threads)
+
+    def program() -> None:
+        with _serving(net, tmp_path, workspace) as broker:
+            refused = _send_request(net, broker, {})
+            assert refused.recv(1, HANG_GUARD_S) == b""
+            refused.close()
+
+            served = _raw_request(net, broker, {})
+            assert "error" in served
+
+    simulator.run(program)
+
+    assert "client worker did not start" in caplog.text
 
 
 class TestGpuOperation:

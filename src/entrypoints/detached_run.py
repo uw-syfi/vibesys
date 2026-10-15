@@ -10,6 +10,15 @@ which reports its milestones and its run's lifecycle facts to the
 ``RecordPublisher`` held here. However the server exits, the publisher leaves
 its last record, with the phase the run ended in, as the instance's tombstone.
 
+Before anything else, it installs the run's narration handler on the root logger and
+the uncaught-exception hooks (``sys.excepthook``, ``threading.excepthook``). Records and
+tracebacks wait in the handler's bounded buffer until run assembly opens the run's log
+store (``vibesys.run.logs.open_run_logs``) and attaches the narration stream, which the
+desktop app shows. What dies before that (a bad argument, an import error, a project
+that does not resolve) is a typed launch failure on the record, or reaches only
+``server.log`` for the person reading the terminal output; logging's last resort keeps
+writing warnings to stderr as it did, so ``server.log`` shows what it always showed.
+
 This module is light: ``tests/architecture/test_light_entrypoints.py`` holds
 its module-level imports to the same allowlist as the host commands.
 """
@@ -17,8 +26,11 @@ its module-level imports to the same allowlist as the host commands.
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
+import threading
+from contextlib import contextmanager
 from functools import partial
 from importlib import import_module
 from pathlib import Path
@@ -46,10 +58,13 @@ from server.registry import (
     instance_root,
     parse_instance_id,
 )
+from vs_logs.api import NarrationHandler, uncaught_hook, uncaught_thread_hook
 from vs_project.api import ProjectStateError, validate_run_id
 from vs_sim.api import OsThreads, SystemClock
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from vibesys.api import Runs
     from vs_sim.api import Clock, Threads
 
@@ -226,8 +241,44 @@ def _starting_record(identity: argparse.Namespace, root: Path, clock: Clock) -> 
     )
 
 
+@contextmanager
+def narration_installed() -> Iterator[NarrationHandler]:
+    """Send this process's log records and uncaught exceptions to a narration handler.
+
+    The handler buffers until run assembly attaches the run's narration stream.
+    Installing a root handler retires ``logging.lastResort``, so it is installed too:
+    warnings still reach stderr (``server.log``) as before. Leaving the block closes the
+    handler and restores the logging configuration and hooks it found.
+    """
+    handler = NarrationHandler(warn=sys.stderr.write)
+    root = logging.getLogger()
+    installed = [handler] if logging.lastResort is None else [handler, logging.lastResort]
+    level = root.level
+    previous_hook = sys.excepthook
+    previous_thread_hook = threading.excepthook
+    for each in installed:
+        root.addHandler(each)
+    root.setLevel(logging.INFO)
+    sys.excepthook = uncaught_hook(handler, previous_hook)
+    threading.excepthook = uncaught_thread_hook(handler, previous_thread_hook)
+    try:
+        yield handler
+    finally:
+        handler.close()
+        sys.excepthook = previous_hook
+        threading.excepthook = previous_thread_hook
+        for each in installed:
+            root.removeHandler(each)
+        root.setLevel(level)
+
+
 def main(argv: list[str] | None = None, *, runs: Runs | None = None) -> None:
     """Hold this server's registry id for its lifetime and serve its run."""
+    with narration_installed():
+        _serve(argv, runs)
+
+
+def _serve(argv: list[str] | None, runs: Runs | None) -> None:
     arguments = sys.argv[1:] if argv is None else argv
     identity = _identity(arguments)
     root = instance_root(os.environ, os.getuid())

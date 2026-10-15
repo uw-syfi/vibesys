@@ -448,6 +448,7 @@ def test_a_latch_set_after_a_restart_reaches_the_restored_worker_that_waits_for_
     assert [d.decision for d in run.state.dropped] == [stale.decision]
     run.reply(run.expect_turn("learn"), Plan(n=7))
     assert run.driver.published(run.state, Shared) == Shared(result=8, latch_at_start=None)
+    assert run.finished is not None
 
 
 @settings(max_examples=examples(pr=10, nightly=200), deadline=None)

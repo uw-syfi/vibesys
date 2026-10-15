@@ -55,6 +55,7 @@ from vs_slurm.api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vs_runtime.api.core import StageOutputOpener
     from vs_runtime.contracts import CandidateWorkspace
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
@@ -178,13 +179,14 @@ async def build_stack(
     cluster: ScenarioCluster | None = None,
     *,
     profile_command: tuple[str, ...] | None = None,
+    stage_output: StageOutputOpener | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
     Job deadlines follow a clock that never moves, so none expires.
 
     With ``profile_command`` the run can capture a profile, whose stdout is
-    ``cluster.profile_output``.
+    ``cluster.profile_output``. ``stage_output`` opens each stage's output stream.
     """
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(
@@ -217,6 +219,7 @@ async def build_stack(
         # Pacing moves a timeline of its own, so polling never brings a deadline nearer.
         sleeper=ManualClock(),
         cluster=cluster,
+        stage_output=stage_output,
     )
     return Stack(executor, cluster, snapshot)
 

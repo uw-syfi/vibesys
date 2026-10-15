@@ -62,15 +62,26 @@ function RunRow(props: {
   );
 }
 
-/** One of a host's ended runs (its registry tombstone): identity and outcome, no live actions. */
-function EndedRunRow(props: {readonly run: HostRun}): JSX.Element {
-  const {run} = props;
+/**
+ * One of a host's ended runs (its registry tombstone): identity and outcome, and Inspect, since the
+ * run's logs outlive it; no live actions.
+ */
+function EndedRunRow(props: {
+  readonly run: HostRun;
+  readonly host: HostKey;
+  readonly hostLabel: string;
+  readonly actions: HostRunActions;
+}): JSX.Element {
+  const {run, host, hostLabel, actions} = props;
   return (
     <tr>
       <td>{run.runId}</td>
       <td className="path">{run.projectRoot}</td>
       <td>{runStatusText(run)}</td>
       <td>{runStartedText(run)}</td>
+      <td className="actions-cell">
+        <Button onClick={() => actions.inspect(host, hostLabel, run)}>Inspect</Button>
+      </td>
     </tr>
   );
 }
@@ -135,11 +146,18 @@ function RunTable(props: {
               <th>Project</th>
               <th>Status</th>
               <th>Started</th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {listing.ended.map(run => (
-              <EndedRunRow key={run.id} run={run} />
+              <EndedRunRow
+                key={run.id}
+                run={run}
+                host={data.key}
+                hostLabel={data.label}
+                actions={actions}
+              />
             ))}
           </tbody>
         </table>

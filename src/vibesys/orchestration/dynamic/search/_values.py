@@ -110,6 +110,28 @@ class WorkPlan(Value):
         return self.step is None or self.step.evaluate == "trusted"
 
 
+class Expectation(Value):
+    """What a planner expected of one workstream it scheduled, and what it meant to do next."""
+
+    work_id: str
+    expected: str
+    if_it_succeeds: str
+    if_it_fails: str
+
+
+class HandoffNote(Value):
+    """A planner's note to the planners after it, as its reply gave it, for what was scheduled.
+
+    ``expectations`` name only workstreams the plan scheduled; ``dropped`` names the workstreams
+    whose expectations were left out because they were not scheduled (or are not in the reply),
+    so the note never says what to do next about work that never ran.
+    """
+
+    expectations: tuple[Expectation, ...] = ()
+    doubts: tuple[str, ...] = ()
+    dropped: tuple[str, ...] = ()
+
+
 # -- why work ended -----------------------------------------------------------------------------
 
 
@@ -342,6 +364,7 @@ class ViolationCode(StrEnum):
     UPDATE_INCOMPLETE = "update-incomplete"
     OUTSIDE_PLAN = "outside-plan"
     """The run follows the task's plan, and the entry is not a repair of one of its failed steps."""
+    EXPECTATION_UNKNOWN = "expectation-unknown"
     RANKING_UNKNOWN = "ranking-unknown"
     RANKING_DUPLICATE = "ranking-duplicate"
 

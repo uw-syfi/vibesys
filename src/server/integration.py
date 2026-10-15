@@ -271,12 +271,10 @@ class RunIntegrationAdapter:
         )
         auxiliary_agents = session.open_auxiliary_agents()
         self._owned.callback(auxiliary_agents.close)
-        self._detach_run = self._attach_run(attachment, auxiliary_agents)
+        self._attach_run(attachment, auxiliary_agents)
 
-    def _attach_run(
-        self, attachment: RunAttachment, session: AuxiliaryAgents
-    ) -> Callable[[], None] | None:
-        """Start the optional experiment-chat surface and return its cleanup callback."""
+    def _attach_run(self, attachment: RunAttachment, session: AuxiliaryAgents) -> None:
+        """Own the optional experiment-chat surface before starting it."""
         previous = self._chat_factory
         if previous is not None:
             previous.close()
@@ -291,6 +289,13 @@ class RunIntegrationAdapter:
             clock=self._clock,
             threads=self._threads,
         )
+
+        def detach() -> None:
+            if self._chat_factory is factory:
+                self._chat_factory = None
+            factory.close()
+
+        self._detach_run = detach
         self._chat_factory = factory
         try:
             factory.start()
@@ -300,13 +305,6 @@ class RunIntegrationAdapter:
                 f"Experiment chat is unavailable: {type(exc).__name__}: {exc}\n",
                 source="experiment-chat",
             )
-
-        def detach() -> None:
-            if self._chat_factory is factory:
-                self._chat_factory = None
-            factory.close()
-
-        return detach
 
     def close(self) -> None:
         """Release adapter subscriptions and optional server resources.

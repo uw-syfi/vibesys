@@ -166,6 +166,7 @@ class ChatManager:
         self._retain_terminal = False
         self._terminal_resource: TerminalChatResource | None = None
         self._retired_terminal_resource: TerminalChatResource | None = None
+        self._terminal_close_in_progress = False
 
     @staticmethod
     def replay_filter(header: EventHeader) -> bool:
@@ -356,7 +357,11 @@ class ChatManager:
         with self._condition:
             if not self._retain_terminal:
                 return False
-            if self._terminal_resource is not None:
+            if (
+                self._terminal_resource is not None
+                or self._retired_terminal_resource is not None
+                or self._terminal_close_in_progress
+            ):
                 message = "Terminal chat resources are already retained"
                 raise RuntimeError(  # This invariant has no input value.
                     message
@@ -368,19 +373,29 @@ class ChatManager:
     def close_terminal_resource(self) -> None:
         """Drain and close the resource retained for the terminal client."""
         with self._condition:
+            self._wait_locked(lambda: self._terminal_close_in_progress, timeout=None)
             resource = self._terminal_resource
-            self._terminal_resource = None
+            retired = resource is None
+            if retired:
+                resource = self._retired_terminal_resource
+                if resource is None or self._active_default_calls > 0:
+                    return
             self._retain_terminal = False
-            if resource is not None and self._default_handler == resource.handler:
+            if not retired and self._default_handler == resource.handler:
                 self._default_handler = None
-            if resource is not None and not self._wait_locked(
+            # Claim before waiting: the condition wait releases the lock, so a
+            # second closer must see ownership rather than claim the same resource.
+            self._terminal_close_in_progress = True
+            if not retired and not self._wait_locked(
                 lambda: self._active_default_calls > 0,
                 timeout=self._drain_timeout_seconds,
             ):
+                self._terminal_resource = None
                 self._retired_terminal_resource = resource
-                resource = None
-        if resource is not None:
-            resource.close()
+                self._terminal_close_in_progress = False
+                self._condition.notify_all()
+                return
+        self._close_claimed_terminal_resource(resource, log_failure=False)
 
     def _thread_chat(self, text: str, thread_id: ChatThreadId) -> str:
         handler = self._acquire_thread_handler(thread_id)
@@ -543,20 +558,45 @@ class ChatManager:
         retired: TerminalChatResource | None = None
         with self._condition:
             self._active_default_calls -= 1
-            if self._active_default_calls == 0:
+            if (
+                self._active_default_calls == 0
+                and self._retired_terminal_resource is not None
+                and not self._terminal_close_in_progress
+            ):
                 retired = self._retired_terminal_resource
-                self._retired_terminal_resource = None
+                self._terminal_close_in_progress = True
             self._condition.notify_all()
         if retired is None:
             return
+        self._close_claimed_terminal_resource(retired, log_failure=True)
+
+    def _close_claimed_terminal_resource(
+        self, resource: TerminalChatResource, *, log_failure: bool
+    ) -> None:
+        """Close one exclusively claimed resource, retaining ownership on failure."""
+        failure: BaseException | None = None
         try:
-            retired.close()
-        except Exception as exc:  # noqa: BLE001  # lint-waiver: LW-010251 [BLE001]; retired handler failures are logged while thread cleanup continues.
+            resource.close()
+        except BaseException as exc:  # noqa: BLE001  # lint-waiver: LW-010251 [BLE001]; ownership must be retained for every failed close, including cancellation.
+            failure = exc
+        with self._condition:
+            if failure is None:
+                if self._terminal_resource is resource:
+                    self._terminal_resource = None
+                if self._retired_terminal_resource is resource:
+                    self._retired_terminal_resource = None
+            self._terminal_close_in_progress = False
+            self._condition.notify_all()
+        if failure is None:
+            return
+        if log_failure and isinstance(failure, Exception):
             self._journal.publish_output(
                 "stderr",
-                f"Terminal experiment chat cleanup failed: {type(exc).__name__}: {exc}\n",
+                f"Terminal experiment chat cleanup failed: {type(failure).__name__}: {failure}\n",
                 source="terminal-chat",
             )
+            return
+        raise failure
 
     def _unavailable_reason(self) -> str:
         return (

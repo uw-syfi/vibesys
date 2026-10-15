@@ -6,7 +6,7 @@ import hashlib
 from copy import deepcopy
 from typing import TYPE_CHECKING, Annotated, Literal, Never, TypeAliasType
 
-from pydantic import ConfigDict, Field, FiniteFloat, JsonValue, TypeAdapter, model_validator
+from pydantic import ConfigDict, Field, FiniteFloat, TypeAdapter, model_validator
 
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
 from server.chat.options import ChatOptions
@@ -30,7 +30,12 @@ from vibesys.api.hypothesis import (
     JudgeVerdict,
     PerfDeltaReason,
 )
-from vs_decode.api import Unreadable, UnreadableKind, decode_json
+from vs_decode.api import (
+    Unreadable,
+    UnreadableKind,
+    decode_json,
+    extract_unique_object_strings,
+)
 from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
@@ -605,7 +610,9 @@ class Response(ResponseEnvelope):
 _REQUEST_ADAPTER = TypeAdapter(ProtocolRequest)
 MAX_REQUEST_FRAME_BYTES = 16 * 1024 * 1024
 """The largest request frame any transport hands to ``decode_request``."""
-_JSON_VALUE: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
+_REQUEST_ID_FIELDS = frozenset({"request_id", "client_id"})
+_MAX_CORRELATION_ID_CHARACTERS = 128
+"""Enough for protocol UUIDs without retaining an attacker-sized rejected value."""
 
 
 def decode_request(frame: str | bytes, *, clock: Clock) -> ProtocolRequest | Response:
@@ -654,15 +661,13 @@ def failure_response(
 
 
 def _frame_ids(frame: str | bytes) -> tuple[str, str]:
-    value = decode_json(
-        frame, _JSON_VALUE, source="request frame", max_bytes=MAX_REQUEST_FRAME_BYTES
+    values = extract_unique_object_strings(
+        frame,
+        _REQUEST_ID_FIELDS,
+        max_bytes=MAX_REQUEST_FRAME_BYTES,
+        max_value_characters=_MAX_CORRELATION_ID_CHARACTERS,
     )
-    if isinstance(value, Unreadable):
-        return "unknown", ""
-    if not isinstance(value, dict):
-        return "unknown", ""
-    client_id = value.get("client_id")
-    return str(value.get("request_id", "unknown")), client_id if isinstance(client_id, str) else ""
+    return values.get("request_id", "unknown"), values.get("client_id", "")
 
 
 class SubscribedMessage(ProtocolModel):

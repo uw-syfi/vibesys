@@ -224,6 +224,7 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> ComputeBackendImpl:
     """Construct the registered implementation for one compute stack.
 
@@ -231,6 +232,9 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
     sandboxes measure command timeouts on, *launcher* starts its host shell
     commands, and *probe* runs the status commands (``nvidia-smi``, ``rocm-smi``) it asks.
     ``clock`` counts seconds since the epoch; a backend stamps what it records with it.
+    ``events`` is a backend-specific contention-events seam (only the CUDA
+    backend reads it today); every registered factory accepts and may ignore
+    it so this call stays uniform across backends.
     """
     _ensure_defaults()
     if backend not in _REGISTRY:
@@ -245,6 +249,7 @@ def create_compute_backend(  # noqa: PLR0913  # lint-waiver: LW-731406 [PLR0913]
         launcher=launcher,
         clock=clock,
         probe=probe,
+        events=events,
     )
 
 
@@ -261,8 +266,10 @@ def _rocm_backend(  # noqa: PLR0913
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> ComputeBackendImpl:
     """The ROCm backend, discovering its GPUs through ``probe``."""
+    del events  # ROCm watches no contention; accepted so the registry call stays uniform
     rocm = import_module("vs_sandbox.rocm_backend")
     return rocm.RocmBackend(
         log_dir,
@@ -289,8 +296,10 @@ def _trainium_backend(  # noqa: PLR0913
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> ComputeBackendImpl:
     """The Trainium backend, discovering its devices through ``probe``."""
+    del events  # Trainium watches no contention; accepted so the registry call stays uniform
     trainium = import_module("vs_sandbox.trainium_backend")
     return trainium.TrainiumBackend(
         log_dir,

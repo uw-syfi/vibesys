@@ -7,6 +7,7 @@ the partition choice, and the blocking ``srun`` launch the host broker uses.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import secrets
 import shlex
@@ -49,6 +50,10 @@ _CONFIRM_INTERVAL_SECONDS = 5
 _WATCHER_JOIN_SECONDS = _SCANCEL_ATTEMPTS * _SCANCEL_TIMEOUT_SECONDS + _CANCEL_GRACE_SECONDS
 _READ_CHARACTERS = 65_536
 _MAX_QUEUE_MINUTES = 60 * 24 * 365
+_MAX_PREFIX_CHARS = 32
+#: Hex characters of the run's digest in its job name prefix: 32 bits keeps two
+#: concurrent runs of one user apart and leaves the operator's prefix most of its room.
+_RUN_TAG_CHARS = 8
 
 
 def _is_normalized_absolute(path: str) -> bool:
@@ -102,6 +107,17 @@ class AgentGpuConfig(BaseModel):
     @classmethod
     def _normalize_arrays(cls, value: object) -> object:
         return tuple(value) if isinstance(value, list) else value
+
+    def for_run(self, run_id: str) -> AgentGpuConfig:
+        """This configuration with a job name prefix that only ``run_id``'s jobs carry.
+
+        The operator's prefix is kept (cut to leave room) and a digest of the run id is
+        appended, so the run's own GPU jobs can be told apart in the queue from another
+        run's of the same user. The result still satisfies the prefix pattern.
+        """
+        tag = hashlib.sha256(run_id.encode()).hexdigest()[:_RUN_TAG_CHARS]
+        kept = self.job_name_prefix[: _MAX_PREFIX_CHARS - len(tag) - 1]
+        return self.model_copy(update={"job_name_prefix": f"{kept}-{tag}"})
 
     @field_validator("partitions", "srun_arguments")
     @classmethod

@@ -98,9 +98,11 @@ class RocmBackend:
         threads: Threads,
         launcher: PipedProcessLauncher,
         clock: Clock,
+        events: object | None = None,
     ) -> None:
         """Configure ROCm execution with its log directory and image override."""
         del clock  # nothing this backend records carries a timestamp
+        del events  # ROCm contention monitoring is not implemented yet
         self.log_dir = Path(log_dir)
         self._lprint = log or print
         self.image = image or _DEFAULT_IMAGE

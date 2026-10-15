@@ -3,10 +3,48 @@ import {HostValidationError, hostFromKey, hostKey, validAlias, validHostPath} fr
 import {
   EMPTY_SETTINGS,
   parseSettings,
+  SshConfigSyntaxError,
   settingsFor,
+  sshConfigDirectives,
   sshConfigHosts,
+  sshGlobSegmentMatches,
+  sshHostPatternsMatch,
   withHostSettings,
 } from './host-settings.js';
+
+function generatedStrings(alphabet: readonly string[], maximumLength: number): string[] {
+  const strings = [''];
+  let frontier = [''];
+  for (let length = 0; length < maximumLength; length += 1) {
+    frontier = frontier.flatMap(prefix => alphabet.map(character => prefix + character));
+    strings.push(...frontier);
+  }
+  return strings;
+}
+
+function referenceWildcardMatches(pattern: string, value: string): boolean {
+  const memo = new Map<string, boolean>();
+  const at = (patternIndex: number, valueIndex: number): boolean => {
+    const key = `${patternIndex}:${valueIndex}`;
+    const known = memo.get(key);
+    if (known !== undefined) return known;
+    const character = pattern[patternIndex];
+    let result: boolean;
+    if (character === undefined) result = valueIndex === value.length;
+    else if (character === '*') {
+      result =
+        at(patternIndex + 1, valueIndex) ||
+        (valueIndex < value.length && at(patternIndex, valueIndex + 1));
+    } else if (character === '?') {
+      result = valueIndex < value.length && at(patternIndex + 1, valueIndex + 1);
+    } else {
+      result = character === value[valueIndex] && at(patternIndex + 1, valueIndex + 1);
+    }
+    memo.set(key, result);
+    return result;
+  };
+  return at(0, 0);
+}
 
 /** A small seeded generator (fast-check is not a dependency; see the testing skill). */
 function generator(seed: number): () => number {
@@ -47,6 +85,73 @@ describe('sshConfigHosts', () => {
     expect(sshConfigHosts('Host -oProxyCommand=evil ok')).toEqual(['ok']);
     expect(() => validAlias('-oProxyCommand=x')).toThrow(HostValidationError);
     expect(() => validAlias('a b')).toThrow(HostValidationError);
+  });
+
+  test('returns ordered include directives without treating quoted comments as comments', () => {
+    expect(
+      sshConfigDirectives(
+        [
+          'Include config.d/*.conf "config with spaces/host #1" # comment',
+          'Host "gpu-box" *.internal',
+          'include=more\\ configs/*.conf',
+        ].join('\n'),
+      ),
+    ).toEqual([
+      {
+        kind: 'include',
+        line: 1,
+        patterns: ['config.d/*.conf', 'config with spaces/host #1'],
+      },
+      {kind: 'host', line: 2, patterns: ['gpu-box', '*.internal'], aliases: ['gpu-box']},
+      {kind: 'include', line: 3, patterns: ['more configs/*.conf']},
+    ]);
+  });
+
+  test('rejects malformed quotes and empty Include arguments with a public typed error', () => {
+    for (const [text, line, reason] of [
+      ['Host ok\nInclude "unterminated', 2, 'invalid-quotes'],
+      ['Include', 1, 'missing-argument'],
+      ['Include ""', 1, 'empty-argument'],
+      ['Include trailing\\', 1, 'trailing-escape'],
+    ] as const) {
+      try {
+        sshConfigDirectives(text);
+        throw new Error('malformed config unexpectedly parsed');
+      } catch (error) {
+        expect(error).toBeInstanceOf(SshConfigSyntaxError);
+        expect(error).toMatchObject({line, reason});
+      }
+    }
+  });
+
+  test('applies a complete Host pattern list, including negative patterns', () => {
+    expect(sshHostPatternsMatch(['gpu-*', '!gpu-bad'], 'gpu-good')).toBeTrue();
+    expect(sshHostPatternsMatch(['gpu-*', '!gpu-bad'], 'gpu-bad')).toBeFalse();
+    expect(sshHostPatternsMatch(['[ab]*'], 'ahost')).toBeFalse();
+    expect(sshHostPatternsMatch(['[ab]*'], '[ab]host')).toBeTrue();
+    expect(sshConfigHosts('Host gpu-bad !gpu-bad gpu-good')).toEqual(['gpu-good']);
+  });
+
+  test('matches only one glob path segment with OpenSSH wildcard and dot rules', () => {
+    expect(sshGlobSegmentMatches('**', 'one')).toBeTrue();
+    expect(sshGlobSegmentMatches('**', 'one/two')).toBeFalse();
+    expect(sshGlobSegmentMatches('[ab]*', 'ahost')).toBeTrue();
+    expect(sshGlobSegmentMatches('*.conf', '.hidden.conf')).toBeFalse();
+    expect(sshGlobSegmentMatches('.*.conf', '.hidden.conf')).toBeTrue();
+    expect(sshGlobSegmentMatches('[a-c][!x].conf', 'bz.conf')).toBeTrue();
+    expect(sshGlobSegmentMatches('[a-c][!x].conf', 'bx.conf')).toBeFalse();
+  });
+
+  test('iterative wildcard matching preserves star and question-mark semantics', () => {
+    const patterns = generatedStrings(['a', 'b', '*', '?'], 4);
+    const values = generatedStrings(['a', 'b'], 4);
+    for (const pattern of patterns) {
+      for (const value of values) {
+        expect(sshGlobSegmentMatches(pattern, value)).toBe(
+          referenceWildcardMatches(pattern, value),
+        );
+      }
+    }
   });
 });
 

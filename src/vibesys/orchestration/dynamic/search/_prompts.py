@@ -192,6 +192,8 @@ class _Planning(RolePromptContext):
     profiling: bool = False
     profile_fields: tuple[str, ...] = ()
     """The measurement fields a profile workstream may require: what the capture supplies."""
+    handoff_paths: tuple[str, ...] = ()
+    """Where the earlier planning calls' handoff files are, newest first: paths, never contents."""
     evaluations: EvaluationQueueView | None = None
     """The trusted evaluation queue; None in a request built before the queue existed."""
     input_overdue: InputOverdueView | None = None

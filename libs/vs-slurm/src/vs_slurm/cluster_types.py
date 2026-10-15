@@ -7,12 +7,12 @@ from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from .errors import SlurmError
 from .runner import (
     _MAX_PROCESS_EXIT_CODE,
     SlurmBatchHandle,
     SlurmBatchResult,
     SlurmBatchStageResult,
-    SlurmError,
     SlurmJobHandle,
     SlurmJobResult,
     SlurmJobStatus,

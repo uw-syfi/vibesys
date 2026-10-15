@@ -149,8 +149,15 @@ export function diffViewerTitle(viewer: DiffViewerState): string {
  * same pathspecs the server hands its own `git diff`.
  */
 export function diffExternalCommand(viewer: DiffViewerState, file: DesignFileChange): string {
-  const paths = file.renamed_from ? `${file.renamed_from} ${file.path}` : file.path;
-  return `git diff ${viewer.base} ${viewer.head} -- ${paths}`;
+  const paths = file.renamed_from ? [file.renamed_from, file.path] : [file.path];
+  const pathspecs = paths.map(path => posixLiteralPathspec(path)).join(' ');
+  return `git diff --no-ext-diff --find-renames ${viewer.base} ${viewer.head} -- ${pathspecs}`;
+}
+
+/** One pathname as an inert POSIX shell word and a Git literal pathspec. */
+function posixLiteralPathspec(path: string): string {
+  const literal = `:(literal)${path}`;
+  return `'${literal.replaceAll("'", `'"'"'`)}'`;
 }
 
 /** How one line of the viewer is toned; the view maps these onto the theme. */

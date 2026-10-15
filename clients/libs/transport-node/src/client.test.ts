@@ -1026,6 +1026,107 @@ describe('ServerClient', () => {
     );
   });
 
+  it('reports truncated event-stream EOF as a non-retryable parse callback', async () => {
+    const watcher = new ConnectionWatcher();
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] !== 'subscribe') return;
+          socket.end(`${subscribedMessage(request)}{"type":"event_batch"`);
+        }),
+      async client => {
+        const disconnects: Error[] = [];
+        const disconnected = new Signal();
+        const subscription = await client.subscribe(
+          0,
+          () => undefined,
+          error => {
+            disconnects.push(error);
+            disconnected.fire();
+          },
+        );
+        await disconnected.fired;
+
+        const failure = disconnects[0];
+        expect(failure).toBeInstanceOf(BackendClientError);
+        expect(failure).toMatchObject({kind: 'parse', retryable: false});
+
+        await subscription.close();
+        await client.close();
+        expect(disconnects.length).toBe(1);
+        expect(watcher.states).toEqual([]);
+      },
+      {onConnectionState: watcher.observe},
+    );
+  });
+
+  it('rejects truncated subscription-handshake EOF as a non-retryable parse fault', async () => {
+    const watcher = new ConnectionWatcher();
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] === 'subscribe') socket.end('{"type":"subscribed"');
+        }),
+      async client => {
+        const disconnects: Error[] = [];
+        const rejected = client.subscribe(
+          0,
+          () => undefined,
+          error => disconnects.push(error),
+        );
+        await expect(rejected).rejects.toBeInstanceOf(BackendClientError);
+        await expect(rejected).rejects.toMatchObject({kind: 'parse', retryable: false});
+
+        await client.close();
+        expect(disconnects).toEqual([]);
+        expect(watcher.states).toEqual([]);
+      },
+      {onConnectionState: watcher.observe},
+    );
+  });
+
+  it('routes truncated control EOF through the non-retryable fault disposition', async () => {
+    const watcher = new ConnectionWatcher();
+    await withServer(
+      socket => socket.once('data', () => socket.end('{"protocol_version":1')),
+      async client => {
+        const rejected = client.request({type: 'command.steer', text: 'inspect the run'});
+        await expect(rejected).rejects.toBeInstanceOf(BackendClientError);
+        await expect(rejected).rejects.toMatchObject({kind: 'parse', retryable: false});
+
+        expect(watcher.states.length).toBe(1);
+        const state = watcher.states[0];
+        expect(state?.status).toBe('disconnected');
+        if (state?.status === 'disconnected') {
+          expect(state.error).toBeInstanceOf(BackendClientError);
+          expect(state.error).toMatchObject({kind: 'parse', retryable: false});
+        }
+        await client.close();
+        expect(watcher.states.length).toBe(1);
+      },
+      {onConnectionState: watcher.observe, reconnectDelaysMs: [10_000]},
+    );
+  });
+
+  it('rejects truncated dedicated-response EOF as a non-retryable parse fault', async () => {
+    const watcher = new ConnectionWatcher();
+    await withServer(
+      socket =>
+        respondToLines(socket, request => {
+          if (request['type'] === 'query.chat') socket.end('{"protocol_version":1');
+        }),
+      async client => {
+        const rejected = client.request({type: 'query.chat', text: 'inspect the run'});
+        await expect(rejected).rejects.toBeInstanceOf(BackendClientError);
+        await expect(rejected).rejects.toMatchObject({kind: 'parse', retryable: false});
+
+        await client.close();
+        expect(watcher.states).toEqual([]);
+      },
+      {onConnectionState: watcher.observe},
+    );
+  });
+
   it('rejects a pending request when the control stream cannot be framed', async () => {
     await withServer(
       socket => {

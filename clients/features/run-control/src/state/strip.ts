@@ -23,6 +23,7 @@ export function runLink(connection: ConnectionStatus): RunLink {
     case 'auth-needed':
     case 'incompatible':
     case 'closed':
+    case 'capacity':
       return 'stuck';
   }
 }
@@ -41,6 +42,8 @@ function connectionLabel(connection: ConnectionStatus): string {
       return 'version mismatch';
     case 'closed':
       return 'closed';
+    case 'capacity':
+      return 'too many runs open on this host';
     default:
       return connection.kind;
   }
@@ -54,6 +57,7 @@ function connectionDetail(connection: ConnectionStatus, host: string): string {
       return `The run on ${host} is no longer running. Its transcript stays on screen; click the host to attach to another run.`;
     case 'offline':
     case 'incompatible':
+    case 'capacity':
       return connection.detail;
     default:
       return '';

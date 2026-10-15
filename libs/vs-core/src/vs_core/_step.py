@@ -18,6 +18,7 @@ from ._dispatch_episode import (
     retirement_dispatch,
     scope_admission,
 )
+from ._host_epochs import downtime
 from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ownership import cleanup_pending
 from ._proofs import (
@@ -1603,7 +1604,11 @@ def consume(state: CoreState, event: CoreEvent, dispatch: Dispatch) -> Transitio
         if isinstance(event, RecoveryStarted):
             # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
             opened = records.open_host_epoch(state.records, state.run, event)
-            state = state.model_copy(update={"records": opened})
+            # The downtime the new epoch proves moves open waits' limits as it moves open
+            # records' limits, so the two agree.
+            credit = downtime(opened.hosts) if opened.hosts != state.records.hosts else 0.0
+            waits = evaluation.credit_downtime(state.evaluation, state.run, credit)
+            state = state.model_copy(update={"records": opened, "evaluation": waits})
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))
     unmet = unmet_waits(given, result.state)

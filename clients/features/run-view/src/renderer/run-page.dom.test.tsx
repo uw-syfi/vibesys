@@ -73,6 +73,7 @@ async function mountRun(
         onReconnectControls={() => undefined}
         onRetryReplay={() => undefined}
         onCommand={command}
+        now={0}
       />,
     );
   };
@@ -401,6 +402,106 @@ test('live controls serialize pause, resume, steer, and stop through acknowledgm
   expect(button(mounted.container, 'Stopping…').disabled).toBe(true);
   await act(async () => fake.replies[3]?.resolve(ack('stop')));
   expect(mounted.container.textContent).toContain('stop consumed');
+  await unmount(mounted);
+});
+
+function pausedByQuota(): CoreState {
+  return runStep(initialCoreState(), {
+    type: 'events',
+    events: [
+      event(1, 'quota_paused', {
+        data: {
+          kind: 'quota_paused',
+          provider: 'claude',
+          condition: 'rate_limited',
+          detail: 'too many requests',
+          fallback_provider: 'codex',
+          fallback_model: 'gpt-5.4',
+        },
+      }),
+      event(2, 'run_status_changed', {
+        data: {kind: 'run_status_changed', status: 'paused', previous: 'running'},
+      }),
+    ],
+  }).state;
+}
+
+test('the quota banner offers both resume choices and sends the one the operator picks', async () => {
+  const fake = new FakeCommands();
+  const mounted = await mountRun(pausedByQuota(), fake.send);
+  const banner = mounted.container.querySelector<HTMLElement>('[data-testid="quota-banner"]');
+  if (banner === null) throw new Error('quota banner missing');
+  expect(banner.textContent).toContain('claude is rate limited');
+
+  const fallbackButton = [...banner.querySelectorAll<HTMLButtonElement>('button')].find(item =>
+    item.textContent?.includes('codex'),
+  );
+  if (fallbackButton === undefined) throw new Error('fallback resume button missing');
+  await act(async () => fallbackButton.click());
+  expect(fake.requests).toEqual([{type: 'command.resume', fallback: true}]);
+  await act(async () => fake.replies[0]?.resolve(ack('resume')));
+  expect(banner.textContent).toContain('resume consumed');
+  await unmount(mounted);
+});
+
+test('the quota banner disappears once the run leaves pausing and paused', async () => {
+  const mounted = await mountRun(pausedByQuota());
+  expect(mounted.container.querySelector('[data-testid="quota-banner"]')).not.toBeNull();
+
+  await act(async () =>
+    mounted.render(
+      runStep(pausedByQuota(), {
+        type: 'events',
+        events: [
+          event(3, 'quota_resumed', {data: {kind: 'quota_resumed', provider: 'claude'}}),
+          event(4, 'run_status_changed', {
+            data: {kind: 'run_status_changed', status: 'running', previous: 'paused'},
+          }),
+        ],
+      }).state,
+    ),
+  );
+  expect(mounted.container.querySelector('[data-testid="quota-banner"]')).toBeNull();
+  await unmount(mounted);
+});
+
+function pausedAgainByDifferentProvider(): CoreState {
+  return runStep(pausedByQuota(), {
+    type: 'events',
+    events: [
+      event(3, 'quota_resumed', {data: {kind: 'quota_resumed', provider: 'claude'}}),
+      event(4, 'run_status_changed', {
+        data: {kind: 'run_status_changed', status: 'running', previous: 'paused'},
+      }),
+      event(5, 'quota_paused', {
+        data: {
+          kind: 'quota_paused',
+          provider: 'codex',
+          condition: 'quota_exhausted',
+          detail: 'out of budget',
+        },
+      }),
+      event(6, 'run_status_changed', {
+        data: {kind: 'run_status_changed', status: 'paused', previous: 'running'},
+      }),
+    ],
+  }).state;
+}
+
+test('a later quota pause does not inherit an earlier, unrelated one’s resume result', async () => {
+  const fake = new FakeCommands();
+  const mounted = await mountRun(pausedByQuota(), fake.send);
+  await act(async () => button(mounted.container, 'Resume').click());
+  await act(async () => fake.replies[0]?.resolve(ack('resume')));
+  expect(mounted.container.querySelector('[data-testid="quota-banner"]')?.textContent).toContain(
+    'resume consumed',
+  );
+
+  await act(async () => mounted.render(pausedAgainByDifferentProvider()));
+  const banner = mounted.container.querySelector<HTMLElement>('[data-testid="quota-banner"]');
+  if (banner === null) throw new Error('quota banner missing');
+  expect(banner.textContent).toContain('codex is out of quota');
+  expect(banner.textContent).not.toContain('resume consumed');
   await unmount(mounted);
 });
 

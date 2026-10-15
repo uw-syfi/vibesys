@@ -12,6 +12,11 @@ export function isIterationStoreReplaced(error: unknown): error is Error {
   return error instanceof ServerError && error.diagnostic?.code === 'iteration_store_replaced';
 }
 
+/** Whether an old server rejected a request it could not decode before typed diagnostics existed. */
+export function isLegacyUnsupportedRequest(error: unknown): error is ServerError {
+  return error instanceof ServerError && error.diagnostic === null;
+}
+
 export type WebSessionStatus = 'connecting' | 'connected' | 'stale';
 
 /** What the page renders about its connection. */

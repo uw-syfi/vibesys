@@ -34,6 +34,7 @@ from typing import assert_never
 
 from vibesys.candidates.api import Baseline, Measured, NotConfigured, Unmeasurable
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._handoff import HANDOFF
 from vibesys.orchestration.dynamic.search._ids import INPUT_KEY, INPUT_MEASURED
 from vibesys.orchestration.dynamic.search._measure import InputPending, measure_the_input
 from vibesys.orchestration.dynamic.search._operations import OPERATIONS
@@ -66,6 +67,7 @@ from vs_core.api.search import Flow, Group, NoWinner, StopRequested, TaskStopped
     operations=OPERATIONS,
     roles=ROLES,
     snapshot=DynamicResume,
+    owned=(HANDOFF,),
 )
 async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner | None:
     """Measure the input while planning, run workstreams in the free slots, name the best."""

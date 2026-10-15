@@ -6,6 +6,12 @@ from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, Partial
 from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, tail
 from vibesys.orchestration.dynamic.search._budget import budget
 from vibesys.orchestration.dynamic.search._config import MAX_WIDTH, DynamicConfig
+from vibesys.orchestration.dynamic.search._handoff import (
+    HANDOFF,
+    WRITE_HANDOFF_KIND,
+    HandoffWritten,
+    WriteHandoff,
+)
 from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
 from vibesys.orchestration.dynamic.search._operations import (
     INTERPRET_KIND,
@@ -103,9 +109,11 @@ from vibesys.orchestration.dynamic.search._values import (
     Blocker,
     BlockerKind,
     DropReason,
+    Expectation,
     Failure,
     FailureKind,
     FinishedWork,
+    HandoffNote,
     HypothesisRecord,
     Proof,
     RoundRecord,
@@ -117,6 +125,7 @@ from vibesys.orchestration.dynamic.search._values import (
 
 __all__ = [
     "CUT",
+    "HANDOFF",
     "IMPLEMENTER",
     "INTERPRET_KIND",
     "JUDGE",
@@ -129,6 +138,7 @@ __all__ = [
     "ROLES",
     "UNSETTLED",
     "VERIFY_KIND",
+    "WRITE_HANDOFF_KIND",
     "AcceptedReading",
     "AgentName",
     "Blocker",
@@ -146,9 +156,12 @@ __all__ = [
     "EvidenceCitation",
     "EvidenceReading",
     "EvidenceReadings",
+    "Expectation",
     "Failure",
     "FailureKind",
     "FinishedWork",
+    "HandoffNote",
+    "HandoffWritten",
     "HypothesisRecord",
     "ImplementPrompt",
     "InputOverdue",
@@ -205,6 +218,7 @@ __all__ = [
     "WorkstreamDone",
     "WorkstreamResume",
     "WorkstreamStart",
+    "WriteHandoff",
     "assertion",
     "blocked_failure",
     "bounded",

@@ -1023,7 +1023,8 @@ def test_late_job_changes_cannot_rewrite_frozen_timeout_or_resume(sequence: int)
         deadline_at=10.0,
         reached_at=10.0,
         unfinished=tuple(
-            core.JobTimeout(resource_id=job, progress=None) for job in continuation.jobs
+            core.JobTimeout(resource_id=job, progress=None, by=core.WaitEnd.LIMIT, at=10.0)
+            for job in continuation.jobs
         ),
     )
     continuation = continuation.model_copy(
@@ -1216,9 +1217,7 @@ def test_all_canonical_turn_sources_authorize_without_new_attempt_charge(
 
 
 @pytest.mark.parametrize("at", [9.0, 10.0, 11.0])
-def test_terminal_observation_requires_deadline_freeze_before_boundary_authorization(
-    at: float,
-) -> None:
+def test_a_wait_suspended_after_its_deadline_is_refused_not_authorized(at: float) -> None:
     state, continuation = fixture(settled=True)
     jobs = tuple(
         job.model_copy(
@@ -1227,8 +1226,12 @@ def test_terminal_observation_requires_deadline_freeze_before_boundary_authoriza
         for job in state.evaluation.jobs
         if job.observation is not None
     )
+    # Core's clock is never behind a fact it holds.
     state = state.model_copy(
-        update={"evaluation": state.evaluation.model_copy(update={"jobs": jobs})}
+        update={
+            "run": state.run.model_copy(update={"now_at": at}),
+            "evaluation": state.evaluation.model_copy(update={"jobs": jobs}),
+        }
     )
     event = core.TurnSuspended(continuation=continuation)
     if at < continuation.deadline_at:
@@ -1237,9 +1240,7 @@ def test_terminal_observation_requires_deadline_freeze_before_boundary_authoriza
         assert isinstance(result.events[0], core.ResumeAuthorized)
         assert result.events[0].timeout is None
     else:
-        # B receives only post-update facts. The frozen contract lacks the prior
-        # progress snapshot, so it must reject rather than invent timeout evidence.
-        with pytest.raises(core.ContractError, match="deadline"):
+        with pytest.raises(core.ContractError, match="no time left"):
             core.step(state, event)
 
 
@@ -1549,7 +1550,11 @@ def test_scope_close_and_timeout_never_substitute_for_dependency_release(
                 "timeout": core.TimedOut(
                     deadline_at=10.0,
                     reached_at=10.0,
-                    unfinished=(core.JobTimeout(resource_id=job.resource_id),),
+                    unfinished=(
+                        core.JobTimeout(
+                            resource_id=job.resource_id, by=core.WaitEnd.LIMIT, at=10.0
+                        ),
+                    ),
                 )
             }
         )
@@ -1656,7 +1661,9 @@ def test_new_suspension_never_accepts_caller_manufactured_authority_or_feedback(
             "timeout": core.TimedOut(
                 deadline_at=10.0,
                 reached_at=10.0,
-                unfinished=(core.JobTimeout(resource_id=owned.resource_id),),
+                unfinished=(
+                    core.JobTimeout(resource_id=owned.resource_id, by=core.WaitEnd.LIMIT, at=10.0),
+                ),
             )
             if timeout
             else None,
@@ -1781,7 +1788,11 @@ def test_feedback_deduplicates_equal_evidence_and_rejects_conflicting_identity(
                 "timeout": core.TimedOut(
                     deadline_at=10.0,
                     reached_at=10.0,
-                    unfinished=(core.JobTimeout(resource_id=first.resource_id),),
+                    unfinished=(
+                        core.JobTimeout(
+                            resource_id=first.resource_id, by=core.WaitEnd.LIMIT, at=10.0
+                        ),
+                    ),
                 ),
             }
         )

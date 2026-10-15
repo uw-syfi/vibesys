@@ -31,12 +31,14 @@ import {
 } from './connection.js';
 import type {
   BrowserLifecycle,
+  ChatResult,
   IterationLoad,
   RunCommand,
   RunCommandOutcome,
   RunConnection,
   RunStreamHandlers,
   TransportHooks,
+  WebChatOptions,
 } from './ports.js';
 import {
   createRunStore,
@@ -173,6 +175,15 @@ export class WebSession {
       this.#startupSettled();
     }
     return this.#closed;
+  }
+
+  /** Fold the answer's events without advancing the subscription cursor. */
+  async ask(text: string, options: WebChatOptions = {}): Promise<ChatResult> {
+    const response = await this.#connection.ask(text, options);
+    if (this.#closed === null && !options.signal?.aborted) {
+      this.store.dispatch({type: 'response-events', events: response.events});
+    }
+    return response.chat;
   }
 
   /** Send one operator command without letting presentation code own the transport. */

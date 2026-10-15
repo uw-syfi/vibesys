@@ -31,7 +31,9 @@ Rules (each site counts once; verdict rules count a line once):
     private_import   Under `libs/<name>/tests/` and `sdk/<name>/tests/` only:
                      an import of the library's own package (the directory
                      under `src/`) that is not `<pkg>.api` or a submodule of
-                     it. `import <pkg>` and `from <pkg> import x` count.
+                     it, nor a second public module listed in
+                     `EXTRA_PUBLIC_MODULES`. `import <pkg>` and
+                     `from <pkg> import x` count.
     wall_clock_sync  In `*.test.ts`, a call to the ambient `setTimeout`
                      scheduler, including optional calls and aliases imported
                      from Node's timer modules. A call through an injected
@@ -230,6 +232,11 @@ CLOCK_FUNCTIONS = frozenset(
     }
 )
 PACKAGE_API = "api"
+EXTRA_PUBLIC_MODULES: dict[str, tuple[str, ...]] = {
+    # The read side, split from `vs_logs.api` so tach can show it to the host helper only.
+    "vs_logs": ("read",),
+}
+"""Public modules a library declares besides ``api``, each its own tach interface."""
 LIBRARY_TESTS_RE = re.compile(r"^(?:libs|sdk)/([^/]+)/tests/")
 EXEMPTION_RE = re.compile(r"#\s*test-isolation:(.*)$")
 TYPESCRIPT_EXEMPTION_RE = re.compile(r"//\s*test-isolation:(.*)$")
@@ -1184,8 +1191,13 @@ class _Sites:
             if module == package:
                 return True
             if module.startswith(f"{package}."):
-                public = f"{package}.{PACKAGE_API}"
-                return module != public and not module.startswith(f"{public}.")
+                publics = [
+                    f"{package}.{name}"
+                    for name in (PACKAGE_API, *EXTRA_PUBLIC_MODULES.get(package, ()))
+                ]
+                return not any(
+                    module == public or module.startswith(f"{public}.") for public in publics
+                )
         return False
 
     def _call_sites(self, node: ast.Call) -> None:

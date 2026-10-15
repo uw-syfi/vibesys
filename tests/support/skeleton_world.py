@@ -117,9 +117,11 @@ if TYPE_CHECKING:
     from vs_sim.api import Clock, SleepingClock
 
 LEASE = 100.0
-# A Slurm job that has not ended this long after it was submitted is cancelled and fails: well
-# inside the run deadline (1000 s), so a job that never leaves the queue cannot outlive the run.
+# A Slurm job that runs this long, or waits this long in the queue, is cancelled and fails: well
+# inside the run deadline (1000 s), so a job that never leaves the queue fails on its own queue
+# deadline instead of running into the run's.
 JOB_TIMEOUT_S = 300
+QUEUE_TIMEOUT_S = 300
 
 
 @dataclass
@@ -200,7 +202,8 @@ class World:
     timed: tuple[Clock, float] | None = None
     job_clock: Clock = field(default_factory=ManualClock)
     """What Slurm job deadlines count on: by default a clock that never moves, so none expires.
-    A world on a virtual loop hands its run clock, so a job outliving ``JOB_TIMEOUT_S`` fails."""
+    A world on a virtual loop hands its run clock, so a job running past ``JOB_TIMEOUT_S``, or queued
+    past ``QUEUE_TIMEOUT_S``, fails."""
     polls: list[str] = field(default_factory=list)
     during_submit: Callable[[], Awaitable[None]] | None = None
     limits: Limits = field(default_factory=lambda: sample_limits(reconciliation_bound=300.0))
@@ -260,6 +263,7 @@ class World:
                 remote_workspace_root="/runs",
                 transport=SlurmSshTransport(host="test"),
                 job_timeout_seconds=JOB_TIMEOUT_S,
+                queue_timeout_seconds=QUEUE_TIMEOUT_S,
             ),
             SlurmExecutionPolicy(),
             SlurmEvaluationPlan(
