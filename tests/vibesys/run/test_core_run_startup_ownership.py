@@ -1,0 +1,188 @@
+"""The product core runner rolls back resources when startup does not complete."""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
+
+import pytest
+
+from vibesys.run.core_run import drive_core_run
+from vibesys.run.core_services import ClosableEvaluation, CoreServices
+from vibesys.run.host import CoreHost
+from vs_core.api import initial_state
+from vs_project.api import FakeStateStore, Project
+from vs_runtime.api import ArtifactStore
+from vs_runtime.api.core import CoreRuntimeBindings, RunTiming
+from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
+from vs_runtime.api.infrastructure import create_run_control_channel
+from vs_runtime.api.testing import FakeRunControlEventSink
+from vs_sim.api.testing import SimThreads, VirtualClock, run_virtual
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from vibesys.run.integration import LocalRunIntegration
+    from vs_core.api import CoreState
+    from vs_runtime.api import Evaluation, RunFacts
+    from vs_runtime.api.core import AgentEvaluationBridge, CoreRuntime, OperationCatalog
+    from vs_runtime.api.infrastructure import OwnedWorkspaces, WorkspaceHolds
+
+
+class BridgeStartError(RuntimeError):
+    """The test bridge's listener service could not start."""
+
+    def __init__(self) -> None:
+        super().__init__("bridge startup interrupted")
+
+
+class BridgeStartCancelled(asyncio.CancelledError):
+    """The test bridge's listener startup was cancelled."""
+
+    def __init__(self) -> None:
+        super().__init__("bridge startup interrupted")
+
+
+class BridgeCloseError(RuntimeError):
+    """The test bridge could not release its listener."""
+
+    def __init__(self) -> None:
+        super().__init__("bridge close failed")
+
+
+class _FailingBridge:
+    """An evaluation bridge that owns its attached shell and then fails to serve."""
+
+    def __init__(
+        self,
+        start_error: type[BaseException] = BridgeStartError,
+        *,
+        close_fails: bool = False,
+    ) -> None:
+        self.shell: CoreRuntime | None = None
+        self.closed = False
+        self._start_error = start_error
+        self._close_fails = close_fails
+
+    def attach(self, shell: CoreRuntime, _clock: object) -> None:
+        self.shell = shell
+
+    async def serve(self) -> None:
+        raise self._start_error
+
+    async def close(self) -> None:
+        self.closed = True
+        if self._close_fails:
+            raise BridgeCloseError
+
+    def unacknowledged(self) -> tuple[str, ...]:
+        return ()
+
+
+class _FollowingWorkspaces:
+    """Minimal owned-workspace fake for the startup ownership boundary."""
+
+    def __init__(self) -> None:
+        self.holds: Callable[[], WorkspaceHolds] | None = None
+
+    def follow(self, holds: Callable[[], WorkspaceHolds]) -> None:
+        self.holds = holds
+
+    async def release_unheld(self) -> None:
+        assert self.holds is not None
+
+
+@dataclass(frozen=True)
+class _Integration:
+    control: object
+
+
+def _declared_state() -> CoreState:
+    state = initial_state()
+    return state.model_copy(
+        update={"run": state.run.model_copy(update={"declaration": counter.declaration})}
+    )
+
+
+def _startup_host(
+    tmp_path: Path, bridge: _FailingBridge
+) -> tuple[CoreHost, LocalRunIntegration, VirtualClock]:
+    """Build the public product boundary around the configured bridge fault."""
+    project = Project.open(tmp_path)
+    clock = VirtualClock(at=1.0)
+    threads = SimThreads(clock)
+    store = FakeStateStore()
+    bindings = CoreRuntimeBindings(transitions=ShellTraceTransitions())
+    namespace = project.state.state_store_namespace("startup-ownership")
+    services = CoreServices(
+        run_id="startup-ownership",
+        search=counter,
+        config=CounterConfig(),
+        state=_declared_state(),
+        bindings=bindings,
+        catalog=cast("OperationCatalog", object()),
+        store=store,
+        publications=namespace,
+        receipts=namespace,
+        evaluation=cast("ClosableEvaluation", object()),
+        artifacts=ArtifactStore(namespace),
+        clock=clock,
+        agent_evaluation=cast("AgentEvaluationBridge", bridge),
+    )
+    workspaces = _FollowingWorkspaces()
+    host = CoreHost(
+        cast("OwnedWorkspaces", workspaces),
+        cast("Evaluation", object()),
+        cast("RunFacts", object()),
+        services,
+        RunTiming(clock, 60.0, threads),
+    )
+    integration = cast(
+        "LocalRunIntegration",
+        _Integration(create_run_control_channel(FakeRunControlEventSink(), threads=threads)),
+    )
+    return host, integration, clock
+
+
+def test_a_bridge_startup_failure_closes_the_bridge_and_releases_the_run_lease(
+    tmp_path: Path,
+) -> None:
+    """Once core starts, every bridge-start exit still unwinds both product-owned resources."""
+    bridge = _FailingBridge()
+    host, integration, clock = _startup_host(tmp_path, bridge)
+
+    async def exercise() -> None:
+        with pytest.raises(BridgeStartError, match="bridge startup interrupted"):
+            await drive_core_run(host, integration)
+
+    run_virtual(clock, exercise())
+
+    assert bridge.closed
+    assert bridge.shell is not None
+    assert not bridge.shell.holds_lease(now_at=clock.now())
+
+
+@pytest.mark.parametrize("start_error", [BridgeStartError, BridgeStartCancelled])
+def test_a_bridge_startup_interruption_survives_a_close_failure(
+    tmp_path: Path, start_error: type[BaseException]
+) -> None:
+    """Bridge cleanup cannot replace the startup failure or cancellation it followed."""
+    bridge = _FailingBridge(start_error, close_fails=True)
+    host, integration, clock = _startup_host(tmp_path, bridge)
+
+    async def exercise() -> BaseException:
+        with pytest.raises(start_error, match="bridge startup interrupted") as failure:
+            await drive_core_run(host, integration)
+        return failure.value
+
+    failure = run_virtual(clock, exercise())
+
+    assert failure.__notes__ == [
+        "Additional error while closing the agent evaluation bridge: "
+        "BridgeCloseError: bridge close failed"
+    ]
+    assert bridge.closed
+    assert bridge.shell is not None
+    assert not bridge.shell.holds_lease(now_at=clock.now())

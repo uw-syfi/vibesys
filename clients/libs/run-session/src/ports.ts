@@ -9,6 +9,7 @@ import type {
   IterationResult,
   ProtocolResponse,
   RequestInput,
+  RunEvent,
   RunSnapshot,
   TuiDefaults,
 } from '@vibesys/contracts';
@@ -55,6 +56,20 @@ export type RunCommandOutcome =
     }
   | {readonly kind: 'rejected'; readonly message: string | null};
 
+/** Optional thread selection and caller-owned cancellation for one experiment-chat turn. */
+export interface WebChatOptions {
+  readonly threadId?: string;
+  readonly signal?: AbortSignalLike;
+}
+
+export type ChatResult = NonNullable<ProtocolResponse['chat']>;
+
+/** The answer and its authoritative response events, before the session folds them. */
+export interface ChatResponse {
+  readonly chat: ChatResult;
+  readonly events: readonly RunEvent[];
+}
+
 /** The run behind one control transport: its snapshot and its persistent event stream. */
 export interface RunConnection {
   /**
@@ -68,6 +83,8 @@ export interface RunConnection {
     expectedStoreId: string,
     signal: AbortSignalLike,
   ): Promise<IterationLoad>;
+  /** Ask the run's experiment-chat agent, retaining events for the session fold. */
+  ask(text: string, options?: WebChatOptions): Promise<ChatResponse>;
   /** Deliver one lifecycle command and resolve its wire response to a semantic outcome. */
   command(input: RunCommand): Promise<RunCommandOutcome>;
   /** Read the server's presentation defaults without making UI code name the transport. */

@@ -6,8 +6,9 @@ the system prompt read from a template file, the capabilities the provider must 
 tools the agent is given. Each role's id comes from the search's id scheme, so the roles the
 search asks and the roles the host declares cannot drift apart.
 
-The implementer and the judge carry the bridged evaluation tool; no other role carries a tool,
-so none needs an MCP server.
+The implementer and the judge carry the bridged evaluation tool. The orchestrator and the
+implementer also carry the read-only queue status tool, so they can weigh how long a queued
+evaluation will wait when they choose and pace work. The profiler carries no tool.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from vibesys.core_roles import (
     READER,
     RoleKind,
     core_role,
+    reading_queue_status,
 )
 from vibesys.orchestration.dynamic.core_policy.api import prompts
 from vibesys.orchestration.dynamic.search import api as search
@@ -43,8 +45,8 @@ def _role(role: Role, kind: RoleKind) -> AgentRole:
     )
 
 
-ORCHESTRATOR = _role(search.PLANNER, READER)
-IMPLEMENTER = _role(search.IMPLEMENTER, MEASURING_WRITER)
+ORCHESTRATOR = _role(search.PLANNER, reading_queue_status(READER))
+IMPLEMENTER = _role(search.IMPLEMENTER, reading_queue_status(MEASURING_WRITER))
 JUDGE = _role(search.JUDGE, MEASURING_READER)
 PROFILER = _role(search.PROFILER, CONTINUING_READER)
 OUTLINER = _role(search.OUTLINER, READER)

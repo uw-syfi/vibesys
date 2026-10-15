@@ -161,6 +161,17 @@ def _rows(*rows: tuple[str, str]) -> str:
     return "".join(f"{proc}, {uuid}\n" for proc, uuid in rows)
 
 
+class _FakeGpuContentionEvents:
+    """Records every contention observation the monitor publishes to it."""
+
+    def __init__(self) -> None:
+        self.observations: list[tuple[str, int]] = []
+
+    def contention_detected(self, *, gpu_uuid: str, new_process_count: int, detail: str) -> None:
+        del detail
+        self.observations.append((gpu_uuid, new_process_count))
+
+
 class TestMonitorLifecycle:
     def _monitor(
         self, tmp_path: Path, telemetry: FakeGpuTelemetry, threads: SimThreads
@@ -221,6 +232,59 @@ class TestMonitorLifecycle:
             assert any(p["pid"] == 200 for p in status.new_procs)
 
         threads.run(case)
+
+    def test_new_pid_publishes_one_contention_observation(self, tmp_path: Path) -> None:
+        """A newly observed process reaches the injected events seam, best-effort."""
+        telemetry = FakeGpuTelemetry(processes=_rows((BASELINE_PROC, GPU_A)))
+        threads = SimThreads()
+        events = _FakeGpuContentionEvents()
+        mon = GpuContentionMonitor(
+            log_dir=tmp_path,
+            gpu_uuid=GPU_A,
+            interval=_INTERVAL,
+            telemetry=telemetry,
+            threads=threads,
+            clock=ManualClock(1000.0),
+            events=events,
+        )
+
+        def case() -> None:
+            mon.start()
+            threads.sleep(_INTERVAL)
+            telemetry.processes = _rows((BASELINE_PROC, GPU_A), (NEW_PROC, GPU_A))
+            threads.sleep(_INTERVAL * 2)
+            mon.stop()
+
+        threads.run(case)
+
+        # The monitor republishes on every poll while the new process stays
+        # live, not only on the tick it first appeared; every observation
+        # names the right GPU and count.
+        assert events.observations
+        assert set(events.observations) == {(GPU_A, 1)}
+
+    def test_no_contention_publishes_nothing(self, tmp_path: Path) -> None:
+        telemetry = FakeGpuTelemetry(processes=_rows((BASELINE_PROC, GPU_A)))
+        threads = SimThreads()
+        events = _FakeGpuContentionEvents()
+        mon = GpuContentionMonitor(
+            log_dir=tmp_path,
+            gpu_uuid=GPU_A,
+            interval=_INTERVAL,
+            telemetry=telemetry,
+            threads=threads,
+            clock=ManualClock(1000.0),
+            events=events,
+        )
+
+        def case() -> None:
+            mon.start()
+            threads.sleep(_INTERVAL * 2)
+            mon.stop()
+
+        threads.run(case)
+
+        assert events.observations == []
 
     def test_new_pid_on_different_gpu_ignored(self, tmp_path: Path) -> None:
         """A new PID on a different GPU is not contention."""

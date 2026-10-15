@@ -694,7 +694,9 @@ const runEventSchema: Record<string, unknown> = {
         "workspace_snapshot",
         "run_configured",
         "framework_warning",
-        "winner_selected"
+        "winner_selected",
+        "workstream_finished",
+        "turn_usage_recorded"
       ],
       "title": "EventType",
       "type": "string"
@@ -804,7 +806,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "GateFinishedData": {
       "additionalProperties": false,
-      "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries the trailing command\noutput on failure.",
+      "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries the trailing command\noutput on failure. ``round_label`` groups the per-recipe local-validation\ngates of one attempt back together, so a client folds them into a\npass-fraction itself rather than the backend aggregating one.",
       "properties": {
         "kind": {
           "const": "gate_finished",
@@ -879,6 +881,18 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Output Tail"
+        },
+        "round_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Round Label"
         },
         "source": {
           "$ref": "#/$defs/FrameworkSource",
@@ -1097,7 +1111,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "JudgeResultData": {
       "additionalProperties": false,
-      "description": "Verdict and feedback returned by the judge.",
+      "description": "Verdict and feedback returned by the judge.\n\nSee ``vibesys.events.JudgeResultData`` for ``skipped``/``skip_reason``/\n``implementer_outcome``.",
       "properties": {
         "kind": {
           "const": "judge_result",
@@ -1120,6 +1134,42 @@ const runEventSchema: Record<string, unknown> = {
         "attempt": {
           "title": "Attempt",
           "type": "integer"
+        },
+        "skipped": {
+          "default": false,
+          "title": "Skipped",
+          "type": "boolean"
+        },
+        "skip_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skip Reason"
+        },
+        "implementer_outcome": {
+          "anyOf": [
+            {
+              "enum": [
+                "continue",
+                "supported",
+                "nominated",
+                "disproven",
+                "implementation_failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Implementer Outcome"
         }
       },
       "required": [
@@ -1571,7 +1621,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RunConfiguredData": {
       "additionalProperties": false,
-      "description": "One per run: the resolved configuration a loop starts with.",
+      "description": "One per run: the resolved configuration a loop starts with.\n\nSee ``vibesys.events.RunConfiguredData`` for ``max_continuation_rounds``/\n``max_unmeasured_turns``.",
       "properties": {
         "kind": {
           "const": "run_configured",
@@ -1639,6 +1689,30 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Pareto Objectives"
+        },
+        "max_continuation_rounds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Continuation Rounds"
+        },
+        "max_unmeasured_turns": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Unmeasured Turns"
         },
         "source": {
           "$ref": "#/$defs/FrameworkSource",
@@ -2160,6 +2234,95 @@ const runEventSchema: Record<string, unknown> = {
       "title": "ToolResultData",
       "type": "object"
     },
+    "TurnUsageData": {
+      "additionalProperties": false,
+      "description": "Settled token and cost accounting for one finished agent turn.\n\nSee ``vibesys.events.TurnUsageData``.",
+      "properties": {
+        "kind": {
+          "const": "turn_usage_recorded",
+          "default": "turn_usage_recorded",
+          "title": "Kind",
+          "type": "string"
+        },
+        "input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "cache_creation_input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Creation Input Tokens"
+        },
+        "cache_read_input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Read Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "total_cost_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Cost Usd"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        }
+      },
+      "title": "TurnUsageData",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
     "UsageUpdateData": {
       "additionalProperties": false,
       "description": "Token usage reported by the active model.",
@@ -2306,6 +2469,130 @@ const runEventSchema: Record<string, unknown> = {
       "required": [
         "kind"
       ]
+    },
+    "WorkstreamFailureData": {
+      "additionalProperties": false,
+      "description": "One workstream's typed account of why it ended without a measured candidate.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/WorkstreamFailureKind"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "turns": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Turns"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "WorkstreamFailureData",
+      "type": "object"
+    },
+    "WorkstreamFailureKind": {
+      "description": "Why a workstream ended without a measured candidate. Closed.\n\nSee ``vibesys.events.WorkstreamFailureKind``, which this mirrors\nmember-for-member.",
+      "enum": [
+        "stopped",
+        "parent-unverified",
+        "refused",
+        "ended",
+        "out-of-budget",
+        "turn-failed",
+        "invalid-reply",
+        "render-failed",
+        "wait-refused",
+        "checkpoint-declined",
+        "no-changed-candidate",
+        "implementation-failed",
+        "review-rejected",
+        "no-trusted-evidence",
+        "evidence-refused",
+        "evidence-undecodable",
+        "profile-capture-unavailable",
+        "turn-limit",
+        "repeated-turn"
+      ],
+      "title": "WorkstreamFailureKind",
+      "type": "string"
+    },
+    "WorkstreamFinishedData": {
+      "additionalProperties": false,
+      "description": "One workstream (one dynamic-run round) ended; its typed failure, if any.\n\nSee ``vibesys.events.WorkstreamFinishedData`` for why ``setup_failure``\nand ``refunded`` are always ``False`` from this event's only current\nproducer.",
+      "properties": {
+        "kind": {
+          "const": "workstream_finished",
+          "default": "workstream_finished",
+          "title": "Kind",
+          "type": "string"
+        },
+        "setup_failure": {
+          "title": "Setup Failure",
+          "type": "boolean"
+        },
+        "refunded": {
+          "title": "Refunded",
+          "type": "boolean"
+        },
+        "repeated_error": {
+          "title": "Repeated Error",
+          "type": "boolean"
+        },
+        "last_error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamFailureData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "kind",
+        "setup_failure",
+        "refunded",
+        "repeated_error"
+      ],
+      "title": "WorkstreamFinishedData",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -2462,9 +2749,11 @@ const runEventSchema: Record<string, unknown> = {
               "todo_update": "#/$defs/TodoUpdateData",
               "tool_call": "#/$defs/ToolCallData",
               "tool_result": "#/$defs/ToolResultData",
+              "turn_usage_recorded": "#/$defs/TurnUsageData",
               "usage_update": "#/$defs/UsageUpdateData",
               "winner_selected": "#/$defs/WinnerSelectedData",
-              "workspace_snapshot": "#/$defs/WorkspaceSnapshotData"
+              "workspace_snapshot": "#/$defs/WorkspaceSnapshotData",
+              "workstream_finished": "#/$defs/WorkstreamFinishedData"
             },
             "propertyName": "kind"
           },
@@ -2582,6 +2871,12 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/WinnerSelectedData"
+            },
+            {
+              "$ref": "#/$defs/WorkstreamFinishedData"
+            },
+            {
+              "$ref": "#/$defs/TurnUsageData"
             }
           ]
         },

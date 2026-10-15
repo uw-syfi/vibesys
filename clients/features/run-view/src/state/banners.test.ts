@@ -1,7 +1,12 @@
 import {describe, expect, test} from 'bun:test';
 import {BackendClientError, type RunEvent} from '@vibesys/contracts';
 import {runStep, type WebSessionState, type WebSessionStatus} from '@vibesys/run-session';
-import {type CoreRunStatus, hasRunEnded, initialCoreState} from '@vibesys/run-state';
+import {
+  type CoreRunStatus,
+  hasRunEnded,
+  initialCoreState,
+  type RunStartupState,
+} from '@vibesys/run-state';
 import {
   CONTROLS_BANNER_COPY,
   connectionBanners,
@@ -10,9 +15,12 @@ import {
   LIVE_SESSION_HEADER_COPY,
   PAGE_CONNECTION_BANNER_COPY,
   pageHeader,
+  STARTUP_QUIET_AFTER_MS,
   STARTUP_STAGE_LABELS,
   STREAM_BANNER_COPY,
+  startupStatusLabel,
 } from './banners.js';
+import {formatElapsed} from './duration.js';
 
 /** Every status core state can hold, so a new one is a compile error here. */
 const RUN_STATUSES: readonly CoreRunStatus[] = [
@@ -106,6 +114,9 @@ const STARTUP_PROGRESS: RunEvent = {
   },
 };
 
+/** Any instant; headers that are not about startup ignore it. */
+const NOW = Date.parse('2026-09-12T10:20:00Z');
+
 describe('connectionBanners', () => {
   test('names a cold unreachable gateway whichever session channel reports first', () => {
     const run = initialCoreState();
@@ -116,7 +127,7 @@ describe('connectionBanners', () => {
       expect(connectionBanners(run, session).page).toEqual({
         message: PAGE_CONNECTION_BANNER_COPY.cold,
       });
-      expect(pageHeader(run, session)).toEqual({
+      expect(pageHeader(run, session, NOW)).toEqual({
         heading: LIVE_SESSION_HEADER_COPY.unreachable.heading,
         status: {
           className: 'status-unreachable',
@@ -127,7 +138,7 @@ describe('connectionBanners', () => {
 
     const beforeEitherFailure = sessionState('connecting', 'up', false);
     expect(connectionBanners(run, beforeEitherFailure).page).toBeNull();
-    expect(pageHeader(run, beforeEitherFailure)).toEqual({
+    expect(pageHeader(run, beforeEitherFailure, NOW)).toEqual({
       heading: LIVE_SESSION_HEADER_COPY.connecting.heading,
       status: {
         className: 'status-connecting',
@@ -161,8 +172,10 @@ describe('connectionBanners', () => {
 
   test('reserves replay loading copy for replay-driven pages', () => {
     const run = initialCoreState();
-    expect(pageHeader(run, null).heading).toBe('Replay is loading');
-    expect(pageHeader(run, sessionState('connected', 'up', true)).heading).toBe('Run overview');
+    expect(pageHeader(run, null, NOW).heading).toBe('Replay is loading');
+    expect(pageHeader(run, sessionState('connected', 'up', true), NOW).heading).toBe(
+      'Run overview',
+    );
   });
 
   test('takes the banner down on the run-ending event itself, folded by the real reducer', () => {
@@ -323,14 +336,14 @@ describe('the status chip while a run is starting', () => {
 
   test('narrates the stage and progress of the environment opening, worded like the Host Panel', () => {
     const run = runStep(runWith('starting'), {type: 'events', events: [STARTUP_PROGRESS]}).state;
-    expect(pageHeader(run, connected).status).toEqual({
+    expect(pageHeader(run, connected, STARTUP_AT + 5_000).status).toEqual({
       className: 'status-starting',
-      label: `${STARTUP_STAGE_LABELS.building_image} 12/30: RUN pip install`,
+      label: `${STARTUP_STAGE_LABELS.building_image} 12/30: RUN pip install · 5s`,
     });
   });
 
   test('keeps the bare status word while starting has reported no progress yet', () => {
-    expect(pageHeader(runWith('starting'), connected).status).toEqual({
+    expect(pageHeader(runWith('starting'), connected, NOW).status).toEqual({
       className: 'status-starting',
       label: 'starting',
     });
@@ -347,11 +360,98 @@ describe('the status chip while a run is starting', () => {
     expect(run.startup).toEqual({
       stage: 'building_image',
       progress: {done: 12, total: 30, label: 'RUN pip install'},
+      stageSince: STARTUP_PROGRESS.timestamp,
+      lastActivityAt: STARTUP_PROGRESS.timestamp,
     });
-    expect(pageHeader(run, connected).status).toEqual({
+    expect(pageHeader(run, connected, NOW).status).toEqual({
       className: 'status-running',
       label: 'running',
     });
+  });
+});
+
+const STARTUP_AT = Date.parse(STARTUP_PROGRESS.timestamp);
+
+function startupWith(
+  stage: RunStartupState['stage'],
+  progress: RunStartupState['progress'],
+  stageSinceMs: number,
+  lastActivityMs: number,
+): RunStartupState {
+  return {
+    stage,
+    progress,
+    stageSince: new Date(stageSinceMs).toISOString(),
+    lastActivityAt: new Date(lastActivityMs).toISOString(),
+  };
+}
+
+describe('startupStatusLabel', () => {
+  const T0 = Date.parse('2026-09-12T10:00:00Z');
+  const SECOND = 1000;
+  const BUILD_PROGRESS = {done: 7, total: 8, label: 'WORKDIR'};
+
+  test('renders the stage, its progress and the time in the stage', () => {
+    const table: ReadonlyArray<
+      readonly [RunStartupState['stage'], RunStartupState['progress'], number, string]
+    > = [
+      ['resolving', null, 0, 'Resolving · 0s'],
+      ['resolving', null, 45 * SECOND, 'Resolving · 45s'],
+      ['building_image', BUILD_PROGRESS, 252 * SECOND, 'Building image 7/8: WORKDIR · 4m12s'],
+      ['building_image', {done: 1, total: null, label: ''}, 3 * SECOND, 'Building image 1/? · 3s'],
+      ['starting_container', null, 3783 * SECOND, 'Starting container · 1h03m'],
+    ];
+    for (const [stage, progress, elapsed, expected] of table) {
+      // Heard from just now, so only the stage clock is under test.
+      const startup = startupWith(stage, progress, T0, T0 + elapsed);
+      expect(startupStatusLabel(startup, T0 + elapsed)).toBe(expected);
+    }
+  });
+
+  test('says nothing is being heard only once the silence reaches the threshold', () => {
+    const startup = startupWith('building_image', BUILD_PROGRESS, T0, T0 + 10 * SECOND);
+    const quietFrom = T0 + 10 * SECOND + STARTUP_QUIET_AFTER_MS;
+    for (const [now, quiet] of [
+      [T0 + 10 * SECOND, false],
+      [quietFrom - 1, false],
+      [quietFrom, true],
+      [quietFrom + 60 * SECOND, true],
+    ] as const) {
+      const label = startupStatusLabel(startup, now);
+      expect({now: now - T0, quiet: label.includes('quiet for')}).toEqual({now: now - T0, quiet});
+    }
+    expect(startupStatusLabel(startup, quietFrom + 60 * SECOND)).toBe(
+      'Building image 7/8: WORKDIR · 2m10s · quiet for 2m00s',
+    );
+  });
+
+  test('clamps a clock earlier than the timestamps to zero', () => {
+    const startup = startupWith('resolving', null, T0, T0);
+    expect(startupStatusLabel(startup, T0 - 90 * SECOND)).toBe('Resolving · 0s');
+  });
+
+  test('drops the timing it cannot parse rather than printing it', () => {
+    const startup = {...startupWith('resolving', null, T0, T0), stageSince: 'not a time'};
+    expect(startupStatusLabel(startup, T0 + 5 * SECOND)).toBe('Resolving');
+  });
+});
+
+describe('formatElapsed', () => {
+  test('uses seconds, minutes with seconds, then hours with minutes', () => {
+    const table: ReadonlyArray<readonly [number, string]> = [
+      [-5000, '0s'],
+      [0, '0s'],
+      [999, '0s'],
+      [45_000, '45s'],
+      [59_999, '59s'],
+      [60_000, '1m00s'],
+      [252_000, '4m12s'],
+      [3_599_000, '59m59s'],
+      [3_600_000, '1h00m'],
+      [3_783_000, '1h03m'],
+      [Number.NaN, '0s'],
+    ];
+    for (const [ms, expected] of table) expect(formatElapsed(ms)).toBe(expected);
   });
 });
 
@@ -368,7 +468,7 @@ function checkCombination(
   const ended = hasRunEnded(run);
   const session = sessionState(sessionStatus, controls, hasSnapshot);
   const banners = connectionBanners(run, session);
-  const header = pageHeader(run, session);
+  const header = pageHeader(run, session, NOW);
   const empty = emptyTranscriptCopy(run, banners);
   const where = {runStatus, sessionStatus, controls, hasSnapshot};
   const down = controls !== 'up';

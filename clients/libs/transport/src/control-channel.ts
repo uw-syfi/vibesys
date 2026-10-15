@@ -832,10 +832,38 @@ export class ControlChannel {
       this.#exhaust();
       return;
     }
-    this.#cancelRedial = this.#scheduleTimeout(() => {
-      this.#cancelRedial = null;
-      this.#startDial();
-    }, delayMs);
+    // Publish an owner before invoking the structural scheduler: it may fire
+    // synchronously, and close or an explicit reconnect may also re-enter while
+    // it is acquiring the underlying cancellation handle.
+    let scheduledCancel: (() => void) | null = null;
+    const cancelRedial = (): void => scheduledCancel?.();
+    this.#cancelRedial = cancelRedial;
+    try {
+      scheduledCancel = this.#scheduleTimeout(() => {
+        // A cancelled scheduler is allowed to deliver a late callback. Only
+        // the owner still installed in the slot may start this dial.
+        if (this.#cancelRedial !== cancelRedial) return;
+        this.#cancelRedial = null;
+        this.#startDial();
+      }, delayMs);
+    } catch (error) {
+      // The callback may have fired before the scheduler threw. In that case
+      // it already consumed this owner and started the recovery, so the stale
+      // acquisition failure has no transition left to settle. Otherwise a
+      // retry timer could not be acquired: make that the typed terminal cause
+      // of this bounded series and answer every request the retry owned. This
+      // path is reached from void transport callbacks and must never escape.
+      if (this.#cancelRedial === cancelRedial) {
+        this.#cancelRedial = null;
+        this.#lastError = channelError(error);
+        this.#exhaust();
+      }
+      return;
+    }
+    // A synchronous callback, close, or explicit reconnect already consumed
+    // the owner before its concrete handle existed. Retire that handle now
+    // instead of restoring an already-finished redial into the ownership slot.
+    if (this.#cancelRedial !== cancelRedial) scheduledCancel();
   }
 
   /**

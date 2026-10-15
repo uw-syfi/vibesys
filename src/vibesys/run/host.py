@@ -20,13 +20,15 @@ from vibesys.run.core_services import (
     agent_session_spec,
     build_core_services,
 )
-from vibesys.run.evaluation import create_evaluation
+from vibesys.run.evaluation import CoreLocalValidationEvents, create_evaluation
+from vibesys.run.evaluation_socket import prepare_queue_status_socket
 from vibesys.run.measurement_events import CoreMeasurementEvents
 from vibesys.run.profilers import WITHHELD_TOOLS_ENV, ProfilerToolOffer, profiler_tool_offer
+from vibesys.run.queue_status import queue_status_reader, queue_status_service
 from vibesys.run.resources import open_run_resources
 from vibesys.run.slurm_evaluation import SlurmSemanticEvaluationExecutor
 from vs_agent.api import AgentSessionKey, AgentSessionState, DurableSessionStore
-from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor
+from vs_runtime.api import PollingEvaluationExecutor, RetryingEvaluationExecutor, TryHandles
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
     BlockingOperations,
@@ -67,15 +69,16 @@ if TYPE_CHECKING:
         RunFacts,
         Workspaces,
     )
-    from vs_runtime.api.core import RunTiming
+    from vs_runtime.api.core import RunTiming, StageOutputOpener
     from vs_runtime.api.infrastructure import (
         AgentExecutionEnvironment,
+        OwnedWorkspaces,
         RunState,
         StopTimer,
         WorkspaceRuntime,
     )
     from vs_sandbox.api import ComputeBackendImpl, DockerSandbox
-    from vs_sim.api import BlockingRunner, Network, ReleaseStack, SleepingClock
+    from vs_sim.api import BlockingRunner, Network, ReleaseStack
 
 
 type StatelessToolServer = Callable[[object], ToolServerDescriptor | None]
@@ -90,12 +93,19 @@ def _profiler_tool_offer(resources: _PreparedRun) -> ProfilerToolOffer:
     )
 
 
-def _tool_context(resources: _PreparedRun) -> AgentToolContext:
+def _tool_context(resources: _PreparedRun, queue_status_socket: Path) -> AgentToolContext:
     env = resources.environment_resources.view.profiler_mcp_env
     withheld = _profiler_tool_offer(resources).withheld
     if withheld:
         env = (*env, (WITHHELD_TOOLS_ENV, ",".join(withheld)))
-    return AgentToolContext(resources.facts.profiler_id, env)
+    return AgentToolContext(
+        resources.facts.profiler_id, env, queue_status_socket=str(queue_status_socket)
+    )
+
+
+def _slurm_handle_root(namespace: StateNamespace) -> Path:
+    """Where the run's cluster evaluation executor keeps its handles and cluster records."""
+    return namespace.external_directory() / "slurm-provider-handles"
 
 
 _NO_PROFILE_CAPTURE_NOTE = (
@@ -157,6 +167,7 @@ class _ProductHostFactory:
             plugin.agents,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
         _require_supported_fallback(self.request.config.agent.quota.to_policy(), agent_specs)
         resources = open_run_resources(
@@ -266,14 +277,13 @@ class _ProductHostFactory:
             reasoning_effort=spec.reasoning_effort,
         )
 
-    def _offered_roles(self, resources: _PreparedRun) -> tuple[AgentRole, ...]:
+    def _offered_roles(self, context: AgentToolContext) -> tuple[AgentRole, ...]:
         """The plugin's roles, without a stateless tool whose provider declines for this run.
 
         A provider that declines (the selected profiler is ``none``) says the run has no such
         tool, and a strategy only runs the turns that use it when the run offers it. A stateless
         tool with no provider at all is a wiring mistake and stays for composition to refuse.
         """
-        context = _tool_context(resources)
         declined = frozenset(
             tool
             for tool, server in (self.stateless_tool_servers or {}).items()
@@ -292,9 +302,8 @@ class _ProductHostFactory:
             for role in self.plugin.agents
         )
 
-    def _stateless_tool_servers(self, resources: _PreparedRun) -> dict[str, ToolServerDescriptor]:
+    def _stateless_tool_servers(self, context: AgentToolContext) -> dict[str, ToolServerDescriptor]:
         """The server of each stateless tool this run's environment can serve, by tool id."""
-        context = _tool_context(resources)
         served = {
             tool: server(context) for tool, server in (self.stateless_tool_servers or {}).items()
         }
@@ -330,6 +339,7 @@ class _ProductHostFactory:
             self.request.config,
             backend=self.request.agent_backend,
             provider=self.request.cli_provider,
+            allow_unvetted_model=self.request.allow_unvetted_model,
         )
         # One client serves every role, so each role's own model and effort ride the spec.
         base = replace(
@@ -386,8 +396,15 @@ class _ProductHostFactory:
             project.state, AgentSessionKey.for_member("core", "run")
         )
         namespace = project.project.state.local_namespace(project.state.run_id, "core-evaluation")
-        executor = self._semantic_executor(
-            self.integration, resources, workspaces, namespace, self.timing.clock
+        # Each stage's output goes to the run's log store under its gate, named by the
+        # measurement's handle and try, as its gate events name it: an in-process stage's as
+        # its command prints it, a Slurm stage's as each scheduler poll reads it.
+        tries = TryHandles()
+        stage_output = tries.stage_output(resources.stage_output)
+        executor = self._semantic_executor(resources, workspaces, namespace, stage_output)
+        tool_context = _tool_context(
+            resources,
+            self._serve_queue_status(resources, _slurm_handle_root(namespace), ownership),
         )
         configuration = partial(self._agent_configuration, resources)
         return build_core_services(
@@ -401,14 +418,20 @@ class _ProductHostFactory:
                 evaluation=RetryingEvaluationExecutor(
                     executor
                     if executor is not None
-                    else PollingEvaluationExecutor(evaluation, workspaces, clock=self.timing.clock),
+                    else PollingEvaluationExecutor(
+                        evaluation,
+                        workspaces,
+                        clock=self.timing.clock,
+                        stage_output=stage_output,
+                    ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
                         project.state.run_id, "core-evaluation-tries"
                     ),
+                    tries=tries,
                 ),
                 environment=self._core_environment(resources),
-                roles=self._offered_roles(resources),
+                roles=self._offered_roles(tool_context),
                 role_models={
                     role: spec.model
                     for role, spec in specs.items()
@@ -424,8 +447,15 @@ class _ProductHostFactory:
                 network=self.network,
                 agent_lifecycle=self.integration.agent_execution_event,
                 evaluation_diagnostics=self._evaluation_diagnostic,
-                stateless_tool_servers=self._stateless_tool_servers(resources),
+                stateless_tool_servers=self._stateless_tool_servers(tool_context),
                 commands=agent_runtime.commands,
+                # No round_label: this instance is built once for the run and
+                # shared across every candidate's local-validation attempts,
+                # so no single label identifies "one attempt" for it (see
+                # CoreLocalValidationEvents.__init__). Its GATE_FINISHED
+                # events stay ungrouped until this path carries its own
+                # per-attempt identity to pass through here.
+                local_validation_events=CoreLocalValidationEvents(self.integration.events),
                 measurement_observer=CoreMeasurementEvents(self.integration.events),
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
@@ -439,6 +469,33 @@ class _ProductHostFactory:
                 ),
             ),
         )
+
+    def _serve_queue_status(
+        self, resources: _PreparedRun, handle_root: Path, ownership: ReleaseStack
+    ) -> Path:
+        """Serve the run's read-only queue status to its agents; return the socket path.
+
+        The service stops when ``ownership`` releases; its socket sits in the run's private
+        socket directory, which every agent container mounts.
+        """
+        project = resources.project_resources
+        socket_path = prepare_queue_status_socket(project.project.root, project.state.run_id)
+        service = queue_status_service(
+            queue_status_reader(
+                resources.environment_resources.view,
+                run_id=project.state.run_id,
+                handle_root=handle_root,
+                processes=self.integration.system.slurm_processes,
+                clock=self.timing.clock,
+            ),
+            socket_path,
+            network=self.network,
+            threads=self.integration.threads,
+            clock=self.timing.clock,
+        )
+        ownership.callback(service.close)
+        service.start()
+        return socket_path
 
     def _core_environment(self, resources: _PreparedRun) -> CoreEnvironment:
         """The evaluation environment and product bounds as facts: capacity, pacing, lifecycle."""
@@ -457,6 +514,8 @@ class _ProductHostFactory:
             queue_allowance_seconds=config.evaluation.queue_allowance_seconds,
             observe_interval_seconds=config.evaluation.observe_interval_seconds,
             observe_backoff_cap_seconds=config.evaluation.observe_backoff_cap_seconds,
+            queue_wait_budget_seconds=config.evaluation.queue_wait_budget_seconds,
+            queue_notice_interval_seconds=config.evaluation.queue_notice_interval_seconds,
             request_retries=config.evaluation.request_retries(),
             max_run_seconds=config.run.max_run_seconds,
             cancellation_bound_seconds=config.run.cancellation_bound_seconds,
@@ -474,13 +533,12 @@ class _ProductHostFactory:
             ),
         )
 
-    @staticmethod
     def _semantic_executor(
-        integration: LocalRunIntegration,
+        self,
         resources: _PreparedRun,
         workspaces: Workspaces,
         namespace: StateNamespace,
-        clock: SleepingClock,
+        stage_output: StageOutputOpener,
     ) -> SlurmSemanticEvaluationExecutor | None:
         """Build the cluster's semantic execution adapter when the environment reports one."""
         cluster = resources.environment_resources.view.cluster_evaluation
@@ -493,10 +551,11 @@ class _ProductHostFactory:
             resources.evaluation_plan,
             workspaces,
             namespace,
-            namespace.external_directory() / "slurm-provider-handles",
-            clock=clock,
-            sleeper=clock,
-            processes=integration.system.slurm_processes,
+            _slurm_handle_root(namespace),
+            clock=self.timing.clock,
+            sleeper=self.timing.clock,
+            processes=self.integration.system.slurm_processes,
+            stage_output=stage_output,
         )
 
     async def stop_new_work(self) -> None:
@@ -524,7 +583,7 @@ class CoreHost:
     ``services.evaluation`` instead.
     """
 
-    workspaces: Workspaces
+    workspaces: OwnedWorkspaces
     evaluation: Evaluation
     facts: RunFacts
     services: CoreServices

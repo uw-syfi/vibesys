@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, HostResource, SandboxKind
+from vs_sim.api import DISCARD
 
 _PLUGIN_ID = "container-exit"
 
@@ -204,8 +205,9 @@ def _execute(
         log: Callable[[str], None] | None = None,
         image: str | None = None,
         clock: object,
+        events: object | None = None,
     ) -> _DaemonBackend:
-        del clock  # the fake backend records no timestamps
+        del clock, events  # the fake backend records no timestamps and has no device to watch
         backend = _DaemonBackend(
             log_dir,
             log=log,
@@ -219,7 +221,7 @@ def _execute(
     request = RunRequest(
         project_root=root,
         orchestration=OrchestrationDescriptor(id=_PLUGIN_ID, config_version=1, options={}),
-        config=Config.model_validate({"model": {"name": _PLUGIN_ID}}),
+        config=Config.model_validate({"model": {"name": "claude-sonnet-5"}}),
         input_bundle=load_task(root),
         objective="Improve the queue.",
         exp_name=_PLUGIN_ID,
@@ -322,5 +324,7 @@ def test_resuming_a_run_ends_only_the_containers_its_dead_host_left_behind(
 
 def _plant_container(engine: FakeDockerEngine, run_id: str) -> str:
     label = f"{RUN_ID_LABEL}={run_id}"
-    result = engine.run(["docker", "run", "-d", "--label", label, "agent-image"], timeout_seconds=1)
+    result = engine.run(
+        ["docker", "run", "-d", "--label", label, "agent-image"], timeout_seconds=1, output=DISCARD
+    )
     return result.stdout.strip()

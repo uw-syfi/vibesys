@@ -40,6 +40,7 @@ from vs_slurm.api import (
 
 if TYPE_CHECKING:
     from pathlib import Path
+from vs_sim.api import DISCARD
 
 _SUBMIT_BUDGET = 19
 _POLL_BUDGET = 3
@@ -356,7 +357,9 @@ def test_a_connector_prints_sacct_states_as_the_real_command_does(tmp_path: Path
     for flag in ("", "-P "):
         command = f"sacct -n {flag}-X -j {observed.job_id} --format=State,ExitCode"
         request = json.dumps({"version": 1, "operation": "exec", "command": command})
-        reply = connector.run(ProcessSpec(("c",), input=request.encode()), timeout=1)
+        reply = connector.run(
+            ProcessSpec(("c",), input=request.encode()), timeout=1, output=DISCARD
+        )
         assert isinstance(reply, ProcessOutcome)
         replies[flag] = json.loads(reply.stdout)["stdout"]
 
@@ -447,7 +450,9 @@ def test_a_connector_refuses_squeue_and_scancel_for_a_purged_job_as_slurm_does(
     replies = {}
     for command in (f"squeue -h -j {observed.job_id} -o %T", f"scancel {observed.job_id}"):
         request = json.dumps({"version": 1, "operation": "exec", "command": command})
-        reply = connector.run(ProcessSpec(("c",), input=request.encode()), timeout=1)
+        reply = connector.run(
+            ProcessSpec(("c",), input=request.encode()), timeout=1, output=DISCARD
+        )
         assert isinstance(reply, ProcessOutcome)
         replies[command.split()[0]] = json.loads(reply.stdout)
 
@@ -485,7 +490,7 @@ def test_trace_connector_enforces_the_connector_request_contract(
     )
 
     with pytest.raises(TypeError):
-        connector.run(ProcessSpec(("trace-connector",), input=payload), timeout=1)
+        connector.run(ProcessSpec(("trace-connector",), input=payload), timeout=1, output=DISCARD)
 
 
 def test_trace_connector_enforces_the_connector_response_bound(tmp_path: Path) -> None:
@@ -501,7 +506,9 @@ def test_trace_connector_enforces_the_connector_response_bound(tmp_path: Path) -
     ).encode()
 
     result = connector.run(
-        ProcessSpec(("trace-connector",), input=request, max_output_bytes=1), timeout=1
+        ProcessSpec(("trace-connector",), input=request, max_output_bytes=1),
+        timeout=1,
+        output=DISCARD,
     )
 
     assert isinstance(result, ProcessOutputTooLarge)

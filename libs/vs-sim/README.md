@@ -5,10 +5,11 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
 
 - `vs_sim.api` holds the role-named interfaces product code takes
   (`Clock`, `Sleeper`, `SleepingClock`, `BlockingRunner`, `SignalSource`,
-  `ProcessLauncher`, `Processes`, `StreamingCommand`, `RandomSource`, `Threads`, `Network`)
+  `ProcessLauncher`, `Processes`, `StreamingCommand`, `OutputSink`, `ByteSource`,
+  `RandomSource`, `Threads`, `Network`)
   and their real implementations (`SystemClock`, `MonotonicClock`, `ThreadBlockingRunner`,
   `LoopSignalSource`, `SubprocessLauncher`, `OsProcesses`, `SubprocessStreamingCommand`,
-  `SeededRandom`, `SystemRandomSource`, `OsThreads`, `UnixNetwork`).
+  `LocalFileSource`, `SeededRandom`, `SystemRandomSource`, `OsThreads`, `UnixNetwork`).
   `Threads` is the one interface for everything that blocks an operating-system thread:
   `spawn`, locks, reentrant locks, conditions, events, thread-local values, synchronous
   `sleep` and a monotonic `now`. `Processes` runs a command to completion in a process group
@@ -27,7 +28,8 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
   `GatedBlockingRunner`, which keeps a blocking call in flight until released), and a contract suite
   every implementation of `Clock`, `BlockingRunner`, `SignalSource`, `ProcessLauncher`,
   `Processes`, `StreamingCommand` (`ScriptedStreamingCommand` is its Fake; the real one runs it in
-  `tests/e2e`), `Threads` and `Network` passes.
+  `tests/e2e`), `OutputSink`, `ByteSource` (`FakeByteSource` is its Fake), `Threads` and
+  `Network` passes.
 - `SimThreads` simulates `Threads` cooperatively: every simulated thread is a real thread
   but only one runs at a time, and under a schedule seed the next one is drawn from the
   seed at every synchronization point (one seed, one interleaving). It shares the
@@ -38,6 +40,26 @@ timing: the clock, sleeping, seeds, signals, child processes and blocking calls.
   `SimNetwork` is the in-memory `Network` built on any `Threads`. Plain Python between two
   synchronization points is atomic, so this finds ordering bugs around locks, conditions,
   events and timers, not unsynchronized data races.
+
+## Command output
+
+A command's output goes through one write interface. Every runner (`Processes.run`,
+`StreamingCommand.run`) takes `output: OutputSink` and writes each chunk of stdout and
+stderr to it as it reads it; its result is the same whatever the sink is. Producers only
+write: they never know where the bytes are kept, chunked or shown. `DISCARD` is the
+explicit opt-out (today the default, until every caller passes a sink), `tee` sends one
+stream to several sinks, `Capture` keeps a bounded copy and counts what it dropped (the
+runners' own results use it), and `Lines` splits each stream into decoded lines for a
+parser such as the image build's step tracker. Writes for the two streams may arrive
+concurrently; each call's bytes stay contiguous.
+
+The read side is `ByteSource` (`size`, `read(offset, max_bytes)`): append-only bytes that
+may grow, wherever they live. `LocalFileSource` reads a file on this host; sources for a
+container's or a cluster's files belong to the libraries that own those transports, and
+report a shrink or a replacement through `SourceWatch` the same way.
+
+Process output is not read back for facts: a fact a caller needs is in the runner's typed
+result or an event, and the sink is for people following the command.
 
 Nothing here reads a wall clock to decide a test outcome. The virtual clock jumps
 only when every task waits, and refuses to idle (`VirtualDeadlockError`) instead of

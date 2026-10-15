@@ -36,6 +36,7 @@ from vs_sandbox.agent_gpu import (
     GpuLauncher,
 )
 from vs_sandbox.host_command_client import SOCKET_ENV, TOKEN_ENV
+from vs_sim.api import WorkerStartRefusedError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -47,6 +48,7 @@ _MAX_FRAME_BYTES = 4 * 1024 * 1024
 # How long close() waits for cancelled jobs to be torn down (their scancel round trips).
 _DRAIN_SECONDS = 60.0
 _SEND_BOUND_SECONDS = 30.0
+_ACCEPT_RETRY_SECONDS = 0.1
 """How long one frame may wait for the client to make room before the broker gives up on it.
 
 A client that stops reading would otherwise block the job's output writer, so the job, and
@@ -329,7 +331,14 @@ class HostCommandBroker:
                 connection = listener.accept()
             except OSError:
                 return  # the listener was closed
-            self._threads.spawn(lambda c=connection: self._handle(c), name="vibesys-command-job")
+            try:
+                self._threads.spawn(
+                    lambda c=connection: self._handle(c), name="vibesys-command-job"
+                )
+            except WorkerStartRefusedError as error:
+                connection.close()
+                _LOG.warning("command broker client worker did not start: %s; retrying", error)
+                self._threads.sleep(_ACCEPT_RETRY_SECONDS)
 
     def _track(self, cancel: Event) -> bool:
         """Register a request as in flight; ``False`` once the broker is closing."""

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from entrypoints.cli.constants import _OUTER_LOOPS
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
+from server.host_api import CLI_PROVIDER_FLAG, MODEL_FLAG, UNVETTED_MODEL_FLAG
 from vibesys.api import (
     KNOWN_COMPUTE_BACKENDS,
     ComputeBackend,
@@ -481,12 +482,28 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--cli-provider",
+        CLI_PROVIDER_FLAG,
         choices=list(SHIPPED_PROVIDERS),
         default=None,
         help=(
             "Which CLI tool to drive when --agent-backend=cli. Overrides "
             "[agent].cli_provider in agent.toml."
+        ),
+    )
+    parser.add_argument(
+        MODEL_FLAG,
+        default=None,
+        help=(
+            "Agent model. Overrides [model].name in agent.toml; when neither names one, "
+            "the CLI provider's default model. Must be a vetted model of the provider."
+        ),
+    )
+    parser.add_argument(
+        UNVETTED_MODEL_FLAG,
+        action="store_true",
+        help=(
+            "Run a provider and model pair outside VibeSys's vetted harness list. "
+            "Runs started from the desktop app cannot opt out."
         ),
     )
     parser.add_argument(

@@ -29,6 +29,7 @@ from typing import assert_never
 
 from vibesys.candidates.api import Baseline, Measured, NotConfigured, Unmeasurable, measure_input
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
+from vibesys.orchestration.dynamic.search._handoff import HANDOFF
 from vibesys.orchestration.dynamic.search._ids import INPUT_KEY, INPUT_MEASURED
 from vibesys.orchestration.dynamic.search._operations import OPERATIONS
 from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone
@@ -53,7 +54,7 @@ from vibesys.orchestration.dynamic.search._workstream import workstream
 from vs_core.api.search import Flow, Group, NoWinner, StopRequested, TaskStopped, search
 
 
-@search("dynamic", config=DynamicConfig, operations=OPERATIONS, roles=ROLES)
+@search("dynamic", config=DynamicConfig, operations=OPERATIONS, roles=ROLES, owned=(HANDOFF,))
 async def dynamic(ctx: Flow, config: DynamicConfig) -> NoWinner | None:
     """Measure the input while planning, run workstreams in the free slots, name the best."""
     ctx.checkpoint(config)

@@ -7,8 +7,8 @@ import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
-from pathlib import Path
-from typing import TypeAlias
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator, model_validator
 
@@ -32,23 +32,26 @@ from .cluster_types import (
     collection_problem,
     validate_operation_id,
 )
+from .errors import SlurmError, SlurmSubmissionRejectedError
 from .remote_operations import RemoteOperationError, RemoteOperationEvidence
 from .runner import (
+    _BATCH_RESULT_ROOT,
     SchedulerReading,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchResult,
-    SlurmError,
     SlurmJobHandle,
     SlurmJobRequest,
     SlurmJobRunner,
     SlurmJobStatus,
     SlurmPhase,
-    SlurmSubmissionRejectedError,
     _validate_batch_request,
     _validate_request,
 )
 from .staging import _ContentStageError, tree_content_identity
+
+if TYPE_CHECKING:
+    from vs_sim.api import ByteSource, OutputStream
 
 Request: TypeAlias = SlurmJobRequest | SlurmBatchRequest
 
@@ -140,6 +143,29 @@ def payload_digest(request: Request) -> str:
 def job_handle(handle: ClusterHandle) -> SlurmJobHandle:
     """Return the allocation locator shared by job and batch handles."""
     return handle.job if isinstance(handle, SlurmBatchHandle) else handle
+
+
+def recorded_job_ids(state_root: Path) -> frozenset[str]:
+    """The scheduler job ids of the operations a ``SlurmCluster`` recorded under ``state_root``.
+
+    These are the jobs this cluster's owner submitted, whatever else the same user has
+    queued. An operation not yet given a scheduler job contributes nothing; a missing
+    directory means none was recorded. Reads only: it takes no lock and writes nothing.
+    """
+    if not state_root.is_dir():
+        return frozenset()
+    ids: set[str] = set()
+    for raw in OperationStore(state_root).records():
+        try:
+            record = Operation.model_validate_json(raw)
+        except ValidationError:
+            continue  # a record another version wrote; it names no job this reader can trust
+        if record.handle is None:
+            continue
+        job_id = job_handle(record.handle).job_id
+        if job_id.isdigit() and int(job_id) > 0:
+            ids.add(job_id)
+    return frozenset(ids)
 
 
 def replace_job_id(handle: ClusterHandle, job_id: str) -> ClusterHandle:
@@ -467,6 +493,13 @@ class SlurmCluster:
                 reason="collection locator unavailable",
             )
         return self._collect_terminal(observed, observed.handle)
+
+    def stage_output(
+        self, handle: SlurmBatchHandle, index: int, stream: OutputStream
+    ) -> ByteSource:
+        """The file stage ``index`` writes ``stream`` to (the batch script's layout), read live."""
+        stage = PurePosixPath(handle.job.remote_workspace) / _BATCH_RESULT_ROOT / f"{index:04d}"
+        return self._runner.remote_file(stage / f"{stream.value}.txt")
 
     def _collect_terminal(
         self, observed: ClusterObservation, handle: ClusterHandle

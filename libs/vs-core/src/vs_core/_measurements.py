@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from . import _wait_clock
 from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
 from ._proofs import (
@@ -63,6 +64,7 @@ from .types.evaluation import (
     EvidenceAcceptanceReceipt,
     InspectOwnedJob,
     JobObserved,
+    JobQueued,
     JobsDrainRequested,
     JobTerminationRequested,
     JobWaitLapsed,
@@ -96,10 +98,10 @@ from .types.waits import WaitOn
 if TYPE_CHECKING:
     from .types.common import DecisionId, Observation, ResourceId, Seconds
     from .types.evaluation import EvaluationEvent, EvaluationState, EvidenceRef, MeasurementPlan
-    from .types.kernel import EvaluationContext, Signal
-    from .types.records import Request, RequestRecord
+    from .types.kernel import EvaluationContext, RunState, Signal
+    from .types.records import RecordsState, Request, RequestRecord
 
-__all__ = ["advance"]
+__all__ = ["advance", "cancel_settled"]
 
 
 def _current(context: EvaluationContext, scope: Scope) -> Verdict[DecisionId | None]:
@@ -1253,6 +1255,9 @@ def _job_observed(
             "released": observation.released,
             "children": tuple(dict.fromkeys((*job.children, *observation.children))),
             "evidence": tuple(accepted),
+            "queue_credit": _wait_clock.credited(
+                job, observation, context.run.limits, context.records.hosts
+            ),
             **_next_poll(job, observation, context),
         }
     )
@@ -1277,7 +1282,7 @@ def _job_observed(
         resource_id=observation.resource_id, observation=observation, previous=previous
     )
     requests: tuple[Outbound, ...] = ()
-    events: tuple[MeasurementResult, ...] = ()
+    events: tuple[MeasurementResult | JobQueued, ...] = _queued_notice(updated, job, context)
     source_id = updated.submission_id if isinstance(updated, OwnedJob) else updated.request_id
     reported = _reported_to_strategy(context, job)
     if _conclusive(observation):
@@ -1286,6 +1291,7 @@ def _job_observed(
         failure = MeasurementFailure.UNKNOWN if refused else claim
         if reported and not _conclusive(job.observation):
             events = (
+                *events,
                 MeasurementResult(
                     scope=job.scope,
                     source_request=source_id,
@@ -1298,6 +1304,7 @@ def _job_observed(
         elif reported and (newly or refused):
             # Late evidence is published once, as the delta, never replayed or dropped.
             events = (
+                *events,
                 MeasurementResult(
                     scope=job.scope,
                     source_request=source_id,
@@ -1330,6 +1337,31 @@ def _job_observed(
         signals=closing or (*_history_unless_awaited(state, context, job, event), wake),
         requests=requests if context.run.status != RunStatus.TERMINAL else (),
         events=events,
+    )
+
+
+def _queued_notice(
+    updated: OwnedJob | RegisteredOwnedJob,
+    job: OwnedJob | RegisteredOwnedJob,
+    context: EvaluationContext,
+) -> tuple[JobQueued, ...]:
+    """A ``JobQueued`` report each time a pending job's queue credit passes another interval.
+
+    It carries the executor's pending reason as given, or none when the executor gave none.
+    """
+    limits = context.run.limits
+    if updated.resource_id is None or not _wait_clock.notice_due(updated, job.queue_credit, limits):
+        return ()
+    progress = updated.progress
+    return (
+        JobQueued(
+            scope=updated.scope,
+            resource_id=updated.resource_id,
+            source_request=_wait_clock.source(updated),
+            queued_s=updated.queue_credit,
+            budget_left_s=_wait_clock.queue_budget_left(updated, limits),
+            pending_reason=None if progress is None else progress.pending_reason,
+        ),
     )
 
 
@@ -1624,6 +1656,8 @@ def _job_request(
     sequence = observation.sequence if observation is not None else 0
     # Evidence is collected once per job, so its id does not name an observation.
     suffix = "" if model is CollectEvidence else f":{sequence}"
+    if model is CancelOwnedJob:
+        suffix += _resend_suffix(context, f"{_step_prefix(job, action)}{suffix}")
     canonical = context.records.record(source)
     # A step on a job is the job's own, whoever asks for it: a poll raised by the clock, a
     # stop, a drain and a late observation all name the submission's decision. Left to the
@@ -1639,6 +1673,22 @@ def _job_request(
         decision_id=inherited.decision_id if inherited is not None else None,
         resource_id=job.resource_id,
     )
+
+
+def _resend_suffix(context: EvaluationContext, base: str) -> str:
+    """Name a cancel sent again for the same observation after earlier ones blocked.
+
+    A cancel blocked at its bound proved nothing (``cancel_settled``), and the job may not be
+    observed again before core asks once more (its submission ended, so nothing polls it).
+    Each re-send gets its own id, so it is a new request and not the blocked one.
+    """
+    blocked = sum(
+        1
+        for row in context.records.records
+        if (row.phase == RequestPhase.BLOCKED or row.failure is not None)
+        and (row.request_id.root == base or row.request_id.root.startswith(f"{base}:resend-"))
+    )
+    return f":resend-{blocked}" if blocked else ""
 
 
 def _job_outbound(
@@ -1765,21 +1815,28 @@ def _cancelling_scope(context: EvaluationContext) -> Scope | None:
 
 
 def _cancel_requested(context: EvaluationContext, resource: ResourceId) -> bool:
+    """Whether core is done asking to cancel *resource* (see ``cancel_settled``)."""
+    return cancel_settled(context.records, context.run, resource)
+
+
+def cancel_settled(records: RecordsState, run: RunState, resource: ResourceId) -> bool:
     """Whether core is done asking to cancel *resource*: one cancel is open or was answered.
 
     A cancel blocked at its bound proved nothing: the executor's cancel failed or its outcome
-    is unknown, and the job may still run. It does not count, so the job's next observation
-    asks for a new cancel (its id names that observation) instead of holding the run closing
-    until the job ends by itself. The backend's ``request_retries.limit`` bounds those
-    re-sends; past it core waits for the job's own end, as it did before any retry.
+    is unknown, and the job may still run. It still proves nothing once a closing run settles
+    it (``failure`` keeps why core ended it without a result). It does not count, so core
+    asks for a new cancel (on the job's next observation, or as the blocked cancel ends when
+    nothing polls the job) instead of leaving the job to end by itself. The backend's
+    ``request_retries.limit`` bounds those re-sends; past it core waits for the job's own
+    end, as it did before any retry.
     """
     cancels = tuple(
-        row
-        for row in context.records.about_resource(resource)
-        if isinstance(row.request, CancelOwnedJob)
+        row for row in records.about_resource(resource) if isinstance(row.request, CancelOwnedJob)
     )
-    blocked = sum(1 for row in cancels if row.phase == RequestPhase.BLOCKED)
-    return blocked < len(cancels) or blocked > context.run.limits.request_retries.limit
+    blocked = sum(
+        1 for row in cancels if row.phase == RequestPhase.BLOCKED or row.failure is not None
+    )
+    return blocked < len(cancels) or blocked > run.limits.request_retries.limit
 
 
 def _known(job: OwnedJob | RegisteredOwnedJob) -> bool:

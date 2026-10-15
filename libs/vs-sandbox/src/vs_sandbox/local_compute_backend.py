@@ -183,9 +183,10 @@ def metal_backend(  # noqa: PLR0913
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> LocalBackend:
     """Apple Silicon / Metal backend (local execution only); it records no timestamps."""
-    del clock, probe
+    del clock, probe, events  # no timestamps; no device to watch for contention
     return LocalBackend(
         ComputeBackend.METAL,
         log_dir,
@@ -210,9 +211,10 @@ def cpu_backend(  # noqa: PLR0913
     launcher: PipedProcessLauncher,
     clock: Clock,
     probe: CommandProbe,
+    events: object | None = None,
 ) -> LocalBackend:
     """CPU-only backend (no GPU; CPU-bound targets like KV stores / servers); no timestamps."""
-    del clock, probe
+    del clock, probe, events  # no timestamps; no device to watch for contention
     return LocalBackend(
         ComputeBackend.CPU,
         log_dir,

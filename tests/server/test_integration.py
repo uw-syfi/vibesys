@@ -18,6 +18,7 @@ from tests.server.support import (
 )
 
 from server.api.protocol import ChatQuery, ChatThreadCreateQuery
+from server.chat.manager import ChatAnswer, TerminalChatResource
 from server.diagnostics import DiagnosticScope, DiagnosticSeverity
 from server.events import (
     EventStatus,
@@ -55,6 +56,7 @@ from vibesys.events import (
 from vibesys.events import RunStartedData as CoreRunStartedData
 from vs_project.api import Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
+from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -795,6 +797,90 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.integration.close()
     parts.integration.close()
+
+
+def test_partially_started_chat_cleanup_survives_a_diagnostic_write_failure(
+    tmp_path: Path,
+) -> None:
+    """A failed startup report cannot orphan the factory's acquired resources."""
+    project, run_id = _project_run(tmp_path / "project")
+    log_dir = project.state.log_directory(run_id)
+    chat_state_dir = project.state.local_namespace(run_id, "server").external_directory("chat")
+    agent_close_calls = 0
+    terminal_close_calls = 0
+    close_order: list[str] = []
+
+    class FlakyClosingAgent:
+        def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+            del message, invocation_id
+            return "answer"
+
+        def close(self) -> None:
+            nonlocal agent_close_calls
+            agent_close_calls += 1
+            close_order.append("factory")
+            if agent_close_calls == 1:
+                message = "factory cleanup was killed"
+                raise RuntimeError(message)
+
+    class TrackingAuxiliaryAgents(_FakeAuxiliaryAgents):
+        def close(self) -> None:
+            close_order.append("auxiliary")
+            super().close()
+
+    def build_agent(_request: ChatAgentBuildRequest) -> FlakyClosingAgent:
+        events_path = log_dir / "run-events.jsonl"
+        events_path.unlink()
+        events_path.mkdir()
+        return FlakyClosingAgent()
+
+    def close_terminal() -> None:
+        nonlocal terminal_close_calls
+        terminal_close_calls += 1
+        close_order.append("terminal")
+
+    parts = build_server_parts(
+        chat_agent_builder=build_agent,
+        threads=SimThreads(),
+    )
+    parts.chat.enable_terminal_retention()
+    parts.chat.retain_terminal_resource(
+        TerminalChatResource(
+            handler=lambda _message: ChatAnswer(text="retained", invocation_id="retained"),
+            close=close_terminal,
+        )
+    )
+    auxiliary = TrackingAuxiliaryAgents()
+    ready = RunReady(
+        record=run_record(project, run_id),
+        log_directory=log_dir,
+        frontend_state_directory=project.state.local_namespace(
+            run_id, "server"
+        ).external_directory(),
+        agent_provider="codex",
+        agent_model="gpt-test",
+        agent_providers=auxiliary_agent_providers(),
+    )
+
+    with pytest.raises(IsADirectoryError):
+        parts.integration.handle_run_ready(cast("RunSession", _FakeRunSession(auxiliary)), ready)
+
+    assert chat_state_dir.is_dir()
+    with pytest.raises(RuntimeError, match="factory cleanup was killed"):
+        parts.integration.close()
+    assert auxiliary.closed
+    assert auxiliary.close_calls == 1
+    assert terminal_close_calls == 1
+    assert agent_close_calls == 1
+    assert close_order == ["factory", "terminal", "auxiliary"]
+
+    parts.integration.close()
+    parts.integration.close()
+
+    assert agent_close_calls == 2
+    assert close_order == ["factory", "terminal", "auxiliary", "factory"]
+    with pytest.raises(RuntimeError, match="threads are not available"):
+        parts.chat.create_thread()
 
 
 @pytest.mark.parametrize("failures", [1, 2])

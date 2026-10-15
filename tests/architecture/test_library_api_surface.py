@@ -15,6 +15,8 @@ import pytest
         "vs_evaluation.api",
         "vs_github.api",
         "vs_issue_tracker.api",
+        "vs_logs.api",
+        "vs_logs.read",
         "vs_core.api",
         "vs_project.api",
         "vs_prompts.api",

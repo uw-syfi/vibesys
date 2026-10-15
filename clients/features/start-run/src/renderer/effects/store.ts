@@ -21,9 +21,21 @@ export function createStartStore(bridge: StartRunBridge): Store<StartState, Star
           dispatch({type: 'tasks-reply', token: request.token, result}),
         );
         return;
+      case 'harnesses':
+        void settled(bridge.harnesses(request.host)).then(result =>
+          dispatch({type: 'harnesses-reply', token: request.token, result}),
+        );
+        return;
       case 'start':
         void settled(
-          bridge.start(request.host, request.project, request.task, request.args, request.token),
+          bridge.start(
+            request.host,
+            request.project,
+            request.task,
+            request.args,
+            request.harness,
+            request.token,
+          ),
         ).then(result => dispatch({type: 'start-reply', token: request.token, result}));
         return;
       case 'cancel-start':

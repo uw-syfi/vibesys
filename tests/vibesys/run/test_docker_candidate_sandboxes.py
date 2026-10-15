@@ -115,8 +115,9 @@ def _candidate_container_counts(
         log: object = None,
         image: str | None = None,
         clock: object,
+        events: object | None = None,
     ) -> _DaemonBackend:
-        del clock  # the fake backend records no timestamps
+        del clock, events  # the fake backend records no timestamps and has no device to watch
         made = _DaemonBackend(
             log_dir,
             log=log,  # ty: ignore[invalid-argument-type]

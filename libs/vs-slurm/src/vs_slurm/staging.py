@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Sequence
 
     from vs_sim.api import Processes, ProcessRun, ProcessSpec
+from vs_sim.api import DISCARD
 
 _DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
@@ -361,7 +362,7 @@ def _run_staged_transfer(
                 rewritten,
                 max_output_bytes=min(rewritten.max_output_bytes, MAX_TRANSPORT_STREAM_BYTES),
             )
-            result = processes.run(bounded, timeout=timeout)
+            result = processes.run(bounded, timeout=timeout, output=DISCARD)
             if (
                 transfer.direction == "download"
                 and isinstance(result, ProcessOutcome)

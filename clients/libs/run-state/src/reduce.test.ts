@@ -1208,6 +1208,7 @@ describe('core state projection', () => {
         metric: 'ops',
         value: 42,
         unit: 'ops/s',
+        timestamp: timestamp(8),
       },
     ]);
   });
@@ -2286,6 +2287,7 @@ describe('typed framework events', () => {
         metric: 'tok_per_sec',
         value: 42.5,
         unit: 'tok/s',
+        timestamp: timestamp(7),
       },
     ]);
   });
@@ -2305,6 +2307,7 @@ describe('typed framework events', () => {
         metric: 'tok_per_sec',
         value: 42.5,
         unit: 'tok/s',
+        timestamp: timestamp(7),
       },
     ]);
     // The reused gate still reports itself in the transcript, as a reused PASS
@@ -2367,7 +2370,7 @@ describe('typed framework events', () => {
     ]);
   });
 
-  it('summarizes the run configuration once', () => {
+  it('summarizes the run configuration once, including its Pareto and benchmark-contract facts', () => {
     const state = reduceEvent(
       initialCoreState(),
       frameworkEvent(
@@ -2380,6 +2383,8 @@ describe('typed framework events', () => {
           model: 'claude-sonnet-4-5',
           objective: 'Raise decode throughput',
           search_policy: 'beam',
+          pareto_objectives: 'latency,throughput',
+          benchmark_contract: true,
           source: 'loop',
         },
         {round_label: null},
@@ -2390,7 +2395,9 @@ describe('typed framework events', () => {
       {
         kind: 'status',
         content:
-          'objective: Raise decode throughput\nmodel: claude-sonnet-4-5\nsearch policy: beam',
+          'objective: Raise decode throughput\nmodel: claude-sonnet-4-5\nsearch policy: beam\n' +
+          'pareto objectives: latency,throughput\n' +
+          'benchmark result contract declared; it owns candidate fitness',
         label: 'framework',
       },
     ]);
@@ -2950,7 +2957,7 @@ describe('quota state', () => {
     });
 
   it('starts with no quota fact', () => {
-    expect(initialCoreState().quota).toEqual({sequence: 0, pause: null});
+    expect(initialCoreState().quota).toEqual({sequence: 0, pause: null, lastSwitch: null});
   });
 
   it('records a pause with the provider diagnostic, reset times and fallback', () => {
@@ -2966,10 +2973,11 @@ describe('quota state', () => {
         policy: 'wait',
         fallback: {provider: 'codex', model: 'gpt-5.4'},
       },
+      lastSwitch: null,
     });
   });
 
-  it('settles on resumed, abandoned and switched, each at its own sequence', () => {
+  it('settles on resumed and abandoned, each at its own sequence, without inventing a switch', () => {
     const settle = {
       quota_resumed: {kind: 'quota_resumed', provider: 'claude'},
       quota_abandoned: {
@@ -2979,20 +2987,292 @@ describe('quota state', () => {
         detail: 'too many requests',
         reason: 'wait budget spent',
       },
-      provider_switched: {
-        kind: 'provider_switched',
-        from_provider: 'claude',
-        to_provider: 'codex',
-        to_model: 'gpt-5.4',
-        reason: 'policy',
-        detail: 'too many requests',
-      },
     } as const;
     for (const [type, data] of Object.entries(settle)) {
       let state = reduceEvent(initialCoreState(), pausedEvent(1));
       state = reduceEvent(state, fixtureEvent(2, type as RunEvent['type'], {data}));
-      expect(state.quota).toEqual({sequence: 2, pause: null});
+      expect(state.quota).toEqual({sequence: 2, pause: null, lastSwitch: null});
     }
+  });
+
+  it('settles on a provider switch and retains the switch it made, not just that it happened', () => {
+    let state = reduceEvent(initialCoreState(), pausedEvent(1));
+    state = reduceEvent(
+      state,
+      fixtureEvent(2, 'provider_switched', {
+        data: {
+          kind: 'provider_switched',
+          from_provider: 'claude',
+          to_provider: 'codex',
+          to_model: 'gpt-5.4',
+          reason: 'policy',
+          detail: 'too many requests',
+        },
+      }),
+    );
+    expect(state.quota).toEqual({
+      sequence: 2,
+      pause: null,
+      lastSwitch: {
+        sequence: 2,
+        fromProvider: 'claude',
+        toProvider: 'codex',
+        toModel: 'gpt-5.4',
+        reason: 'policy',
+        detail: 'too many requests',
+      },
+    });
+  });
+
+  it('keeps the last switch sticky across a later pause and resume', () => {
+    let state = reduceEvent(initialCoreState(), pausedEvent(1));
+    state = reduceEvent(
+      state,
+      fixtureEvent(2, 'provider_switched', {
+        data: {
+          kind: 'provider_switched',
+          from_provider: 'claude',
+          to_provider: 'codex',
+          to_model: 'gpt-5.4',
+          reason: 'policy',
+          detail: 'too many requests',
+        },
+      }),
+    );
+    state = reduceEvent(state, pausedEvent(3));
+    expect(state.quota.lastSwitch).toEqual({
+      sequence: 2,
+      fromProvider: 'claude',
+      toProvider: 'codex',
+      toModel: 'gpt-5.4',
+      reason: 'policy',
+      detail: 'too many requests',
+    });
+    state = reduceEvent(
+      state,
+      fixtureEvent(4, 'quota_resumed', {data: {kind: 'quota_resumed', provider: 'codex'}}),
+    );
+    expect(state.quota).toEqual({
+      sequence: 4,
+      pause: null,
+      lastSwitch: {
+        sequence: 2,
+        fromProvider: 'claude',
+        toProvider: 'codex',
+        toModel: 'gpt-5.4',
+        reason: 'policy',
+        detail: 'too many requests',
+      },
+    });
+  });
+});
+
+describe('winner selection state', () => {
+  it('starts with no result', () => {
+    expect(initialCoreState().winner).toBeNull();
+  });
+
+  it('records a candidate winner with its settlement', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'winner_selected', {
+        data: {
+          kind: 'winner_selected',
+          selection: 'candidate',
+          revision: 'abc123def456',
+          settlement_id: 'settlement-9',
+        },
+      }),
+    );
+    expect(state.winner).toEqual({
+      selection: 'candidate',
+      revision: 'abc123def456',
+      settlementId: 'settlement-9',
+    });
+  });
+
+  it('records the baseline kept unchanged, with no settlement to name', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'winner_selected', {
+        data: {kind: 'winner_selected', selection: 'baseline', revision: 'baseline-rev'},
+      }),
+    );
+    expect(state.winner).toEqual({
+      selection: 'baseline',
+      revision: 'baseline-rev',
+      settlementId: null,
+    });
+  });
+});
+
+describe('workstream telemetry state', () => {
+  it('starts with no workstreams', () => {
+    expect(initialCoreState().workstreams).toEqual({});
+  });
+
+  it('folds a successful workstream finish', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'workstream_finished', {
+        round_label: 'round-3',
+        data: {
+          kind: 'workstream_finished',
+          setup_failure: false,
+          refunded: false,
+          repeated_error: false,
+        },
+      }),
+    );
+    expect(Object.values(state.workstreams)).toEqual([
+      {
+        roundKey: {kind: 'number', number: 3},
+        roundNumber: 3,
+        roundLabel: 'round-3',
+        finished: true,
+        finishedAt: timestamp(1),
+        finishedAtSequence: 1,
+        setupFailure: false,
+        refunded: false,
+        repeatedError: false,
+        lastError: null,
+        usage: {
+          inputTokens: 0,
+          cacheCreationInputTokens: 0,
+          cacheReadInputTokens: 0,
+          outputTokens: 0,
+          totalCostUsd: 0,
+        },
+      },
+    ]);
+  });
+
+  it('folds the failure detail a repeated, refunded setup failure carries', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(2, 'workstream_finished', {
+        round_label: 'round-4',
+        data: {
+          kind: 'workstream_finished',
+          setup_failure: true,
+          refunded: true,
+          repeated_error: true,
+          last_error: {
+            kind: 'out-of-budget',
+            role: 'implementer',
+            turns: 5,
+            limit: 5,
+            text: 'ran out of turns',
+          },
+        },
+      }),
+    );
+    const [record] = Object.values(state.workstreams);
+    expect(record?.lastError).toEqual({
+      kind: 'out-of-budget',
+      role: 'implementer',
+      turns: 5,
+      limit: 5,
+      text: 'ran out of turns',
+    });
+    expect(record?.setupFailure).toBe(true);
+    expect(record?.refunded).toBe(true);
+    expect(record?.repeatedError).toBe(true);
+  });
+
+  it('accumulates token usage across multiple turns of the same workstream', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'turn_usage_recorded', {
+        round_label: 'round-1',
+        agent_kind: 'implementer',
+        data: {
+          kind: 'turn_usage_recorded',
+          input_tokens: 100,
+          output_tokens: 20,
+          cache_creation_input_tokens: 5,
+          cache_read_input_tokens: 1,
+          total_cost_usd: 0.01,
+        },
+      }),
+    );
+    state = reduceEvent(
+      state,
+      fixtureEvent(2, 'turn_usage_recorded', {
+        round_label: 'round-1',
+        agent_kind: 'reviewer',
+        data: {
+          kind: 'turn_usage_recorded',
+          input_tokens: 50,
+          output_tokens: 10,
+          total_cost_usd: 0.02,
+        },
+      }),
+    );
+    const [record] = Object.values(state.workstreams);
+    expect(record?.usage).toEqual({
+      inputTokens: 150,
+      cacheCreationInputTokens: 5,
+      cacheReadInputTokens: 1,
+      outputTokens: 30,
+      totalCostUsd: 0.03,
+    });
+  });
+
+  it('keeps a workstream finish and its usage on the same record', () => {
+    let state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'turn_usage_recorded', {
+        round_label: 'round-2',
+        data: {kind: 'turn_usage_recorded', input_tokens: 10, output_tokens: 2},
+      }),
+    );
+    state = reduceEvent(
+      state,
+      fixtureEvent(2, 'workstream_finished', {
+        round_label: 'round-2',
+        data: {
+          kind: 'workstream_finished',
+          setup_failure: false,
+          refunded: false,
+          repeated_error: false,
+        },
+      }),
+    );
+    const [record] = Object.values(state.workstreams);
+    expect(record?.finished).toBe(true);
+    expect(record?.usage).toEqual({
+      inputTokens: 10,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      outputTokens: 2,
+      totalCostUsd: 0,
+    });
+  });
+
+  it('ignores a workstream finish with no round scope', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'workstream_finished', {
+        data: {
+          kind: 'workstream_finished',
+          setup_failure: false,
+          refunded: false,
+          repeated_error: false,
+        },
+      }),
+    );
+    expect(state.workstreams).toEqual({});
+  });
+
+  it('ignores a turn usage event with no round scope', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      fixtureEvent(1, 'turn_usage_recorded', {
+        data: {kind: 'turn_usage_recorded', input_tokens: 10},
+      }),
+    );
+    expect(state.workstreams).toEqual({});
   });
 });
 
@@ -3012,7 +3292,12 @@ describe('run startup progress state', () => {
 
   it('folds a stage with no progress of its own', () => {
     const state = reduceEvent(initialCoreState(), progressEvent(1, {stage: 'resolving'}));
-    expect(state.startup).toEqual({stage: 'resolving', progress: null});
+    expect(state.startup).toEqual({
+      stage: 'resolving',
+      progress: null,
+      stageSince: timestamp(1),
+      lastActivityAt: timestamp(1),
+    });
   });
 
   it('folds a stage with done, total and a running step label', () => {
@@ -3026,6 +3311,8 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'building_image',
       progress: {done: 12, total: 30, label: 'RUN pip install'},
+      stageSince: timestamp(1),
+      lastActivityAt: timestamp(1),
     });
   });
 
@@ -3037,6 +3324,8 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'starting_container',
       progress: {done: 0, total: null, label: ''},
+      stageSince: timestamp(1),
+      lastActivityAt: timestamp(1),
     });
   });
 
@@ -3059,6 +3348,34 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'building_image',
       progress: {done: 2, total: 10, label: 'RUN build'},
+      stageSince: timestamp(2),
+      lastActivityAt: timestamp(3),
     });
+  });
+
+  it('resets the stage clock on a stage change and keeps it across same-stage events', () => {
+    const stages = ['resolving', 'building_image', 'building_image', 'starting_container'] as const;
+    let state = initialCoreState();
+    const observed = stages.map((stage, index) => {
+      state = reduceEvent(state, progressEvent(index + 1, {stage}));
+      return [state.startup?.stageSince, state.startup?.lastActivityAt];
+    });
+    expect(observed).toEqual([
+      [timestamp(1), timestamp(1)],
+      [timestamp(2), timestamp(2)],
+      [timestamp(2), timestamp(3)],
+      [timestamp(4), timestamp(4)],
+    ]);
+  });
+
+  it('resets again when an earlier stage recurs, and a replay yields the same fact', () => {
+    const events = [
+      progressEvent(1, {stage: 'building_image'}),
+      progressEvent(2, {stage: 'starting_container'}),
+      progressEvent(3, {stage: 'building_image'}),
+    ];
+    const fold = (): CoreState => events.reduce(reduceEvent, initialCoreState());
+    expect(fold().startup?.stageSince).toBe(timestamp(3));
+    expect(fold().startup).toEqual(fold().startup);
   });
 });

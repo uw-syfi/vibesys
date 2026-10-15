@@ -7,11 +7,14 @@ import threading
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vs_sim.api import OsThreads, UnixNetwork
+import pytest
+
+from vs_sim.api import OsThreads, UnixNetwork, WorkerStartRefusedError
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     NetworkContract,
     NetworkUnderTest,
+    RefusingThreads,
     SimNetwork,
     SimThreads,
     ThreadsContract,
@@ -45,6 +48,26 @@ class TestSimThreadsSeeded(ThreadsContract):
     def threads_under_test(self, seed: int) -> ThreadsUnderTest:
         sim = SimThreads(schedule_seed=seed)
         return ThreadsUnderTest(sim, sim.run, tick=1.0, exact=True)
+
+
+class TestRefusingThreads(ThreadsContract):
+    def threads_under_test(self, seed: int) -> ThreadsUnderTest:
+        sim = SimThreads(schedule_seed=seed)
+        return ThreadsUnderTest(RefusingThreads(sim, {}), sim.run, tick=1.0, exact=True)
+
+
+def test_refusing_threads_consumes_only_the_scripted_starts() -> None:
+    sim = SimThreads()
+    threads = RefusingThreads(sim, {"client": 1})
+    ran: list[str] = []
+
+    def main() -> None:
+        with pytest.raises(WorkerStartRefusedError, match="client"):
+            threads.spawn(lambda: ran.append("refused"), name="client")
+        threads.spawn(lambda: ran.append("started"), name="client")
+
+    sim.run(main)
+    assert ran == ["started"]
 
 
 def _unix_paths() -> Callable[[str], str]:

@@ -19,6 +19,7 @@ from server.api.protocol import (
     SubscribeRequest,
 )
 from server.transport.subscriptions import (
+    DeliveryWatermark,
     SubscriptionAdmissionClosedError,
     SubscriptionTracker,
 )
@@ -209,12 +210,14 @@ class _ClientSession:
             # subscribe first; the failure then reaches the client as a
             # stream error, exactly as it did when the replay was read after
             # the handshake.
+            # Keep both fields in the same event-store generation.
+            snapshot = api.snapshot()
             self._write_message(
                 SubscribedMessage(
                     request_id=request.request_id,
                     client_id=request.client_id,
-                    run_id=api.snapshot().run_id,
-                    latest_sequence=api.latest_sequence,
+                    run_id=snapshot.run_id,
+                    latest_sequence=snapshot.sequence,
                 )
             )
             raise
@@ -227,7 +230,7 @@ class _ClientSession:
             )
         )
         cursor, reported_floor, store_id = self._write_bootstrap(request, bootstrap)
-        delivery.delivered(cursor)
+        delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
         hung_up = self._threads.event()
         self._hangup_watcher = self._threads.spawn(
             partial(self._watch_for_hangup, hung_up), name="vibesys-server-jsonl-hangup"
@@ -243,7 +246,7 @@ class _ClientSession:
                 # willing to replay. Bootstrap again at a fresh tail rather
                 # than deliver a window the bound was meant to exclude.
                 cursor, reported_floor, store_id = self._rebootstrap(request, cursor, store_id)
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             # ``wait_for_change`` only tells us that the stream changed. Take
             # one watermark-consistent snapshot before writing so a resumed
@@ -257,7 +260,7 @@ class _ClientSession:
                 # the two logs compare in length. Bootstrap against the store
                 # that is live now; the client re-folds from the batch's id.
                 cursor, reported_floor, store_id = self._rebootstrap(request, cursor, store_id)
-                delivery.delivered(cursor)
+                delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
                 continue
             self._write_event_batch(
                 EventBatchMessage(
@@ -269,7 +272,7 @@ class _ClientSession:
                 )
             )
             cursor = checkpoint.through_sequence
-            delivery.delivered(cursor)
+            delivery.delivered(DeliveryWatermark(store_id=store_id, sequence=cursor))
 
     def close(self) -> None:
         """Close the connection and drain the subscription's hangup watcher."""
@@ -494,9 +497,9 @@ class UnixJsonlServer:
         """Wait until a presentation client has established its event stream."""
         return self._subscriptions.wait_for_subscriber(timeout)
 
-    def wait_until_delivered(self, sequence: int, timeout: float) -> bool:
-        """Close subscription admission and wait for streams to reach ``sequence``."""
-        return self._subscriptions.wait_until_delivered(sequence, timeout)
+    def wait_until_delivered(self, watermark: DeliveryWatermark, timeout: float) -> bool:
+        """Close subscription admission and wait for streams to reach *watermark*."""
+        return self._subscriptions.wait_until_delivered(watermark, timeout)
 
     def wait_for_subscriber_disconnect(self) -> None:
         """Keep terminal events queryable until the last active subscriber exits."""

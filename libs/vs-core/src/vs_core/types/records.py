@@ -176,7 +176,11 @@ class RequestRecord(OutcomeValue):
     retry_at: Seconds | None = None
     """Core time at which the request goes out again after a retryable failure, else None."""
     until: Until
-    """When core ends this record if it is still open, and the watches that end it sooner."""
+    """When core ends this record if it is still open, and the watches that end it sooner.
+
+    A record that started a job has no limit while the job is queued, and each queued
+    interval moves ``at`` later by its length, so its limit counts from the job's start
+    (``_wait_clock``)."""
     failure: Failed | None = None
     """Why core ended it without a result (limit passed, watch fired), else None."""
     limit_from_dispatch: Seconds | None = None
