@@ -245,6 +245,44 @@ and, with a backoff, waits on the run clock between them. `ctx.retry` returns th
 `ctx.publish(record)` replaces the flow's published record (a pydantic model): what status views,
 projections and tests read about a run in flight. It is kept in the state beside the journal.
 
+### The run trace
+
+The runtime records what the run's work did as **spans**, without the search doing anything: one
+span for each flow task (the root and every task a group starts) and one for each operation a flow
+awaits (an agent turn and its render, a workspace's start and settlement, a verification, a
+measurement and its interpretation, an owner operation, the adoption). Each is recorded at the
+point where the runtime already handles that transition, so a new operation kind or flow
+construct gets its span from the same few points.
+
+| Field | What it holds |
+|---|---|
+| `id` | `flow:<path>#<n>` for a task (`n` counts the tasks started at that path, since a key can be started again after its task ended; the root is `flow:#1`), `op:<decision id>` for an operation |
+| `parent` | the span of the flow that started the task or issued the operation (None for the root) |
+| `type`, `name` | `flow` with the flow's name, or `operation` with the operation's registered kind (or, for core's own requests, the id root core issued it under: the role's name for a turn, `measure`, `start`, `settle`, `adopt`...) |
+| `status` | `running` (an operation in flight, or a flow waiting on its own work: an operation, a turn, a task or a group), `waiting` (a flow waiting only on time, a latch or the stop), `pending` (a flow a code change restarts, until its parent starts its key again), `done`, `failed`, `stopped` |
+| `waiting_on` | one entry per source of the flow's current wait: `operation` (ref: the operation's span, or a turn's signal), `slot` (a task's span, `group`, or a latch), `time` (the timer), `stop`; `since` is when that wait began |
+| `attempts` | each try of `ctx.retry` in the flow: `n` of `of`, its times, and `done`, `again` (with the reason as text) or `gave_up` |
+| `started_at`, `ended_at` | run-clock times |
+| `failure` | `outcome` when a `failed` span ended with a failure value (an operation answered `Failed`, a task returned `Failed` or `GaveUp`, the run finished as a failure) and `interruption` when a `stopped` span was interrupted (the stop landed, the flow abandoned the operation, a code change dropped it, the run ended around it) |
+| `stop` | when the operator's stop reached this flow, and whether it `landed` (raised `Stopped` in it) |
+| `label` | the search's label of the span: empty until searches can label spans |
+
+**Determinism.** Every journal step records its run-clock time (`Step.at`, the host's `now_at`
+when it delivered the event); every span transition the step makes carries that time, and replay
+reads it back from the step. It is an input like the event, so it is not in the digest. Flow code
+is deterministic, so replaying a journal yields the same spans, ids and times. The spans are kept
+beside the live flows in the persisted state; a restart after a code change continues them: a
+registered flow resumes in its own span (pending until its parent starts its key again), and an
+operation in flight or a task that is not a registered flow ends `stopped` (a fresh start of that
+key gets the next `#n`). When the root issues the run's `Finish`, every span still open ends, and
+the root ends `done`, `failed` or `stopped` by the proposed result, so a finished run has no
+running or waiting span. A defect crashes the step that raised it, which is never persisted, so a
+trace holds no defect.
+
+The shell reads the spans as `FlowDriver.trace(state)`, a frozen `RunTrace` of `Span`s (exported
+from `vs_core.api`); `FlowState` itself stays private. `test_flows_trace.py` and the sweep in
+`test_flows_properties.py` check the properties, live and with a restart after every step.
+
 ### Checkpoints and code changes
 
 A flow registered with `@flow(snapshot=S)` takes its snapshot as its argument and records newer
@@ -336,6 +374,7 @@ def test_a_lost_turn_is_asked_again(begin: Begin) -> None:
 
 - `begin` runs every story twice: live, and with a save-and-restart after every step.
 - `run.waiting()` says what each flow waits for (its sources), so a test can assert it.
+- `run.trace()` is the run trace so far (see "The run trace").
 - `run.timeline()` prints the run as a timeline (`worker.1:Plan stop t=30`); property tests print
   their shrunk counterexamples this way.
 

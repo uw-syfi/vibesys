@@ -120,7 +120,9 @@ class Trace:
             case Failed(reason=reason):
                 self._end(span_id, SpanStatus.FAILED, _outcome(reason.value))
             case GaveUp(reasons=reasons):
-                self._end(span_id, SpanStatus.FAILED, _outcome(f"gave up after {len(reasons)}"))
+                self._end(
+                    span_id, SpanStatus.FAILED, _outcome(f"gave up after {len(reasons)} tries")
+                )
             case _:
                 self._end(span_id, SpanStatus.DONE, None)
 

@@ -234,7 +234,7 @@ def test_a_failure_is_recorded_as_the_outcome_it_is(
     task = span_of(run, "flow:d/#1")
     assert task.status is core.SpanStatus.FAILED
     assert task.failure == core.SpanFailure(
-        kind=core.FailureKind.OUTCOME, message="gave up after 2"
+        kind=core.FailureKind.OUTCOME, message="gave up after 2 tries"
     )
     root_span = span_of(run, "flow:#1")
     assert root_span.status is core.SpanStatus.FAILED
