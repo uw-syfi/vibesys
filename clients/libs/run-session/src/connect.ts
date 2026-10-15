@@ -3,7 +3,7 @@
  * stream, placed by the stream reconciler. Runtime-neutral: the app supplies the transport (a
  * WebSocket, or the desktop shell's bridge shaped as one).
  */
-import {isServerRejection, ServerError} from '@vibesys/contracts';
+import {ServerError} from '@vibesys/contracts';
 import {
   type ControlChannelState,
   type ControlTransport,
@@ -14,7 +14,7 @@ import {
   StreamReconciler,
   sameControlChannelState,
 } from '@vibesys/transport';
-import {isIterationStoreReplaced} from './connection.js';
+import {isIterationStoreReplaced, isLegacyUnsupportedRequest} from './connection.js';
 import type {RunConnection, TransportHooks} from './ports.js';
 
 /** The event stream's tail and its redial timing; the defaults are the transport's. */
@@ -97,7 +97,7 @@ function openRunConnection(
       } catch (error) {
         if (
           iterationCapability === 'unknown' &&
-          isServerRejection(error) &&
+          isLegacyUnsupportedRequest(error) &&
           !isIterationStoreReplaced(error)
         ) {
           iterationCapability = 'unsupported';
