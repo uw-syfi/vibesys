@@ -521,15 +521,43 @@ class _Loop:
         A blocked check reopens only on an observation, and with nothing in flight and no
         timer due none will come: the run would sit running until its deadline. So the loop
         stops it with a ``blocked`` result that says why, as it stops a run at its deadline.
+        A blocked check whose last inspection has already answered can never resolve either,
+        so recovery can never open, whatever unrelated timers (another turn's deadline) are
+        still due: waiting for them would hold admission closed in silence.
         """
         return (
             core.records.recovery.phase == RecoveryPhase.BLOCKED
             and core.run.result is None
-            and not self._shell.in_flight
-            and self._next_wake(core) is None
-            and self._shell.next_wake_at is None
             and not any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+            and (
+                (
+                    not self._shell.in_flight
+                    and self._next_wake(core) is None
+                    and self._shell.next_wake_at is None
+                )
+                or self._blocked_for_good(core)
+            )
         )
+
+    def _blocked_for_good(self, core: CoreState) -> bool:
+        """Whether some blocked check has had its last answer and nothing about it still runs.
+
+        The reconciliation deadline blocks a check and sends one last inspection of its target;
+        once that inspection has settled without resolving the check, no observation about
+        the target is left to come (a restart keeps it blocked too).
+        """
+        running = {request.request_id for request in self._shell.in_flight}
+        for check in core.records.recovery.checks:
+            if check.resolution != "blocked" or check.inspection is None:
+                continue
+            inspection = core.records.record(check.inspection)
+            if (
+                inspection is not None
+                and inspection.phase in (RequestPhase.COMPLETED, RequestPhase.BLOCKED)
+                and not {check.target, check.inspection} & running
+            ):
+                return True
+        return False
 
     def _signature(self) -> object:
         """Everything that changes when work happened; time, liveness and the revision do not."""
