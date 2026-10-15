@@ -1373,7 +1373,7 @@ depends_on = ["vs_prompts", "vs_runtime"]
 
 [[interfaces]]
 from = ["vibesys.core_roles"]
-expose = ["CONTINUATION", "CONTINUING_READER", "EVALUATION_TOOL", "MEASURING", "MEASURING_READER", "MEASURING_WRITER", "READER", "RoleKind", "core_role"]
+expose = ["CONTINUATION", "CONTINUING_READER", "EVALUATION_TOOL", "MEASURING", "MEASURING_READER", "MEASURING_WRITER", "READER", "RoleKind", "WRITER", "core_role"]
 
 [[modules]]
 # The agent roles of a core dynamic run: host wiring (vs_runtime values, template file

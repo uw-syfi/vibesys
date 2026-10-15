@@ -10,10 +10,11 @@ stories in which the planner merges whatever is mergeable, and named stories for
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Unpack
 
 from hypothesis import event, given, note, settings
 from hypothesis import strategies as st
-from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, Host, begin, config
+from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, Host, World, begin, config
 from tests.vibesys.orchestration.dynamic._replies import implement, merge, merged, plan_reply
 from tests.vibesys.orchestration.dynamic._slots import (
     implement_and_judge,
@@ -95,10 +96,17 @@ class MainWatch:
     story=steps(),
     rounds=st.integers(2, 4),
     in_flight=st.integers(1, 2),
-    throughputs=st.dictionaries(
-        st.sampled_from([f"c{n}" for n in range(1, 12)]), st.floats(10, 200), max_size=11
+    world=st.fixed_dictionaries(
+        {
+            # The planner merges what is mergeable; how each commit measures, and how the merger
+            # answers its turns, in order.
+            "merging": st.sampled_from([True]),
+            "throughputs": st.dictionaries(
+                st.sampled_from([f"c{n}" for n in range(1, 12)]), st.floats(10, 200), max_size=11
+            ),
+            "merger_answers": st.lists(st.integers(0, 3), max_size=4),
+        }
     ),
-    answers=st.lists(st.integers(0, 3), max_size=4),
 )
 def test_main_moves_only_through_a_merge_that_merged_and_new_work_starts_from_it(
     *,
@@ -106,15 +114,12 @@ def test_main_moves_only_through_a_merge_that_merged_and_new_work_starts_from_it
     story: list[Step],
     rounds: int,
     in_flight: int,
-    throughputs: dict[str, float],
-    answers: list[int],
+    world: World,
 ) -> None:
     host = begin(
         config(max_rounds=rounds, max_in_flight=in_flight),
         restarting=restarting,
-        merging=True,
-        throughputs=throughputs,
-        merger_answers=answers,
+        **world,
     )
     watch = MainWatch()
     try:
@@ -186,9 +191,9 @@ def _plan(host: Host, *entries: dict[str, object]) -> PlannerPrompt:
     return context
 
 
-def _first_candidate(*, restarting: bool, **world: object) -> Host:
+def _first_candidate(*, restarting: bool, **world: Unpack[World]) -> Host:
     """A run whose first workstream made candidate ``c1`` of ``h1``, beating the input."""
-    host = begin(config(max_rounds=5), restarting=restarting, **world)  # ty: ignore[invalid-argument-type]
+    host = begin(config(max_rounds=5), restarting=restarting, **world)
     first = _plan(host, implement("h1"))
     assert first.main_revision == first.base_revision
     assert first.mergeable == ()
