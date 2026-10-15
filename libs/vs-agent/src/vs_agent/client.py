@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import timedelta
+from functools import partial
 from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
@@ -39,7 +40,7 @@ from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
-from vs_sim.api import utc_datetime
+from vs_sim.api import CloseOnce, Released, utc_datetime
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -261,7 +262,9 @@ class AgentClient:
         #: Roles whose provider CLI passed its readiness probe on this client.
         self._check_readiness = check_readiness
         self._ready_roles: set[str] = set()
-        self._closed = False
+        self._close = CloseOnce()
+        # Sessions whose close failed after they left the cache; the client's close retries them.
+        self._unclosed: list[LaunchedSession] = []
         self._cancelled = False
         self._threads = threads
         self._clock = clock
@@ -808,24 +811,33 @@ class AgentClient:
         )
 
     def close(self) -> None:
-        """Close all cached sessions and the launcher exactly once."""
-        if self._closed:
-            return
-        self._closed = True
+        """Close all sessions and the launcher; a failed close is tried again by the next call."""
+        self._close.run(self._close_all)
+
+    def _close_all(self) -> Released:
+        kept, self._unclosed = self._unclosed, []
+        steps: list[Callable[[], None]] = [
+            *(partial(self._close_or_keep, session) for session in kept),
+            *(partial(self._evict, key) for key in tuple(self._sessions)),
+            self._launcher.close,
+        ]
         first_error: Exception | None = None
-        for key in tuple(self._sessions):
+        for step in steps:
             try:
-                self._evict(key)
+                step()
             except Exception as error:  # cleanup must continue  # noqa: BLE001  # lint-waiver: LW-010124 [BLE001]; AgentClient.close must evict a failed provider session while re-raising the turn's original failure.
                 if first_error is None:
                     first_error = error
-        try:
-            self._launcher.close()
-        except Exception as error:  # preserve earlier cleanup failures  # noqa: BLE001  # lint-waiver: LW-010125 [BLE001]; AgentClient.close must evict a failed provider session while re-raising the turn's original failure.
-            if first_error is None:
-                first_error = error
         if first_error is not None:
             raise first_error
+        return Released("agent sessions and launcher closed")
+
+    def _close_or_keep(self, session: LaunchedSession) -> None:
+        try:
+            session.close()
+        except BaseException:
+            self._unclosed.append(session)
+            raise
 
     def cancel(self) -> None:
         """Stop every in-flight turn without discarding its checkpoint."""
@@ -926,11 +938,12 @@ class AgentClient:
         # Stop an in-flight turn before releasing the session's resources:
         # a client closed from another thread (a kill, a context exit) would
         # otherwise pull the workspace and session state out from under a turn
-        # that is still running.
+        # that is still running. A session whose close fails is kept for the
+        # client's close to retry.
         try:
             cached.session.cancel()
         finally:
-            cached.session.close()
+            self._close_or_keep(cached.session)
 
     def _open_session(self, spec: AgentSessionSpec) -> LaunchedSession:
         """Perform VibeSys-owned setup, then have the launcher open the session."""
@@ -978,8 +991,8 @@ class AgentClient:
                 )
 
     def _ensure_open(self) -> None:
-        if self._closed or self._cancelled:
-            state = "closed" if self._closed else "cancelled"
+        if self._close.started or self._cancelled:
+            state = "closed" if self._close.started else "cancelled"
             msg = f"agent client is {state}"
             raise RuntimeError(msg)
 

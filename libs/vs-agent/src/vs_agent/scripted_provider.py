@@ -104,6 +104,11 @@ class FakeProviderError(RuntimeError):
         return cls("fake agent turn was cancelled")
 
     @classmethod
+    def close_failed(cls) -> FakeProviderError:
+        """Describe a scheduled failure of the provider's close."""
+        return cls("fake agent provider close failed")
+
+    @classmethod
     def provider_closed(cls) -> FakeProviderError:
         """Describe session creation after the fake provider was closed."""
         return cls("fake agent provider is closed")
@@ -373,6 +378,7 @@ class FakeProvider:
         script: FakeTurnScript | None = None,
         on_turn: Callable[[AgentTurnRequest], None] | None = None,
         threads: Threads,
+        close_failures: int = 0,
     ) -> None:
         """Create a provider whose sessions emit ``turn``/``turns`` and answer with ``answer``.
 
@@ -391,7 +397,9 @@ class FakeProvider:
         just like production, and can be followed by a correction turn.
         ``script.reset_after_turn`` retires a completed conversation after
         that turn, as production budget renewal does. Strict continuations
-        suppress renewal.
+        suppress renewal. ``close_failures`` makes that many first calls of
+        :meth:`close` raise before closing anything, as a launcher whose
+        cleanup command died does.
         """
         if turn is not None and turns is not None:
             raise FakeProviderError.conflicting_turn_inputs()
@@ -415,6 +423,8 @@ class FakeProvider:
         self._session_count = 0
         self._lock = self._threads.lock()
         self._closed = False
+        self._close_failures = close_failures
+        self.close_calls = 0
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -484,10 +494,14 @@ class FakeProvider:
         return session
 
     def close(self) -> None:
-        """Close every session this provider opened, idempotently."""
+        """Close every session this provider opened, idempotently; ``close_calls`` counts calls."""
         with self._lock:
+            self.close_calls += 1
             if self._closed:
                 return
+            if self._close_failures > 0:
+                self._close_failures -= 1
+                raise FakeProviderError.close_failed()
             self._closed = True
             sessions, self._sessions = self._sessions, []
         for session in sessions:

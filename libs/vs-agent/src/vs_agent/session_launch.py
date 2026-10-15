@@ -42,6 +42,7 @@ from vs_agent.session_environment import (
 )
 from vs_agent.shim_turns import LaunchedSession, SteerLedger, TurnEvents
 from vs_sandbox.api import build_host_sandbox
+from vs_sim.api import CloseOnce, Released
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
@@ -389,7 +390,7 @@ class ConfinedSessionLauncher:
         self._clock = clock
         self._ids = ids
         self._sessions: WeakSet[LaunchedSession] = WeakSet()
-        self._closed = False
+        self._close = CloseOnce()
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -451,7 +452,7 @@ class ConfinedSessionLauncher:
         this role, confine a fresh executor to it, and hand the library the
         sandbox's own environment.
         """
-        if self._closed:
+        if self._close.started:
             message = "session launcher is closed"
             raise RuntimeError(message)
         if spec.provider != self._provider:
@@ -688,10 +689,21 @@ class ConfinedSessionLauncher:
         return sandbox
 
     def close(self) -> None:
-        """Close every session opened by this launcher, idempotently."""
-        if self._closed:
-            return
-        self._closed = True
-        for session in self._sessions:
-            session.close()
-        self._sessions.clear()
+        """Close every session opened by this launcher; a failed close is retried next call."""
+        self._close.run(self._close_sessions)
+
+    def _close_sessions(self) -> Released:
+        first_error: Exception | None = None
+        for session in tuple(self._sessions):
+            try:
+                session.close()
+            except Exception as error:  # noqa: BLE001  # LW-010569 [BLE001]; every session gets its close before the first failure is raised.
+                # > Stopping at the first failure would leave the later sessions running; a
+                # > narrower type would let an unexpected one skip them the same way.
+                if first_error is None:
+                    first_error = error
+            else:
+                self._sessions.discard(session)
+        if first_error is not None:
+            raise first_error
+        return Released("every launched session closed")
