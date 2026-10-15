@@ -94,7 +94,7 @@ def _make_case(implementation: str, tmp_path: Path) -> _Case:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     if implementation == "fake":
-        cluster = FakeCluster()
+        cluster = FakeCluster(clock=ManualClock())
 
         def script(operation_id: str, **values: Unpack[_ScriptOptions]) -> None:
             def lost_claim() -> None:
@@ -276,7 +276,7 @@ def test_cancel_acknowledges_a_tombstoned_dispatch_with_no_scheduler_job(
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     if implementation == "fake":
-        fake = FakeCluster()
+        fake = FakeCluster(clock=ManualClock())
         fake.script("never-accepted", on_dispatch=_drop_before_scheduler_acceptance)
         cluster: Cluster = fake
     else:

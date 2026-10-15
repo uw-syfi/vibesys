@@ -9,8 +9,6 @@ from typing import TYPE_CHECKING, TypeAlias, TypedDict, Unpack
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from vs_sim.api.testing import ManualClock
-
 from .cluster import job_handle, payload_digest
 from .cluster_types import (
     ClusterCancelOutcome,
@@ -221,7 +219,7 @@ class FakeCluster:
     def __init__(
         self,
         *,
-        clock: Clock | None = None,
+        clock: Clock,
         timing: SlurmTimingProfile | None = None,
         seed: int = 0,
     ) -> None:
@@ -232,7 +230,7 @@ class FakeCluster:
         each job's values are drawn deterministically from ``seed`` and its
         operation identity.
         """
-        self.clock: Clock = clock if clock is not None else ManualClock()
+        self.clock = clock
         self._timing = timing if timing is not None else SlurmTimingProfile()
         self._seed = seed
         self._lock = RLock()

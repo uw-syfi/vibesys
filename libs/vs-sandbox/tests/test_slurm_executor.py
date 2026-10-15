@@ -93,7 +93,7 @@ class _ScenarioCluster(FakeCluster):
         benchmark_stdout: str = '{"throughput": 10}',
         service_log_tail: str = "",
     ) -> None:
-        super().__init__()
+        super().__init__(clock=ManualClock())
         self.config = config
         self.service_log_tail = service_log_tail
         self.job_exit_code = 0
@@ -453,7 +453,7 @@ class _TombstonedSubmissionCluster(FakeCluster):
         *,
         notify_after: int | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(clock=ManualClock())
         self._schedule = schedule
         self._notify_after = len(schedule) if notify_after is None else notify_after
         self.cancelled_job_ids: list[str | None] = []
@@ -1302,7 +1302,7 @@ async def test_dispatch_lost_before_scheduler_acceptance_ends_as_durable_failure
 ) -> None:
     """Stable no-job evidence closes an ambiguous dispatch instead of polling forever."""
     config = _config()
-    runner = FakeCluster()
+    runner = FakeCluster(clock=ManualClock())
     clock = ManualClock(1_000)
     executor = SlurmEvaluationExecutor(
         config,
@@ -1760,7 +1760,7 @@ async def test_executor_rejects_invalid_identity_before_persistence(
 async def test_inactive_executor_cancels_prepared_intent_without_external_identity(
     tmp_path: Path,
 ) -> None:
-    cluster = FakeCluster()
+    cluster = FakeCluster(clock=ManualClock())
     admission = SharedSlurmAdmission(1)
     workspace = _workspace(tmp_path)
     first = SlurmEvaluationExecutor(
@@ -1823,7 +1823,7 @@ async def test_conflicting_executor_cannot_cancel_or_recover_another_payload(
     accepted = threading.Event()
     operation_id = "claimed-operation"
     if implementation == "fake":
-        cluster = FakeCluster()
+        cluster = FakeCluster(clock=ManualClock())
         cluster.script(operation_id, states=(SlurmJobStatus.PENDING,))
         cluster.on_accept(operation_id, accepted.set)
         config = _config()
@@ -2011,7 +2011,7 @@ async def test_poll_reports_each_lifecycle_phase_without_submitting_or_recoverin
     operation_id = "polled-operation"
     states = (SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
     if implementation == "fake":
-        cluster = FakeCluster()
+        cluster = FakeCluster(clock=ManualClock())
         config = _config()
         cluster.script(operation_id, states=states)
     else:

@@ -1710,9 +1710,6 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
     "libs/vs-runtime/src/vs_runtime/_slurm_environment.py": {
         "SlurmEnvironment._start_command_broker:HostCommandBroker(...)": Owner.LANE_A,
     },
-    "libs/vs-runtime/src/vs_runtime/api/slurm_evaluation_stack.py": {
-        "build_stack:clock=None": Owner.PURITY,
-    },
     "libs/vs-sandbox/src/vs_sandbox/agent_gpu.py": {
         "read_windows:SubprocessProbe()": Owner.LANE_A,
         "AgentGpuLauncher.__init__:processes=None": Owner.LANE_A,
@@ -1753,9 +1750,6 @@ REAL_DEFAULT_PENDING: dict[str, dict[str, Owner]] = {
     },
     "libs/vs-sandbox/src/vs_sandbox/slurm_executor.py": {
         "SlurmEvaluationExecutor.__init__:processes=None": Owner.LANE_A,
-    },
-    "libs/vs-slurm/src/vs_slurm/fake_cluster.py": {
-        "FakeCluster.__init__:clock=None": Owner.PURITY,
     },
     "src/launch/__init__.py": {
         "LaunchSettings:slurm_processes=None": Owner.LANE_A,
