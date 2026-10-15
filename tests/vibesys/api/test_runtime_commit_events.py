@@ -147,8 +147,8 @@ def test_workstream_finished_carries_the_round_s_typed_failure() -> None:
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
-        threads=OsThreads(),
-        slurm_processes=REAL_PROCESSES,
+        threads=SimThreads(),
+        system=idle_environment_system(),
     )
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)

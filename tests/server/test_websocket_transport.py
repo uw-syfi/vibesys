@@ -27,7 +27,7 @@ from urllib.request import urlopen
 import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
-from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, build_server_parts
+from tests.server.support import DEADLOCK_GUARD_S, REQUEST_TIME, ServerParts, build_server_parts
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, InvalidStatus
@@ -51,7 +51,7 @@ from server.transport.discovery import (
     WebInstanceClaim,
     WebInstanceRecord,
 )
-from server.transport.subscriptions import SubscriptionTracker
+from server.transport.subscriptions import DeliveryWatermark, SubscriptionTracker
 from server.transport.unix_jsonl import UnixJsonlServer
 from server.transport.websocket import (
     WebSocketBindError,
@@ -83,6 +83,16 @@ if TYPE_CHECKING:
     from server.api.protocol import ProtocolRequest, RunSnapshot
     from server.api.service import RunApi, SubscriptionBootstrap, SubscriptionCheckpoint
     from vs_sim.api import BlockingRunner, Event
+
+
+def _delivery_watermark(parts: ServerParts) -> DeliveryWatermark:
+    """Capture the journal generation and cursor under their shared lock."""
+    with parts.condition:
+        return DeliveryWatermark(
+            store_id=parts.journal.store_id_locked(),
+            sequence=parts.journal.latest_sequence_locked(),
+        )
+
 
 # The burst has to be larger than the send path can absorb, or the producing
 # coroutine never stalls and the write deadline under test never fires. The
@@ -2536,12 +2546,12 @@ def test_a_browser_stream_reports_what_it_delivered_so_a_closing_server_can_wait
             assert json.loads(await websocket.recv())["type"] == "subscribed"
             assert json.loads(await websocket.recv())["type"] == "event_batch"
             caught_up.append(
-                tracker.wait_until_delivered(parts.api.latest_sequence, DEADLOCK_GUARD_S)
+                tracker.wait_until_delivered(_delivery_watermark(parts), DEADLOCK_GUARD_S)
             )
             parts.journal.publish_output("stdout", "the run's last line")
             assert json.loads(await websocket.recv())["type"] == "event_batch"
             caught_up.append(
-                tracker.wait_until_delivered(parts.api.latest_sequence, DEADLOCK_GUARD_S)
+                tracker.wait_until_delivered(_delivery_watermark(parts), DEADLOCK_GUARD_S)
             )
 
     with gateway:
@@ -2569,7 +2579,7 @@ def test_terminal_drain_refuses_a_late_browser_subscription(tmp_path: Path) -> N
         threads=OsThreads(),
         request_runner=ThreadBlockingRunner(),
     ) as gateway:
-        assert tracker.wait_until_delivered(parts.api.latest_sequence, 0.0)
+        assert tracker.wait_until_delivered(_delivery_watermark(parts), 0.0)
         refusal = asyncio.run(subscribe(gateway))
     parts.close()
 
