@@ -44,6 +44,7 @@ from vs_core.api import (
     RevisionId,
     RevisionRef,
     SessionId,
+    WaitEnd,
 )
 from vs_core.api.search import (
     ReplyCorrection,
@@ -286,11 +287,27 @@ CONTEXTS: dict[Template, st.SearchStrategy[BaseModel]] = {
     PromptTemplate.IMPLEMENT: IMPLEMENT_PROMPTS,
     PromptTemplate.REVIEW: REVIEW_PROMPTS,
     PromptTemplate.PROFILE_REQUEST: PROFILE_PROMPTS,
-    CoreProtocolTemplate.RESUME: st.builds(
-        ResumeFacts,
-        agent=st.sampled_from(ROLES),
-        retained=st.none() | REVISIONS,
-        timed_out=st.booleans(),
+    CoreProtocolTemplate.RESUME: st.one_of(
+        st.builds(
+            ResumeFacts,
+            agent=st.sampled_from(ROLES),
+            retained=st.none() | REVISIONS,
+            ended_by=st.none(),
+        ),
+        st.builds(
+            ResumeFacts,
+            agent=st.sampled_from(ROLES),
+            retained=st.none() | REVISIONS,
+            ended_by=st.just(WaitEnd.QUEUE_BUDGET),
+            queue_budget_spent=st.sampled_from([True]),
+        ),
+        st.builds(
+            ResumeFacts,
+            agent=st.sampled_from(ROLES),
+            retained=st.none() | REVISIONS,
+            ended_by=st.sampled_from((WaitEnd.LIMIT, WaitEnd.RUN_END)),
+            queue_budget_spent=st.booleans(),
+        ),
     ),
     CoreProtocolTemplate.REPLY_CORRECTION: st.builds(
         ReplyCorrection,
