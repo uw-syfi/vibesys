@@ -361,15 +361,13 @@ class _DetachedGatewayEffects:
     One class covers launching and stopping because both act on the same
     gateway through the same mechanisms. `stop_detached_gateway` reaches it
     through the narrower `WebGatewayStopEffects` Protocol, which omits `spawn`
-    and `discover`. Time passes on *threads* (the real clock by default), and
-    *discovery* finds the gateway and identifies processes (this host's by default).
+    and `discover`. Time passes on *threads*, and *discovery* finds the gateway
+    and identifies processes; `real_gateway_effects` builds this host's.
     """
 
-    def __init__(
-        self, threads: Threads | None = None, discovery: WebDiscovery | None = None
-    ) -> None:
-        self._threads = OsThreads() if threads is None else threads
-        self._discovery = production_web_discovery() if discovery is None else discovery
+    def __init__(self, threads: Threads, discovery: WebDiscovery) -> None:
+        self._threads = threads
+        self._discovery = discovery
 
     def spawn(
         self,
@@ -412,13 +410,15 @@ class _DetachedGatewayEffects:
         self._threads.sleep(seconds)
 
 
-_DETACHED_EFFECTS = _DetachedGatewayEffects()
+def real_gateway_effects() -> _DetachedGatewayEffects:
+    """This host's gateway effects: OS threads and the production discovery; entrypoints only."""
+    return _DetachedGatewayEffects(OsThreads(), production_web_discovery())
 
 
 def _spawn_detached(
     arguments: list[str],
     instance_path: Path,
-    effects: _DetachedGatewayEffects = _DETACHED_EFFECTS,
+    effects: _DetachedGatewayEffects,
 ) -> None:
     """Start the long-lived child and wait for its capability record."""
     instance_path.parent.mkdir(parents=True, exist_ok=True)
@@ -515,7 +515,7 @@ class _DetachedStartError(RuntimeError):
 def _spawn_detached_instance(
     arguments: list[str],
     root: Path,
-    effects: _DetachedGatewayEffects = _DETACHED_EFFECTS,
+    effects: _DetachedGatewayEffects,
 ) -> LiveInstanceRecord:
     """Start a headless detached server under ``root`` and return its serving record.
 
@@ -667,7 +667,7 @@ class WebGatewayStopEffects(Protocol):
 
 def stop_detached_gateway(
     instance_path: Path,
-    effects: WebGatewayStopEffects | None = None,
+    effects: WebGatewayStopEffects,
 ) -> GatewayStopResult:
     """Stop the gateway using ``instance_path`` and wait for its files to close.
 
@@ -705,7 +705,6 @@ def stop_detached_gateway(
     so the result does not claim it was, and the observation still decides the
     outcome.
     """
-    effects = _DETACHED_EFFECTS if effects is None else effects
     hold = effects.observe(instance_path)
     record = effects.read_record(instance_path)
     if record is None and hold.free:
@@ -781,10 +780,9 @@ class WebGatewayPortEffects(Protocol):
 
 def stop_web_gateway_on_port(
     port: int,
-    effects: WebGatewayPortEffects | None = None,
+    effects: WebGatewayPortEffects,
 ) -> GatewayPortStopResult:
     """Stop only a listener proven to be the same-user VibeSys gateway."""
-    effects = _DETACHED_EFFECTS if effects is None else effects
     observation = effects.inspect_port(port)
     if observation.state is WebPortState.FREE:
         return GatewayPortStopResult(GatewayPortStopOutcome.NOT_RUNNING, observation)
@@ -843,10 +841,10 @@ class WebInstanceFinder(Protocol):
 
 
 def _discover_web_instance(
-    path: Path, finder: WebInstanceFinder, threads: Threads | None = None
+    path: Path, finder: WebInstanceFinder, threads: Threads
 ) -> WebInstanceRecord | None:
-    """Wait through the bind-to-record race before deciding to launch again."""
-    clock = OsThreads() if threads is None else threads
+    """Wait through the bind-to-record race, on *threads*' clock, before deciding to launch again."""
+    clock = threads
     deadline = clock.now() + 2
     while True:
         record = finder.discover(path, cleanup_stale=False)
@@ -859,9 +857,7 @@ def _discover_web_instance(
         clock.sleep(0.05)
 
 
-def _launch_detached_instance(
-    arguments: list[str], effects: _DetachedGatewayEffects = _DETACHED_EFFECTS
-) -> None:
+def _launch_detached_instance(arguments: list[str], effects: _DetachedGatewayEffects) -> None:
     """Validate, spawn a headless detached server, and print one JSON line.
 
     The line is the server's ``LiveInstanceRecord`` on success (exit 0), else
@@ -1005,7 +1001,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
     detach = _detach_requested(arguments)
     detached_child = os.environ.get("VIBESYS_DETACHED_CHILD") == "1"
     if detach and not web and not detached_child:
-        _launch_detached_instance(arguments)
+        _launch_detached_instance(arguments, real_gateway_effects())
         return
     try:
         # Resolve the browser artifact before reusing or spawning a gateway.
@@ -1022,7 +1018,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
     if web and not detached_child:
         if instance_path is None:  # pragma: no cover - web always supplies a path.
             raise RuntimeError("Web instance path was not resolved")  # noqa: TRY003  # lint-waiver: LW-101038 [TRY003]; guard an impossible parser/launcher invariant
-        existing = _discover_web_instance(instance_path, production_web_discovery())
+        existing = _discover_web_instance(instance_path, production_web_discovery(), OsThreads())
         if existing is not None:
             if web_bundle is not None and existing.web_build_id != web_bundle.build_id:
                 cli.configuration_error(
@@ -1037,7 +1033,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
             return
         if detach:
             try:
-                _spawn_detached(arguments, instance_path)
+                _spawn_detached(arguments, instance_path, real_gateway_effects())
             except RuntimeError as exc:
                 # A refused or failed detached launch is an operator-facing
                 # outcome, not a defect, so it reports a message rather than a

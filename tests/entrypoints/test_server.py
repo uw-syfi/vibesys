@@ -54,6 +54,7 @@ from entrypoints.server import (
     _web_port_from_argv,
     _web_requested,
     main,
+    real_gateway_effects,
     stop_detached_gateway,
     stop_web_gateway_on_port,
 )
@@ -397,7 +398,9 @@ def test_second_web_launch_reuses_live_instance(
     )
     opened: list[str] = []
     # test-isolation: inject the discovered live gateway to exercise reuse without a real launcher
-    monkeypatch.setattr(server_entrypoint, "_discover_web_instance", lambda _path, _finder: record)
+    monkeypatch.setattr(
+        server_entrypoint, "_discover_web_instance", lambda _path, _finder, _threads: record
+    )
     # test-isolation: capture browser opening so the test remains headless and deterministic
     monkeypatch.setattr(
         server_entrypoint.webbrowser, "open", lambda url, **_kwargs: opened.append(url)
@@ -830,7 +833,7 @@ def test_port_stop_reports_success_when_the_listener_exits_before_signalling() -
 def test_detached_gateway_effects_read_a_record_and_observe_without_probing(
     tmp_path: Path,
 ) -> None:
-    effects = _DetachedGatewayEffects()
+    effects = real_gateway_effects()
     instance_path = tmp_path / ".vibesys" / "web-gateway.json"
     record = gateway_record(os.getpid())
     record.write(instance_path)
@@ -851,7 +854,7 @@ def test_detached_gateway_effects_read_a_record_and_observe_without_probing(
 
 
 def test_detached_launch_effects_capture_a_real_child_and_use_discovery(tmp_path: Path) -> None:
-    effects = _DetachedGatewayEffects()
+    effects = real_gateway_effects()
     output_path = tmp_path / "child.log"
     with output_path.open("w+b") as output:
         process = effects.spawn(

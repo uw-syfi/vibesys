@@ -116,6 +116,7 @@ def _serve(
                     ),
                     clock,
                     metadata=FileInstanceMetadataStore(root),
+                    threads=OsThreads(),
                 )
                 runtime = ServerRuntime(
                     run_id="run-1",

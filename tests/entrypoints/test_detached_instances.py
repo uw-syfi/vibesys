@@ -651,7 +651,11 @@ def test_a_detached_server_record_follows_its_run_and_names_it_throughout() -> N
 
     with registry.register(INSTANCE) as hold:
         publisher = RecordPublisher(
-            hold, _starting(INSTANCE), clock, metadata=FakeInstanceMetadataStore()
+            hold,
+            _starting(INSTANCE),
+            clock,
+            metadata=FakeInstanceMetadataStore(),
+            threads=SimThreads(),
         )
         seen()
         publisher.listening()
@@ -698,7 +702,7 @@ def test_resolved_project_replaces_the_launch_directory_before_listening(tmp_pat
     )
 
     with registry.register(INSTANCE) as hold:
-        publisher = RecordPublisher(hold, starting, clock, metadata=metadata)
+        publisher = RecordPublisher(hold, starting, clock, metadata=metadata, threads=SimThreads())
         publisher.resolved(project_root=project, task="latency")
         publisher.listening()
 
@@ -728,7 +732,11 @@ def test_a_run_that_fails_at_startup_shows_its_reason_to_a_client_that_comes_lat
     registry = LiveRegistry(FakeInstanceStore(), clock)
     with registry.register(INSTANCE) as hold:
         publisher = RecordPublisher(
-            hold, _starting(INSTANCE), clock, metadata=FakeInstanceMetadataStore()
+            hold,
+            _starting(INSTANCE),
+            clock,
+            metadata=FakeInstanceMetadataStore(),
+            threads=SimThreads(),
         )
         publisher.listening()
         publisher.observe(status=RunStatus.FAILED)
@@ -751,7 +759,11 @@ def test_a_server_that_exits_before_its_run_ends_leaves_a_failed_tombstone() -> 
     registry = LiveRegistry(FakeInstanceStore(), clock)
     with registry.register(INSTANCE) as hold:
         RecordPublisher(
-            hold, _starting(INSTANCE), clock, metadata=FakeInstanceMetadataStore()
+            hold,
+            _starting(INSTANCE),
+            clock,
+            metadata=FakeInstanceMetadataStore(),
+            threads=SimThreads(),
         ).end()
 
     (ended,) = registry.list().ended

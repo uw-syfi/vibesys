@@ -20,6 +20,7 @@ from entrypoints.server import (
     GatewayStopOutcome,
     GatewayStopResult,
     WebInstanceFinder,
+    real_gateway_effects,
     stop_detached_gateway,
     stop_web_gateway_on_port,
 )
@@ -201,11 +202,9 @@ def _live_command(  # noqa: PLR0913  # lint-waiver: LW-101077 [PLR0913]; keep in
     return command
 
 
-def _wait_for_record(
-    path: Path, finder: WebInstanceFinder, threads: Threads | None = None
-) -> WebInstanceRecord:
-    """Poll *finder* for the gateway's record on *threads*' clock (the real one by default)."""
-    clock = OsThreads() if threads is None else threads
+def _wait_for_record(path: Path, finder: WebInstanceFinder, threads: Threads) -> WebInstanceRecord:
+    """Poll *finder* for the gateway's record on *threads*' clock."""
+    clock = threads
     deadline = clock.now() + _RECORD_WAIT_SECONDS
     while clock.now() < deadline:
         record = finder.discover(path, cleanup_stale=False)
@@ -234,14 +233,15 @@ class WebLiveEffects(Protocol):
 class _DefaultWebLiveEffects:
     """Builds and launches on the terminal, through *children* (the real system by default).
 
-    *finder* finds the launched gateway (this host's discovery by default).
+    *finder* finds the launched gateway, polling on *threads*' clock.
     """
 
     def __init__(
-        self, children: ForegroundLauncher | None = None, finder: WebInstanceFinder | None = None
+        self, children: ForegroundLauncher | None, finder: WebInstanceFinder, threads: Threads
     ) -> None:
         self._children = children
         self._finder = finder
+        self._threads = threads
 
     def build(self, root: Path) -> None:
         status = _run_foreground(
@@ -254,17 +254,13 @@ class _DefaultWebLiveEffects:
         return _run_foreground(self._children, command, cwd=root, env=environment)
 
     def wait_for_record(self, instance: Path) -> WebInstanceRecord:
-        finder = production_web_discovery() if self._finder is None else self._finder
-        return _wait_for_record(instance, finder)
-
-
-_LIVE_EFFECTS = _DefaultWebLiveEffects()
+        return _wait_for_record(instance, self._finder, self._threads)
 
 
 def _run_live(
     args: argparse.Namespace,
     root: Path,
-    effects: WebLiveEffects = _LIVE_EFFECTS,
+    effects: WebLiveEffects,
 ) -> int:
     _validate_live_arguments(args)
     if args.demo:
@@ -492,13 +488,13 @@ def _still_in_use_message(instance: Path, result: GatewayStopResult) -> str:
 
 def _run_stop(
     args: argparse.Namespace,
-    effects: WebGatewayStopEffects | WebGatewayPortEffects | None = None,
+    effects: WebGatewayStopEffects | WebGatewayPortEffects,
 ) -> int:
     port = getattr(args, "port", None)
     if port is not None:
         result = stop_web_gateway_on_port(
             port,
-            cast("WebGatewayPortEffects | None", effects),
+            cast("WebGatewayPortEffects", effects),
         )
         print(_port_stop_message(result), flush=True)  # noqa: T201  # lint-waiver: LW-102907 [T201]; report the safe port-keyed stop outcome to the operator
         return (
@@ -509,7 +505,7 @@ def _run_stop(
         )
     result = stop_detached_gateway(
         args.instance,
-        cast("WebGatewayStopEffects | None", effects),
+        cast("WebGatewayStopEffects", effects),
     )
     print(_stop_message(args.instance, result), flush=True)  # noqa: T201  # lint-waiver: LW-101099 [T201]; report the gateway lifecycle outcome to the operator
     return 1 if result.outcome is GatewayStopOutcome.STILL_HOLDING else 0
@@ -544,7 +540,9 @@ def main(argv: list[str] | None = None, children: ForegroundLauncher | None = No
     if args.command == "dev":
         return _run_dev(args, root, children)
     if args.command == "live":
-        return _run_live(args, root, _DefaultWebLiveEffects(children))
+        return _run_live(
+            args, root, _DefaultWebLiveEffects(children, production_web_discovery(), OsThreads())
+        )
     if args.command == "tunnel":
         return _run_tunnel(args, children)
     if args.command == "status":
@@ -554,7 +552,7 @@ def main(argv: list[str] | None = None, children: ForegroundLauncher | None = No
     if args.command == "rotate":
         return _run_rotate(args, production_web_discovery(), UrllibLoopbackHttp())
     if args.command == "stop":
-        return _run_stop(args)
+        return _run_stop(args, real_gateway_effects())
     raise AssertionError(f"Unhandled web command: {args.command}")  # noqa: TRY003  # lint-waiver: LW-101101 [TRY003]; guard parser dispatch exhaustiveness
 
 

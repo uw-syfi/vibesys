@@ -87,17 +87,17 @@ class RecordPublisher:
         clock: Clock,
         *,
         metadata: InstanceMetadataStore,
-        threads: Threads | None = None,
+        threads: Threads,
     ) -> None:
         """Publish ``record`` through ``hold`` now; ``clock`` stamps the tombstone.
 
-        ``threads`` paces progress writes; it defaults to the operating system's.
+        ``threads`` paces progress writes.
         """
         self._hold = hold
         self._metadata = metadata
         self._record = record
         self._clock = clock
-        self._threads = threads or OsThreads()
+        self._threads = threads
         self._lock = self._threads.lock()
         self._held: RunPhase | None = None
         self._flush_scheduled = False
@@ -238,6 +238,7 @@ def main(argv: list[str] | None = None, *, runs: Runs | None = None) -> None:
             _starting_record(identity, root, clock),
             clock,
             metadata=FileInstanceMetadataStore(root),
+            threads=OsThreads(),
         )
         try:
             import_module("entrypoints.server").main(arguments, observer=publisher, runs=runs)

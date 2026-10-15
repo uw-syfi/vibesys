@@ -258,7 +258,8 @@ def test_run_live_launches_gateway_and_prints_browser_links(
         run_args=(),
     )
 
-    assert _run_live(args, tmp_path, web._DefaultWebLiveEffects(children, _PUBLISHED)) == 0  # noqa: SLF001  # lint-waiver: LW-101700 [SLF001]; the default effects are the unit that runs the build and the gateway
+    effects = web._DefaultWebLiveEffects(children, _PUBLISHED, SimThreads())  # noqa: SLF001  # lint-waiver: LW-101700 [SLF001]; the default effects are the unit that runs the build and the gateway
+    assert _run_live(args, tmp_path, effects) == 0
     assert [child.argv for child in children.children] == [("pnpm", "build"), ("gateway",)]
     output = capsys.readouterr().out
     assert f"Web build: sha256:{'1' * 64}" in output
@@ -269,7 +270,7 @@ def test_run_live_launches_gateway_and_prints_browser_links(
 @given(status=integers(min_value=1, max_value=255))
 def test_a_failed_bundle_build_stops_the_live_launch(status: int) -> None:
     children = _exits_with(status)
-    effects = web._DefaultWebLiveEffects(children)  # noqa: SLF001  # lint-waiver: LW-101702 [SLF001]; the default effects are the unit that runs the build
+    effects = web._DefaultWebLiveEffects(children, _PUBLISHED, SimThreads())  # noqa: SLF001  # lint-waiver: LW-101702 [SLF001]; the default effects are the unit that runs the build
 
     with pytest.MonkeyPatch.context() as monkeypatch:
         # test-isolation: the pnpm lookup searches the host's PATH, which the test does not control.
@@ -294,7 +295,7 @@ def test_run_live_rejects_missing_project_for_non_demo_mode(tmp_path: Path) -> N
         run_args=(),
     )
     with pytest.raises(SystemExit, match="pass --project"):
-        _run_live(args, tmp_path)
+        _run_live(args, tmp_path, FailedLiveEffects())
 
 
 def test_run_live_demo_stages_replay_log_for_gateway(
@@ -324,7 +325,7 @@ def test_run_live_demo_stages_replay_log_for_gateway(
         run_args=(),
     )
 
-    effects = web._DefaultWebLiveEffects(_exits_with(0), _PUBLISHED)  # noqa: SLF001  # lint-waiver: LW-101701 [SLF001]; isolate the helper from a detached server process
+    effects = web._DefaultWebLiveEffects(_exits_with(0), _PUBLISHED, SimThreads())  # noqa: SLF001  # lint-waiver: LW-101701 [SLF001]; isolate the helper from a detached server process
     assert _run_live(args, tmp_path, effects) == 0
     replay_log = cast("Path", captured["replay_log"])
     runtime_dir = tmp_path / "clients" / "apps" / "web" / ".vibesys-demo"
@@ -352,7 +353,7 @@ def test_run_live_demo_rejects_operator_run_arguments(tmp_path: Path) -> None:
     (tmp_path / _DEMO_LOG).write_text("{}\n")
 
     with pytest.raises(SystemExit, match="does not accept run arguments"):
-        _run_live(args, tmp_path)
+        _run_live(args, tmp_path, FailedLiveEffects())
 
 
 class FailedLiveEffects(WebLiveEffects):
