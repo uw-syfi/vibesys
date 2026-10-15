@@ -100,11 +100,14 @@ _FAILURE_OF = {
 def assert_trace_well_formed(trace: core.RunTrace, now: float) -> None:
     """Check the run trace's shape at run-clock time ``now``.
 
-    Every span comes after its parent, its times are on the clock so far and in order, and its
+    Every link names a span of the run, every span comes after its parent, its times are on the clock so far and in order, and its
     status agrees with its end, its failure and what it waits on.
     """
     seen: dict[core.SpanId, core.Span] = {}
+    ids = {span.id for span in trace.spans}
     for span in trace.spans:
+        links = span.label.links if span.label else ()
+        assert all(link.to in ids for link in links), f"{span.id} links to a missing span"
         assert span.id not in seen, f"{span.id} recorded twice"
         if span.parent is not None:
             parent = seen.get(span.parent)
