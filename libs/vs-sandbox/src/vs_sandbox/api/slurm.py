@@ -75,6 +75,7 @@ from vs_sandbox.slurm_profile import (
     trusted_profile_command,
 )
 from vs_sandbox.slurm_settings_toml import render_slurm_operator_toml, write_slurm_operator_toml
+from vs_sandbox.slurm_stage_output import SlurmStageOutputOpener
 
 #: The single-file, standard-library-only client an agent's container runs.
 HOST_COMMAND_CLIENT = Path(host_command_client.__file__).resolve()
@@ -121,6 +122,7 @@ __all__ = [
     "SlurmPolicyError",
     "SlurmProcessBroker",
     "SlurmProcessBrokerError",
+    "SlurmStageOutputOpener",
     "SlurmStagePayload",
     "SlurmTargetLifecycle",
     "agent_gpu_capability",
