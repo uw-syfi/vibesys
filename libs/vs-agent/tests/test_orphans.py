@@ -124,3 +124,66 @@ def test_a_daemon_that_cannot_list_containers_is_an_error_not_an_empty_run(
 ) -> None:
     with pytest.raises(OrphanReapError, match="run-a"):
         reap_orphaned_agents("run-a", docker=_BrokenDocker(returncode), log=lambda _line: None)
+
+
+class _RemovalAnswers:
+    """A docker client listing one container of the run, whose ``rm -f`` answers as given."""
+
+    def __init__(self, container_id: str, returncode: int | None, stderr: str) -> None:
+        self._container_id = container_id
+        self._returncode = returncode
+        self._stderr = stderr
+
+    def run(self, argv: Sequence[str], *, timeout_seconds: float) -> DockerResult:
+        if argv[1] == "ps":
+            return docker_result(list(argv), 0, f"{self._container_id}\n", "")
+        assert list(argv[1:3]) == ["rm", "-f"]
+        if self._returncode is None:
+            raise docker_timed_out(list(argv), timeout_seconds)
+        return docker_result(list(argv), self._returncode, "", self._stderr)
+
+    def spawn(self, argv: Sequence[str]) -> NoReturn:
+        raise AssertionError(argv)
+
+
+_GONE = "Error response from daemon: No such container: {id}"
+_GOING = "Error response from daemon: removal of container {id} is already in progress"
+
+
+@settings(max_examples=examples(pr=20, nightly=100))
+@given(
+    answer=st.one_of(
+        st.just((0, "")),
+        st.tuples(st.integers(1, 255), st.sampled_from([_GONE, _GOING])),
+        st.tuples(st.integers(1, 255), st.text(alphabet="abc :", max_size=20)),
+        st.just((None, "")),
+    )
+)
+def test_a_removal_is_released_exactly_when_the_container_is_gone_or_going(
+    answer: tuple[int | None, str],
+) -> None:
+    """Regression (REVIEW-9 P3-3): an ``--rm`` container gone before its ``rm`` refused a resume.
+
+    The reaper reads ``docker rm -f`` through the one Docker lifecycle translator,
+    so "already gone" and "already being removed" end the orphan, and any other
+    failure, or a client that never answered, still stops the resume.
+    """
+    returncode, template = answer
+    container = "c0ffee"
+    stderr = template.format(id=container)
+    docker = _RemovalAnswers(container, returncode, stderr)
+    gone_or_going = returncode == 0 or template in {_GONE, _GOING}
+
+    def reap() -> tuple[str, ...]:
+        return reap_orphaned_agents(
+            "run-a",
+            docker=docker,
+            log=lambda _line: None,
+            confinement_for=lambda _container: FakeConfinement(),
+        )
+
+    if gone_or_going:
+        assert reap() == (container,)
+    else:
+        with pytest.raises(OrphanReapError, match=container):
+            reap()
