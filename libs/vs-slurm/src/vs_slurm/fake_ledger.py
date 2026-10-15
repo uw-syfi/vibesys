@@ -9,6 +9,7 @@ from .ledger import (
     LedgerError,
     LedgerLease,
     LedgerRecord,
+    UnreadableLease,
     check_transition,
     decode_lease,
     decode_record,
@@ -31,8 +32,8 @@ class _Store:
     def __init__(self) -> None:
         # (project, key) -> (attempt, revision) -> encoded record
         self.records: dict[tuple[str, str], dict[tuple[int, int], str]] = {}
-        # (project, key) -> holder -> encoded lease
-        self.leases: dict[tuple[str, str], dict[str, str]] = {}
+        # (project, key) -> holder -> (encoded lease, when its file was last written)
+        self.leases: dict[tuple[str, str], dict[str, tuple[str, float]]] = {}
         # The cluster's filesystem outside the ledger: absolute path -> bytes.
         self.operator_files: dict[str, bytes] = {}
 
@@ -58,10 +59,10 @@ class FakeEvaluationLedger:
         slot = (self._project, validate_key(key))
         self._store.records.setdefault(slot, {})[(attempt, revision)] = document
 
-    def store_raw_lease(self, key: str, holder: str, document: str) -> None:
-        """Plant a lease's stored bytes, as another build would have written them."""
+    def store_raw_lease(self, key: str, holder: str, document: str, *, written_at: float) -> None:
+        """Plant a lease's stored bytes, as another build would have written them at ``written_at``."""
         slot = (self._project, validate_key(key))
-        self._store.leases.setdefault(slot, {})[holder] = document
+        self._store.leases.setdefault(slot, {})[holder] = (document, written_at)
 
     def read(self, key: str) -> LedgerEntry | None:
         """The request's current attempt, the revision it was read at, and its leases."""
@@ -83,12 +84,12 @@ class FakeEvaluationLedger:
                 latest[attempt] = (revision, record)
         *earlier, (revision, current) = (latest[attempt] for attempt in sorted(latest))
         readable: list[LedgerLease] = []
-        unreadable: list[str] = []
-        for holder, text in sorted(leases.items()):
+        unreadable: list[UnreadableLease] = []
+        for holder, (text, written_at) in sorted(leases.items()):
             try:
                 readable.append(decode_lease(text, path=f"{key}/leases/{holder}.json"))
             except LedgerError:
-                unreadable.append(holder)  # a live holder of unknown kind
+                unreadable.append(UnreadableLease(holder, written_at))
         return LedgerEntry(
             current,
             tuple(readable),
@@ -112,9 +113,10 @@ class FakeEvaluationLedger:
         return self._create(record, current.revision + 1)
 
     def renew(self, key: str, lease: LedgerLease) -> None:
-        """Write this holder's lease."""
+        """Write this holder's lease; its file is written when the lease was renewed."""
         slot = (self._project, validate_key(key))
-        self._store.leases.setdefault(slot, {})[validate_holder(lease.holder)] = encode(lease)
+        holder = validate_holder(lease.holder)
+        self._store.leases.setdefault(slot, {})[holder] = (encode(lease), lease.renewed_at)
 
     def release(self, key: str, holder: str) -> None:
         """Drop this holder's lease."""

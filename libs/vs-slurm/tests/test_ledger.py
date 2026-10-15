@@ -46,7 +46,9 @@ from vs_slurm.api import (
     SlurmTreeArtifact,
     SubmitBoundJob,
     Unleased,
+    UnreadableLease,
     Withdrawn,
+    claim_expired,
     evaluation_key,
     handle_of_job,
     job_of_handle,
@@ -373,9 +375,46 @@ def test_a_request_is_unleased_only_after_its_newest_lease_and_the_grace_period(
     if isinstance(verdict, Unleased):
         later = lease_verdict(entry, now=now + 1, grace_seconds=grace)
         assert isinstance(later, Unleased)
-    # A lease this build cannot read holds the request whatever the others say.
-    unknown = dataclasses.replace(entry, unreadable_leases=("run-new",))
-    assert lease_verdict(unknown, now=now, grace_seconds=grace) == Leased(math.inf)
+
+
+@given(
+    readable=st.lists(_TIMES, max_size=2),
+    written=st.lists(_TIMES, min_size=1, max_size=2),
+    grace=st.floats(min_value=0, max_value=1e4),
+    now=_TIMES,
+)
+@example(readable=[], written=[0.0], grace=0.0, now=1e6)
+@settings(max_examples=examples(pr=50, nightly=500), deadline=None)
+def test_a_lease_this_build_cannot_read_holds_for_one_claim_window_after_its_last_write(
+    readable: list[float], written: list[float], grace: float, now: float
+) -> None:
+    """A newer build's live holder rewrites its lease; one that crashed stops blocking the key.
+
+    An undecodable lease counts as expiring one claim window after its file was
+    last written, so it holds the request (and its claim, if it is the owner's)
+    exactly as long as a lease renewed then would, and never forever.
+    """
+    window = 900.0
+    leases = tuple(
+        LedgerLease(holder=f"run-{index}", renewed_at=0.0, expires_at=expiry)
+        for index, expiry in enumerate(readable)
+    )
+    unreadable = tuple(
+        UnreadableLease(holder="run-a" if index == 0 else f"new-{index}", written_at=at)
+        for index, at in enumerate(written)
+    )
+    record = _record(LedgerState.SUBMITTED, created_at=0.0, claim_expires_at=window)
+    entry = LedgerEntry(record, leases, unreadable_leases=unreadable)
+    newest = max((*readable, *(at + window for at in written)))
+    verdict = lease_verdict(entry, now=now, grace_seconds=grace)
+    assert verdict == (Leased(newest + grace) if now <= newest + grace else Unleased(newest))
+    assert not isinstance(lease_verdict(entry, now=math.inf, grace_seconds=grace), Leased)
+    # The owner's undecodable lease renews its claim when its file was written.
+    claim = LedgerEntry(
+        _record(LedgerState.SUBMITTING, created_at=0.0, claim_expires_at=window),
+        unreadable_leases=unreadable,
+    )
+    assert claim_expired(claim, now=now) == (now > max(window, written[0] + window))
 
 
 def test_a_locator_lands_artifacts_where_the_attaching_request_declares(tmp_path: Path) -> None:
@@ -509,7 +548,8 @@ def test_a_lease_this_build_cannot_read_holds_the_request_and_blocks_no_removal(
 ) -> None:
     """A newer build's lease is a live holder: never swept, listed, and ``evals remove`` works."""
     world = _World(tmp_path, status=SlurmJobStatus.RUNNING)
-    world.ledger.store_raw_lease(world.key, "run-new", '{"format_version": 2}\n')
+    document = '{"format_version": 2}\n'
+    world.ledger.store_raw_lease(world.key, "run-new", document, written_at=1e9 - 60.0)
 
     assert (
         sweep_unleased(
@@ -525,6 +565,26 @@ def test_a_lease_this_build_cannot_read_holds_the_request_and_blocks_no_removal(
     outcome = withdraw(world.ledger, world.cluster, world.key, reason="removed by operator")
     assert outcome == Withdrawn(world.key, ledger_operation_id(world.key, 0), world.job_id)
     assert world.state() is LedgerState.WITHDRAWN
+
+
+def test_a_lease_left_unreadable_by_a_crashed_build_is_swept_and_named_in_a_warning(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An undecodable lease not rewritten for a claim window no longer blocks its key."""
+    world = _World(tmp_path, status=SlurmJobStatus.RUNNING)
+    world.ledger.store_raw_lease(world.key, "run-new", "not json\n", written_at=1e9 - 901.0)
+
+    with caplog.at_level("WARNING"):
+        outcomes = sweep_unleased(
+            world.ledger, world.cluster, now=1e9, grace_seconds=0.0, orphans=OrphanChecks(900.0)
+        )
+
+    assert outcomes == (Withdrawn(world.key, ledger_operation_id(world.key, 0), world.job_id),)
+    assert world.state() is LedgerState.WITHDRAWN
+    (warning,) = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert world.key[:12] in warning
+    assert "run-new" in warning
+    assert f"vibesys evals remove {world.key[:12]}" in warning
 
 
 def test_the_sweep_leaves_a_completed_job_for_a_run_to_collect(tmp_path: Path) -> None:

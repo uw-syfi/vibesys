@@ -168,7 +168,10 @@ def _line(row: LedgerRow) -> str:
         else f"lease renewed {_duration(row.lease_age_seconds)} ago"
     )
     if row.unreadable_leases:
-        lease += f", unreadable lease from {', '.join(row.unreadable_leases)}"
+        lease += (
+            f", unreadable lease from {', '.join(row.unreadable_leases)}"
+            f" (`vibesys evals remove {row.entry}` withdraws it)"
+        )
     wait = ""
     if row.waiting_seconds is not None:
         wait = f"  waiting {_duration(row.waiting_seconds)}"

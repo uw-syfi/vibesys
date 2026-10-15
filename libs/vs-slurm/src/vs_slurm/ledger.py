@@ -32,7 +32,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import re
 import stat
@@ -429,14 +428,28 @@ class LedgerLease(_Document):
 
 
 @dataclass(frozen=True, slots=True)
+class UnreadableLease:
+    """A lease this build cannot decode: its holder and when its file was last written.
+
+    ``written_at`` is the file's modification time on the ledger's filesystem,
+    in epoch seconds: a live holder renews its lease, and so rewrites the file,
+    every third of a lease period, whatever build it runs.
+    """
+
+    holder: str
+    written_at: float
+
+
+@dataclass(frozen=True, slots=True)
 class LedgerEntry:
     """The current attempt of a request, the revision it was read at, and every lease on it.
 
     ``revision`` is what a compare-and-swap (``EvaluationLedger.replace``) is
-    against: revision 0 is the claim. ``unreadable_leases`` names the holders
-    whose lease this build cannot decode (a newer ``format_version``, or a
-    damaged file): each counts as a live holder of unknown kind, so the request
-    is never swept as unleased while one stands, and reading never fails on one.
+    against: revision 0 is the claim. ``unreadable_leases`` are the leases
+    this build cannot decode (a newer ``format_version``, or a damaged file):
+    each counts as a holder of unknown kind, renewed when its file was last
+    written, so reading never fails on one and it holds the request for one
+    claim window after its last write (``lease_verdict``, ``claim_expired``).
     ``earlier`` holds the current record of every earlier attempt, oldest first;
     each is final, since a new attempt is claimed only after the last one ended.
     """
@@ -444,8 +457,13 @@ class LedgerEntry:
     record: LedgerRecord
     leases: tuple[LedgerLease, ...] = ()
     revision: int = 0
-    unreadable_leases: tuple[str, ...] = ()
+    unreadable_leases: tuple[UnreadableLease, ...] = ()
     earlier: tuple[LedgerRecord, ...] = ()
+
+    @property
+    def claim_window(self) -> float:
+        """How long, in seconds, the current attempt's claim holds without a renewal."""
+        return self.record.claim_expires_at - self.record.created_at
 
 
 def check_transition(before: LedgerRecord, after: LedgerRecord) -> None:
@@ -707,12 +725,18 @@ LeaseVerdict = Leased | Unleased
 def lease_verdict(entry: LedgerEntry, *, now: float, grace_seconds: float) -> LeaseVerdict:
     """Whether a request is still wanted. Pure: the record's creation counts as its first lease.
 
-    A lease this build cannot read holds the request indefinitely: its expiry is
-    unknown, and a newer build's holder may well be alive.
+    A lease this build cannot read has an unknown expiry, and a newer build's
+    holder may well be alive: it counts as expiring one claim window after its
+    file was last written. A live holder of any build rewrites it far sooner;
+    one that crashed stops blocking the request then.
     """
-    if entry.unreadable_leases:
-        return Leased(math.inf)
-    expired_at = max((lease.expires_at for lease in entry.leases), default=entry.record.created_at)
+    expired_at = max(
+        (
+            *(lease.expires_at for lease in entry.leases),
+            *(lease.written_at + entry.claim_window for lease in entry.unreadable_leases),
+        ),
+        default=entry.record.created_at,
+    )
     until = expired_at + grace_seconds
     return Leased(until) if now <= until else Unleased(expired_at)
 
@@ -759,18 +783,22 @@ def claim_expired(entry: LedgerEntry, *, now: float) -> bool:
     ``owner``) current, and each renewal extends the claim by the claim's own
     window (``claim_expires_at - created_at``) from ``renewed_at``. So a slow
     but live submitter is never taken over, and a dead one is taken over one
-    window after its last renewal. An owner lease this build cannot read holds
-    the claim indefinitely.
+    window after its last renewal. An owner lease this build cannot read counts
+    as renewed when its file was last written.
     """
     record = entry.record
-    if record.owner in entry.unreadable_leases:
-        return False
-    window = record.claim_expires_at - record.created_at
     renewed = max(
-        (lease.renewed_at for lease in entry.leases if lease.holder == record.owner),
-        default=record.created_at,
+        (
+            record.created_at,
+            *(lease.renewed_at for lease in entry.leases if lease.holder == record.owner),
+            *(
+                lease.written_at
+                for lease in entry.unreadable_leases
+                if lease.holder == record.owner
+            ),
+        )
     )
-    return now > max(record.claim_expires_at, renewed + window)
+    return now > max(record.claim_expires_at, renewed + entry.claim_window)
 
 
 @dataclass(frozen=True, slots=True)
@@ -827,6 +855,7 @@ __all__ = [
     "SubmitBoundJob",
     "SubmitStep",
     "Unleased",
+    "UnreadableLease",
     "check_transition",
     "claim_expired",
     "content_digest",

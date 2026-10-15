@@ -145,7 +145,7 @@ def _row(entry: LedgerEntry, cluster: Cluster, *, now: float) -> LedgerRow:
         attempt=record.attempt,
         owner=record.owner,
         lease_holders=tuple(lease.holder for lease in entry.leases),
-        unreadable_leases=entry.unreadable_leases,
+        unreadable_leases=tuple(lease.holder for lease in entry.unreadable_leases),
         lease_age_seconds=None if newest is None else max(0.0, now - newest),
         candidate=record.labels.candidate,
         workstream=record.labels.workstream,

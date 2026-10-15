@@ -27,6 +27,7 @@ from vs_slurm.api import (
     SlurmConfig,
     SlurmConnectorTransport,
     SubmitBoundJob,
+    UnreadableLease,
     encode_ledger_document,
     ledger_operation_id,
 )
@@ -49,7 +50,8 @@ class _Case:
     reopen: Callable[[], EvaluationLedger]
     plant: Callable[[str, int, str], None]
     put_file: Callable[[str, bytes], str]
-    plant_lease: Callable[[str, str, str], None]
+    # Plant a lease's bytes, its file last written at the given epoch second.
+    plant_lease: Callable[[str, str, str, float], None]
 
 
 def _make(implementation: str, root: Path) -> _Case:
@@ -61,7 +63,10 @@ def _make(implementation: str, root: Path) -> _Case:
             fake.put_operator_file(path, content)
             return path
 
-        return _Case(fake, fake.reopen, fake.store_raw, put_fake, fake.store_raw_lease)
+        def plant_fake_lease(key: str, holder: str, document: str, written_at: float) -> None:
+            fake.store_raw_lease(key, holder, document, written_at=written_at)
+
+        return _Case(fake, fake.reopen, fake.store_raw, put_fake, plant_fake_lease)
     remote = root / "remote"
     remote.mkdir()
     config = SlurmConfig(
@@ -89,10 +94,12 @@ def _make(implementation: str, root: Path) -> _Case:
         path.write_bytes(content)
         return path.as_posix()
 
-    def plant_lease(key: str, holder: str, document: str) -> None:
+    def plant_lease(key: str, holder: str, document: str, written_at: float) -> None:
         directory = remote / "contract" / "ledger" / PROJECT / key / "leases"
         directory.mkdir(parents=True, exist_ok=True)
-        (directory / f"{holder}.json").write_text(document, encoding="utf-8")
+        path = directory / f"{holder}.json"
+        path.write_text(document, encoding="utf-8")
+        os.utime(path, (written_at, written_at))
 
     return _Case(open_ledger(), open_ledger, plant, put_file, plant_lease)
 
@@ -294,11 +301,12 @@ def test_a_lease_this_build_cannot_decode_is_a_holder_of_unknown_kind(
     """One undecodable lease never fails the read: it is reported, and the others stand."""
     case.ledger.claim(_record())
     case.ledger.renew(KEY, LedgerLease(holder="run-a", renewed_at=1.0, expires_at=301.0))
-    case.plant_lease(KEY, "run-new", document)
+    case.plant_lease(KEY, "run-new", document, 1_700_000_000.0)
     entry = case.reopen().read(KEY)
     assert entry is not None
     assert [lease.holder for lease in entry.leases] == ["run-a"]
-    assert entry.unreadable_leases == ("run-new",)
+    # When its file was last written bounds how long it holds the request.
+    assert entry.unreadable_leases == (UnreadableLease("run-new", 1_700_000_000.0),)
     assert entry.record == _record()
 
 

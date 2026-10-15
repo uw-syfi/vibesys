@@ -10,6 +10,7 @@ run attaching to it settles, never a withdrawn record over a live job.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -175,6 +176,8 @@ def _cancel_live(cluster: Cluster, record: LedgerRecord) -> str | None | Withdra
     return cancelled.job_id or known
 
 
+_LOG = logging.getLogger(__name__)
+
 _ORPHANING_STATES = frozenset({LedgerState.FAILED, LedgerState.WITHDRAWN})
 
 
@@ -280,12 +283,30 @@ def sweep_unleased(
         if entry is None:
             continue
         outcomes.extend(_cancel_orphans(cluster, entry, orphans, now=now))
+        if entry.unreadable_leases and not entry.record.state.settled:
+            _warn_unreadable(entry)
         if sweepable(entry):
             reason = f"no run leased it for {grace_seconds:.0f} s"
             outcome = _sweep_one(ledger, cluster, entry, reason=reason, still=sweepable)
             if outcome is not None:
                 outcomes.append(outcome)
     return tuple(outcomes)
+
+
+def _warn_unreadable(entry: LedgerEntry) -> None:
+    """Say that a lease this build cannot read holds a request, and how to free it now."""
+    key = entry.record.key
+    for lease in entry.unreadable_leases:
+        _LOG.warning(
+            "evaluation ledger request %s has a lease from %s that this build cannot read "
+            "(a newer build's, or a damaged file); it holds the request until %.0f s after "
+            "its file was last written (epoch %.0f). `vibesys evals remove %s` withdraws it now",
+            key[:12],
+            lease.holder,
+            entry.claim_window,
+            lease.written_at,
+            key[:12],
+        )
 
 
 def _sweep_one(
