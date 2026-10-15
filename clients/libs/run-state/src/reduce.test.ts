@@ -3292,7 +3292,12 @@ describe('run startup progress state', () => {
 
   it('folds a stage with no progress of its own', () => {
     const state = reduceEvent(initialCoreState(), progressEvent(1, {stage: 'resolving'}));
-    expect(state.startup).toEqual({stage: 'resolving', progress: null});
+    expect(state.startup).toEqual({
+      stage: 'resolving',
+      progress: null,
+      stageSince: timestamp(1),
+      lastActivityAt: timestamp(1),
+    });
   });
 
   it('folds a stage with done, total and a running step label', () => {
@@ -3306,6 +3311,8 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'building_image',
       progress: {done: 12, total: 30, label: 'RUN pip install'},
+      stageSince: timestamp(1),
+      lastActivityAt: timestamp(1),
     });
   });
 
@@ -3317,6 +3324,8 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'starting_container',
       progress: {done: 0, total: null, label: ''},
+      stageSince: timestamp(1),
+      lastActivityAt: timestamp(1),
     });
   });
 
@@ -3339,6 +3348,34 @@ describe('run startup progress state', () => {
     expect(state.startup).toEqual({
       stage: 'building_image',
       progress: {done: 2, total: 10, label: 'RUN build'},
+      stageSince: timestamp(2),
+      lastActivityAt: timestamp(3),
     });
+  });
+
+  it('resets the stage clock on a stage change and keeps it across same-stage events', () => {
+    const stages = ['resolving', 'building_image', 'building_image', 'starting_container'] as const;
+    let state = initialCoreState();
+    const observed = stages.map((stage, index) => {
+      state = reduceEvent(state, progressEvent(index + 1, {stage}));
+      return [state.startup?.stageSince, state.startup?.lastActivityAt];
+    });
+    expect(observed).toEqual([
+      [timestamp(1), timestamp(1)],
+      [timestamp(2), timestamp(2)],
+      [timestamp(2), timestamp(3)],
+      [timestamp(4), timestamp(4)],
+    ]);
+  });
+
+  it('resets again when an earlier stage recurs, and a replay yields the same fact', () => {
+    const events = [
+      progressEvent(1, {stage: 'building_image'}),
+      progressEvent(2, {stage: 'starting_container'}),
+      progressEvent(3, {stage: 'building_image'}),
+    ];
+    const fold = (): CoreState => events.reduce(reduceEvent, initialCoreState());
+    expect(fold().startup?.stageSince).toBe(timestamp(3));
+    expect(fold().startup).toEqual(fold().startup);
   });
 });

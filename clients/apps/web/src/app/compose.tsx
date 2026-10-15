@@ -27,6 +27,7 @@ import {type JSX, type ReactNode, useEffect, useState, useSyncExternalStore} fro
 import {bootstrapGateway, fetchCampaignFixture} from '../platform/backend.js';
 import type {WebThemeController} from './theme.js';
 import {WebThemePicker} from './theme-picker.js';
+import {useNow} from './use-now.js';
 import '@vibesys/ui/tokens.css';
 // Each feature styles its own views; the page frame is the entry's `styles.css`.
 import '@vibesys/feature-gateway-connect/styles.css';
@@ -39,6 +40,7 @@ function useStore<S>(store: Pick<Store<S, unknown>, 'getState' | 'subscribe'>): 
 }
 
 const NOTHING = (): void => undefined;
+const SYSTEM_CLOCK = (): number => Date.now();
 type CampaignStore = ReturnType<typeof createCampaignReplayStore>;
 type GatewayStore = Store<GatewayConnectState, GatewayConnectAction>;
 
@@ -285,6 +287,7 @@ function Live({session, run}: {readonly session: WebSession; readonly run: RunSt
   const state = useStore(run);
   const sessionState = useStore(session);
   const [view, setView] = useState<RunView>('run');
+  const now = useNow(SYSTEM_CLOCK, state.status === 'starting');
   // Created once for this page's lifetime, over the same session the run page reads: it
   // subscribes to `session.store`, which (unlike the session's own transport) supports multiple
   // independent subscribers, so this coexists with the run page's own subscription below.
@@ -316,6 +319,7 @@ function Live({session, run}: {readonly session: WebSession; readonly run: RunSt
       onReconnectControls={() => session.reconnectControls()}
       onRetryReplay={NOTHING}
       onCommand={session.command}
+      now={now}
       headerAction={
         <>
           {toggle}

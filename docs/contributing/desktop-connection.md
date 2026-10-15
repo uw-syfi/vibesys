@@ -316,6 +316,13 @@ Facts enter once:
   keeps reporting `starting` with its stage and progress, a resume drops the held request, and
   `READY` lands the run in `pausing` or `stopping` if one is still held. Core may land a held stop
   before `READY`, abandoning the startup; the run then goes from `starting` straight to `stopped`. A failure while starting past `resolving` names the startup stage it failed in.
+- **Starting label**: the run view's status chip shows the stage, its progress, how long the
+  stage has run, and, once nothing has been heard for 60 s, `quiet for <duration>`, so a slow
+  image build or container start never looks frozen. The fold keeps the envelope timestamps of the
+  stage's first event (`stageSince`, reset when the stage changes) and of the latest one
+  (`lastActivityAt`); the label is a pure function of that state and a `now` the page owner
+  ticks once a second only while the run is `starting`. It uses no event beyond
+  `run_startup_progress`.
 - **Record**: the server rewrites its record atomically (temp file, rename) on each phase change;
   a change of progress alone is written at most once per second, the latest one when the second
   ends.

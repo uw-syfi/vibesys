@@ -223,9 +223,13 @@ function applyRunStartupProgressData(state: CoreState, event: RunEvent): CoreSta
   const data = event.data;
   if (data?.kind !== 'run_startup_progress') return state;
   const progress = data.progress;
+  const previous = state.startup;
   return cloneCoreStateWith(state, {
     startup: {
       stage: data.stage,
+      stageSince:
+        previous !== null && previous.stage === data.stage ? previous.stageSince : event.timestamp,
+      lastActivityAt: event.timestamp,
       progress:
         progress == null
           ? null
