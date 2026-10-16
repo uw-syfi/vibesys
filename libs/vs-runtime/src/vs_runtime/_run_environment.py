@@ -545,6 +545,14 @@ class RunEnvironment(Protocol):
         """Where this environment runs *executable* at *site*, or why it cannot."""
         ...
 
+    def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
+        """Whether a run here gives its agent the compute backend's accelerator on this host.
+
+        Such a run needs that accelerator usable here: it checks it before its image
+        build. *docker_in_docker* is the task's ``[environment] docker_in_docker``.
+        """
+        ...
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
         ...
@@ -616,6 +624,11 @@ class HostEnvironment(_NoopWorkspaceRecovery):
     supported_profiler_ids: frozenset[str] | None = None
     backend_image: str | None = None
     requires_local_profiler_preflight = True
+
+    def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
+        """No container: the host agent reaches the accelerator itself."""
+        del docker_in_docker
+        return False
 
     def __init__(
         self,
@@ -889,6 +902,10 @@ class DockerEnvironment:
         with _starting_container(request) as output:
             return SandboxSession.start(sandbox=sandbox, view=view, output=output)
 
+    def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
+        """The editor container gets the accelerator, unless Docker-in-Docker forbids it."""
+        return attaches_accelerator(docker_in_docker=docker_in_docker)
+
     def build_editor(
         self,
         request: RunEnvironmentRequest,
@@ -906,7 +923,7 @@ class DockerEnvironment:
         requirements = request.evaluator_requirements
         log: Callable[[str], None] = request.log or (lambda _: None)
         toolchains: set[str] = set(evaluator_agent_toolchains(requirements))
-        attach_accelerator = extras.attach_accelerator and attaches_accelerator(
+        attach_accelerator = extras.attach_accelerator and self.attaches_backend_accelerator(
             docker_in_docker=request.docker_in_docker
         )
         if attach_accelerator:
@@ -1125,6 +1142,11 @@ class SkyPilotEnvironment(DockerEnvironment):
             )
         )
 
+    def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
+        """The local editor is CPU-only; the cluster job holds the accelerator."""
+        del docker_in_docker
+        return False
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve and validate SkyPilot resources without starting them."""
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="skypilot")
@@ -1301,6 +1323,11 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
     materialize_local_model_weights = False
     default_profiler_id = "torch"
     supported_profiler_ids: frozenset[str] | None = frozenset({"auto", "torch", "none"})
+
+    def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
+        """The local editor is CPU-only; the Modal deployment holds the accelerator."""
+        del docker_in_docker
+        return False
 
     def __init__(self, config: ModalEnvironmentConfig) -> None:
         """Configure Modal execution from its deployment settings."""

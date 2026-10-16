@@ -181,6 +181,7 @@ def make_local_shell_sandbox(
 
 _REGISTRY: dict[ComputeBackend, Callable[..., ComputeBackendImpl]] = {}
 _HOST_ONLY: set[ComputeBackend] = set()
+_AVAILABILITY: dict[ComputeBackend, Callable[[CommandProbe], str | None]] = {}
 
 
 def register_compute_backend(
@@ -188,17 +189,36 @@ def register_compute_backend(
     factory: Callable[..., ComputeBackendImpl],
     *,
     host_only: bool = False,
+    unavailable: Callable[[CommandProbe], str | None] | None = None,
 ) -> None:
     """Register the factory used to construct one compute backend.
 
     ``host_only`` declares that the backend's accelerator cannot be reached
-    from a container, so its agent has to run on the host.
+    from a container, so its agent has to run on the host. ``unavailable`` says,
+    through a command probe, why this host cannot provide the backend's
+    accelerator (``None`` when it can); it makes the decision the backend's own
+    ``ensure_accelerator_available`` makes, and a backend without one always can.
     """
     _REGISTRY[backend] = factory
     if host_only:
         _HOST_ONLY.add(backend)
     else:
         _HOST_ONLY.discard(backend)
+    if unavailable is None:
+        _AVAILABILITY.pop(backend, None)
+    else:
+        _AVAILABILITY[backend] = unavailable
+
+
+def accelerator_unavailable(backend: ComputeBackend, probe: CommandProbe) -> str | None:
+    """Why this host cannot provide *backend*'s accelerator, asked through *probe*, or ``None``.
+
+    A run raises this reason from ``ensure_accelerator_available`` before its image
+    build; asking here lets a check made before the run report it instead.
+    """
+    _ensure_defaults()
+    check = _AVAILABILITY.get(backend)
+    return None if check is None else check(probe)
 
 
 def backend_is_host_only(backend: ComputeBackend) -> bool:
@@ -317,7 +337,9 @@ def _register_defaults() -> None:
     cuda = import_module("vs_sandbox.cuda_backend")
     local = import_module("vs_sandbox.local_compute_backend")
 
-    register_compute_backend(ComputeBackend.CUDA, cuda.CudaBackend)
+    register_compute_backend(
+        ComputeBackend.CUDA, cuda.CudaBackend, unavailable=cuda.cuda_accelerator_unavailable
+    )
     register_compute_backend(
         ComputeBackend.METAL,
         local.metal_backend,
@@ -339,6 +361,7 @@ __all__ = [
     "ContentionMonitor",
     "Device",
     "SandboxKind",
+    "accelerator_unavailable",
     "backend_is_host_only",
     "create_compute_backend",
     "register_compute_backend",
