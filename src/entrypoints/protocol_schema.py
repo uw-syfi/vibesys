@@ -11,14 +11,18 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from launch import built_in_orchestrations
 from server.api.schema import SpanAttributeModels, protocol_json_schema
 
+if TYPE_CHECKING:
+    from pydantic import BaseModel
+
 
 def built_in_span_attributes() -> SpanAttributeModels:
     """For each built-in orchestration that labels spans, each kind's attribute model."""
-    found: dict[str, dict[str, type]] = {}
+    found: dict[str, dict[str, type[BaseModel]]] = {}
     for registration in built_in_orchestrations().registrations():
         plugin = registration.plugin
         kinds = {kind.name: kind.attrs for kind in plugin.core.span_kinds if kind.attrs}

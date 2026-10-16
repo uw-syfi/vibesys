@@ -270,7 +270,7 @@ def _span_attributes_model(span_attributes: SpanAttributeModels) -> type[BaseMod
     fields: dict[str, Any] = {}
     for orchestration, kinds in sorted(span_attributes.items()):
         name = "".join(part.title() for part in orchestration.replace("-", "_").split("_"))
-        per_kind = {kind: (model | None, None) for kind, model in sorted(kinds.items())}
+        per_kind: dict[str, Any] = {kind: (m | None, None) for kind, m in sorted(kinds.items())}
         model = create_model(f"{name}SpanAttributes", __config__=_STRICT, **per_kind)
         fields[orchestration] = (model | None, None)
     return create_model("SpanAttributes", __config__=_STRICT, **fields)
