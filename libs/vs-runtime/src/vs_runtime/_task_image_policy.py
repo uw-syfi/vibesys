@@ -42,7 +42,9 @@ if TYPE_CHECKING:
 
     from vs_runtime._run_environment import RunEnvironmentSpec
 
-_ENVIRONMENT_CLASSES: dict[str, type] = {
+_ENVIRONMENT_CLASSES: dict[
+    str, type[DockerEnvironment | HostEnvironment | ModalEnvironment | SlurmEnvironment]
+] = {
     "docker": DockerEnvironment,
     "host": HostEnvironment,
     "modal": ModalEnvironment,
