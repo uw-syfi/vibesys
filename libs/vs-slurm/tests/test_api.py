@@ -21,6 +21,7 @@ from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
     PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE,
     SCHEDULER_READ_END,
+    SERVICE_NOT_READY_EXIT_CODE,
     SlurmBatchHandle,
     SlurmBatchRequest,
     SlurmBatchStage,
@@ -892,8 +893,11 @@ def test_teardown_ends_every_session_the_job_started_and_outlives_them_within_a_
         )
 
     lines = script.splitlines()
-    service = lines.index('setsid python -m server --port "${PORT}" > .vs-slurm-service.log 2>&1 &')
-    command = lines.index("setsid python check.py &")
+    marked = 'VS_SLURM_JOB_PROCESS="$vs_token" setsid'
+    service = lines.index(
+        f'{marked} python -m server --port "${{PORT}}" > .vs-slurm-service.log 2>&1 &'
+    )
+    command = lines.index(f"{marked} python check.py &")
     assert lines[service + 1 : service + 3] == [
         "service_pid=$!",
         'vs_groups="$vs_groups $service_pid"',
@@ -913,13 +917,13 @@ def test_teardown_ends_every_session_the_job_started_and_outlives_them_within_a_
     assert teardown.index("trap '' TERM") < term
     assert f"deadline=$((SECONDS + {grace}))" in teardown[term:kill]
     assert f"deadline=$((SECONDS + {exit_wait}))" in teardown[kill:]
-    assert teardown.count('while vs_live && [ "$SECONDS" -lt "$deadline" ]') == 2
-    failure = teardown[teardown.index("vs_live || return 0") :]
+    assert teardown.count('while vs_scan && [ "$SECONDS" -lt "$deadline" ]') == 2
+    failure = teardown[teardown.index('[ -n "$vs_alive" ] || return 0') :]
     assert f"still alive {exit_wait} s after SIGKILL" in failure
-    assert f"exit {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE}" in failure
-    assert f"printf '%s\\n' {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE} > " in failure
-    # Zombies are not alive: a zombie's parent, maybe outside the job, decides when it goes.
-    assert "$4 !~ /^Z/" in script
+    # A service that never became ready keeps its status; any other job fails with 71.
+    kept = failure.index(f'[ "$status" -ne {SERVICE_NOT_READY_EXIT_CODE} ] || return 0')
+    assert kept < failure.index(f"exit {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE}")
+    assert f"printf '%s\\n' {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE} > " in failure[kept:]
 
 
 def test_jobs_are_submitted_without_scheduler_requeue(tmp_path: Path) -> None:

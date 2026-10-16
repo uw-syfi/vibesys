@@ -83,9 +83,18 @@ none of them is left, for at most `process_exit_wait_seconds` (1 to 1800,
 default 120). A process Slurm finds still running when the script has exited
 can make Slurm's step kill fail ("Kill task failed") and drain the node; a CUDA
 process holding a large GPU allocation can take tens of seconds to exit after
-SIGKILL. A zombie does not count as running. When a process outlives the wait,
-the script lists it (`ps` output) on the job's stderr and exits with code 71
-(`PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE`), so the evaluation is not reused.
+SIGKILL. A zombie does not count as running, unless it still has threads: a
+process whose main thread exited shows as a zombie while its other threads run,
+and a CUDA process releases the GPU only when its last thread exits. When a
+process outlives the wait, the script lists it (`ps` output) on the job's stderr
+and exits with code 71 (`PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE`), so the
+evaluation is not reused; a service that never became ready keeps its code 70.
+Both commands start with the environment variable `VS_SLURM_JOB_PROCESS` set to
+a token unique to the job script, so a descendant that left their sessions with
+`setsid` (Ray and daemons do) is found by that marker, and its own session joins
+the job's. Not found: a descendant that leaves the sessions and also clears its
+environment (`env -i setsid ...`), or that is already exiting when teardown
+starts; Slurm's own step kill still ends it, but the script does not wait for it.
 
 The grace plus the wait must be shorter than a `--time`/`-t` limit in
 `sbatch_arguments`: an explicit wait that does not fit is rejected, and the

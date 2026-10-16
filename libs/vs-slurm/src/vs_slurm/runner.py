@@ -1768,6 +1768,7 @@ def _job_script(request: _JobScriptRequest) -> str:
             stop_grace_seconds=request.service_stop_grace_seconds,
             exit_wait_seconds=request.process_exit_wait_seconds,
             status_path=status_path,
+            kept_exit_code=SERVICE_NOT_READY_EXIT_CODE,
         )
     )
     if service is not None:
