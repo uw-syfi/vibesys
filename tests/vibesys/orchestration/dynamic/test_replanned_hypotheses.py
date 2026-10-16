@@ -77,8 +77,10 @@ def test_a_hypothesis_that_goes_on_runs_as_a_second_workstream_of_the_tree() -> 
 @given(
     story=_stories(),
     stop=stops(),
-    replans=st.lists(st.integers(0, 7), min_size=4, max_size=12),
-    abandons=st.lists(st.integers(0, 4), max_size=6),
+    planner=st.tuples(
+        st.lists(st.integers(0, 7), min_size=4, max_size=12),
+        st.lists(st.integers(0, 4), max_size=6),
+    ),
     width=st.tuples(st.integers(2, 5), st.integers(1, 2)),
 )
 def test_any_reuse_of_hypothesis_ids_keeps_every_published_record_projectable(
@@ -86,11 +88,11 @@ def test_any_reuse_of_hypothesis_ids_keeps_every_published_record_projectable(
     restarting: bool,
     story: list[Step],
     stop: Stop | None,
-    replans: list[int],
-    abandons: list[int],
+    planner: tuple[list[int], list[int]],
     width: tuple[int, int],
 ) -> None:
     rounds, in_flight = width
+    replans, abandons = planner
     host = begin(
         config(max_rounds=rounds, max_in_flight=in_flight),
         restarting=restarting,

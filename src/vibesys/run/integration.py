@@ -201,7 +201,11 @@ class _RunProjection(Protocol):
 
 
 class CommittedStateProjector(Protocol):
-    """Project just-committed plugin state into product run facts."""
+    """Project just-committed plugin state into product run facts.
+
+    A projection is derived from the committed state; it raises ``ValueError`` (a Pydantic
+    ``ValidationError`` included) when that state cannot be shown as a valid view.
+    """
 
     def project_committed(
         self,
@@ -399,19 +403,48 @@ class _CoreCommitObserver:
         self._run_id = run_id
         self._projector = projector
         self._namespace = namespace
+        self._failing = False
 
     def committed(self, previous: BaseModel | None, current: BaseModel) -> None:
-        """Publish the durable state hint before the events derived from it."""
-        self._integration.publish_committed_state(self._namespace, current)
-        _emit_core_commit_events(
-            self._integration.events, self._project(previous), self._project(current)
-        )
+        """Publish the durable state hint before the events derived from it.
+
+        The runtime's `CommitObserver` contract says this never raises: the commit is already
+        durable, and what is published here is derived from it. A projection that cannot be
+        built leaves the run going with its view stale, and is reported once per failing
+        stretch as a framework warning instead of ending the run.
+        """
+        try:
+            self._integration.publish_committed_state(self._namespace, current)
+            _emit_core_commit_events(
+                self._integration.events, self._project(previous), self._project(current)
+            )
+        except ValueError as error:
+            self._projection_failed(error)
+        else:
+            self._failing = False
         _emit_winner_selected(
             self._integration.events,
             winner_selection(previous) if isinstance(previous, RuntimeRecord) else None,
             winner_selection(current) if isinstance(current, RuntimeRecord) else None,
         )
         _emit_span_changes(self._integration.events, _run_trace(previous), _run_trace(current))
+
+    def _projection_failed(self, error: ValueError) -> None:
+        if self._failing:
+            return
+        self._failing = True
+        self._integration.events.emit(
+            CoreEventType.FRAMEWORK_WARNING,
+            data=FrameworkWarningData(
+                summary=(
+                    "the run's view could not be built from its committed state; "
+                    "the run goes on and its view stays stale until it can be built again"
+                ),
+                detail=str(error),
+                source=FrameworkSource.LOOP,
+                source_label="projection",
+            ),
+        )
 
     def _project(self, value: BaseModel | None) -> _RunProjection | None:
         projector = self._projector

@@ -139,11 +139,7 @@ def _snapshots(draw: st.DrawFn) -> RunSnapshot:
             if prior is None
             else prior.model_copy(update={"rounds": (*prior.rounds, *rounds)})
         )
-    leading = (
-        draw(st.none() | st.sampled_from(sorted(hypotheses)))
-        if hypotheses
-        else None
-    )
+    leading = draw(st.none() | st.sampled_from(sorted(hypotheses))) if hypotheses else None
     baseline = draw(
         st.sampled_from((NotConfigured(), Measured(reading=InputReading(accuracy_passed=True))))
     )
@@ -281,7 +277,9 @@ def test_a_hypothesis_that_goes_on_is_a_second_workstream_beside_its_first() -> 
                 title=first.title,
                 hypothesis="claim",
                 first_sequence=6,
-                rounds=(RoundRecord(sequence=6, attempt=AttemptId(root=f"attempt:{hypothesis}:6")),),
+                rounds=(
+                    RoundRecord(sequence=6, attempt=AttemptId(root=f"attempt:{hypothesis}:6")),
+                ),
             ),
         ),
         finished=(FinishedWork(sequence=6, plan=first, parent=_PARENT),),

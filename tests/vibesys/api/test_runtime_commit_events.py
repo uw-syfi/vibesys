@@ -9,6 +9,7 @@ projector and no concrete strategy ID.
 
 from __future__ import annotations
 
+import itertools
 from typing import Literal
 
 from hypothesis import given, settings
@@ -20,6 +21,7 @@ from vibesys.api import IterationKind, IterationStatus, IterationSummary, Iterat
 from vibesys.events import (
     CoreEvent,
     CoreEventType,
+    FrameworkWarningData,
     IterationsChangedData,
     WorkstreamFailureKind,
 )
@@ -42,6 +44,8 @@ class _FakeAgentState(BaseModel):
     round_status: Literal["completed", "failed"] = "completed"
     last_error: RoundFailureSummary | None = None
     repeated_error: bool = False
+    unprojectable: bool = False
+    """The state names two iteration nodes alike, so its projection fails validation."""
 
 
 class _FakeProjector:
@@ -53,11 +57,11 @@ class _FakeProjector:
         return _agent_view(state, run_id=run_id)
 
 
-def _iterations(round_numbers: tuple[int, ...]) -> IterationTree:
+def _iterations(round_numbers: tuple[int, ...], *, alike: bool = False) -> IterationTree:
     return IterationTree.from_nodes(
         tuple(
             IterationSummary(
-                id=f"round:{number}",
+                id="round" if alike else f"round:{number}",
                 kind=IterationKind.ROUND,
                 label=f"Round {number}",
                 ordinal=number,
@@ -74,7 +78,10 @@ def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
         loop="commit-probe",
         status=RunStatus.ACTIVE,
         projection={"rounds": list(state.round_numbers), "active": state.active},
-        iterations=_iterations(state.round_numbers),
+        iterations=_iterations(
+            (*state.round_numbers, 0, -1) if state.unprojectable else state.round_numbers,
+            alike=state.unprojectable,
+        ),
         rounds=tuple(
             RoundSummary(
                 number=number,
@@ -306,3 +313,59 @@ def test_a_commit_of_another_namespace_projects_nothing() -> None:
         for event in captured
         if event.type in {CoreEventType.ROUND_FINISHED, CoreEventType.ITERATIONS_CHANGED}
     ]
+
+
+@given(unprojectable=st.lists(st.booleans(), max_size=10))
+@settings(max_examples=examples(pr=20, nightly=200))
+def test_a_commit_whose_view_cannot_be_built_warns_once_per_stretch_and_never_raises(
+    unprojectable: list[bool],
+) -> None:
+    """The observer runs after a commit is durable and must not raise (runtime `CommitObserver`).
+
+    Regression: a projection that failed validation escaped the observer and ended a live run.
+    Now each stretch of commits whose view cannot be built warns once, and the commits around it
+    still publish their rounds.
+    """
+    integration = LocalRunIntegration(
+        clock=ManualClock(),
+        git=REAL_GIT,
+        github=NO_GITHUB,
+        threads=SimThreads(),
+        system=idle_environment_system(),
+    )
+    observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
+    captured: list[CoreEvent] = []
+    integration.events.subscribe(captured.append)
+    states = [_FakeAgentState()]
+    for revision, broken in enumerate(unprojectable, start=1):
+        states.append(
+            _FakeAgentState(
+                round_numbers=tuple(range(1, revision + 1)),
+                revision=revision,
+                unprojectable=broken,
+            )
+        )
+
+    failed: list[bool] = []
+    for before, after in itertools.pairwise(states):
+        observer.committed(before, after)
+        failed.append(before.unprojectable or after.unprojectable)
+
+    warnings = [
+        event
+        for event in captured
+        if event.type is CoreEventType.FRAMEWORK_WARNING
+        and isinstance(event.data, FrameworkWarningData)
+        and event.data.source_label == "projection"
+    ]
+    stretches = sum(
+        1 for index, now in enumerate(failed) if now and (index == 0 or not failed[index - 1])
+    )
+    assert len(warnings) == stretches
+    announced = [
+        int((event.round_label or "").removeprefix("round-"))
+        for event in captured
+        if event.type is CoreEventType.ROUND_FINISHED
+    ]
+    published = [state.revision for state, now in zip(states[1:], failed, strict=True) if not now]
+    assert set(published) <= set(announced)
