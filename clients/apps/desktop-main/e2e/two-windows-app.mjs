@@ -21,7 +21,7 @@
  * `@vibesys/connection`'s own tests).
  */
 import {Duplex} from 'node:stream';
-import {app, webContents} from 'electron';
+import {app, ipcMain, webContents} from 'electron';
 import {RunControl} from '@vibesys/feature-run-control/main';
 
 // Resolve after `test:e2e` builds the package, exactly as `welcome-recovery-app.mjs` does: this
@@ -35,6 +35,10 @@ const [{confineContents, lockDownSession, registerAppScheme, serveBundledUi}, {A
 
 const RUN_URL = 'app://vibesys/desktop.html';
 const HOST = {kind: 'local'};
+// The welcome preload asks for the theme to paint in before the page's scripts run.
+ipcMain.on('vibesys:welcome:theme', event => {
+  event.returnValue = 'paper';
+});
 
 /** One simulated run: its identity, and the distinguishing content its fixture server answers. */
 const RUNS = {
@@ -261,6 +265,7 @@ void app.whenReady().then(() => {
   for (const label of ['a', 'b']) {
     windows[label] = new AppWindow({
       log,
+      surfaceUrl: 'app://vibesys/welcome.html',
       connect: (port, runId) => runs.connect(port, runId),
       closed: runId => runs.detach(runId),
       fatal: error => fatals.push(error.message),

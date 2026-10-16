@@ -22,6 +22,10 @@ const [
 ]);
 
 const WELCOME_URL = 'app://vibesys/welcome.html';
+// The welcome preload asks for the theme to paint in before the page's scripts run.
+ipcMain.on('vibesys:welcome:theme', event => {
+  event.returnValue = 'paper';
+});
 const RUN_URL = 'app://vibesys/desktop.html';
 const CREDIT_BYTES = 16 * 1024 * 1024;
 const INSTANCE_ID = '0123456789ab';
@@ -272,6 +276,7 @@ void app.whenReady().then(() => {
   const welcome = new WelcomeFeed();
   appWindow = new AppWindow({
     log,
+    surfaceUrl: WELCOME_URL,
     connect: (port, runId) => runs.connect(port, runId),
     closed: runId => runs.detach(runId),
     fatal: error => fatals.push(error.message),
@@ -282,6 +287,14 @@ void app.whenReady().then(() => {
     hosts: new FakeHosts(),
     runs,
     settings: new FakeSettings(),
+    preferences: {
+      answer: async () => ({
+        appearance: {mode: 'system', light: 'paper', dark: 'ink'},
+        notifications: {enabled: true},
+        archived: [],
+      }),
+    },
+    surfaceUrl: WELCOME_URL,
     welcomeIpc: {
       handle: (channel, listener) =>
         ipcMain.handle(channel, (event, ...args) =>
