@@ -177,6 +177,32 @@ def test_woken_search_state_commits_with_receipts_and_callbacks() -> None:
     assert shell.record.envelope.event_cursor == EventCursor(sequence=0)
 
 
+@search("timing", config=CounterConfig)
+async def timing(ctx: Flow, config: CounterConfig) -> None:
+    """A search that, in its first step, asks to be woken a second after the run clock."""
+    del config
+    await ctx.first(ctx.timer(ctx.clock.now() + 1))
+    await ctx.first(ctx.stopped)
+
+
+@given(start=st.floats(min_value=0, max_value=4e9, allow_nan=False))
+def test_a_new_run_starts_its_search_at_the_time_it_starts(start: float) -> None:
+    """The first step reads the start time: no span before it, no deadline already past."""
+    store = FakeStateStore()
+    shell = CoreRuntime(
+        store,
+        timing.driver(CounterConfig()),
+        declared(timing),
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+    )
+    shell.start("host", now_at=start, lease_duration=100)
+    assert shell.next_wake_at == start + 1
+    spans = shell.record.envelope.strategy.live.trace.spans
+    assert spans
+    assert all(span.started_at == start for span in spans)
+
+
 def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
     store = FakeStateStore()
     fence = store.acquire("writer", now=0, duration=1)

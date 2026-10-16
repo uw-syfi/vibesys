@@ -506,7 +506,11 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime already started"
             raise RuntimeError(message)
         self._load()
-        core = self._initial if self._record is None else self.record.envelope.core
+        core = (
+            _started_at(self._initial, now_at)
+            if self._record is None
+            else self.record.envelope.core
+        )
         if core.run.declaration != self._search.declaration:
             raise ContractError(("declaration",), "initial strategy declaration mismatch")
         selected = validate_startup(self._search.declaration, core.run.capabilities)
@@ -1412,3 +1416,16 @@ def _search_generators() -> Iterator[None]:
         yield
     finally:
         sys.set_asyncgen_hooks(*previous)
+
+
+def _started_at(core: CoreState, now_at: float) -> CoreState:
+    """A new run's state with its clock at the time it starts.
+
+    A new run's state is built before it starts, with no time on its clock. The search's first
+    step runs before core hears of the clock (``RecoveryStarted``), so without this it would
+    read time zero: its root span would start at zero and a deadline it computes from ``now``
+    would already have passed.
+    """
+    return core.model_copy(
+        update={"run": core.run.model_copy(update={"now_at": max(core.run.now_at, now_at)})}
+    )
