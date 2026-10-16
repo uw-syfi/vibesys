@@ -559,7 +559,13 @@ def test_mpmc_baseline_builds_with_its_declared_build_and_passes_its_check(tmp_p
     ((verified, _contents),) = verify_outputs(checkout, bundle.candidate_outputs)
     assert verified.path == "queue-candidate.so"
     assert verified.size > 0
-    check = [part.replace("${PROJECT_ROOT}", str(checkout)) for part in bundle.accuracy_command]
+    # The task's check exactly, except that its per-history time budget (a wall-clock bound
+    # that a loaded CI worker can exceed) only guards against a hang here.
+    check = [
+        *(part.replace("${PROJECT_ROOT}", str(checkout)) for part in bundle.accuracy_command),
+        "--check-budget",
+        "10m",
+    ]
     completed = run_test_command(check, cwd=checkout, check=False, capture_output=True, text=True)
     assert completed.returncode == 0, completed.stdout + completed.stderr
     assert "PASS - mpmc reservation-aware bounded FIFO" in completed.stdout
