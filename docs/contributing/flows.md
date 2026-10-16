@@ -31,6 +31,7 @@ role data). A search whose flows act on a system another library owns (an issue 
 `owned=` (the codecs of that library's operations); `ctx.owners.perform` sends one and returns the
 typed outcome or a `Failed`, and the declaration requires the host to provide an owner for each.
 A search that labels its spans passes `spans=` (its `SpanKind` declarations; see "Span labels").
+The dynamic search is the worked example (`src/vibesys/orchestration/dynamic/search/_spans.py`).
 The id scheme derives from the search name.
 
 The root flow starts with the config and returns `None` or `NoWinner(reason)`. **A flow never
@@ -342,7 +343,11 @@ await session.turn(prompt, within=s, label=Label(AGENT_TURN, attrs={"role": "imp
 
 - `ctx.label(kind, **fields)` labels the current flow's span. The fields it names (`title`,
   `links`, `attrs`, `verdict`, `reason`) replace the earlier ones; the rest stay. A span keeps
-  the kind of its first label.
+  the kind of its first label. `ctx.label(kind, span=s, ...)` labels a span this flow started
+  instead: a task of its group (`task.span`), or an operation it issued. `ctx.operation_span` is
+  the span of the operation the flow issued last, so a flow can label a measurement with what
+  only its answer says (the value, the verdict). A span the flow did not start is refused
+  (`label.span`).
 - `label=Label(kind, ...)` on `session.turn`, `ctx.evaluation.measure`, `ctx.workspaces.verify`
   and `ctx.owners.perform` labels the operation's span when it is issued (for a turn, each
   provider turn of the ask; not its render).

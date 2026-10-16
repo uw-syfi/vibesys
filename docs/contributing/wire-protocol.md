@@ -72,7 +72,15 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   gives the snapshot's spans; folding a prefix gives the trace at that prefix's last sequence.
 - **Generic.** A span's `label.kind` names a kind its search declared at `@search`. A client
   that does not know the kind renders it from `name`, `label.title`, `status`, `label.attrs_json`
-  and `label.links`, so a new kind needs no protocol change.
+  and `label.links`, so a new kind needs no protocol change. A kind's attribute schema is in the
+  `ProtocolDocument` under `span_attributes.<orchestration>.<kind>`, so `attrs_json` decodes to
+  a generated TypeScript type. An orchestration declares its kinds once, at `@search(spans=...)`.
+  Its core policy carries the same declaration (`CorePolicy.span_kinds`), and
+  `python -m entrypoints.protocol_schema` exports the built-in ones
+  (`tests/server/test_protocol_schema.py` holds the committed schema to it). Today only the
+  dynamic search labels spans: `planning_call`, `workstream` (verdicts `accepted`, `rejected`;
+  link `builds_on`), `agent_turn` and `gate` (verdicts `passed`, `failed_check`, `slower`). The
+  other searches' spans carry no label and render plainly.
 - **Ids.** `flow:<path>#<n>` for a flow task, `op:<decision id>` for an operation, both plain
   strings. A span id is stable across replay and restart.
 - **Contract choices.** `waiting_on[].kind` is `operation`, `slot`, `time` or `stop`. There is no
