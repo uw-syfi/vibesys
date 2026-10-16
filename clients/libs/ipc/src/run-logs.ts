@@ -1,16 +1,10 @@
 /**
- * The run page's logs requests: what the run preload's `logs` sends the main process on
- * `LOGS_CHANNEL`, and what comes back. The page names no host and no channel: the main process
- * serves each request from the run the page is bound to, over that host's logs channel
- * (`docs/contributing/desktop-connection.md`, "Logs"). A listing names that run's instance, and a
- * read must name the same one. A read carries a token the page chose, unique among its reads in
+ * A page's logs requests: what a view's `logs` sends the main process, and what comes back. A
+ * listing names the run's instance, and a read must name the same one. A read carries a token the page chose, unique among its reads in
  * flight, so the page can `withdraw` it when it stops waiting: an IPC invoke cannot be withdrawn
  * itself, and the main process then withdraws the helper's long poll.
  */
 import type {LogListOutcome, LogReadInput, LogReadOutcome} from '@vibesys/logs';
-
-/** IPC channel on which the run page asks the main process for its run's logs (`invoke`). */
-export const LOGS_CHANNEL = 'vibesys:logs';
 
 /** The longest read token a page may choose. */
 const LOG_READ_TOKEN_MAX_LENGTH = 64;

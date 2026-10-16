@@ -43,9 +43,7 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
   },
   'apps/web': {
     entry: [
-      // The desktop shell's run page (`desktop.html`, built by `vite.desktop.config.ts`); knip's
-      // Vite plugin finds the browser page (`index.html` -> `src/app/main.tsx`) itself.
-      'src/app/desktop-main.tsx',
+      // knip's Vite plugin finds the browser page (`index.html` -> `src/app/main.tsx`) itself.
       // The browser transport bundle's entry (`vite.browser.config.ts`).
       'src/platform/backend.ts',
       'src/**/*.test.ts',
@@ -70,11 +68,6 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
       'playwright.config.ts',
       'e2e/**/*.{ts,mjs}',
     ],
-  },
-  'apps/desktop-renderer': {
-    // The welcome page's entry (`welcome.html`, built by `vite.config.ts`).
-    entry: ['src/main.tsx', 'src/**/*.test.ts', 'src/**/*.test.tsx', 'e2e/**/*.spec.ts'],
-    project: ['src/**/*.ts', 'src/**/*.tsx', 'e2e/**/*.{ts,js}'],
   },
   'apps/desktop-shell': {
     // The app shell's page (`shell.html`, built by `vite.config.ts`) and its Playwright journey.

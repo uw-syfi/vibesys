@@ -15,7 +15,6 @@ import {connectRun, WebSession} from '@vibesys/run-session';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {EventSourceCampaignStream, openTransport} from '../platform/backend.js';
-import {markDesktopShell} from '../platform/desktop-shell.js';
 import {GatewaySessionStore} from '../platform/gateway-storage.js';
 import {browserLifecycle} from '../platform/lifecycle.js';
 import '../styles.css';
@@ -31,7 +30,6 @@ if (scrubbed.pageUrl !== launchUrl) {
   window.history.replaceState(scrubbed.historyState, '', scrubbed.pageUrl);
 }
 
-markDesktopShell(document.documentElement, window.vibesysDesktop);
 const theme = createWebThemeController(
   document.documentElement,
   new BrowserWebThemePreferenceStore(() => window.localStorage),

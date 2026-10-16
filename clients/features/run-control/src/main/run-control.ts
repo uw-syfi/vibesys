@@ -22,7 +22,6 @@ import {
   type ConnectionLease,
   connectionStatus,
   type HostConnection,
-  type LogsLease,
   type Phase,
 } from '@vibesys/connection';
 import type {
@@ -33,22 +32,32 @@ import type {
 import {
   type ConnectionStatus,
   type HostId,
+  type HostKey,
   hostFromKey,
   hostKey,
   hostLabel,
   instanceObservation,
 } from '@vibesys/hosts';
-import type {
-  ChromeState,
-  HarnessChoice,
-  RunLogsReply,
-  RunLogsRequest,
-  StartOutcome,
-} from '@vibesys/ipc';
-import type {ResumeRunId, StopView} from '@vibesys/runs';
+import type {HarnessChoice} from '@vibesys/ipc';
+import type {ResumeRunId} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {type RelayPort, relay} from './relay.js';
 import {StopController} from './stop-controller.js';
+
+/** How a start ended: attached, or cancelled (and its run stopped). */
+export type StartOutcome = 'started' | 'cancelled';
+
+/** The run most recently bound, and the state of its connection. */
+export interface BoundRun {
+  readonly host: HostKey;
+  readonly hostLabel: string;
+  /** The registry id of the server driving the run. */
+  readonly instanceId: string;
+  /** The run's id, from its record. */
+  readonly runId: string;
+  readonly project: string;
+  readonly connection: ConnectionStatus;
+}
 
 /** The page that shows one attached run, in its own window. */
 interface RunPage {
@@ -89,55 +98,8 @@ interface Binding {
    * record says nothing about the run, so only a server seen live, then gone, has ended.
    */
   seenLive: boolean;
-  /**
-   * The binding's lease on its host's logs channel, taken by the page's first logs request and
-   * released with the binding.
-   */
-  logs: LogsLease | null;
-  /** The page's log reads in flight, by the token it named each with, for its `withdraw`. */
-  readonly reads: Map<string, AbortController>;
   /** Retire this binding's connection lease once and report when cleanup settles. */
   readonly release: () => PromiseLike<void>;
-}
-
-/** Release a binding's connection lease and, when its page asked for logs, its logs lease. */
-function releaseLeases(lease: ConnectionLease, binding: Binding | null): PromiseLike<void> {
-  const logs = binding?.logs ?? null;
-  if (binding !== null) {
-    binding.logs = null;
-    for (const read of binding.reads.values()) read.abort(new Error('the run page was released'));
-    binding.reads.clear();
-  }
-  const released = lease[Symbol.asyncDispose]();
-  if (logs === null) return released;
-  return Promise.all([logs[Symbol.asyncDispose](), released]).then(() => undefined);
-}
-
-/** What a page's log read answers. */
-type LogReadReply = RunLogsReply<Extract<RunLogsRequest, {readonly kind: 'read'}>>;
-
-/**
- * Run the page's read named `token` under a signal its `withdraw` aborts. A withdrawn read answers a
- * `transport` failure: the page stopped waiting for it, so this only settles the invoke.
- */
-async function withdrawableRead(
-  reads: Map<string, AbortController>,
-  token: string,
-  read: (signal: AbortSignal) => Promise<LogReadReply>,
-): Promise<LogReadReply> {
-  if (reads.has(token)) {
-    return {ok: false, failure: {code: 'transport', message: `read ${token} is already in flight`}};
-  }
-  const controller = new AbortController();
-  reads.set(token, controller);
-  try {
-    return await read(controller.signal);
-  } catch (error) {
-    if (!controller.signal.aborted) throw error;
-    return {ok: false, failure: {code: 'transport', message: 'the page withdrew the read'}};
-  } finally {
-    if (reads.get(token) === controller) reads.delete(token);
-  }
 }
 
 /** One target (host, instance) a call is navigating toward, from claim to bind or abandonment. */
@@ -200,12 +162,7 @@ export class RunControl {
   readonly #starts = new Map<string, Map<number, Claim>>();
   /** Stale launches held until the matching claim binds or is abandoned. */
   readonly #pendingAdoptions = new Map<string, PendingAdoption>();
-  /**
-   * The most recently bound run, for the single legacy "attached run" the welcome window's title
-   * strip still shows (`ChromeState.attached`). A real multi-run summary is the unified run-registry
-   * dashboard's job (#814/#816), out of scope here; until then this is a deliberate, documented
-   * simplification, not a correctness property of the registry itself.
-   */
+  /** The most recently bound run, which a launch from the command line opens a window for. */
   #lastBoundRunId: string | null = null;
   /** Orders claims by request time; see `Claim.sequence`. */
   #nextSequence = 0;
@@ -238,8 +195,8 @@ export class RunControl {
     });
   }
 
-  /** The most recently bound run, for the title strip. */
-  attached(): ChromeState['attached'] {
+  /** The most recently bound run, or null when none is bound. */
+  attached(): BoundRun | null {
     const runId = this.#lastBoundRunId;
     const run = runId === null ? undefined : this.#bindings.get(runId);
     if (run === undefined) return null;
@@ -251,10 +208,6 @@ export class RunControl {
       project: run.project,
       connection: run.status,
     };
-  }
-
-  stops(): Record<string, StopView> {
-    return this.#stops.views();
   }
 
   /** Attach to registry run `instanceId` on `id`. */
@@ -355,13 +308,6 @@ export class RunControl {
     );
   }
 
-  /** The user asked to retry the most recently bound run's connection (or to sign in again). */
-  retry(): void {
-    const runId = this.#lastBoundRunId;
-    if (runId === null) return;
-    this.#bindings.get(runId)?.connection.dispatch({type: 'user-retry'});
-  }
-
   /**
    * Relay one connection `runId`'s run page opened, over a run channel. Message and close listener
    * ownership is installed synchronously before this returns.
@@ -383,41 +329,6 @@ export class RunControl {
         throw error;
       }
     });
-  }
-
-  /**
-   * Answer one logs request from `runId`'s run page, over its host's logs channel. The run's
-   * instance id comes from the binding, which took it from the record the app attached to: a
-   * listing names it, and a read that names another instance is refused. A `withdraw` aborts the
-   * page's read in flight with that token, which withdraws the helper's long poll; a token naming
-   * no read in flight (it already answered) is a no-op.
-   */
-  logs<R extends RunLogsRequest>(runId: string, request: R): Promise<RunLogsReply<R>>;
-  async logs(runId: string, request: RunLogsRequest): Promise<RunLogsReply<RunLogsRequest>> {
-    const run = this.#bindings.get(runId);
-    if (request.kind === 'withdraw') {
-      run?.reads.get(request.token)?.abort(new Error('the page withdrew the read'));
-      return null;
-    }
-    if (run === undefined) {
-      return {
-        ok: false,
-        failure: {code: 'unknown_instance', message: `run ${runId} is not attached`},
-      };
-    }
-    run.logs ??= run.connection.openLogs();
-    if (request.kind === 'list') return run.logs.list(run.instanceId);
-    if (request.read.instance_id !== run.instanceId) {
-      return {
-        ok: false,
-        failure: {
-          code: 'unknown_instance',
-          message: `this page is bound to instance ${run.instanceId}, not ${request.read.instance_id}`,
-        },
-      };
-    }
-    const logs = run.logs;
-    return withdrawableRead(run.reads, request.token, signal => logs.read(request.read, signal));
   }
 
   /** End `runId`'s page; the run itself keeps going on its host. Safe when `runId` is not bound. */
@@ -626,7 +537,7 @@ export class RunControl {
       pendingObservations.splice(0);
       for (const unsubscribe of subscriptions.splice(0).reverse()) unsubscribe();
       try {
-        leaseRelease = releaseLeases(lease, binding);
+        leaseRelease = lease[Symbol.asyncDispose]();
       } catch (error) {
         leaseRelease = Promise.reject(error);
       }
@@ -655,8 +566,6 @@ export class RunControl {
         page: {wake: () => page?.wake(), close: closePage},
         status: connectionStatus(connection.phase),
         seenLive: false,
-        logs: null,
-        reads: new Map(),
         release,
       };
       binding = provisional;

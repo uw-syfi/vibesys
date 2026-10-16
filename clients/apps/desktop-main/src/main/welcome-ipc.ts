@@ -61,8 +61,6 @@ export interface WelcomeBinding {
   /** The page that surface loads; a sender on another page is refused. */
   readonly url: string;
   readonly answer: (request: WelcomeRequest, rendererGeneration: string) => Promise<unknown>;
-  /** Synchronously remove a replaced document's authority. */
-  readonly revoke: (rendererGeneration: string) => void;
   /** Settle a replaced document's asynchronous cleanup; a rejection still counts as settled. */
   readonly retire: (rendererGeneration: string) => Promise<void>;
 }
@@ -133,7 +131,6 @@ class WindowAdmission {
     this.#activeGenerations = new Set();
     for (const generation of retiring) {
       this.#retiredGenerations.add(generation);
-      this.#binding.revoke(generation);
     }
     this.#retirement = this.#retirement.then(async () => {
       await Promise.allSettled(retiring.map(async generation => this.#binding.retire(generation)));

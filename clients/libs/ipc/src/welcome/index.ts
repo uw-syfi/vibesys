@@ -8,7 +8,7 @@
  * composes them: `WELCOME_CHANNELS` and `WelcomeBridge` are the union of the groups, and
  * `parseWelcomeRequest` sends a channel to its group's parser.
  */
-import type {HostKey, HostListing} from '@vibesys/hosts';
+import type {HostListing} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 import {
   HOSTS_CHANNELS,
@@ -47,7 +47,7 @@ import {
   type StartRunRequest,
   type StartRunWelcomeBridge,
 } from './start-run.js';
-import type {ChromeState, WelcomeEvent, WelcomeOverview, WelcomeResult} from './types.js';
+import type {WelcomeEvent, WelcomeOverview, WelcomeResult} from './types.js';
 import {isChannelOf} from './values.js';
 import {
   parseWindowsRequest,
@@ -56,7 +56,7 @@ import {
   type WindowsWelcomeBridge,
 } from './windows.js';
 
-/** The app's own requests: the overview the welcome view loads first. */
+/** The app's own requests: the overview the shell loads first. */
 const APP_CHANNELS = {overview: 'vibesys:welcome:overview'} as const;
 
 export const WELCOME_CHANNELS = {
@@ -75,26 +75,16 @@ type WelcomeChannel = (typeof WELCOME_CHANNELS)[keyof typeof WELCOME_CHANNELS];
 /** The complete positional shape of every welcome request at the renderer boundary. */
 const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.overview]: 0,
-  [WELCOME_CHANNELS.hosts]: 0,
-  [WELCOME_CHANNELS.host]: 1,
   [WELCOME_CHANNELS.setCheckout]: 3,
   [WELCOME_CHANNELS.cancelCheckout]: 1,
-  [WELCOME_CHANNELS.cancelInspection]: 1,
   [WELCOME_CHANNELS.signIn]: 1,
   [WELCOME_CHANNELS.complete]: 2,
-  [WELCOME_CHANNELS.inspect]: 3,
   [WELCOME_CHANNELS.logs]: 3,
   [WELCOME_CHANNELS.releaseLogs]: 0,
   [WELCOME_CHANNELS.tasks]: 2,
   [WELCOME_CHANNELS.harnesses]: 1,
-  [WELCOME_CHANNELS.start]: 6,
-  [WELCOME_CHANNELS.cancelStart]: 1,
   [WELCOME_CHANNELS.attach]: 2,
   [WELCOME_CHANNELS.resume]: 3,
-  [WELCOME_CHANNELS.showRun]: 0,
-  [WELCOME_CHANNELS.showWelcome]: 0,
-  [WELCOME_CHANNELS.retry]: 0,
-  [WELCOME_CHANNELS.stop]: 3,
   [WELCOME_CHANNELS.stopConfirmed]: 3,
   [WELCOME_CHANNELS.releaseRun]: 0,
   [WELCOME_CHANNELS.readEvents]: 5,
@@ -131,9 +121,7 @@ export interface WelcomeBridge
     WindowsWelcomeBridge {
   readonly platform: string;
   overview(): Promise<WelcomeResult<WelcomeOverview>>;
-  onChrome(listener: (event: WelcomeEvent<ChromeState>) => void): void;
   onRecent(listener: (event: WelcomeEvent<readonly RecentRun[]>) => void): void;
-  onShowHost(listener: (event: WelcomeEvent<HostKey>) => void): void;
   onListing(listener: (event: WelcomeEvent<HostListing>) => void): void;
   onPreferences(listener: (event: WelcomeEvent<PreferencesView>) => void): void;
 }
@@ -174,7 +162,7 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
   throw new Error(`${JSON.stringify(channel)} is not a welcome request`);
 }
 
-export type {HostsWelcomeBridge, WelcomeInspection} from './hosts.js';
+export type {HostsWelcomeBridge} from './hosts.js';
 export type {
   CheckoutInspection,
   MachineEntry,
@@ -211,9 +199,7 @@ export type {
   StartRunWelcomeBridge,
 } from './start-run.js';
 export {
-  type ChromeState,
   type PathCompletion,
-  type StartOutcome,
   settled,
   WELCOME_EVENTS,
   type WelcomeEvent,

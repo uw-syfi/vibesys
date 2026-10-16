@@ -1,7 +1,0 @@
-/* The "Start a run" sheet's task choices. */
-.tasks { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
-.tasks label { border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-.tasks input { margin: 0 6px 0 0; }
-/* The "Start a run" sheet's model choice: a label and its select on one row. */
-.harness { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
-.harness select { flex: 1; }

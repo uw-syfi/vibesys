@@ -113,7 +113,6 @@ directory = "clients"
 timeout_seconds = 1200
 commands = [
   ["pnpm", "--filter", "@vibesys/app-web", "test:e2e"],
-  ["pnpm", "--filter", "@vibesys/app-desktop-renderer", "test:e2e"],
   ["pnpm", "--filter", "@vibesys/app-desktop-main", "test:e2e"],
   ["pnpm", "--filter", "@vibesys/app-ui-gallery", "test:e2e"],
   ["pnpm", "--filter", "@vibesys/app-desktop-shell", "test:e2e"],

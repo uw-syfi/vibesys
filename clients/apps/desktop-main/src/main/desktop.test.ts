@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {WELCOME_CHANNELS, type WelcomeEvent, type WelcomeResult} from '@vibesys/ipc';
 import {DEFAULT_PREFERENCES, type RecentFile} from '@vibesys/settings';
-import {SHELL_URL, WELCOME_URL} from './app-assets.js';
+import {SHELL_URL} from './app-assets.js';
 import {Desktop, type DesktopDeps} from './desktop.js';
 import {RunWindows} from './run-windows.js';
 import {WelcomeFeed} from './welcome-feed.js';
@@ -25,7 +25,7 @@ class FakeWelcomeIpc implements WelcomeIpc {
     channel: string,
     ...args: unknown[]
   ): Promise<WelcomeResult<unknown>> {
-    return this.invokeAs(7, 'app://vibesys/welcome.html', rendererGeneration, channel, ...args);
+    return this.invokeAs(7, 'app://vibesys/shell.html', rendererGeneration, channel, ...args);
   }
 
   invokeAs(
@@ -120,8 +120,9 @@ interface RetirementCleanups {
 function desktopWorld(cleanups: RetirementCleanups = {}) {
   const events: string[] = [];
   const logs: string[] = [];
-  const starts: Parameters<DesktopDeps['runs']['start']>[] = [];
-  const cancels: Parameters<DesktopDeps['runs']['cancelStart']>[] = [];
+  const checkouts: {readonly path: unknown; readonly change: unknown}[] = [];
+  const launches: string[] = [];
+  let bound: ReturnType<DesktopDeps['runs']['attached']> = null;
   let releaseCleanup = (): void => {};
   const cleanup = new Promise<void>(resolve => {
     releaseCleanup = resolve;
@@ -138,31 +139,42 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     },
   });
   const runs: DesktopDeps['runs'] = {
-    attached: () => null,
-    stops: () => ({}),
-    attach: async () => undefined,
-    start: async (...args) => {
-      starts.push(args);
+    attached: () => bound,
+    attach: async (id, instanceId) => {
+      launches.push(`attach:${JSON.stringify(id)}:${instanceId}`);
+      bound = {
+        host: 'ssh:chelan4',
+        hostLabel: 'chelan4',
+        instanceId,
+        runId: '20261015-163047',
+        project: '/p',
+        connection: {kind: 'connected'},
+      };
+    },
+    start: async (_id, project) => {
+      launches.push(`start:${project}`);
+      bound = {
+        host: 'local',
+        hostLabel: 'This Mac',
+        instanceId: '0123456789ab',
+        runId: 'run-1',
+        project,
+        connection: {kind: 'connected'},
+      };
       return 'started';
     },
-    cancelStart: (...args) => {
-      cancels.push(args);
-    },
-    retireStartOwner: owner => {
-      events.push(`retire-start:${owner}`);
+    detach: runId => {
+      launches.push(`detach:${runId}`);
+      bound = null;
     },
     resume: async () => undefined,
     stop: async () => undefined,
-    retry: () => undefined,
   };
   const hosts: DesktopDeps['hosts'] = {
-    aliases: async () => [],
-    host: async id => ({
-      key: id.kind === 'local' ? 'local' : `ssh:${id.alias}`,
-      label: id.kind === 'local' ? 'This Mac' : id.alias,
-      checkout: null,
-    }),
-    setCheckout: async (_id, path) => String(path),
+    setCheckout: async (_id, path, change) => {
+      checkouts.push({path, change});
+      return String(path);
+    },
     cancelCheckout: async () => undefined,
     cancelCheckoutOwner: async owner => {
       events.push(`cancel-checkout:${owner}`);
@@ -172,8 +184,6 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
       }
       await cleanup;
     },
-    cancelInspection: () => undefined,
-    cancelInspectionOwner: () => undefined,
     complete: async (_id, directory) => ({
       kind: 'listed',
       directory,
@@ -182,20 +192,9 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     }),
     harnesses: async () => ({kind: 'unsupported'}),
     readEvents: async () => ({kind: 'unsupported'}),
-    inspect: async (_id, instanceId) => ({
-      id: instanceId,
-      state: 'ended',
-      record: null,
-      metadata: null,
-      control_socket_path: '/tmp/control.sock',
-      server_log_path: '/tmp/server.log',
-    }),
     logs: async () => ({ok: true, instanceId: '000000000001', streams: []}),
     recent: async () => undefined,
     releaseLogs: () => undefined,
-    retireInspectionOwner: owner => {
-      events.push(`retire-inspection:${owner}`);
-    },
     retireOwner: async owner => {
       events.push(`retire-host:${owner}`);
       if (cleanups.retireOwner !== undefined) {
@@ -204,7 +203,6 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
       }
       await cleanup;
     },
-    settingsProblem: async () => null,
     signIn: async () => undefined,
     tasks: async () => [],
   };
@@ -214,14 +212,12 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     recent: async () => recent,
   };
   const window: DesktopDeps['window'] = {
-    mode: 'welcome',
     welcome: document,
     focus: () => undefined,
-    setMode: () => undefined,
     releaseSurfaceRun: () => undefined,
     sendWelcome: <T>(_channel: string, _event: WelcomeEvent<T>): void => undefined,
   };
-  new Desktop({
+  const desktop = new Desktop({
     window,
     welcome: new WelcomeFeed(),
     hosts,
@@ -246,13 +242,12 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
         return {kind: 'unsupported'};
       },
     },
-    surfaceUrl: WELCOME_URL,
     runWindows,
     shellUrl: SHELL_URL,
     welcomeIpc: ipc,
     log: message => logs.push(message),
   });
-  return {runWindowList, ipc, document, starts, cancels, events, logs, releaseCleanup};
+  return {runWindowList, ipc, document, desktop, checkouts, launches, events, logs, releaseCleanup};
 }
 
 describe('Desktop run windows', () => {
@@ -276,13 +271,9 @@ describe('Desktop run windows', () => {
     expect(window?.url).toBe(`${SHELL_URL}?host=ssh%3Achelan4&run=20261015-163047`);
     expect(window?.title).toBe('VibeSys · chelan4 · 20261015-163047');
 
-    // Its surface is answered, but it cannot switch the main window's view.
-    await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.hosts)).resolves.toMatchObject({
+    // Its surface is answered.
+    await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.releaseLogs)).resolves.toMatchObject({
       ok: true,
-    });
-    await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.showRun)).resolves.toMatchObject({
-      ok: false,
-      error: 'show-run is for the main window',
     });
 
     // Opening the same run again, from either window, focuses its window.
@@ -293,13 +284,13 @@ describe('Desktop run windows', () => {
     // Closed, it is forgotten and refused; opening the run again makes a new window.
     window?.close();
     await spin();
-    await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.hosts)).resolves.toMatchObject({
+    await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.releaseLogs)).resolves.toMatchObject({
       ok: false,
       error: 'not the welcome view',
     });
     await w.ipc.invoke('10:100', WELCOME_CHANNELS.openRunWindow, run);
     expect(w.runWindowList).toHaveLength(2);
-    await expect(fromRunWindow(21, '31:301', WELCOME_CHANNELS.hosts)).resolves.toMatchObject({
+    await expect(fromRunWindow(21, '31:301', WELCOME_CHANNELS.releaseLogs)).resolves.toMatchObject({
       ok: true,
     });
   });
@@ -346,64 +337,58 @@ async function spin(): Promise<void> {
   for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
 }
 
-describe('Desktop welcome start ownership', () => {
-  test('passes the exact renderer generation through start, cancel, and synchronous retirement', async () => {
+describe('Desktop launches', () => {
+  test('the main window plan opens nothing', async () => {
+    const w = desktopWorld();
+    await w.desktop.open({kind: 'main-window'});
+    expect(w.launches).toEqual([]);
+    expect(w.runWindowList).toHaveLength(0);
+  });
+
+  test('an instance plan resolves the run, lets it go, and opens it in a window of its own', async () => {
+    const w = desktopWorld();
+    await w.desktop.open({
+      kind: 'instance',
+      host: {kind: 'ssh', alias: 'chelan4'},
+      instanceId: '0123456789ab',
+    });
+    expect(w.launches).toEqual([
+      'attach:{"kind":"ssh","alias":"chelan4"}:0123456789ab',
+      'detach:20261015-163047',
+    ]);
+    expect(w.runWindowList.map(window => window.url)).toEqual([
+      `${SHELL_URL}?host=ssh%3Achelan4&run=20261015-163047`,
+    ]);
+  });
+
+  test('a start plan starts the run on this machine and opens it in a window of its own', async () => {
+    const w = desktopWorld();
+    await w.desktop.open({kind: 'start', project: '/project', runArgs: ['--x']});
+    expect(w.launches).toEqual(['start:/project', 'detach:run-1']);
+    expect(w.runWindowList.map(window => window.url)).toEqual([
+      `${SHELL_URL}?host=local&run=run-1`,
+    ]);
+  });
+});
+
+describe('Desktop checkout ownership', () => {
+  test('passes the exact renderer generation through a checkout change and its retirement', async () => {
     const w = desktopWorld();
 
-    const harness = {provider: 'claude', model: 'claude-a'};
     await expect(
-      w.ipc.invoke(
-        '10:100',
-        WELCOME_CHANNELS.start,
-        'local',
-        '/project',
-        'spsc',
-        '--rounds 2',
-        harness,
-        1,
-      ),
-    ).resolves.toEqual({ok: true, value: 'started'});
-    await expect(w.ipc.invoke('10:100', WELCOME_CHANNELS.cancelStart, 1)).resolves.toEqual({
-      ok: true,
-      value: null,
-    });
-
-    expect(w.starts).toEqual([
-      [
-        {kind: 'local'},
-        '/project',
-        'spsc',
-        ['--rounds', '2'],
-        {owner: '10:100', sequence: 1},
-        harness,
-      ],
-    ]);
-    expect(w.cancels).toEqual([[{owner: '10:100', sequence: 1}]]);
+      w.ipc.invoke('10:100', WELCOME_CHANNELS.setCheckout, 'local', '/old', 1),
+    ).resolves.toEqual({ok: true, value: '/old'});
+    expect(w.checkouts).toEqual([{path: '/old', change: {owner: '10:100', sequence: 1}}]);
 
     w.document.navigate('10:100');
-    expect(w.events).toEqual(['retire-inspection:10:100', 'retire-start:10:100']);
-    const successor = w.ipc.invoke(
-      '11:101',
-      WELCOME_CHANNELS.start,
-      'local',
-      '/project',
-      'spsc',
-      '--rounds 3',
-      null,
-      1,
-    );
+    const successor = w.ipc.invoke('11:101', WELCOME_CHANNELS.setCheckout, 'local', '/new', 1);
     await spin();
-    expect(w.events).toEqual([
-      'retire-inspection:10:100',
-      'retire-start:10:100',
-      'cancel-checkout:10:100',
-      'retire-host:10:100',
-    ]);
-    expect(w.starts).toHaveLength(1);
+    expect(w.events).toEqual(['cancel-checkout:10:100', 'retire-host:10:100']);
+    expect(w.checkouts).toHaveLength(1);
 
     w.releaseCleanup();
-    await expect(successor).resolves.toEqual({ok: true, value: 'started'});
-    expect(w.starts[1]?.[4]).toEqual({owner: '11:101', sequence: 1});
+    await expect(successor).resolves.toEqual({ok: true, value: '/new'});
+    expect(w.checkouts[1]?.change).toEqual({owner: '11:101', sequence: 1});
   });
 
   test('a rejected cleanup cannot admit a successor while its sibling is pending', async () => {
@@ -418,36 +403,18 @@ describe('Desktop welcome start ownership', () => {
         await retirement.promise;
       },
     });
-    await w.ipc.invoke(
-      '10:100',
-      WELCOME_CHANNELS.start,
-      'local',
-      '/project',
-      'spsc',
-      '--rounds 2',
-      null,
-      1,
-    );
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.setCheckout, 'local', '/old', 1);
 
     w.document.navigate('10:100');
-    const successor = w.ipc.invoke(
-      '11:101',
-      WELCOME_CHANNELS.start,
-      'local',
-      '/project',
-      'spsc',
-      '--rounds 3',
-      null,
-      1,
-    );
+    const successor = w.ipc.invoke('11:101', WELCOME_CHANNELS.setCheckout, 'local', '/new', 1);
     await retirementStarted.promise;
     await spin();
 
-    expect(w.starts).toHaveLength(1);
+    expect(w.checkouts).toHaveLength(1);
     expect(w.logs).toEqual([]);
     retirement.resolve();
-    await expect(successor).resolves.toEqual({ok: true, value: 'started'});
-    expect(w.starts).toHaveLength(2);
+    await expect(successor).resolves.toEqual({ok: true, value: '/new'});
+    expect(w.checkouts).toHaveLength(2);
     expect(w.logs).toEqual([
       'could not retire checkout changes: checkout cancellation: Error: checkout cancellation failed',
     ]);
@@ -462,12 +429,12 @@ describe('Desktop welcome start ownership', () => {
         throw new Error('host retirement failed');
       },
     });
-    await w.ipc.invoke('10:100', WELCOME_CHANNELS.hosts);
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.releaseLogs);
 
     w.document.navigate('10:100');
-    await expect(w.ipc.invoke('11:101', WELCOME_CHANNELS.hosts)).resolves.toEqual({
+    await expect(w.ipc.invoke('11:101', WELCOME_CHANNELS.releaseLogs)).resolves.toEqual({
       ok: true,
-      value: [],
+      value: null,
     });
 
     expect(w.logs).toEqual([

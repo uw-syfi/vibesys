@@ -6,8 +6,7 @@
   "vibesys": {
     "layer": "service",
     "entries": {
-      ".": "neutral",
-      "./testing": "neutral"
+      ".": "neutral"
     }
   },
   "exports": {
@@ -15,11 +14,6 @@
       "@vibesys/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    },
-    "./testing": {
-      "@vibesys/source": "./src/testing/index.ts",
-      "types": "./dist/testing/index.d.ts",
-      "default": "./dist/testing/index.js"
     }
   },
   "files": [
@@ -27,7 +21,7 @@
     "!dist/.*.tsbuildinfo"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json tsconfig.testing.json",
+    "build": "tsc -b tsconfig.lib.json",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },

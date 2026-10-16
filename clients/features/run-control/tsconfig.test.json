@@ -18,28 +18,13 @@
   ],
   "references": [
     {
-      "path": "./tsconfig.state.json"
-    },
-    {
-      "path": "./tsconfig.renderer.json"
-    },
-    {
       "path": "./tsconfig.main.json"
     },
     {
       "path": "../../libs/ipc/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/ipc/tsconfig.testing.json"
-    },
-    {
-      "path": "../../libs/machine/tsconfig.testing.json"
-    },
-    {
       "path": "../../libs/runs/tsconfig.lib.json"
-    },
-    {
-      "path": "../../libs/store/tsconfig.testing.json"
     },
     {
       "path": "../../libs/connection/tsconfig.lib.json"

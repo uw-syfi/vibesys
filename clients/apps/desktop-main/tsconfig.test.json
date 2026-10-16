@@ -21,9 +21,6 @@
       "path": "./tsconfig.lib.json"
     },
     {
-      "path": "./tsconfig.preload-run.json"
-    },
-    {
       "path": "./tsconfig.preload-welcome.json"
     },
     {
@@ -43,9 +40,6 @@
     },
     {
       "path": "../../libs/connection/tsconfig.lib.json"
-    },
-    {
-      "path": "../../features/start-run/tsconfig.state.json"
     },
     {
       "path": "../../features/app-shell/tsconfig.main.json"

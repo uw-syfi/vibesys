@@ -84,27 +84,18 @@ test('new tests, new files outside the UI paths and non-source files are allowed
     head.set(`${RENDERER}/view.test.tsx`, "import './view.js';\n");
     head.set(`${RENDERER}/view.dom.test.tsx`, '');
     head.set(`${CAMPAIGN}/src/state/reducer.ts`, 'export const reduce = 1;\n');
-    head.set('apps/desktop-renderer/src/main.tsx', "import './wiring/stores.js';\n");
-    head.set('apps/desktop-renderer/src/shell/sidebar.tsx', CLEAN_VIEW);
+    head.set('apps/desktop-shell/src/shell.tsx', CLEAN_VIEW);
     head.set(`${RENDERER}/notes.md`, 'text');
   });
   assert.deepEqual(errors, []);
 });
 
-test('the app UI paths are the web app and the welcome view only', () => {
-  const refused = [
-    'apps/web/src/app/panel.tsx',
-    'apps/web/src/styles.css',
-    'apps/desktop-renderer/src/ui/panel.tsx',
-    'apps/desktop-renderer/src/welcome.css',
-  ];
+test('the app UI paths are the web app only', () => {
+  const refused = ['apps/web/src/app/panel.tsx', 'apps/web/src/styles.css'];
   for (const path of refused) {
     assert.equal(errorsAfter(head => head.set(path, '')).length, 1, path);
   }
-  const allowed = [
-    'apps/web/src/platform/backend.ts',
-    'apps/desktop-renderer/src/wiring/stores.ts',
-  ];
+  const allowed = ['apps/web/src/platform/backend.ts', 'apps/desktop-shell/src/shell.tsx'];
   for (const path of allowed) {
     assert.deepEqual(
       errorsAfter(head => head.set(path, '')),

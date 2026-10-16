@@ -2,9 +2,9 @@
  * The run page's one path to the backend. It is the only module of `apps/web`, and of the features
  * it composes, that imports @vibesys/transport's runtime values or calls `fetch`
  * (`clients/.dependency-cruiser.mjs` and `clients/tools/lint-rules/web-fetch-only-in-backend.grit` hold
- * it to that): the control transport (a WebSocket, or the desktop shell's bridge shaped as one)
+ * it to that): the control transport (a WebSocket)
  * that `@vibesys/run-session`'s `connectRun` runs the run over, the gateway's capability exchange,
- * the campaign fixture, and the desktop run page's log requests. It is also the
+ * and the campaign fixture. It is also the
  * entry of the browser transport bundle that `check:web-browser-bundle` keeps free of Node builtins.
  */
 
@@ -15,16 +15,8 @@ import {
   parseCampaignFrame,
   parseReplayScenario,
 } from '@vibesys/feature-campaign/state';
-import type {RunLogsRequest} from '@vibesys/ipc';
-import type {LogListOutcome, LogReadOutcome, RunLogSource} from '@vibesys/logs';
 import type {TransportHooks} from '@vibesys/run-session';
-import {
-  type AbortSignalLike,
-  type ControlTransport,
-  abortReason as reasonOf,
-  registerAbort,
-  type ScheduleTimeout,
-} from '@vibesys/transport';
+import type {ControlTransport, ScheduleTimeout} from '@vibesys/transport';
 import {type WebSocketLike, WebSocketTransport} from '@vibesys/transport/websocket';
 
 export type {ControlTransport, WebSocketLike};
@@ -36,7 +28,7 @@ export interface TransportTiming {
 }
 
 /**
- * The control transport over `url`, or over the sockets `webSocket` opens (the desktop bridge),
+ * The control transport over `url`, or over the sockets `webSocket` opens,
  * redialing on `timing`'s cadence so the command path and the event stream back off on one
  * schedule.
  */
@@ -220,72 +212,4 @@ export class EventSourceCampaignStream implements CampaignStream {
     };
     return () => void release();
   }
-}
-
-/** One logs request to the desktop app's main process (the run preload's `logs`). */
-export type AskLogs = (request: RunLogsRequest) => Promise<unknown>;
-
-function isOutcome(value: unknown): value is {readonly ok: boolean} {
-  return (
-    typeof value === 'object' && value !== null && typeof Reflect.get(value, 'ok') === 'boolean'
-  );
-}
-
-/** The last read token this page named; each read takes the next, so none repeats on the page. */
-let lastLogRead = 0;
-
-function nextLogReadToken(): string {
-  lastLogRead += 1;
-  return `r${lastLogRead}`;
-}
-
-/**
- * Ask `request`, resolving a refusal or a malformed answer as a `transport` failure. An IPC
- * request cannot be withdrawn itself, so an aborted request rejects at once and its late answer is
- * dropped; an aborted read also sends its `withdraw`, so the main process aborts its read too.
- */
-function askLogs<T extends LogListOutcome | LogReadOutcome>(
-  logs: AskLogs,
-  request: RunLogsRequest,
-  signal: AbortSignalLike,
-): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const registration = registerAbort(signal, () => {
-      reject(reasonOf(signal));
-      if (request.kind === 'read') withdraw(logs, request.token);
-    });
-    if (registration.aborted) {
-      reject(reasonOf(signal));
-      return;
-    }
-    const failed = (message: string): T =>
-      ({ok: false, failure: {code: 'transport', message}}) as T;
-    logs(request).then(
-      answer => {
-        registration.detach();
-        resolve(isOutcome(answer) ? (answer as T) : failed('the desktop app sent no log answer'));
-      },
-      (error: unknown) => {
-        registration.detach();
-        resolve(failed(error instanceof Error ? error.message : String(error)));
-      },
-    );
-  });
-}
-
-/** Tell the main process to abort the read named `token`; its answer, or failure, is ignored. */
-function withdraw(logs: AskLogs, token: string): void {
-  new Promise<unknown>(resolve => resolve(logs({kind: 'withdraw', token}))).catch(() => {
-    // The page already stopped waiting for the read; a withdrawal that fails leaves the main
-    // process's read to end by its own wait bound.
-  });
-}
-
-/** The run page's `RunLogSource` over the desktop app's logs requests. */
-export function bridgeLogSource(logs: AskLogs): RunLogSource {
-  return {
-    list: signal => askLogs<LogListOutcome>(logs, {kind: 'list'}, signal),
-    read: (input, signal) =>
-      askLogs<LogReadOutcome>(logs, {kind: 'read', token: nextLogReadToken(), read: input}, signal),
-  };
 }

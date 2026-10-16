@@ -3,15 +3,12 @@
  * needed for an authoritative bootstrap snapshot are retained beside that sequence.
  */
 import type {HostKey, HostListing} from '@vibesys/hosts';
-import type {ChromeState, PreferencesView, WelcomeEvent, WelcomeOverview} from '@vibesys/ipc';
+import type {PreferencesView, WelcomeEvent, WelcomeOverview} from '@vibesys/ipc';
 import type {RecentRun} from '@vibesys/runs';
 
 export interface WelcomeSnapshotValues {
-  readonly settingsProblem: string | null;
   /** A disk read used until this process has published a newer Recent value. */
   readonly recent: readonly RecentRun[];
-  readonly chrome: ChromeState;
-  readonly host: HostKey;
 }
 
 /** The single sequence and retained state behind the welcome snapshot-plus-stream handoff. */
@@ -20,20 +17,12 @@ export class WelcomeFeed {
   #recent: readonly RecentRun[] | null = null;
   readonly #listings = new Map<HostKey, HostListing>();
 
-  chrome(value: ChromeState): WelcomeEvent<ChromeState> {
-    return this.#next(value);
-  }
-
   recent(value: readonly RecentRun[]): WelcomeEvent<readonly RecentRun[]> {
     this.#recent = value;
     return this.#next(value);
   }
 
   preferences(value: PreferencesView): WelcomeEvent<PreferencesView> {
-    return this.#next(value);
-  }
-
-  showHost(value: HostKey): WelcomeEvent<HostKey> {
     return this.#next(value);
   }
 

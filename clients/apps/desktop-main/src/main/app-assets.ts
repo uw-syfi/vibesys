@@ -1,7 +1,7 @@
 /**
  * How the window loads the bundled web UI, as pure functions of URLs and paths.
  *
- * The UI ships inside the app (`dist/ui`, the page bundles `scripts/copy-ui.mjs` copies in) and is
+ * The UI ships inside the app (`dist/ui`, the page bundle `scripts/copy-ui.mjs` copies in) and is
  * served from the privileged `app://vibesys` origin. That origin is the only one the window may navigate
  * to; it has no network access at all (`CONTENT_SECURITY_POLICY` here, and the main process cancels
  * every http(s) and ws(s) request), because the page reaches its server only through the preload
@@ -12,23 +12,8 @@ import {extname, isAbsolute, join, normalize, relative, sep} from 'node:path';
 export const APP_SCHEME = 'app';
 const APP_HOST = 'vibesys';
 const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
-/** The page the window opens. */
-export const APP_ENTRY_URL = `${APP_ORIGIN}/desktop.html`;
-/** The stable welcome surface that may invoke welcome IPC. */
-export const WELCOME_URL = `${APP_ORIGIN}/welcome.html`;
-/** The redesigned app shell, shown in the welcome surface's place under `VIBESYS_DESKTOP_SHELL=next`. */
+/** The app shell, the one page the windows show (a run window's URL adds the run in its query). */
 export const SHELL_URL = `${APP_ORIGIN}/shell.html`;
-
-/**
- * The page the window's trusted surface loads: the app shell when `VIBESYS_DESKTOP_SHELL` is `next`,
- * the welcome view when it is unset. Any other value is refused, naming the variable, so a typo
- * never silently shows the old view.
- */
-export function surfaceUrl(shell: string | undefined): string {
-  if (shell === undefined || shell === '') return WELCOME_URL;
-  if (shell === 'next') return SHELL_URL;
-  throw new Error(`VIBESYS_DESKTOP_SHELL must be "next" or unset, not ${JSON.stringify(shell)}`);
-}
 
 /**
  * Same-origin scripts, styles, and images only; no connections of any kind. React's inline style

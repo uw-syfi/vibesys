@@ -176,7 +176,7 @@ The run page is one app package over three feature packages
   enforce both.
 
 The store kernel (`Step`, `Reducer`, `createStore`) comes from
-`@vibesys/store`, shared with the desktop welcome view. The reducers are
+`@vibesys/store`, shared with the desktop shell. The reducers are
 tested model-based with `checkModel` from `@vibesys/store/testing`: seeded
 random action and reply sequences, checking after every step that each awaited
 token was issued and no two slots await one, that no stale reply is applied,
@@ -394,7 +394,7 @@ The connection design (one host helper, one connection manager, explicit run ide
 lifecycle phases, per-screen stores) is in [desktop-connection.md](desktop-connection.md); this
 section says how the code is laid out and how to run it.
 
-The desktop app (`clients/apps/desktop-main`) ships its own copy of the web UI and
+The desktop app (`clients/apps/desktop-main`) ships its own UI (`clients/apps/desktop-shell`) and
 reaches servers through its main process, without the web gateway. A server is
 a detached run (`vibesys --detach`, see `tui-architecture.md`) on this machine
 or on an SSH host. The main process reaches every host the same way: it runs the
@@ -403,24 +403,22 @@ protocol; This Mac and an SSH host differ only in how the helper is started, and
 the page cannot tell them apart.
 
 ```bash
-# The welcome view: recent runs, This Mac, and Connect to host
+# The main window: the sidebar, New run, Machines, Settings
 pnpm --dir clients --filter @vibesys/app-desktop-main start
 
-# The welcome view on one SSH host, or straight into one of its detached runs
-pnpm --dir clients --filter @vibesys/app-desktop-main start -- --host HOST [--instance ID]
+# One of a host's detached runs, in a window of its own (--instance alone: one on this machine)
+pnpm --dir clients --filter @vibesys/app-desktop-main start -- --host HOST --instance ID
 
-# Start a detached run for a local project and open the window on it
+# Start a detached run for a local project and open it in a window of its own
 pnpm --dir clients --filter @vibesys/app-desktop-main start -- --project ~/proj [-- RUN_ARGS...]
 ```
 
-`start` builds the app, including the two page bundles the window loads from the
-`app://vibesys` origin: the run view (`@vibesys/app-web`'s `build:desktop`, from
-`clients/apps/web/desktop.html`) and the welcome view (`@vibesys/app-desktop-renderer`'s
-`build`, from `clients/apps/desktop-renderer/welcome.html`). The page has no network access: the main process
-cancels every http(s) and ws(s) request and the page's Content Security Policy
-forbids connections. Its only way to the server is the preload bridge,
-`window.vibesysDesktop.connect()`, which takes no host or path: the main process
-binds the run view to one run.
+`start` builds the app, including the page bundle the windows load from the `app://vibesys` origin
+(`@vibesys/app-desktop-shell`'s `build`, from `clients/apps/desktop-shell/shell.html`). The page has
+no network access: the main process cancels every http(s) and ws(s) request and the page's Content
+Security Policy forbids connections. Its only way to the server is the preload bridge
+(`window.vibesysWelcome`, whose `connectRun` takes no host or path): the main process binds a window
+to one run.
 
 ### Layout
 
@@ -429,36 +427,30 @@ checker holds the boundaries between them, and `clients/.dependency-cruiser.mjs`
 inside them:
 
 - `clients/apps/desktop-main` (`@vibesys/app-desktop-main`) is composition only: `src/main/` is
-  the composition root, the window, the lifecycle, page confinement, launch arguments, and the
-  welcome IPC boundary, which routes each request `@vibesys/ipc` parsed to the feature that owns
-  it. `src/preload/` holds the two sandboxed preloads, each a single file, which the main process
-  loads by path and never imports.
+  the composition root, the windows, the lifecycle, page confinement, launch arguments, and the
+  shell's IPC boundary, which routes each request `@vibesys/ipc` parsed to the feature that owns
+  it. `src/preload/` holds the one sandboxed preload (`welcome.cts`, the surface's historical
+  name), a single file, which the main process loads by path and never imports.
 - The features' `./main` entries are their main-process controllers: `@vibesys/feature-hosts`
   (`Hosts`: checkouts, tasks, path completion, pushed listings) and
-  `@vibesys/feature-run-control` (`RunControl`: attach, start, resume, stop, retry, and the run
-  page's relay).
+  `@vibesys/feature-run-control` (`RunControl`: attach, start, resume, stop, and the relay of a
+  window's run connections). These packages have no renderer; the screens are the strict features
+  (`app-shell`, `settings`, `machines`, `new-run`, `run-page`).
 - `@vibesys/connection` is the connection manager, a pure `state/` machine and a `shell/`; only
   its shell starts processes or opens sockets. `@vibesys/settings` is `hosts.json` and
   `recent.json` with `SettingsStore` as their one writer.
-- The welcome view is `clients/apps/desktop-renderer` (`@vibesys/app-desktop-renderer`),
-  composition only: `main.tsx` (the entry) over `wiring/` (each feature's store over the welcome
-  bridge, and the main process's events fanned out to them) and `ui/` (the view, composed from the
-  features' views, with the flows that cross features). The features are
-  `@vibesys/feature-hosts` (the host panel, checkout form, sign-in, "Connect to host", and path
-  completion), `@vibesys/feature-start-run` (the "Start a run" sheet),
-  `@vibesys/feature-run-control` (the title strip, stop and force stop, resume, the banner), and
-  `@vibesys/feature-recent-runs` (Recent). Each feature's effects call only the slice of the
-  welcome bridge its `./state` declares (`HostsBridge`, `StartRunBridge`, `RunControlBridge`).
+- The renderer is `clients/apps/desktop-shell` (`@vibesys/app-desktop-shell`), composition only:
+  `main.tsx` (the entry) and `shell.tsx` (each strict feature's store over the bridge, and the
+  screen the sidebar selects). The screens are built from `@vibesys/ui` alone.
 - The processes share only workspace packages: `@vibesys/hosts` (host naming, a host's listed
   runs), `@vibesys/runs` (ids, recent runs, the stop and resume decisions), and `@vibesys/ipc`
-  (the run page's bridge and the typed welcome IPC, each feature's requests with the parser the
-  main process runs on them). The welcome view draws its dialogs, path fields, status chip, and
-  buttons with `@vibesys/ui`.
+  (the run connection's port messages and the typed shell IPC, each feature's requests with the
+  parser the main process runs on them).
 
 `apps/desktop-main` declares one entry per process: `.` (`node`, `src/main/index.ts`, the Electron
-main) and `./preload-run` and `./preload-welcome` (`preload`, the two preload files), so the
-package-graph checker holds each side to its runtime and its third-party imports, and a preload to
-loading only Electron. `src/preload/welcome.test.ts` drives the welcome preload's bridge into
+main) and `./preload-welcome` (`preload`, the preload file), so the package-graph checker holds
+each side to its runtime and its third-party imports, and a preload to loading only Electron.
+`src/preload/welcome.test.ts` drives the preload's bridge into
 `@vibesys/ipc`'s parser, so the renderer and the main process agree on every channel's arguments.
 
 ### Connections
@@ -471,7 +463,7 @@ loading only Electron. `src/preload/welcome.test.ts` drives the welcome preload'
   The app owns one master connection per host (`ControlMaster`, `ControlPath=/tmp/vsd-<uid>/%C`,
   `ControlPersist=30m`, `ServerAliveInterval`), shared by every connection to that host. Only the
   master authenticates, through an askpass helper that shows ssh's prompt in a native dialog, and
-  only when the user asks (the welcome view's sign-in, a Retry); a host key is never accepted
+  only when the user asks (a machine's sign-in); a host key is never accepted
   silently. Every helper is a `BatchMode` exec channel over the master.
 - Both links start the helper with the same bootstrap (`shell/bootstrap.ts`), the only shell text
   the app sends to a host: `sh -c '<one-line script>' vibesys-helper xHEX`, a fixed script with no
@@ -499,38 +491,32 @@ Every implementation passes one contract suite (`testing/host-connection-contrac
 in-memory `FakeHelper`, which speaks the helper protocol on the wire and replays the `helper-*`
 conformance scenarios, and the real helper of this checkout (`VIBESYS_REAL_CONTRACTS=1`).
 
-### Welcome view and run view
+### The desktop shell
 
-The window opens on the welcome view (`clients/apps/desktop-renderer/welcome.html`, a React
-bundle built apart from the run view's, with its own narrow preload): recent runs with
-their status, one host's panel (its checkout, its live runs, "Start a run"), and "Connect to host",
-a searchable list of the concrete `Host` aliases in `~/.ssh/config` that also accepts a typed
-`user@host`. The main process answers its requests only for that view's web contents and
+The window opens on the app shell (`clients/apps/desktop-shell/shell.html`, a React bundle with
+the preload above): the sidebar (live and recent runs, Machines), New run, Machines, Settings, and
+the Run screen. The main process answers its requests only for a window's own shell document and
 validates every value before it reaches a host. Host data is pushed, never polled: the main
 process watches each shown host's registry (`instances.watch`) and sends every change
 (`HostListing`); recent runs' statuses derive from those listings. The checkout and project fields
 complete paths as you type (`paths.complete`: one listing per directory, filtered in the view).
 
-On first use of an SSH host the welcome view asks "Where is your VibeSys checkout on HOST?" and
-checks the answer by starting the helper there before saving it (`hosts.json`, version 2: one
-`checkout` per host key); This Mac defaults to the checkout the app was built from. "Start a run"
-lists a project's tasks (`tasks.list`) and starts it (`run.start`), extra arguments split like a
-shell's words; it can be cancelled while it starts, and the run is then stopped as soon as its
-record appears. Recent rows are stored by `(host, run id)` from the run's record when the app
-starts or attaches to it (`recent.json`, version 2).
+On first use of an SSH host the Machines screen asks for the checkout on that host and checks the
+answer by starting the helper there before saving it (`hosts.json`, version 2: one `checkout` per
+host key); This Mac defaults to the checkout the app was built from. New run lists a project's
+tasks (`tasks.list`) and starts it (`run.start`). Recent rows are stored by `(host, run id)` from
+the run's record when the app starts or attaches to it (`recent.json`, version 2).
 
-Once attached, the run view (the web UI) fills the window and the welcome view shrinks to the
-title strip above it, showing the host and the connection status. Each page connection is a
-MessagePort the main process relays to a new run channel (`features/run-control/relay.ts`),
-reframing one port message as one newline-delimited line in each direction. The page drives those
-connections with the browser's `WebSocketTransport` and `WebSession`, which keep their resume and
-reconciliation logic but no retry timer of their own: the shell wakes the page when the host
-connection recovers.
+A shown run is attached to its window, and the Run screen's session is that window's. Each
+connection is a MessagePort the main process relays to a new run channel
+(`features/run-control/relay.ts`), reframing one port message as one newline-delimited line in each
+direction. The session (`@vibesys/run-session`) keeps its resume and reconciliation logic but no
+retry timer of its own: the main process wakes the page when the host connection recovers.
 
-The welcome view's stores (each feature's `state/`) are pure reducers on `@vibesys/store`'s
-kernel; each feature's `renderer/ui/` is presentational and `renderer/effects/` its shell, and the
-app's `main.tsx` is the composition root. They are tested model-based with `checkModel` from
-`@vibesys/store/testing`, with random window states from `@vibesys/ipc/testing`.
+The screens' stores are pure reducers or XState machines (`clients-architecture.md`, "State"); each
+feature's `renderer/ui/` is presentational and `renderer/effects/` its shell, and the app's
+`main.tsx` is the composition root. They are tested model-based with `checkModel` from
+`@vibesys/store/testing`.
 
 `AppLifecycle` (`main/app/app-lifecycle.ts`) is the one owner of process-wide state: a
 single-instance lock (a second launch focuses the first window and opens what it was asked to)

@@ -51,9 +51,6 @@ importers:
       '@vibesys/feature-settings':
         specifier: workspace:*
         version: link:../../features/settings
-      '@vibesys/feature-start-run':
-        specifier: workspace:*
-        version: link:../../features/start-run
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../../libs/hosts
@@ -85,67 +82,6 @@ importers:
       electron:
         specifier: 44.6.0
         version: 44.6.0
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
-  apps/desktop-renderer:
-    dependencies:
-      '@vibesys/feature-hosts':
-        specifier: workspace:*
-        version: link:../../features/hosts
-      '@vibesys/feature-recent-runs':
-        specifier: workspace:*
-        version: link:../../features/recent-runs
-      '@vibesys/feature-run-control':
-        specifier: workspace:*
-        version: link:../../features/run-control
-      '@vibesys/feature-start-run':
-        specifier: workspace:*
-        version: link:../../features/start-run
-      '@vibesys/hosts':
-        specifier: workspace:*
-        version: link:../../libs/hosts
-      '@vibesys/ipc':
-        specifier: workspace:*
-        version: link:../../libs/ipc
-      '@vibesys/runs':
-        specifier: workspace:*
-        version: link:../../libs/runs
-      '@vibesys/store':
-        specifier: workspace:*
-        version: link:../../libs/store
-      '@vibesys/ui':
-        specifier: workspace:*
-        version: link:../../libs/ui
-      react:
-        specifier: 19.1.1
-        version: 19.1.1
-      react-dom:
-        specifier: 19.1.1
-        version: 19.1.1(react@19.1.1)
-    devDependencies:
-      '@playwright/test':
-        specifier: 1.55.0
-        version: 1.55.0
-      '@types/bun':
-        specifier: 1.4.2
-        version: 1.4.2
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      '@types/react':
-        specifier: 19.1.13
-        version: 19.1.13
-      '@types/react-dom':
-        specifier: 19.1.9
-        version: 19.1.9(@types/react@19.1.13)
-      '@vitejs/plugin-react':
-        specifier: 5.0.4
-        version: 5.0.4(vite@7.1.5(@types/node@24.13.3)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.1))
-      happy-dom:
-        specifier: 20.14.5
-        version: 20.14.5
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -277,9 +213,6 @@ importers:
       '@vibesys/feature-web-theme':
         specifier: workspace:*
         version: link:../../features/web-theme
-      '@vibesys/ipc':
-        specifier: workspace:*
-        version: link:../../libs/ipc
       '@vibesys/logs':
         specifier: workspace:*
         version: link:../../libs/logs
@@ -513,24 +446,9 @@ importers:
       '@vibesys/logs':
         specifier: workspace:*
         version: link:../../libs/logs
-      '@vibesys/machine':
-        specifier: workspace:*
-        version: link:../../libs/machine
       '@vibesys/settings':
         specifier: workspace:*
         version: link:../../libs/settings
-      '@vibesys/store':
-        specifier: workspace:*
-        version: link:../../libs/store
-      '@vibesys/ui':
-        specifier: workspace:*
-        version: link:../../libs/ui
-      react:
-        specifier: 19.1.1
-        version: 19.1.1
-      xstate:
-        specifier: 5.33.2
-        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -538,21 +456,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
-      '@types/react':
-        specifier: 19.1.13
-        version: 19.1.13
-      '@types/react-dom':
-        specifier: 19.1.9
-        version: 19.1.9(@types/react@19.1.13)
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport
-      happy-dom:
-        specifier: 20.14.5
-        version: 20.14.5
-      react-dom:
-        specifier: 19.1.1
-        version: 19.1.1(react@19.1.1)
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -649,50 +555,6 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  features/recent-runs:
-    dependencies:
-      '@vibesys/hosts':
-        specifier: workspace:*
-        version: link:../../libs/hosts
-      '@vibesys/runs':
-        specifier: workspace:*
-        version: link:../../libs/runs
-      '@vibesys/store':
-        specifier: workspace:*
-        version: link:../../libs/store
-      '@vibesys/ui':
-        specifier: workspace:*
-        version: link:../../libs/ui
-      react:
-        specifier: 19.1.1
-        version: 19.1.1
-    devDependencies:
-      '@types/bun':
-        specifier: 1.4.2
-        version: 1.4.2
-      '@types/react':
-        specifier: 19.1.13
-        version: 19.1.13
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
-  features/replay:
-    dependencies:
-      '@vibesys/contracts':
-        specifier: workspace:*
-        version: link:../../libs/contracts
-      '@vibesys/store':
-        specifier: workspace:*
-        version: link:../../libs/store
-    devDependencies:
-      '@types/bun':
-        specifier: 1.4.2
-        version: 1.4.2
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
   features/run-control:
     dependencies:
       '@vibesys/connection':
@@ -707,30 +569,15 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
-      '@vibesys/machine':
-        specifier: workspace:*
-        version: link:../../libs/machine
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
       '@vibesys/settings':
         specifier: workspace:*
         version: link:../../libs/settings
-      '@vibesys/store':
-        specifier: workspace:*
-        version: link:../../libs/store
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport
-      '@vibesys/ui':
-        specifier: workspace:*
-        version: link:../../libs/ui
-      react:
-        specifier: 19.1.1
-        version: 19.1.1
-      xstate:
-        specifier: 5.33.2
-        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -738,9 +585,6 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
-      '@types/react':
-        specifier: 19.1.13
-        version: 19.1.13
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -885,43 +729,6 @@ importers:
       '@types/react':
         specifier: 19.1.13
         version: 19.1.13
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
-  features/start-run:
-    dependencies:
-      '@vibesys/hosts':
-        specifier: workspace:*
-        version: link:../../libs/hosts
-      '@vibesys/ipc':
-        specifier: workspace:*
-        version: link:../../libs/ipc
-      '@vibesys/store':
-        specifier: workspace:*
-        version: link:../../libs/store
-      '@vibesys/ui':
-        specifier: workspace:*
-        version: link:../../libs/ui
-      react:
-        specifier: 19.1.1
-        version: 19.1.1
-    devDependencies:
-      '@types/bun':
-        specifier: 1.4.2
-        version: 1.4.2
-      '@types/react':
-        specifier: 19.1.13
-        version: 19.1.13
-      '@types/react-dom':
-        specifier: 19.1.9
-        version: 19.1.9(@types/react@19.1.13)
-      happy-dom:
-        specifier: 20.14.5
-        version: 20.14.5
-      react-dom:
-        specifier: 19.1.1
-        version: 19.1.1(react@19.1.1)
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

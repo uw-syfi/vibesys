@@ -1,11 +1,11 @@
 /**
  * What the app was asked to open, from its command line and environment, as a pure function.
  *
- * - No arguments: the welcome view.
- * - `--host NAME`: the welcome view, on that SSH host. `--host NAME --instance ID` attaches to that host's
- *   detached run `ID`; `--instance ID` alone attaches to one on this machine.
+ * - No arguments: the main window.
+ * - `--host NAME --instance ID` opens that SSH host's detached run `ID` in a window of its own;
+ *   `--instance ID` alone opens one on this machine.
  * - `--project PATH [-- RUN_ARGS...]`: start a detached run for that project on this machine and
- *   open the bundled UI on it.
+ *   open it in a window of its own.
  *
  * Errors name the offending argument, so the shell can print them as they are.
  */
@@ -14,12 +14,12 @@ import {type HostId, HostValidationError, validAlias} from '@vibesys/hosts';
 import {isInstanceId} from '@vibesys/runs';
 
 export type LaunchPlan =
-  | {readonly kind: 'welcome'; readonly host: HostId | null}
+  | {readonly kind: 'main-window'}
   | {readonly kind: 'instance'; readonly host: HostId; readonly instanceId: string}
   | {readonly kind: 'start'; readonly project: string; readonly runArgs: readonly string[]};
 
 const USAGE =
-  'usage: vibesys-desktop [--host NAME] [--instance ID]\n' +
+  'usage: vibesys-desktop [[--host NAME] --instance ID]\n' +
   '       vibesys-desktop --project PATH [-- RUN_ARGS...]';
 
 export class LaunchError extends Error {
@@ -51,10 +51,13 @@ export function parseLaunch(argv: readonly string[], cwd: string): LaunchPlan {
   return hostPlan(values.get('--host'), values.get('--instance'));
 }
 
-/** The welcome view (on `alias` when given), or the run `instanceId` on that host or this machine. */
+/** The main window, or the run `instanceId` on `alias`'s host or this machine. */
 function hostPlan(alias: string | undefined, instanceId: string | undefined): LaunchPlan {
   const host: HostId | null = alias === undefined ? null : {kind: 'ssh', alias: hostAlias(alias)};
-  if (instanceId === undefined) return {kind: 'welcome', host};
+  if (instanceId === undefined) {
+    if (host !== null) throw new LaunchError(`--host needs --instance\n${USAGE}`);
+    return {kind: 'main-window'};
+  }
   if (!isInstanceId(instanceId)) {
     throw new LaunchError(`--instance needs a run id of 12 hex digits, not ${instanceId}`);
   }

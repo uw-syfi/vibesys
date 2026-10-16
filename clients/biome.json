@@ -154,8 +154,7 @@
         "libs/connection/src/state/**/*.ts",
         "!**/*.test.ts",
         "!**/*.test.tsx",
-        "!features/gateway-connect/src/renderer/effects/gateway-connect.ts",
-        "!features/hosts/src/renderer/effects/stores.ts"
+        "!features/gateway-connect/src/renderer/effects/gateway-connect.ts"
       ],
       "plugins": ["./tools/lint-rules/features-no-hand-rolled-control.grit"]
     },

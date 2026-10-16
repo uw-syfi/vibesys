@@ -72,9 +72,7 @@ function cases(random: Seeded): Case[] {
   const name = random.pick(NAMES);
   const instance = random.pick(INSTANCES);
   const token = 1 + random.int(1_000_000);
-  const words = random.pick(['', '--rounds 2', "--note 'two words'"]);
   const force = random.pick([true, false]);
-  const harness = random.pick([null, {provider: 'claude', model: 'claude-a'}]);
   const directory = path.endsWith('/') ? path : `${path}/`;
   const inputs = {
     project: path,
@@ -100,20 +98,13 @@ function cases(random: Seeded): Case[] {
   };
   return [
     [bridge => bridge.overview(), {kind: 'overview'}],
-    [bridge => bridge.hosts(), {kind: 'hosts'}],
-    [bridge => bridge.host(key), {kind: 'host', host}],
     [
       bridge => bridge.setCheckout(key, path, token),
       {kind: 'set-checkout', host, path, change: token},
     ],
     [bridge => bridge.cancelCheckout(token), {kind: 'cancel-checkout', change: token}],
-    [bridge => bridge.cancelInspection(token), {kind: 'cancel-inspection', inspection: token}],
     [bridge => bridge.signIn(key), {kind: 'sign-in', host}],
     [bridge => bridge.complete(key, directory), {kind: 'complete', host, directory}],
-    [
-      bridge => bridge.inspect(key, instance, token),
-      {kind: 'inspect', host, instance, inspection: token},
-    ],
     [
       bridge => bridge.logs(key, instance, {kind: 'list'}),
       {kind: 'logs', host, instance, request: {kind: 'list'}},
@@ -121,27 +112,12 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.releaseLogs(), {kind: 'release-logs'}],
     [bridge => bridge.tasks(key, path), {kind: 'tasks', host, project: path}],
     [bridge => bridge.harnesses(key), {kind: 'harnesses', host}],
-    [
-      bridge => bridge.start(key, path, name, words, harness, token),
-      {kind: 'start', host, project: path, task: name, args: words, harness, start: token},
-    ],
-    [bridge => bridge.cancelStart(token), {kind: 'cancel-start', start: token}],
     [bridge => bridge.attach(key, instance), {kind: 'attach', host, instance}],
     [
       bridge => bridge.resume(key, path, exactResumeRunId(name)),
       {kind: 'resume', host, project: path, run: exactResumeRunId(name)},
     ],
-    [bridge => bridge.showRun(), {kind: 'show-run'}],
-    [bridge => bridge.showWelcome(), {kind: 'show-welcome'}],
-    [bridge => bridge.retry(), {kind: 'retry'}],
-    [
-      bridge => bridge.stop(key, instance, force),
-      {kind: 'stop', host, instance, force, confirmed: false},
-    ],
-    [
-      bridge => bridge.stopConfirmed(key, instance, force),
-      {kind: 'stop', host, instance, force, confirmed: true},
-    ],
+    [bridge => bridge.stopConfirmed(key, instance, force), {kind: 'stop', host, instance, force}],
     [bridge => bridge.releaseRun(), {kind: 'release-run'}],
     [
       bridge => bridge.readEvents(key, path, name, token, 1 + (token % 1000)),
@@ -207,9 +183,7 @@ describe('the welcome contract', () => {
     const main = new ParsingMain();
     const heard: Array<readonly [string, unknown]> = [];
     const bridge = main.bridge;
-    bridge.onChrome(event => heard.push([WELCOME_EVENTS.chrome, event]));
     bridge.onRecent(event => heard.push([WELCOME_EVENTS.recent, event]));
-    bridge.onShowHost(event => heard.push([WELCOME_EVENTS.showHost, event]));
     bridge.onListing(event => heard.push([WELCOME_EVENTS.listing, event]));
     bridge.onPreferences(event => heard.push([WELCOME_EVENTS.preferences, event]));
     expect([...main.subscribed.keys()].sort()).toEqual(Object.values(WELCOME_EVENTS).sort());

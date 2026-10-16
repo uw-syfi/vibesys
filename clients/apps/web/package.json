@@ -14,7 +14,6 @@
     "dev": "vite",
     "build": "vite build",
     "build:browser": "vite build --config vite.browser.config.ts",
-    "build:desktop": "vite build --config vite.desktop.config.ts",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
     "test:e2e": "turbo run build --filter=@vibesys/app-web... && playwright test"
@@ -24,7 +23,6 @@
     "@vibesys/feature-gateway-connect": "workspace:*",
     "@vibesys/feature-run-view": "workspace:*",
     "@vibesys/feature-web-theme": "workspace:*",
-    "@vibesys/ipc": "workspace:*",
     "@vibesys/run-session": "workspace:*",
     "@vibesys/store": "workspace:*",
     "@vibesys/transport": "workspace:*",

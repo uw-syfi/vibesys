@@ -149,10 +149,8 @@ const MAIN_PROCESS = [
   '^libs/settings/src/',
   '^features/[^/]+/src/main/',
 ];
-// The desktop renderer app (`apps/desktop-renderer/src`) is composition only: `main.tsx` (the
-// entry) over `wiring/` (the feature stores over the welcome bridge) and `ui/` (the view composed
-// from the features' views), which never reach each other.
-const DESKTOP_RENDERER = '^apps/desktop-renderer/src/';
+// The desktop shell app (`apps/desktop-shell/src`) is the one desktop renderer.
+const DESKTOP_SHELL = '^apps/desktop-shell/src/';
 const UI_RUNTIME = '(?:^|/)node_modules/(?:react|react-dom|electron)/';
 
 function desktopRules() {
@@ -201,29 +199,15 @@ function desktopRules() {
   ];
 }
 
-/** The renderers' rules: the desktop renderer app's layers, and what no renderer may reach. */
+/** The renderers' rules: what no renderer may reach. */
 function rendererRules() {
   return [
-    {
-      // The view renders the stores' state and reports events; the stores and the bridge are the
-      // wiring's.
-      name: 'desktop-renderer-ui-does-not-import-wiring',
-      severity: 'error',
-      from: {path: `${DESKTOP_RENDERER}ui/`, pathNot: TEST_FILE},
-      to: {path: [`${DESKTOP_RENDERER}wiring/`, `${DESKTOP_RENDERER}main\\.tsx$`]},
-    },
-    {
-      name: 'desktop-renderer-wiring-does-not-import-ui',
-      severity: 'error',
-      from: {path: `${DESKTOP_RENDERER}wiring/`, pathNot: TEST_FILE},
-      to: {path: [`${DESKTOP_RENDERER}ui/`, `${DESKTOP_RENDERER}main\\.tsx$`]},
-    },
     {
       // Renderer code (the renderer apps and the features) reaches the main process only through
       // its preload's bridge.
       name: 'renderers-do-not-import-electron',
       severity: 'error',
-      from: {path: [DESKTOP_RENDERER, WEB, FEATURE], pathNot: TEST_FILE},
+      from: {path: [DESKTOP_SHELL, WEB, FEATURE], pathNot: TEST_FILE},
       to: {path: '(?:^|/)node_modules/electron/', dependencyTypesNot: ['type-only']},
     },
     {
@@ -231,7 +215,7 @@ function rendererRules() {
       // the preload's bridge.
       name: 'web-opens-no-sockets-or-processes',
       severity: 'error',
-      from: {path: [DESKTOP_RENDERER, WEB, FEATURE], pathNot: TEST_FILE},
+      from: {path: [DESKTOP_SHELL, WEB, FEATURE], pathNot: TEST_FILE},
       to: {dependencyTypes: ['core'], path: '^(?:node:)?(?:net|child_process)$'},
     },
   ];

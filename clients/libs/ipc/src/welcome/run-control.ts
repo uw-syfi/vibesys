@@ -1,7 +1,6 @@
 /**
- * The run-control feature's welcome requests: attach, resume, stop (with the app's question, or
- * already confirmed by the view that asked), retry, and switching between
- * the run and the welcome view.
+ * The run-control feature's welcome requests: attach, resume, stop (the view asks the user first),
+ * letting a run go, and reading a run's recorded history.
  */
 import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
 import {exactResumeRunId, type ResumeRunId} from '@vibesys/runs';
@@ -11,10 +10,6 @@ import {type ChannelOf, instance, project} from './values.js';
 export const RUN_CONTROL_CHANNELS = {
   attach: 'vibesys:welcome:attach',
   resume: 'vibesys:welcome:resume',
-  showRun: 'vibesys:welcome:show-run',
-  showWelcome: 'vibesys:welcome:show-welcome',
-  retry: 'vibesys:welcome:retry',
-  stop: 'vibesys:welcome:stop',
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
   releaseRun: 'vibesys:welcome:release-run',
   readEvents: 'vibesys:welcome:read-events',
@@ -49,11 +44,7 @@ export const RUN_PORT_MESSAGE = 'vibesys:run-port';
 export interface RunControlWelcomeBridge {
   attach(host: HostKey, instance: string): Promise<WelcomeResult<null>>;
   resume(host: HostKey, project: string, run: ResumeRunId): Promise<WelcomeResult<null>>;
-  showRun(): Promise<WelcomeResult<null>>;
-  showWelcome(): Promise<WelcomeResult<null>>;
-  retry(): Promise<WelcomeResult<null>>;
-  stop(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
-  /** Stop without the app's own question: the view already asked the user, who said yes. */
+  /** Stop a run: the view already asked the user, who said yes. */
   stopConfirmed(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
   /**
    * Open one connection to the run the window attached for this view (`attach` binds it), over
@@ -89,12 +80,7 @@ export type RunControlRequest =
       readonly host: HostId;
       readonly instance: string;
       readonly force: boolean;
-      /** Whether the view already asked the user, so the app does not ask again. */
-      readonly confirmed: boolean;
     }
-  | {readonly kind: 'show-run'}
-  | {readonly kind: 'show-welcome'}
-  | {readonly kind: 'retry'}
   | {readonly kind: 'release-run'}
   | {
       readonly kind: 'read-events';
@@ -141,21 +127,13 @@ export function parseRunControlRequest(
         project: project(second),
         run: exactResumeRunId(third),
       };
-    case RUN_CONTROL_CHANNELS.stop:
     case RUN_CONTROL_CHANNELS.stopConfirmed:
       return {
         kind: 'stop',
         host: hostFromKey(first),
         instance: instance(second, 'stop'),
         force: forceStop(third),
-        confirmed: channel === RUN_CONTROL_CHANNELS.stopConfirmed,
       };
-    case RUN_CONTROL_CHANNELS.showRun:
-      return {kind: 'show-run'};
-    case RUN_CONTROL_CHANNELS.showWelcome:
-      return {kind: 'show-welcome'};
-    case RUN_CONTROL_CHANNELS.retry:
-      return {kind: 'retry'};
     case RUN_CONTROL_CHANNELS.releaseRun:
       return {kind: 'release-run'};
     case RUN_CONTROL_CHANNELS.readEvents:

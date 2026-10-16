@@ -22,7 +22,6 @@
     {"path": "../../libs/run-session/tsconfig.lib.json"},
     {"path": "../../libs/run-session/tsconfig.testing.json"},
     {"path": "../../libs/store/tsconfig.lib.json"},
-    {"path": "../../libs/ipc/tsconfig.lib.json"},
     {"path": "../../libs/logs/tsconfig.lib.json"},
     {"path": "../../features/run-view/tsconfig.state.json"},
     {"path": "../../features/run-view/tsconfig.renderer.json"},

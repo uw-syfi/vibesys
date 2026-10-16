@@ -5,9 +5,6 @@
       "path": "./tsconfig.lib.json"
     },
     {
-      "path": "./tsconfig.preload-run.json"
-    },
-    {
       "path": "./tsconfig.preload-welcome.json"
     },
     {

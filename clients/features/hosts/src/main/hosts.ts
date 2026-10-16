@@ -22,16 +22,11 @@ import {
   hostKey,
   hostLabel,
   hostListing,
+  type InstanceInspection,
   inspectionReply,
   validHostPath,
 } from '@vibesys/hosts';
-import type {
-  HarnessListing,
-  PathCompletion,
-  RunHistoryPage,
-  RunLogsRequest,
-  WelcomeInspection,
-} from '@vibesys/ipc';
+import type {HarnessListing, PathCompletion, RunHistoryPage, RunLogsRequest} from '@vibesys/ipc';
 import type {LogListOutcome, LogReadOutcome} from '@vibesys/logs';
 import {
   rememberInstance,
@@ -383,10 +378,10 @@ export class Hosts {
     id: HostId,
     instanceId: string,
     change: InspectionChangeId,
-  ): Promise<WelcomeInspection> {
+  ): Promise<InstanceInspection> {
     const current = this.#claimInspection(change);
     await using lease = await this.connection(id);
-    let inspection: WelcomeInspection;
+    let inspection: InstanceInspection;
     try {
       const reply = await lease.connection.request({
         type: 'instances.inspect',

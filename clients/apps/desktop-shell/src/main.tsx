@@ -1,6 +1,5 @@
 /**
- * The app shell's entry: the redesigned window, over the welcome preload's bridge
- * (`window.vibesysWelcome`), shown under `VIBESYS_DESKTOP_SHELL=next`.
+ * The app shell's entry: the window, over the preload's bridge (`window.vibesysWelcome`).
  */
 import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';

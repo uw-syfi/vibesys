@@ -24,13 +24,12 @@ import type {HostId} from '@vibesys/hosts';
 import {
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
-  type RunLogsRequest,
   WELCOME_EVENTS,
   type WelcomeEvent,
 } from '@vibesys/ipc';
 import {remember, SettingsStore} from '@vibesys/settings';
 import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor} from 'electron';
-import {SHELL_URL, surfaceUrl} from './app-assets.js';
+import {SHELL_URL} from './app-assets.js';
 import {AppLaunches} from './app-launches.js';
 import {AppLifecycle, realTimers} from './app-lifecycle.js';
 import {
@@ -109,9 +108,7 @@ async function openWindow(
     preferencesPath: join(userData, 'preferences.json'),
     log,
   });
-  let desktop: Desktop | null = null;
   const welcome = new WelcomeFeed();
-  const surface = surfaceUrl(process.env['VIBESYS_DESKTOP_SHELL']);
   const preferences = new PreferencesMain({
     store: settings,
     nativeTheme,
@@ -135,7 +132,6 @@ async function openWindow(
       notification.show();
     },
   });
-  const changed = (): void => desktop?.chromeChanged();
   const hosts = new Hosts({
     manager,
     settings,
@@ -151,16 +147,17 @@ async function openWindow(
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),
     // A run shown in a window of its own is live there; any other run in the main window.
-    openPage: (runId, title) =>
-      (windows.runs.showing(runId) ?? windows.main).openRunPage(runId, title),
-    confirm: text => windows.main.confirmStop(text),
+    openPage: runId => (windows.runs.showing(runId) ?? windows.main).bindRun(runId),
+    // Every stop is confirmed by the Run screen that asks, so the app asks no question.
+    confirm: () => Promise.reject(new Error('stops are confirmed by the view that asks')),
+    // Nothing shows the window's run state any more.
+    changed: () => {},
     remember: (run, current) => settings.updateRecent(recent => remember(recent, run), current),
-    changed,
     log,
     now: () => Date.now(),
   });
-  const windows = appWindows(runs, changed, surface, fatal);
-  desktop = new Desktop({
+  const windows = appWindows(runs, fatal);
+  const desktop = new Desktop({
     window: windows.main,
     welcome,
     hosts,
@@ -169,7 +166,6 @@ async function openWindow(
     settings,
     preferences,
     newRun: newRunMain(hosts, settings),
-    surfaceUrl: surface,
     runWindows: windows.runs,
     shellUrl: SHELL_URL,
     welcomeIpc: {
@@ -194,26 +190,17 @@ async function openWindow(
 }
 
 /**
- * The app's windows: the main one, on the trusted `surface`, and the run windows, each the shell's
- * Run screen alone; losing a run window's surface closes only that window. `broadcast` sends one
+ * The app's windows: the main one, on the app shell, and the run windows, each the shell's Run
+ * screen alone; losing a run window's surface closes only that window. `broadcast` sends one
  * ordered event to every window's surface.
  */
-function appWindows(
-  runs: RunControl,
-  changed: () => void,
-  surface: string,
-  fatal: (error: Error) => void,
-) {
+function appWindows(runs: RunControl, fatal: (error: Error) => void) {
   const shared = {
     log,
     connect: (port: RelayPort, runId: string) => runs.connect(port, runId),
-    logs: (runId: string, request: RunLogsRequest) => runs.logs(runId, request),
-    closed: (runId: string) => {
-      runs.detach(runId);
-      changed();
-    },
+    closed: (runId: string) => runs.detach(runId),
   };
-  const main = new AppWindow({...shared, surfaceUrl: surface, fatal});
+  const main = new AppWindow({...shared, surfaceUrl: SHELL_URL, fatal});
   const runWindows = new RunWindows({
     shellUrl: SHELL_URL,
     create: (url, title, closed) => {

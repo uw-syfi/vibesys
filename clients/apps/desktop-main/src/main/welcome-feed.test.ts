@@ -1,6 +1,5 @@
 import {describe, expect, test} from 'bun:test';
 import type {HostListing} from '@vibesys/hosts';
-import type {ChromeState} from '@vibesys/ipc';
 import type {RecentRun} from '@vibesys/runs';
 import {WelcomeFeed} from './welcome-feed.js';
 
@@ -40,27 +39,7 @@ describe('WelcomeFeed', () => {
 });
 
 function values(recentRuns: readonly RecentRun[]) {
-  return {
-    settingsProblem: null,
-    recent: recentRuns,
-    chrome: chrome('snapshot'),
-    host: 'local' as const,
-  };
-}
-
-function chrome(runId: string): ChromeState {
-  return {
-    mode: 'run',
-    attached: {
-      host: 'local',
-      hostLabel: 'This Mac',
-      instanceId: `instance-${runId}`,
-      runId,
-      project: `/projects/${runId}`,
-      connection: {kind: 'connected'},
-    },
-    stops: {},
-  };
+  return {recent: recentRuns};
 }
 
 function recent(runId: string): RecentRun {

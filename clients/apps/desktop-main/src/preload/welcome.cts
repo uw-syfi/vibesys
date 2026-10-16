@@ -1,12 +1,12 @@
 /**
- * Sandboxed preload of the welcome view: the page's only way out of its sandbox.
+ * Sandboxed preload of the app shell: the page's only way out of its sandbox. (Its name and the
+ * `welcome` channel prefix are the surface's historical ones.)
  *
- * It exposes one function per welcome request (`@vibesys/ipc`'s `WelcomeBridge`); each is an
- * `invoke` the main process answers only for the welcome view's own web contents, and parses with
- * `@vibesys/ipc`'s `parseWelcomeRequest` (`welcome.test.ts` holds the two to the same arguments).
- * Five events come back: the window's state (`onChrome`), the recent runs (`onRecent`), a host to
- * show (`onShowHost`), a host's runs as its helper pushed them (`onListing`), and the preferences
- * (`onPreferences`). Before the page's scripts run it asks, synchronously, for what the first paint needs
+ * It exposes one function per request (`@vibesys/ipc`'s `WelcomeBridge`); each is an `invoke` the
+ * main process answers only for a window's own shell document, and parses with `@vibesys/ipc`'s
+ * `parseWelcomeRequest` (`welcome.test.ts` holds the two to the same arguments). Three events come
+ * back: the recent runs (`onRecent`), a host's runs as its helper pushed them (`onListing`), and the
+ * preferences (`onPreferences`). Before the page's scripts run it asks, synchronously, for what the first paint needs
  * (the stored theme and the window controls' inset) and sets it on the document. Sandboxed
  * preloads cannot be ES modules or import local files, hence `.cts` and the channel names repeated
  * here; the types keep them in step. It loads only Electron (the package-graph checker's
@@ -20,26 +20,16 @@ type Events = typeof import('@vibesys/ipc').WELCOME_EVENTS;
 
 const CHANNELS: Channels = {
   overview: 'vibesys:welcome:overview',
-  hosts: 'vibesys:welcome:hosts',
-  host: 'vibesys:welcome:host',
   setCheckout: 'vibesys:welcome:set-checkout',
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
-  cancelInspection: 'vibesys:welcome:cancel-inspection',
   signIn: 'vibesys:welcome:sign-in',
   complete: 'vibesys:welcome:complete',
-  inspect: 'vibesys:welcome:inspect',
   logs: 'vibesys:welcome:logs',
   releaseLogs: 'vibesys:welcome:release-logs',
   tasks: 'vibesys:welcome:tasks',
   harnesses: 'vibesys:welcome:harnesses',
-  start: 'vibesys:welcome:start',
-  cancelStart: 'vibesys:welcome:cancel-start',
   attach: 'vibesys:welcome:attach',
   resume: 'vibesys:welcome:resume',
-  showRun: 'vibesys:welcome:show-run',
-  showWelcome: 'vibesys:welcome:show-welcome',
-  retry: 'vibesys:welcome:retry',
-  stop: 'vibesys:welcome:stop',
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
   releaseRun: 'vibesys:welcome:release-run',
   readEvents: 'vibesys:welcome:read-events',
@@ -62,9 +52,7 @@ const CHANNELS: Channels = {
   showMainWindow: 'vibesys:welcome:show-main-window',
 };
 const EVENTS: Events = {
-  chrome: 'vibesys:welcome:chrome',
   recent: 'vibesys:welcome:recent',
-  showHost: 'vibesys:welcome:show-host',
   listing: 'vibesys:welcome:listing',
   preferences: 'vibesys:welcome:preferences-changed',
 };
@@ -99,27 +87,16 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
   return {
     platform: capabilities.platform,
     overview: () => call(CHANNELS.overview),
-    hosts: () => call(CHANNELS.hosts),
-    host: host => call(CHANNELS.host, host),
     setCheckout: (host, path, change) => call(CHANNELS.setCheckout, host, path, change),
     cancelCheckout: change => call(CHANNELS.cancelCheckout, change),
-    cancelInspection: inspection => call(CHANNELS.cancelInspection, inspection),
     signIn: host => call(CHANNELS.signIn, host),
     complete: (host, directory) => call(CHANNELS.complete, host, directory),
-    inspect: (host, instance, inspection) => call(CHANNELS.inspect, host, instance, inspection),
     logs: (host, instance, request) => call(CHANNELS.logs, host, instance, request),
     releaseLogs: () => call(CHANNELS.releaseLogs),
     tasks: (host, project) => call(CHANNELS.tasks, host, project),
     harnesses: host => call(CHANNELS.harnesses, host),
-    start: (host, project, task, args, harness, start) =>
-      call(CHANNELS.start, host, project, task, args, harness, start),
-    cancelStart: start => call(CHANNELS.cancelStart, start),
     attach: (host, instance) => call(CHANNELS.attach, host, instance),
     resume: (host, project, run) => call(CHANNELS.resume, host, project, run),
-    showRun: () => call(CHANNELS.showRun),
-    showWelcome: () => call(CHANNELS.showWelcome),
-    retry: () => call(CHANNELS.retry),
-    stop: (host, instance, force) => call(CHANNELS.stop, host, instance, force),
     releaseRun: () => call(CHANNELS.releaseRun),
     readEvents: (host, project, runId, fromSequence, max) =>
       call(CHANNELS.readEvents, host, project, runId, fromSequence, max),
@@ -144,9 +121,7 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     helperFeatures: host => call(CHANNELS.helperFeatures, host),
     openRunWindow: run => call(CHANNELS.openRunWindow, run),
     showMainWindow: () => call(CHANNELS.showMainWindow),
-    onChrome: on(EVENTS.chrome),
     onRecent: on(EVENTS.recent),
-    onShowHost: on(EVENTS.showHost),
     onListing: on(EVENTS.listing),
     onPreferences: on(EVENTS.preferences),
   };

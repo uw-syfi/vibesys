@@ -35,9 +35,6 @@
       "path": "../../features/run-control/tsconfig.main.json"
     },
     {
-      "path": "../../features/start-run/tsconfig.state.json"
-    },
-    {
       "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {

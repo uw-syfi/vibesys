@@ -38,17 +38,10 @@ const FEATURE_UI = ['src/renderer/'];
 export const FROZEN_UI_PACKAGES = {
   'features/campaign': FEATURE_UI,
   'features/run-view': FEATURE_UI,
-  'features/start-run': FEATURE_UI,
-  'features/hosts': FEATURE_UI,
-  'features/recent-runs': FEATURE_UI,
-  'features/run-control': FEATURE_UI,
   'features/conversation': FEATURE_UI,
   'features/gateway-connect': FEATURE_UI,
-  'features/replay': FEATURE_UI,
   'features/web-theme': FEATURE_UI,
   'apps/web': ['src/app/', 'src/styles.css'],
-  // The desktop renderer's welcome view; the redesigned shell is composed elsewhere in the app.
-  'apps/desktop-renderer': ['src/ui/', 'src/welcome.css'],
 };
 
 /** JSX intrinsic elements a person operates: the raw controls `@vibesys/ui` wraps. */

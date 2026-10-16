@@ -132,7 +132,7 @@ test('CommonJS TypeScript preload files are covered by the raw HTML gate', async
   assertRawHtmlDiagnostics(diagnostics, 1);
 });
 
-for (const parent of ['features/replay/src', 'libs/run-state/src', 'tui/src/ui']) {
+for (const parent of ['features/run-page/src', 'libs/run-state/src', 'tui/src/ui']) {
   test(`${parent} is covered by the raw HTML gate`, async t => {
     assertRawHtmlDiagnostics(
       await lintFixture(t, parent, RAW_HTML_SINKS['innerHTML assignment']),

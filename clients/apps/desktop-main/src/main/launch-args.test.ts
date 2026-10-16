@@ -25,13 +25,9 @@ describe('parseLaunch', () => {
     });
   });
 
-  test('opens the welcome view, on a host when one is named', () => {
-    expect(parseLaunch([], CWD)).toEqual({kind: 'welcome', host: null});
-    expect(parseLaunch(['--'], CWD)).toEqual({kind: 'welcome', host: null});
-    expect(parseLaunch(['--host', 'gpu-box'], CWD)).toEqual({
-      kind: 'welcome',
-      host: {kind: 'ssh', alias: 'gpu-box'},
-    });
+  test('opens the main window when nothing is asked for', () => {
+    expect(parseLaunch([], CWD)).toEqual({kind: 'main-window'});
+    expect(parseLaunch(['--'], CWD)).toEqual({kind: 'main-window'});
   });
 
   test('attaches to a detached run on a host, or on this machine', () => {
@@ -53,6 +49,7 @@ describe('parseLaunch', () => {
       [['--host', 'h', '--', 'x'], 'only --project takes run arguments'],
       [['--host', '-oProxyCommand=x'], 'not a usable ssh host name'],
       [['--host'], '--host needs a value'],
+      [['--host', 'gpu-box'], '--host needs --instance'],
       [['--instance', 'ZZ'], '--instance needs a run id'],
       [['--host', 'h', '--project', 'p'], 'pass only one of'],
       [['--project'], '--project needs a path'],

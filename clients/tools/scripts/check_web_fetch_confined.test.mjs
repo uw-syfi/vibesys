@@ -51,7 +51,7 @@ for (const [name, source] of Object.entries(FETCHES)) {
 }
 
 test('a feature package forbids fetch', async t => {
-  assert.equal((await lintFixture(t, 'features/replay/src', FETCHES.call)).length, 1);
+  assert.equal((await lintFixture(t, 'features/run-page/src', FETCHES.call)).length, 1);
 });
 
 test('a property named fetch is not the global', async t => {

@@ -53,21 +53,19 @@ clients/
                                               ports, connectRun, WebSession    -> contracts, run-state,
                                                                        transport, store, machine
   libs/transport-node/ @vibesys/transport-node   stdio / unix socket / ssh channel  -> transport
-  libs/ipc/         @vibesys/ipc              typed main <-> renderer messages, the welcome
+  libs/ipc/         @vibesys/ipc              typed main <-> renderer messages, the shell's
                                               requests' parsers per feature      -> hosts, runs
   libs/connection/  @vibesys/connection       host connection manager            -> contracts, transport, hosts,
                                                                                     machine
   libs/settings/    @vibesys/settings         settings store, atomic files       -> hosts, runs
-  features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect, replay, hosts,
-                                              start-run, run-control, recent-runs; strict:
-                                              app-shell, settings, machines
+  features/<x>/     @vibesys/feature-<x>      run-view, gateway-connect (web only), hosts and
+                                              run-control (main process only); strict:
+                                              app-shell, settings, machines, new-run, run-page
   apps/desktop-main      @vibesys/app-desktop-main      composition only (Electron main), and the
                                                         sandboxed preloads
-  apps/desktop-renderer  @vibesys/app-desktop-renderer  composition only (Electron renderer)
-  apps/web               @vibesys/app-web               composition only (browser, and the
-                                                        desktop shell's run page)
-  apps/desktop-shell     @vibesys/app-desktop-shell     composition only, strict: the redesigned
-                                                        window (`shell.html`)
+  apps/web               @vibesys/app-web               composition only (browser)
+  apps/desktop-shell     @vibesys/app-desktop-shell     composition only, strict: the desktop
+                                                        window (`shell.html`), the only renderer
   apps/ui-gallery        @vibesys/app-ui-gallery        development only, never shipped: every
                                                         component in every theme, screenshot-tested
                                                         in Ink
@@ -139,7 +137,7 @@ unrelated addition. The split gave `store` (generic, domain-free like `ui`), `ru
 fold, its round, performance, and transcript projections as separate entries), `hosts`, `runs`, and
 `run-session` (the live session below the UI, out of `feature-run-view`, which keeps only its
 interaction state, banner copy, and UI). A helper used by one feature lives in that feature
-(`shellWords` is `@vibesys/feature-start-run/state`'s). The `bucket-names` rule keeps foundation,
+(task-argument parsing was `@vibesys/feature-start-run/state`'s). The `bucket-names` rule keeps foundation,
 core, and domain packages from being named `entities`, `core`, `common`, `utils`, `shared`,
 `helpers`, or `misc`.
 
@@ -262,7 +260,7 @@ truth for each fact; everything else is derived from it.
 | Entry | Runtime | Contents |
 | --- | --- | --- |
 | `.` | `dom` | The components (see [Components](#components)), `applyTheme`, and the token types (`ThemeName`, `ColorRole`, `SpaceToken`, `TextStyle`, ...). |
-| `./legacy` | `dom` | Today's `Button`, `Combobox`, `Dialog` and `StatusChip`, which take `className` and raw HTML attributes. Frozen: only the frozen views import it, and it is deleted with them. |
+| `./legacy` | `dom` | Today's `Button`, `Combobox`, `Dialog` and `StatusChip`, which take `className` and raw HTML attributes. Frozen: only the frozen web views (`gateway-connect`, `run-view`, `conversation`) import it, and it is deleted with them. |
 | `./tokens` | `neutral` | `THEMES`, `DEFAULT_THEMES`, `SPACE`, `TYPE`, `SIZE`, `RADIUS`, `ELEVATION`, `MOTION`, `CONTRAST_PAIRS`, `contrastRatio`, and `renderTokensCss`. No DOM, so tests and tools import it. |
 | `./tokens.css` | `dom` asset | Generated from `./tokens`; never edited by hand. |
 | `./components.css` | `dom` asset | The components' styles, hand-written from token variables only. |
@@ -327,8 +325,7 @@ matches its design needs a reader; the checks hold the parts it is built from.
 An old UI package gets fixes only. `FROZEN_UI_PACKAGES` in
 [`clients/tools/scripts/check_frozen_ui.mjs`](https://github.com/uw-syfi/vibesys/blob/main/clients/tools/scripts/check_frozen_ui.mjs)
 is the one list of them, each with the paths that hold its UI (`src/renderer/` for a feature;
-`src/app/` and `src/styles.css` for `apps/web`; `src/ui/` and `src/welcome.css`, the welcome view,
-for `apps/desktop-renderer`). In `tui_quality`, `pnpm check:frozen-ui --base-ref origin/main`
+`src/app/` and `src/styles.css` for `apps/web`). In `tui_quality`, `pnpm check:frozen-ui --base-ref origin/main`
 compares the change with its merge base with `origin/main`, and in a listed package it refuses:
 
 - a new file under a UI path (new test files are allowed);
@@ -533,7 +530,7 @@ exclusions are tracked in #1969.
 | `@vibesys/connection`'s `HostConnection` | machine | migrated (phase 8) |
 | `feature-web-theme`'s current host-default request | machine | native (#2168) |
 | `feature-run-view`'s startup log panel (`startupLogMachine`) | machine | native |
-| `feature-start-run`, `feature-hosts`, `feature-gateway-connect`, `feature-replay` screen stores | reducer with reply tokens | one feature per change |
+| `feature-gateway-connect` screen store | reducer with reply tokens | deleted with `apps/web` |
 
 ## Build model
 
@@ -625,22 +622,22 @@ names a missing or extra one.
 | `@vibesys/runs` | domain | exists: run, task, and instance ids, a recent run's status from its host's listing, the exact-resume policy, the stop flow; depends on `contracts`, `hosts` | domain split (#1949) |
 | `@vibesys/machine` | core | exists: `actorStore`, `clockFrom`, `unprovided` (`.`) and `checkMachine` (`./testing`); domain-free | state architecture (#1950) |
 | `@vibesys/run-session` | domain | exists: the run fold's wiring (`runStep`), the session lifecycle (`sessionMachine`, three parallel regions: start-up, recovery, and the fenced replacement snapshot), its ports, the run connection over a control transport (`connectRun`), and `WebSession`, with `./testing` (an in-memory control transport and page lifecycle, and `sessionWith`) | domain split (#1949) |
-| `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) moved into `@vibesys/feature-start-run` | domain split (#1949) |
-| `@vibesys/ipc` | service | exists: the run page's bridge (port messages, their validation, the preload contract web's desktop shell reads) and the welcome view's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts`, and `./testing` (random window states for store models); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
+| `@vibesys/entities` | domain | deleted: split into `hosts` and `runs`; task arguments (`shellWords`) lived in `@vibesys/feature-start-run`, deleted with the Start sheet | domain split (#1949) |
+| `@vibesys/ipc` | service | exists: the run connection's port messages and their validation, and the shell's channels, events, and payloads, with each feature's requests (channels, bridge slice, and the parser the main process runs) in `welcome/<feature>.ts` (the surface's historical name); depends on `hosts`, `runs` | domain packages (phase 5 of #1878); per-feature parsers with phase 8 |
 | `@vibesys/connection` | service | exists (`.`, `node`): the connection manager (`ConnectionManager`, `HostConnection`: an XState machine in `state/` and a `shell/` owning the links, channels, and the machine's clock), the ssh and local links, the bootstrap, and `connectionStatus`, with `./testing` (`FakeHelper`, `FakeLink`, and the `HostConnection` contract suite); depends on `contracts`, `transport`, `hosts` | desktop main process (phase 8 of #1878) |
 | `@vibesys/settings` | service | exists (`.`, `node`): the settings store (`hosts.json`, `recent.json`, `preferences.json` with the appearance, notifications and archived runs; one writer, atomic replace), with `./testing` (`FakeSettingsFilesystem`); depends on `hosts`, `runs` | desktop main process (phase 8 of #1878) |
-| `@vibesys/feature-run-view`, `@vibesys/feature-gateway-connect`, `@vibesys/feature-replay` | feature | exist: the run page's transcript, rounds, status, and banners (`./state`, `./renderer`; the live session is `@vibesys/run-session`); the browser's gateway connect form (`./renderer`); the recorded-run load (`./state`, `./renderer`) | feature packages (phase 6 of #1878) |
+| `@vibesys/feature-run-view`, `@vibesys/feature-gateway-connect` | feature | exist, for `apps/web` only (frozen, deleted with it): the run page's transcript, rounds, status, and banners (`./state`, `./renderer`; the live session is `@vibesys/run-session`); the browser's gateway connect form (`./renderer`). `@vibesys/feature-replay` is deleted: nothing imported it | feature packages (phase 6 of #1878); desktop cutover (#2850) |
 | `@vibesys/feature-web-theme` | feature | exists: the exhaustive Web palette and its runtime names (checked against the generated theme union), plus the XState lifecycle for resolving the current live host's default; the app injects its session operation and owns DOM application and persistence | Web theme picker (#2168) |
-| `@vibesys/feature-hosts`, `@vibesys/feature-start-run`, `@vibesys/feature-run-control`, `@vibesys/feature-recent-runs` | feature | exist, renderer side (`./state`, `./renderer`): the host panel, checkout form, sign-in, "Connect to host", and path completion; the "Start a run" sheet; the title strip, stop, force stop, resume, and the banner; Recent. Each feature's effects call only the slice of `@vibesys/ipc`'s welcome bridge its `./state` declares. `feature-hosts` and `feature-run-control` also publish their main-process controllers (`./main`: `Hosts`; `RunControl` with its relay and stop flow) | desktop renderer (phase 7 of #1878); `./main` with the main-process split (phase 8) |
-| `apps/web` | app | exists: composition only, on the per-entry layout (one `dom` entry, no exports): the browser entry and boot decision, the desktop shell's run page (`desktop-main.tsx` and the bridge transport), the one backend adapter, storage and lifecycle. Its run connection (`connectRun`) is `@vibesys/run-session`'s and the run page's styles are the features' own (`./styles.css`). The desktop run page still moves to `apps/desktop-renderer`: what remains is the page lifecycle (`platform/lifecycle.ts`) and the live run page's composition (`createLiveApp`), which both apps would use, the bridge transport (`desktop-shell.ts`), and a second Vite page in that app's build, which `apps/desktop-main`'s `copy-ui.mjs` then copies | feature packages (phase 6 of #1878) |
-| `apps/desktop-renderer` | app | exists: composition only (one `dom` entry, no exports): the welcome view's entry, its stores wired to the welcome preload's bridge, and the view composed from the desktop features | desktop renderer (phase 7 of #1878) |
+| `@vibesys/feature-hosts`, `@vibesys/feature-run-control` | feature | exist, main process only (`./main`): `Hosts` (the host connections' leases, checkout changes, sign-in, path completion, a run's logs and recorded history) and `RunControl` (attach, start, resume, stop, with its relay and stop flow). Their renderers (the host panel, the Start sheet, the title strip, Recent) and `@vibesys/feature-start-run` and `@vibesys/feature-recent-runs` were deleted with the welcome view at the cutover (#2850) | desktop renderer (phase 7 of #1878); `./main` with the main-process split (phase 8) |
+| `apps/web` | app | exists: composition only, on the per-entry layout (one `dom` entry, no exports): the browser entry and boot decision, the one backend adapter, storage and lifecycle. Its run connection (`connectRun`) is `@vibesys/run-session`'s and the run page's styles are the features' own (`./styles.css`). It has no desktop build: the desktop app shows runs on the Run screen of `apps/desktop-shell`. Frozen; deleted with the web deprecation | feature packages (phase 6 of #1878); desktop cutover (#2850) |
+| `apps/desktop-renderer` | app | deleted at the cutover (#2850): the welcome view. `apps/desktop-shell` is the one desktop renderer | desktop renderer (phase 7 of #1878) |
 | `@vibesys/feature-app-shell` | feature (strict) | exists: the sidebar store (Live, Recent with the last 20 and Show all, Machines, the selected screen) over the hosts' listings, Recent and archived runs, with seeded-sequence invariant tests; the shell layout and placeholder screens (`./renderer`); the run notices a listing calls for, raised by `./main` when Settings enables them | redesign (#2842) |
 | `@vibesys/feature-settings` | feature (strict) | exists: the Settings store (appearance and notifications, saved under tokens) and screen; `./main` answers the preference requests and keeps Electron's `nativeTheme` on the appearance's mode | redesign (#2842) |
 | `@vibesys/feature-machines` | feature (strict) | exists: the Machines store (the saved machines, each one's status a selector over its last report: Ready, Checkout not found, Sign in, or Can't connect; the Add form and the checkout form, whose path suggestions carry each checkout's version), with seeded-sequence invariant tests, and the screen (`./renderer`); `./main` lists the machines from `hosts.json`, reports a machine's facts from its connection's state and `machine.describe`, inspects paths (`checkout.inspect`) and removes a machine. Adding a machine or changing its checkout is `feature-hosts`' checked `setCheckout` | redesign (#2843) |
 | `@vibesys/feature-new-run` | feature (strict) | exists: the New run form and its rules (`./state`: the inputs a run starts with and their key, the extra arguments that may not repeat a typed option, the prefill from the last run on a machine) and its machine (parallel regions loading what the machine offers, the project's tasks and the debounced "Ready to start" checks, with model tests); the screen and its store (`./renderer`); `./main` answers its requests with one host helper method each and records a started run in Recent | redesign (#2844) |
-| `apps/desktop-shell` | app (strict) | exists: the redesigned window's composition (`shell.html`), loaded in the welcome view's place when `VIBESYS_DESKTOP_SHELL=next`; its Playwright journey runs against a Fake of the welcome bridge | redesign (#2842) |
+| `apps/desktop-shell` | app (strict) | exists: the desktop window's composition (`shell.html`), the one page every window loads (a run window adds its run to the query); its Playwright journeys run against a Fake of the bridge | redesign (#2842); the only renderer since the cutover (#2850) |
 | `apps/ui-gallery` | app | exists: development only, never shipped (one `dom` entry, no exports): the component gallery and its screenshot and axe suite (see [The gallery and its screenshots](#the-gallery-and-its-screenshots)) | none |
-| `apps/desktop-main` | app | exists: composition only (Electron main, `.`, `node`): the lifecycle, page confinement, the window, launch arguments, and the welcome requests routed to the features' `./main` controllers; and the two sandboxed preloads (`./preload-run`, `./preload-welcome`, `preload`). Its build copies the two page bundles into `dist/ui` | desktop main process (phase 8 of #1878) |
+| `apps/desktop-main` | app | exists: composition only (Electron main, `.`, `node`): the lifecycle, page confinement, the windows, launch arguments, and the shell's requests routed to the features' `./main` controllers; and the sandboxed preload (`./preload-welcome`, `preload`; the name is the surface's historical one). Its build copies the shell's bundle into `dist/ui` | desktop main process (phase 8 of #1878) |
 | `@vibesys/backend-client` | core | deleted: split into `transport` and `transport-node` | backend-client split (#1910) |
 | `@vibesys/desktop` | app | deleted: emptied into `connection`, `settings`, the features' `./main`, and `apps/desktop-main` | desktop main process (phase 8 of #1878) |
 | `@vibesys/web` | app | moved: features into `features/*`, the composition into `apps/web` | feature packages (phase 6 of #1878) |

@@ -10,17 +10,13 @@
  * Host data reaches the view as pushes (`listing`), folded from the host helper's
  * `instances.watch`: there is no refresh request to forget, and no timer.
  */
-import type {ConnectionStatus, HostKey, HostListing} from '@vibesys/hosts';
-import type {RecentRun, StopView} from '@vibesys/runs';
+import type {HostListing} from '@vibesys/hosts';
+import type {RecentRun} from '@vibesys/runs';
 
 /** The events the main process sends the welcome view. */
 export const WELCOME_EVENTS = {
-  /** The window's state changed (`ChromeState`). */
-  chrome: 'vibesys:welcome:chrome',
   /** The recent runs changed (`RecentRun[]`): the settings store wrote them. */
   recent: 'vibesys:welcome:recent',
-  /** Show a host's panel (`HostKey`): a launch or a second launch asked for it. */
-  showHost: 'vibesys:welcome:show-host',
   /** A host's runs changed (`HostListing`), as its helper pushed them. */
   listing: 'vibesys:welcome:listing',
   /** The preferences changed (`PreferencesView`): the settings store wrote them. */
@@ -34,44 +30,16 @@ export interface WelcomeEvent<T> {
   readonly value: T;
 }
 
-/** What the window shows, for the welcome view's title strip. */
-export interface ChromeState {
-  /** `welcome`: the welcome view fills the window; `run`: the run view does, under the strip. */
-  readonly mode: 'welcome' | 'run';
-  /** The attached run, when there is one. */
-  readonly attached: {
-    readonly host: HostKey;
-    readonly hostLabel: string;
-    /** The registry id of the server driving the run. */
-    readonly instanceId: string;
-    /** The run's id, from its record. */
-    readonly runId: string;
-    readonly project: string;
-    /** The connection to the run; the strip words it. */
-    readonly connection: ConnectionStatus;
-  } | null;
-  /** The stop flows past idle, by `stopKey` (host, newline, instance id). */
-  readonly stops: Readonly<Record<string, StopView>>;
-}
-
 export interface WelcomeOverview {
   /** Events at or before this cursor are already covered by this overview. */
   readonly eventCursor: number;
-  /** Why the app's settings file was ignored, when it was. */
-  readonly settingsProblem: string | null;
   readonly recent: readonly RecentRun[];
   /** The latest value heard from every host watch. */
   readonly listings: readonly HostListing[];
-  readonly chrome: ChromeState;
-  /** The host whose panel to show first (a launch may name one). */
-  readonly host: HostKey;
 }
 
 /** What directory completion established (`@vibesys/hosts` owns it, with its reducer). */
 export type {PathCompletion} from '@vibesys/hosts';
-
-/** How a start the welcome view asked for ended: attached, or cancelled (and its run stopped). */
-export type StartOutcome = 'started' | 'cancelled';
 
 export type WelcomeResult<T> =
   | {readonly ok: true; readonly value: T}

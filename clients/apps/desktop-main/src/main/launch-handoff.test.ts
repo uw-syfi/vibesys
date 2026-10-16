@@ -22,11 +22,7 @@ describe('single-instance launch handoff', () => {
     const cases = [
       {
         argv: [],
-        plan: {kind: 'welcome', host: null},
-      },
-      {
-        argv: ['--host', 'gpu-box'],
-        plan: {kind: 'welcome', host: {kind: 'ssh', alias: 'gpu-box'}},
+        plan: {kind: 'main-window'},
       },
       {
         argv: ['--instance', '0123456789ab'],
