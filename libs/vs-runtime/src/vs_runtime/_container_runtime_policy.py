@@ -36,6 +36,15 @@ def attaches_accelerator(*, docker_in_docker: bool) -> bool:
     return not docker_in_docker
 
 
+class RefusesDockerInDocker:
+    """An environment that refuses a docker-in-docker task, so it never needs Sysbox."""
+
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """Never: such a task is refused here (``reject_docker_in_docker``)."""
+        del docker_in_docker
+        return False
+
+
 DOCKER_IN_DOCKER_NOTICE = (
     "[docker] docker_in_docker: sysbox-runc with a per-run Docker daemon inside the "
     "sandbox; no accelerator is attached (Sysbox cannot forward devices)"

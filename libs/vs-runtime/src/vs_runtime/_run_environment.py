@@ -55,6 +55,7 @@ from vs_runtime._cli_container_env import cli_container_env, cli_provider_env_an
 from vs_runtime._command_environment_session import command_environment_session
 from vs_runtime._container_runtime_policy import (
     DOCKER_IN_DOCKER_NOTICE,
+    RefusesDockerInDocker,
     attaches_accelerator,
     reject_docker_in_docker,
 )
@@ -570,11 +571,7 @@ class RunEnvironment(CaptureRecoverySource, Protocol):
         ...
 
     def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
-        """Whether a run here needs this host's Docker daemon to register Sysbox.
-
-        Such a run checks it before its image build and stops when it is missing.
-        *docker_in_docker* is the task's ``[environment] docker_in_docker``.
-        """
+        """Whether a run here needs the host's Docker daemon to register Sysbox."""
         ...
 
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
@@ -631,7 +628,7 @@ class _NoopWorkspaceRecovery(NoCaptureRecovery):
         return False
 
 
-class HostEnvironment(_NoopWorkspaceRecovery):
+class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     """Run the agent on the host, refusing to start unless it is confined.
 
     Selected for backends whose accelerator no container can reach (Metal on
@@ -651,11 +648,6 @@ class HostEnvironment(_NoopWorkspaceRecovery):
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """No container: the host agent reaches the accelerator itself."""
-        del docker_in_docker
-        return False
-
-    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
-        """No container, so no Sysbox (a docker-in-docker task is refused here)."""
         del docker_in_docker
         return False
 
@@ -940,7 +932,7 @@ class DockerEnvironment(NoCaptureRecovery):
         return attaches_accelerator(docker_in_docker=docker_in_docker)
 
     def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
-        """A docker-in-docker sandbox runs under the host daemon's Sysbox runtime."""
+        """A docker-in-docker sandbox runs under the host daemon's Sysbox."""
         return docker_in_docker
 
     def build_editor(
@@ -1143,7 +1135,7 @@ class _SkyPilotRunEnvironmentSession:
         self._close.run(self._steps.close)
 
 
-class SkyPilotEnvironment(DockerEnvironment):
+class SkyPilotEnvironment(RefusesDockerInDocker, DockerEnvironment):
     """CPU-only Docker editor with host-mediated SkyPilot evaluation."""
 
     config: SkyPilotEnvironmentConfig
@@ -1186,11 +1178,6 @@ class SkyPilotEnvironment(DockerEnvironment):
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """The local editor is CPU-only; the cluster job holds the accelerator."""
-        del docker_in_docker
-        return False
-
-    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
-        """SkyPilot refuses a docker-in-docker task, so it never needs Sysbox."""
         del docker_in_docker
         return False
 
@@ -1361,7 +1348,7 @@ class SkyPilotEnvironment(DockerEnvironment):
         )
 
 
-class ModalEnvironment(_NoopWorkspaceRecovery):
+class ModalEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     """Run candidate evaluations as Modal deployments."""
 
     isolated = True
@@ -1373,11 +1360,6 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """The local editor is CPU-only; the Modal deployment holds the accelerator."""
-        del docker_in_docker
-        return False
-
-    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
-        """Modal refuses a docker-in-docker task, so it never needs Sysbox."""
         del docker_in_docker
         return False
 

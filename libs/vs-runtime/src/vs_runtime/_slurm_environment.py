@@ -16,7 +16,7 @@ from vs_runtime._agent_gpu_commands import (
 )
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
 from vs_runtime._command_environment_session import command_environment_session
-from vs_runtime._container_runtime_policy import reject_docker_in_docker
+from vs_runtime._container_runtime_policy import RefusesDockerInDocker, reject_docker_in_docker
 from vs_runtime._host_command_bridge import (
     agent_paths,
     bridge_editor_extras,
@@ -319,7 +319,7 @@ class _ClusterPlans:
     support_paths: Mapping[str, Path]
 
 
-class SlurmEnvironment(_NoopWorkspaceRecovery):
+class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     """Edit in a local Docker container while trusted evaluation and ROCprof run through Slurm.
 
     The agent never runs on the host. Trusted accuracy and benchmark work is not
@@ -339,11 +339,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """The local editor holds no accelerator; the cluster does the GPU work."""
-        del docker_in_docker
-        return False
-
-    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
-        """Slurm refuses a docker-in-docker task, so it never needs Sysbox."""
         del docker_in_docker
         return False
 
