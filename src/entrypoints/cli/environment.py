@@ -92,6 +92,11 @@ def _editor_image(plan: EditorImagePlan, build: TaskImageBuild | None) -> str | 
     return plan.resolve(built)
 
 
+def _image_option(image: str | None) -> dict[str, object]:
+    """The Slurm editor's ``image`` option, present only when there is one to pin."""
+    return {} if image is None else {"image": image}
+
+
 def run_environment_spec_from_args(
     args: argparse.Namespace,
     *,
@@ -152,7 +157,7 @@ def run_environment_spec_from_args(
                 "config_path": str(
                     slurm_config or Path("~/.config/vibesys/slurm-gpu.toml").expanduser()
                 ),
-                "image": image,
+                **_image_option(image),
             },
             resources=bundle.manifest.resources if bundle is not None else None,
             task_dockerfile=plan.task_dockerfile,
@@ -164,7 +169,7 @@ def run_environment_spec_from_args(
                 "config_path": str(
                     slurm_config or Path("~/.config/vibesys/slurm.toml").expanduser()
                 ),
-                "image": image,
+                **_image_option(image),
             },
             task_dockerfile=plan.task_dockerfile,
         )

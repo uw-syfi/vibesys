@@ -28,8 +28,10 @@ from entrypoints.cli import (
     parse_cli_invocation,
     run_environment_spec_from_args,
 )
+from entrypoints.cli.environment import TaskImageBuild
 from entrypoints.headless import main
 from vibesys.api.metrics import MetricSpace, Objective
+from vibesys.api.request import TaskImageError, backend_default_image
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -53,6 +55,7 @@ from vs_project.api import (
     RunExecutionRecord,
 )
 from vs_runtime.api import RunStatus as PluginRunStatus
+from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, run_environment_record
 
 if TYPE_CHECKING:
@@ -103,7 +106,14 @@ command = ["uv", "run", "python", "benchmark/benchmark.py"]
     return project
 
 
-def _write_repository_task(project: Path, name: str) -> Path:
+_TASK_RESOURCES = """
+[resources]
+accelerators_per_node = 1
+accelerator_backend = "cuda"
+"""
+
+
+def _write_repository_task(project: Path, name: str, *, resources: bool = False) -> Path:
     task = project / ".vibesys" / "tasks" / name
     task.mkdir(parents=True)
     (task / "OBJECTIVE.md").write_text(f"Optimize {name}.\n")
@@ -120,6 +130,7 @@ command = ["python", "-c", "print('ok')"]
 [benchmark]
 command = ["python", "-c", "print('1')"]
 """
+        + (_TASK_RESOURCES if resources else "")
     )
     return task
 
@@ -525,25 +536,58 @@ def test_task_dockerfile_selects_docker_without_building_during_validation(
     build.assert_not_called()
 
 
-def test_task_dockerfile_builds_once_for_a_launch(tmp_path: Path) -> None:
+def _docker_builds(runner: FakeDockerBuildRunner) -> list[tuple[str, ...]]:
+    return [argv for argv, _, _ in runner.calls if argv[1] == "build"]
+
+
+_CONTAINER_ENVIRONMENTS = ("docker", "modal", "skypilot", "slurm")
+
+
+def _container_environment_flags(environment: str, tmp_path: Path) -> list[str]:
+    if environment == "slurm":
+        config = _write_slurm_operator_config(tmp_path / "operator-slurm.toml")
+        return ["--run-environment", "slurm", "--slurm-config", str(config)]
+    return {
+        "docker": [],
+        "modal": ["--modal"],
+        "skypilot": ["--skypilot", "--cluster-profile", "gpu"],
+    }[environment]
+
+
+@pytest.mark.parametrize("environment", _CONTAINER_ENVIRONMENTS)
+@pytest.mark.parametrize("backend", [ComputeBackend.CUDA, ComputeBackend.ROCM, ComputeBackend.CPU])
+def test_task_dockerfile_builds_once_on_the_backend_base_for_every_container_environment(
+    environment: str, backend: ComputeBackend, tmp_path: Path
+) -> None:
+    """Regression: Slurm, Modal and SkyPilot refused a task Dockerfile, and no
+    environment passed the backend's default image as ``BASE_IMAGE``."""
     project = tmp_path / "repository"
     project.mkdir()
-    task = _write_repository_task(project, "latency")
+    task = _write_repository_task(project, "latency", resources=environment == "skypilot")
     dockerfile = task / "Dockerfile"
-    dockerfile.write_text("FROM python:3.12-bookworm\n")
-    invocation = parse_cli_invocation(["--project", str(project), "--task", "latency"])
-    image_id = f"sha256:{'a' * 64}"
+    dockerfile.write_text("ARG BASE_IMAGE\nFROM ${BASE_IMAGE}\n")
+    invocation = parse_cli_invocation(
+        [
+            "--project",
+            str(project),
+            "--task",
+            "latency",
+            *_container_environment_flags(environment, tmp_path),
+        ]
+    )
+    image_id = f"sha256:{'c' * 64}"
+    runner = FakeDockerBuildRunner(image_id=image_id)
 
-    with patch("entrypoints.cli.environment.build_task_image", return_value=image_id) as build:
-        spec = run_environment_spec_from_args(
-            invocation.args,
-            build_task_docker_image=True,
-        )
+    spec = run_environment_spec_from_args(
+        invocation.args, task_image=TaskImageBuild(backend=backend, runner=runner)
+    )
 
-    assert spec.name == "docker"
+    assert spec.name == environment
     assert spec.options["image"] == image_id
-    build.assert_called_once()
-    assert build.call_args.args == (dockerfile.resolve(),)
+    assert spec.task_dockerfile == dockerfile.resolve()
+    assert run_environment_record(spec).image == image_id
+    (build,) = _docker_builds(runner)
+    assert f"BASE_IMAGE={backend_default_image(backend)}" in build
 
 
 @pytest.mark.parametrize(
@@ -587,24 +631,22 @@ def test_each_outer_loop_builds_the_task_image_once(
     assert request.run_environment.options["image"] == image_id
 
 
-@pytest.mark.parametrize(
-    "flags",
-    [
-        ["--modal"],
-        ["--skypilot"],
-        ["--docker-image", "custom:latest"],
-    ],
-)
-def test_fresh_task_dockerfile_rejects_conflicting_environment_flags(
-    flags: list[str],
+@pytest.mark.parametrize("environment", _CONTAINER_ENVIRONMENTS)
+def test_fresh_task_dockerfile_rejects_an_explicit_docker_image(
+    environment: str,
     tmp_path: Path,
 ) -> None:
     project = tmp_path / "repository"
     project.mkdir()
-    task = _write_repository_task(project, "latency")
+    task = _write_repository_task(project, "latency", resources=environment == "skypilot")
     (task / "Dockerfile").write_text("FROM python:3.12-bookworm\n")
+    flags = [
+        *_container_environment_flags(environment, tmp_path),
+        "--docker-image",
+        "custom:latest",
+    ]
 
-    with pytest.raises(ValueError, match="task Dockerfile"):
+    with pytest.raises(TaskImageError, match="cannot be combined with --docker-image"):
         parse_cli_invocation(["--project", str(project), "--task", "latency", *flags])
 
 
@@ -1066,10 +1108,11 @@ def test_repository_resume_restores_the_recorded_task(
     assert invocation.args.input_bundle.task_root == selected.resolve()
 
 
-def test_repository_resume_migrates_a_recorded_local_environment_to_docker_without_building(
+def test_repository_resume_refuses_a_task_dockerfile_the_record_has_no_image_for(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Regression: resume silently ran without the task image the task declares."""
     project = tmp_path / "repository"
     project.mkdir()
     task = _write_repository_task(project, "latency")
@@ -1084,16 +1127,15 @@ def test_repository_resume_migrates_a_recorded_local_environment_to_docker_witho
     )
     monkeypatch.chdir(project)
 
-    args = parse_cli_invocation(["--resume", run_id]).args
-    with patch("entrypoints.cli.environment.build_task_image") as build:
-        spec = run_environment_spec_from_args(args, build_task_docker_image=True)
-
-    assert spec.name == "docker"
-    assert spec.options["image"] is None
-    build.assert_not_called()
+    with pytest.raises(TaskImageError, match="recorded without a task image"):
+        parse_cli_invocation(["--resume", run_id])
 
 
-def test_repository_resume_rebuilds_a_recorded_task_docker_environment(
+@pytest.mark.parametrize("environment", ["docker", "slurm"])
+@pytest.mark.parametrize("reproduced", [True, False])
+def test_repository_resume_rebuilds_and_checks_the_recorded_task_image(
+    environment: str,
+    reproduced: bool,  # noqa: FBT001
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1103,13 +1145,20 @@ def test_repository_resume_rebuilds_a_recorded_task_docker_environment(
     dockerfile = task / "Dockerfile"
     dockerfile.write_text("FROM python:3.12-bookworm\n")
     recorded_image = f"sha256:{'a' * 64}"
-    rebuilt_image = f"sha256:{'b' * 64}"
+    rebuilt_image = recorded_image if reproduced else f"sha256:{'b' * 64}"
+    slurm_config = (
+        str(_write_slurm_operator_config(tmp_path / "operator-slurm.toml"))
+        if environment == "slurm"
+        else None
+    )
     run_id = "20260811-120000-11111111-agent"
     _write_project_run(
         project,
         run_id,
         configuration=_agent_configuration(
-            run_environment=RunEnvironmentRecord(name="docker", image=recorded_image)
+            run_environment=RunEnvironmentRecord(
+                name=environment, image=recorded_image, config_path=slurm_config
+            )
         ),
         created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
         options=_RunFixtureOptions(task_name="latency"),
@@ -1117,13 +1166,18 @@ def test_repository_resume_rebuilds_a_recorded_task_docker_environment(
     monkeypatch.chdir(project)
 
     args = parse_cli_invocation(["--resume", run_id]).args
-    with patch("entrypoints.cli.environment.build_task_image", return_value=rebuilt_image) as build:
-        spec = run_environment_spec_from_args(args, build_task_docker_image=True)
+    runner = FakeDockerBuildRunner(image_id=rebuilt_image)
+    build = TaskImageBuild(backend=ComputeBackend.CUDA, runner=runner)
 
-    assert spec.name == "docker"
-    assert spec.options["image"] == rebuilt_image
-    build.assert_called_once()
-    assert build.call_args.args == (dockerfile.resolve(),)
+    if reproduced:
+        spec = run_environment_spec_from_args(args, task_image=build)
+        assert spec.name == environment
+        assert run_environment_record(spec).image == recorded_image
+    else:
+        with pytest.raises(TaskImageError, match="Dockerfile or its build context changed"):
+            run_environment_spec_from_args(args, task_image=build)
+    (docker_build,) = _docker_builds(runner)
+    assert str(dockerfile.resolve()) in docker_build
 
 
 def test_repository_resume_rejects_a_different_task(tmp_path: Path) -> None:
