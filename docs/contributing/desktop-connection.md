@@ -623,7 +623,10 @@ run is attached, the store keeps its `WebSession` open (bootstrap, stream, recov
 the trace's span events in sequence order (the session's `onRunAction`), so the tabs fold the trace
 at the sequence they show (`viewedRun`). Pause and Resume are protocol commands on that session,
 offered only while its controls are up. Leaving the run releases it (`releaseRun`), and a new
-shell document detaches the run the old one held. Its invariants (force offered only while stopping
+shell document detaches the run the old one held. An ended run opens from its recorded history
+instead: the store reads `runs.read_events` (feature `run_history`, through the welcome bridge's
+`readEvents`) page by page under a token, validates each event, and folds the pages into the same
+`run` slice, so the tabs have one source; an older host answers `unsupported`. Its invariants (force offered only while stopping
 and only after its bound, no stop flow outliving the live run, the link holding exactly the live
 server, no session report without an attached run, trace events in increasing sequence, commands
 sent only when offered) are checked over seeded action sequences with stale replies. The theme
