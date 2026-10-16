@@ -16,7 +16,8 @@ from vs_agent.api.images import (
     TaskImageBuildError,
     build_task_image,
     is_task_image_reference,
-    local_image_exists,
+    local_image_id,
+    task_image_inputs,
     task_image_reference,
 )
 from vs_agent.api.testing import (
@@ -482,8 +483,9 @@ def test_the_reference_is_the_tag_the_build_produces(base: str | None) -> None:
         store = _FakeDockerImageStore()
         reference = task_image_reference(dockerfile, base_image=base)
 
-        assert not local_image_exists(
-            reference, command_runner=store, output=DISCARD, clock=ManualClock()
+        assert (
+            local_image_id(reference, command_runner=store, output=DISCARD, clock=ManualClock())
+            is None
         )
         build_task_image(
             dockerfile, base_image=base, command_runner=store, clock=ManualClock(), output=DISCARD
@@ -491,6 +493,68 @@ def test_the_reference_is_the_tag_the_build_produces(base: str | None) -> None:
 
         assert store.builds == [reference]
         assert is_task_image_reference(reference)
-        assert local_image_exists(
-            reference, command_runner=store, output=DISCARD, clock=ManualClock()
+        assert (
+            local_image_id(reference, command_runner=store, output=DISCARD, clock=ManualClock())
+            == store.tags[reference]
         )
+
+
+@given(content=st.text(max_size=200), base=st.one_of(st.none(), st.just("python:3")))
+def test_identical_inputs_at_two_locations_have_the_same_inputs_digest(
+    content: str, base: str | None
+) -> None:
+    """Regression: a copied project (``--runs-dir``) counted as changed task inputs."""
+    with tempfile.TemporaryDirectory() as directory:
+        references = []
+        for location in ("a", "b"):
+            task = Path(directory) / location / "t"
+            task.mkdir(parents=True)
+            (task / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+            (task / "payload.txt").write_text(content, encoding="utf-8")
+            references.append(task_image_reference(task / "Dockerfile", base_image=base))
+
+    first, second = references
+    assert first != second  # the owner, which scopes pruning, differs
+    assert task_image_inputs(first) == task_image_inputs(second) is not None
+
+
+def test_a_non_task_image_has_no_inputs_digest() -> None:
+    assert task_image_inputs(_IMAGE_ID) is None
+    assert task_image_inputs("python:3.12-bookworm") is None
+
+
+_IGNORE_CASES = [
+    # (.dockerignore, edited file, whether the edit is a build input)
+    ("README.md\n", "README.md", False),
+    ("*.md\n", "docs/notes.md", True),  # ``*`` stays within one segment
+    ("**/*.md\n", "docs/notes.md", False),
+    ("docs\n", "docs/notes.md", False),  # a directory pattern covers its contents
+    ("docs\n!docs/keep.md\n", "docs/keep.md", True),
+    ("# comment\n/README.md\n", "README.md", False),
+    ("*\n!Dockerfile\n", "README.md", False),
+    ("*\n", "Dockerfile", True),  # the Dockerfile is always an input
+    ("*\n", ".dockerignore", True),
+    ("bench?.py\n", "bench1.py", False),
+    ("bench[0-9].py\n", "benchx.py", True),
+    ("", "README.md", True),
+]
+
+
+@pytest.mark.parametrize(("dockerignore", "edited", "is_input"), _IGNORE_CASES)
+def test_the_inputs_digest_honors_dockerignore(
+    dockerignore: str, edited: str, *, is_input: bool, tmp_path: Path
+) -> None:
+    """Regression: editing a file the build never sees (a README) changed the task's inputs."""
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("FROM scratch\n", encoding="utf-8")
+    (tmp_path / ".dockerignore").write_text(dockerignore, encoding="utf-8")
+    target = tmp_path / edited
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        target.write_text("before\n", encoding="utf-8")
+    before = task_image_reference(dockerfile, base_image=None)
+
+    with target.open("a", encoding="utf-8") as file:
+        file.write("# edited\n")
+
+    assert (task_image_reference(dockerfile, base_image=None) != before) is is_input

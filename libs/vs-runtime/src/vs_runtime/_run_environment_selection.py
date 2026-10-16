@@ -78,7 +78,7 @@ def resolve_run_environment_spec(
         f"[environment] the {backend.value} backend cannot be reached from Docker; "
         "running the agent on the host under Seatbelt"
     )
-    return replace(spec, name="host", options={})
+    return replace(spec, name="host", options={}, image_id=None)
 
 
 def derived_environment_name(name: str, backend: ComputeBackend, *, platform: str) -> str:
@@ -143,21 +143,23 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
             "(use the docker run environment)"
         )
         raise ValueError(message)
+    # The environment runs the image's pinned ID when the launch resolved one.
+    options = spec.options if spec.image_id is None else {**spec.options, "image": spec.image_id}
     if spec.name == "docker":
-        return DockerEnvironment.from_options(spec.options)
+        return DockerEnvironment.from_options(options)
     if spec.name == "host":
-        return HostEnvironment.from_options(spec.options)
+        return HostEnvironment.from_options(options)
     if spec.name == "modal":
-        return ModalEnvironment.from_options(spec.options)
+        return ModalEnvironment.from_options(options)
     if spec.name == "skypilot":
-        return SkyPilotEnvironment.from_options(spec.options, spec.resources)
+        return SkyPilotEnvironment.from_options(options, spec.resources)
     if spec.name == "slurm":
-        return SlurmEnvironment.from_options(spec.options)
+        return SlurmEnvironment.from_options(options)
     if spec.name == "slurm-gpu":
         # Deprecated alias: the old file, translated, opens the slurm environment.
-        image = spec.options.get("image")
+        image = options.get("image")
         return SlurmEnvironment.from_slurm_gpu(
-            Path(str(spec.options["config_path"])),
+            Path(str(options["config_path"])),
             spec.resources,
             docker=DockerEnvironmentConfig(image=str(image) if image else None),
         )

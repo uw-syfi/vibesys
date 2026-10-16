@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
@@ -27,6 +28,7 @@ _ENVIRONMENTS = ("docker", "host", "modal", "skypilot", "slurm", "slurm-gpu")
 _CONTAINER_ENVIRONMENTS = tuple(name for name in _ENVIRONMENTS if name != "host")
 _DOCKERFILE = Path("/project/.vibesys/tasks/t/Dockerfile")
 _REFERENCES = st.sampled_from(("vibesys-task-build:o-1", "vibesys-task-build:o-2"))
+_LOCAL_ID = "sha256:" + "c" * 64
 _IDS = st.sampled_from(("sha256:" + "a" * 64, "sha256:" + "b" * 64))
 _BASES = st.one_of(st.none(), st.sampled_from(("nvcr.io/nvidia/pytorch:25.04-py3", "python:3")))
 
@@ -34,11 +36,14 @@ _BASES = st.one_of(st.none(), st.sampled_from(("nvcr.io/nvidia/pytorch:25.04-py3
 def _facts(
     reference: str, base: str | None, recorded: str | None, *, present: bool | None
 ) -> TaskImageFacts:
+    is_reference = recorded is not None and recorded.startswith("vibesys-task-build:")
     return TaskImageFacts(
         reference=reference,
         base_image=base,
-        recorded_is_reference=recorded is not None and recorded.startswith("vibesys-task-build:"),
-        recorded_present=present,
+        recorded_is_reference=is_reference,
+        # These fakes have no owner part: the whole reference is the inputs digest.
+        recorded_inputs_match=is_reference and recorded == reference,
+        recorded_id=_LOCAL_ID if present else None,
     )
 
 
@@ -88,7 +93,10 @@ def test_a_task_dockerfile_is_honored_or_refused_never_dropped(
             or (launch == "fresh" and image is not None)
             or (
                 launch == "resume"
-                and (image is None or (facts.recorded_is_reference and image != reference))
+                and (
+                    image is None
+                    or (facts.recorded_is_reference and image != reference and not present)
+                )
             )
         )
         assert refused_because
@@ -99,10 +107,13 @@ def test_a_task_dockerfile_is_honored_or_refused_never_dropped(
         assert plan.image == reference
         assert plan.build is not None
         assert plan.build.base_image == base
+        assert plan.resolve(_LOCAL_ID) == _LOCAL_ID
         return
-    # A resume always runs the recorded image, and builds only when it is gone.
+    # A resume always records the recorded image, and builds only when it is gone.
     assert plan.image == image
     assert (plan.build is None) is present
+    if present:
+        assert plan.resolve(None) == _LOCAL_ID  # pinned to the local ID, not the tag
     if plan.build is not None and not facts.recorded_is_reference:
         assert plan.build.base_image is None  # built as before BASE_IMAGE
         assert plan.build.expected_id == image
@@ -123,17 +134,52 @@ def test_unchanged_inputs_resume_on_a_new_image_id_when_the_cache_is_gone(
 
     assert plan.build is not None
     assert plan.notice is not None
-    assert plan.resolve(built) == reference
+    assert plan.image == reference
+    assert plan.resolve(built) == built
 
 
-def test_changed_inputs_are_refused_on_resume() -> None:
+def test_identical_inputs_at_another_location_resume() -> None:
+    """Regression: a copied project's task, at another path, counted as changed inputs."""
+    recorded = "vibesys-task-build:owner_a-inputs"
+    facts = TaskImageFacts(
+        reference="vibesys-task-build:owner_b-inputs",
+        base_image=None,
+        recorded_is_reference=True,
+        recorded_inputs_match=True,
+    )
+    plan = editor_image_plan(
+        "slurm", task_dockerfile=_DOCKERFILE, image=recorded, launch="resume", facts=facts
+    )
+
+    assert plan.image == recorded
+    assert plan.build is not None
+    assert plan.resolve(_LOCAL_ID) == _LOCAL_ID
+
+
+def test_changed_inputs_resume_on_the_recorded_image_while_it_is_local() -> None:
+    """Regression: a benchmark edit mid-campaign refused resume though the image was local."""
+    plan = editor_image_plan(
+        "docker",
+        task_dockerfile=_DOCKERFILE,
+        image="vibesys-task-build:o-1",
+        launch="resume",
+        facts=_facts("vibesys-task-build:o-2", None, "vibesys-task-build:o-1", present=True),
+    )
+
+    assert plan.build is None
+    assert plan.notice is not None
+    assert "inputs changed" in plan.notice
+    assert plan.resolve(None) == _LOCAL_ID
+
+
+def test_changed_inputs_are_refused_on_resume_once_the_image_is_gone() -> None:
     with pytest.raises(TaskImageError, match="inputs changed"):
         editor_image_plan(
             "docker",
             task_dockerfile=_DOCKERFILE,
             image="vibesys-task-build:o-1",
             launch="resume",
-            facts=_facts("vibesys-task-build:o-2", None, "vibesys-task-build:o-1", present=True),
+            facts=_facts("vibesys-task-build:o-2", None, "vibesys-task-build:o-1", present=False),
         )
 
 
@@ -185,11 +231,10 @@ def test_a_selection_not_built_from_the_task_dockerfile_is_refused(
 def test_a_run_opens_only_with_its_task_image_built(environment: str, image: str | None) -> None:
     options = {} if image is None else {"image": image}
     spec = RunEnvironmentSpec(name=environment, options=options, task_dockerfile=_DOCKERFILE)
-    if image is None:
-        with pytest.raises(TaskImageError, match="without building it"):
-            require_built_task_image(spec, _DOCKERFILE)
-    else:
-        require_built_task_image(spec, _DOCKERFILE)
+    with pytest.raises(TaskImageError, match="without building it"):
+        require_built_task_image(spec, _DOCKERFILE)  # no resolved image ID
+    if image is not None:
+        require_built_task_image(replace(spec, image_id=_LOCAL_ID), _DOCKERFILE)
     require_built_task_image(RunEnvironmentSpec(name=environment), None)
 
 
@@ -217,3 +262,7 @@ def test_a_container_environment_runs_its_backend_on_the_image_option(
 
     assert build_run_environment(spec).backend_image == image
     assert run_environment_record(spec).image == image
+    # A resolved ID is what runs; the record keeps the reference.
+    pinned = replace(spec, image_id=_LOCAL_ID)
+    assert build_run_environment(pinned).backend_image == _LOCAL_ID
+    assert run_environment_record(pinned).image == image

@@ -7,20 +7,28 @@ backend's default image (passed as ``BASE_IMAGE``) and layers the agent
 Features on top.
 
 The run records the task image's *reference*: a local tag keyed to the task's
-location and to a digest of every build input. On resume:
+location (which scopes pruning only) and to a digest of every build input,
+which alone decides whether inputs are unchanged. On resume:
 
-- the recorded image still in the local daemon is reused without a build;
-- otherwise, unchanged inputs rebuild the same reference (the image ID may
-  differ when Docker's build cache is gone), with a notice;
-- changed inputs are refused.
+- the recorded image still in the local daemon is reused without a build,
+  with a notice if the inputs changed since (a benchmark edit mid-campaign);
+- otherwise, unchanged inputs rebuild the image (the image ID may differ when
+  Docker's build cache is gone, and the tag's owner when the task moved),
+  with a notice;
+- changed inputs with the image gone are refused.
 
 Runs recorded before references (a bare image ID) are reused when the ID is
 still local, else rebuilt as they were built then (without ``BASE_IMAGE``)
 and refused unless the rebuild reproduces the recorded ID.
 
+Either way the environment runs the image's immutable *ID*, resolved once
+at launch (:meth:`EditorImagePlan.resolve`), never the mutable tag: a later
+launch of the same task may prune the tag while this run still builds agent
+containers from it.
+
 :func:`editor_image_plan` is the one pure decision for every environment. The
 entry point gathers :class:`TaskImageFacts` (it reads files and asks Docker),
-performs the build the plan asks for, and checks it with
+performs the build the plan asks for, and resolves the ID with
 :meth:`EditorImagePlan.resolve`.
 """
 
@@ -110,10 +118,10 @@ class TaskImageError(ValueError):
     def inputs_changed(cls, dockerfile: Path, recorded: str, current: str) -> TaskImageError:
         """Describe task image inputs that differ from the recorded ones."""
         return cls(
-            f"cannot resume: the task image inputs changed since the run started (recorded "
-            f"{recorded}, now {current}). The Dockerfile, its build context, the task's "
-            f"location, or the backend's base image differ from {dockerfile} as recorded; "
-            f"restore them, or start a new run."
+            f"cannot resume: the recorded task image {recorded} is no longer in the local "
+            f"Docker daemon, and the task image inputs changed since the run started (now "
+            f"{current}). The Dockerfile, its build context, or the backend's base image "
+            f"differ from {dockerfile} as recorded; restore them, or start a new run."
         )
 
     @classmethod
@@ -134,14 +142,17 @@ class TaskImageFacts:
     ``reference`` is the tag the task's current inputs build to on
     ``base_image``, the backend's default image. ``recorded_is_reference`` says whether the
     resumed run's recorded image is such a tag (``False``: a bare image ID
-    from before references). ``recorded_present`` says whether the recorded
-    image is in the local daemon; ``None`` on a fresh launch.
+    from before references). ``recorded_inputs_match`` says whether that tag's
+    input digest equals ``reference``'s (the owner, the task's location, is
+    ignored). ``recorded_id`` is the recorded image's ID in the local daemon,
+    ``None`` when it is gone or on a fresh launch.
     """
 
     reference: str
     base_image: str | None
     recorded_is_reference: bool = False
-    recorded_present: bool | None = None
+    recorded_inputs_match: bool = False
+    recorded_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -159,31 +170,33 @@ class TaskImageBuildStep:
 
 @dataclass(frozen=True)
 class EditorImagePlan:
-    """What a launch runs and builds for its agent container, decided before any build.
+    """What a launch records, runs and builds for its agent container, decided before any build.
 
-    ``image`` is the image the environment runs (``None``: the backend's
-    default, or, while only validating, not yet known). ``build`` is the
-    task image build to perform first, if any. ``notice`` is what the launch
-    reports about a rebuild on resume.
+    ``image`` is the image the run records (``None``: the backend's default,
+    or, while only validating, not yet known). ``image_id`` is the immutable
+    ID the environment runs when it is known without a build. ``build`` is
+    the task image build to perform first, if any. ``notice`` is what the
+    launch reports on resume.
     """
 
     image: str | None
     task_dockerfile: Path | None = None
+    image_id: str | None = None
     build: TaskImageBuildStep | None = None
     notice: str | None = None
 
     def resolve(self, built: str | None) -> str | None:
-        """Return the image the environment runs, given the ID the build produced.
+        """Return the image ID the environment runs, given the ID the build produced.
 
         ``built`` is ``None`` when no build ran. A pre-reference run refuses a
         rebuilt ID different from the recorded one.
         """
         if self.build is None or built is None:
-            return self.image
+            return self.image_id
         expected = self.build.expected_id
         if expected is not None and built != expected:
             raise TaskImageError.legacy_image_changed(self.build.dockerfile, expected, built)
-        return self.image
+        return built
 
 
 def editor_image_plan(
@@ -214,18 +227,29 @@ def editor_image_plan(
         return _fresh_plan(task_dockerfile, image=image, facts=facts)
     if image is None:
         raise TaskImageError.recorded_without_task_image(environment, task_dockerfile)
-    reuse = EditorImagePlan(image=image, task_dockerfile=task_dockerfile)
     if facts is None:
-        return reuse
-    if facts.recorded_is_reference and image != facts.reference:
+        return EditorImagePlan(image=image, task_dockerfile=task_dockerfile)
+    changed = facts.recorded_is_reference and not facts.recorded_inputs_match
+    if facts.recorded_id is not None:
+        return EditorImagePlan(
+            image=image,
+            task_dockerfile=task_dockerfile,
+            image_id=facts.recorded_id,
+            notice=(
+                f"[environment] the task image inputs changed since the run started; "
+                f"resuming on the recorded task image {image} ({facts.recorded_id})"
+                if changed
+                else None
+            ),
+        )
+    if changed:
         raise TaskImageError.inputs_changed(task_dockerfile, image, facts.reference)
-    if facts.recorded_present:
-        return reuse
     notice = (
         f"[environment] the run's task image {image} is no longer in the local Docker daemon; "
         f"rebuilding it from {task_dockerfile}"
     )
     if facts.recorded_is_reference:
+        # Builds ``facts.reference``: the same inputs, under this location's owner.
         step = TaskImageBuildStep(task_dockerfile, facts.base_image)
     else:
         # Built before references, without BASE_IMAGE: rebuild exactly as then.
@@ -255,9 +279,14 @@ def require_built_task_image(spec: RunEnvironmentSpec, task_dockerfile: Path | N
     """Refuse to open a run whose task image was not built into its selection.
 
     A task Dockerfile in a container environment needs the task image as the
-    spec's ``image``; a selection built only for validation has none.
+    spec's ``image`` and its resolved ``image_id``; a selection built only for
+    validation has neither.
     """
     if task_dockerfile is None or not runs_agent_in_container(spec.name):
         return
-    if spec.task_dockerfile != task_dockerfile or not spec.options.get("image"):
+    if (
+        spec.task_dockerfile != task_dockerfile
+        or not spec.options.get("image")
+        or spec.image_id is None
+    ):
         raise TaskImageError.not_built(spec.name, task_dockerfile)

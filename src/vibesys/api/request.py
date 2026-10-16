@@ -38,7 +38,8 @@ from vs_agent.api.images import (
     DockerBuildRunner,
     build_task_image,
     is_task_image_reference,
-    local_image_exists,
+    local_image_id,
+    task_image_inputs,
     task_image_reference,
 )
 from vs_project.api import GitRemoteRepository
@@ -98,7 +99,7 @@ __all__ = [
     "load_objectives",
     "load_project_task",
     "load_task",
-    "local_image_exists",
+    "local_image_id",
     "make_run_environment_spec",
     "migrate_recorded_run_environment",
     "repository_name_from_experiment",
@@ -109,6 +110,7 @@ __all__ = [
     "run_environment_uses_docker",
     "supported_profilers",
     "synthesize_input_bundle",
+    "task_image_inputs",
     "task_image_reference",
     "validate_descriptor",
     "validate_experiment_name",

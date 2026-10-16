@@ -27,8 +27,9 @@ from vs_agent.images import (
     build_task_image,
     ensure_pushed,
     is_task_image_reference,
-    local_image_exists,
+    local_image_id,
     push_agent_image,
+    task_image_inputs,
     task_image_reference,
 )
 
@@ -57,7 +58,8 @@ __all__ = [
     "build_task_image",
     "ensure_pushed",
     "is_task_image_reference",
-    "local_image_exists",
+    "local_image_id",
     "push_agent_image",
+    "task_image_inputs",
     "task_image_reference",
 ]

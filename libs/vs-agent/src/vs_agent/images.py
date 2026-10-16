@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import JsonValue, TypeAdapter
 
+from vs_agent._build_context import build_context_files
 from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_decode.api import decode_json
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
@@ -848,13 +849,26 @@ def _validated_task_dockerfile(dockerfile_path: Path, timeout: float) -> Path:
 def task_image_reference(dockerfile_path: Path, *, base_image: str | None) -> str:
     """Return the local tag :func:`build_task_image` builds *dockerfile_path* to.
 
-    The tag is a function of the task directory's location and of every build
-    input (the context, the Dockerfile, ``base_image``), read now, without
-    Docker. A run records it so a resume can tell unchanged inputs (rebuild
-    the same tag when the image is gone) from changed ones.
+    The tag is ``<owner>-<inputs>``: ``<owner>`` keys the task directory's
+    location (it scopes pruning only), and ``<inputs>`` is a digest of every
+    build input (the Dockerfile, the context files ``.dockerignore`` keeps,
+    ``base_image``), read now, without Docker. A run records it so a resume can
+    tell unchanged inputs from changed ones with :func:`task_image_inputs`.
     """
     dockerfile = _validated_task_dockerfile(dockerfile_path, _DEFAULT_BUILD_TIMEOUT_SECONDS)
-    return _task_image_tag(dockerfile.parent, base_image)
+    return _task_image_tag(dockerfile, base_image)
+
+
+def task_image_inputs(reference: str) -> str | None:
+    """Return the build-input digest of a task image *reference*, or ``None`` for another image.
+
+    Two references with the same digest were built from identical inputs,
+    whichever directory the task was in.
+    """
+    if not is_task_image_reference(reference):
+        return None
+    _owner, separator, inputs = reference.removeprefix(f"{TASK_IMAGE_REPOSITORY}:").rpartition("-")
+    return inputs if separator else None
 
 
 def is_task_image_reference(image: str) -> bool:
@@ -862,17 +876,18 @@ def is_task_image_reference(image: str) -> bool:
     return image.startswith(f"{TASK_IMAGE_REPOSITORY}:")
 
 
-def local_image_exists(
+def local_image_id(
     image: str,
     *,
     command_runner: DockerBuildRunner | None = None,
     output: OutputSink,
     clock: Clock,
-) -> bool:
-    """Return whether the local Docker daemon has *image* (a tag or an ID).
+) -> str | None:
+    """Return the immutable ID of *image* (a tag or an ID) in the local daemon, or ``None``.
 
-    A failed ``docker image inspect`` means absent. Docker missing, or the
-    inspection outliving its bound, raises :class:`TaskImageBuildError`.
+    A failed ``docker image inspect`` means absent. Docker missing, the
+    inspection outliving its bound, or an answer that is no image ID raises
+    :class:`TaskImageBuildError`.
     """
     build = _BuildRun(
         runner=command_runner or SubprocessDockerBuildRunner(),
@@ -888,12 +903,19 @@ def local_image_exists(
     )
     argv = ("docker", "image", "inspect", "--format", "{{.Id}}", image)
     result = _run_docker(build, argv, action="inspecting", target=target)
-    return result.returncode == 0
+    if result.returncode != 0:
+        return None
+    image_id = result.stdout.strip()
+    if result.stdout_truncated or _IMAGE_ID.fullmatch(image_id) is None:
+        displayed = result.stdout_diagnostic("<empty>")
+        raise TaskImageBuildError.invalid_runnable_id(target.image_label, image, displayed)
+    return image_id
 
 
-def _task_image_tag(context: Path, base_image: str | None) -> str:
+def _task_image_tag(dockerfile: Path, base_image: str | None) -> str:
     """The task image's local tag: its owner, then its build inputs."""
-    return f"{TASK_IMAGE_REPOSITORY}:{_task_image_owner(context)}-{_task_image_digest(context, base_image)}"
+    owner = _task_image_owner(dockerfile.parent)
+    return f"{TASK_IMAGE_REPOSITORY}:{owner}-{_task_image_digest(dockerfile, base_image)}"
 
 
 def _task_image_owner(context: Path) -> str:
@@ -911,29 +933,31 @@ def _build_task_image(dockerfile: Path, *, base_image: str | None, build: _Build
         image_repository=_TASK_IMAGE_REPOSITORY,
         image_label="task image",
     )
-    image_tag = _task_image_tag(context, base_image)
+    image_tag = _task_image_tag(dockerfile, base_image)
     built = _build_and_inspect(target, extra_build_args, build, image_tag=image_tag)
     _prune_superseded_task_tags(build, context, keep_tag=image_tag)
     return built
 
 
-def _task_image_digest(context: Path, base_image: str | None) -> str:
-    """Hash *context* and *base_image* into a deterministic 32-character tag suffix.
+def _task_image_digest(dockerfile: Path, base_image: str | None) -> str:
+    """Hash a task's build inputs and *base_image* into a deterministic 32-character tag suffix.
 
     The task Dockerfile is always a direct child of its own build context
     (:func:`_validated_task_dockerfile` keeps the lexical parent as the
-    context), so hashing every file under *context* already covers it along
-    with every other input Docker can read while building. Folding in
-    *base_image* covers the one input outside the context. The same inputs
-    always hash to the same tag, mirroring how
-    :func:`vs_sandbox.feature_image.build_feature_image` keys the agent
-    layer's tag to its own inputs.
+    context), so hashing every file the build sends to Docker (the context
+    after ``.dockerignore``, plus the Dockerfile and ``.dockerignore``)
+    covers every input Docker can read while building. Folding in
+    *base_image* covers the one input outside the context. Paths are hashed
+    relative to the context, so the same inputs hash the same wherever the
+    task lives, mirroring how :func:`vs_sandbox.feature_image.build_feature_image`
+    keys the agent layer's tag to its own inputs.
     """
+    context = dockerfile.parent
     digest = hashlib.sha256()
     digest.update(repr(base_image).encode())
     digest.update(b"\0")
-    for path in sorted(p for p in context.rglob("*") if p.is_file()):
-        digest.update(str(path.relative_to(context)).encode())
+    for path in build_context_files(context, dockerfile=dockerfile):
+        digest.update(path.relative_to(context).as_posix().encode())
         digest.update(b"\0")
         digest.update(path.read_bytes())
         digest.update(b"\0")

@@ -16,9 +16,10 @@ from vibesys.api.request import (
     derived_environment_name,
     editor_image_plan,
     is_task_image_reference,
-    local_image_exists,
+    local_image_id,
     make_run_environment_spec,
     supported_profilers,
+    task_image_inputs,
     task_image_reference,
 )
 from vs_sim.api import DISCARD, MonotonicClock
@@ -94,16 +95,17 @@ def _task_image_facts(
 ) -> TaskImageFacts:
     """Read what the plan needs: the inputs' reference and whether the recorded image is local."""
     base_image = backend_default_image(build.backend)
-    present = None
-    if launch == "resume" and recorded is not None:
-        present = local_image_exists(
-            recorded, command_runner=build.runner, output=DISCARD, clock=MonotonicClock()
-        )
+    reference = task_image_reference(dockerfile, base_image=base_image)
+    if launch == "fresh" or recorded is None:
+        return TaskImageFacts(reference=reference, base_image=base_image)
     return TaskImageFacts(
-        reference=task_image_reference(dockerfile, base_image=base_image),
+        reference=reference,
         base_image=base_image,
-        recorded_is_reference=recorded is not None and is_task_image_reference(recorded),
-        recorded_present=present,
+        recorded_is_reference=is_task_image_reference(recorded),
+        recorded_inputs_match=task_image_inputs(recorded) == task_image_inputs(reference),
+        recorded_id=local_image_id(
+            recorded, command_runner=build.runner, output=DISCARD, clock=MonotonicClock()
+        ),
     )
 
 
@@ -132,10 +134,10 @@ def _editor_image(
         launch=launch,
         facts=_task_image_facts(dockerfile, image, launch, build),
     )
-    if plan.build is None:
-        return plan
     if plan.notice is not None:
         sys.stderr.write(f"{plan.notice}\n")
+    if plan.build is None:
+        return plan
     built = build_task_image(
         plan.build.dockerfile,
         base_image=plan.build.base_image,
@@ -143,7 +145,7 @@ def _editor_image(
         clock=MonotonicClock(),
         output=DISCARD,
     )
-    return replace(plan, image=plan.resolve(built))
+    return replace(plan, image_id=plan.resolve(built))
 
 
 def _image_option(image: str | None) -> dict[str, object]:
@@ -158,9 +160,11 @@ def run_environment_spec_from_args(
 ) -> RunEnvironmentSpec:
     """Resolve the requested run environment from CLI and external operator config.
 
-    With *task_image*, a task Dockerfile is built and its image ID becomes the
-    environment's ``image``; without it (validation) nothing is built, but the
-    same decision runs, so an unsupported combination fails either way.
+    With *task_image*, a task Dockerfile is built (or, on resume, reused); its
+    reference becomes the recorded ``image`` and its immutable ID the spec's
+    ``image_id``, which the environment runs. Without it (validation) nothing
+    is built, but the same decision runs, so an unsupported combination fails
+    either way.
     """
     bundle = getattr(args, "input_bundle", None)
     selected = getattr(args, "run_environment", None)
@@ -222,6 +226,7 @@ def run_environment_spec_from_args(
             },
             resources=bundle.manifest.resources if bundle is not None else None,
             task_dockerfile=plan.task_dockerfile,
+            image_id=plan.image_id,
         )
     if requested_environment == "slurm":
         return RunEnvironmentSpec(
@@ -233,6 +238,7 @@ def run_environment_spec_from_args(
                 **_image_option(image),
             },
             task_dockerfile=plan.task_dockerfile,
+            image_id=plan.image_id,
         )
 
     return replace(
@@ -250,6 +256,7 @@ def run_environment_spec_from_args(
             resources=bundle.manifest.resources if bundle is not None else None,
         ),
         task_dockerfile=plan.task_dockerfile,
+        image_id=plan.image_id,
     )
 
 

@@ -185,8 +185,12 @@ class RunEnvironmentSpec:
     resources: RunResourceRequest | None = None
     #: The task Dockerfile the ``image`` option was built from, or ``None``
     #: when the image is the operator's or the backend's. Not recorded: the
-    #: run record pins the built image itself.
+    #: run record holds the task image's reference.
     task_dockerfile: Path | None = None
+    #: The immutable ID the task image resolved to at launch. Not recorded;
+    #: when set, the environment runs it in place of the ``image`` option, so
+    #: a later launch pruning the task image's tag cannot change this run.
+    image_id: str | None = None
 
 
 @dataclass(frozen=True)
