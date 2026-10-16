@@ -187,7 +187,14 @@ def test_dynamic_iterations_group_attempts_under_stable_workstreams() -> None:
         (node.id, node.parent_id, node.kind, node.ordinal, node.status, node.child_count)
         for node in tree.nodes
     ] == [
-        ("workstream:000001.cache", None, IterationKind.WORKSTREAM, 1, IterationStatus.COMPLETED, 1),
+        (
+            "workstream:000001.cache",
+            None,
+            IterationKind.WORKSTREAM,
+            1,
+            IterationStatus.COMPLETED,
+            1,
+        ),
         ("workstream:000002.parser", None, IterationKind.WORKSTREAM, 2, IterationStatus.ACTIVE, 0),
         (
             "attempt:cache:1",
