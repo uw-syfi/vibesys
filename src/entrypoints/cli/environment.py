@@ -22,6 +22,7 @@ from vibesys.api.request import (
     task_image_inputs,
     task_image_reference,
 )
+from vs_agent.api.images import SubprocessDockerBuildRunner
 from vs_sim.api import DISCARD, MonotonicClock
 
 if TYPE_CHECKING:
@@ -104,7 +105,10 @@ def _task_image_facts(
         recorded_is_reference=is_task_image_reference(recorded),
         recorded_inputs_match=task_image_inputs(recorded) == task_image_inputs(reference),
         recorded_id=local_image_id(
-            recorded, command_runner=build.runner, output=DISCARD, clock=MonotonicClock()
+            recorded,
+            command_runner=build.runner or SubprocessDockerBuildRunner(),
+            output=DISCARD,
+            clock=MonotonicClock(),
         ),
     )
 

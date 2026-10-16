@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterable
 
 DOCKERIGNORE = ".dockerignore"
 
@@ -27,25 +27,24 @@ class _Pattern:
     exclusion: bool
 
 
-def build_context_files(context: Path, *, dockerfile: Path) -> list[Path]:
-    """Return the regular files under *context* a build reads, sorted by relative path."""
-    patterns = _read_patterns(context / DOCKERIGNORE)
-    always = {dockerfile.relative_to(context).as_posix(), DOCKERIGNORE}
-    files = []
-    for path in context.rglob("*"):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(context).as_posix()
-        if relative in always or not _ignored(relative, patterns):
-            files.append(path)
-    return sorted(files, key=lambda path: path.relative_to(context).as_posix())
+def build_context_inputs(
+    relative_paths: Iterable[str], *, dockerignore: str | None, dockerfile: str
+) -> list[str]:
+    """Return the context files a build reads, sorted.
+
+    *relative_paths* are the regular files under the context, ``/``-separated
+    and relative to it; *dockerignore* is the text of its ``.dockerignore``
+    (``None``: there is none); *dockerfile* is the Dockerfile's relative path.
+    Pure: the caller lists and reads the files.
+    """
+    patterns = _parse_patterns(dockerignore or "")
+    always = {dockerfile, DOCKERIGNORE}
+    return sorted(path for path in relative_paths if path in always or not _ignored(path, patterns))
 
 
-def _read_patterns(dockerignore: Path) -> tuple[_Pattern, ...]:
-    if not dockerignore.is_file():
-        return ()
+def _parse_patterns(text: str) -> tuple[_Pattern, ...]:
     patterns = []
-    for raw in dockerignore.read_text(encoding="utf-8", errors="replace").splitlines():
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue

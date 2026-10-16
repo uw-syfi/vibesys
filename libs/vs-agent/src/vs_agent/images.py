@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import JsonValue, TypeAdapter
 
-from vs_agent._build_context import build_context_files
+from vs_agent._build_context import DOCKERIGNORE, build_context_inputs
 from vs_agent.agent_feature import AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_decode.api import decode_json
 from vs_sandbox.api import FeatureImageBuildError, FinalImage, build_feature_image
@@ -879,7 +879,7 @@ def is_task_image_reference(image: str) -> bool:
 def local_image_id(
     image: str,
     *,
-    command_runner: DockerBuildRunner | None = None,
+    command_runner: DockerBuildRunner,
     output: OutputSink,
     clock: Clock,
 ) -> str | None:
@@ -890,7 +890,7 @@ def local_image_id(
     :class:`TaskImageBuildError`.
     """
     build = _BuildRun(
-        runner=command_runner or SubprocessDockerBuildRunner(),
+        runner=command_runner,
         timeout=_DEFAULT_VERIFY_TIMEOUT_SECONDS,
         output=output,
         clock=clock,
@@ -956,10 +956,23 @@ def _task_image_digest(dockerfile: Path, base_image: str | None) -> str:
     digest = hashlib.sha256()
     digest.update(repr(base_image).encode())
     digest.update(b"\0")
-    for path in build_context_files(context, dockerfile=dockerfile):
-        digest.update(path.relative_to(context).as_posix().encode())
+    files = {
+        path.relative_to(context).as_posix(): path for path in context.rglob("*") if path.is_file()
+    }
+    dockerignore = files.get(DOCKERIGNORE)
+    kept = build_context_inputs(
+        files,
+        dockerignore=(
+            None
+            if dockerignore is None
+            else dockerignore.read_text(encoding="utf-8", errors="replace")
+        ),
+        dockerfile=dockerfile.relative_to(context).as_posix(),
+    )
+    for relative in kept:
+        digest.update(relative.encode())
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(files[relative].read_bytes())
         digest.update(b"\0")
     return digest.hexdigest()[:32]
 
