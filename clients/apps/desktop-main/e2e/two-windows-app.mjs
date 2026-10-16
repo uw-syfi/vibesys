@@ -20,6 +20,8 @@
  * backend or the connection manager's own reconnect/sharing behavior (covered by
  * `@vibesys/connection`'s own tests).
  */
+// First, before any page loads: see the module for the Playwright race it closes.
+import './pin-performance-global.mjs';
 import {Duplex} from 'node:stream';
 import {app, ipcMain, webContents} from 'electron';
 import {RunControl} from '@vibesys/feature-run-control/main';

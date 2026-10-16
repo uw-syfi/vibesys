@@ -3,6 +3,8 @@
  * preloads, IPC binders, renderer confinement, and lifecycle wiring. In-memory implementations
  * replace only host/run/settings I/O so the journey needs no subprocess, socket, or user files.
  */
+// First, before any page loads: see the module for the Playwright race it closes.
+import './pin-performance-global.mjs';
 import {app, BaseWindow, ipcMain, webContents} from 'electron';
 import {firstLoad} from './first-load.mjs';
 
