@@ -311,6 +311,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     """
 
     isolated = False
+    uses_docker = True
     backend_image: str | None = None
 
     def __init__(

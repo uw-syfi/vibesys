@@ -591,6 +591,11 @@ class RunEnvironment(Protocol):
         ...
 
     @property
+    def uses_docker(self) -> bool:
+        """Whether a run here starts local Docker containers (the agent's, or an editor's)."""
+        ...
+
+    @property
     def materialize_local_model_weights(self) -> bool:
         """Whether external model-weight symlinks are copied into the workspace."""
         ...
@@ -684,6 +689,7 @@ class HostEnvironment(_NoopWorkspaceRecovery):
     """
 
     isolated: bool = False
+    uses_docker: bool = False
     materialize_local_model_weights: bool = True
     default_profiler_id = "nsys"
     supported_profiler_ids: frozenset[str] | None = None
@@ -904,6 +910,7 @@ class DockerEnvironment:
     """Run agents and evaluator commands in a Docker sandbox."""
 
     isolated = True
+    uses_docker = True
     requires_local_profiler_preflight = True
     materialize_local_model_weights = True
     default_profiler_id = "nsys"
@@ -1368,6 +1375,7 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
     """Run candidate evaluations as Modal deployments."""
 
     isolated = True
+    uses_docker = True
     requires_local_profiler_preflight = True
     materialize_local_model_weights = False
     default_profiler_id = "torch"

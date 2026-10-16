@@ -23,6 +23,7 @@ from server.host_preflight import (
     one_line,
 )
 from vibesys.api import ConfigurationError
+from vibesys.api.request import run_environment_uses_docker
 from vs_agent.api.images import AGENT_IMAGE_REPOSITORY
 from vs_sim.api import SubprocessProbe
 
@@ -50,21 +51,40 @@ def preflight_report(
     """Validate ``argv`` as a run would, then check the agent image and the evaluator."""
     try:
         args = parse(argv)
-        validated_run_request(args)
+        request, _config = validated_run_request(args)
     except ConfigurationError as error:
         diagnostic = error.diagnostic
         return PreflightReport(
             settings=SettingsInvalid(
                 code=diagnostic.code, stage=diagnostic.stage, message=diagnostic.message
             ),
+            uses_docker=None,
             agent_image=_not_checked(CheckId.AGENT_IMAGE),
             evaluator=_not_checked(CheckId.EVALUATOR_AVAILABLE),
         )
+    return valid_report(
+        uses_docker=run_environment_uses_docker(request.run_environment),
+        bundle=args.input_bundle,
+        probe=probe,
+    )
+
+
+def valid_report(*, uses_docker: bool, bundle: InputBundle, probe: CommandProbe) -> PreflightReport:
+    """The report for valid settings; the agent image is checked only where Docker runs."""
     return PreflightReport(
         settings=SettingsValid(),
-        agent_image=agent_image_check(probe),
-        evaluator=evaluator_check(args.input_bundle),
+        uses_docker=uses_docker,
+        agent_image=agent_image_check(probe) if uses_docker else NO_AGENT_IMAGE,
+        evaluator=evaluator_check(bundle),
     )
+
+
+NO_AGENT_IMAGE = Check(
+    id=CheckId.AGENT_IMAGE,
+    state=CheckState.OK,
+    detail="not needed: this run's environment starts no Docker container",
+)
+"""The agent image check for a run whose environment needs no Docker: nothing to build."""
 
 
 def agent_image_check(probe: CommandProbe) -> Check:
