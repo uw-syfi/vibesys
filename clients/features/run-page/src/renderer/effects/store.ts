@@ -20,7 +20,7 @@ import {
 
 /** The run's logs as the app reads them. */
 export interface RunPageLogs {
-  list(): Promise<LogListOutcome>;
+  list(instanceId: string): Promise<LogListOutcome>;
   readonly transport: LogTransport;
 }
 
@@ -47,7 +47,7 @@ type Dispatch = (action: RunPageAction) => void;
 
 /** One follower per stream `followedStreams` names, started and stopped as the state changes. */
 class Followers {
-  readonly #followers = new Map<string, {stop(): void}>();
+  readonly #followers = new Map<string, {readonly instanceId: string; stop(): void}>();
 
   constructor(
     private readonly logs: RunPageLogs,
@@ -59,7 +59,7 @@ class Followers {
     const instanceId = state.record.kind === 'unlisted' ? null : state.record.run.id;
     const wanted = new Set(instanceId === null ? [] : followedStreams(state));
     for (const [streamId, follower] of this.#followers) {
-      if (wanted.has(streamId)) continue;
+      if (wanted.has(streamId) && follower.instanceId === instanceId) continue;
       follower.stop();
       this.#followers.delete(streamId);
     }
@@ -83,7 +83,7 @@ class Followers {
       last = view;
       this.dispatch({type: 'log-view', streamId, view});
     });
-    this.#followers.set(streamId, actor);
+    this.#followers.set(streamId, {instanceId, stop: () => actor.stop()});
   }
 }
 
@@ -146,7 +146,7 @@ export function createRunPageStore(
         const settle = (outcome: LogListOutcome): void =>
           dispatch({type: 'streams', token: request.token, outcome});
         void ports.logs
-          ?.list()
+          ?.list(request.instanceId)
           .then(settle, (error: unknown) =>
             settle({ok: false, failure: {code: 'transport', message: String(error)}}),
           );

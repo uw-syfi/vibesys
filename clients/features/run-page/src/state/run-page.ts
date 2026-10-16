@@ -53,8 +53,13 @@ export type StopFlow =
 
 export type RunLogs =
   | {readonly kind: 'idle'}
-  | {readonly kind: 'listing'; readonly token: number; readonly streams: readonly LogStream[]}
-  | {readonly kind: 'listed'; readonly streams: readonly LogStream[]}
+  | {
+      readonly kind: 'listing';
+      readonly token: number;
+      readonly instanceId: string;
+      readonly streams: readonly LogStream[];
+    }
+  | {readonly kind: 'listed'; readonly instanceId: string; readonly streams: readonly LogStream[]}
   | {readonly kind: 'failed'; readonly message: string; readonly unsupported: boolean};
 
 export interface RunPageState {
@@ -97,7 +102,7 @@ export type RunPageAction =
 export type RunPageRequest =
   | {readonly kind: 'stop'; readonly force: boolean}
   | {readonly kind: 'arm-bound'; readonly token: number; readonly ms: number}
-  | {readonly kind: 'list-logs'; readonly token: number}
+  | {readonly kind: 'list-logs'; readonly token: number; readonly instanceId: string}
   | {readonly kind: 'pause'}
   | {readonly kind: 'resume'}
   | {readonly kind: 'resume-ended'; readonly fromRound: number | null}
@@ -177,19 +182,32 @@ function armed(state: RunPageState, forced: boolean): RunPageStep {
 
 /** Ask for the stream listing again, unless the app cannot read logs or one is in flight. */
 function relisted(state: RunPageState): RunPageStep {
-  if (state.unavailable.logs !== undefined || state.logs.kind === 'listing') {
+  const instanceId = recordInstance(state.record);
+  if (
+    state.unavailable.logs !== undefined ||
+    instanceId === null ||
+    (state.logs.kind === 'listing' && state.logs.instanceId === instanceId)
+  ) {
     return {state, requests: []};
   }
   const token = state.next;
-  const streams = state.logs.kind === 'listed' ? state.logs.streams : [];
+  const streams =
+    state.logs.kind === 'listed' && state.logs.instanceId === instanceId ? state.logs.streams : [];
   return {
-    state: {...state, next: token + 1, logs: {kind: 'listing', token, streams}},
-    requests: [{kind: 'list-logs', token}],
+    state: {...state, next: token + 1, logs: {kind: 'listing', token, instanceId, streams}},
+    requests: [{kind: 'list-logs', token, instanceId}],
   };
 }
 
+function recordInstance(record: RunRecord): string | null {
+  return record.kind === 'unlisted' ? null : record.run.id;
+}
+
 function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
-  const next: RunPageState = {...state, record};
+  const instanceChanged = recordInstance(state.record) !== recordInstance(record);
+  const next: RunPageState = instanceChanged
+    ? {...state, record, logs: {kind: 'idle'}, views: {}, selected: null}
+    : {...state, record};
   if (record.kind !== 'live') {
     // The run ended (or left the listing): no stop is pending and no force is offered.
     const settled = {...next, stop: STOP_IDLE};
@@ -220,7 +238,26 @@ function withStreams(state: RunPageState, token: number, outcome: LogListOutcome
       requests: [],
     };
   }
-  return {state: {...state, logs: {kind: 'listed', streams: outcome.streams}}, requests: []};
+  if (outcome.instanceId !== state.logs.instanceId) {
+    return {
+      state: {
+        ...state,
+        logs: {
+          kind: 'failed',
+          message: `the app listed logs for ${outcome.instanceId}, not ${state.logs.instanceId}`,
+          unsupported: false,
+        },
+      },
+      requests: [],
+    };
+  }
+  return {
+    state: {
+      ...state,
+      logs: {kind: 'listed', instanceId: outcome.instanceId, streams: outcome.streams},
+    },
+    requests: [],
+  };
 }
 
 function unchanged(state: RunPageState): RunPageStep {
@@ -358,6 +395,12 @@ export function runPageInvariants(state: RunPageState): string[] {
   }
   if (state.stop.kind !== 'idle' && state.record.kind !== 'live') {
     problems.push(`a ${state.stop.kind} stop outlives the live run`);
+  }
+  if (
+    (state.logs.kind === 'listing' || state.logs.kind === 'listed') &&
+    state.logs.instanceId !== recordInstance(state.record)
+  ) {
+    problems.push('log state belongs to a different run instance');
   }
   if (state.unavailable.logs !== undefined && state.logs.kind !== 'idle') {
     problems.push('logs are read although the app cannot read them');

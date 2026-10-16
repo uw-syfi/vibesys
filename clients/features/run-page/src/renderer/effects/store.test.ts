@@ -1,5 +1,8 @@
 import {expect, test} from 'bun:test';
+import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
+import type {LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
+import type {AbortSignalLike} from '@vibesys/transport';
 import {stopBannerView} from '../../state/index.js';
 import {createRunPageStore, type RunPagePorts} from '../index.js';
 
@@ -59,6 +62,24 @@ function fakePorts(stops: boolean[]): RunPagePorts {
   };
 }
 
+interface PendingRead {
+  readonly input: LogReadInput;
+  readonly signal: AbortSignalLike;
+}
+
+class FakeLogTransport implements LogTransport {
+  readonly reads: PendingRead[] = [];
+
+  read(input: LogReadInput, signal: AbortSignalLike): Promise<LogReadOutcome> {
+    this.reads.push({input, signal});
+    return new Promise(() => {});
+  }
+}
+
+async function settled(): Promise<void> {
+  for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+}
+
 const SEED = {
   identity: {host: 'ssh:chelan4', runId: '20261015-163047'},
   title: {project: '~/vibesys-projects/queue-rs', task: 'mpmc'},
@@ -90,4 +111,41 @@ test('dispose cancels an armed bound', () => {
   expect(clock.pending).toBe(1);
   store.dispose();
   expect(clock.pending).toBe(0);
+});
+
+test('an instance replacement restarts a follower even when the stream id is reused', async () => {
+  const clock = new FakeClock();
+  const transport = new FakeLogTransport();
+  const stream: LogStream = {
+    id: 'startup',
+    owner: {kind: 'startup_step', stage: 'building_image'},
+    command: 'docker build .',
+    retained_start: 0,
+    size: 0,
+    outcome: null,
+  };
+  const ports: RunPagePorts = {
+    ...fakePorts([]),
+    logs: {
+      list: instanceId => Promise.resolve({ok: true, instanceId, streams: [stream]}),
+      transport,
+    },
+  };
+  const store = createRunPageStore({...SEED, unavailable: {}}, ports, clock.schedule);
+  store.dispatch({type: 'record', record: {kind: 'live', run: {...running(), phase: 'starting'}}});
+  await settled();
+  expect(transport.reads.map(read => read.input.instance_id)).toEqual(['a1b2c3d4e5f6']);
+
+  store.dispatch({
+    type: 'record',
+    record: {kind: 'live', run: {...running(), id: 'fedcba654321', phase: 'starting'}},
+  });
+  await settled();
+
+  expect(transport.reads[0]?.signal.aborted).toBe(true);
+  expect(transport.reads.map(read => read.input.instance_id)).toEqual([
+    'a1b2c3d4e5f6',
+    'fedcba654321',
+  ]);
+  store.dispose();
 });

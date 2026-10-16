@@ -98,11 +98,8 @@ export function welcomeRunPorts(
     archive: () => void settled(bridge.archive(target.run, true)),
     runAgain: () => navigation.runAgain(),
     logs: {
-      list: async () => {
-        const instance = target.instance();
-        if (instance === null) return failed('the run is not listed yet') as LogListOutcome;
-        return answer(await settled(bridge.logs(host, instance, {kind: 'list'}))) as LogListOutcome;
-      },
+      list: async instanceId =>
+        answer(await settled(bridge.logs(host, instanceId, {kind: 'list'}))) as LogListOutcome,
       transport: readOver(bridge, target),
     },
     release: () => void settled(bridge.releaseLogs()),

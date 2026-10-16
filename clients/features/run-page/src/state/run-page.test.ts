@@ -307,4 +307,59 @@ describe('the run page store', () => {
     expect(shown.tab).toBe('logs');
     expect(streamLines(shown, 's5')).toEqual([{text: '16:30:51 INFO run started', stream: 'out'}]);
   });
+
+  test('an instance replacement fences its old log listing and projected bytes', () => {
+    const first = fold(initial(), [{type: 'record', record: RECORDS[1] as RunRecord}]);
+    const firstList = first.requests.find(request => request.kind === 'list-logs');
+    if (firstList?.kind !== 'list-logs') throw new Error('no first listing asked');
+    expect(firstList.instanceId).toBe('a1b2c3d4e5f6');
+
+    const oldView = foldChunk(emptyLogView(), {
+      offset: 0,
+      data: 'bytes from the replaced instance\n',
+      next_offset: 33,
+      eof: false,
+      closed: false,
+      truncated_before: false,
+      pipes: [],
+    });
+    const withOldBytes = fold(first.state, [
+      {type: 'log-view', streamId: 's1', view: oldView},
+    ]).state;
+    const replacement = {
+      kind: 'live',
+      run: server('starting', {id: 'fedcba654321'}),
+    } as const;
+    const replaced = fold(withOldBytes, [{type: 'record', record: replacement}]);
+    const secondList = replaced.requests.find(request => request.kind === 'list-logs');
+    if (secondList?.kind !== 'list-logs') throw new Error('no replacement listing asked');
+
+    expect(secondList.instanceId).toBe('fedcba654321');
+    expect(secondList.token).not.toBe(firstList.token);
+    expect(replaced.state.views).toEqual({});
+    expect(replaced.state.logs).toMatchObject({
+      kind: 'listing',
+      token: secondList.token,
+      instanceId: 'fedcba654321',
+    });
+
+    const stale = runPageStep(replaced.state, {
+      type: 'streams',
+      token: firstList.token,
+      outcome: {ok: true, instanceId: 'a1b2c3d4e5f6', streams: STREAMS},
+    });
+    expect(stale.state).toBe(replaced.state);
+
+    const mismatched = runPageStep(replaced.state, {
+      type: 'streams',
+      token: secondList.token,
+      outcome: {ok: true, instanceId: 'a1b2c3d4e5f6', streams: STREAMS},
+    });
+    expect(mismatched.state.logs).toEqual({
+      kind: 'failed',
+      message: 'the app listed logs for a1b2c3d4e5f6, not fedcba654321',
+      unsupported: false,
+    });
+    expect(mismatched.state.views).toEqual({});
+  });
 });
