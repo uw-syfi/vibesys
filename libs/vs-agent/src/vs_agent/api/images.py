@@ -7,6 +7,7 @@ optional runner seam; they do not inspect the packaged Feature.
 
 from vs_agent.agent_feature import AGENT_FEATURES_PROJECT, AGENT_USER, AGENT_WORKDIR, agent_feature
 from vs_agent.images import (
+    AGENT_IMAGE_REPOSITORY,
     DEFAULT_AGENT_IMAGE_REGISTRY,
     DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS,
     DOCKER_OUTPUT_TAIL_CHARACTERS,
@@ -29,6 +30,7 @@ from vs_agent.images import (
 
 __all__ = [
     "AGENT_FEATURES_PROJECT",
+    "AGENT_IMAGE_REPOSITORY",
     "AGENT_USER",
     "AGENT_WORKDIR",
     "DEFAULT_AGENT_IMAGE_REGISTRY",

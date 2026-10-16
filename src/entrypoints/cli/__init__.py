@@ -60,6 +60,7 @@ from entrypoints.cli.loops import (
     _validate_evolve,
     _validate_plain,
 )
+from entrypoints.cli.preflight import run_preflight
 from entrypoints.cli.resume import _resolve_resume_args
 from vibesys.api import ConfigurationError, RunRequest, boot_trace
 from vibesys.api.request import (
@@ -211,6 +212,9 @@ def dispatch(argv: list[str], runs: Runs | None = None) -> None:
     """Parse and run one headless VibeSys invocation, on ``runs`` or the default launcher."""
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
+        return
+    if argv and argv[0] == "preflight":
+        run_preflight(argv[1:], lambda arguments: parse_cli_invocation(arguments).args)
         return
     with boot_trace.span("dispatch"), boot_trace.span("parse_cli_invocation"):
         invocation = parse_cli_invocation(argv)

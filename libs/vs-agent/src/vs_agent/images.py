@@ -80,7 +80,8 @@ _TASK_IMAGE_REPOSITORY = "vibesys-task-build"
 #: resolve it in a ``FROM`` line. Keyed by the full ID, so re-tagging is a
 #: no-op and the agent layer's cache key stays stable.
 _BASE_IMAGE_REPOSITORY = "vibesys-base"
-_AGENT_IMAGE_REPOSITORY = "vibesys-agent-build"
+AGENT_IMAGE_REPOSITORY = "vibesys-agent-build"
+"""The local repository every agent image build is tagged under (one tag per input digest)."""
 #: A BuildKit progress line that starts a Dockerfile step: ``#7 [ 2/14] RUN ...``,
 #: or ``#7 [stage 2/14] RUN ...`` in a named stage of a multi-stage build.
 _BUILD_STEP = re.compile(r"^#\d+ \[(?:\S+ )?\s*(\d+)/(\d+)\] (.+)$")
@@ -1012,7 +1013,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
             base,
             (agent_feature(), *features),
             final=FinalImage(
-                user=AGENT_USER, workdir=AGENT_WORKDIR, image_repository=_AGENT_IMAGE_REPOSITORY
+                user=AGENT_USER, workdir=AGENT_WORKDIR, image_repository=AGENT_IMAGE_REPOSITORY
             ),
             command_runner=commands,
             timeout=timeout,

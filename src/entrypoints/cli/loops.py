@@ -42,6 +42,8 @@ from vs_sim.api import LoopSignalSource, OsProcesses
 if TYPE_CHECKING:
     import argparse
 
+    from vibesys.api import Config
+
 
 def _normalize_runs_dir(args: argparse.Namespace) -> None:
     raw = getattr(args, "runs_dir", None)
@@ -329,6 +331,28 @@ def _evolve_policy_descriptor(
 def _build_run_request(args: argparse.Namespace) -> RunRequest:
     """Build the one request format consumed by every registered policy."""
     with boot_trace.span("run_preamble"):
+        request, config = validated_run_request(args)
+        _prepare_experiment_repository(args, config)
+        run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
+        if args.resume is not None:
+            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {request.project_root}/\n")
+        return request.model_copy(
+            update={
+                "exp_name": args.exp_name,
+                "remote_repo": args.repo,
+                "run_environment": run_environment,
+            }
+        )
+
+
+def validated_run_request(args: argparse.Namespace) -> tuple[RunRequest, Config]:
+    """The run's request and configuration, validated as a run validates them, with no effect.
+
+    Raises ``ConfigurationError`` naming what is wrong. Both a run and ``vibesys preflight``
+    call it, so a configuration preflight accepts is one the run accepts; neither discovers
+    a GitHub account nor builds an image before it returns.
+    """
+    with boot_trace.span("validate_run_request"):
         bundle: InputBundle = args.input_bundle
         config, skills, backend = load_config_and_skills(args, domain=bundle.domain)
         if args.outer_loop in {"agent", "profile-guided", "dynamic"}:
@@ -362,20 +386,8 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
             remote_repo=args.repo,
             repo_visibility=args.repo_visibility,
         )
-        # Both entrypoints use this builder. Validate the complete request
-        # before GitHub account discovery or building a task Docker image.
         validate_run_request(request, git=Git(OsProcesses()))
-        _prepare_experiment_repository(args, config)
-        run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
-        if args.resume is not None:
-            sys.stdout.write(f"Resuming VibeSys run {args.resume} in {bundle.root}/\n")
-        return request.model_copy(
-            update={
-                "exp_name": args.exp_name,
-                "remote_repo": args.repo,
-                "run_environment": run_environment,
-            }
-        )
+        return request, config
 
 
 def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:

@@ -8,7 +8,17 @@ from pathlib import Path
 
 from entrypoints.cli.constants import _OUTER_LOOPS
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
-from server.host_api import CLI_PROVIDER_FLAG, MODEL_FLAG, UNVETTED_MODEL_FLAG
+from server.host_api import (
+    CLI_PROVIDER_FLAG,
+    LOCAL_FLAG,
+    MAX_RUN_SECONDS_FLAG,
+    MODEL_FLAG,
+    PUBLISH_FLAG,
+    REPO_FLAG,
+    ROLE_MODEL_FLAG,
+    ROLE_REASONING_EFFORT_FLAG,
+    UNVETTED_MODEL_FLAG,
+)
 from vibesys.api import (
     KNOWN_COMPUTE_BACKENDS,
     ComputeBackend,
@@ -448,7 +458,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="SkyPilot CLI executable. Default: sky.",
     )
     parser.add_argument(
-        "--repo",
+        REPO_FLAG,
         default=None,
         metavar="[OWNER/]NAME",
         help=(
@@ -458,9 +468,43 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         ),
     )
     parser.add_argument(
-        "--local",
+        LOCAL_FLAG,
         action="store_true",
         help="Keep this experiment local under --runs-dir; do not create or sync GitHub.",
+    )
+    parser.add_argument(
+        PUBLISH_FLAG,
+        action="store_true",
+        help=(
+            "Publish this run's project to GitHub under the generated repository name, as a "
+            "run under --runs-dir does. A run in place stays local without it or --repo."
+        ),
+    )
+    parser.add_argument(
+        MAX_RUN_SECONDS_FLAG,
+        type=_positive_int,
+        default=None,
+        metavar="SECONDS",
+        help="Wall-clock budget for the run. Overrides [run].max_run_seconds in agent.toml.",
+    )
+    parser.add_argument(
+        ROLE_MODEL_FLAG,
+        type=_role_setting,
+        action="append",
+        default=[],
+        metavar="ROLE=MODEL",
+        help="Model for one agent role. Overrides agent.roles.ROLE.model; repeatable.",
+    )
+    parser.add_argument(
+        ROLE_REASONING_EFFORT_FLAG,
+        type=_role_setting,
+        action="append",
+        default=[],
+        metavar="ROLE=EFFORT",
+        help=(
+            "Reasoning effort for one agent role. Overrides agent.roles.ROLE.reasoning_effort; "
+            "repeatable."
+        ),
     )
     parser.add_argument(
         "--repo-visibility",
@@ -543,6 +587,25 @@ def _apply_common_args(parser: argparse.ArgumentParser) -> None:
             "with --resume, the exact run to resume. Generated when omitted."
         ),
     )
+
+
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        number = 0
+    if number <= 0:
+        message = f"expected a positive whole number, got {value!r}"
+        raise argparse.ArgumentTypeError(message)
+    return number
+
+
+def _role_setting(value: str) -> tuple[str, str]:
+    role, separator, setting = value.partition("=")
+    if not separator or not role or not setting:
+        message = f"expected ROLE=VALUE, got {value!r}"
+        raise argparse.ArgumentTypeError(message)
+    return role, setting
 
 
 def _run_id(value: str) -> str:

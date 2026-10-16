@@ -177,10 +177,34 @@ def _load_effective_config(args: argparse.Namespace) -> Config:
         config = config.model_copy(
             update={"model": config.model.model_copy(update={"name": model})}
         )
+    config = _with_run_overrides(config, args)
     recorded = getattr(args, "project_run_configuration", None)
     if recorded is not None:
         config = _restore_project_config(args, config, recorded)
     return config
+
+
+def _with_run_overrides(config: Config, args: argparse.Namespace) -> Config:
+    """``config`` with the run's time limit and role settings from the command line.
+
+    The overrides are validated as if ``agent.toml`` held them, so an error names the key.
+    """
+    seconds = getattr(args, "max_run_seconds", None)
+    role_models: list[tuple[str, str]] = getattr(args, "role_model", [])
+    role_efforts: list[tuple[str, str]] = getattr(args, "role_reasoning_effort", [])
+    if seconds is None and not role_models and not role_efforts:
+        return config
+    document = config.model_dump(mode="json", exclude_unset=False)
+    if seconds is not None:
+        document["run"]["max_run_seconds"] = seconds
+    roles = document["agent"]["roles"]
+    for key, settings in (("model", role_models), ("reasoning_effort", role_efforts)):
+        for role, value in settings:
+            roles.setdefault(role, {})[key] = value
+    try:
+        return Config.model_validate(document)
+    except ValueError as exc:
+        _configuration_error(str(exc), code="config_load_failed", stage="config_loading")
 
 
 def _resolve_repository_owner(config: Config) -> str:
@@ -216,7 +240,7 @@ def _prepare_experiment_repository(args: argparse.Namespace, config: Config) -> 
 
     # A direct project run stays local unless publication was requested
     # explicitly. Copied projects retain the convenient generated remote.
-    if args.runs_dir is None and args.repo is None:
+    if args.runs_dir is None and args.repo is None and not args.publish:
         args.local = True
         return
 

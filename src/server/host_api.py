@@ -71,6 +71,7 @@ from pydantic import (
     model_validator,
 )
 
+from server.host_preflight import Check, RunOptions
 from vs_decode.api import Unreadable, decode_json
 
 PROTOCOL_VERSION = 1
@@ -760,6 +761,10 @@ class HelperFeature(StrEnum):
     """``machine.describe``: the host's checkout, hardware, Docker, harness CLIs and run counts."""
     CHECKOUT_INSPECT = "checkout_inspect"
     """``checkout.inspect``: whether a path holds a VibeSys checkout this app can use."""
+    PREFLIGHT = "preflight"
+    """``run.preflight``: the closed checks that say whether a run can start, each with its fix."""
+    RUN_OPTIONS = "run_options"
+    """``run.start``'s and ``run.preflight``'s ``options``: rounds, time limit, results, roles."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -768,6 +773,20 @@ MODEL_FLAG: Final = "--model"
 """The run option that names the agent model; ``run.start`` emits it for ``harness``."""
 UNVETTED_MODEL_FLAG: Final = "--allow-unvetted-model"
 """The terminal's opt-out from the vetted harness list; ``run.start`` refuses it in ``args``."""
+MAX_ROUNDS_FLAG: Final = "--max-rounds"
+"""The run option that bounds its rounds; ``run.start`` emits it for ``options.rounds``."""
+MAX_RUN_SECONDS_FLAG: Final = "--max-run-seconds"
+"""Overrides ``[run].max_run_seconds``; ``run.start`` emits it for ``options.time_limit_s``."""
+ROLE_MODEL_FLAG: Final = "--role-model"
+"""``ROLE=MODEL``, overriding ``agent.roles.ROLE.model``; emitted per ``options.roles`` model."""
+ROLE_REASONING_EFFORT_FLAG: Final = "--role-reasoning-effort"
+"""``ROLE=EFFORT``, overriding ``agent.roles.ROLE.reasoning_effort``; emitted per role effort."""
+PUBLISH_FLAG: Final = "--publish"
+"""Publishes the project to GitHub under the generated name; emitted for ``publish_github``."""
+REPO_FLAG: Final = "--repo"
+"""Publishes the project to a named GitHub repository; a typed ``results`` refuses it in ``args``."""
+LOCAL_FLAG: Final = "--local"
+"""Keeps the run local; ``run.start`` emits it for ``results: keep``."""
 
 
 RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -907,6 +926,20 @@ class RunStartRequest(_HelperRequest):
     harness: HarnessChoice | None = None
     """A pair ``harnesses.list`` offered; ``None`` keeps the project's configuration.
     Sent only after ``hello`` returned ``harnesses``."""
+    options: RunOptions | None = None
+    """Typed run options; ``args`` may then not repeat any option set here.
+    Sent only after ``hello`` returned ``run_options``."""
+
+
+class RunPreflightRequest(_HelperRequest):
+    """Whether the run ``run.start`` would launch with these inputs can start, check by check."""
+
+    type: Literal["run.preflight"] = "run.preflight"
+    project: str
+    task: str | None = None
+    args: tuple[str, ...] = ()
+    harness: HarnessChoice | None = None
+    options: RunOptions | None = None
 
 
 class RunStopRequest(_HelperRequest):
@@ -1093,11 +1126,13 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     RunsReadEventsRequest: HelperFeature.RUN_HISTORY,
     MachineDescribeRequest: HelperFeature.MACHINE_DESCRIBE,
     CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
+    RunPreflightRequest: HelperFeature.PREFLIGHT,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
 HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFeature]]] = {
-    RunStartRequest: {"harness": HelperFeature.HARNESSES},
+    RunStartRequest: {"harness": HelperFeature.HARNESSES, "options": HelperFeature.RUN_OPTIONS},
+    RunPreflightRequest: {"harness": HelperFeature.HARNESSES, "options": HelperFeature.RUN_OPTIONS},
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
@@ -1132,7 +1167,8 @@ HelperRequest = Annotated[
     | HarnessesListRequest
     | RunsReadEventsRequest
     | MachineDescribeRequest
-    | CheckoutInspectRequest,
+    | CheckoutInspectRequest
+    | RunPreflightRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1575,6 +1611,13 @@ CheckoutInspection = Annotated[
 ]
 
 
+class RunPreflightReply(_HelperReply):
+    """Every check, in ``CheckId`` order; Start is enabled exactly when none is ``fail``."""
+
+    type: Literal["run.preflight"] = "run.preflight"
+    checks: tuple[Check, ...]
+
+
 class CheckoutInspectReply(_HelperReply):
     """What the path holds."""
 
@@ -1670,6 +1713,7 @@ HelperReply = (
     | RunsReadEventsReply
     | MachineDescribeReply
     | CheckoutInspectReply
+    | RunPreflightReply
 )
 """A request's result; its ``type`` is the request's."""
 
