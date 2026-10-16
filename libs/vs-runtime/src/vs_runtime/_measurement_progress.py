@@ -11,7 +11,7 @@ process writes it, while the stage runs, to a stream a ``StageOutputOpener`` ope
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol
 
 from vs_evaluation.api import (
@@ -49,12 +49,15 @@ class StageRun:
     ``attempt`` counts the tries of the measurement, from 1: a
     ``RetryingEvaluationExecutor`` measures again under a new inner handle, and its
     :class:`TryHandles` names that run by the measurement's handle and try number.
+    ``decision_id`` is the core decision the measurement answers, when
+    :class:`MeasurementDecisions` knows it: its run-trace span is ``op:<decision_id>``.
     """
 
     handle_id: str
     stage_id: str
     purpose: str | None = None
     attempt: int = 1
+    decision_id: str | None = None
 
 
 type StageOutputOpener = Callable[[StageRun], AbstractContextManager[OutputSink]]
@@ -66,6 +69,33 @@ runs, and exits the context when the stage has ended (passed, failed, or been
 cancelled) on every path; after exit nothing more is written. The stream carries output
 only: what the stage measured is reported through :class:`StageSettled`.
 """
+
+
+class MeasurementDecisions:
+    """Which core decision each measurement handle answers, as its submission named it.
+
+    ``MeasurementRequests`` records every handle it submits here, so a stage's output can
+    be named by the decision behind it (the gate's run-trace span). Share one with the
+    requests and the stage output opener; it is used on the executors' event loop only.
+    A job submitted by an earlier host is unknown here, and its stages carry no decision.
+    """
+
+    def __init__(self) -> None:
+        """Know no measurement yet."""
+        self._decisions: dict[str, str] = {}
+
+    def record(self, handle_id: str, decision_id: str) -> None:
+        """Remember that the measurement ``handle_id`` answers ``decision_id``."""
+        self._decisions[handle_id] = decision_id
+
+    def stage_output(self, opener: StageOutputOpener) -> StageOutputOpener:
+        """``opener``, called with each stage's run naming the decision its measurement answers."""
+
+        def open_stage_output(run: StageRun) -> AbstractContextManager[OutputSink]:
+            decision = self._decisions.get(run.handle_id)
+            return opener(run if decision is None else replace(run, decision_id=decision))
+
+        return open_stage_output
 
 
 @dataclass(frozen=True, slots=True)

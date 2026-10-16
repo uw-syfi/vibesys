@@ -82,6 +82,7 @@ from vs_runtime._evaluation_jobs import (
 from vs_runtime._evidence_ledger import ReceiptEvidenceLedger
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
+    MeasurementDecisions,
     MeasurementObserver,
     MeasurementProgress,
 )
@@ -174,11 +175,14 @@ class MeasurementRequests:
         jobs: PollingEvaluationExecutor,
         store: ReceiptStore,
         observer: MeasurementObserver | None = None,
+        decisions: MeasurementDecisions | None = None,
     ) -> None:
         """Bind the executor that runs jobs and the receipts that make requests idempotent.
 
         *observer* is told when each stage of a job starts and ends; it never changes a result.
+        *decisions* learns which decision each submitted handle answers, for stage output.
         """
+        self._decisions = MeasurementDecisions() if decisions is None else decisions
         self._jobs = jobs
         self._store = store
         self._progress = MeasurementProgress(observer or IgnoreMeasurement())
@@ -512,6 +516,8 @@ class MeasurementRequests:
     ) -> ExecutionResult:
         request_id = _identity(request)
         handle = handle_for(request_id)
+        if request.decision_id is not None:
+            self._decisions.record(handle, request.decision_id.root)
         try:
             eval_request = measurement_request(
                 request.plan, request.scope, handle, deadline_at=context.until.at

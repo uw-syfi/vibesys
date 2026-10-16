@@ -14,7 +14,7 @@ tool's output at its call site, through a `tee` of its sink, is allowed.
 | --- | --- | --- |
 | Producers | process runners, `vs_sandbox`, `vs_slurm`, `vibesys` | Write bytes to a `vs_sim.api.OutputSink`; nothing else. |
 | Recorder | `vs_logs.api` | Streams, offsets, the cap, the index. No docker, gates or UI. |
-| Owners | `vibesys.log_owners` (`LogOwner`) | What each stream is for, as a typed reference to the run model; `span_id` names the run-trace span it belongs to when its writer knows it. |
+| Owners | `vibesys.log_owners` (`LogOwner`) | What each stream is for, as a typed reference to the run model; `span_id` names the run-trace span it belongs to when its writer knows it: a gate stage's stream names its gate's operation span (`op:<decision>`), from the decision its measurement answers (`MeasurementDecisions`, which `MeasurementRequests` fills as it submits; a job an earlier host submitted names none). |
 | Reader | `vs_logs.read` | List streams; read a bounded chunk from an offset or the tail. |
 | Serving | `server.host_helper_logs` (`logs` feature), over `server.host_helper_os.StoreLogReader` | Chunk caps, long-poll follow, discovery. |
 | Clients | `clients/` logs lib | Selection, follow, rendering. |

@@ -34,6 +34,7 @@ from vs_runtime.api.core import (
     CoreStartup,
     IgnoreCommits,
     IgnoreMeasurement,
+    MeasurementDecisions,
     MeasurementServices,
     OperationPorts,
     OwedSubmissions,
@@ -162,6 +163,8 @@ class CoreResources:
     network: Network
     """Serves the in-turn agent evaluation socket."""
     measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
+    measurement_decisions: MeasurementDecisions = field(default_factory=MeasurementDecisions)
+    """Which decision each measurement answers; the same one names stage output by its gate."""
     """Hears each measurement stage start and end, for the host's event stream."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
     """Hears each confirmed commit, for committed views and round events."""
@@ -253,7 +256,9 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         threads=resources.threads,
         blocking=resources.blocking,
         workspaces=resources.workspaces,
-        measurement=MeasurementServices(resources.evaluation, resources.measurement_observer),
+        measurement=MeasurementServices(
+            resources.evaluation, resources.measurement_observer, resources.measurement_decisions
+        ),
         sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
         operations=catalog,
     )
