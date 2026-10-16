@@ -205,6 +205,29 @@ test('a live run is attached, its session opened, and Pause and Resume go throug
   store.dispose();
 });
 
+test('a session that reports while it opens is opened once', async () => {
+  const app = new FakeApp();
+  const ports = fakePorts([], app);
+  const store = createRunPageStore(
+    SEED,
+    {
+      ...ports,
+      openSession: observer => {
+        const session = ports.openSession(observer);
+        // The real session reports its state at once, which reconciles the store again.
+        observer.session(LIVE_VIEW);
+        return session;
+      },
+    },
+    new FakeClock().schedule,
+  );
+  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+  await Promise.resolve();
+  expect(app.asked.filter(asked => asked === 'open')).toHaveLength(1);
+  expect(store.getState().session).toEqual(LIVE_VIEW);
+  store.dispose();
+});
+
 test('a session that reports after its run ended reaches nothing', async () => {
   const app = new FakeApp();
   const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);

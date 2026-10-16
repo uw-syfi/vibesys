@@ -7,6 +7,7 @@ import {
   installFakeNewRun,
 } from './fake-bridge.js';
 import {type FakeRunSeed, installFakeRun} from './fake-run.js';
+import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 
 /**
  * The Run screen's journey against the Fake bridge and a fake run that reports its startup steps
@@ -72,6 +73,19 @@ const SEED: FakeBridgeSeed = {
   ],
 };
 
+/** The live run's server: a session that opens and answers, with no events to show yet. */
+const SERVER: FakeServerSeed = {
+  runId: RUN_ID,
+  batch: {
+    type: 'event_batch',
+    events: [{timestamp: '2026-10-15T16:30:51Z', type: 'server_ready', sequence: 1}],
+    through_sequence: 1,
+    store_id: 'store-1',
+    history_after_sequence: 0,
+  },
+  snapshot: {run_id: RUN_ID, sequence: 1, status: 'starting'},
+};
+
 const RUN: FakeRunSeed = {
   streams: [
     stream('s1', {kind: 'startup_step', stage: 'building_image'}, 'ended'),
@@ -94,6 +108,7 @@ async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
   await page.addInitScript(installFakeMachines, seed);
   await page.addInitScript(installFakeNewRun, seed);
   await page.addInitScript(installFakeRun, RUN);
+  await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');
   await page
@@ -140,7 +155,7 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   // Running: the timeline goes; the Logs tab groups the streams by owner and follows one.
   await push(page, listed([server('running')], []));
   await expect(startup).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'Pause'})).toBeDisabled();
+  await expect(page.getByRole('button', {name: 'Pause'})).toBeEnabled();
   await page.getByRole('tab', {name: 'Logs'}).click();
   const streams = page.getByRole('tree', {name: 'Log streams'});
   for (const group of ['Startup', 'Gates', 'Tool builds', 'Run narration']) {

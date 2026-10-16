@@ -77,7 +77,7 @@ function openWebSession(
     ...page.session(welcomeRunBridge(bridge, page.messages)),
     onRunAction: action => observer.data(runData(action)),
   });
-  session.subscribe(() => {
+  const reportSession = (): void => {
     const view = session.getState();
     observer.session({
       hasSnapshot: view.hasSnapshot,
@@ -85,7 +85,9 @@ function openWebSession(
       controls: view.controls.status === 'connected',
       error: view.error?.message ?? null,
     });
-  });
+  };
+  session.subscribe(reportSession);
+  reportSession();
   session.store.subscribe(() => observer.core(session.store.getState()));
   void session.start();
   return {

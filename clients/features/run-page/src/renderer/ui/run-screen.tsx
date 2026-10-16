@@ -311,6 +311,9 @@ export function RunScreen(props: {
       <Stack gap="space-5">
         <Header state={state} dispatch={dispatch} />
         <StopBanner state={state} dispatch={dispatch} />
+        {state.notice === null ? null : (
+          <Banner tone="err" title="The run did not take the command" body={state.notice} />
+        )}
         <EndedBanner state={state} dispatch={dispatch} />
         <Startup state={state} />
         <Tabs

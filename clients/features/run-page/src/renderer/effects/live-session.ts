@@ -40,24 +40,30 @@ export class SessionHolder {
     if (wanted === null) return;
     // A closed session's late reports are dropped here, before they reach the store.
     let current = true;
+    let session: LiveSession | null = null;
+    // Held before the session opens: opening reports at once, and each report reconciles again.
+    this.#open = {
+      instance: wanted,
+      session: {
+        command: kind =>
+          session === null ? Promise.resolve('the run is still connecting') : session.command(kind),
+        close: () => {
+          current = false;
+          session?.close();
+        },
+      },
+    };
     const report = (action: RunPageAction): void => {
       if (current) this.dispatch(action);
     };
-    const session = this.openSession({
+    const opened = this.openSession({
       session: view => report({type: 'session', session: view}),
       core: core => report({type: 'run-core', core}),
       data: data => report({type: 'run-data', data}),
     });
-    this.#open = {
-      instance: wanted,
-      session: {
-        command: kind => session.command(kind),
-        close: () => {
-          current = false;
-          session.close();
-        },
-      },
-    };
+    session = opened;
+    // Closed while it was opening (a report moved the link on): close what just opened.
+    if (!current) opened.close();
   }
 
   command(kind: 'pause' | 'resume'): Promise<string | null> {

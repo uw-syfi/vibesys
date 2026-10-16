@@ -608,11 +608,25 @@ graceful stop. The ended banner reads the end record and offers Resume, naming
 `resume_from_round`, only when it says `resumable`. Logs are grouped by their owner (startup
 steps, gate stages, tool builds, narration) and read over the welcome bridge's `logs`, which the
 main process serves from the host's logs channel until the screen lets it go; the startup
-timeline is built from the startup steps' streams. Pause and Resume of a live run are shown
-disabled with the reason until the shell window has a live run connection, and "Open in new
-window" stays out of the "⋯" menu until the app opens more than one window (#2615). Its invariants (force offered only while stopping and only after its bound,
-no stop flow outliving the live run, commands sent only when offered) are checked over seeded
-action sequences with stale replies. The theme
+timeline is built from the startup steps' streams. "Open in new window" stays out of the "⋯"
+menu until the app opens more than one window (#2615).
+
+A live run is attached to the window under a token (the store's `link`), through the same
+`RunControl.attach` a run page uses. Under the app shell the window binds that run to the surface
+itself (`AppWindow` with `SHELL_URL`): no run page opens, the run IPC registry admits the shell
+document's connects, and the wake goes to it. The shell's `connectRun` hands main one end of a new
+channel and the page the other, as a window message (`RUN_PORT_MESSAGE`), because a port cannot
+cross the context bridge; the page speaks the relay's credit protocol over it
+(`@vibesys/ipc`'s `openPortSocket`) and the app shapes it as the session's transport. While the
+run is attached, the store keeps its `WebSession` open (bootstrap, stream, recovery stay in
+`@vibesys/run-session`'s machine) and folds what it reports: the session's state, the run fold, and
+the trace's span events in sequence order (the session's `onRunAction`), so the tabs fold the trace
+at the sequence they show (`viewedRun`). Pause and Resume are protocol commands on that session,
+offered only while its controls are up. Leaving the run releases it (`releaseRun`), and a new
+shell document detaches the run the old one held. Its invariants (force offered only while stopping
+and only after its bound, no stop flow outliving the live run, the link holding exactly the live
+server, no session report without an attached run, trace events in increasing sequence, commands
+sent only when offered) are checked over seeded action sequences with stale replies. The theme
 is in the first paint: the welcome preload asks the main process synchronously for the stored
 theme and the window controls' inset (`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and
 sets them on the root element before the page's scripts run.
