@@ -64,6 +64,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.setAppearance]: [{mode: 'dark', light: 'mist', dark: 'midnight'}],
   [WELCOME_CHANNELS.setNotifications]: [false],
   [WELCOME_CHANNELS.archive]: [{host: 'local', runId: '20261015-163047'}, true],
+  [WELCOME_CHANNELS.openRunWindow]: [{host: 'ssh:chelan4', runId: '20261015-163047'}],
   [WELCOME_CHANNELS.machines]: [],
   [WELCOME_CHANNELS.machine]: ['ssh:chelan4'],
   [WELCOME_CHANNELS.inspectCheckout]: ['ssh:chelan4', '~/vibesys'],

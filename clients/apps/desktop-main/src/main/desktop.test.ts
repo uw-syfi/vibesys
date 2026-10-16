@@ -1,8 +1,9 @@
 import {describe, expect, test} from 'bun:test';
 import {WELCOME_CHANNELS, type WelcomeEvent, type WelcomeResult} from '@vibesys/ipc';
 import {DEFAULT_PREFERENCES, type RecentFile} from '@vibesys/settings';
-import {WELCOME_URL} from './app-assets.js';
+import {SHELL_URL, WELCOME_URL} from './app-assets.js';
 import {Desktop, type DesktopDeps} from './desktop.js';
+import {RunWindows} from './run-windows.js';
 import {WelcomeFeed} from './welcome-feed.js';
 import type {WelcomeDocument, WelcomeInvokeEvent, WelcomeIpc} from './welcome-ipc.js';
 
@@ -24,16 +25,54 @@ class FakeWelcomeIpc implements WelcomeIpc {
     channel: string,
     ...args: unknown[]
   ): Promise<WelcomeResult<unknown>> {
+    return this.invokeAs(7, 'app://vibesys/welcome.html', rendererGeneration, channel, ...args);
+  }
+
+  invokeAs(
+    senderId: number,
+    senderUrl: string,
+    rendererGeneration: string,
+    channel: string,
+    ...args: unknown[]
+  ): Promise<WelcomeResult<unknown>> {
     const handler = this.#handlers.get(channel);
     if (handler === undefined) throw new Error(`no handler for ${channel}`);
-    return handler(
-      {
-        senderId: 7,
-        senderUrl: 'app://vibesys/welcome.html',
-        rendererGeneration,
-      },
-      ...args,
-    );
+    return handler({senderId, senderUrl, rendererGeneration}, ...args);
+  }
+}
+
+/** A run window the registry made: its surface's document, and what reached it. */
+class FakeRunWindow {
+  readonly sent: string[] = [];
+  focused = 0;
+  readonly #destroyed = new Set<() => void>();
+  readonly welcome: WelcomeDocument;
+
+  constructor(
+    readonly id: number,
+    readonly url: string,
+    readonly title: string,
+    readonly closed: () => void,
+  ) {
+    this.welcome = {
+      currentId: () => id,
+      onNewDocument: () => undefined,
+      onDestroyed: listener => this.#destroyed.add(listener),
+    };
+  }
+
+  focus(): void {
+    this.focused += 1;
+  }
+
+  sendWelcome<T>(channel: string, _event: WelcomeEvent<T>): void {
+    this.sent.push(channel);
+  }
+
+  /** The user closes the native window. */
+  close(): void {
+    for (const listener of this.#destroyed) listener();
+    this.closed();
   }
 }
 
@@ -89,6 +128,15 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
   });
   const document = new FakeWelcomeDocument();
   const ipc = new FakeWelcomeIpc();
+  const runWindowList: FakeRunWindow[] = [];
+  const runWindows = new RunWindows({
+    shellUrl: SHELL_URL,
+    create: (url, title, closed) => {
+      const window = new FakeRunWindow(20 + runWindowList.length, url, title, closed);
+      runWindowList.push(window);
+      return window;
+    },
+  });
   const runs: DesktopDeps['runs'] = {
     attached: () => null,
     stops: () => ({}),
@@ -198,11 +246,63 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
       },
     },
     surfaceUrl: WELCOME_URL,
+    runWindows,
+    shellUrl: SHELL_URL,
     welcomeIpc: ipc,
     log: message => logs.push(message),
   });
-  return {ipc, document, starts, cancels, events, logs, releaseCleanup};
+  return {runWindowList, ipc, document, starts, cancels, events, logs, releaseCleanup};
 }
+
+describe('Desktop run windows', () => {
+  test('a run opens in its own window once, whose surface is answered until it closes', async () => {
+    const w = desktopWorld();
+    const run = {host: 'ssh:chelan4', runId: '20261015-163047'};
+    const fromRunWindow = (id: number, generation: string, channel: string, ...args: unknown[]) =>
+      w.ipc.invokeAs(
+        id,
+        `${SHELL_URL}?host=ssh%3Achelan4&run=20261015-163047`,
+        generation,
+        channel,
+        ...args,
+      );
+
+    await expect(w.ipc.invoke('10:100', WELCOME_CHANNELS.openRunWindow, run)).resolves.toEqual({
+      ok: true,
+      value: null,
+    });
+    const [window] = w.runWindowList;
+    expect(window?.url).toBe(`${SHELL_URL}?host=ssh%3Achelan4&run=20261015-163047`);
+    expect(window?.title).toBe('VibeSys · chelan4 · 20261015-163047');
+
+    // Its surface is answered, but it cannot switch the main window's view.
+    await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.hosts)).resolves.toMatchObject({
+      ok: true,
+    });
+    await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.showRun)).resolves.toMatchObject({
+      ok: false,
+      error: 'show-run is for the main window',
+    });
+
+    // Opening the same run again, from either window, focuses its window.
+    await fromRunWindow(20, '30:300', WELCOME_CHANNELS.openRunWindow, run);
+    expect(w.runWindowList).toHaveLength(1);
+    expect(window?.focused).toBe(1);
+
+    // Closed, it is forgotten and refused; opening the run again makes a new window.
+    window?.close();
+    await spin();
+    await expect(fromRunWindow(20, '30:300', WELCOME_CHANNELS.hosts)).resolves.toMatchObject({
+      ok: false,
+      error: 'not the welcome view',
+    });
+    await w.ipc.invoke('10:100', WELCOME_CHANNELS.openRunWindow, run);
+    expect(w.runWindowList).toHaveLength(2);
+    await expect(fromRunWindow(21, '31:301', WELCOME_CHANNELS.hosts)).resolves.toMatchObject({
+      ok: true,
+    });
+  });
+});
 
 describe('Desktop New run routing', () => {
   test('sends each New run request to the New run feature', async () => {

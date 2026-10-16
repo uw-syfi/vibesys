@@ -79,6 +79,10 @@ export interface AppWindowDeps {
   readonly closed: (runId: string) => void;
   /** The welcome surface exhausted its bounded recovery; enter fatal app shutdown. */
   readonly fatal: (error: Error) => void;
+  /** The native window's title before any run page names one; `VibeSys` by default. */
+  readonly title?: string;
+  /** The native window closed. */
+  readonly windowClosed?: () => void;
 }
 
 function pendingRunPort(port: MessagePortMain): PendingRunPort {
@@ -119,7 +123,7 @@ export class AppWindow {
       height: 900,
       minWidth: 960,
       minHeight: 600,
-      title: 'VibeSys',
+      title: deps.title ?? 'VibeSys',
       ...windowChrome(process.platform),
     });
     this.#runPages = new RunPageLifecycle({
@@ -149,6 +153,7 @@ export class AppWindow {
       for (const listener of [...this.#welcomeDestroyed]) listener();
       this.#detachCurrentRun();
       this.#unregisterRunIpc();
+      deps.windowClosed?.();
     });
     // A new surface document has not attached the run the old one showed: let that run go.
     if (this.#runsInSurface) this.#welcomeNewDocuments.add(() => this.#detachCurrentRun());
