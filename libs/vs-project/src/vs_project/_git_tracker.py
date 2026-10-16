@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -286,6 +287,31 @@ class GitTracker:
             [".", *self._state_integration.metadata_restore_exclusions],
             style=PatchStyle.EXACT,
         )
+
+    def measured_input(self, commit: str, unread: Sequence[str]) -> str:
+        """The digest of what an evaluation of *commit* reads: its candidate patch, less *unread*.
+
+        *unread* names workspace paths (files or directories) the task's evaluation never
+        reads, such as an agent's notes. Two commits that differ only there have the same
+        digest, so they are one measured input. The baseline commit is part of the digest,
+        so commits of different workspaces never share one.
+        """
+        root = self._git.root_commit(commit)
+        if root is None:
+            message = f"cannot resolve workspace baseline for commit {commit}"
+            raise ValueError(message)
+        skipped = [
+            f":(exclude){_wildcard_safe(Path(path).as_posix().rstrip('/'))}" for path in unread
+        ]
+        patch = self._git.diff_patch(
+            root,
+            commit,
+            [".", *self._state_integration.metadata_restore_exclusions, *skipped],
+            style=PatchStyle.EXACT,
+        )
+        digest = hashlib.sha256(f"{root}\n".encode())
+        digest.update(patch.encode())
+        return f"sha256:{digest.hexdigest()}"
 
     def diff_name_status(self, base: str, head: str) -> str | None:
         """Return the NUL-delimited ``--name-status`` diff between two commits.
