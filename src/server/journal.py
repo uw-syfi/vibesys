@@ -34,6 +34,7 @@ from server.events import (
     make_event,
 )
 from server.host_api import RUN_EVENTS_FILE
+from server.trace import TraceProjection
 from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
@@ -183,7 +184,12 @@ class WireJournal:
         self._canonical_execution_ids: set[str] = set()
         self._legacy_invocation_ids: set[str] = set()
         self._error_diagnostics: dict[int, tuple[BaseException, Diagnostic]] = {}
-        self._listeners: list[tuple[EventListener, HeaderFilter]] = []
+        self.trace = TraceProjection()
+        """The run's spans, folded from its span events (live and replayed). The journal stamps
+        each turn's events with the turn's span from it."""
+        self._listeners: list[tuple[EventListener, HeaderFilter]] = [
+            (self.trace.observe, TraceProjection.replay_filter)
+        ]
         self.log_dir: Path | None = None
         self._read_only = False
 
@@ -249,7 +255,9 @@ class WireJournal:
                 if previous is not None and durable.last_sequence == 0:
                     durable.store_id = previous.store_id
                 for event in pending:
-                    self._apply_recorded(durable.append(event), listener_failures)
+                    self._apply_recorded(
+                        durable.append(self._with_turn_span(event)), listener_failures
+                    )
                 self._store = durable
                 self.log_dir = log_dir
                 started_fresh = previous is None and not read_only
@@ -288,6 +296,7 @@ class WireJournal:
             with self._condition:
                 if self._read_only:
                     return event
+                event = self._with_turn_span(event)
                 store = self._store
                 if store is None:
                     self._pending_events.append(event)
@@ -308,6 +317,7 @@ class WireJournal:
             with self._condition:
                 if self._read_only:
                     return event
+                event = self._with_turn_span(event)
                 store = self._store
                 if store is None:
                     self._pending_events.append(event)
@@ -536,6 +546,13 @@ class WireJournal:
             canonical_lifecycle_ids=self._canonical_execution_ids,
             invocation_lifecycle_ids=self._legacy_invocation_ids,
         )
+
+    def _with_turn_span(self, event: RunEvent) -> RunEvent:
+        """``event`` naming the agent-turn span its execution ran as, when the trace has it."""
+        if event.span_id is not None or event.execution_id is None:
+            return event
+        span = self.trace.turn_span(event.execution_id)
+        return event if span is None else event.model_copy(update={"span_id": span})
 
     def _apply_recorded(self, event: RunEvent, listener_failures: ListenerFailures) -> RunEvent:
         self._index_execution_identity(event.type, event.execution_id)

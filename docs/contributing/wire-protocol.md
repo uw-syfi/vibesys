@@ -91,11 +91,14 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   issuing it ends every open span, and the root span ends `done`, `failed` or `stopped` by the
   proposed result.
 - **Agent turns.** An agent-turn span carries `invocation`, the invocation id the turn ran as.
-  The runtime owns the mapping from that id to the span: the server stamps
-  `turn_usage_recorded.data.span_id` with the agent-turn span of the record's `execution_id`.
-  Clients never join the two. A log stream's owner names its span in `span_id` when the writer
+  The runtime owns the mapping from that id to the span: the server stamps the envelope's
+  `span_id` of every event whose `execution_id` ran as a recorded agent-turn span (the turn's
+  output chunks, tool calls and results, activity, usage) and `turn_usage_recorded.data.span_id`
+  with it. An event recorded before its span, or one outside a turn, carries none; events recorded
+  before the field existed carry none. Clients never join the two, so a transcript reaches a span
+  by `span_id` and never by invocation, name or time. A log stream's owner names its span in `span_id` when the writer
   knows it, and `logs.list` filters by it (see [desktop-connection.md](desktop-connection.md)).
-- **Evolution.** The three events, `RunSnapshot.spans`, `TurnUsageData.span_id` and
+- **Evolution.** The three events, `RunSnapshot.spans`, `RunEvent.span_id`, `TurnUsageData.span_id` and
   `LogOwner.span_id` are additive within `PROTOCOL_VERSION` 1. A client that predates them counts
   the events as unknown kinds and ignores the new optional fields.
 

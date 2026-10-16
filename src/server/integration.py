@@ -27,7 +27,6 @@ from server.events import (
 from server.read_model import RunInspector
 from server.run_attachment import AgentSelection, RunAttachment
 from server.run_lifecycle import RunTrigger
-from server.trace import TraceProjection
 from vibesys.api import CoreEventType
 from vs_sim.api import CloseOnce, ReleaseStack
 
@@ -224,9 +223,8 @@ class RunIntegrationAdapter:
         self._detach_run: Callable[[], None] | None = None
         self._close = CloseOnce()
         self._failure_diagnostics: dict[str, Diagnostic] = {}
-        self.trace = TraceProjection()
+        self.trace = journal.trace
         """The run's spans, folded from its span events (live and replayed)."""
-        journal.add_listener(self.trace.observe, replay_filter=TraceProjection.replay_filter)
 
     @property
     def attached_run(self) -> RunRecord | None:

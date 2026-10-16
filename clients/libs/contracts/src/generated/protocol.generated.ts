@@ -1420,6 +1420,10 @@ export interface RunEvent {
   invocation_id?: InvocationId;
   execution_id?: ExecutionId1;
   chat_thread_id?: ChatThreadId | null;
+  /**
+   * The agent-turn span of the run trace this event belongs to: the server stamps it on every event whose execution_id ran as a recorded agent-turn span (the turn's output, tool calls and results, activity and usage), so a client joins a transcript to the trace by id and never by invocation, name or time. Absent when the event is not part of a turn, or when it was recorded before its span was.
+   */
+  span_id?: SpanId | null;
   data?: Data;
   truncated?: Truncated;
 }

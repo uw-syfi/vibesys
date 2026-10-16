@@ -17,16 +17,20 @@ from tests.server.support import build_server_parts
 import vs_core.api as core
 from server.events import EventType, TurnUsageData
 from vibesys.events import (
+    AgentOutputChunkData,
     CoreEventType,
     SpanEndedData,
     SpanStartedData,
     SpanUpdatedData,
+    ToolCallData,
+    ToolResultData,
 )
 from vibesys.events import TurnUsageData as CoreTurnUsageData
 from vs_core.api.testing import FlowRun, Prompt, fake_search
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
+    from pathlib import Path
     from random import Random
 
     import pytest
@@ -86,13 +90,9 @@ def emit_changes(parts: ServerParts, before: core.RunTrace | None, after: core.R
         parts.core_events.emit(event_type, data=data(span=span))
 
 
-@settings(max_examples=examples(pr=4, nightly=30), deadline=None)
-@given(turns=st.integers(1, 3), order=st.randoms(use_true_random=False))
-def test_the_snapshot_holds_the_spans_the_runtime_holds_and_usage_names_its_turn(
-    tmp_path_factory: pytest.TempPathFactory, turns: int, order: Random
-) -> None:
-    parts = build_server_parts()
-    parts.integration.attach(tmp_path_factory.mktemp("run"), run_id="run-trace")
+def run_to_end(parts: ServerParts, directory: Path, turns: int, order: Random) -> FlowRun:
+    """Run the toy search to its end, emitting every step's span changes."""
+    parts.integration.attach(directory, run_id="run-trace")
     run = FlowRun.start(search, Config(turns=turns))
     before: core.RunTrace | None = None
     for _ in range(4 * turns + 4):  # each turn is a render and a reply; bounded against hangs
@@ -104,7 +104,16 @@ def test_the_snapshot_holds_the_spans_the_runtime_holds_and_usage_names_its_turn
         before = after
         asked = [a for a in run.open if isinstance(a.request, core.RequestTurn)]
         run.reply(order.choice(asked), Plan(n=1))
+    return run
 
+
+@settings(max_examples=examples(pr=4, nightly=30), deadline=None)
+@given(turns=st.integers(1, 3), order=st.randoms(use_true_random=False))
+def test_the_snapshot_holds_the_spans_the_runtime_holds_and_usage_names_its_turn(
+    tmp_path_factory: pytest.TempPathFactory, turns: int, order: Random
+) -> None:
+    parts = build_server_parts()
+    run = run_to_end(parts, tmp_path_factory.mktemp("run"), turns, order)
     assert run.finished is not None
     turn = next(span for span in run.trace().spans if span.invocation is not None)
     parts.core_events.emit(
@@ -114,3 +123,63 @@ def test_the_snapshot_holds_the_spans_the_runtime_holds_and_usage_names_its_turn
     )
     usage = [e.data for e in parts.journal.read() if e.type is EventType.TURN_USAGE_RECORDED]
     assert usage == [TurnUsageData(input_tokens=3, span_id=turn.id)]
+
+
+def _transcript_data(
+    kind: int, number: int
+) -> AgentOutputChunkData | ToolCallData | ToolResultData:
+    if kind == 0:
+        return AgentOutputChunkData(channel="assistant", content=f"words {number}")
+    if kind == 1:
+        return ToolCallData(tool="Read", call_id=f"c{number}", args={"path": "a.py"})
+    return ToolResultData(tool="Read", call_id=f"c{number}", content="x")
+
+
+_TRANSCRIPT_TYPES = {
+    0: CoreEventType.AGENT_OUTPUT_CHUNK,
+    1: CoreEventType.TOOL_CALL,
+    2: CoreEventType.TOOL_RESULT,
+}
+
+
+@settings(max_examples=examples(pr=4, nightly=30), deadline=None)
+@given(
+    turns=st.integers(1, 3),
+    order=st.randoms(use_true_random=False),
+    kinds=st.lists(st.integers(0, 2), min_size=1, max_size=8),
+)
+def test_every_transcript_event_of_a_turn_names_the_turns_span(
+    tmp_path_factory: pytest.TempPathFactory, turns: int, order: Random, kinds: list[int]
+) -> None:
+    """The server stamps a turn's output, tool calls and results with its span, nothing else."""
+    parts = build_server_parts()
+    run = run_to_end(parts, tmp_path_factory.mktemp("run"), turns, order)
+    spans = [span for span in run.trace().spans if span.invocation is not None]
+    assert len(spans) == turns
+    for span in spans:
+        for number, kind in enumerate(kinds):
+            parts.core_events.emit(
+                _TRANSCRIPT_TYPES[kind],
+                execution_id=span.invocation,
+                data=_transcript_data(kind, number),
+            )
+    parts.core_events.emit(
+        CoreEventType.AGENT_OUTPUT_CHUNK,
+        execution_id="no-such-invocation",
+        data=AgentOutputChunkData(channel="assistant", content="stray"),
+    )
+    parts.core_events.emit(
+        CoreEventType.AGENT_OUTPUT_CHUNK,
+        data=AgentOutputChunkData(channel="assistant", content="no turn"),
+    )
+
+    by_invocation = {span.invocation: span.id for span in spans}
+    transcript = [
+        e
+        for e in parts.journal.read()
+        if e.type in {EventType.AGENT_OUTPUT_CHUNK, EventType.TOOL_CALL, EventType.TOOL_RESULT}
+    ]
+    assert len(transcript) == turns * len(kinds) + 2
+    for event in transcript:
+        assert event.span_id == by_invocation.get(event.execution_id)
+    assert sum(event.span_id is not None for event in transcript) == turns * len(kinds)

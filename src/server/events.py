@@ -895,6 +895,17 @@ class RunEvent(BaseModel):
     # Which experiment-chat thread a chat event belongs to. None is the
     # default thread, preserving events written before threads existed.
     chat_thread_id: ChatThreadId | None = None
+    span_id: SpanId | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The agent-turn span of the run trace this event belongs to: the server stamps it on "
+            "every event whose execution_id ran as a recorded agent-turn span (the turn's output, "
+            "tool calls and results, activity and usage), so a client joins a transcript to the "
+            "trace by id and never by invocation, name or time. Absent when the event is not "
+            "part of a turn, or when it was recorded before its span was."
+        ),
+    )
     data: EventData | None = None
     # Absent on ordinary and legacy events so adding the marker does not change
     # their serialized bytes. True means the recording boundary cut variable
