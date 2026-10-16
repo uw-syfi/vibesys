@@ -200,6 +200,20 @@ The timeout bounds the load after readiness and cannot exceed the remaining
 capture deadline. Profiling provides diagnostic evidence; accuracy and benchmark
 acceptance still use their own unchanged gates.
 
+A task may name workspace paths its evaluation never reads, such as the notes
+an agent keeps between turns:
+
+```toml
+[workspace]
+unread = ["NOTES.md", "evidence/"]
+```
+
+A commit that changes only these paths is the input an earlier run already
+measured. When an agent's own evaluation was the attempt's only run of that
+input and its latest run, the strategy's official measurement reuses it
+instead of submitting a second job, and the result names the run it reused.
+Each entry is a plain relative file or directory path, without wildcards.
+
 ## Start from an Example
 
 The examples under `examples/<category>/` in a VibeSys source checkout are

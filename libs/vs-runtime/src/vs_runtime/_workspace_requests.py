@@ -130,6 +130,7 @@ class _Facts:
     children_complete: bool = False
     resource_id: ResourceId | None = None
     revision: RevisionRef | None = None
+    measured_input: str | None = None
     diagnostic: str = ""
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
     holding_nothing: ObservationFacts | None = None
@@ -297,6 +298,7 @@ class RuntimeWorkspaceRequests:
             resource_id=facts.resource_id,
             diagnostic=facts.diagnostic,
             revision=facts.revision,
+            measured_input=facts.measured_input,
         )
         observation = self._observations.observe(
             ObservationSubject.of(request), observed, observed_at=context.now_at
@@ -783,6 +785,7 @@ class RuntimeWorkspaceRequests:
             children_complete=True,
             resource_id=resource_id,
             revision=revision_ref(commit),
+            measured_input=await workspace.measured_input(commit),
         )
 
     async def _discard(

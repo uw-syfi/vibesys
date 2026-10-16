@@ -88,6 +88,10 @@ class WorkspaceResource(Protocol):
 
     def candidate_patch(self, revision: str) -> str: ...
 
+    def measured_input(self, revision: str) -> str:
+        """The digest of what the task's evaluation of *revision* reads (``GitTracker``)."""
+        ...
+
     def is_retained(self, revision: str) -> bool: ...
 
     def trusted_input_changes(self) -> list[str]: ...
@@ -389,6 +393,10 @@ class RuntimeWorkspace:
 
     async def candidate_patch(self, revision: str) -> str:
         return await run_sync(self._owner.runner, self._resource.candidate_patch, revision)
+
+    async def measured_input(self, revision: str) -> str:
+        """The digest of what the task's evaluation of *revision* reads."""
+        return await run_sync(self._owner.runner, self._resource.measured_input, revision)
 
     async def trusted_input_changes(self) -> list[str]:
         return await run_sync(self._owner.runner, self._resource.trusted_input_changes)
