@@ -72,7 +72,10 @@ from vs_runtime._environment_startup import (
 )
 from vs_runtime._image_features import image_features
 from vs_runtime._model_artifacts import read_model_metadata
-from vs_runtime._objective_document import materialize_objective_document
+from vs_runtime._objective_document import (
+    materialize_objective_document,
+    outside_objective,
+)
 from vs_runtime._project_run import CaptureRecoverySource, NoCaptureRecovery
 from vs_runtime._run_environment_facts import (
     ClusterEvaluationFacts,
@@ -255,8 +258,6 @@ class RunEnvironmentView:
     framework_setup_timeout_seconds: int = 0
     profiler_mcp_env: tuple[tuple[str, str], ...] = ()
     profiler_mcp_resources: tuple[HostResource, ...] = ()
-    # Host files the agent reads by path, outside the project, which its confinement must
-    # leave readable. Only an environment whose agent runs on the host sets it.
     agent_host_resources: tuple[HostResource, ...] = ()
     # Set when trusted evaluation runs as Slurm jobs; ``None`` otherwise.
     cluster_evaluation: ClusterEvaluationFacts | None = None
@@ -692,7 +693,7 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         """Create a host sandbox and its agent path view."""
         del presentation
         _materialize_effective_objective(request)
-        objective_document = _outside_project_objective(request)
+        document, grants = outside_objective(request.objective, request.log_dir)
         sandbox = _make_host_sandbox(request)
         evaluation = _host_evaluation_plan(request)
         return command_environment_session(
@@ -700,20 +701,12 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
                 sandbox=sandbox,
                 view=RunEnvironmentView(
                     paths=AgentPaths(
-                        objective=(
-                            str(objective_document)
-                            if objective_document is not None
-                            else "OBJECTIVE.md"
-                        ),
+                        objective=(str(document) if document is not None else "OBJECTIVE.md"),
                         accuracy_command=evaluation.accuracy_command,
                         benchmark_command=evaluation.benchmark_command,
                         profiler_support=request.profiler_support_path,
                     ),
-                    agent_host_resources=(
-                        ()
-                        if objective_document is None
-                        else (HostResource(objective_document, HostResourceAccess.READ_ONLY),)
-                    ),
+                    agent_host_resources=grants,
                 ),
             )
         )
@@ -1682,25 +1675,6 @@ def _materialize_effective_objective(request: RunEnvironmentRequest) -> Path | N
         request.objective,
         workspace=request.git_history_root or request.workspace,
         authored_document=request.objective_document,
-        destination=request.log_dir / "effective-objective.md",
-    )
-
-
-def _outside_project_objective(request: RunEnvironmentRequest) -> Path | None:
-    """Give an agent on the host a copy of the effective objective outside the project.
-
-    The committed objective sits in the run's record below ``.vibesys/state/runs``, which
-    agent confinement hides, so the agent reads this copy beside the run's logs instead,
-    as a container agent reads its mount. The committed document stays the authority: the
-    copy carries exactly the effective objective.
-    """
-    if request.objective is None:
-        return None
-    request.log_dir.mkdir(parents=True, exist_ok=True)
-    return materialize_objective_document(
-        request.objective,
-        workspace=request.log_dir,
-        authored_document=None,
         destination=request.log_dir / "effective-objective.md",
     )
 
