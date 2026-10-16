@@ -6,12 +6,12 @@ import '@vibesys/ui/tokens.css';
 import '@vibesys/ui/fonts.css';
 import '@vibesys/ui/components.css';
 import {pageAppearance} from '@vibesys/feature-settings/renderer';
-import type {WelcomeBridge} from '@vibesys/ipc';
+import {runOfWindow, type WelcomeBridge} from '@vibesys/ipc';
 import {Card, EmptyState, Page} from '@vibesys/ui';
 import {StrictMode} from 'react';
 import {createRoot} from 'react-dom/client';
 import {shellSessionOptions} from './run-session.js';
-import {createShellStores, Shell} from './shell.js';
+import {createShellStores, RunWindow, Shell} from './shell.js';
 
 declare global {
   interface Window {
@@ -48,9 +48,15 @@ if (bridge === undefined) {
       session: run => shellSessionOptions(run, {document, window, navigator}),
     },
   );
+  // A run window's page names its run in its query; the main window's has none.
+  const run = runOfWindow(window.location.search);
   createRoot(root).render(
     <StrictMode>
-      <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
+      {run === null ? (
+        <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />
+      ) : (
+        <RunWindow stores={stores} run={run} />
+      )}
     </StrictMode>,
   );
 }

@@ -30,6 +30,7 @@ export {
   FONT_STACKS,
   type FontFamily,
   type FontWeight,
+  MONO_ADVANCE,
   MOTION,
   type MotionSpec,
   RADIUS,

@@ -1,4 +1,5 @@
 import type {JSX} from 'react';
+import {MONO_ADVANCE, TYPE} from '../tokens/index.js';
 
 /** A measured point; `filled` points are drawn solid, the rest hollow. */
 export interface ChartPoint {
@@ -16,7 +17,28 @@ export interface ChartTick {
 /** The drawing's own coordinates: the SVG scales to its container's width. */
 const WIDTH = 1000;
 const HEIGHT = 300;
-const PLOT = {left: 56, right: 990, top: 12, bottom: 266};
+const PLOT = {right: 990, top: 12, bottom: 266};
+/** The gap between a y label and the axis, and the margin left of the longest label. */
+const LABEL_GAP = 8;
+const EDGE = 4;
+
+interface Plot {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
+/**
+ * The plot area, its left gutter as wide as the longest y label needs, so a label is never cut at
+ * the drawing's edge whatever its length. The labels are drawn in the mono `section` style, each
+ * glyph `MONO_ADVANCE` em wide.
+ */
+function plotFor(yTicks: readonly ChartTick[]): Plot {
+  const longest = Math.max(0, ...yTicks.map(tick => tick.label.length));
+  const glyph = TYPE.section.size * MONO_ADVANCE;
+  return {...PLOT, left: EDGE + Math.ceil(longest * glyph) + LABEL_GAP};
+}
 
 interface Scale {
   readonly x: (value: number) => number;
@@ -29,12 +51,12 @@ function extent(values: readonly number[]): readonly [number, number] {
   return low === high ? [low - 1, high + 1] : [low, high];
 }
 
-function scale(xs: readonly number[], ys: readonly number[]): Scale {
+function scale(plot: Plot, xs: readonly number[], ys: readonly number[]): Scale {
   const [x0, x1] = extent(xs);
   const [y0, y1] = extent(ys);
   return {
-    x: value => PLOT.left + ((value - x0) / (x1 - x0)) * (PLOT.right - PLOT.left),
-    y: value => PLOT.bottom - ((value - y0) / (y1 - y0)) * (PLOT.bottom - PLOT.top),
+    x: value => plot.left + ((value - x0) / (x1 - x0)) * (plot.right - plot.left),
+    y: value => plot.bottom - ((value - y0) / (y1 - y0)) * (plot.bottom - plot.top),
   };
 }
 
@@ -49,25 +71,26 @@ function stepPath(steps: readonly {readonly x: number; readonly y: number}[], at
 
 /** The grid and labels at the ticks, and the two axes. */
 function Axes(props: {
+  readonly plot: Plot;
   readonly at: Scale;
   readonly xTicks: readonly ChartTick[];
   readonly yTicks: readonly ChartTick[];
 }): JSX.Element {
-  const {at, xTicks, yTicks} = props;
+  const {plot, at, xTicks, yTicks} = props;
   return (
     <>
       {yTicks.map(tick => (
         <g key={`y${tick.value}`}>
           <line
             className="vs-chart-grid"
-            x1={PLOT.left}
-            x2={PLOT.right}
+            x1={plot.left}
+            x2={plot.right}
             y1={at.y(tick.value)}
             y2={at.y(tick.value)}
           />
           <text
             className="vs-chart-label"
-            x={PLOT.left - 8}
+            x={plot.left - LABEL_GAP}
             y={at.y(tick.value)}
             textAnchor="end"
             dominantBaseline="middle"
@@ -81,7 +104,7 @@ function Axes(props: {
           key={`x${tick.value}`}
           className="vs-chart-label"
           x={at.x(tick.value)}
-          y={PLOT.bottom + 16}
+          y={plot.bottom + 16}
           textAnchor="middle"
         >
           {tick.label}
@@ -89,17 +112,17 @@ function Axes(props: {
       ))}
       <line
         className="vs-chart-axis"
-        x1={PLOT.left}
-        x2={PLOT.left}
-        y1={PLOT.top}
-        y2={PLOT.bottom}
+        x1={plot.left}
+        x2={plot.left}
+        y1={plot.top}
+        y2={plot.bottom}
       />
       <line
         className="vs-chart-axis"
-        x1={PLOT.left}
-        x2={PLOT.right}
-        y1={PLOT.bottom}
-        y2={PLOT.bottom}
+        x1={plot.left}
+        x2={plot.right}
+        y1={plot.bottom}
+        y2={plot.bottom}
       />
     </>
   );
@@ -123,7 +146,9 @@ export function Chart(props: {
   const steps = props.steps ?? [];
   const xTicks = props.xTicks ?? [];
   const yTicks = props.yTicks ?? [];
+  const plot = plotFor(yTicks);
   const at = scale(
+    plot,
     [...props.points.map(p => p.x), ...steps.map(p => p.x), ...xTicks.map(t => t.value)],
     [
       ...props.points.map(p => p.y),
@@ -139,17 +164,17 @@ export function Chart(props: {
       role="img"
       aria-label={props.label}
     >
-      <Axes at={at} xTicks={xTicks} yTicks={yTicks} />
+      <Axes plot={plot} at={at} xTicks={xTicks} yTicks={yTicks} />
       {props.reference === undefined ? null : (
         <g>
           <line
             className="vs-chart-reference"
-            x1={PLOT.left}
-            x2={PLOT.right}
+            x1={plot.left}
+            x2={plot.right}
             y1={at.y(props.reference.y)}
             y2={at.y(props.reference.y)}
           />
-          <text className="vs-chart-label" x={PLOT.left + 6} y={at.y(props.reference.y) - 6}>
+          <text className="vs-chart-label" x={plot.left + 6} y={at.y(props.reference.y) - 6}>
             {props.reference.label}
           </text>
         </g>
@@ -170,12 +195,12 @@ export function Chart(props: {
           className="vs-chart-playhead"
           x1={at.x(props.playhead)}
           x2={at.x(props.playhead)}
-          y1={PLOT.top}
-          y2={PLOT.bottom}
+          y1={plot.top}
+          y2={plot.bottom}
         />
       )}
       {props.xTitle === undefined ? null : (
-        <text className="vs-chart-label" x={PLOT.right} y={HEIGHT - 2} textAnchor="end">
+        <text className="vs-chart-label" x={plot.right} y={HEIGHT - 2} textAnchor="end">
           {props.xTitle}
         </text>
       )}

@@ -25,7 +25,13 @@ import {
   inspectionReply,
   validHostPath,
 } from '@vibesys/hosts';
-import type {HarnessListing, PathCompletion, RunLogsRequest, WelcomeInspection} from '@vibesys/ipc';
+import type {
+  HarnessListing,
+  PathCompletion,
+  RunHistoryPage,
+  RunLogsRequest,
+  WelcomeInspection,
+} from '@vibesys/ipc';
 import type {LogListOutcome, LogReadOutcome} from '@vibesys/logs';
 import {
   rememberInstance,
@@ -289,6 +295,40 @@ export class Hosts {
       return reply.tasks.tasks.map(task => task.name);
     } catch (error) {
       throw plain(error, `Could not read the tasks of ${path}`);
+    }
+  }
+
+  /**
+   * One page of run `runId`'s recorded events in `project` on `id` (`runs.read_events`), from
+   * `from`; `unsupported` when the host's VibeSys does not serve history (`run_history`).
+   */
+  async readEvents(
+    id: HostId,
+    project: string,
+    runId: string,
+    from: number,
+    max: number,
+  ): Promise<RunHistoryPage> {
+    await using lease = await this.connection(id);
+    try {
+      const reply = await lease.connection.request({
+        type: 'runs.read_events',
+        project,
+        run_id: runId,
+        from_sequence: from,
+        max,
+      });
+      return {
+        kind: 'page',
+        events: reply.events,
+        next: reply.next_sequence,
+        complete: reply.complete,
+      };
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `Could not read the history of run ${runId}`);
     }
   }
 

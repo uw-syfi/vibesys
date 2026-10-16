@@ -260,3 +260,44 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
   });
   Object.assign(page.fakeHost, {newRun});
 }
+
+/** What the fake window requests did, for the journey to read. */
+export interface FakeWindows {
+  /** Each run asked to open in its own window, as `host run`. */
+  readonly opened: string[];
+  /** How often the main window was asked to come to the front. */
+  shownMain: number;
+}
+
+/**
+ * The windows part of the Fake, as a further init script: `openRunWindow` opens the run's page in
+ * a new browser window, as main opens an `AppWindow`, or focuses the one already showing it. A
+ * journey that wants the new window's page to have the bridge too installs the scripts on its
+ * browser context.
+ */
+export function installFakeWindows(): void {
+  const windows = new Map<string, Window>();
+  const record: FakeWindows = {opened: [], shownMain: 0};
+  const ok = () => Promise.resolve({ok: true, value: null});
+  const page = window as unknown as {vibesysWelcome: object; fakeHost: object};
+  Object.assign(page.vibesysWelcome, {
+    openRunWindow: (run: {host: string; runId: string}) => {
+      const key = `${run.host} ${run.runId}`;
+      record.opened.push(key);
+      const shown = windows.get(key);
+      if (shown !== undefined && !shown.closed) {
+        shown.focus();
+        return ok();
+      }
+      const query = `host=${encodeURIComponent(run.host)}&run=${encodeURIComponent(run.runId)}`;
+      const opened = window.open(`./shell.html?${query}`, '_blank');
+      if (opened !== null) windows.set(key, opened);
+      return ok();
+    },
+    showMainWindow: () => {
+      record.shownMain += 1;
+      return ok();
+    },
+  });
+  Object.assign(page.fakeHost, {windows: record});
+}

@@ -167,6 +167,14 @@ export function formatValue(value: number): string {
   return value.toLocaleString('en-US', {maximumFractionDigits: digits});
 }
 
+/** A value on an axis, compact (`24M`, `1.5k`, `0.002`) so a long number never crowds the gutter. */
+function formatAxisValue(value: number): string {
+  return value.toLocaleString('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: Math.abs(value) >= 1 ? 1 : 3,
+  });
+}
+
 /** About five round ticks over `[low, high]`. */
 function ticks(low: number, high: number, label: (value: number) => string) {
   const span = high - low || Math.abs(high) || 1;
@@ -227,7 +235,7 @@ function chartView(run: RunAtView, index: SpanIndex): ChartView | null {
     xTicks: ticks(0, Math.max(playhead, ...points.map(point => point.x)), value =>
       duration(value * 60),
     ),
-    yTicks: ticks(Math.min(...ys), Math.max(...ys), formatValue),
+    yTicks: ticks(Math.min(...ys), Math.max(...ys), formatAxisValue),
     xTitle: 'time since the run started →',
     legend: `${metric}${unitText ? ` in${unitText}` : ''} · ● kept · ○ not kept · - - baseline · ┊ view`,
   };

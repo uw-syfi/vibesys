@@ -3,14 +3,17 @@ import type {RunEvent} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, foldChunk} from '@vibesys/logs';
+import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
   endedView,
   FORCE_STOP_BOUND_MS,
   followedStreams,
+  HISTORY_PAGE_EVENTS,
   headerView,
   logGroups,
   MAP_FILTERS,
+  quotaBannerView,
   RUN_TABS,
   type RunPageAction,
   type RunPageRequest,
@@ -24,6 +27,7 @@ import {
   streamLines,
   timelineView,
   type Unavailable,
+  viewedRun,
 } from './index.js';
 
 const RUN = {host: 'ssh:chelan4', runId: '20261015-163047'} as const;
@@ -110,6 +114,9 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'stop-failed'},
   {type: 'pause'},
   {type: 'resume'},
+  {type: 'wait-for-quota'},
+  {type: 'stop-waiting'},
+  {type: 'wait-refused', message: "unknown field 'when'"},
   {type: 'resume-ended'},
   {type: 'open-window'},
   {type: 'archive'},
@@ -131,9 +138,33 @@ function runEvent(random: Seeded, sequence: number): RunEvent {
   } as unknown as RunEvent;
 }
 
+function quotaEvent(sequence: number, data: Record<string, unknown>): RunEvent {
+  return {sequence, type: data['kind'], data} as unknown as RunEvent;
+}
+
+const PAUSED = {
+  kind: 'quota_paused',
+  provider: 'claude',
+  condition: 'quota_exhausted',
+  detail: 'Claude usage limit reached',
+  resets_at: 1_760_580_000,
+};
+
+/** The run fold after quota events: none, a pause, a pause with a wait, or a wait cancelled. */
+function quotaCore(stage: number): CoreState {
+  const events = [
+    quotaEvent(1, PAUSED),
+    quotaEvent(2, {kind: 'quota_waiting', provider: 'claude', resumes_at: 1_760_580_120}),
+    quotaEvent(3, {kind: 'quota_wait_cancelled', provider: 'claude', reason: 'paused'}),
+  ].slice(0, stage);
+  return events.reduce(reduceEvent, initialCoreState());
+}
+
 /** What the attached run's session might report, current or late. */
 function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
-  switch (random.int(4)) {
+  switch (random.int(5)) {
+    case 4:
+      return {type: 'run-core', core: quotaCore(random.int(4))};
     case 0:
       return {
         type: 'attached',
@@ -158,8 +189,23 @@ function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
           events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
         },
       };
-    default:
+    case 3:
       return {type: 'view', view: random.bool() ? {at: 'live'} : {at: random.int(30)}};
+    default:
+      return {
+        type: 'history',
+        token: random.pick(issued),
+        reply: random.pick([
+          {kind: 'unsupported'} as const,
+          {kind: 'failed', message: 'channel closed'} as const,
+          {
+            kind: 'page',
+            events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
+            next: random.int(40),
+            complete: random.bool(),
+          } as const,
+        ]),
+      };
   }
 }
 
@@ -195,9 +241,15 @@ function randomAction(random: Seeded, issued: readonly number[]): RunPageAction 
 }
 
 function issues(request: RunPageRequest): number | null {
-  return request.kind === 'arm-bound' || request.kind === 'list-logs' || request.kind === 'attach'
-    ? request.token
-    : null;
+  switch (request.kind) {
+    case 'arm-bound':
+    case 'list-logs':
+    case 'attach':
+    case 'read-history':
+      return request.token;
+    default:
+      return null;
+  }
 }
 
 function awaited(state: RunPageState) {
@@ -205,6 +257,7 @@ function awaited(state: RunPageState) {
     bound: state.stop.kind === 'stopping' ? state.stop.bound : null,
     logs: state.logs.kind === 'listing' ? state.logs.token : null,
     attach: state.link.kind === 'attaching' ? state.link.token : null,
+    history: state.history.kind === 'reading' ? state.history.token : null,
   };
 }
 
@@ -212,19 +265,33 @@ function reply(action: RunPageAction) {
   if (action.type === 'bound-elapsed') return {slot: 'bound', token: action.token};
   if (action.type === 'streams') return {slot: 'logs', token: action.token};
   if (action.type === 'attached') return {slot: 'attach', token: action.token};
+  if (action.type === 'history') return {slot: 'history', token: action.token};
   return null;
+}
+
+/** Why a Pause or Resume was not on offer in `before` (header or quota banner), or null. */
+function commandNotOffered(
+  before: RunPageState,
+  request: Extract<RunPageRequest, {kind: 'pause' | 'resume'}>,
+): string | null {
+  const header = headerView(before);
+  const banner = quotaBannerView(before, String);
+  const offers =
+    request.kind === 'pause'
+      ? [header.pause, banner?.stopWaiting]
+      : request.when === 'now'
+        ? [header.resume, banner?.resumeNow]
+        : [banner?.wait];
+  const offered = offers.some(each => each?.shown === true && each.disabledReason === null);
+  return offered ? null : `${request.kind} was sent while not offered`;
 }
 
 /** Why `request` was not on offer in `before`, or null when it was. */
 function notOffered(before: RunPageState, request: RunPageRequest): string | null {
-  const header = headerView(before);
   switch (request.kind) {
     case 'pause':
-      return header.pause.shown && header.pause.disabledReason === null
-        ? null
-        : 'pause was sent while not offered';
     case 'resume':
-      return header.resume.shown ? null : 'resume was sent while not offered';
+      return commandNotOffered(before, request);
     case 'stop': {
       const banner = stopBannerView(before);
       const offered = !request.force || (banner.kind === 'stopping' && banner.forceOffered);
@@ -268,6 +335,50 @@ describe('the run page store', () => {
         also: offeredOnly,
       });
     }
+  });
+
+  test('a quota pause offers Resume now and the wait, and the wait offers Stop waiting', () => {
+    const at = (seconds: number) => `t${seconds}`;
+    const attached = fold(initial(), [
+      {type: 'record', record: {kind: 'live', run: server('paused', {paused: 'quota'})}},
+    ]);
+    const token = attached.requests.find(request => request.kind === 'attach');
+    const ready = fold(attached.state, [
+      {type: 'attached', token: token?.kind === 'attach' ? token.token : 0, error: null},
+      {type: 'session', session: {hasSnapshot: true, streaming: true, controls: true, error: null}},
+      {type: 'run-core', core: quotaCore(1)},
+    ]).state;
+    expect(headerView(ready).resume.shown).toBe(false);
+    expect(quotaBannerView(ready, at)).toMatchObject({
+      title: 'Paused: Claude hit its usage limit',
+      body: 'Claude usage limit reached. Claude expects capacity back at t1760580000.',
+      wait: {shown: true},
+      stopWaiting: {shown: false},
+    });
+    expect(fold(ready, [{type: 'wait-for-quota'}]).requests).toEqual([
+      {kind: 'resume', when: 'capacity_returns'},
+    ]);
+    expect(fold(ready, [{type: 'resume'}]).requests).toEqual([{kind: 'resume', when: 'now'}]);
+    // Stop waiting is not on offer before the run waits.
+    expect(fold(ready, [{type: 'stop-waiting'}]).requests).toEqual([]);
+
+    const waiting = fold(ready, [{type: 'run-core', core: quotaCore(2)}]).state;
+    expect(quotaBannerView(waiting, at)).toMatchObject({
+      title: "Waiting for Claude's quota",
+      body: 'The run resumes by itself at about t1760580120.',
+      wait: {shown: false},
+      stopWaiting: {shown: true},
+    });
+    expect(fold(waiting, [{type: 'stop-waiting'}]).requests).toEqual([{kind: 'pause'}]);
+    expect(fold(waiting, [{type: 'wait-for-quota'}]).requests).toEqual([]);
+
+    const cancelled = fold(waiting, [{type: 'run-core', core: quotaCore(3)}]).state;
+    expect(quotaBannerView(cancelled, at)?.wait.shown).toBe(true);
+    // A run paused by its user shows no quota banner.
+    const byUser = fold(cancelled, [
+      {type: 'record', record: {kind: 'live', run: server('paused')}},
+    ]).state;
+    expect(quotaBannerView(byUser, at)).toBeNull();
   });
 
   test('offers force stop only after the bound elapses while stopping', () => {
@@ -437,6 +548,61 @@ describe('the run page store', () => {
       unsupported: false,
     });
     expect(mismatched.state.views).toEqual({});
+  });
+
+  test('a run watched to its end keeps what its session folded and reads no history', () => {
+    const live = fold(initial(), [{type: 'record', record: RECORDS[2] as RunRecord}]);
+    const attach = live.requests.find(request => request.kind === 'attach');
+    if (attach?.kind !== 'attach') throw new Error('no attach asked');
+    const span = {
+      sequence: 3,
+      type: 'span_started',
+      timestamp: '2026-10-15T16:30:51Z',
+      data: {span: {id: 'flow:w1'}},
+    } as unknown as RunEvent;
+    const watched = fold(live.state, [
+      {type: 'attached', token: attach.token, error: null},
+      {type: 'run-data', data: {kind: 'events', events: [span]}},
+    ]).state;
+    const ended = fold(watched, [{type: 'record', record: RECORDS[8] as RunRecord}]);
+    expect(ended.requests.some(request => request.kind === 'read-history')).toBe(false);
+    expect(ended.state.run).toBe(watched.run);
+    expect(ended.state.history).toEqual({kind: 'read'});
+  });
+
+  test('an ended run reads its history page by page into the run, and the tabs see its spans', () => {
+    const span = (sequence: number, id: string, type: string): RunEvent =>
+      ({
+        sequence,
+        type,
+        timestamp: '2026-10-15T16:30:51Z',
+        data: {span: {id}},
+      }) as unknown as RunEvent;
+    const ended = fold(initial(), [{type: 'record', record: RECORDS[8] as RunRecord}]);
+    const first = ended.requests.find(request => request.kind === 'read-history');
+    expect(first).toMatchObject({from: 0, max: HISTORY_PAGE_EVENTS});
+    if (first?.kind !== 'read-history') throw new Error('no history asked');
+    const paged = fold(ended.state, [
+      {
+        type: 'history',
+        token: first.token,
+        reply: {kind: 'page', events: [span(1, 'a', 'span_started')], next: 2, complete: false},
+      },
+    ]);
+    const second = paged.requests.find(request => request.kind === 'read-history');
+    expect(second).toMatchObject({from: 2});
+    if (second?.kind !== 'read-history') throw new Error('no second page asked');
+    const read = fold(paged.state, [
+      {
+        type: 'history',
+        token: second.token,
+        reply: {kind: 'page', events: [span(2, 'b', 'span_started')], next: 3, complete: true},
+      },
+    ]).state;
+    expect(read.history).toEqual({kind: 'read'});
+    expect(viewedRun(read).spans.map(each => each.id)).toEqual(['a', 'b']);
+    expect(viewedRun({...read, view: {at: 1}}).spans.map(each => each.id)).toEqual(['a']);
+    expect(read.run.core).not.toBeNull();
   });
 });
 

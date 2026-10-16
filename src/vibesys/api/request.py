@@ -7,6 +7,7 @@ Catalog validation here requires an explicit registry.
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 from vibesys.composition import resolve_agent_specs
@@ -46,13 +47,14 @@ from vs_runtime.api.infrastructure import (
     resolve_run_environment_spec,
     run_environment_record,
 )
-from vs_sandbox.api import backend_default_image
+from vs_sandbox.api import accelerator_unavailable, backend_default_image
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vs_project.api import Git, OrchestrationDescriptor
+    from vs_sim.api import CommandProbe
 
 
 def default_skill_roots() -> tuple[Path, ...]:
@@ -90,6 +92,7 @@ __all__ = [
     "repository_name_from_experiment",
     "resolve_run_environment_spec",
     "resolve_skill_source_dirs",
+    "run_accelerator_unavailable",
     "run_environment_record",
     "run_environment_uses_docker",
     "supported_profilers",
@@ -134,6 +137,27 @@ def run_environment_uses_docker(spec: RunEnvironmentSpec | None) -> bool:
     environment.
     """
     return build_run_environment(spec or make_run_environment_spec()).uses_docker
+
+
+def run_accelerator_unavailable(request: RunRequest, probe: CommandProbe) -> str | None:
+    """Why this host cannot give `request`'s run the accelerator it needs, or `None`.
+
+    A run whose environment hands its agent the compute backend's accelerator here checks
+    that accelerator before its image build and stops when it is missing; this asks the
+    same question through `probe`, so a run that passes it does not stop on it at launch.
+    """
+    spec = resolve_run_environment_spec(
+        request.run_environment or make_run_environment_spec(),
+        request.backend,
+        platform=sys.platform,
+        log=lambda _line: None,
+    )
+    environment = build_run_environment(spec)
+    if not environment.attaches_backend_accelerator(
+        docker_in_docker=request.input_bundle.docker_in_docker
+    ):
+        return None
+    return accelerator_unavailable(request.backend, probe)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

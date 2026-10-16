@@ -184,9 +184,7 @@ class CudaBackend:
         GPU fails here -- before any image build -- instead of at the first
         ``docker run --gpus`` call.
         """
-        if os.environ.get("CUDA_VISIBLE_DEVICES"):
-            return
-        if not self._telemetry.gpus():
+        if not _gpu_usable(self._telemetry):
             raise CudaAcceleratorUnavailableError.no_gpu_detected()
 
     def make_monitor(self, log_dir: Path) -> ContentionMonitor | None:
@@ -362,3 +360,20 @@ def _gpu_to_dict(g: GpuInfo) -> dict[str, int | str]:
         "memory_free_mib": g.memory_free_mib,
         "utilization_pct": g.utilization_pct,
     }
+
+
+def cuda_accelerator_unavailable(probe: CommandProbe) -> str | None:
+    """Why the ``cuda`` backend cannot run on this host, read through *probe*, or ``None``.
+
+    The same decision :meth:`CudaBackend.ensure_accelerator_available` makes before a
+    run builds its image, so a check made ahead of the run (``vibesys preflight``)
+    agrees with the run.
+    """
+    if _gpu_usable(NvidiaSmiTelemetry(probe=probe)):
+        return None
+    return str(CudaAcceleratorUnavailableError.no_gpu_detected())
+
+
+def _gpu_usable(telemetry: GpuTelemetry) -> bool:
+    """A pinned ``CUDA_VISIBLE_DEVICES`` is trusted; otherwise ``nvidia-smi`` must list a GPU."""
+    return bool(os.environ.get("CUDA_VISIBLE_DEVICES")) or bool(telemetry.gpus())

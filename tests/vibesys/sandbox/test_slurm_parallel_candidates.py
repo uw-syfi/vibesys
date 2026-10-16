@@ -111,7 +111,7 @@ def _run(
     *,
     environment: SlurmEnvironment | None = None,
     opened: list[RunEnvironmentSession] | None = None,
-    slurm_processes: Processes = NO_PROCESSES,
+    slurm_processes: Processes | None = None,
 ) -> None:
     """Open a run whose candidates are Slurm sessions, and await *exercise* with its workspaces.
 
@@ -143,7 +143,12 @@ def _run(
             network=UnixNetwork(),
             processes=NO_PROCESSES,
             launcher=launcher,
-            slurm_processes=slurm_processes,
+            # The scheduler answers the GPU launcher's partition-limit query.
+            slurm_processes=slurm_processes
+            or FakeProcesses(
+                lambda _spec: ProcessScript(stdout=b"main* 2:00:00\n"),
+                pass_time=ManualClock().advance,
+            ),
         ),
     ) as env:
         try:

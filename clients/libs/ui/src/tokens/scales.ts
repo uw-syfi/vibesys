@@ -146,6 +146,12 @@ export const TYPE: Readonly<Record<TextStyle, TextSpec>> = {
   metric: text('mono', 22, 28, 600),
 };
 
+/**
+ * The advance of a monospace glyph, in em: every glyph of JetBrains Mono (the bundled mono face) is
+ * 600 units wide on its 1000-unit em. A label in a mono style is `chars * size * MONO_ADVANCE` wide.
+ */
+export const MONO_ADVANCE = 0.6;
+
 /** `flat` is everything in the page, `raised` menus and popovers, `overlay` the modal and its scrim. */
 export type ElevationLevel = 'flat' | 'raised' | 'overlay';
 export interface ElevationSpec {

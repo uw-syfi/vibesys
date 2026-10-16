@@ -3,6 +3,7 @@
 import {describe, expect, test} from 'bun:test';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {Chart, CheckList, type CheckState, LogPane, Table} from './index.js';
+import {MONO_ADVANCE, TYPE} from './tokens/index.js';
 
 describe('LogPane', () => {
   test('renders every line as text, never as markup, and marks standard error', () => {
@@ -39,6 +40,52 @@ describe('Chart', () => {
       expect(html).toContain(part);
     }
     expect(html).toContain('aria-label="Series"');
+  });
+});
+
+/** The y labels of a chart: each one's text, and where its text ends and the axis begins. */
+function yLabels(html: string): {
+  readonly labels: readonly string[];
+  readonly ends: readonly number[];
+} {
+  const found = [
+    ...html.matchAll(
+      /<text class="vs-chart-label" x="([\d.]+)"[^>]*text-anchor="end"[^>]*>([^<]*)<\/text>/g,
+    ),
+  ];
+  return {
+    labels: found.map(match => match[2] ?? ''),
+    ends: found.map(match => Number(match[1])),
+  };
+}
+
+describe('Chart y labels', () => {
+  const formats: Readonly<Record<string, (value: number) => string>> = {
+    grouped: value => value.toLocaleString('en-US', {maximumFractionDigits: 3}),
+    compact: value =>
+      value.toLocaleString('en-US', {notation: 'compact', maximumFractionDigits: 3}),
+    plain: value => String(value),
+  };
+
+  test('are never cut by the drawing edge, for values from 1e-3 to 1e12 in any format', () => {
+    const glyph = TYPE.section.size * MONO_ADVANCE;
+    for (const [name, format] of Object.entries(formats)) {
+      for (let exponent = -3; exponent <= 12; exponent += 1) {
+        for (const mantissa of [1, 1.5, 2.5, 7.25, 9.999]) {
+          const high = mantissa * 10 ** exponent;
+          const yTicks = [high / 4, high / 2, high].map(value => ({value, label: format(value)}));
+          const html = renderToStaticMarkup(
+            <Chart label="Series" points={[{x: 1, y: high, filled: true}]} yTicks={yTicks} />,
+          );
+          const {labels, ends} = yLabels(html);
+          expect(labels).toEqual(yTicks.map(tick => tick.label));
+          labels.forEach((label, index) => {
+            const start = (ends[index] ?? 0) - label.length * glyph;
+            expect(start, `${name} ${label}`).toBeGreaterThanOrEqual(0);
+          });
+        }
+      }
+    }
   });
 });
 

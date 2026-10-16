@@ -370,6 +370,31 @@ describe('Hosts.harnesses', () => {
   });
 });
 
+describe('Hosts.readEvents', () => {
+  test('returns a typed unsupported outcome without sending runs.read_events', async () => {
+    const link = new FakeLink();
+    link.helper.features.delete('run_history');
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.readEvents(LOCAL, '/srv/project', 'run-1', 0, 10)).resolves.toEqual({
+      kind: 'unsupported',
+    });
+    expect(link.helper.requests.filter(request => request.type === 'runs.read_events')).toEqual([]);
+  });
+
+  test('names the run when the host has no history for it', async () => {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    await expect(subject.hosts.readEvents(LOCAL, '/srv/project', 'run-1', 0, 10)).rejects.toThrow(
+      'Could not read the history of run run-1',
+    );
+  });
+});
+
 describe('Hosts checkout changes', () => {
   test('removing a host fences an older checkout validation before acknowledging removal', async () => {
     const settings = new SettingsStore({

@@ -100,6 +100,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
   stop = () => this.#ask('stop', null);
   stopConfirmed = () => this.#ask('stop-confirmed', null);
   releaseRun = () => this.#ask('release-run', null);
+  readEvents = () => this.#ask('read-events', {kind: 'unsupported'} as const);
   connectRun = (): void => undefined;
   onWake = (): void => undefined;
   inspect = () => {
@@ -176,6 +177,8 @@ class FakeWelcomeBridge implements WelcomeBridge {
   copyOut = async () => this.#refused();
   startRun = async () => this.#refused();
   helperFeatures = async () => ({ok: true as const, value: []});
+  openRunWindow = async () => this.#refused();
+  showMainWindow = async () => this.#refused();
   #refused = () => ({ok: false as const, error: 'not in this window', authNeeded: false});
 
   listenerCounts(): number[] {

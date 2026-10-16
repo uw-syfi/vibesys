@@ -5,7 +5,13 @@
  * `@vibesys/run-session`'s machine; this keeps exactly one open per attached server.
  */
 import type {CoreState} from '@vibesys/run-state';
-import type {RunData, RunPageAction, RunPageState, SessionView} from '../../state/index.js';
+import type {
+  ResumeWhen,
+  RunData,
+  RunPageAction,
+  RunPageState,
+  SessionView,
+} from '../../state/index.js';
 
 /** What a live session reports to the store. */
 export interface SessionObserver {
@@ -14,10 +20,15 @@ export interface SessionObserver {
   data(data: RunData): void;
 }
 
+/** A command the Run screen sends over the session: Pause, or Resume now or when capacity returns. */
+export type SessionCommand =
+  | {readonly kind: 'pause'}
+  | {readonly kind: 'resume'; readonly when: ResumeWhen};
+
 /** One open session: a command it delivers, and its close. */
 export interface LiveSession {
-  /** Send Pause or Resume; resolves null once acknowledged, or why the run refused it. */
-  command(kind: 'pause' | 'resume'): Promise<string | null>;
+  /** Send `command`; resolves null once acknowledged, or why the run refused it. */
+  command(command: SessionCommand): Promise<string | null>;
   close(): void;
 }
 
@@ -45,8 +56,10 @@ export class SessionHolder {
     this.#open = {
       instance: wanted,
       session: {
-        command: kind =>
-          session === null ? Promise.resolve('the run is still connecting') : session.command(kind),
+        command: command =>
+          session === null
+            ? Promise.resolve('the run is still connecting')
+            : session.command(command),
         close: () => {
           current = false;
           session?.close();
@@ -66,10 +79,10 @@ export class SessionHolder {
     if (!current) opened.close();
   }
 
-  command(kind: 'pause' | 'resume'): Promise<string | null> {
+  command(command: SessionCommand): Promise<string | null> {
     const open = this.#open;
     if (open === null) return Promise.resolve('the run is not connected');
-    return open.session.command(kind);
+    return open.session.command(command);
   }
 
   close(): void {

@@ -49,7 +49,13 @@ from vs_sandbox.api.slurm import (
 )
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
-from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
+from vs_sim.api.testing import (
+    NO_PROCESSES,
+    FakeProcesses,
+    ManualClock,
+    ProcessScript,
+    SimThreads,
+)
 from vs_slurm.api import FakeConnector, SlurmWorkspaceRootProbeError
 
 if TYPE_CHECKING:
@@ -200,7 +206,11 @@ def _request(
             network=UnixNetwork(),
             processes=NO_PROCESSES,
             launcher=SubprocessPipedProcessLauncher(),
-            slurm_processes=NO_PROCESSES,
+            # The scheduler answers the GPU launcher's partition-limit query.
+            slurm_processes=FakeProcesses(
+                lambda _spec: ProcessScript(stdout=b"main* 2:00:00\n"),
+                pass_time=ManualClock().advance,
+            ),
         ),
     )
 

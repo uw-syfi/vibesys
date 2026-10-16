@@ -42,6 +42,7 @@ const CHANNELS: Channels = {
   stop: 'vibesys:welcome:stop',
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
   releaseRun: 'vibesys:welcome:release-run',
+  readEvents: 'vibesys:welcome:read-events',
   preferences: 'vibesys:welcome:preferences',
   setAppearance: 'vibesys:welcome:set-appearance',
   setNotifications: 'vibesys:welcome:set-notifications',
@@ -57,6 +58,8 @@ const CHANNELS: Channels = {
   copyOut: 'vibesys:welcome:copy-out',
   startRun: 'vibesys:welcome:start-run',
   helperFeatures: 'vibesys:welcome:helper-features',
+  openRunWindow: 'vibesys:welcome:open-run-window',
+  showMainWindow: 'vibesys:welcome:show-main-window',
 };
 const EVENTS: Events = {
   chrome: 'vibesys:welcome:chrome',
@@ -118,6 +121,8 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     retry: () => call(CHANNELS.retry),
     stop: (host, instance, force) => call(CHANNELS.stop, host, instance, force),
     releaseRun: () => call(CHANNELS.releaseRun),
+    readEvents: (host, project, runId, fromSequence, max) =>
+      call(CHANNELS.readEvents, host, project, runId, fromSequence, max),
     connectRun: id => capabilities.connectRun(id),
     onWake: listener => capabilities.on(WAKE_CHANNEL, () => listener()),
     stopConfirmed: (host, instance, force) => call(CHANNELS.stopConfirmed, host, instance, force),
@@ -137,6 +142,8 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     copyOut: (host, source, destination) => call(CHANNELS.copyOut, host, source, destination),
     startRun: (host, inputs) => call(CHANNELS.startRun, host, inputs),
     helperFeatures: host => call(CHANNELS.helperFeatures, host),
+    openRunWindow: run => call(CHANNELS.openRunWindow, run),
+    showMainWindow: () => call(CHANNELS.showMainWindow),
     onChrome: on(EVENTS.chrome),
     onRecent: on(EVENTS.recent),
     onShowHost: on(EVENTS.showHost),

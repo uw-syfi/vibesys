@@ -3,15 +3,16 @@
  * startup timeline, the log streams grouped by owner, and the stop and ended banners. The renderer
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
-import type {RunEvent, Span} from '@vibesys/contracts';
+import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
-import {traceAt} from './live.js';
+import {overviewAt, traceAt} from './live.js';
 import {
   commandable,
+  quotaPause,
   type RunPageState,
   runPhase,
   type StopFlow,
@@ -104,13 +105,77 @@ export function headerView(state: RunPageState): HeaderView {
     subtitle: `${state.hostLabel} · ${state.identity.runId}`,
     status: status(state),
     pause: offer(phase.kind === 'running' && !phase.pausing, commandReason(state)),
-    resume: offer(phase.kind === 'paused', commandReason(state)),
+    // A run paused by a usage limit is resumed from its banner, which also offers to wait.
+    resume: offer(phase.kind === 'paused' && phase.by === 'user', commandReason(state)),
     stop: offer(
       (phase.kind === 'starting' || phase.kind === 'running' || phase.kind === 'paused') &&
         state.stop.kind === 'idle',
     ),
     openWindow: offer(true, unavailable['open-window']),
     archive: offer(phase.kind === 'ended'),
+  };
+}
+
+/** The banner while the run is paused by a usage limit: what stopped it, and what to do. */
+export interface QuotaBannerView {
+  readonly title: string;
+  readonly body: string;
+  readonly resumeNow: Offer;
+  /** "Wait and resume when quota is back": shown until the run waits. */
+  readonly wait: Offer;
+  /** "Stop waiting": shown while the run waits. */
+  readonly stopWaiting: Offer;
+}
+
+function providerName(provider: string): string {
+  return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
+/**
+ * The quota banner, or null unless the run is paused by a usage limit. `time` words an epoch second
+ * (the shell formats it in the user's time zone); nothing here reads a clock.
+ */
+export function quotaBannerView(
+  state: RunPageState,
+  time: (epochSeconds: number) => string,
+): QuotaBannerView | null {
+  const phase = runPhase(state);
+  if (phase.kind !== 'paused' || phase.by !== 'quota') return null;
+  const pause = quotaPause(state);
+  const reason = commandReason(state);
+  const waiting = pause?.waiting ?? null;
+  const offers = {
+    resumeNow: offer(true, reason),
+    wait: offer(waiting === null && state.waitRefused === null, reason),
+    stopWaiting: offer(waiting !== null, reason),
+  };
+  if (pause === null) {
+    return {
+      ...offers,
+      title: 'Paused: usage limit reached',
+      body: 'The run waits for you to resume it, or for its quota to return.',
+    };
+  }
+  const provider = providerName(pause.provider);
+  if (waiting !== null) {
+    return {
+      ...offers,
+      title: `Waiting for ${provider}'s quota`,
+      body:
+        waiting.resumesAt === null
+          ? `${provider} gave no reset time, so the run tries again at its quota policy's retry interval.`
+          : `The run resumes by itself at about ${time(waiting.resumesAt)}.`,
+    };
+  }
+  const limit = pause.condition === 'rate_limited' ? 'rate limit' : 'usage limit';
+  const reset =
+    pause.resetsAt === null
+      ? `${provider} gave no reset time.`
+      : `${provider} expects capacity back at ${time(pause.resetsAt)}.`;
+  return {
+    ...offers,
+    title: `Paused: ${provider} hit its ${limit}`,
+    body: `${pause.detail}. ${reset}`,
   };
 }
 
@@ -376,6 +441,8 @@ export function endedView(state: RunPageState): EndedView | null {
 export interface ViewedRun {
   readonly core: CoreState | null;
   readonly trace: RunTrace;
+  /** The run's declared overview at the view, or null before one was declared. */
+  readonly overview: RunOverview | null;
   readonly spans: readonly Span[];
   readonly spanEvents: readonly RunEvent[];
   /** The sequence shown: null at the live end. */
@@ -388,6 +455,7 @@ export function viewedRun(state: RunPageState): ViewedRun {
   return {
     core: state.run.core,
     trace,
+    overview: overviewAt(state.run.trace, at),
     spans: traceSpans(trace),
     spanEvents: state.run.trace.events,
     at,

@@ -41,7 +41,11 @@ if child == 0:
 print(f"leader={{os.getpid()}} group={{os.getpgrp()}}", flush=True)
 signal.pause()
 """
-    probe = ScriptedProbe(lambda _argv: ProbeResult(0, ""))
+    # The scheduler reports the partition's limit before submission; every
+    # other probe (the cancel's scancel and queue check) succeeds with no output.
+    probe = ScriptedProbe(
+        lambda argv: ProbeResult(0, "gpu* 2:00:00\n" if argv[-1].split()[0] == "sinfo" else "")
+    )
     launcher = AgentGpuLauncher(
         AgentGpuConfig(
             partitions=("gpu",),
@@ -81,4 +85,5 @@ signal.pause()
     assert leader_and_group[1] == leader_and_group[2]
     assert status == -signal.SIGTERM
     programs = [argv[-1].split()[0] for argv, _timeout in probe.calls]
-    assert programs == ["scancel", "squeue"]
+    # The partition-limit query before submission, then the cancel and its queue check.
+    assert programs == ["sinfo", "scancel", "squeue"]

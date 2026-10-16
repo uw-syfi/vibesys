@@ -79,4 +79,6 @@ def test_a_host_that_is_itself_inside_a_slurm_allocation_still_runs_jobs_as_new_
 
         assert result.exit_code == 0, result.output
         assert "job-ran" in result.output
-        assert slurm_cluster.queue() == []
+        # Slurm keeps a job in COMPLETING for a moment after its script exits, which is
+        # after the command returned, so the queue is read once it has drained.
+        slurm_cluster.wait_for_empty_queue()

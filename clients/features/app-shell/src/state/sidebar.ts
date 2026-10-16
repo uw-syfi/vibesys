@@ -30,6 +30,11 @@ export interface RunRow {
 /** What the sidebar's row menus ask of the app. */
 export interface ShellActions {
   archive(run: RunRef): void;
+  /**
+   * Show `run` in a window of its own, where it is then live; this window leaves its Run screen
+   * for New run when it showed that run.
+   */
+  openWindow(run: RunRef): void;
 }
 
 /** One saved machine: whether its last check found it ready, or the check awaited. */

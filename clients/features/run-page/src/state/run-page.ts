@@ -12,11 +12,22 @@
  * A live run is attached under a token (`link`); once attached, the shell runs the run's session
  * (`@vibesys/run-session`) and reports what it says (`session`) and what it folded (`run`). Pause
  * and Resume are protocol commands, so they are offered only while the session can deliver one.
+ * A run paused by a usage limit also offers to wait: Resume with `when: capacity_returns`, which the
+ * run acknowledges with `quota_waiting` (folded into the pause by `@vibesys/run-state`), and "Stop
+ * waiting" (Pause) once it waits. A server that refuses the wait (an older one rejects `when`) no
+ * longer offers it for this run instance (`waitRefused`).
  */
+
+import type {RunEvent} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
-import type {CoreState} from '@vibesys/run-state';
+import {
+  type CoreState,
+  initialCoreState,
+  type QuotaPause,
+  reduceEventBatch,
+} from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
 import {
   EMPTY_RUN_FOLD,
@@ -28,6 +39,9 @@ import {
   traceStep,
 } from './live.js';
 import {WORK_FILTER_ALL, type WorkFilter, type WorkOutcome} from './work-filter.js';
+
+/** When a Resume takes effect: now, or once the provider's capacity returns. */
+export type ResumeWhen = 'now' | 'capacity_returns';
 
 /** How long a Stop may take before "Force stop" is offered. */
 export const FORCE_STOP_BOUND_MS = 2 * 60 * 1000;
@@ -53,6 +67,31 @@ export type RunPhase =
   | {readonly kind: 'paused'; readonly by: 'user' | 'quota'}
   | {readonly kind: 'stopping'}
   | {readonly kind: 'ended'; readonly run: HostRun; readonly end: RunEnd};
+
+/** The most events one history page asks for. */
+export const HISTORY_PAGE_EVENTS = 500;
+
+/**
+ * An ended run's recorded events, read page by page (`runs.read_events`) into the run fold: not
+ * asked yet, a page awaited under a token, all read, not served by this host, or failed.
+ */
+export type RunHistory =
+  | {readonly kind: 'idle'}
+  | {readonly kind: 'reading'; readonly token: number; readonly from: number}
+  | {readonly kind: 'read'}
+  | {readonly kind: 'unsupported'}
+  | {readonly kind: 'failed'; readonly message: string};
+
+/** What one history read settled to. */
+export type HistoryReply =
+  | {
+      readonly kind: 'page';
+      readonly events: readonly RunEvent[];
+      readonly next: number;
+      readonly complete: boolean;
+    }
+  | {readonly kind: 'unsupported'}
+  | {readonly kind: 'failed'; readonly message: string};
 
 /** The page's own stop flow: confirming, or a stop sent and waiting for the run to end. */
 export type StopFlow =
@@ -126,6 +165,10 @@ export interface RunPageState {
   /** Why the last command the run refused failed, until the next one. */
   readonly notice: string | null;
   readonly map: MapState;
+  /** An ended run's recorded events, read into `run`. */
+  readonly history: RunHistory;
+  /** Why the attached run refused to wait for its quota; the wait is not offered again for it. */
+  readonly waitRefused: string | null;
   readonly next: number;
 }
 
@@ -149,6 +192,10 @@ export type RunPageAction =
   | {readonly type: 'log-view'; readonly streamId: string; readonly view: LogView}
   | {readonly type: 'pause'}
   | {readonly type: 'resume'}
+  /** Resume the quota-paused run when capacity returns. */
+  | {readonly type: 'wait-for-quota'}
+  /** End that wait: the run stays paused. */
+  | {readonly type: 'stop-waiting'}
   | {readonly type: 'resume-ended'}
   | {readonly type: 'open-window'}
   | {readonly type: 'archive'}
@@ -158,14 +205,17 @@ export type RunPageAction =
   | {readonly type: 'run-core'; readonly core: CoreState}
   | {readonly type: 'run-data'; readonly data: RunData}
   | {readonly type: 'command-refused'; readonly message: string}
-  | {readonly type: 'view'; readonly view: RunView};
+  /** The run refused a Resume when capacity returns (an older server rejects `when`). */
+  | {readonly type: 'wait-refused'; readonly message: string}
+  | {readonly type: 'view'; readonly view: RunView}
+  | {readonly type: 'history'; readonly token: number; readonly reply: HistoryReply};
 
 export type RunPageRequest =
   | {readonly kind: 'stop'; readonly force: boolean}
   | {readonly kind: 'arm-bound'; readonly token: number; readonly ms: number}
   | {readonly kind: 'list-logs'; readonly token: number; readonly instanceId: string}
   | {readonly kind: 'pause'}
-  | {readonly kind: 'resume'}
+  | {readonly kind: 'resume'; readonly when: ResumeWhen}
   | {readonly kind: 'resume-ended'; readonly fromRound: number | null}
   | {readonly kind: 'open-window'}
   | {readonly kind: 'archive'}
@@ -173,7 +223,14 @@ export type RunPageRequest =
   /** Attach the live run's server `instance` to this window, answering `attached` with `token`. */
   | {readonly kind: 'attach'; readonly token: number; readonly instance: string}
   /** Let the attached run go (its session closes with it). */
-  | {readonly kind: 'release'};
+  | {readonly kind: 'release'}
+  /** Read the ended run's recorded events from `from`, answering `history` with `token`. */
+  | {
+      readonly kind: 'read-history';
+      readonly token: number;
+      readonly from: number;
+      readonly max: number;
+    };
 
 export interface RunPageStep {
   readonly state: RunPageState;
@@ -203,6 +260,8 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     view: {at: 'live'},
     notice: null,
     map: {filter: 'all', open: new Set(), selected: null},
+    history: {kind: 'idle'},
+    waitRefused: null,
     next: 1,
   };
 }
@@ -296,9 +355,44 @@ function linked(state: RunPageState): RunPageStep {
       link: {kind: 'attaching', token, instance: wanted},
       session: null,
       run: EMPTY_RUN_FOLD,
+      waitRefused: null,
     },
     requests: [...release, {kind: 'attach', token, instance: wanted}],
   };
+}
+
+/** Ask for the next history page from `from`. */
+function readingFrom(state: RunPageState, from: number): RunPageStep {
+  const token = state.next;
+  return {
+    state: {...state, next: token + 1, history: {kind: 'reading', token, from}},
+    requests: [{kind: 'read-history', token, from, max: HISTORY_PAGE_EVENTS}],
+  };
+}
+
+/**
+ * An ended run opened with nothing folded reads its history once into the run fold; a run that is
+ * live again (a resume)
+ * gets its data from its session, and drops a history read in flight.
+ */
+function historyFor(state: RunPageState): RunPageStep {
+  if (state.record.kind === 'live') {
+    return {
+      state: state.history.kind === 'idle' ? state : {...state, history: {kind: 'idle'}},
+      requests: [],
+    };
+  }
+  if (state.record.kind === 'unlisted' && state.history.kind === 'reading') {
+    return {state: {...state, history: {kind: 'idle'}}, requests: []};
+  }
+  if (state.record.kind === 'ended' && state.history.kind === 'idle') {
+    // A run watched to its end already holds what its session folded; only one opened ended
+    // (nothing folded yet) reads its recorded history.
+    const folded = state.run.core !== null || state.run.trace !== EMPTY_RUN_FOLD.trace;
+    if (folded) return {state: {...state, history: {kind: 'read'}}, requests: []};
+    return readingFrom(state, 0);
+  }
+  return {state, requests: []};
 }
 
 function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
@@ -308,7 +402,33 @@ function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
     : {...state, record};
   const link = linked(fenced);
   const step = recordStep(link.state, record);
-  return {state: step.state, requests: [...link.requests, ...step.requests]};
+  const history = historyFor(step.state);
+  return {
+    state: history.state,
+    requests: [...link.requests, ...step.requests, ...history.requests],
+  };
+}
+
+function withHistory(state: RunPageState, token: number, reply: HistoryReply): RunPageStep {
+  const {history} = state;
+  if (history.kind !== 'reading' || history.token !== token) return {state, requests: []};
+  if (reply.kind === 'unsupported') return {state: {...state, history: reply}, requests: []};
+  if (reply.kind === 'failed') {
+    return {state: {...state, history: {kind: 'failed', message: reply.message}}, requests: []};
+  }
+  const run: RunFold =
+    reply.events.length === 0
+      ? state.run
+      : {
+          core: reduceEventBatch(state.run.core ?? initialCoreState(), reply.events),
+          trace: traceStep(state.run.trace, {kind: 'events', events: reply.events}),
+        };
+  const folded = {...state, run};
+  // A page that read nothing new cannot advance: stop rather than ask for the same page again.
+  if (reply.complete || reply.next <= history.from) {
+    return {state: {...folded, history: {kind: 'read'}}, requests: []};
+  }
+  return readingFrom(folded, reply.next);
 }
 
 function recordStep(next: RunPageState, record: RunRecord): RunPageStep {
@@ -423,9 +543,22 @@ export function commandable(state: RunPageState): boolean {
   return state.link.kind === 'attached' && state.session?.controls === true;
 }
 
+/** The usage-limit stop the run is paused on, while it is paused by quota; null otherwise. */
+export function quotaPause(state: RunPageState): QuotaPause | null {
+  const phase = runPhase(state);
+  if (phase.kind !== 'paused' || phase.by !== 'quota') return null;
+  return state.run.core?.quota.pause ?? null;
+}
+
+/** Whether the run waits for its quota now (it acknowledged a Resume when capacity returns). */
+export function waitingForQuota(state: RunPageState): boolean {
+  return quotaPause(state)?.waiting != null;
+}
+
 /** A command the screen offers, sent only when the current state offers it. */
 function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
   const phase = runPhase(state);
+  const byQuota = phase.kind === 'paused' && phase.by === 'quota';
   const offered = (when: boolean, request: RunPageRequest): RunPageStep => ({
     state,
     requests: when ? [request] : [],
@@ -438,7 +571,18 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
     case 'resume':
       return offered(commandable(state) && phase.kind === 'paused', {
         kind: 'resume',
+        when: 'now',
       });
+    case 'wait-for-quota':
+      return offered(
+        commandable(state) && byQuota && !waitingForQuota(state) && state.waitRefused === null,
+        {
+          kind: 'resume',
+          when: 'capacity_returns',
+        },
+      );
+    case 'stop-waiting':
+      return offered(commandable(state) && waitingForQuota(state), {kind: 'pause'});
     case 'resume-ended': {
       const end = phase.kind === 'ended' ? phase.end : null;
       return offered(end?.resumable === true, {
@@ -549,8 +693,19 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       };
     case 'command-refused':
       return {state: {...state, notice: action.message}, requests: []};
+    case 'wait-refused':
+      return {
+        state: {
+          ...state,
+          notice: `The run cannot wait for its quota: ${action.message}`,
+          waitRefused: action.message,
+        },
+        requests: [],
+      };
     case 'view':
       return {state: {...state, view: action.view}, requests: []};
+    case 'history':
+      return withHistory(state, action.token, action.reply);
     default:
       return null;
   }
@@ -562,6 +717,9 @@ function liveProblems(state: RunPageState): string[] {
   const live = state.record.kind === 'live' ? state.record.run.id : null;
   const held = state.link.kind === 'none' ? null : state.link.instance;
   if (held !== live) problems.push(`the link holds ${held} while the live server is ${live}`);
+  if (state.history.kind === 'reading' && state.record.kind !== 'ended') {
+    problems.push('history is read for a run that is not ended');
+  }
   if (state.session !== null && state.link.kind !== 'attached') {
     problems.push('a session reports without an attached run');
   }

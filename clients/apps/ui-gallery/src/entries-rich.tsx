@@ -324,6 +324,15 @@ function ScrubberDemo(): JSX.Element {
   );
 }
 
+const LARGE_POINTS = [
+  {x: 1, y: 18_000_000, filled: true},
+  {x: 2, y: 17_200_000, filled: false},
+  {x: 3, y: 21_500_000, filled: true},
+  {x: 4, y: 20_100_000, filled: false},
+  {x: 5, y: 24_000_000, filled: true},
+  {x: 6, y: 22_800_000, filled: false},
+];
+
 const POINTS = [
   {x: 1, y: 100, filled: true},
   {x: 2, y: 96, filled: false},
@@ -424,27 +433,48 @@ export const RICH_ENTRIES = {
   },
   Chart: {
     render: () => (
-      <Card>
-        <Chart
-          label="Throughput of each measured attempt relative to the baseline"
-          points={POINTS}
-          steps={[
-            {x: 1, y: 100},
-            {x: 3, y: 118},
-            {x: 5, y: 127},
-            {x: 6, y: 127},
-          ]}
-          reference={{y: 100, label: 'baseline'}}
-          playhead={4.5}
-          yTicks={[
-            {value: 90, label: '0.9x'},
-            {value: 110, label: '1.1x'},
-            {value: 130, label: '1.3x'},
-          ]}
-          xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
-          xTitle="measurements"
-        />
-      </Card>
+      <Stack>
+        <Card>
+          <Chart
+            label="Throughput of each measured attempt relative to the baseline"
+            points={POINTS}
+            steps={[
+              {x: 1, y: 100},
+              {x: 3, y: 118},
+              {x: 5, y: 127},
+              {x: 6, y: 127},
+            ]}
+            reference={{y: 100, label: 'baseline'}}
+            playhead={4.5}
+            yTicks={[
+              {value: 90, label: '0.9x'},
+              {value: 110, label: '1.1x'},
+              {value: 130, label: '1.3x'},
+            ]}
+            xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
+            xTitle="measurements"
+          />
+        </Card>
+        <Card>
+          <Chart
+            label="Throughput in operations per second, with large values"
+            points={LARGE_POINTS}
+            steps={[
+              {x: 1, y: 18_000_000},
+              {x: 3, y: 21_500_000},
+              {x: 5, y: 24_000_000},
+              {x: 6, y: 24_000_000},
+            ]}
+            reference={{y: 18_000_000, label: 'baseline'}}
+            yTicks={[16_000_000, 20_000_000, 24_000_000].map(value => ({
+              value,
+              label: value.toLocaleString('en-US'),
+            }))}
+            xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
+            xTitle="measurements"
+          />
+        </Card>
+      </Stack>
     ),
   },
   SidebarItem: {

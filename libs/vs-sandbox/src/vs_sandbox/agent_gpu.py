@@ -33,7 +33,12 @@ if TYPE_CHECKING:
 
     from vs_sim.api import CommandProbe, Event, PipedProcess, PipedProcessLauncher, Threads
 
-_UNLIMITED = "unlimited"
+_UNLIMITED = frozenset({"unlimited", "infinite"})
+_MAX_CLOCK_FIELDS = 3
+_SINFO_FIELDS = 2
+_SINFO_TIMEOUT_SECONDS = 30
+#: Exit status of a command rejected before ``srun`` (the shell's "usage error").
+_REJECTED_STATUS = 2
 _WINDOWS_TIMEOUT_SECONDS = 30
 _CANCEL_GRACE_SECONDS = 30
 _SCANCEL_TIMEOUT_SECONDS = 60
@@ -73,10 +78,12 @@ class AgentGpuRequestError(ValueError):
 class AgentGpuConfig(BaseModel):
     """Operator limits and commands for the agent's GPU jobs, submitted from this host.
 
-    ``partitions`` is a preference order. With ``windows_command`` set, the
-    first partition whose reported window starts the job now is chosen;
-    otherwise, and when nothing starts now, the first partition whose time
-    limit fits the request is used and the job waits in its queue.
+    ``partitions`` is a preference order. A partition is eligible only when its
+    time limit, read from the scheduler (``sinfo``), fits the request. With
+    ``windows_command`` set, the first eligible partition whose reported window
+    starts the job now is chosen; otherwise, and when nothing starts now, the
+    first eligible partition is used and the job waits in its queue. A request
+    no partition's limit fits is rejected before ``srun``, naming each limit.
 
     A job sees its workspace (writable), the system directories, and
     ``read_only_paths``: extra absolute host paths, such as the operator's
@@ -202,18 +209,57 @@ class GpuCommand:
 
 
 def _minutes(value: str) -> float:
-    """Parse a Slurm ``[D-]HH:MM:SS`` limit, or ``unlimited``, to minutes."""
-    if value == _UNLIMITED:
+    """Parse a Slurm ``[D-][[HH:]MM:]SS`` limit, or ``unlimited``/``infinite``, to minutes.
+
+    Raises ``ValueError`` for anything else (``n/a``, ``NOT_SET``, an empty string).
+    """
+    if value.lower() in _UNLIMITED:
         return math.inf
     days, _, clock = value.rpartition("-")
-    hours, minutes, seconds = (int(part) for part in clock.split(":"))
-    return (int(days or 0) * 24 + hours) * 60 + minutes + seconds / 60
+    parts = [int(part) for part in clock.split(":")]
+    if not 1 <= len(parts) <= _MAX_CLOCK_FIELDS or any(part < 0 for part in parts):
+        message = f"not a Slurm time limit: {value!r}"
+        raise ValueError(message)
+    seconds = 0
+    for part in parts:
+        seconds = seconds * 60 + part
+    return int(days or 0) * 24 * 60 + seconds / 60
 
 
-def _starts_now(partition: Mapping[str, object], request: GpuJobRequest) -> bool | None:
-    """Return whether the partition's window starts *request* now, or ``None`` if it cannot fit."""
-    if request.time_minutes > _minutes(str(partition["partition_max_time"])):
-        return None
+def parse_partition_limits(sinfo_output: str) -> Mapping[str, float]:
+    """Map partition name to its time limit in minutes from ``sinfo -h -o "%P %l"`` text.
+
+    The default partition's ``*`` suffix is dropped. A line that is not
+    ``<name> <limit>`` with a parseable limit is left out, so its partition is
+    reported as unknown rather than guessed at.
+    """
+    limits: dict[str, float] = {}
+    for line in sinfo_output.splitlines():
+        fields = line.split()
+        if len(fields) != _SINFO_FIELDS:
+            continue
+        try:
+            limits[fields[0].removesuffix("*")] = _minutes(fields[1])
+        except ValueError:
+            continue
+    return limits
+
+
+def read_partition_limits(shell: Sequence[str], probe: CommandProbe) -> Mapping[str, float]:
+    """Ask the scheduler, through *shell*, for every partition's time limit in minutes.
+
+    An unanswered or failed ``sinfo`` yields no limits, so every partition is
+    then unknown to :func:`choose_partition` and a request is rejected, not guessed.
+    """
+    argv = (*shell, shlex.join(("sinfo", "--noheader", "--format=%P %l")))
+    result = probe.run(argv, timeout_seconds=_SINFO_TIMEOUT_SECONDS)
+    if result is None or result.returncode != 0:
+        return {}
+    return parse_partition_limits(result.stdout)
+
+
+def _starts_now(partition: Mapping[str, object], request: GpuJobRequest) -> bool:
+    """Return whether the partition's window starts *request* now."""
     groups = partition.get("groups")
     if not isinstance(groups, list):
         return False
@@ -229,32 +275,48 @@ def _starts_now(partition: Mapping[str, object], request: GpuJobRequest) -> bool
 def choose_partition(
     config: AgentGpuConfig,
     request: GpuJobRequest,
+    limits: Mapping[str, float],
     windows: Mapping[str, object] | None,
 ) -> str:
-    """Prefer a partition that starts *request* now, else the first whose limit fits it.
+    """Prefer an eligible partition that starts *request* now, else the first eligible one.
 
-    *windows* is the scheduler's start-time report (the ``slurm-windows --json``
-    shape: ``partitions[].partition_max_time`` and ``groups[].options[]`` with
-    ``max_time`` and ``start``). Without it the first configured partition is
-    used. Malformed reports are treated as absent rather than guessed at.
+    A partition is eligible when its time limit in *limits* (minutes by name,
+    from :func:`read_partition_limits`) is at least the request's. *windows* is
+    the scheduler's start-time report (the ``slurm-windows --json`` shape:
+    ``groups[].options[]`` with ``max_time`` and ``start`` per partition). A
+    malformed or absent report only loses the "starts now" preference.
+
+    Raises :class:`AgentGpuRequestError`, naming the requested minutes and each
+    configured partition's limit, when none is eligible; a partition missing
+    from *limits* is shown as unknown and never chosen.
     """
-    if windows is None:
-        return config.partitions[0]
+    eligible = [
+        name for name in config.partitions if limits.get(name, -math.inf) >= request.time_minutes
+    ]
+    if not eligible:
+        shown = ", ".join(
+            f"{name} ({_describe_limit(limits[name]) if name in limits else 'limit unknown'})"
+            for name in config.partitions
+        )
+        message = (
+            f"--time {request.time_minutes} fits no configured partition's time limit: {shown}"
+        )
+        raise AgentGpuRequestError(message)
     try:
-        entries = cast("list[Mapping[str, object]]", windows["partitions"])
+        entries = cast(
+            "list[Mapping[str, object]]", cast("Mapping[str, object]", windows)["partitions"]
+        )
         reported = {str(entry["partition"]): entry for entry in entries}
-        fits = []
-        for name in config.partitions:
-            if name not in reported:
-                continue
-            starts = _starts_now(reported[name], request)
-            if starts:
+        for name in eligible:
+            if name in reported and _starts_now(reported[name], request):
                 return name
-            if starts is not None:
-                fits.append(name)
     except (KeyError, TypeError, ValueError):
-        return config.partitions[0]
-    return fits[0] if fits else config.partitions[0]
+        pass
+    return eligible[0]
+
+
+def _describe_limit(minutes: float) -> str:
+    return "unlimited" if math.isinf(minutes) else f"limit {minutes:g} minutes"
 
 
 def read_windows(config: AgentGpuConfig, probe: CommandProbe) -> Mapping[str, object] | None:
@@ -359,14 +421,25 @@ class AgentGpuLauncher:
     ) -> int:
         """Run *command* in a new allocation, streaming merged output to *write*.
 
-        Returns the command's exit status as ``srun`` reports it. Setting
+        Returns the command's exit status as ``srun`` reports it, or 2 after
+        writing the reason when no partition's time limit fits the request (no
+        job is submitted). Setting
         *cancel* (from any thread) cancels the job by its unique name, then
         stops ``srun``; the call still returns only after ``srun`` exits. Stopping
         a ``docker exec`` or ``ssh`` wrapper does not stop the ``srun`` behind it,
         so a cancelled job is then looked up in the queue, and one still listed is
         reported on *write* as unconfirmed.
         """
-        partition = choose_partition(self._config, request, read_windows(self._config, self._probe))
+        try:
+            partition = choose_partition(
+                self._config,
+                request,
+                read_partition_limits(self._shell, self._probe),
+                read_windows(self._config, self._probe),
+            )
+        except AgentGpuRequestError as error:
+            write(f"[vibesys-gpu] rejected before srun: {error}\n".encode())
+            return _REJECTED_STATUS
         job_name = new_job_name(self._config)
         argv = srun_argv(
             self._config, request, partition=partition, job_name=job_name, command=command.argv
@@ -472,6 +545,8 @@ __all__ = [
     "GpuJobRequest",
     "GpuLauncher",
     "choose_partition",
+    "parse_partition_limits",
+    "read_partition_limits",
     "read_windows",
     "resolve_executable",
     "srun_argv",

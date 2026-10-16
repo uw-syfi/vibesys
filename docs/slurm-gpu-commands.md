@@ -93,8 +93,9 @@ kind = "local"
 shell_command = ["bash", "-c"]
 
 [vibesys.agent_gpu]
-# Preference order. With windows_command set, the first partition whose window
-# starts the job now is used; otherwise the first whose time limit fits.
+# Preference order. A partition is used only if its time limit (read from
+# `sinfo`) fits the request. With windows_command set, the first such partition
+# whose window starts the job now is used; otherwise the first such partition.
 partitions = ["main", "priority"]
 max_gpus = 8
 max_time_minutes = 120
@@ -153,8 +154,11 @@ the one place that says how. The file is parsed once when the run starts, and th
 run keeps its own rendering of it in `logs/slurm-operator.toml`.
 
 Every job carries `--partition`, `--gres=gpu:N`, `--time`, and a
-`vibesys-gpu-*` job name. A misconfigured or missing `windows_command` falls
-back to the first configured partition.
+`vibesys-gpu-*` job name. A misconfigured or missing `windows_command` only
+drops the "starts now" preference: the first partition whose `sinfo` time limit
+fits is used. A request that no configured partition's limit fits (or whose
+limits `sinfo` did not report) is rejected before `srun`, with the reason on the
+job's output and exit status 2.
 
 ## Profiling
 

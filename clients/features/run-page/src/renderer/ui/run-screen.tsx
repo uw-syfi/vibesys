@@ -25,6 +25,7 @@ import {
   logsNotice,
   NOTHING_FOLDED,
   type Offer,
+  quotaBannerView,
   RUN_TABS,
   type RunAtView,
   type RunPageAction,
@@ -153,6 +154,55 @@ function StopBanner(props: {
             ),
           }
         : {})}
+    />
+  );
+}
+
+/** Words an epoch second as the user's local weekday and time; reads no clock. */
+const QUOTA_TIME = new Intl.DateTimeFormat(undefined, {
+  weekday: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+function QuotaBanner(props: {
+  readonly state: RunPageState;
+  readonly dispatch: Dispatch;
+}): JSX.Element | null {
+  const {state, dispatch} = props;
+  const banner = quotaBannerView(state, seconds => QUOTA_TIME.format(seconds * 1000));
+  if (banner === null) return null;
+  return (
+    <Banner
+      tone="warn"
+      title={banner.title}
+      body={banner.body}
+      actions={
+        <>
+          <Button
+            variant="primary"
+            text="Resume now"
+            press={() => dispatch({type: 'resume'})}
+            {...reason(banner.resumeNow)}
+          />
+          {banner.wait.shown ? (
+            <Button
+              variant="secondary"
+              text="Wait and resume when quota is back"
+              press={() => dispatch({type: 'wait-for-quota'})}
+              {...reason(banner.wait)}
+            />
+          ) : null}
+          {banner.stopWaiting.shown ? (
+            <Button
+              variant="secondary"
+              text="Stop waiting"
+              press={() => dispatch({type: 'stop-waiting'})}
+              {...reason(banner.stopWaiting)}
+            />
+          ) : null}
+        </>
+      }
     />
   );
 }
@@ -329,6 +379,7 @@ export function RunScreen(props: {
       <Stack gap="space-5">
         <Header state={state} dispatch={dispatch} />
         <StopBanner state={state} dispatch={dispatch} />
+        <QuotaBanner state={state} dispatch={dispatch} />
         {state.notice === null ? null : (
           <Banner tone="err" title="The run did not take the command" body={state.notice} />
         )}

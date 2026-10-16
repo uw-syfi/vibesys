@@ -19,7 +19,7 @@ import {
   type WelcomeEvent,
 } from '@vibesys/ipc';
 import {BaseWindow, dialog, ipcMain, type MessagePortMain, type WebContentsView} from 'electron';
-import {APP_ENTRY_URL, SHELL_URL} from './app-assets.js';
+import {APP_ENTRY_URL, isSameAppPage, SHELL_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
 import {type PendingRunPort, RunIpcRegistry} from './run-ipc.js';
 import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
@@ -79,6 +79,10 @@ export interface AppWindowDeps {
   readonly closed: (runId: string) => void;
   /** The welcome surface exhausted its bounded recovery; enter fatal app shutdown. */
   readonly fatal: (error: Error) => void;
+  /** The native window's title before any run page names one; `VibeSys` by default. */
+  readonly title?: string;
+  /** The native window closed. */
+  readonly windowClosed?: () => void;
 }
 
 function pendingRunPort(port: MessagePortMain): PendingRunPort {
@@ -113,13 +117,14 @@ export class AppWindow {
 
   constructor(deps: AppWindowDeps) {
     this.#deps = deps;
-    this.#runsInSurface = deps.surfaceUrl === SHELL_URL;
+    // The app shell's page, with or without a run window's query, shows runs in its own document.
+    this.#runsInSurface = isSameAppPage(deps.surfaceUrl, SHELL_URL);
     this.#window = new BaseWindow({
       width: 1440,
       height: 900,
       minWidth: 960,
       minHeight: 600,
-      title: 'VibeSys',
+      title: deps.title ?? 'VibeSys',
       ...windowChrome(process.platform),
     });
     this.#runPages = new RunPageLifecycle({
@@ -149,6 +154,7 @@ export class AppWindow {
       for (const listener of [...this.#welcomeDestroyed]) listener();
       this.#detachCurrentRun();
       this.#unregisterRunIpc();
+      deps.windowClosed?.();
     });
     // A new surface document has not attached the run the old one showed: let that run go.
     if (this.#runsInSurface) this.#welcomeNewDocuments.add(() => this.#detachCurrentRun());

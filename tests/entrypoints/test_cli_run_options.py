@@ -11,6 +11,7 @@ from hypothesis import strategies as st
 from entrypoints import cli
 from entrypoints.cli.config import load_config_and_skills
 from entrypoints.cli.preflight import (
+    ACCELERATOR_UNAVAILABLE,
     AGENT_IMAGES_COMMAND,
     agent_image_check,
     preflight_report,
@@ -172,3 +173,62 @@ def test_a_run_that_needs_no_docker_needs_no_agent_image(tmp_path: Path) -> None
     assert (report.uses_docker, report.agent_image.state) == (False, CheckState.OK)
     assert report.agent_image.detail.startswith("not needed")
     assert probe.calls == []
+
+
+_GPU_ROW = "0, GPU-1, NVIDIA A100, 10, 40960, 3\n"
+
+
+def _nvidia_smi(answer: ProbeResult | None) -> ScriptedProbe:
+    """A host whose ``nvidia-smi`` answers ``answer`` and that runs nothing else."""
+    return ScriptedProbe(lambda argv: answer if argv[0] == "nvidia-smi" else None)
+
+
+def _parse(argv: list[str]) -> Namespace:
+    return cli.parse_cli_invocation(argv).args
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [None, ProbeResult(0, ""), ProbeResult(9, "", "NVIDIA-SMI has failed"), ProbeResult(0, "junk")],
+    ids=["no-nvidia-smi", "no-gpu", "driver-error", "unreadable"],
+)
+def test_a_cuda_run_on_a_host_without_a_gpu_fails_preflight_naming_the_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: ProbeResult | None
+) -> None:
+    """Regression: preflight passed, then the run stopped at launch with no GPU for ``cuda``."""
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+
+    report = preflight_report(_argv(tmp_path, "--backend", "cuda"), _parse, _nvidia_smi(answer))
+
+    assert isinstance(report.settings, SettingsInvalid)
+    assert report.settings.code == ACCELERATOR_UNAVAILABLE
+    assert "--backend cpu" in report.settings.message
+    assert "\n" not in report.settings.message
+
+
+@pytest.mark.parametrize(
+    ("flags", "answer"),
+    [
+        (["--backend", "cuda"], ProbeResult(0, _GPU_ROW)),
+        (["--backend", "cpu", "--profiler", "none"], None),
+    ],
+    ids=["cuda-with-gpu", "cpu"],
+)
+def test_a_run_whose_accelerator_is_usable_passes_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: list[str], answer: ProbeResult | None
+) -> None:
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+
+    report = preflight_report(_argv(tmp_path, *flags), _parse, _nvidia_smi(answer))
+
+    assert report.settings.valid is True
+
+
+def test_a_pinned_cuda_device_is_trusted_as_the_run_trusts_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
+
+    report = preflight_report(_argv(tmp_path, "--backend", "cuda"), _parse, _nvidia_smi(None))
+
+    assert report.settings.valid is True

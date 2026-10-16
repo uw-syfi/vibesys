@@ -1,10 +1,10 @@
 import {describe, expect, test} from 'bun:test';
 import {WELCOME_CHANNELS, type WelcomeResult} from '@vibesys/ipc';
 import {
-  bindWelcomeIpc,
   type WelcomeDocument,
   type WelcomeInvokeEvent,
   type WelcomeIpc,
+  WelcomeRouter,
 } from './welcome-ipc.js';
 
 class Deferred {
@@ -120,22 +120,21 @@ async function spin(): Promise<void> {
   for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
 }
 
-describe('bindWelcomeIpc', () => {
+describe('WelcomeRouter', () => {
   test('admits only the welcome resource, independent of query or fragment', async () => {
     const ipc = new FakeWelcomeIpc();
     const document = new FakeWelcomeDocument();
     const answered: string[] = [];
-    bindWelcomeIpc(
-      ipc,
-      document,
-      'app://vibesys/welcome.html',
-      async (_request, generation) => {
+    new WelcomeRouter(ipc).bind({
+      document: document,
+      url: 'app://vibesys/welcome.html',
+      answer: async (_request, generation) => {
         answered.push(generation);
         return null;
       },
-      () => undefined,
-      async () => undefined,
-    );
+      revoke: () => undefined,
+      retire: async () => undefined,
+    });
 
     for (const url of [
       'app://vibesys/welcome.html',
@@ -175,24 +174,23 @@ describe('bindWelcomeIpc', () => {
     const answered: Array<{readonly generation: string; readonly change: number}> = [];
     const revoked: string[] = [];
     const retired: string[] = [];
-    bindWelcomeIpc(
-      ipc,
-      document,
-      'app://vibesys/welcome.html',
-      async (request, generation) => {
+    new WelcomeRouter(ipc).bind({
+      document: document,
+      url: 'app://vibesys/welcome.html',
+      answer: async (request, generation) => {
         if (request.kind !== 'set-checkout') return null;
         answered.push({generation, change: request.change});
         if (answered.length === 1) await firstReply.promise;
         return '/checkout';
       },
-      generation => {
+      revoke: generation => {
         revoked.push(generation);
       },
-      async generation => {
+      retire: async generation => {
         retired.push(generation);
         await retirement.promise;
       },
-    );
+    });
 
     const first = ipc.invokeFrom('10:100', WELCOME_CHANNELS.setCheckout, 'local', '/old', 1);
     await spin();
@@ -224,21 +222,20 @@ describe('bindWelcomeIpc', () => {
     const retirementsStarted = new Deferred();
     const retired: string[] = [];
     const answered: string[] = [];
-    bindWelcomeIpc(
-      ipc,
-      document,
-      'app://vibesys/welcome.html',
-      async (_request, generation) => {
+    new WelcomeRouter(ipc).bind({
+      document: document,
+      url: 'app://vibesys/welcome.html',
+      answer: async (_request, generation) => {
         answered.push(generation);
         return null;
       },
-      () => undefined,
-      async generation => {
+      revoke: () => undefined,
+      retire: async generation => {
         retired.push(generation);
         if (retired.length === 2) retirementsStarted.resolve();
         await (generation === '10:100' ? firstRetirement.promise : secondRetirement.promise);
       },
-    );
+    });
     await ipc.invokeFrom('10:100', WELCOME_CHANNELS.hosts);
     await ipc.invokeFrom('10:101', WELCOME_CHANNELS.hosts);
 
@@ -264,17 +261,16 @@ describe('bindWelcomeIpc', () => {
     const ipc = new FakeWelcomeIpc();
     const document = new FakeWelcomeDocument();
     const answered: string[] = [];
-    bindWelcomeIpc(
-      ipc,
-      document,
-      'app://vibesys/welcome.html',
-      async (_request, generation) => {
+    new WelcomeRouter(ipc).bind({
+      document: document,
+      url: 'app://vibesys/welcome.html',
+      answer: async (_request, generation) => {
         answered.push(generation);
         return null;
       },
-      () => undefined,
-      async () => undefined,
-    );
+      revoke: () => undefined,
+      retire: async () => undefined,
+    });
 
     const obsolete = ipc.invokeFrom('10:100', WELCOME_CHANNELS.hosts);
     document.navigate(null);
@@ -296,24 +292,24 @@ describe('bindWelcomeIpc', () => {
     const ipc = new FakeWelcomeIpc();
     const document = new FakeWelcomeDocument();
     const retired: string[] = [];
-    bindWelcomeIpc(
-      ipc,
-      document,
-      'app://vibesys/welcome.html',
-      async () => null,
-      () => undefined,
-      async generation => {
+    new WelcomeRouter(ipc).bind({
+      document: document,
+      url: 'app://vibesys/welcome.html',
+      answer: async () => null,
+      revoke: () => undefined,
+      retire: async generation => {
         retired.push(generation);
       },
-    );
+    });
 
     await ipc.invokeFrom('10:100', WELCOME_CHANNELS.hosts);
     document.destroy();
     await spin();
     expect(retired).toEqual(['10:100']);
+    // The closed window's binding is gone: nothing answers its sender any more.
     await expect(ipc.invokeFrom('10:100', WELCOME_CHANNELS.hosts)).resolves.toMatchObject({
       ok: false,
-      error: 'welcome view was replaced',
+      error: 'not the welcome view',
     });
   });
 
@@ -322,19 +318,18 @@ describe('bindWelcomeIpc', () => {
     const document = new FakeWelcomeDocument();
     const retired: string[] = [];
     const answered: string[] = [];
-    bindWelcomeIpc(
-      ipc,
-      document,
-      'app://vibesys/welcome.html',
-      async (_request, generation) => {
+    new WelcomeRouter(ipc).bind({
+      document: document,
+      url: 'app://vibesys/welcome.html',
+      answer: async (_request, generation) => {
         answered.push(generation);
         return null;
       },
-      () => undefined,
-      async generation => {
+      revoke: () => undefined,
+      retire: async generation => {
         retired.push(generation);
       },
-    );
+    });
 
     await ipc.invokeFromSender(7, 'app://vibesys/welcome.html', '10:100', WELCOME_CHANNELS.hosts);
     document.replace(8);
@@ -347,5 +342,60 @@ describe('bindWelcomeIpc', () => {
     ).resolves.toEqual({ok: true, value: null});
     expect(retired).toEqual(['10:100']);
     expect(answered).toEqual(['10:100', '11:101']);
+  });
+
+  test('routes each request to the window that sent it, and a closed window to nobody', async () => {
+    const ipc = new FakeWelcomeIpc();
+    const router = new WelcomeRouter(ipc);
+    const main = new FakeWelcomeDocument();
+    const run = new FakeWelcomeDocument();
+    run.replace(8);
+    const answered: string[] = [];
+    const retired: string[] = [];
+    const bind = (name: string, document: FakeWelcomeDocument, url: string): void =>
+      router.bind({
+        document,
+        url,
+        answer: async (_request, generation) => {
+          answered.push(`${name} ${generation}`);
+          return name;
+        },
+        revoke: () => undefined,
+        retire: async generation => {
+          retired.push(`${name} ${generation}`);
+        },
+      });
+    bind('main', main, 'app://vibesys/shell.html');
+    bind('run', run, 'app://vibesys/shell.html');
+    const ask = (sender: number, url: string, generation: string) =>
+      ipc.invokeFromSender(sender, url, generation, WELCOME_CHANNELS.hosts);
+
+    await expect(ask(7, 'app://vibesys/shell.html', '10:100')).resolves.toEqual({
+      ok: true,
+      value: 'main',
+    });
+    await expect(ask(8, 'app://vibesys/shell.html?run=x', '20:200')).resolves.toEqual({
+      ok: true,
+      value: 'run',
+    });
+    // A sender that is neither window's current document, or on another page, is refused.
+    await expect(ask(9, 'app://vibesys/shell.html', '30:300')).resolves.toMatchObject({ok: false});
+    await expect(ask(8, 'app://vibesys/welcome.html', '20:200')).resolves.toMatchObject({
+      ok: false,
+    });
+
+    // Closing the run window retires only its documents; the main window still answers.
+    run.destroy();
+    await spin();
+    expect(retired).toEqual(['run 20:200']);
+    await expect(ask(8, 'app://vibesys/shell.html', '20:200')).resolves.toMatchObject({
+      ok: false,
+      error: 'not the welcome view',
+    });
+    await expect(ask(7, 'app://vibesys/shell.html', '10:100')).resolves.toEqual({
+      ok: true,
+      value: 'main',
+    });
+    expect(answered).toEqual(['main 10:100', 'run 20:200', 'main 10:100']);
   });
 });

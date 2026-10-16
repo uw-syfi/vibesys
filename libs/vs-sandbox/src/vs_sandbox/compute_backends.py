@@ -181,6 +181,7 @@ def make_local_shell_sandbox(
 
 _REGISTRY: dict[ComputeBackend, Callable[..., ComputeBackendImpl]] = {}
 _HOST_ONLY: set[ComputeBackend] = set()
+_AVAILABILITY: dict[ComputeBackend, Callable[[CommandProbe], str | None]] = {}
 _DEFAULT_IMAGES: dict[ComputeBackend, str] = {}
 
 
@@ -189,13 +190,17 @@ def register_compute_backend(
     factory: Callable[..., ComputeBackendImpl],
     *,
     host_only: bool = False,
+    unavailable: Callable[[CommandProbe], str | None] | None = None,
     default_image: str | None = None,
 ) -> None:
     """Register the factory used to construct one compute backend.
 
     ``host_only`` declares that the backend's accelerator cannot be reached
     from a container, so its agent has to run on the host. ``default_image``
-    is the image the factory falls back to when a run names none.
+    is the image the factory falls back to when a run names none. ``unavailable``
+    says, through a command probe, why this host cannot provide the backend's
+    accelerator (``None`` when it can); it makes the decision the backend's own
+    ``ensure_accelerator_available`` makes, and a backend without one always can.
     """
     _REGISTRY[backend] = factory
     if host_only:
@@ -206,6 +211,21 @@ def register_compute_backend(
         _DEFAULT_IMAGES.pop(backend, None)
     else:
         _DEFAULT_IMAGES[backend] = default_image
+    if unavailable is None:
+        _AVAILABILITY.pop(backend, None)
+    else:
+        _AVAILABILITY[backend] = unavailable
+
+
+def accelerator_unavailable(backend: ComputeBackend, probe: CommandProbe) -> str | None:
+    """Why this host cannot provide *backend*'s accelerator, asked through *probe*, or ``None``.
+
+    A run raises this reason from ``ensure_accelerator_available`` before its image
+    build; asking here lets a check made before the run report it instead.
+    """
+    _ensure_defaults()
+    check = _AVAILABILITY.get(backend)
+    return None if check is None else check(probe)
 
 
 def backend_is_host_only(backend: ComputeBackend) -> bool:
@@ -338,7 +358,10 @@ def _register_defaults() -> None:
     trainium = import_module("vs_sandbox.trainium_backend")
 
     register_compute_backend(
-        ComputeBackend.CUDA, cuda.CudaBackend, default_image=cuda.DEFAULT_IMAGE
+        ComputeBackend.CUDA,
+        cuda.CudaBackend,
+        default_image=cuda.DEFAULT_IMAGE,
+        unavailable=cuda.cuda_accelerator_unavailable,
     )
     register_compute_backend(
         ComputeBackend.METAL,
@@ -365,6 +388,7 @@ __all__ = [
     "ContentionMonitor",
     "Device",
     "SandboxKind",
+    "accelerator_unavailable",
     "backend_default_image",
     "backend_is_host_only",
     "create_compute_backend",
