@@ -92,7 +92,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from server.relay import ByteSink, ByteSource
-    from vs_sim.api import Connection, Event, Threads
+    from vs_sim.api import Connection, Event, ReservableThreads, Threads
 
 WATCH_INTERVAL_SECONDS: Final = 1.0
 """How often a watch reads the registry; a change is pushed at most this late."""
@@ -740,7 +740,9 @@ class _ChannelClosed:
 
 
 class _Channel:
-    def __init__(self, host: HelperHost, inbox: _Inbox, output: ByteSink, threads: Threads) -> None:
+    def __init__(
+        self, host: HelperHost, inbox: _Inbox, output: ByteSink, threads: ReservableThreads
+    ) -> None:
         self._host = host
         self._inbox = inbox
         self._output = output
@@ -1035,7 +1037,7 @@ def serve_channel(
     source: ByteSource,
     output: ByteSink,
     errors: ByteSink,
-    threads: Threads,
+    threads: ReservableThreads,
 ) -> int:
     """Serve one channel until its input ends or it is relayed; the process exit status.
 

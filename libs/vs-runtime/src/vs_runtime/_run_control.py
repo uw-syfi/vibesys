@@ -88,6 +88,15 @@ class RunControlChannel(Protocol):
         """Cancel a pause or stop request and release a parked run."""
         ...
 
+    def land_pause(self) -> None:
+        """Report that a pause has landed: the run is held paused and nothing of it runs.
+
+        Emits ``PAUSED`` when a pause is in force and no stop is pending; otherwise nothing,
+        so a resume or a stop that came first is never reported as a pause. The core run loop
+        calls it, as a parked turn reports its own pause.
+        """
+        ...
+
     def resume_with_fallback(self) -> None:
         """Resume like :meth:`resume`, asking a run parked on a provider capacity limit to switch.
 
@@ -231,6 +240,13 @@ class RuntimeRunControlChannel:
     def resume(self) -> None:
         """Cancel a pending pause or stop and release a parked run."""
         self._release(fallback=False)
+
+    def land_pause(self) -> None:
+        """Emit ``PAUSED`` while a pause is in force and no stop is pending."""
+        with self._lock:
+            landed = self._paused and not self._stop_requested
+        if landed:
+            self._emit(RunControlTransitionKind.PAUSED)
 
     def _release(self, *, fallback: bool) -> None:
         with self._lock:

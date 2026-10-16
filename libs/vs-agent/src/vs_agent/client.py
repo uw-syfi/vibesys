@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
+from vs_agent import provider_profiles
 from vs_agent.callbacks import AgentLogger
 from vs_agent.cli_common import agent_label, materialize_skills
 from vs_agent.contracts import (
@@ -483,6 +484,7 @@ class AgentClient:
             model_name=spec.model,
             agent_label=label,
             progress=progress,
+            context_window=provider_profiles.model_context_window(spec.provider, spec.model),
             agent_kind=spec.role,
             round_label=turn.label,
             invocation_id=turn.invocation_id,

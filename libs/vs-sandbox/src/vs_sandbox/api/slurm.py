@@ -13,12 +13,18 @@ from vs_sandbox.agent_gpu import (
     AgentGpuLauncher,
     AgentGpuRequestError,
     GpuCommand,
+    GpuJobOutcome,
     GpuJobRequest,
     GpuLauncher,
     choose_partition,
     parse_partition_limits,
 )
 from vs_sandbox.agent_gpu_cap import CANCELLED_BEFORE_SUBMISSION, CappedGpuLauncher
+from vs_sandbox.gpu_command_runner import (
+    GpuCaptureRecovery,
+    GpuCommandRunner,
+    gpu_capture_execution_identity,
+)
 from vs_sandbox.host_command_broker import (
     BrokerTransport,
     GpuCommands,
@@ -117,8 +123,11 @@ __all__ = [
     "BrokerTransport",
     "BrokeredProcesses",
     "CappedGpuLauncher",
+    "GpuCaptureRecovery",
     "GpuCommand",
+    "GpuCommandRunner",
     "GpuCommands",
+    "GpuJobOutcome",
     "GpuJobRequest",
     "GpuLauncher",
     "HipApiTime",
@@ -155,6 +164,7 @@ __all__ = [
     "check_read_only_links",
     "choose_partition",
     "configured_capture_lifecycle",
+    "gpu_capture_execution_identity",
     "load_slurm_gpu_alias_settings",
     "load_slurm_operator_settings",
     "load_slurm_policy",

@@ -294,8 +294,9 @@ class _TruncatingRunner(FakeCommandRunner):
         super().execute(command, timeout=timeout, output=output)
         if command.startswith("rm -f -- ") and "--output-json" in command:
             head = "evaluator log line\n" * 10
+            combined = head + "\n\n... Output truncated at 100000 characters."
             return CommandResult(
-                output=head + "\n\n... Output truncated at 100000 characters.",
+                output=combined,
                 exit_code=0,
                 truncated=True,
                 stdout=head,

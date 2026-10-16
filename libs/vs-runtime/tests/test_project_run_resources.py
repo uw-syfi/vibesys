@@ -29,6 +29,7 @@ from vs_runtime.api.infrastructure import (
     open_project_run_resources,
 )
 from vs_runtime.api.testing import FakeProjectMaterializationEffects
+from vs_sandbox.api import CaptureExecutionIdentity, CaptureExecutionKind
 from vs_sim.api.testing import ManualClock
 
 if TYPE_CHECKING:
@@ -402,6 +403,39 @@ def test_resume_recovery_failure_releases_the_run_host_lock(tmp_path: Path) -> N
     assert raised.value is failure
     with Project.open(root).state.exclusive_run_host(_RUN_ID):
         pass
+
+
+def test_restart_reconciles_candidate_capture_before_any_workspace_session_opens(
+    tmp_path: Path,
+) -> None:
+    """A new process uses run-scoped recovery, not a replacement root command runner."""
+    root = tmp_path / "project"
+    _write_project(root)
+    effects = _effects([])
+    execution = CaptureExecutionIdentity(
+        kind=CaptureExecutionKind.SLURM_GPU,
+        execution_id="vibesys-run-capture-1234abcd",
+    )
+    with open_project_run_resources(
+        _request(root), effects=effects, resolve_resume=_unexpected_resume
+    ) as first_host:
+        first_host.record_capture_intent("candidate-1", execution)
+
+    recovered: list[tuple[Path, CaptureExecutionIdentity]] = []
+
+    class Recovery:
+        def reconcile(self, workspace: Path, recorded: CaptureExecutionIdentity) -> bool:
+            recovered.append((workspace, recorded))
+            return True
+
+    with open_project_run_resources(
+        _request(root, existing=True),
+        effects=replace(effects, capture_recovery=Recovery()),
+        resolve_resume=lambda _recorded: OrchestrationResumeDecision(descriptor=None),
+    ) as restarted:
+        expected = restarted.project.state.candidate_worktree_directory(_RUN_ID, "candidate-1")
+        assert recovered == [(expected, execution)]
+        assert restarted.capture_intents() == ()
 
 
 def test_project_run_request_uses_canonical_project_root(tmp_path: Path) -> None:

@@ -51,8 +51,9 @@ class ModelCfg(_Strict):
         min_length=1,
         max_length=256,
         description=(
-            "Model identifier, e.g. 'claude-opus-5'. The --model flag overrides. Must be a "
-            "vetted model of the selected CLI provider; None uses that provider's default."
+            "Model identifier, as the selected CLI provider's --model flag takes it. The "
+            "--model flag overrides. Must be a vetted model of that provider (agentshim's "
+            "known models for it); None uses that provider's default."
         ),
     )
 

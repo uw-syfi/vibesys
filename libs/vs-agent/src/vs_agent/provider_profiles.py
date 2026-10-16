@@ -14,7 +14,16 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from types import ModuleType
+
     from agentshim import ProviderProfile
+
+
+def _agentshim() -> ModuleType:
+    """Import ``agentshim`` on first use (see :func:`provider_profile` for why)."""
+    import agentshim  # noqa: PLC0415  # lint-waiver: LW-010181 [PLC0415]; Keep agentshim lazy in provider_profile so unused providers and import cycles stay unloaded.
+
+    return agentshim
 
 
 def provider_profile(provider: str) -> ProviderProfile:
@@ -29,11 +38,19 @@ def provider_profile(provider: str) -> ProviderProfile:
         ValueError: if agentshim does not register *provider*. The message
             names the provider and the registered alternatives.
     """
-    import agentshim  # noqa: PLC0415  # lint-waiver: LW-010181 [PLC0415]; Keep agentshim lazy in provider_profile so unused providers and import cycles stay unloaded.
-
-    return agentshim.get_provider(provider).profile
+    return _agentshim().get_provider(provider).profile
 
 
 def provider_binary(provider: str) -> str:
     """The program name of *provider*'s CLI, as agentshim's profile names it."""
     return provider_profile(provider).binary
+
+
+def model_context_window(provider: str, model: str | None) -> int | None:
+    """*model*'s context window in tokens when *provider* runs it, or ``None`` when unknown.
+
+    agentshim owns the fact (``agentshim.context_window``). An unknown model is
+    ``None``, never a guess from a similar name, so a caller shows no limit
+    rather than a wrong one.
+    """
+    return _agentshim().context_window(provider, model)

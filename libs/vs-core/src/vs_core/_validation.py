@@ -42,13 +42,24 @@ from .types.until import WhileAlive, WhileOpen, Within
 
 if TYPE_CHECKING:
     from .types.attempts import AttemptView
-    from .types.kernel import CoreState, DecisionSubmitted
+    from .types.kernel import CoreState, DecisionSubmitted, RunState
 
 
 def _reject(
     decision: Command, code: RejectionCode, path: tuple[str | int, ...], detail: str
 ) -> Rejected:
     return Rejected(decision_id=decision.decision_id, code=code, path=path, detail=detail)
+
+
+def takes_command(run: RunState, command: Command) -> bool:
+    """Whether the run's status lets core take ``command`` now.
+
+    An open run takes any command. A run that is not open (paused, closing, blocked, or with
+    its result proposed) still takes a ``Finish`` and a ``Withdraw`` until it is terminal.
+    """
+    if run.status == RunStatus.RUNNING and run.result is None:
+        return True
+    return isinstance(command, Finish | Withdraw) and run.status != RunStatus.TERMINAL
 
 
 def validate_decision(
@@ -60,9 +71,7 @@ def validate_decision(
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
-    if (state.run.status != RunStatus.RUNNING or state.run.result is not None) and not (
-        isinstance(decision, Finish | Withdraw) and state.run.status != RunStatus.TERMINAL
-    ):
+    if not takes_command(state.run, decision):
         return _reject(
             decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
         )

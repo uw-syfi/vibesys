@@ -158,7 +158,7 @@ def test_agent_gpu_cancellation_scancels_before_stopping_the_whole_local_group(
     )
     output = bytearray()
 
-    status = threads.run(
+    outcome = threads.run(
         lambda: launcher.run(
             GpuJobRequest(gpus=1, time_minutes=5),
             GpuCommand(argv=("work",), cwd=Path("workspace"), env={"TOKEN": "value"}),
@@ -170,8 +170,9 @@ def test_agent_gpu_cancellation_scancels_before_stopping_the_whole_local_group(
     expected = ["scancel", "SIGTERM"]
     if term_survivors:
         expected.append("SIGKILL")
-    assert trace == [*expected, "squeue"]
-    assert status == 143
+    assert trace == [*expected, *(["squeue"] * 6)]
+    assert outcome.exit_code == 143
+    assert outcome.termination_confirmed
     assert output.endswith(b"wrapper ready\n")
     assert processes.started[0].env == {"TOKEN": "value"}
     assert processes.started[0].merge_stderr
@@ -198,7 +199,7 @@ def test_agent_gpu_does_not_signal_a_group_that_settles_during_scancel() -> None
         threads=threads,
     )
 
-    status = threads.run(
+    outcome = threads.run(
         lambda: launcher.run(
             GpuJobRequest(gpus=1, time_minutes=5),
             GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
@@ -207,8 +208,9 @@ def test_agent_gpu_does_not_signal_a_group_that_settles_during_scancel() -> None
         )
     )
 
-    assert status == 0
-    assert trace == ["scancel", "squeue"]
+    assert outcome.exit_code == 0
+    assert outcome.termination_confirmed
+    assert trace == ["scancel", *(["squeue"] * 6)]
 
 
 def _launcher(
@@ -263,12 +265,12 @@ def test_a_cancel_is_reported_unconfirmed_while_squeue_still_lists_or_cannot_ans
 ) -> None:
     """Regression (REVIEW-9 P2-3): a killed wrapper's job kept its GPUs with no report.
 
-    The job counts as gone only on an ``squeue`` that succeeded and listed nothing,
-    and it is asked a bounded number of times.
+    The job counts as gone only after six consecutive successful ``squeue``
+    answers list nothing, and the observation window remains bounded.
     """
     trace: list[str] = []
     output = _cancelled_run(_SlurmProbe(trace, squeue=[*listed, ProbeResult(0, "")]), trace)
 
-    confirmed = len(listed) < 6
-    assert trace.count("squeue") == (len(listed) + 1 if confirmed else 6)
+    confirmed = len(listed) <= 6
+    assert trace.count("squeue") == min(len(listed) + 6, 12)
     assert (b"cancel unconfirmed" in output) is not confirmed

@@ -1,8 +1,9 @@
 import {describe, expect, test} from 'bun:test';
-import type {RunEvent} from '@vibesys/contracts';
+import type {RunEvent, RunSnapshot, Span} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, foldChunk} from '@vibesys/logs';
+import type {RunTracePublication} from '@vibesys/run-session';
 import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
@@ -106,6 +107,29 @@ function fold(state: RunPageState, actions: readonly RunPageAction[]) {
   return {state: current, requests};
 }
 
+function traceSpan(id: string): Span {
+  return {id, parent: null, type: 'flow', name: id, status: 'done', started_at: 1};
+}
+
+function spanEvent(sequence: number, id: string): RunEvent {
+  return {
+    sequence,
+    type: 'span_started',
+    data: {kind: 'span_started', span: traceSpan(id)},
+  } as RunEvent;
+}
+
+function attached(): RunPageState {
+  const requested = fold(initial(), [{type: 'record', record: RECORDS[2] as RunRecord}]);
+  const attach = requested.requests.find(request => request.kind === 'attach');
+  if (attach?.kind !== 'attach') throw new Error('no attachment requested');
+  return fold(requested.state, [{type: 'attached', token: attach.token, error: null}]).state;
+}
+
+function snapshot(sequence: number, ids: readonly string[]): RunSnapshot {
+  return {run_id: RUN.runId, sequence, status: 'running', spans: ids.map(traceSpan)};
+}
+
 const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'ask-stop'},
   {type: 'cancel-stop'},
@@ -182,10 +206,20 @@ function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
         },
       };
     case 2:
+      if (random.bool()) {
+        return {
+          type: 'run-data',
+          data: {
+            kind: 'rebootstrap',
+            base: random.pick(['preserve', 'reset'] as const),
+            events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
+          },
+        };
+      }
       return {
         type: 'run-data',
         data: {
-          kind: random.pick(['events', 'rebootstrap'] as const),
+          kind: 'events',
           events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
         },
       };
@@ -379,6 +413,86 @@ describe('the run page store', () => {
       {type: 'record', record: {kind: 'live', run: server('paused')}},
     ]).state;
     expect(quotaBannerView(byUser, at)).toBeNull();
+  });
+
+  test('same-store rebootstrap keeps the snapshot base and replaces the replay suffix', () => {
+    const state = fold(attached(), [
+      {type: 'run-data', data: {kind: 'snapshot', snapshot: snapshot(40, ['base'])}},
+      {type: 'run-data', data: {kind: 'events', events: [spanEvent(41, 'old-tail')]}},
+      {
+        type: 'run-data',
+        data: {
+          kind: 'rebootstrap',
+          base: 'preserve',
+          events: [spanEvent(42, 'replayed-tail')],
+        },
+      },
+    ]).state;
+
+    expect(viewedRun(state).spans.map(span => span.id)).toEqual(['base', 'replayed-tail']);
+    expect(state.run.trace.base.sequence).toBe(40);
+    expect(state.run.trace.events.map(item => item.sequence)).toEqual([42]);
+  });
+
+  test('retains snapshot-only history when an event publication races ahead of the snapshot', () => {
+    const publications: readonly RunTracePublication[] = [
+      {kind: 'events', events: [spanEvent(2, 'live-tail')]},
+      {kind: 'snapshot', snapshot: snapshot(1, ['historical-base'])},
+    ];
+    const state = fold(
+      attached(),
+      publications.map(data => ({type: 'run-data', data})),
+    ).state;
+
+    expect(viewedRun(state).spans.map(span => span.id)).toEqual(['historical-base', 'live-tail']);
+    expect(state.run.trace.base.sequence).toBe(1);
+    expect(state.run.trace.events.map(item => item.sequence)).toEqual([2]);
+  });
+
+  test('a proven replacement store resets both the trace base and replay suffix', () => {
+    const state = fold(attached(), [
+      {type: 'run-data', data: {kind: 'snapshot', snapshot: snapshot(40, ['old-base'])}},
+      {type: 'run-data', data: {kind: 'events', events: [spanEvent(41, 'old-tail')]}},
+      {
+        type: 'run-data',
+        data: {
+          kind: 'rebootstrap',
+          base: 'reset',
+          events: [spanEvent(1, 'new-store')],
+        },
+      },
+    ]).state;
+
+    expect(viewedRun(state).spans.map(span => span.id)).toEqual(['new-store']);
+    expect(state.run.trace.base.sequence).toBe(0);
+    expect(state.run.trace.events.map(item => item.sequence)).toEqual([1]);
+  });
+
+  test('a fenced snapshot restores snapshot-only spans after an identity-unproven reset', () => {
+    const publication: RunTracePublication = {
+      kind: 'rebootstrap',
+      base: 'reset',
+      events: [spanEvent(2, 'identity-unknown')],
+    };
+    const reset = fold(attached(), [
+      {type: 'run-data', data: {kind: 'snapshot', snapshot: snapshot(40, ['old-base'])}},
+      {type: 'run-data', data: {kind: 'events', events: [spanEvent(41, 'old-tail')]}},
+      {type: 'run-data', data: publication},
+    ]).state;
+    expect(viewedRun(reset).spans.map(span => span.id)).toEqual(['identity-unknown']);
+
+    const restored = fold(reset, [
+      {
+        type: 'run-data',
+        data: {kind: 'snapshot', snapshot: snapshot(2, ['old-base', 'identity-unknown'])},
+      },
+    ]).state;
+    expect(viewedRun(restored).spans.map(span => span.id)).toEqual([
+      'old-base',
+      'identity-unknown',
+    ]);
+    expect(restored.run.trace.base.sequence).toBe(2);
+    expect(restored.run.trace.events).toEqual([]);
   });
 
   test('offers force stop only after the bound elapses while stopping', () => {

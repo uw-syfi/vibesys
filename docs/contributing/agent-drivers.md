@@ -109,10 +109,14 @@ by a fresh one.
 
 ## Vetted harnesses
 
-`vs_agent.provider_policy.HARNESSES` is the one list of the provider and model
-pairs VibeSys runs agents with; a provider's first entry is its default model.
-Which pairs are vetted is launch policy, so the list lives here; whether a CLI
-accepts a model is provider knowledge, and stays in agentshim.
+`vs_agent.provider_policy.harnesses()` is the one list of the provider and
+model pairs VibeSys runs agents with. It is derived at call time: for each
+shipped provider, the models agentshim's `ProviderProfile.models` lists, the
+provider's default first. Which models a CLI runs, its default model, and each
+model's context window (`agentshim.context_window`) are model knowledge, owned
+by agentshim; VibeSys's policy is only which providers it ships and the
+operator's opt-out. `test_no_model_knowledge_in_product_code` fails on a model
+id literal in product code.
 
 `AgentSpec` enforces it: constructing a CLI spec, or replacing its model (a
 role override, a quota fallback, a chat thread), raises

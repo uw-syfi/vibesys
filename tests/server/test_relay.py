@@ -38,12 +38,24 @@ from server.relay import (
     advance,
     ending,
     next_deadline,
+    relay,
     run_bridge,
 )
-from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads, examples
+from vs_sim.api import WorkerStartRefusedError
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    RefusingReservableThreads,
+    SimNetwork,
+    SimThreads,
+    examples,
+    wait_or_fail,
+)
 
 if TYPE_CHECKING:
-    from vs_sim.api import Connection, Listener
+    from collections.abc import Callable
+    from types import TracebackType
+
+    from vs_sim.api import Condition, Connection, Event, Listener, Lock, WorkerReservation
 
 _LIMITS = BridgeLimits()
 _DEADLINE = _LIMITS.write_deadline_seconds
@@ -236,6 +248,607 @@ class _Stdout:
     def wait_for(self, size: int) -> None:
         with self._cond:
             assert self._cond.wait_for(lambda: len(self.data) >= size, HANG_GUARD_S)
+
+
+class _ObservedRefusingThreads(RefusingReservableThreads):
+    """Record worker ownership and the exact eager/refusal interleaving."""
+
+    def __init__(self, delegate: SimThreads, refusal: str) -> None:
+        super().__init__(delegate, {refusal: 1})
+        self.events: list[str] = []
+        self.reservations: list[_ObservedReservation] = []
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        entered = self.event()
+        exited = self.event()
+
+        def observed() -> object:
+            self.events.append(f"{name}:entered")
+            entered.set()
+            try:
+                return target()
+            finally:
+                self.events.append(f"{name}:exited")
+                exited.set()
+
+        reservation = _ObservedReservation(
+            self,
+            super().reserve(observed, name=name, daemon=daemon),
+            entered,
+            exited,
+        )
+        self.reservations.append(reservation)
+        return reservation
+
+    @property
+    def active(self) -> bool:
+        return any(reservation.active for reservation in self.reservations)
+
+
+class _ReservationAcquisitionRefusedThreads(RefusingReservableThreads):
+    """Refuse native preparation before the first reservation can be returned."""
+
+    def __init__(self, delegate: SimThreads) -> None:
+        super().__init__(delegate, {})
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        del target, daemon
+        raise WorkerStartRefusedError(f"vs-sim-worker-starter-for-{name}")
+
+
+class _NotifyInterruptedCondition:
+    """A public ``Condition`` Fake whose first broadcast is interrupted."""
+
+    def __init__(self, delegate: Condition, failure: BaseException) -> None:
+        self._delegate = delegate
+        self._failure = failure
+        self.notification_attempts = 0
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:  # noqa: FBT001, FBT002  # LW-921774 [FBT001, FBT002]; mirrors the public Condition contract under test.
+        return self._delegate.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        self._delegate.release()
+
+    def __enter__(self) -> object:
+        return self._delegate.__enter__()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+        /,
+    ) -> None:
+        self._delegate.__exit__(exc_type, exc, tb)
+
+    def wait(self, timeout: float | None = None) -> bool:
+        return self._delegate.wait(timeout)
+
+    def wait_for(self, predicate: Callable[[], bool], timeout: float | None = None) -> bool:
+        return self._delegate.wait_for(predicate, timeout)
+
+    def notify(self, n: int = 1) -> None:
+        self._delegate.notify(n)
+
+    def notify_all(self) -> None:
+        self.notification_attempts += 1
+        if self.notification_attempts == 1:
+            raise self._failure
+        self._delegate.notify_all()
+
+
+class _WaitAfterNotifyInterruptedCondition(_NotifyInterruptedCondition):
+    """Interrupt the owner's first wait after commit notification succeeds."""
+
+    def __init__(self, delegate: Condition, failure: BaseException) -> None:
+        super().__init__(delegate, failure)
+        self._interrupt_next_wait = False
+
+    def wait(self, timeout: float | None = None) -> bool:
+        if self._interrupt_next_wait:
+            self._interrupt_next_wait = False
+            raise self._failure
+        return self._delegate.wait(timeout)
+
+    def notify_all(self) -> None:
+        self.notification_attempts += 1
+        self._delegate.notify_all()
+        if self.notification_attempts == 1:
+            self._interrupt_next_wait = True
+
+
+class _GateNotifyInterruptedThreads(_ObservedRefusingThreads):
+    """Interrupt commit notification or the transition into supervision."""
+
+    def __init__(
+        self,
+        delegate: SimThreads,
+        refusal: str,
+        failure: BaseException,
+        *,
+        interrupt_after_notify: bool = False,
+    ) -> None:
+        super().__init__(delegate, refusal)
+        self._failure = failure
+        self._interrupt_after_notify = interrupt_after_notify
+        self._condition_count = 0
+        self.gate_condition: _NotifyInterruptedCondition | None = None
+
+    def condition(self, lock: Lock | None = None) -> Condition:
+        condition = super().condition(lock)
+        self._condition_count += 1
+        # The startup gate and supervisor deliberately share _Relay's first condition.
+        if self._condition_count == 1:
+            if self._interrupt_after_notify:
+                interrupted = _WaitAfterNotifyInterruptedCondition(condition, self._failure)
+            else:
+                interrupted = _NotifyInterruptedCondition(condition, self._failure)
+            self.gate_condition = interrupted
+            return interrupted
+        return condition
+
+
+class _ObservedReservation:
+    def __init__(
+        self,
+        owner: _ObservedRefusingThreads,
+        reservation: WorkerReservation,
+        entered: Event,
+        exited: Event,
+    ) -> None:
+        self._owner = owner
+        self._reservation = reservation
+        self.entered = entered
+        self._exited = exited
+
+    @property
+    def name(self) -> str:
+        return self._reservation.name
+
+    @property
+    def active(self) -> bool:
+        return self.entered.is_set() and not self._exited.is_set()
+
+    def start(self) -> None:
+        try:
+            self._reservation.start()
+        except WorkerStartRefusedError:
+            self._owner.events.append(f"{self.name}:refused")
+            raise
+
+    def settle(self) -> None:
+        self._reservation.settle()
+
+
+class _StartRaisesThreads(_ObservedRefusingThreads):
+    """Start one reserved worker, then raise before returning from its start."""
+
+    def __init__(
+        self,
+        delegate: SimThreads,
+        name: str,
+        failure: BaseException,
+        *,
+        settle_name: str | None = None,
+        settle_failure: BaseException | None = None,
+    ) -> None:
+        super().__init__(delegate, "never-refused")
+        self._name = name
+        self._failure = failure
+        self._settle_name = settle_name
+        self._settle_failure = settle_failure
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        reservation = super().reserve(target, name=name, daemon=daemon)
+        assert isinstance(reservation, _ObservedReservation)
+        result: WorkerReservation = reservation
+        if name == self._name:
+            result = _StartRaisesReservation(self.events, reservation, self._failure)
+        if name == self._settle_name:
+            assert self._settle_failure is not None
+            result = _SettleRaisesReservation(self.events, result, self._settle_failure)
+        return result
+
+
+class _StartRaisesReservation:
+    def __init__(
+        self,
+        events: list[str],
+        reservation: _ObservedReservation,
+        failure: BaseException,
+    ) -> None:
+        self._events = events
+        self._reservation = reservation
+        self._failure = failure
+
+    @property
+    def name(self) -> str:
+        return self._reservation.name
+
+    def start(self) -> None:
+        self._reservation.start()
+        wait_or_fail(self._reservation.entered, f"{self.name} target entering")
+        self._events.append(f"{self.name}:raised")
+        raise self._failure
+
+    def settle(self) -> None:
+        self._reservation.settle()
+
+
+class _SettleRaisesReservation:
+    """Interrupt one settlement attempt, then delegate the required retry."""
+
+    def __init__(
+        self,
+        events: list[str],
+        reservation: WorkerReservation,
+        failure: BaseException,
+    ) -> None:
+        self._events = events
+        self._reservation = reservation
+        self._failure = failure
+        self._interrupted = False
+
+    @property
+    def name(self) -> str:
+        return self._reservation.name
+
+    def start(self) -> None:
+        self._reservation.start()
+
+    def settle(self) -> None:
+        if not self._interrupted:
+            self._interrupted = True
+            self._events.append(f"{self.name}:settle-interrupted")
+            raise self._failure
+        self._reservation.settle()
+
+
+class _CatastrophicStartError(BaseException):
+    """A non-Exception failure at the worker-start boundary."""
+
+
+class _GateNotificationInterrupted(BaseException):
+    """An asynchronous exit inside the commit-to-supervision transition."""
+
+
+@dataclass
+class _ObservedConnection:
+    """A connection Fake that exposes relay I/O and exact ownership release."""
+
+    sent: bytearray = field(default_factory=bytearray)
+    receives: int = 0
+    close_calls: int = 0
+
+    def send(self, data: bytes, timeout: float | None = None) -> None:
+        del timeout
+        self.sent += data
+
+    def recv(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        del max_bytes, timeout
+        self.receives += 1
+        return b""
+
+    def peer_closed(self) -> bool:
+        return False
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+@pytest.mark.parametrize("failed_name", ["relay-upstream", "relay-downstream"])
+def test_relay_reports_copy_worker_start_refusal(failed_name: str) -> None:
+    """Either copy-worker refusal is a typed, closed relay outcome rather than an exception."""
+    simulator = SimThreads(schedule_seed=0)
+    threads = RefusingReservableThreads(simulator, {failed_name: 1})
+    connection = _ObservedConnection()
+
+    result = simulator.run(
+        lambda: relay(
+            connection,
+            client=ClientStreams(
+                _Stdin(simulator, [b"{}\n"], finished=True),
+                _Stdout(simulator),
+            ),
+            threads=threads,
+        )
+    )
+
+    assert result == BridgeResult(
+        ChannelEndOutcome.CONNECT_FAILED,
+        "relay copy worker start was refused",
+    )
+    assert connection.close_calls == 1
+
+
+def test_dispatcher_bootstrap_refusal_is_a_closed_relay_outcome() -> None:
+    """Reservation acquisition failure is inside startup ownership and crosses no bytes."""
+    simulator = SimThreads(schedule_seed=0)
+    threads = _ReservationAcquisitionRefusedThreads(simulator)
+    connection = _ObservedConnection()
+    stdin = _Stdin(simulator, [b'{"type":"command.stop"}\n'], finished=True)
+    stdout = _Stdout(simulator)
+
+    result = simulator.run(
+        lambda: relay(
+            connection,
+            client=ClientStreams(stdin, stdout),
+            threads=threads,
+        )
+    )
+
+    assert result == BridgeResult(
+        ChannelEndOutcome.CONNECT_FAILED,
+        "relay copy worker start was refused",
+    )
+    assert stdin.chunks == [b'{"type":"command.stop"}\n']
+    assert connection.sent == b""
+    assert connection.receives == 0
+    assert stdout.data == b""
+    assert connection.close_calls == 1
+
+
+def test_first_worker_refusal_aborts_relay_startup_without_crossing_bytes() -> None:
+    """First-worker refusal closes once and returns typed evidence without a worker."""
+    simulator = SimThreads(schedule_seed=0)
+    threads = _ObservedRefusingThreads(simulator, "relay-upstream")
+    connection = _ObservedConnection()
+    stdin = _Stdin(simulator, [b'{"type":"command.stop"}\n'], finished=True)
+    stdout = _Stdout(simulator)
+
+    result, active_at_return = simulator.run(
+        lambda: (
+            relay(
+                connection,
+                client=ClientStreams(stdin, stdout),
+                threads=threads,
+            ),
+            threads.active,
+        )
+    )
+
+    assert result == BridgeResult(
+        ChannelEndOutcome.CONNECT_FAILED,
+        "relay copy worker start was refused",
+    )
+    assert result.exit_status == EXIT_STATUS[ChannelEndOutcome.CONNECT_FAILED]
+    assert stdin.chunks == [b'{"type":"command.stop"}\n']
+    assert connection.sent == b""
+    assert connection.receives == 0
+    assert stdout.data == b""
+    assert connection.close_calls == 1
+    assert not active_at_return
+
+
+def test_second_worker_refusal_aborts_an_eager_first_worker_before_io() -> None:
+    """The first worker may enter before the second refusal, but it cannot read."""
+    simulator = SimThreads(schedule_seed=0)
+    threads = _ObservedRefusingThreads(simulator, "relay-downstream")
+    connection = _ObservedConnection()
+    stdin = _Stdin(simulator, [b'{"type":"command.stop"}\n'], finished=True)
+
+    result, active_at_return = simulator.run(
+        lambda: (
+            relay(
+                connection,
+                client=ClientStreams(stdin, _Stdout(simulator)),
+                threads=threads,
+            ),
+            threads.active,
+        )
+    )
+
+    assert result.outcome is ChannelEndOutcome.CONNECT_FAILED
+    assert threads.events.index("relay-upstream:entered") < threads.events.index(
+        "relay-downstream:refused"
+    )
+    assert stdin.chunks == [b'{"type":"command.stop"}\n']
+    assert connection.sent == b""
+    assert connection.receives == 0
+    assert connection.close_calls == 1
+    assert not active_at_return
+
+
+def test_aborted_startup_retries_notification_after_publishing_its_decision() -> None:
+    """A failed abort broadcast is retried, so an eager copy worker can settle."""
+    simulator = SimThreads(schedule_seed=0)
+    failure = _GateNotificationInterrupted("abort notification interrupted")
+    threads = _GateNotifyInterruptedThreads(
+        simulator,
+        "relay-downstream",
+        failure,
+    )
+    connection = _ObservedConnection()
+    stdin = _Stdin(simulator, [b'{"type":"command.stop"}\n'], finished=True)
+    stdout = _Stdout(simulator)
+
+    result, active_at_return = simulator.run(
+        lambda: (
+            relay(
+                connection,
+                client=ClientStreams(stdin, stdout),
+                threads=threads,
+            ),
+            threads.active,
+        )
+    )
+
+    assert result == BridgeResult(
+        ChannelEndOutcome.CONNECT_FAILED,
+        "relay copy worker start was refused",
+    )
+    assert threads.gate_condition is not None
+    assert threads.gate_condition.notification_attempts == 2
+    assert stdin.chunks == [b'{"type":"command.stop"}\n']
+    assert connection.sent == b""
+    assert connection.receives == 0
+    assert stdout.data == b""
+    assert connection.close_calls == 1
+    assert not active_at_return
+
+
+def test_interrupted_commit_publication_aborts_before_workers_cross_bytes() -> None:
+    """A failed commit broadcast remains unobserved and can become an owned abort."""
+    simulator = SimThreads(schedule_seed=0)
+    failure = _GateNotificationInterrupted("commit notification interrupted")
+    threads = _GateNotifyInterruptedThreads(simulator, "never-refused", failure)
+    connection = _ObservedConnection()
+    stdin = _Stdin(simulator, [b"pending-command\n"], finished=False)
+    stdout = _Stdout(simulator)
+
+    with pytest.raises(_GateNotificationInterrupted) as raised:
+        simulator.run(
+            lambda: relay(
+                connection,
+                client=ClientStreams(stdin, stdout),
+                threads=threads,
+            )
+        )
+
+    assert raised.value is failure
+    assert threads.gate_condition is not None
+    assert threads.gate_condition.notification_attempts == 2
+    assert threads.events == [
+        "relay-upstream:entered",
+        "relay-downstream:entered",
+        "relay-upstream:exited",
+        "relay-downstream:exited",
+    ]
+    assert stdin.chunks == [b"pending-command\n"]
+    assert connection.sent == b""
+    assert connection.receives == 0
+    assert stdout.data == b""
+    assert connection.close_calls == 1
+    assert not threads.active
+
+
+def test_interrupted_commit_to_supervision_transition_aborts_unobserved_workers() -> None:
+    """An exit after commit notification but before the first wait cannot leak workers."""
+    simulator = SimThreads(schedule_seed=0)
+    failure = _GateNotificationInterrupted("commit-to-supervision interrupted")
+    threads = _GateNotifyInterruptedThreads(
+        simulator,
+        "never-refused",
+        failure,
+        interrupt_after_notify=True,
+    )
+    connection = _ObservedConnection()
+    stdin = _Stdin(simulator, [b"pending-command\n"], finished=False)
+    stdout = _Stdout(simulator)
+
+    with pytest.raises(_GateNotificationInterrupted) as raised:
+        simulator.run(
+            lambda: relay(
+                connection,
+                client=ClientStreams(stdin, stdout),
+                threads=threads,
+            )
+        )
+
+    assert raised.value is failure
+    assert threads.gate_condition is not None
+    assert threads.gate_condition.notification_attempts == 2
+    assert threads.events == [
+        "relay-upstream:entered",
+        "relay-downstream:entered",
+        "relay-upstream:exited",
+        "relay-downstream:exited",
+    ]
+    assert stdin.chunks == [b"pending-command\n"]
+    assert connection.sent == b""
+    assert connection.receives == 0
+    assert stdout.data == b""
+    assert connection.close_calls == 1
+    assert not threads.active
+
+
+@pytest.mark.parametrize("failed_name", ["relay-upstream", "relay-downstream"])
+def test_started_then_interrupted_worker_settles_before_start_failure_propagates(
+    failed_name: str,
+) -> None:
+    """Every ambiguously started worker settles while the exact interruption propagates."""
+    simulator = SimThreads(schedule_seed=0)
+    failure = _CatastrophicStartError(f"catastrophic {failed_name} start")
+    threads = _StartRaisesThreads(simulator, failed_name, failure)
+    connection = _ObservedConnection()
+    stdin = _Stdin(simulator, [b'{"type":"command.stop"}\n'], finished=True)
+    stdout = _Stdout(simulator)
+    active_when_raised: list[bool] = []
+
+    def interrupted() -> BridgeResult:
+        try:
+            return relay(
+                connection,
+                client=ClientStreams(stdin, stdout),
+                threads=threads,
+            )
+        except BaseException:
+            active_when_raised.append(threads.active)
+            raise
+
+    with pytest.raises(_CatastrophicStartError) as raised:
+        simulator.run(interrupted)
+
+    assert raised.value is failure
+    assert str(raised.value) == f"catastrophic {failed_name} start"
+    assert threads.events.index(f"{failed_name}:entered") < threads.events.index(
+        f"{failed_name}:raised"
+    )
+    assert stdin.chunks == [b'{"type":"command.stop"}\n']
+    assert connection.sent == b""
+    assert connection.receives == 0
+    assert stdout.data == b""
+    assert connection.close_calls == 1
+    assert active_when_raised == [False]
+
+
+def test_cleanup_interruption_does_not_replace_start_failure_or_strand_workers() -> None:
+    """An interruption while aborting startup is retried before the original failure escapes."""
+    simulator = SimThreads(schedule_seed=0)
+    failure = _CatastrophicStartError("downstream start interrupted")
+    cleanup_interruption = _CatastrophicStartError("upstream settlement interrupted")
+    threads = _StartRaisesThreads(
+        simulator,
+        "relay-downstream",
+        failure,
+        settle_name="relay-upstream",
+        settle_failure=cleanup_interruption,
+    )
+    connection = _ObservedConnection()
+    stdin = _Stdin(simulator, [b"{}\n"], finished=True)
+    active_when_raised: list[bool] = []
+
+    def interrupted() -> BridgeResult:
+        try:
+            return relay(
+                connection,
+                client=ClientStreams(stdin, _Stdout(simulator)),
+                threads=threads,
+            )
+        except BaseException:
+            active_when_raised.append(threads.active)
+            raise
+
+    with pytest.raises(_CatastrophicStartError) as raised:
+        simulator.run(interrupted)
+
+    assert raised.value is failure
+    assert any(
+        "relay startup cleanup was interrupted 1 time(s)" in note for note in raised.value.__notes__
+    )
+    assert "relay-upstream:settle-interrupted" in threads.events
+    assert active_when_raised == [False]
+    assert stdin.chunks == [b"{}\n"]
+    assert connection.sent == b""
+    assert connection.receives == 0
+    assert connection.close_calls == 1
 
 
 def _split(data: bytes, cuts: list[int]) -> list[bytes]:

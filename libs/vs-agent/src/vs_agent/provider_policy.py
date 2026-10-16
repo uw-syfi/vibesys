@@ -5,7 +5,10 @@ a provider *is*: its binary, state directories, auth environment variables,
 skill-discovery paths, and container install recipe. This module owns what
 VibeSys *decides* to do with that: which providers it ships, what a shipped
 provider's container environment needs, which CLI version its container image
-pins, and which VibeSys behaviors are scoped to a single provider.
+pins, and which VibeSys behaviors are scoped to a single provider. Which
+models a provider runs, and its default model, are agentshim's facts
+(``ProviderProfile.models``); this module only restricts them to the shipped
+providers.
 
 Before this module existed, several of these decisions were copied by hand
 into the modules that needed them (a shipped-provider tuple in the session
@@ -43,29 +46,25 @@ class Harness:
     model: str
 
 
-HARNESSES: tuple[Harness, ...] = (
-    Harness("codex", "gpt-5.6-sol"),
-    Harness("codex", "gpt-5.6-luna"),
-    Harness("codex", "gpt-5.6-terra"),
-    Harness("codex", "gpt-5.5"),
-    Harness("claude", "claude-opus-5"),
-    Harness("claude", "claude-fable-5"),
-    Harness("claude", "claude-sonnet-5"),
-    Harness("claude", "claude-haiku-4-5"),
-    Harness("opencode", "google-vertex/gemini-3-pro-preview"),
-)
-"""The provider and model pairs VibeSys runs agents with, the one list of them.
+def harnesses() -> tuple[Harness, ...]:
+    """The provider and model pairs VibeSys runs agents with, the one list of them.
 
-A run uses only these unless its operator opts out at the terminal
-(``--allow-unvetted-model``). A provider's first entry is its default model. A
-shipped provider with no entry (Gemini today) runs only with that opt-out.
-Which pairs are vetted is VibeSys's launch policy; whether a CLI accepts a
-model is agentshim's provider knowledge.
-"""
+    Derived at call time from agentshim, which owns which models each provider's
+    CLI runs and which is its default (``ProviderProfile.models``, default
+    first). VibeSys's policy is only which providers it ships, and which it
+    offers first: :data:`DEFAULT_CLI_PROVIDER`, then :data:`SHIPPED_PROVIDERS`
+    in order. A run uses only these pairs unless its operator opts out at the
+    terminal (``--allow-unvetted-model``). A shipped provider for which
+    agentshim names no model (Gemini today) runs only with that opt-out.
+    """
+    order = (DEFAULT_CLI_PROVIDER, *(p for p in SHIPPED_PROVIDERS if p != DEFAULT_CLI_PROVIDER))
+    return tuple(
+        Harness(provider, model) for provider in order for model in vetted_models(provider)
+    )
 
 
 class UnvettedHarnessError(ValueError):
-    """A provider and model pair outside :data:`HARNESSES`."""
+    """A provider and model pair outside :func:`harnesses`."""
 
     def __init__(self, provider: str, model: str | None) -> None:
         """Name the pair and the models vetted for ``provider``; ``model`` None names none."""
@@ -78,8 +77,13 @@ class UnvettedHarnessError(ValueError):
 
 
 def vetted_models(provider: str) -> tuple[str, ...]:
-    """The models vetted for ``provider``, its default first."""
-    return tuple(harness.model for harness in HARNESSES if harness.provider == provider)
+    """The models vetted for ``provider``, its default first; none for a provider VibeSys does not ship.
+
+    agentshim's ``ProviderProfile.models`` for a shipped provider, read at call time.
+    """
+    if provider not in SHIPPED_PROVIDERS:
+        return ()
+    return provider_profiles.provider_profile(provider).models
 
 
 def default_model(provider: str) -> str | None:
@@ -90,7 +94,7 @@ def default_model(provider: str) -> str | None:
 
 def check_harness(provider: str, model: str) -> None:
     """Raise :class:`UnvettedHarnessError` unless ``(provider, model)`` is vetted."""
-    if Harness(provider, model) not in HARNESSES:
+    if model not in vetted_models(provider):
         raise UnvettedHarnessError(provider, model)
 
 
@@ -125,7 +129,8 @@ from this dict are rejected up front in ``build_agent_client``.
 CODEX_DOCKER_CLI_VERSION = "0.160.0"
 """Keep the editor container aligned with the verified host CLI feature set.
 
-Luna and its Max reasoning level require a newer CLI than the old 0.125 pin.
+The models VibeSys runs through Codex, and their reasoning levels, need a newer
+CLI than the old 0.125 pin.
 It must also be at least the CLI version agentshim generated its ``codex
 app-server`` protocol from: an older server omits fields that protocol requires,
 and a container turn then fails to decode ``thread/start``.

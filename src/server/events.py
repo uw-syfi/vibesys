@@ -593,7 +593,14 @@ class BenchmarkResultData(EventPayload):
 
 
 class RoundFinishedData(EventPayload):
-    """Summary of attempt, judge, and performance outcomes for a round."""
+    """Wire summary of judge and performance outcomes for one recorded round.
+
+    A projected dynamic implementation round carries a non-null envelope
+    ``round_label`` matching its accompanying ``workstream_finished`` event.
+    ``attempts`` is strategy-neutral; dynamic currently reports one and does
+    not use it as an implementer-turn count. The CLI glossary owns the public
+    round, workstream, and attempt definitions.
+    """
 
     kind: Literal["round_finished"] = "round_finished"
     attempts: int
@@ -756,11 +763,12 @@ class WorkstreamFailureData(BaseModel):
 
 
 class WorkstreamFinishedData(EventPayload):
-    """One workstream (one dynamic-run round) ended; its typed failure, if any.
+    """Wire summary for one projected, recorded policy round and its typed failure, if any.
 
-    See ``vibesys.events.WorkstreamFinishedData`` for why ``setup_failure``
-    and ``refunded`` are always ``False`` from this event's only current
-    producer.
+    See ``vibesys.events.WorkstreamFinishedData`` for the generic producer's
+    serial and dynamic behavior. Its current round projection always reports
+    ``setup_failure`` and ``refunded`` as ``False``; in the dynamic policy
+    specifically, profile and merge workstreams do not emit this event.
     """
 
     kind: Literal["workstream_finished"] = "workstream_finished"

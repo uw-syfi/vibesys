@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from vs_project.api.workspace_tree import EntryKind
 from vs_runtime._agent_execution import (
@@ -19,7 +19,13 @@ from vs_runtime._trusted_evaluation import (
 from vs_runtime._workspace_files import entry_kind, file_fingerprint
 from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
-from vs_sandbox.api import HostResource, HostResourceAccess
+from vs_runtime.contracts import CaptureStopUnconfirmedError
+from vs_sandbox.api import (
+    CaptureExecutionIdentity,
+    CommandStopUnconfirmedError,
+    HostResource,
+    HostResourceAccess,
+)
 from vs_sim.api import CloseOnce, ReleaseStack
 
 if TYPE_CHECKING:
@@ -37,7 +43,7 @@ if TYPE_CHECKING:
         TrustedEvaluationExecutor,
     )
     from vs_sandbox.api import CommandRunner
-    from vs_sim.api import BlockingRunner, OutputSink, Threads
+    from vs_sim.api import BlockingRunner, Event, OutputSink, Threads
 from vs_sim.api import DISCARD
 
 
@@ -72,6 +78,12 @@ class ModelRequestReconciler(Protocol):
         *,
         log: Callable[[str], object] = print,
     ) -> tuple[str, ...]: ...
+
+
+@runtime_checkable
+class _CaptureExecutionProvider(Protocol):
+    @property
+    def capture_execution(self) -> CaptureExecutionIdentity | None: ...
 
 
 class WorkspaceResourceFactory:
@@ -132,6 +144,22 @@ class WorkspaceResourceFactory:
     def leftover_candidates(self) -> tuple[str, ...]:
         """The workspace IDs of the run's candidate worktrees on disk."""
         return self._project.leftover_candidates()
+
+    def unsettled_candidates(self) -> frozenset[str]:
+        """Candidate IDs retained after an unconfirmed command stop."""
+        return self._project.unsettled_candidates()
+
+    def record_capture_intent(self, workspace_id: str, execution: CaptureExecutionIdentity) -> None:
+        """Durably protect a candidate before external submission."""
+        self._project.record_capture_intent(workspace_id, execution)
+
+    def clear_capture_intent(self, workspace_id: str) -> None:
+        """Clear a settled candidate capture intent."""
+        self._project.clear_capture_intent(workspace_id)
+
+    def reconcile_capture_intents(self) -> frozenset[str]:
+        """Retry the run-scoped recovery owner; never use this root session as a proxy."""
+        return self._project.reconcile_capture_intents()
 
     def remove_leftover(self, workspace_id: str) -> None:
         """Remove a candidate worktree no live handle owns; its sandbox closed with its host."""
@@ -432,6 +460,28 @@ class RuntimeWorkspaceResource:
         return self._environment.session.sandbox.execute(
             command, timeout=timeout_seconds, output=DISCARD
         )
+
+    def execute_capture(
+        self,
+        command: str,
+        timeout_seconds: int | None,
+        cancel: Event,
+    ) -> CommandExecutionResult:
+        """Execute through the environment's role-specific capture runner."""
+        try:
+            return self._environment.session.capture_commands.execute(
+                command, timeout=timeout_seconds, cancel=cancel, output=DISCARD
+            )
+        except CommandStopUnconfirmedError as cause:
+            raise CaptureStopUnconfirmedError from cause
+
+    @property
+    def capture_execution(self) -> CaptureExecutionIdentity | None:
+        """Stable external identity when capture can be recovered after restart."""
+        session = self._environment.session
+        if not isinstance(session, _CaptureExecutionProvider):
+            return None
+        return session.capture_execution
 
     def agent_sandbox(self) -> CommandRunner | None:
         environment = self._environment

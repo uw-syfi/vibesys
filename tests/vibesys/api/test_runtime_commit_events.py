@@ -129,7 +129,7 @@ def test_commit_projection_preserves_semantics_and_publication_order() -> None:
     assert workstream_finished.data.refunded is False
     assert workstream_finished.data.repeated_error is False
     assert workstream_finished.data.last_error is None
-    assert workstream_finished.round_label == round_finished.round_label
+    assert workstream_finished.round_label == round_finished.round_label == "round-1"
     iterations_changed = next(
         event for event in captured if event.type is CoreEventType.ITERATIONS_CHANGED
     )

@@ -25,7 +25,9 @@ export {
   type IterationPublicationOutcome,
   type IterationRunMismatch,
   type RunAction,
+  type RunDispatchOutcome,
   type RunStore,
+  type RunTracePublication,
   runStep,
 } from './run.js';
 export {WebSession, type WebSessionOptions} from './web-session.js';

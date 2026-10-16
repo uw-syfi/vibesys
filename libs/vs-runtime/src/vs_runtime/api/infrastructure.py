@@ -292,6 +292,7 @@ from vs_runtime._workspace_runtime import (
     CommandExecutionResult,
     RuntimeAccuracyRun,
     RuntimeBenchmarkRun,
+    RuntimeCaptureCommands,
     RuntimeCommands,
     RuntimeWorkspaceEvaluation,
     WorkspaceEvaluationSpec,
@@ -334,9 +335,11 @@ def create_workspace_runtime(
     """
     workspaces = RuntimeWorkspaces(workspace_resources, runner=blocking.runner)
     commands = RuntimeCommands(workspaces, blocking)
+    capture_commands = RuntimeCaptureCommands(workspaces, blocking)
     return WorkspaceRuntime(
         workspaces=workspaces,
         commands=commands,
+        capture_commands=capture_commands,
         evaluation=RuntimeWorkspaceEvaluation(workspaces, commands, validation_passes),
     )
 

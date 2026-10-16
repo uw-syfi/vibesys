@@ -1768,7 +1768,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "RoundFinishedData": {
       "additionalProperties": false,
-      "description": "Summary of attempt, judge, and performance outcomes for a round.",
+      "description": "Wire summary of judge and performance outcomes for one recorded round.\n\nA projected dynamic implementation round carries a non-null envelope\n``round_label`` matching its accompanying ``workstream_finished`` event.\n``attempts`` is strategy-neutral; dynamic currently reports one and does\nnot use it as an implementer-turn count. The CLI glossary owns the public\nround, workstream, and attempt definitions.",
       "properties": {
         "kind": {
           "const": "round_finished",
@@ -3283,7 +3283,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "WorkstreamFinishedData": {
       "additionalProperties": false,
-      "description": "One workstream (one dynamic-run round) ended; its typed failure, if any.\n\nSee ``vibesys.events.WorkstreamFinishedData`` for why ``setup_failure``\nand ``refunded`` are always ``False`` from this event's only current\nproducer.",
+      "description": "Wire summary for one projected, recorded policy round and its typed failure, if any.\n\nSee ``vibesys.events.WorkstreamFinishedData`` for the generic producer's\nserial and dynamic behavior. Its current round projection always reports\n``setup_failure`` and ``refunded`` as ``False``; in the dynamic policy\nspecifically, profile and merge workstreams do not emit this event.",
       "properties": {
         "kind": {
           "const": "workstream_finished",

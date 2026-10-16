@@ -51,6 +51,7 @@ from vs_runtime.api.core import (
     LeaseUnavailableError,
     RunControlBridge,
     RunLoopConfig,
+    RunOutcome,
     RunStalledError,
     drive_core,
     start_core,
@@ -211,6 +212,87 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
         + math.ceil(horizon / max(LEASE / 3, min_sleep))
         + 3
     )
+
+
+class _Operator(ProbedRunClock):
+    """The loop's clock, with an operator who pauses at the n-th wait and resumes later.
+
+    The operator acts as each wait begins (a wait the loop cancels never ends). The resume
+    comes ``held_for`` waits after core committed the pause, so the run sits paused for a
+    while first; a pause that never lands (the run ended first) is never resumed.
+    """
+
+    def __init__(self, inner: VirtualClock, channel: RuntimeRunControlChannel) -> None:
+        """Wrap the loop's clock; the operator acts on ``channel``."""
+        super().__init__(inner)
+        self.channel = channel
+        self.core: Callable[[], CoreState] | None = None
+        self.pause_at = 0
+        self.held_for = 0
+        self.paused_waits = 0
+        self.statuses: list[RunStatus] = []
+
+    async def sleep(self, seconds: float) -> None:
+        """Pause, or resume a run that has been paused long enough; then advance time."""
+        assert self.core is not None
+        status = self.core().run.status
+        self.statuses.append(status)
+        if len(self.statuses) == self.pause_at:
+            self.channel.request_pause()
+        elif status == RunStatus.PAUSED and self.channel.pause_requested():
+            self.paused_waits += 1
+            if self.paused_waits >= self.held_for:
+                self.channel.resume()
+        await super().sleep(seconds)
+
+
+async def _operated_run(pause_at: int, held_for: int) -> tuple[_Operator, RunOutcome, list[str]]:
+    """The full skeleton run (baseline, one attempt, adoption) with a pause and a resume."""
+    transitions: list[str] = []
+    channel = RuntimeRunControlChannel(
+        lambda transition: transitions.append(transition.kind.value), threads=SimThreads()
+    )
+    clock = _Operator(clock_from(1.0), channel)
+    clock.pause_at, clock.held_for = pause_at, held_for
+    with (
+        tempfile.TemporaryDirectory() as directory,
+        open_skeleton_world(Path(directory), timed=(clock, 20.0)) as world,
+    ):
+        process, host = _host(world, clock, channel)
+        clock.core = lambda: process.shell.record.envelope.core
+        start_core(host, _config())
+        outcome = await drive_core(host, _config())
+    return clock, outcome, transitions
+
+
+#: How the run ends with no pause: it adopts the candidate its one attempt kept.
+_UNPAUSED_END = ("success", "adopted: settlement:settle.1")
+
+
+@settings(max_examples=examples(pr=4, nightly=40), deadline=None)
+# Pauses during the baseline measurement (the chelan4 case: a pause before the first step).
+@example(pause_at=7, held_for=20)
+@example(pause_at=40, held_for=5)
+@example(pause_at=4, held_for=1)
+@given(pause_at=st.integers(min_value=1, max_value=60), held_for=st.integers(1, 30))
+async def test_a_pause_holds_the_run_until_resumed_and_the_run_then_ends_as_it_would_have(
+    pause_at: int, held_for: int
+) -> None:
+    """A pause at any point holds the run, and after the resume the run ends unchanged.
+
+    The search keeps deciding while the run is paused (a measurement in flight still
+    finishes); core takes none of that work until the resume, and the search is never told
+    its work was refused. Whenever core commits the pause with nothing running, the channel
+    reports it landed (``paused``), so the operator sees Paused, then Running on the resume.
+    """
+    clock, outcome, transitions = await _operated_run(pause_at, held_for)
+    assert outcome.status == RunStatus.TERMINAL
+    assert outcome.result is not None
+    assert (outcome.result.outcome, outcome.result.reason) == _UNPAUSED_END
+    if RunStatus.PAUSED in clock.statuses:
+        assert clock.paused_waits >= held_for
+        assert transitions[:2] == ["pause_requested", "paused"]
+        assert transitions[-1] == "resumed"
 
 
 async def _measure_a_job_running(tmp_path: Path, runtime: float) -> tuple[World, Process, bool]:

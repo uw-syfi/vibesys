@@ -205,6 +205,7 @@ class RunControlBridge:
         self._started = False
         self._paused = False
         self._stopped = False
+        self._landed = False
 
     def watch_stop(self, listener: Callable[[], object]) -> Callable[[], None]:
         """Call ``listener`` (on the requesting thread) at each stop request; returns unsubscribe.
@@ -240,6 +241,20 @@ class RunControlBridge:
             self._paused = not self._paused
             events.append(self._event("pause" if self._paused else "resume", now_at))
         return tuple(events)
+
+    def settled(self, core: CoreState, *, running: bool) -> None:
+        """Report a pause once it has landed: core holds the run paused and nothing runs.
+
+        Core takes no new work while paused, but a request already running (an agent turn,
+        a job poll) finishes first; ``running`` says one still is. The pause is reported once
+        per stretch of committed ``PAUSED`` status, so the operator sees the run paused when
+        it is, not only at an agent turn's end.
+        """
+        if core.run.status != RunStatus.PAUSED:
+            self._landed = False
+        elif not running and not self._landed:
+            self._landed = True
+            self._channel.land_pause()
 
     def _report_consumed(self, role: str, round_label: str, execution_id: str) -> None:
         self._channel.notify_steer_consumed(
@@ -465,6 +480,8 @@ class _Loop:
                 return self._outcome(refusal)
             if self._core().run.status == RunStatus.TERMINAL:
                 break
+            if self._controls is not None:
+                self._controls.settled(self._core(), running=bool(self._shell.in_flight))
             if self._signature() == before:
                 await self._wait(now)
         return self._outcome()

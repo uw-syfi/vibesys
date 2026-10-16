@@ -73,6 +73,7 @@ class _EnvironmentSession:
             return _identity_path(host)
 
         self.sandbox = SimpleNamespace(agent_path=agent_path)
+        self.capture_commands = self.sandbox
         self.view = SimpleNamespace(cli_sandboxed=False, isolated=False)
         self.close_count = 0
         self.close_failures = close_failures

@@ -104,10 +104,11 @@ from server.host_helper_requests import (
 from server.registry import FakeInstanceStore, FakeStopIntents, LiveRegistry, StopEffects
 from server.relay import EXIT_STATUS
 from vs_decode.api import Unreadable
+from vs_sim.api import WorkerStartRefusedError
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     FakeProcessSignaller,
-    RefusingThreads,
+    RefusingReservableThreads,
     SimNetwork,
     SimThreads,
     examples,
@@ -117,7 +118,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from server.registry import StopRequester
-    from vs_sim.api import Event, Listener, ProcessSignaller, Threads
+    from vs_sim.api import Event, Listener, ProcessSignaller, ReservableThreads, WorkerReservation
 
 ALL_FEATURES = tuple(feature.value for feature in HelperFeature)
 
@@ -976,11 +977,11 @@ def _failed_compensation_components(
     threads: SimThreads,
     started: LiveInstanceRecord,
     release: Callable[[], None],
-) -> tuple[StopRequester, ProcessSignaller, Threads]:
+) -> tuple[StopRequester, ProcessSignaller, ReservableThreads]:
     """Select the deterministic boundary failure for one compensation scenario."""
     requester: StopRequester = _RejectingStopRequester()
     signaller: ProcessSignaller = FakeProcessSignaller(set())
-    channel_threads: Threads = threads
+    channel_threads: ReservableThreads = threads
     if scenario == "stop_raises":
         requester = _RaisingStopRequester()
     elif scenario == "stop_base_exception":
@@ -995,7 +996,7 @@ def _failed_compensation_components(
         signaller = _UnsupportedProcessSignaller()
     else:
         requester = _StoppingRequester(release)
-        channel_threads = RefusingThreads(threads, {"helper-stop-started": 1})
+        channel_threads = RefusingReservableThreads(threads, {"helper-stop-started": 1})
     return requester, signaller, channel_threads
 
 
@@ -1551,6 +1552,131 @@ def test_run_connect_relays_bytes_both_ways_including_ones_sent_early(
     assert relayed == downstream
     assert status == EXIT_STATUS[ChannelEndOutcome.SERVER_CLOSED]
     assert ChannelEnd.model_validate_json(errors).outcome is ChannelEndOutcome.SERVER_CLOSED
+
+
+def test_relay_worker_refusal_returns_one_typed_channel_end() -> None:
+    """A handed-over channel reports startup refusal instead of losing the worker error."""
+    threads = SimThreads(schedule_seed=0)
+    channel_threads = RefusingReservableThreads(threads, {"relay-downstream": 1})
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    store.hold("0123456789ab").publish(record("0123456789ab", run_id="run-7"))
+    errors = ByteBuffer()
+    server_received: list[bytes] = []
+
+    def serve(listener: Listener) -> None:
+        connection = listener.accept(HANG_GUARD_S)
+        server_received.append(connection.recv(1, HANG_GUARD_S))
+
+    def main() -> tuple[dict[str, Any], int | None]:
+        listener = network.listen("run.sock")
+        server = threads.spawn(lambda: serve(listener), name="server")
+        client = ChannelClient(threads)
+
+        def run_helper() -> None:
+            client.status = serve_channel(
+                host=fake_host(channel_threads, network, store=store),
+                source=client,
+                output=client,
+                errors=errors,
+                threads=channel_threads,
+            )
+
+        helper = threads.spawn(run_helper, name="helper")
+        client.send(_hello())
+        client.receive()
+        connect = _line(_request("run.connect", "c", instance_id="0123456789ab", role="control"))
+        client.send(connect + b"\n" + b'{"type":"command.stop"}\n')
+        connected = client.receive()
+        helper.join(HANG_GUARD_S)
+        server.join(HANG_GUARD_S)
+        assert not helper.is_alive()
+        assert not server.is_alive()
+        return connected, client.status
+
+    connected, status = threads.run(main)
+    assert connected == {
+        "type": "run.connect",
+        "request_id": "c",
+        "run_id": "run-7",
+        "protocol_version": 1,
+    }
+    assert server_received == [b""]
+    assert status == EXIT_STATUS[ChannelEndOutcome.CONNECT_FAILED]
+    assert ChannelEnd.model_validate_json(errors.data) == ChannelEnd(
+        outcome=ChannelEndOutcome.CONNECT_FAILED,
+        exit_status=EXIT_STATUS[ChannelEndOutcome.CONNECT_FAILED],
+        detail="relay copy worker start was refused",
+    )
+
+
+class _ReservationAcquisitionRefusedThreads(RefusingReservableThreads):
+    """Refuse the dispatcher's native preparation before returning a reservation."""
+
+    def __init__(self, delegate: SimThreads) -> None:
+        super().__init__(delegate, {})
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        del target, daemon
+        raise WorkerStartRefusedError(f"vs-sim-worker-starter-for-{name}")
+
+
+def test_dispatcher_bootstrap_refusal_returns_one_typed_channel_end_without_command_io() -> None:
+    """The public helper closes a failed relay startup without leaking its raw refusal."""
+    threads = SimThreads(schedule_seed=0)
+    channel_threads = _ReservationAcquisitionRefusedThreads(threads)
+    network = SimNetwork(threads)
+    store = FakeInstanceStore()
+    store.hold("0123456789ab").publish(record("0123456789ab", run_id="run-7"))
+    errors = ByteBuffer()
+    server_received: list[bytes] = []
+
+    def serve(listener: Listener) -> None:
+        connection = listener.accept(HANG_GUARD_S)
+        server_received.append(connection.recv(1, HANG_GUARD_S))
+
+    def main() -> tuple[dict[str, Any], int | None]:
+        listener = network.listen("run.sock")
+        server = threads.spawn(lambda: serve(listener), name="server")
+        client = ChannelClient(threads)
+
+        def run_helper() -> None:
+            client.status = serve_channel(
+                host=fake_host(channel_threads, network, store=store),
+                source=client,
+                output=client,
+                errors=errors,
+                threads=channel_threads,
+            )
+
+        helper = threads.spawn(run_helper, name="helper")
+        client.send(_hello())
+        client.receive()
+        connect = _line(_request("run.connect", "c", instance_id="0123456789ab", role="control"))
+        client.send(connect + b"\n" + b'{"type":"command.stop"}\n')
+        connected = client.receive()
+        helper.join(HANG_GUARD_S)
+        server.join(HANG_GUARD_S)
+        assert not helper.is_alive()
+        assert not server.is_alive()
+        return connected, client.status
+
+    connected, status = threads.run(main)
+    assert connected == {
+        "type": "run.connect",
+        "request_id": "c",
+        "run_id": "run-7",
+        "protocol_version": 1,
+    }
+    assert server_received == [b""]
+    assert status == EXIT_STATUS[ChannelEndOutcome.CONNECT_FAILED]
+    assert ChannelEnd.model_validate_json(errors.data) == ChannelEnd(
+        outcome=ChannelEndOutcome.CONNECT_FAILED,
+        exit_status=EXIT_STATUS[ChannelEndOutcome.CONNECT_FAILED],
+        detail="relay copy worker start was refused",
+    )
 
 
 def test_run_connect_to_a_server_that_is_gone_is_a_typed_error_and_the_channel_lives_on() -> None:

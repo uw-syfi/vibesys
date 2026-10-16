@@ -54,8 +54,12 @@ const SPAN_EVENTS: ReadonlySet<string> = new Set([
 export type RunData =
   | {readonly kind: 'snapshot'; readonly snapshot: RunSnapshot}
   | {readonly kind: 'events'; readonly events: readonly RunEvent[]}
-  /** The stream replaced its history: the trace starts again from these events. */
-  | {readonly kind: 'rebootstrap'; readonly events: readonly RunEvent[]};
+  /** The stream replaced its replay; a proven new store also replaces the trace base. */
+  | {
+      readonly kind: 'rebootstrap';
+      readonly base: 'preserve' | 'reset';
+      readonly events: readonly RunEvent[];
+    };
 
 function lastSequence(log: TraceLog): number {
   return log.events.at(-1)?.sequence ?? log.base.sequence;
@@ -85,7 +89,10 @@ export function traceStep(log: TraceLog, data: RunData): TraceLog {
     case 'events':
       return appended(log, data.events);
     case 'rebootstrap':
-      return appended(EMPTY_TRACE_LOG, data.events);
+      return appended(
+        data.base === 'preserve' ? {...log, events: []} : EMPTY_TRACE_LOG,
+        data.events,
+      );
   }
 }
 

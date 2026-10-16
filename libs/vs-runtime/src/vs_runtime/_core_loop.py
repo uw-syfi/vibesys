@@ -29,7 +29,6 @@ from vs_core.api import (
     KernelNotImplementedError,
     Observation,
     OperationRegistry,
-    RecoveryPhase,
     RecoveryStarted,
     RequestId,
     RequestPhase,
@@ -44,6 +43,7 @@ from vs_core.api import (
     Until,
     advance,
     check_decisions,
+    deferred,
     encode_json,
     orphan_waits,
     run_view,
@@ -802,11 +802,16 @@ class CoreRuntime[S: StrategyState]:
         self._release_held()
 
     def _flush(self, item: _Flush) -> None:
-        """Deliver due wake-ups and submit held decisions; commit only if there was any."""
+        """Deliver due wake-ups and submit held decisions; commit only if there was any.
+
+        A held decision core still cannot take (``deferred``: recovery not ready, or the run
+        paused) is not resubmitted, so a paused run writes nothing until it is resumed.
+        """
         record = self.record
         due = tuple(wake for wake in record.wakes if wake <= item.now_at)
-        ready = record.envelope.core.records.recovery.phase == RecoveryPhase.READY
-        if not due and not (ready and record.pending_decisions):
+        core = record.envelope.core
+        takeable = any(not deferred(core, held) for held in record.pending_decisions)
+        if not due and not takeable:
             return
         self._apply(
             Transition(state=record.envelope.core),

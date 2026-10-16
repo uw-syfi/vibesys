@@ -2,7 +2,7 @@
 
 import pytest
 
-from vs_redaction.api import redact_diagnostic_tail, redact_diagnostic_text
+from vs_redaction.api import DiagnosticRedactor, redact_diagnostic_tail, redact_diagnostic_text
 
 
 @pytest.mark.parametrize(
@@ -23,6 +23,27 @@ def test_diagnostic_tail_never_exposes_a_credential_split_by_its_boundary(
 
         assert len(tail) == limit
         assert "secret" not in tail
+
+
+@pytest.mark.parametrize(
+    "credential",
+    [
+        "API_TOKEN=assignment-secret",
+        "Bearer bearer-secret",
+        "clientSecret=camel-secret",
+    ],
+)
+def test_complete_diagnostic_text_redacts_common_credentials(credential: str) -> None:
+    assert "secret" not in redact_diagnostic_text(credential)
+
+
+def test_diagnostic_tail_redacts_before_selecting_the_tail() -> None:
+    text = "prefix:API_TOKEN=" + "s" * 2_000 + " " + "z" * 1_000
+
+    tail = redact_diagnostic_tail(text, max_chars=1_100)
+
+    assert "API_TOKEN=[REDACTED]" in tail
+    assert "s" * 20 not in tail
 
 
 def test_diagnostic_tail_rejects_a_negative_bound() -> None:
@@ -85,3 +106,28 @@ def test_repeated_bounds_never_reintroduce_a_split_credential() -> None:
 
     assert len(second) == 1_000
     assert "repeated-bound-secret" not in second
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "prefix API_TOKEN\n =\nassignment-secret suffix",
+        "prefix bearer\n bearer-secret suffix",
+        "prefix-clientSecret:camel-secret, suffix",
+        "ordinary output without credentials",
+    ],
+)
+def test_stream_redaction_matches_complete_redaction_at_every_split(text: str) -> None:
+    expected = redact_diagnostic_text(text)
+
+    for split_at in range(len(text) + 1):
+        redactor = DiagnosticRedactor()
+        actual = redactor.append(text[:split_at])
+        actual += redactor.append(text[split_at:])
+        actual += redactor.finish()
+
+        assert actual == expected
+
+    redactor = DiagnosticRedactor()
+    one_character_at_a_time = "".join(redactor.append(character) for character in text)
+    assert one_character_at_a_time + redactor.finish() == expected

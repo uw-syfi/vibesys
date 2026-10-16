@@ -514,7 +514,17 @@ depends_on = []
 [[modules]]
 path = "vs_redaction.api"
 layer = "prompts_and_lower_libs"
+depends_on = ["vs_redaction._patterns", "vs_redaction._stream"]
+
+[[modules]]
+path = "vs_redaction._patterns"
+layer = "prompts_and_lower_libs"
 depends_on = []
+
+[[modules]]
+path = "vs_redaction._stream"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_redaction._patterns"]
 
 [[modules]]
 path = "vs_async_ops"

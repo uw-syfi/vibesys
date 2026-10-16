@@ -37,7 +37,13 @@ from vs_runtime.api.testing import (
     idle_environment_system,
     unconfined_host_environment,
 )
-from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
+from vs_sandbox.api import (
+    CaptureExecutionIdentity,
+    CaptureExecutionKind,
+    HostResource,
+    HostResourceAccess,
+    ProjectPathPolicy,
+)
 from vs_sandbox.api.testing import FakeCommandRunner, FakeComputeBackend
 from vs_sim.api.testing import InlineBlockingRunner, ManualClock, SimThreads
 
@@ -55,6 +61,10 @@ class _Session:
     sandbox: CommandRunner
     view: RunEnvironmentView
     closed: bool = False
+
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
 
     def __enter__(self) -> _Session:
         return self
@@ -172,6 +182,58 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
     candidate.close()
     assert not candidate_path.exists()
     assert opened_sessions[-1].closed
+    environment.close()
+    project.close()
+
+
+def test_workspace_factory_cannot_reconcile_through_a_replacement_session(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
+    project = open_project_run_resources(
+        _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
+    )
+    execution = CaptureExecutionIdentity(
+        kind=CaptureExecutionKind.SLURM_GPU,
+        execution_id="vibesys-recorded-capture-deadbeef",
+    )
+    project.record_capture_intent("candidate-1", execution)
+    sandbox = FakeCommandRunner()
+    session = _Session(sandbox, RunEnvironmentView(paths=AgentPaths()))
+    environment = open_run_environment_resources(
+        RunEnvironmentRequest(
+            log_dir=project.logger.log_dir,
+            workspace=root,
+            ref_dir=None,
+            backend=FakeComputeBackend(threads=SimThreads()),
+            agent_backend="stub",
+            cli_provider="codex",
+            run_id="workspace-resource-test",
+            framework_root=tmp_path,
+            clock=ManualClock(),
+            system=idle_environment_system(),
+        ),
+        lambda _request: session,
+        clock=ManualClock(),
+    )
+    factory = WorkspaceResourceFactory(
+        project,
+        environment,
+        evaluation_plan=TrustedEvaluationPlan(),
+        memory_paths=(),
+        skill_source_dirs=(),
+        skill_selection=NULL_SKILL_SELECTION,
+        host_resources=(),
+        events=lambda _event: None,
+        threads=SimThreads(),
+        blocking=InlineBlockingRunner(),
+    )
+
+    assert factory.reconcile_capture_intents() == frozenset({"candidate-1"})
+    assert project.unsettled_candidates() == frozenset({"candidate-1"})
+
     environment.close()
     project.close()
 
