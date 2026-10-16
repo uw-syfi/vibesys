@@ -113,18 +113,16 @@ def _vendor_count(key: ast.AST | None, value: ast.AST) -> str | None:
     return f"{key.value}: {count}"
 
 
-def _vendor_table_rows(node: ast.AST) -> list[str]:
+def _vendor_table_rows(node: ast.Dict | ast.Tuple | ast.List) -> list[str]:
     """Each ``vendor: count`` row of a dict or tuple-of-pairs literal."""
     if isinstance(node, ast.Dict):
         pairs = list(zip(node.keys, node.values, strict=True))
-    elif isinstance(node, ast.Tuple | ast.List):
+    else:
         pairs = [
             (element.elts[0], element.elts[1])
             for element in node.elts
             if isinstance(element, ast.Tuple) and len(element.elts) == 2
         ]
-    else:
-        return []
     return [row for key, value in pairs if (row := _vendor_count(key, value)) is not None]
 
 
@@ -140,7 +138,8 @@ def model_literals(tree: ast.AST) -> list[tuple[int, str]]:
             text = _folded_str(node)
             if text is not None and _states_a_model(text):
                 found.append((node.lineno, text))
-        found.extend((node.lineno, row) for row in _vendor_table_rows(node))
+        if isinstance(node, ast.Dict | ast.Tuple | ast.List):
+            found.extend((node.lineno, row) for row in _vendor_table_rows(node))
     return found
 
 
