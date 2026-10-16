@@ -157,7 +157,7 @@ def _tools(tmp_path: Path) -> tuple[tuple[ToolSpec, ...], str]:
     project, run_id = _project_with_run(tmp_path)
     _seed_agent_state(project, run_id)
     store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
-    return build_tools(store, project, run_id), run_id
+    return build_tools(store, run_id), run_id
 
 
 @pytest.fixture(scope="module")
@@ -209,12 +209,12 @@ class TestToolRegistration:
         store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
 
         with pytest.raises(Exception, match="no-such-run"):  # vs_project.ProjectStateError
-            build_tools(store, project, "no-such-run")
+            build_tools(store, "no-such-run")
 
 
 class TestEndToEnd:
     def test_non_agent_projection_has_neutral_run_tools(self, tmp_path: Path) -> None:
-        project, run_id = _project_with_run(tmp_path)
+        _project, run_id = _project_with_run(tmp_path)
 
         class CustomStore:
             def get_run(self, requested: str) -> RunView:
@@ -226,7 +226,7 @@ class TestEndToEnd:
                     projection={"kind": "team-search", "workers": 3},
                 )
 
-        tools = build_tools(cast("RunStore", CustomStore()), project, run_id)
+        tools = build_tools(cast("RunStore", CustomStore()), run_id)
         server = _server(tools)
 
         summary = asyncio.run(_call(server, "run_summary"))

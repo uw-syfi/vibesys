@@ -330,6 +330,25 @@ class GitRepository(Protocol):
         """Whether any ref under ``prefix`` points at a commit that reaches ``commit`` (portable)."""
         ...
 
+    def branches(self, prefix: str) -> tuple[str, ...]:
+        """The names of the local branches that start with ``prefix``, sorted (cli-only).
+
+        ``prefix`` is empty (every branch) or a branch-name prefix that ends in ``/``
+        (``vibesys-runs/``), so it names a branch hierarchy; another value raises
+        ``ValueError``. No match, or no repository, is empty.
+        """
+        ...
+
+    def tree_files(self, revision: Revision, directory: str) -> tuple[str, ...]:
+        """The repository paths of the regular files below ``directory`` in ``revision``'s tree.
+
+        Sorted, at any depth. ``directory`` is a normalized relative directory path
+        without a trailing ``/``. Symbolic links and nested repositories are not
+        files. An absent directory, or a ``revision`` that names no commit, is
+        empty (cli-only).
+        """
+        ...
+
     # -- changing refs -------------------------------------------------------
 
     def update_ref(self, ref: str, commit: str) -> None:

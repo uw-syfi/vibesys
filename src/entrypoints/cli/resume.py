@@ -19,6 +19,7 @@ from vibesys.api.request import migrate_recorded_run_environment
 from vs_project.api import (
     Git,
     GitError,
+    GitRunHistory,
     GitTracker,
     NullGitTrackerEvents,
     OrchestrationRunManifest,
@@ -301,6 +302,17 @@ def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
         )
 
 
+def _latest_run_id(project: Project) -> str:
+    """The project's latest run, whichever branch is checked out (each run has its own)."""
+    events = NullGitTrackerEvents()
+    repository = open_git_repository(project.root, git=Git(OsProcesses()), faults=events)
+    runs = GitRunHistory(project, repository).recorded().runs
+    if not runs:
+        message = f"No VibeSys runs exist under {project.root}"
+        raise ProjectStateError(message)
+    return runs[-1].run_id
+
+
 def _requested_resume(args: argparse.Namespace, *, direct: bool) -> str | None:
     """The run a resume names, or pins with ``--run-id``; ``None`` selects the current run."""
     if direct and args.resume != "latest":
@@ -335,10 +347,11 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
         else _resolve_project_root(args.resume, args.runs_dir)
     )
     try:
-        store = Project.open(project_root).state
+        project = Project.open(project_root)
+        store = project.state
         run_id = _requested_resume(args, direct=direct)
         if run_id is None:
-            run_id = store.current_run_id() or store.resolve_run().run_id
+            run_id = store.current_run_id() or _latest_run_id(project)
         _switch_project_resume_branch(project_root, run_id)
         manifest = store.load_run(run_id)
     except ProjectStateError as exc:

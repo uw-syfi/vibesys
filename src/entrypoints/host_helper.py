@@ -49,7 +49,7 @@ from server.registry import (
     instance_root,
 )
 from server.relay import FdSink, FdSource
-from vs_project.api import Git
+from vs_project.api import Git, git_repositories
 from vs_sim.api import (
     OsProcesses,
     OsThreads,
@@ -173,7 +173,7 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
             pause=threads.sleep,
             intents=ProjectStopIntents(),
         ),
-        projects=FileProjects(),
+        projects=FileProjects(git_repositories(Git(OsProcesses()))),
         directories=OsDirectories(),
         launcher=SubprocessRunLauncher(SubprocessLauncher(), headless_command),
         preflight=SubprocessRunPreflight(SubprocessLauncher(), headless_command),

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, ClassVar
 from vs_project._exclude_file import append_excludes
 from vs_project._git_process import git_environment
 from vs_project._nested_repositories import GITLINK_MODE, require_no_nested_repository
+from vs_project._ref_names import require_branch_prefix
 from vs_project.api.git_repository import (
     COMMIT_IDENTITY_EMAIL,
     COMMIT_IDENTITY_NAME,
@@ -39,6 +40,7 @@ if TYPE_CHECKING:
 
 
 _BRANCH_PREFIX = "refs/heads/"
+_REGULAR_FILE_MODES = frozenset({"100644", "100755"})
 
 
 _LIST_INDEX = ("ls-files", "--stage", "-z")
@@ -282,6 +284,31 @@ class CliGitRepository:
             ]
         )
         return result.returncode == 0 and bool(result.stdout.strip())
+
+    def branches(self, prefix: str) -> tuple[str, ...]:
+        hierarchy = f"{_BRANCH_PREFIX}{require_branch_prefix(prefix)}"
+        result = self._run(["for-each-ref", "--format=%(refname)", hierarchy])
+        if result.returncode != 0:
+            return ()
+        names = (line.removeprefix(_BRANCH_PREFIX) for line in _text(result.stdout).splitlines())
+        return tuple(sorted(name for name in names if name.startswith(prefix)))
+
+    def tree_files(self, revision: Revision, directory: str) -> tuple[str, ...]:
+        commit = self.resolve_commit(revision)
+        if commit is None:
+            return ()
+        result = self._run(["ls-tree", "-r", "-z", "--full-tree", commit, "--", f"{directory}/"])
+        if result.returncode != 0:
+            return ()
+        records = (record.partition("\t") for record in _text(result.stdout).split("\0"))
+        return tuple(
+            sorted(
+                path
+                for metadata, _, path in records
+                if metadata.split(" ")[0] in _REGULAR_FILE_MODES
+                and path.startswith(f"{directory}/")
+            )
+        )
 
     # -- changing refs -------------------------------------------------------
 

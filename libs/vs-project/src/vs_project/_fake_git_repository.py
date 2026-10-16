@@ -40,11 +40,20 @@ from vs_project._fake_git_worktree import (
     write_file,
 )
 from vs_project._git_events import NullGitTrackerEvents
-from vs_project._git_objects import EMPTY_SNAPSHOT, FileEntry, Snapshot, clean_message, tree_id
+from vs_project._git_objects import (
+    EMPTY_SNAPSHOT,
+    EXECUTABLE,
+    REGULAR,
+    FileEntry,
+    Snapshot,
+    clean_message,
+    tree_id,
+)
 from vs_project._git_pathspec import PathspecError, Pathspecs
 from vs_project._git_refnames import is_valid_branch_name, is_valid_ref_name
 from vs_project._git_textdiff import detect_changes, render_name_status, render_patch
 from vs_project._nested_repositories import require_no_nested_repository
+from vs_project._ref_names import require_branch_prefix
 from vs_project.api.git_repository import (
     CommitSubject,
     GitCommandError,
@@ -61,6 +70,7 @@ if TYPE_CHECKING:
     from vs_project.api.git_repository import GitFaultSink, Pathspec, Revision
 
 _PROGRAM = "git"
+_REGULAR_FILE_MODES = frozenset({REGULAR, EXECUTABLE})
 """The command name error messages show; the Fake starts no process."""
 _NOT_A_REPOSITORY = "fatal: not a git repository (or any of the parent directories): .git"
 
@@ -381,6 +391,36 @@ class FakeGitRepository:
                 (name == stem or name.startswith(f"{stem}/"))
                 and found.repo.objects.reaches(tip, target)
                 for name, tip in found.repo.refs.items()
+            )
+
+    def branches(self, prefix: str) -> tuple[str, ...]:
+        hierarchy = f"refs/heads/{require_branch_prefix(prefix)}"
+        with self._operation("branches"):
+            found = self._find()
+            if found is None:
+                return ()
+            return tuple(
+                sorted(
+                    name.removeprefix("refs/heads/")
+                    for name in found.repo.refs
+                    if name.startswith(hierarchy)
+                )
+            )
+
+    def tree_files(self, revision: Revision, directory: str) -> tuple[str, ...]:
+        with self._operation("tree_files"):
+            found = self._find()
+            if found is None:
+                return ()
+            snapshot = self._snapshot_of(_Scope(found.repo, found), revision)
+            if snapshot is None:
+                return ()
+            return tuple(
+                sorted(
+                    path
+                    for path, entry in snapshot.items()
+                    if path.startswith(f"{directory}/") and entry.mode in _REGULAR_FILE_MODES
+                )
             )
 
     def tree_of(self, revision: Revision) -> str | None:

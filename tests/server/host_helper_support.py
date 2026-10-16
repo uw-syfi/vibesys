@@ -56,6 +56,7 @@ from server.registry import (
     StopEffects,
 )
 from vs_decode.api import Unreadable
+from vs_project.api.testing import FakeGitRepositories
 from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, ScriptedProbe
 
 if TYPE_CHECKING:
@@ -353,7 +354,7 @@ def fake_host(
             pause=threads.sleep,
             intents=FakeStopIntents(),
         ),
-        projects=FileProjects(),
+        projects=FileProjects(FakeGitRepositories().repository),
         directories=directories or FakeDirectories(tree={HOME: {}}),
         launcher=launcher or FakeRunLauncher(failed_launch),
         preflight=FakeRunPreflight(),

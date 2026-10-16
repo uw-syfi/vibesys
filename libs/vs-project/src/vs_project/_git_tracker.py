@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
+from vs_project._run_branches import RUN_BRANCH_PREFIX, run_branch, run_of_branch
 from vs_project._state_io import STATE_DOCUMENT_MAX_BYTES
 from vs_project._workspace_tree import (
     EntryKind,
@@ -18,6 +19,7 @@ from vs_project._workspace_tree import (
     open_workspace_tree,
 )
 from vs_project.api.git_repository import GitError, PatchStyle, StagingError
+from vs_project.errors import ProjectStateError
 from vs_project.project import Project
 
 if TYPE_CHECKING:
@@ -127,7 +129,8 @@ class GitTracker:
             dict.fromkeys(_normalize_project_paths(trusted_input_paths))
         )
         self._trusted_input_baseline: str | None = None
-        self._project_branch = f"vibesys-runs/{run_id}"
+        self._project_branch = run_branch(run_id)
+        self._home_branch: str | None = None
         self._state_integration: ProjectGitIntegration = Project.open(
             self.root
         ).state.git_integration(run_id)
@@ -799,11 +802,20 @@ class GitTracker:
         if not self._branch_exists(branch):
             message = f"cannot resume VibeSys run {self.run_id!r}: branch {branch!r} does not exist"
             raise ValueError(message)
-        if self._current_branch() != branch:
+        current = self._current_branch()
+        if current == branch:
+            # Already checked out: by an earlier step of this resume, which noted the home
+            # branch, or by a run that ended without returning.
+            self._home_branch = self._home_of_run_branch(branch)
+        else:
             self._require_clean_project(
                 "cannot switch to the resumed VibeSys branch with pending project changes"
             )
+            home = self._home_of(current)
+            if home is not None:
+                self._state_integration.record_home_branch(home)
             self._git.switch_branch(branch)
+            self._home_branch = home
         if trusted_input_baseline is not None:
             self.configure_trusted_input_baseline(trusted_input_baseline)
 
@@ -829,17 +841,76 @@ class GitTracker:
             self._add_all()
             self._git.commit("initial: project baseline", allow_empty=True)
 
+        if self._branch_exists(branch):
+            message = f"VibeSys run branch already exists: {branch}"
+            raise ValueError(message)
+        current = self._current_branch()
+        home = self._home_of(current)
+        if current is not None and home is None:
+            message = (
+                f"the project is on VibeSys run branch {current!r}, and the branch that run "
+                "started from is unknown; check out the branch a new run should start from"
+            )
+            raise ValueError(message)
+        if home is not None:
+            # Noted before the checkout moves, so a run killed at any later point still
+            # tells the next run (or a resume) where the checkout belongs.
+            self._state_integration.record_home_branch(home)
+            if current != home:
+                self._git.switch_branch(home)
+
         branch_point = self.current_sha()
         if branch_point is None:
             message = "user-project baseline commit could not be resolved"
             raise ValueError(message)
-
-        if self._branch_exists(branch):
-            message = f"VibeSys run branch already exists: {branch}"
-            raise ValueError(message)
         self._git.switch_branch(branch, create=True)
+        self._home_branch = home
         self._trusted_input_baseline = branch_point
         self._events.baseline_configured(branch_point)
+
+    @property
+    def home_branch(self) -> str | None:
+        """The branch this run started from, which the next run checks out before branching.
+
+        ``None`` before ``init``, for a detached checkout, and for a resumed run whose
+        origin is unknown.
+        """
+        return self._home_branch
+
+    def _home_of(self, current: str | None) -> str | None:
+        """The branch a run started on ``current`` belongs to: ``current``, unless it is a run's."""
+        if current is None:
+            return None
+        if run_of_branch(current) is None:
+            return current
+        return self._home_of_run_branch(current)
+
+    def _home_of_run_branch(self, branch: str) -> str | None:
+        """The home of the run whose branch is ``branch``: noted, or else inferred.
+
+        A run that predates noting its home (its branch may hold earlier runs' commits)
+        belongs to the one local branch outside the run branches that it descends from.
+        """
+        run_id = run_of_branch(branch)
+        try:
+            noted = None if run_id is None else self._state_integration.recorded_home_branch(run_id)
+        except ProjectStateError:
+            noted = None
+        if noted is not None and self._is_home_candidate(noted):
+            return noted
+        descended_from = [
+            name
+            for name in self._git.branches("")
+            if self._is_home_candidate(name) and self._git.is_ancestor(name, branch)
+        ]
+        return descended_from[0] if len(descended_from) == 1 else None
+
+    def _is_home_candidate(self, name: str) -> bool:
+        return (
+            not name.startswith(RUN_BRANCH_PREFIX)
+            and self._git.is_valid_branch_name(name)
+            and self._branch_exists(name)
+        )
 
     def _install_project_excludes(self) -> None:
         """Idempotently add local/private paths to ``.git/info/exclude``."""

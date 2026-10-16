@@ -54,6 +54,7 @@ from vs_project._private_directory import (
     ensure_private_directory,
     user_runtime_root,
 )
+from vs_project._run_history import GitRunHistory
 from vs_project._socket import (
     MAX_SOCKET_PATH_BYTES,
     SocketPathTooLongError,
@@ -104,6 +105,7 @@ from vs_project.api.git_repository import (
     Revision,
     StagingError,
 )
+from vs_project.api.run_history import RecordedRuns, RunHistory
 from vs_project.api.state_models import StateModels
 from vs_project.api.state_store import (
     CommitFault,
@@ -162,6 +164,7 @@ __all__ = [
     "GitRemoteRepository",
     "GitRepository",
     "GitRepositoryFactory",
+    "GitRunHistory",
     "GitSnapshotFile",
     "GitSnapshotPlan",
     "GitText",
@@ -191,10 +194,12 @@ __all__ = [
     "ProjectStateError",
     "Pygit2GitRepository",
     "QuarantinedEnvelope",
+    "RecordedRuns",
     "RepositoryLocation",
     "Revision",
     "RunEnvironmentRecord",
     "RunExecutionRecord",
+    "RunHistory",
     "RunLogger",
     "RunResourceRequest",
     "SocketPathTooLongError",

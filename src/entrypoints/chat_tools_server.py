@@ -21,7 +21,8 @@ Tool set:
   history.
 - `list_rounds`: every completed round, run-wide, in chronological order.
 - `list_state_files` / `read_state_file`: raw access to this run's portable
-  state documents (`vs_project.ProjectState.portable_run_export`), for
+  state documents (`RunRecord.portable_documents`, read whichever branch is
+  checked out), for
   detail the DTOs above do not carry. This is the direct equivalent of what
   `TrajectoryEvidence` used to copy into `trajectory/state/`; the raw
   per-attempt/event logs it also copied from `log_dir` are not reproduced
@@ -194,12 +195,12 @@ def _list_rounds_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     )
 
 
-def _list_state_files_tool(project: Project, run_id: str) -> ToolSpec[_NoArgs]:
+def _list_state_files_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
-        snapshot = project.state.portable_run_export(run_id)
-        if not snapshot.files:
+        documents = store.get_record(run_id).portable_documents()
+        if not documents:
             return "(no state files)"
-        return "\n".join(str(state_file.relative_path) for state_file in snapshot.files)
+        return "\n".join(str(document.relative_path) for document in documents)
 
     return ToolSpec(
         name="list_state_files",
@@ -212,10 +213,9 @@ def _list_state_files_tool(project: Project, run_id: str) -> ToolSpec[_NoArgs]:
     )
 
 
-def _read_state_file_tool(project: Project, run_id: str) -> ToolSpec[_StateFileArgs]:
+def _read_state_file_tool(store: RunStore, run_id: str) -> ToolSpec[_StateFileArgs]:
     def handler(args: _StateFileArgs) -> str:
-        snapshot = project.state.portable_run_export(run_id)
-        for state_file in snapshot.files:
+        for state_file in store.get_record(run_id).portable_documents():
             if str(state_file.relative_path) != args.relative_path:
                 continue
             try:
@@ -232,7 +232,7 @@ def _read_state_file_tool(project: Project, run_id: str) -> ToolSpec[_StateFileA
     )
 
 
-def build_tools(store: RunStore, project: Project, run_id: str) -> tuple[ToolSpec[Any], ...]:
+def build_tools(store: RunStore, run_id: str) -> tuple[ToolSpec[Any], ...]:
     """Build every read-only tool this server exposes for one run."""
     # Touch the run once up front so a missing run_id fails fast and
     # identically across every tool, instead of six different "get_run" calls
@@ -243,8 +243,8 @@ def build_tools(store: RunStore, project: Project, run_id: str) -> tuple[ToolSpe
         _list_hypotheses_tool(store, run_id),
         _get_hypothesis_tool(store, run_id),
         _list_rounds_tool(store, run_id),
-        _list_state_files_tool(project, run_id),
-        _read_state_file_tool(project, run_id),
+        _list_state_files_tool(store, run_id),
+        _read_state_file_tool(store, run_id),
     )
 
 
@@ -269,7 +269,7 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     project = Project.open(args.project_root)
     store = open_run_store(project, git=Git(OsProcesses()), threads=OsThreads())
-    tools = build_tools(store, project, args.run_id)
+    tools = build_tools(store, args.run_id)
     serve_stdio(tools, server_name="vibesys-run")
 
 

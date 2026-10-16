@@ -88,6 +88,8 @@ from vs_agent.api import (
 from vs_logs.api import installed_narration
 from vs_project.api import (
     AgentRoleExecutionRecord,
+    GitRunHistory,
+    NullGitTrackerEvents,
     OrchestrationDescriptor,
     OrchestrationRunManifest,
     Project,
@@ -307,7 +309,12 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                     ) from exc
 
             if existing:
-                recorded_run = Project.open(project_root).state.load_run(run_id)
+                # Read before the run's branch is checked out: the project is on its
+                # home branch between runs, so the run's history is read from its branch.
+                recorded_run = GitRunHistory(
+                    Project.open(project_root),
+                    integration.git_repository(project_root, NullGitTrackerEvents()),
+                ).manifest(run_id)
                 validate_agent_role_catalog(recorded_run.execution.agent_roles, agent_specs)
 
         with boot_trace.span("profiler_preflight"):

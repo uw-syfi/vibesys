@@ -59,13 +59,14 @@ from server.host_helper_requests import (
 )
 from server.host_preflight import PreflightReport
 from vs_decode.api import Unreadable, decode_json
-from vs_project.api import Project, ProjectError
+from vs_project.api import GitRunHistory, NullGitTrackerEvents, Project, ProjectError
 from vs_sim.api import ProcessSpec
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_logs.read import LogReader as StoreReader
+    from vs_project.api import GitRepositoryFactory
     from vs_sim.api import CommandProbe, ProcessLauncher
 
 _PYPROJECT_LIMIT_BYTES = 1 << 20
@@ -74,7 +75,16 @@ _LAUNCH_RECORD_LIMIT = 1 << 20
 
 
 class FileProjects:
-    """Projects read through ``vs_project``'s ``Project`` on this filesystem."""
+    """Projects read through ``vs_project``'s ``Project`` on this filesystem.
+
+    Runs are read through ``vs_project``'s ``RunHistory`` over the repository
+    ``repositories`` opens at the project root, so every run lists whichever branch the
+    project has checked out.
+    """
+
+    def __init__(self, repositories: GitRepositoryFactory) -> None:
+        """Read run branches through the repositories ``repositories`` opens."""
+        self._repositories = repositories
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -94,7 +104,8 @@ class FileProjects:
         """The project's root and its runs, oldest first; runs this VibeSys cannot read are left out."""
         opened = self._open(project)
         try:
-            manifests = opened.state.list_runs()
+            history = GitRunHistory(opened, self._repositories(opened.root, NullGitTrackerEvents()))
+            manifests = history.recorded().runs
         except ProjectError as exc:
             raise ProjectLookupError(
                 HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)

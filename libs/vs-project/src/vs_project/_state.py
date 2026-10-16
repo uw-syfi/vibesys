@@ -295,6 +295,14 @@ class ProjectGitIntegration:
         """Return the ignore expression that preserves trusted VibeSys files on clean."""
         return f"{_CONFIG_DIRECTORY_NAME}/"
 
+    def record_home_branch(self, branch: str) -> None:
+        """Durably note, on this machine, the branch this run returns the checkout to."""
+        ProjectState(self._project_root).record_home_branch(self._run_id, branch)
+
+    def recorded_home_branch(self, run_id: str) -> str | None:
+        """The branch ``run_id`` noted with ``record_home_branch``, or ``None``."""
+        return ProjectState(self._project_root).home_branch(run_id)
+
     def validate_candidate_worktree(self, path: Path) -> Path:
         """Resolve a candidate worktree below this run's machine-local area."""
         store = ProjectState(self._project_root)
@@ -1103,12 +1111,81 @@ class ProjectState:
         )
 
     def load_run(self, run_id: str) -> OrchestrationRunManifest:
-        """Load the current run manifest or reject an unsupported schema."""
+        """Load the run manifest in the checkout or reject an unsupported schema.
+
+        This is the checkout's copy, which the run whose branch is checked out reads
+        and writes. ``RunHistory`` reads every run, whichever branch is checked out.
+        """
         path = self._run_manifest_path(run_id)
-        version = _read_json_object(path).get("schema_version")
-        if version != RUN_SCHEMA_VERSION:
-            raise ProjectStateError.unsupported_run_schema(path, version, RUN_SCHEMA_VERSION)
+        _require_run_schema(_read_json_object(path), source=path)
         return _load_model(path, OrchestrationRunManifest)
+
+    def record_home_branch(self, run_id: str, branch: str) -> None:
+        """Atomically note the branch a run returns the checkout to, in machine-local state.
+
+        Machine-local because it describes this checkout, and outside the project so no
+        branch switch and no agent in the workspace changes it.
+        """
+        path = self._home_branch_path(run_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write_text(path, f"{branch}\n")
+
+    def home_branch(self, run_id: str) -> str | None:
+        """The branch noted by ``record_home_branch`` for ``run_id``, or ``None``."""
+        path = self._home_branch_path(run_id)
+        try:
+            return path.read_text(encoding="utf-8").strip() or None
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise ProjectStateError.metadata_read_failed(path, exc) from exc
+
+    def _home_branch_path(self, run_id: str) -> Path:
+        return self._local_state_dir(run_id, "git") / "home-branch"
+
+    def run_directory(self, run_id: str) -> PurePosixPath:
+        """One run's portable state directory, relative to the project root, as Git names it."""
+        return _STATE_DIRECTORY_POSIX / "runs" / validate_run_id(run_id)
+
+    def checkout_run_ids(self) -> tuple[str, ...]:
+        """The ids of the run directories in the checkout, sorted; other entries are ignored."""
+        self._validate_storage_roots()
+        runs_dir = self._metadata_dir / "runs"
+        try:
+            children = tuple(runs_dir.iterdir()) if runs_dir.is_dir() else ()
+        except OSError as exc:
+            raise ProjectStateError.metadata_read_failed(runs_dir, exc) from exc
+        return tuple(
+            sorted(
+                child.name
+                for child in children
+                if child.is_dir() and re.fullmatch(_IDENTIFIER_PATTERN, child.name)
+            )
+        )
+
+    def checkout_run_file(self, run_id: str, relative_path: str | PurePosixPath) -> bytes | None:
+        """One portable file of a run in the checkout, or ``None`` when absent.
+
+        Needs no manifest, so it also reads a run whose manifest is on another branch.
+        """
+        run_dir = self._contained_run_dir(run_id)
+        path = _contained_without_symlinks(
+            run_dir, run_dir / _validate_state_relative_path(relative_path), kind="portable"
+        )
+        if not path.exists():
+            return None
+        if not path.is_file():
+            raise ProjectStateError.state_path_not_file(path)
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise ProjectStateError.state_file_read_failed(path, exc) from exc
+
+    def checkout_run_files(self, run_id: str) -> tuple[StateFile, ...]:
+        """Every portable file of a run in the checkout, relative to its directory, sorted."""
+        return _snapshot_directory(
+            project_root=self.project_root, root=self._contained_run_dir(run_id)
+        ).files
 
     def run_manifest_snapshot(self, run_id: str) -> StateSnapshot:
         """Snapshot the current portable manifest for one run."""
@@ -1428,6 +1505,37 @@ def _prepare_state_home(state_home: Path) -> None:
     except OSError as exc:
         message = f"Could not create VibeSys state home {state_home}: {exc}"
         raise ProjectStateError(message) from exc
+
+
+def _require_run_schema(raw: dict[str, object], *, source: Path) -> None:
+    version = raw.get("schema_version")
+    if version != RUN_SCHEMA_VERSION:
+        raise ProjectStateError.unsupported_run_schema(source, version, RUN_SCHEMA_VERSION)
+
+
+def parse_run_manifest(contents: bytes, *, source: Path) -> OrchestrationRunManifest:
+    """Strictly decode run manifest bytes read from a run branch.
+
+    It applies the same schema-version rule and strict model as ``ProjectState.load_run``
+    does to the checkout's file; ``source`` names where the bytes came from in errors.
+    """
+    try:
+        raw = json.loads(contents.decode("utf-8"))
+    except (ValueError, RecursionError) as exc:
+        raise ProjectStateError.metadata_read_failed(source, exc) from exc
+    if not isinstance(raw, dict):
+        raise ProjectStateError.metadata_not_object(source)
+    _require_run_schema(raw, source=source)
+    decoded = decode_json(
+        contents,
+        OrchestrationRunManifest,
+        source=str(source),
+        max_bytes=STATE_DOCUMENT_MAX_BYTES,
+        options=ValidationOptions(strict=True),
+    )
+    if isinstance(decoded, Unreadable):
+        raise ProjectStateError.invalid_metadata(source, decoded.details("metadata"))
+    return decoded
 
 
 def validate_run_id(run_id: str, *, source: Path | None = None) -> str:

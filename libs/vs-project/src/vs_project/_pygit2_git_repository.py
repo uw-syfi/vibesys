@@ -335,6 +335,12 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS:
             return False
 
+    def branches(self, prefix: str) -> tuple[str, ...]:
+        return self._cli.branches(prefix)
+
+    def tree_files(self, revision: Revision, directory: str) -> tuple[str, ...]:
+        return self._cli.tree_files(revision, directory)
+
     def _reaches(self, repository: pygit2.Repository, name: str, wanted: pygit2.Oid) -> bool:
         """Whether the ref ``name`` ends at a commit that is, or descends from, ``wanted``."""
         try:

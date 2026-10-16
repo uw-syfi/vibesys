@@ -290,7 +290,12 @@ extra host paths granted to the agent read-only. See
 [Sandboxing and confinement](contributing/sandboxing.md).
 
 VibeSys initializes Git when needed and creates one `vibesys-runs/<run-id>` branch
-per run. Agent-authored source stays at its normal project paths. Portable state
+per run, cut from the branch checked out when the run starts (its home branch).
+The run's branch stays checked out after it ends; the next run checks the home
+branch out before cutting its own, and a resume checks out the run's branch. Every
+run stays listed and resumable from any branch, because run history is read from
+the run branches. Agent-authored source stays at its
+normal project paths. Portable state
 remains in the project, while machine-local state defaults to `~/.vibesys`:
 
 ```text

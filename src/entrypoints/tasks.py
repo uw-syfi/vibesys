@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import ProjectLookupError
+from vs_project.api import Git, git_repositories
+from vs_sim.api import OsProcesses
 
 if TYPE_CHECKING:
     from server.host_api import TaskList
@@ -53,7 +55,7 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
     if not project.expanduser().is_absolute():
         project = cwd / project
     try:
-        listing = FileProjects().tasks(project.expanduser())
+        listing = FileProjects(git_repositories(Git(OsProcesses()))).tasks(project.expanduser())
     except ProjectLookupError as exc:
         return 1, "", f"vibesys tasks: {exc}\n"
     return 0, (listing.model_dump_json() if args.json else format_tasks(listing)) + "\n", ""
