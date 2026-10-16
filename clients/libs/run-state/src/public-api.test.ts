@@ -12,6 +12,10 @@ describe('published run-state surface', () => {
   it('exports only the fold, its read helpers, and each projection from its own entry', () => {
     expect(Object.keys(fold).sort()).toEqual([
       'executionStatusFor',
+      'foldEventBatch',
+      'foldEventRebootstrap',
+      'foldResponseEvents',
+      'foldSnapshot',
       'hasRunEnded',
       'initialCoreState',
       'initialIterationNavigation',

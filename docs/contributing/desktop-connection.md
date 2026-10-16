@@ -620,25 +620,28 @@ cross the context bridge; the page speaks the relay's credit protocol over it
 (`@vibesys/ipc`'s `openPortSocket`) and the app shapes it as the session's transport. While the
 run is attached, the store keeps its `WebSession` open (bootstrap, stream, recovery stay in
 `@vibesys/run-session`'s machine) and folds what it reports: the session's state, the run fold, and
-the trace's span events in sequence order (the session's `onRunAction`), so the tabs fold the trace
-at the sequence they show (`viewedRun`). Pause and Resume are protocol commands on that session,
-offered only while its controls are up. A run paused by a usage limit shows the quota banner
+the trace's accepted span events in sequence order (the session's `onTracePublication`), so the
+tabs fold the trace at the sequence they show (`viewedRun`). Pause and Resume are protocol commands
+on that session, offered only while its controls are up. When a rebootstrap cannot prove that the
+current trace base still belongs to the run, its reset initiates a snapshot request fenced to the
+established store, including when that store is unchanged. A run paused by a usage limit shows the quota banner
 instead of the header's Resume: the provider and its reset time, "Resume now" (`command.resume`
 with `when: now`), "Wait and resume when quota is back" (`when: capacity_returns`), and, once the
 run reports `quota_waiting` (folded into the run fold's quota pause, with its `resumes_at`), the
 expected time and "Stop waiting" (`command.pause`) until `quota_wait_cancelled`. A server that
-refuses the wait (an older one rejects `when`) no longer offers it for that run instance. Times are words
-for the events' epoch seconds in the user's time zone; no clock is read. Leaving the run releases it (`releaseRun`), and a new
-shell document detaches the run the old one held. An ended run opens from its recorded history
-instead: the store reads `runs.read_events` (feature `run_history`, through the welcome bridge's
-`readEvents`) page by page under a token, validates each event, and folds the pages into the same
-`run` slice, so the tabs have one source; an older host answers `unsupported`. Its invariants (force offered only while stopping
-and only after its bound, no stop flow outliving the live run, the link holding exactly the live
-server, no session report without an attached run, trace events in increasing sequence, commands
-sent only when offered) are checked over seeded action sequences with stale replies. The theme
-is in the first paint: the welcome preload asks the main process synchronously for the stored
-theme and the window controls' inset (`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and
-sets them on the root element before the page's scripts run.
+refuses the wait (an older one rejects `when`) no longer offers it for that run instance. Times are
+words for the events' epoch seconds in the user's time zone; no clock is read. Leaving the run
+releases it (`releaseRun`), and a new shell document detaches the run the old one held. An ended run
+opens from its recorded history instead: the store reads `runs.read_events` (feature `run_history`,
+through the welcome bridge's `readEvents`) page by page under a token, validates each event, and
+folds the pages into the same `run` slice, so the tabs have one source; an older host answers
+`unsupported`. Its invariants (force offered only while stopping and only after its bound, no stop
+flow outliving the live run, the link holding exactly the live server, no session report without an
+attached run, trace events in increasing sequence, commands sent only when offered) are checked over
+seeded action sequences with stale replies. The theme is in the first paint: the welcome preload asks
+the main process synchronously for the stored theme and the window controls' inset
+(`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and sets them on the root element before
+the page's scripts run.
 
 ## Windows and notifications
 

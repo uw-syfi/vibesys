@@ -9,6 +9,8 @@ import {
 import {
   type CoreRunStatus,
   type CoreState,
+  foldEventBatch,
+  foldSnapshot,
   hasRunEnded,
   initialCoreState,
   latestDiagnosticChange,
@@ -80,6 +82,21 @@ describe('core state projection', () => {
     ]);
     expect(burst.diagnostics).toHaveLength(1);
     expect(burst.diagnostics[0]?.id).toBe('core-state:run-identity-mismatch');
+  });
+
+  it('returns the exact accepted subset alongside a mixed-run batch rejection', () => {
+    const accepted = {...outputEvent(1, 'accepted'), run_id: 'run-a'};
+    const foreign = {...outputEvent(2, 'foreign'), run_id: 'run-b'};
+
+    const folded = foldEventBatch(initialCoreState(), [accepted, foreign]);
+
+    expect(folded.state).toMatchObject({runId: 'run-a', sequence: 1});
+    expect(folded.acceptedEvents).toEqual([accepted]);
+    expect(folded.rejection).toEqual({
+      expectedRunId: 'run-a',
+      receivedRunId: 'run-b',
+      summary: 'Ignored data for run run-b; this projection owns run-a',
+    });
   });
 
   it('rejects checkpoint and history metadata carried by a foreign batch', () => {
@@ -1668,13 +1685,15 @@ describe('the run lifecycle', () => {
       baseEvent(3, 'run_finished'),
     ]);
 
-    const stale = reduceSnapshot(ended, {
+    const snapshot = {
       run_id: 'run',
       status: 'running',
       sequence: 3,
-    } satisfies RunSnapshot);
+    } satisfies RunSnapshot;
+    const stale = reduceSnapshot(ended, snapshot);
 
     expect(stale.status).toBe('completed');
+    expect(foldSnapshot(ended, snapshot).disposition).toBe('stale');
   });
 
   it('reads a resumed run as running from the transition after the replay', () => {
