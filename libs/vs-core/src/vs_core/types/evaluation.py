@@ -30,6 +30,7 @@ from .common import (
     ScopeReopenNormalization,
     Seconds,
     Value,
+    unset,
 )
 from .evaluation_history import (
     EvaluationHistoryCursor,
@@ -95,6 +96,16 @@ class MeasurementPlan(Value):
     submitted_at: Seconds
     queue_allowance: Seconds
     reusable_evidence: tuple[EvidenceId, ...] = ()
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The digest of what the evaluation reads at ``candidate``, when the runtime computed it.
+
+    The runtime owns it: the content of the candidate's tree without the paths the task
+    declares its evaluation never reads (an agent's notes, say). Two revisions with one
+    measured input are one measured candidate, so a notes-only commit is no new candidate.
+    An agent's evaluation plan carries it from the runtime's snapshot, and core sets it on a
+    Measure plan from the scope's checkpoint of the revision. None when nobody computed it;
+    then only the commit identifies the candidate.
+    """
     accuracy_stage: str | None = Field(default=None, min_length=1)
     """The stage whose pass is the correctness (accuracy) gate, named explicitly.
 
@@ -183,6 +194,13 @@ class EvidenceRef(Value):
     status: ObservationStatus
     artifacts: tuple[ArtifactRef, ...] = ()
     acceptance_receipt: EvidenceAcceptanceReceipt | None = None
+    reused_from: RequestId | None = Field(default=None, exclude_if=unset)
+    """The earlier submission whose finished job this record re-reads; None for a new run.
+
+    A reused record names its own submission as ``source_request`` and its own purpose and
+    candidate, but no new job ran: it is the result of ``reused_from``'s job, which core
+    checked carries the same evidence id and status (`vs_core._measurement_reuse`).
+    """
 
     @property
     def key(self) -> EvidenceKey:
@@ -267,6 +285,8 @@ class OwnedJob(Value):
     terminal: bool = False
     released: bool = False
     evidence: tuple[EvidenceRef, ...] = ()
+    reuses: RequestId | None = Field(default=None, exclude_if=unset)
+    """The earlier submission whose finished job answers this one (`SubmitMeasurement.reuses`)."""
     pacing: ObservePacing = ObservePacing()
     wait: WaitOn | None = None
     """What the live job waits on: its next poll's timer, or the poll in flight. A terminal
@@ -448,6 +468,8 @@ class MeasurementIdentity(Value):
     stages: tuple[MeasurementStageIdentity, ...]
     accuracy_stage: str | None = Field(default=None, min_length=1)
     accuracy_gated: tuple[EvidenceKind, ...]
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The plan's ``measured_input``: what the evaluation reads at ``candidate``, if known."""
 
     @classmethod
     def from_plan(cls, plan: MeasurementPlan, candidate: RevisionRef) -> MeasurementIdentity:
@@ -455,6 +477,7 @@ class MeasurementIdentity(Value):
         return cls(
             purpose=plan.purpose,
             candidate=candidate,
+            measured_input=plan.measured_input,
             evaluator_digest=plan.evaluator_digest,
             workload_digest=plan.workload_digest,
             environment_digest=plan.environment_digest,
@@ -470,6 +493,19 @@ class MeasurementIdentity(Value):
             accuracy_stage=plan.accuracy_stage,
             accuracy_gated=tuple(sorted(set(plan.accuracy_gated))),
         )
+
+    def measures_same_input(self, other: MeasurementIdentity) -> bool:
+        """Whether ``other`` runs this evaluation on the same input, whatever its purpose.
+
+        Every field but the purpose must match, except the candidate: one commit is one input,
+        and two commits are one input when both measured inputs are known and equal (a commit
+        that changed only paths the evaluation never reads).
+        """
+        same_input = self.candidate == other.candidate or (
+            self.measured_input is not None and self.measured_input == other.measured_input
+        )
+        rest = {"purpose": self.purpose, "candidate": self.candidate, "measured_input": None}
+        return same_input and other.model_copy(update=rest) == self.model_copy(update=rest)
 
     @model_validator(mode="after")
     def canonical_stage_dag(self) -> MeasurementIdentity:
@@ -909,6 +945,13 @@ class SubmitMeasurement(RequestBase):
 
     kind: Literal["submit_measurement"] = "submit_measurement"
     plan: MeasurementPlan
+    reuses: RequestId | None = Field(default=None, exclude_if=unset)
+    """An earlier submission of the same input whose finished job answers this one.
+
+    Core sets it only under the reuse rule (`vs_core._measurement_reuse`). The runtime then
+    runs no job: it reads the earlier job's result again as this submission's evidence, each
+    record naming ``reuses`` as ``reused_from``.
+    """
 
 
 class ObserveOwnedJob(RequestBase):

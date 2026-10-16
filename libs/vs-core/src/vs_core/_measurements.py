@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from . import _wait_clock
 from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
+from ._measurement_reuse import checkpoint_input, reused_record, reused_run
 from ._proofs import (
     Mismatch,
     Missing,
@@ -361,7 +362,7 @@ def _requested(
         or not isinstance(resolved, Proven)
     ):
         return _rejected(state, event.scope)
-    plan = resolved.value
+    plan = checkpoint_input(context, event.scope, resolved.value)
     identity = _identity(plan)
     if not isinstance(identity, Proven):
         return _rejected(state, event.scope)
@@ -382,9 +383,10 @@ def _requested(
         for row in context.records.records
     ):
         return AreaChange(state=state)
-    return _admit(
-        state, context, _Origin(event.scope, origin.value.decision_id), plan, identity.value
-    )
+    run = reused_run(state, event.scope, identity.value)
+    reuses = None if run is None else run.submission_id
+    origin_of = _Origin(event.scope, origin.value.decision_id, reuses=reuses)
+    return _admit(state, context, origin_of, plan, identity.value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,6 +397,8 @@ class _Origin:
     decision_id: DecisionId | None
     within: Within | None = None
     """The agent's limit; None for a Measure decision, whose limit is its wait's."""
+    reuses: RequestId | None = None
+    """The run that answers a first submission without a new one (`reused_run`)."""
 
 
 def _admit(
@@ -577,6 +581,8 @@ def _allocate(
         admission_id=authority.value,
         decision_id=decision_id,
         plan=plan,
+        # Only a first submission reuses: a retry after a failure measures afresh.
+        reuses=origin.reuses if ordinal == 1 else None,
     )
     updated = budget.model_copy(
         update={
@@ -863,6 +869,7 @@ def _submission_job(
             submission_id=source.request_id,
             scope=request.scope,
             plan=request.plan,
+            reuses=request.reuses,
             status=ObservationStatus.PENDING,
             # A job nobody has polled is due now. Normally the first JobObserved replaces
             # this; after a restart that lost it (the submit ran, its job observation was
@@ -1119,7 +1126,11 @@ def _measure_origin(
     resolved = _resolved_plan(context, request.scope, decision.plan)
     if not isinstance(resolved, Proven):
         return resolved
-    if resolved.value != request.plan:
+    # Core set the measured input at admission from the scope's first checkpoint, if any then.
+    if request.plan not in (
+        resolved.value,
+        checkpoint_input(context, request.scope, resolved.value),
+    ):
         return Mismatch(ProofField.PAYLOAD)
     return Proven(None)
 
@@ -1207,7 +1218,7 @@ def _store_evidence(
     refused = False
     for evidence in event.evidence:
         verdict = _evidence(job, event, evidence)
-        if not isinstance(verdict, Proven):
+        if not isinstance(verdict, Proven) or not reused_record(state, job, evidence):
             continue
         incoming = verdict.value
         previous = next((e for e in ledger if e.key == incoming.key), None)

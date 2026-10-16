@@ -35,6 +35,7 @@ from .common import (
     SetupFailureKind,
     Value,
     WorkspaceMode,
+    unset,
 )
 from .evaluation_history import (
     AttemptEvaluationHistory,
@@ -99,6 +100,8 @@ class AttemptCheckpoint(Value):
     request_id: RequestId
     revision: RevisionRef
     retention: Literal["wip", "candidate"]
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """What an evaluation reads at ``revision``, as the snapshot's observation reported it."""
 
 
 class CheckpointDeclined(Value):
