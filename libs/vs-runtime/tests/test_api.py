@@ -286,7 +286,12 @@ def test_fake_commands_are_argv_based_scriptable_and_recorded() -> None:
     async def scenario() -> None:
         run = _Run()
         workspace = run.workspaces.root
-        expected = CommandResult(output="profile data", exit_code=7, truncated=True)
+        expected = CommandResult(
+            output="profile data",
+            exit_code=7,
+            truncated=True,
+            diagnostic_output="profile data",
+        )
         run.commands.script(expected)
 
         result = await run.commands.run(
@@ -319,6 +324,35 @@ def test_fake_commands_are_argv_based_scriptable_and_recorded() -> None:
         assert run.commands.calls[1].timeout_seconds == 45
 
     asyncio.run(scenario())
+
+
+def test_command_result_derives_diagnostic_only_from_complete_output() -> None:
+    result = CommandResult(output="API_TOKEN=runtime-secret", exit_code=1)
+
+    assert result.output == "API_TOKEN=runtime-secret"
+    assert "runtime-secret" not in result.diagnostic_output
+
+
+def test_command_result_rejects_truncation_without_a_prebounded_diagnostic() -> None:
+    with pytest.raises(ValidationError, match="requires diagnostic_output"):
+        CommandResult(output="OKEN=runtime-secret", exit_code=1, truncated=True)
+
+
+def test_command_result_derives_an_empty_diagnostic_for_empty_truncated_output() -> None:
+    result = CommandResult(output="", exit_code=1, truncated=True)
+
+    assert result.diagnostic_output == ""
+
+
+def test_command_result_preserves_an_explicitly_empty_diagnostic() -> None:
+    result = CommandResult(
+        output="API_TOKEN=runtime-secret",
+        exit_code=1,
+        truncated=True,
+        diagnostic_output="",
+    )
+
+    assert result.diagnostic_output == ""
 
 
 @pytest.mark.parametrize(

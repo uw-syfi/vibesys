@@ -216,6 +216,15 @@ def _failure_text(failure: Failure) -> str:
     return ""
 
 
+def _operator_failure_text(failure: Failure) -> str:
+    """Project evaluator output safely without changing the policy's captured text."""
+    if failure.operator_output is not None:
+        return failure.operator_output
+    if failure.output:
+        return failure.kind.value
+    return _failure_text(failure)
+
+
 def _round_failure_summary(failure: Failure | None) -> RoundFailureSummary | None:
     """The round's typed failure, in the strategy-neutral shape ``WORKSTREAM_FINISHED`` reads."""
     if failure is None:
@@ -226,6 +235,7 @@ def _round_failure_summary(failure: Failure | None) -> RoundFailureSummary | Non
         turns=failure.turns,
         limit=failure.limit,
         text=_failure_text(failure),
+        operator_text=_operator_failure_text(failure),
     )
 
 

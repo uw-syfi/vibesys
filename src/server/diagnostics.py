@@ -69,12 +69,10 @@ class Diagnostic(BaseModel):
     # strings or integers so clients need not parse a lossy dotted rendering.
     validation_paths: ValidationPaths | None = None
 
-    @field_validator("summary", "detail", "hint", mode="before")
+    @field_validator("summary", "detail", "hint")
     @classmethod
-    def _redact_text(cls, value: object) -> object:
-        if isinstance(value, str):
-            return redact_diagnostic_text(value)
-        return value
+    def _redact_text(cls, value: str | None) -> str | None:
+        return None if value is None else redact_diagnostic_text(value)
 
 
 def exception_detail(error: BaseException) -> str:

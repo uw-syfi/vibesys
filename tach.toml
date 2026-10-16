@@ -407,7 +407,7 @@ depends_on = ["vibesys.run.evaluation_socket", "vs_agent", "vs_core", "vs_github
 [[modules]]
 path = "vibesys.run.measurement_events"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_runtime"]
+depends_on = ["vibesys", "vs_redaction.api", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.run.core_run"
@@ -427,7 +427,7 @@ depends_on = ["vibesys", "vibesys.errors", "vibesys.run.evaluation", "vibesys.ru
 [[modules]]
 path = "vibesys.run.evaluation"
 layer = "orchestration_host"
-depends_on = ["vs_evaluation.api", "vibesys", "vibesys.inputs", "vibesys.run.contracts", "vs_runtime", "vs_sim.api", "vs_core"]
+depends_on = ["vs_evaluation.api", "vibesys", "vibesys.inputs", "vibesys.run.contracts", "vs_runtime", "vs_sim.api", "vs_core", "vs_redaction.api"]
 
 [[modules]]
 path = "vibesys.run.profilers"
@@ -464,12 +464,12 @@ depends_on = ["vibesys", "vs_prompts", "vs_core"]
 [[modules]]
 path = "vs_sandbox"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_decode.api", "vs_evaluation", "vs_evaluation.api", "vs_evaluation.api.queue_status", "vs_project", "vs_slurm", "vs_sandbox.slurm_wiring", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_evaluation", "vs_evaluation.api", "vs_evaluation.api.queue_status", "vs_project", "vs_redaction.api", "vs_slurm", "vs_sandbox.slurm_wiring", "vs_sim.api"]
 
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.api", "vs_core", "vs_decode.api", "vs_agent", "vs_github", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_async_ops.api", "vs_core", "vs_decode.api", "vs_agent", "vs_github", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_redaction.api", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_agent"

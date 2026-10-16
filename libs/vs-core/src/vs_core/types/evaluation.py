@@ -720,6 +720,8 @@ class JobObserved(Value):
     # proves (see `MeasurementFailure`) and lets the submission be retried only when
     # it says infrastructure.
     failure: MeasurementFailure | None = None
+    operator_diagnostic: str = ""
+    """Credential-safe host projection kept separate from the raw diagnostic."""
 
     @model_validator(mode="after")
     def correlated_progress(self) -> JobObserved:
@@ -743,6 +745,8 @@ class RegisteredJobObserved(Value):
     observation: Observation
     evidence: tuple[EvidenceRef, ...] = ()
     evaluation_result: EvaluationTerminalFacts | None = None
+    operator_diagnostic: str = ""
+    """Credential-safe host projection kept separate from the raw diagnostic."""
 
     @model_validator(mode="after")
     def correlated_progress(self) -> RegisteredJobObserved:
@@ -849,11 +853,14 @@ class MeasurementResult(Value):
     evidence: tuple[EvidenceRef, ...]
     status: ObservationStatus
     diagnostic: str = ""
-    """The executor's failure text, its last `MEASUREMENT_DIAGNOSTIC_LIMIT` characters.
+    """The executor's raw failure text, bounded to its trailing
+    ``MEASUREMENT_DIAGNOSTIC_LIMIT`` characters.
 
     It is the only account of a failure that left no evidence, such as a benchmark that
     died without a result record, so the strategy can tell the agent why it was given up.
     """
+    operator_diagnostic: str = ""
+    """Credential-safe bounded projection for operator-facing events only."""
 
 
 class JobQueued(Value):

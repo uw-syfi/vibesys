@@ -149,6 +149,9 @@ class _RoundFailureProjection(Protocol):
     @property
     def text(self) -> str: ...
 
+    @property
+    def operator_text(self) -> str | None: ...
+
 
 class _RoundProjection(Protocol):
     """Product facts needed to translate one projected round into events."""
@@ -291,12 +294,19 @@ def _workstream_failure_data(
     """The round's typed failure, as the wire's frozen ``WorkstreamFailureKind`` vocabulary."""
     if failure is None:
         return None
+    operator_text = failure.operator_text
+    if operator_text is None:
+        operator_text = (
+            failure.kind
+            if failure.kind == WorkstreamFailureKind.NO_TRUSTED_EVIDENCE.value
+            else failure.text
+        )
     return WorkstreamFailureData(
         kind=WorkstreamFailureKind(failure.kind),
         role=failure.role,
         turns=failure.turns,
         limit=failure.limit,
-        text=failure.text,
+        text=operator_text,
     )
 
 

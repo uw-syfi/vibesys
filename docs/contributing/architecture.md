@@ -223,12 +223,14 @@ graph TD
     vs_runtime --> vs_mcp
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts
+    vs_runtime --> vs_redaction
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_sim
     vs_runtime --> vs_slurm
     vs_sandbox --> vs_decode
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_project
+    vs_sandbox --> vs_redaction
     vs_sandbox --> vs_sim
     vs_sandbox --> vs_slurm
     vs_slurm --> vs_decode

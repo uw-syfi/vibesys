@@ -233,7 +233,10 @@ _FIELDS: dict[FailureKind, tuple[frozenset[str], frozenset[str]]] = {
     FailureKind.RENDER_FAILED: (frozenset({"role"}), frozenset()),
     FailureKind.WAIT_REFUSED: (frozenset({"role", "refusal"}), frozenset()),
     FailureKind.CHECKPOINT_DECLINED: (frozenset({"declined"}), frozenset()),
-    FailureKind.NO_TRUSTED_EVIDENCE: (frozenset({"status"}), frozenset({"output"})),
+    FailureKind.NO_TRUSTED_EVIDENCE: (
+        frozenset({"status"}),
+        frozenset({"output", "operator_output"}),
+    ),
     FailureKind.TURN_LIMIT: (frozenset({"turns", "limit", "blocker"}), frozenset()),
     FailureKind.REPEATED_TURN: (frozenset({"blocker"}), frozenset()),
     FailureKind.NOT_MEASURED: (frozenset({"dropped"}), frozenset({"superseded_by"})),
@@ -253,6 +256,8 @@ class Failure(Value):
     status: ObservationStatus | None = None
     output: str = ""
     """What an evaluator printed (a failed job's diagnostic), kept as captured data."""
+    operator_output: str | None = None
+    """Credential-safe projection of output for operator-facing events only."""
     turns: int | None = None
     limit: int | None = None
     blocker: Blocker | None = None
@@ -264,25 +269,29 @@ class Failure(Value):
     def fields_match_kind(self) -> "Failure":
         """Refuse a field that does not belong to the kind, or a kind missing its field."""
         required, optional = _FIELDS.get(self.kind, (frozenset(), frozenset()))
-        present = {
-            name
-            for name in (
-                "role",
-                "cause",
-                "ended",
-                "turn_failure",
-                "refusal",
-                "declined",
-                "status",
-                "turns",
-                "limit",
-                "blocker",
-                "revision",
-                "dropped",
-                "superseded_by",
-            )
-            if getattr(self, name) is not None
-        } | ({"output"} if self.output else set())
+        present = (
+            {
+                name
+                for name in (
+                    "role",
+                    "cause",
+                    "ended",
+                    "turn_failure",
+                    "refusal",
+                    "declined",
+                    "status",
+                    "turns",
+                    "limit",
+                    "blocker",
+                    "revision",
+                    "dropped",
+                    "superseded_by",
+                )
+                if getattr(self, name) is not None
+            }
+            | ({"output"} if self.output else set())
+            | ({"operator_output"} if self.operator_output is not None else set())
+        )
         if missing := required - present:
             message = f"{self.kind.value} needs {sorted(missing)[0]}"
             raise ValueError(message)

@@ -476,6 +476,7 @@ class MeasurementRequests:
                 evidence=view.evidence,
                 evaluation_result=view.facts,
                 failure=view.failure,
+                operator_diagnostic=view.operator_diagnostic,
             ),
         )
 
@@ -500,6 +501,7 @@ class MeasurementRequests:
                 evidence=view.evidence,
                 evaluation_result=view.facts,
                 failure=view.failure,
+                operator_diagnostic=view.operator_diagnostic,
             ),
         )
 

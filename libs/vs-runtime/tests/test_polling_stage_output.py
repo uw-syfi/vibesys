@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 
 from vs_evaluation.api import (
+    MAX_EVIDENCE_SUMMARY_CHARS,
     ContentDigest,
     EvaluationRequest,
     EvaluationState,
@@ -23,8 +24,15 @@ from vs_evaluation.api import (
     EvidenceKind,
     ExecutorObservation,
     SemanticEvaluationStage,
+    TrustedEvidence,
 )
-from vs_runtime.api import AccuracyEvaluation, BenchmarkFailureKind, PollingEvaluationExecutor
+from vs_redaction.api import redact_diagnostic_tail
+from vs_runtime.api import (
+    AccuracyEvaluation,
+    BenchmarkEvaluation,
+    BenchmarkFailureKind,
+    PollingEvaluationExecutor,
+)
 from vs_runtime.api.core import StageRun
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 from vs_sim.api import Capture
@@ -130,6 +138,52 @@ async def test_a_stage_writes_its_output_to_its_own_stream_before_it_settles() -
     await executor.close()
 
 
+@pytest.mark.parametrize("kind", [EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK])
+@pytest.mark.parametrize("split_at", range(1, len("API_TOKEN")))
+async def test_local_stage_keeps_raw_evidence_and_separate_operator_failure(
+    kind: EvidenceKind,
+    split_at: int,
+) -> None:
+    credential = "API_TOKEN=local-summary-secret"
+    suffix = "z" * (MAX_EVIDENCE_SUMMARY_CHARS + split_at - len(credential) - 1)
+    feedback = "prefix:" + credential + " " + suffix
+    evaluation = FakeEvaluation(default_accuracy=AccuracyEvaluation(executed=True))
+    if kind is EvidenceKind.ACCURACY:
+        evaluation.script_accuracy(
+            AccuracyEvaluation(
+                executed=True,
+                feedback=feedback,
+                operator_feedback=redact_diagnostic_tail(
+                    feedback, max_chars=MAX_EVIDENCE_SUMMARY_CHARS
+                ),
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
+            )
+        )
+    else:
+        evaluation.script_benchmark(
+            BenchmarkEvaluation(
+                executed=True,
+                feedback=feedback,
+                operator_feedback=redact_diagnostic_tail(
+                    feedback, max_chars=MAX_EVIDENCE_SUMMARY_CHARS
+                ),
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
+            )
+        )
+    executor, _streams = await _start(evaluation)
+
+    observed = await _terminal(executor)
+    stage = next(stage for stage in observed.stage_results if stage.name == kind.value)
+    evidence = TrustedEvidence.model_validate(stage.result)
+
+    assert evidence.semantic_summary is not None
+    assert "local-summary-secret" in evidence.semantic_summary
+    assert len(evidence.semantic_summary) <= MAX_EVIDENCE_SUMMARY_CHARS
+    assert stage.operator_summary is not None
+    assert "local-summary-secret" not in stage.operator_summary
+    await executor.close()
+
+
 class _Ending(StrEnum):
     FAILS = "fails"
     RAISES = "raises"
@@ -144,7 +198,10 @@ async def test_a_stage_that_ends_early_closes_its_stream_with_what_it_wrote(
     if ending is _Ending.FAILS:
         evaluation.script_accuracy(
             AccuracyEvaluation(
-                executed=True, feedback="mismatch", failure_kind=BenchmarkFailureKind.WORKLOAD
+                executed=True,
+                feedback="mismatch",
+                operator_feedback="mismatch",
+                failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         )
     elif ending is _Ending.RAISES:

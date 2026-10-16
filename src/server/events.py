@@ -552,10 +552,10 @@ class SubprocessOutputData(EventPayload):
     stream: OutputStream
     content: str
 
-    @field_validator("content", mode="before")
+    @field_validator("content")
     @classmethod
-    def _redact_content(cls, value: object) -> object:
-        return redact_diagnostic_text(value) if isinstance(value, str) else value
+    def _redact_content(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
 
 
 class JudgeResultData(EventPayload):
@@ -616,8 +616,8 @@ class GateFinishedData(EventPayload):
 
     ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
     ``unit`` keeps the historical fallback of the metric name when the
-    contract declares no unit. ``output_tail`` carries the trailing command
-    output on failure. ``round_label`` groups the per-recipe local-validation
+    contract declares no unit. ``output_tail`` carries bounded, credential-redacted
+    trailing command output on failure. ``round_label`` groups the per-recipe local-validation
     gates of one attempt back together, so a client folds them into a
     pass-fraction itself rather than the backend aggregating one.
     """
@@ -636,10 +636,10 @@ class GateFinishedData(EventPayload):
     source: FrameworkSource = FrameworkSource.GATES
     source_label: str | None = None
 
-    @field_validator("output_tail", mode="before")
+    @field_validator("output_tail")
     @classmethod
-    def _redact_output_tail(cls, value: object) -> object:
-        return redact_diagnostic_text(value) if isinstance(value, str) else value
+    def _redact_output_tail(cls, value: str | None) -> str | None:
+        return None if value is None else redact_diagnostic_text(value)
 
 
 class WorkspaceSnapshotData(EventPayload):
@@ -742,10 +742,10 @@ class WorkstreamFailureData(BaseModel):
     limit: int | None = None
     text: str = ""
 
-    @field_validator("text", mode="before")
+    @field_validator("text")
     @classmethod
-    def _redact_text(cls, value: object) -> object:
-        return redact_diagnostic_text(value) if isinstance(value, str) else value
+    def _redact_text(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
 
 
 class WorkstreamFinishedData(EventPayload):

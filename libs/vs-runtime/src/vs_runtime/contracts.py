@@ -21,6 +21,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, 
 from vs_core.api import EvidenceRequirements, SpanKind
 from vs_evaluation.api import EvidenceFailureKind
 from vs_evaluator_protocol.api import PartialMeasurement
+from vs_redaction.api import redact_diagnostic_text
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -357,6 +358,26 @@ class CommandResult(BaseModel):
     output: str
     exit_code: int | None = None
     truncated: bool = False
+    # Operator-facing form created before a command runner applies its output cap.
+    diagnostic_output: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _require_prebounded_diagnostic(cls, value: object) -> object:
+        """Derive from complete output, but never sanitize an already-truncated fragment."""
+        if not isinstance(value, Mapping) or "diagnostic_output" in value:
+            return value
+        output = value.get("output")
+        if isinstance(output, bytes):
+            output = output.decode()
+        if not isinstance(output, str):
+            return value
+        if value.get("truncated", False):
+            if not output:
+                return {**value, "diagnostic_output": ""}
+            message = "a truncated command result requires diagnostic_output from before truncation"
+            raise ValueError(message)
+        return {**value, "diagnostic_output": redact_diagnostic_text(output)}
 
 
 class Commands(Protocol):
@@ -542,6 +563,8 @@ class AccuracyEvaluation(BaseModel):
 
     executed: bool
     feedback: str | None = None
+    operator_feedback: str | None = None
+    """Credential-safe feedback for operator-facing projections, never agent evidence."""
     # Whose fault the failure is: present exactly when accuracy failed, with no default.
     failure_kind: BenchmarkFailureKind | None = None
     receipt: AccuracyReceipt | None = None
@@ -550,6 +573,9 @@ class AccuracyEvaluation(BaseModel):
     def _failure_kind_exactly_when_failed(self) -> AccuracyEvaluation:
         if (self.feedback is None) != (self.failure_kind is None):
             message = "an accuracy outcome carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if (self.feedback is None) != (self.operator_feedback is None):
+            message = "an accuracy failure requires a separate operator-safe feedback"
             raise ValueError(message)
         return self
 
@@ -566,6 +592,8 @@ class BenchmarkEvaluation(BaseModel):
 
     executed: bool
     feedback: str | None = None
+    operator_feedback: str | None = None
+    """Credential-safe feedback for operator-facing projections, never agent evidence."""
     # Whose fault the failure is: present exactly when the benchmark failed, with no default.
     failure_kind: BenchmarkFailureKind | None = None
     metric_name: str | None = None
@@ -584,6 +612,9 @@ class BenchmarkEvaluation(BaseModel):
             raise ValueError(message)
         if (self.feedback is None) != (self.failure_kind is None):
             message = "a benchmark carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if (self.feedback is None) != (self.operator_feedback is None):
+            message = "a benchmark failure requires a separate operator-safe feedback"
             raise ValueError(message)
         return self
 

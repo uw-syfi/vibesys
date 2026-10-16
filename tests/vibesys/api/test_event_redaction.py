@@ -66,3 +66,44 @@ def test_workstream_failure_redacts_credentials_during_public_event_validation()
     assert event.data.model_dump()["last_error"]["text"] == (
         "password: [REDACTED]; TOKEN=[REDACTED]"
     )
+
+
+def test_byte_text_is_coerced_before_every_semantic_event_redaction() -> None:
+    gate = GateFinishedData.model_validate(
+        {"gate": GateKind.ACCURACY, "output_tail": b"API_TOKEN=gate-bytes-secret"}
+    )
+    subprocess = CoreEvent.model_validate(
+        {
+            "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
+            "type": CoreEventType.SUBPROCESS_OUTPUT,
+            "data": {
+                "kind": "subprocess_output",
+                "process_id": "accuracy-1",
+                "process_kind": "accuracy_checker",
+                "stream": "stderr",
+                "content": b"TOKEN=stream-bytes-secret",
+            },
+        }
+    )
+    workstream = CoreEvent.model_validate(
+        {
+            "timestamp": datetime(2026, 1, 1, tzinfo=UTC),
+            "type": CoreEventType.WORKSTREAM_FINISHED,
+            "data": {
+                "kind": "workstream_finished",
+                "setup_failure": False,
+                "refunded": False,
+                "repeated_error": False,
+                "last_error": {
+                    "kind": "no-trusted-evidence",
+                    "text": b"password: workstream-bytes-secret",
+                },
+            },
+        }
+    )
+
+    assert gate.output_tail == "API_TOKEN=[REDACTED]"
+    assert subprocess.data is not None
+    assert subprocess.data.model_dump()["content"] == "TOKEN=[REDACTED]"
+    assert workstream.data is not None
+    assert workstream.data.model_dump()["last_error"]["text"] == "password: [REDACTED]"

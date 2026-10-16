@@ -145,6 +145,22 @@ def test_diagnostic_redacts_explicit_text_on_construction_and_round_trip() -> No
     assert restored == diagnostic
 
 
+def test_diagnostic_coerces_bytes_before_redacting_every_text_field() -> None:
+    diagnostic = Diagnostic.model_validate(
+        {
+            "code": "request_failed",
+            "summary": b"TOKEN=summary-bytes-secret",
+            "detail": b"password: detail-bytes-secret",
+            "hint": b"Bearer hint-bytes-secret",
+            "scope": DiagnosticScope.RUN,
+        }
+    )
+
+    assert diagnostic.summary == "TOKEN=[REDACTED]"
+    assert diagnostic.detail == "password: [REDACTED]"
+    assert diagnostic.hint == "Bearer [REDACTED]"
+
+
 def test_failure_factories_keep_legacy_fields_consistent_and_sanitized() -> None:
     error = PermissionError("OPENAI_API_KEY=secret")
     response = Response.from_exception(

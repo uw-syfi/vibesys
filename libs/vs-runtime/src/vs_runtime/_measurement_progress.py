@@ -14,7 +14,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
-from vs_evaluation.api import EvidenceOutcome, PollPhase, StageState, TrustedEvidence
+from vs_evaluation.api import (
+    MAX_EVIDENCE_SUMMARY_CHARS,
+    EvidenceOutcome,
+    PollPhase,
+    StageState,
+    TrustedEvidence,
+)
+from vs_redaction.api import redact_diagnostic_tail
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -151,7 +158,19 @@ class MeasurementProgress:
                     if evidence is None
                     else tuple(StageMetric(m.name, m.value, m.unit) for m in evidence.metrics),
                     summary=None if evidence is None else evidence.semantic_summary,
-                    failure=step.failure,
+                    failure=(
+                        step.operator_failure
+                        if step.operator_failure is not None
+                        else step.operator_summary
+                        if evidence is not None
+                        and evidence.outcome is EvidenceOutcome.FAILED
+                        and step.operator_summary is not None
+                        else redact_diagnostic_tail(
+                            step.failure, max_chars=MAX_EVIDENCE_SUMMARY_CHARS
+                        )
+                        if step.failure is not None
+                        else None
+                    ),
                     stdout=step.stdout_tail,
                     stderr=step.stderr_tail,
                 )

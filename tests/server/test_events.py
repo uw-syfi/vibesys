@@ -377,6 +377,29 @@ class TestFrameworkEventRoundTrip:
 
         assert failure.text == "password: [REDACTED]; TOKEN=[REDACTED]"
 
+    def test_byte_text_is_coerced_before_every_replay_redaction(self) -> None:
+        gate = GateFinishedData.model_validate(
+            {"gate": GateKind.ACCURACY, "output_tail": b"API_TOKEN=gate-bytes-secret"}
+        )
+        subprocess = SubprocessOutputData.model_validate(
+            {
+                "process_id": "accuracy-1",
+                "process_kind": "accuracy_checker",
+                "stream": "stderr",
+                "content": b"TOKEN=stream-bytes-secret",
+            }
+        )
+        failure = WorkstreamFailureData.model_validate(
+            {
+                "kind": WorkstreamFailureKind.NO_TRUSTED_EVIDENCE,
+                "text": b"password: workstream-bytes-secret",
+            }
+        )
+
+        assert gate.output_tail == "API_TOKEN=[REDACTED]"
+        assert subprocess.content == "TOKEN=[REDACTED]"
+        assert failure.text == "password: [REDACTED]"
+
     @pytest.mark.parametrize("value", [float("nan"), float("inf")])
     def test_gate_finished_rejects_non_finite_value(self, value: float) -> None:
         with pytest.raises(ValidationError, match="finite"):

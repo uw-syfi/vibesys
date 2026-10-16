@@ -360,6 +360,7 @@ class EvaluationCoordinator:
             and current.current_stage == observed.current_stage
             and current.stage_results == observed.stage_results
             and current.failure == observed.failure
+            and current.operator_failure == observed.operator_failure
             and not current.submission_pending
         ):
             return current
@@ -369,6 +370,7 @@ class EvaluationCoordinator:
                 "current_stage": observed.current_stage,
                 "stage_results": observed.stage_results,
                 "failure": observed.failure,
+                "operator_failure": observed.operator_failure,
                 "submission_pending": False,
                 "revision": current.revision + 1,
             }
@@ -472,6 +474,7 @@ class EvaluationCoordinator:
                 current_stage=record.current_stage,
                 stage_results=record.stage_results,
                 failure=record.failure,
+                operator_failure=record.operator_failure,
                 submission_pending=record.submission_pending,
                 cancel_requested=record.cancel_requested,
             )

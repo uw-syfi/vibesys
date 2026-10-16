@@ -6,6 +6,8 @@ file covers scripting and call-recording, which only a fake has.
 
 from __future__ import annotations
 
+import pytest
+
 from vs_sandbox.api import CommandResult
 from vs_sandbox.api.testing import FakeCommandRunner
 from vs_sim.api import DISCARD
@@ -39,6 +41,85 @@ def test_default_result_is_configurable() -> None:
 
     assert result.exit_code == 1
     assert result.output == "boom"
+
+
+def test_truncated_result_requires_a_prebounded_diagnostic_for_each_retained_view() -> None:
+    with pytest.raises(ValueError, match="requires diagnostic_output"):
+        CommandResult(output="OKEN=sandbox-secret", exit_code=1, truncated=True)
+
+    with pytest.raises(ValueError, match="requires diagnostic_stdout"):
+        CommandResult(
+            output="stdout fragment",
+            stdout="stdout fragment",
+            exit_code=1,
+            truncated=True,
+            diagnostic_output="safe aggregate",
+        )
+
+    with pytest.raises(ValueError, match="requires diagnostic_stderr"):
+        CommandResult(
+            output="stderr fragment",
+            stderr="stderr fragment",
+            exit_code=1,
+            truncated=True,
+            diagnostic_output="safe aggregate",
+            diagnostic_stdout="",
+        )
+
+
+def test_truncated_result_derives_empty_diagnostics_for_unrepresented_streams() -> None:
+    empty = CommandResult(output="", exit_code=1, truncated=True)
+    aggregate_only = CommandResult(
+        output="retained aggregate",
+        exit_code=1,
+        truncated=True,
+        diagnostic_output="safe aggregate",
+    )
+
+    assert (empty.diagnostic_output, empty.diagnostic_stdout, empty.diagnostic_stderr) == (
+        "",
+        "",
+        "",
+    )
+    assert aggregate_only.diagnostic_output == "safe aggregate"
+    assert aggregate_only.diagnostic_stdout == aggregate_only.diagnostic_stderr == ""
+
+
+def test_truncated_result_preserves_explicitly_empty_diagnostics() -> None:
+    result = CommandResult(
+        output="OKEN=sandbox-secret",
+        exit_code=1,
+        truncated=True,
+        diagnostic_output="",
+        diagnostic_stdout="",
+        diagnostic_stderr="",
+    )
+
+    assert result.diagnostic_output == ""
+
+
+@pytest.mark.parametrize("split_at", range(1, len("API_TOKEN")))
+def test_failed_process_keeps_raw_output_but_bounds_a_pre_redacted_diagnostic(
+    split_at: int,
+) -> None:
+    """The raw command contract stays intact while its UI-safe view cannot leak a split key."""
+    limit = 100
+    credential = "API_TOKEN=stream-secret"
+    # A failed stderr-only result has 81 payload characters after its 19-character
+    # marker. Place that retained tail exactly `split_at` characters into the key.
+    suffix = "z" * (81 + split_at - len(credential) - 1)
+    stderr = "p" * 32 + credential + " " + suffix
+    sandbox = FakeCommandRunner(max_output_chars=limit)
+    sandbox.script_process("fail", stderr=stderr, returncode=1)
+
+    result = sandbox.execute("fail", output=DISCARD)
+
+    assert "stream-secret" in result.stderr
+    assert "API_TOKEN" not in result.stderr
+    assert "stream-secret" not in result.diagnostic_stderr
+    assert "stream-secret" not in result.diagnostic_output
+    assert len(result.output) <= limit
+    assert len(result.diagnostic_output) <= limit
 
 
 def test_execute_records_every_call() -> None:

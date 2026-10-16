@@ -3273,6 +3273,7 @@ dependencies = [
     { name = "vs-mcp" },
     { name = "vs-project" },
     { name = "vs-prompts" },
+    { name = "vs-redaction" },
     { name = "vs-sandbox" },
     { name = "vs-sim" },
     { name = "vs-slurm" },
@@ -3294,6 +3295,7 @@ requires-dist = [
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-prompts", editable = "libs/vs-prompts" },
+    { name = "vs-redaction", editable = "libs/vs-redaction" },
     { name = "vs-sandbox", editable = "libs/vs-sandbox" },
     { name = "vs-sim", editable = "libs/vs-sim" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },
@@ -3311,6 +3313,7 @@ dependencies = [
     { name = "vs-decode" },
     { name = "vs-evaluation" },
     { name = "vs-project" },
+    { name = "vs-redaction" },
     { name = "vs-sim" },
     { name = "vs-slurm" },
 ]
@@ -3324,6 +3327,7 @@ requires-dist = [
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-evaluation", editable = "libs/vs-evaluation" },
     { name = "vs-project", editable = "libs/vs-project" },
+    { name = "vs-redaction", editable = "libs/vs-redaction" },
     { name = "vs-sim", editable = "libs/vs-sim" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },
 ]
