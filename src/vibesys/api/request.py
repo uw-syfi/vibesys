@@ -149,6 +149,7 @@ def run_accelerator_unavailable(request: RunRequest, probe: CommandProbe) -> str
     spec = resolve_run_environment_spec(
         request.run_environment or make_run_environment_spec(),
         request.backend,
+        task_dockerfile=request.input_bundle.dockerfile_path,
         platform=sys.platform,
         log=lambda _line: None,
     )
