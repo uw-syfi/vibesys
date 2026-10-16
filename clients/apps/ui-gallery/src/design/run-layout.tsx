@@ -19,6 +19,7 @@ import {
   Gantt,
   type GanttRow,
   type GanttSegment,
+  type GanttView,
   type Guide,
   KeyValue,
   LogPane,
@@ -388,9 +389,13 @@ function Timeline(props: {
   readonly flags: DesignFlags;
   readonly go: (zoom: Zoom) => void;
 }): JSX.Element {
+  const [view, setView] = useState<GanttView>({from: 0, to: now(props.flags)});
   return (
     <Gantt
       label="Candidates over time"
+      size="fill"
+      view={view}
+      changeView={setView}
       nameLabel="candidate · built on"
       figureLabel="vs input"
       from={0}
@@ -469,6 +474,7 @@ function CandidateList(props: {
   return (
     <PickList
       label="Candidates"
+      size="fill"
       {...(props.compact
         ? {}
         : {

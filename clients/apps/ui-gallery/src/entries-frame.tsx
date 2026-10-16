@@ -5,6 +5,7 @@ import {
   DotLegend,
   Gantt,
   type GanttRow,
+  type GanttView,
   type Guide,
   LogPane,
   Meter,
@@ -240,6 +241,7 @@ const ROWS: readonly GanttRow[] = [
 const TICKS = [0, 5, 10].map(at => ({at, label: `${at}m`}));
 
 function GanttDemo(): JSX.Element {
+  const [view, setView] = useState<GanttView>({from: 0, to: 14});
   return (
     <Stack>
       <Card>
@@ -251,6 +253,8 @@ function GanttDemo(): JSX.Element {
           to={14}
           playhead={14}
           ticks={TICKS}
+          view={view}
+          changeView={setView}
           rows={ROWS}
         />
       </Card>
@@ -272,6 +276,7 @@ function ScreenDemo(): JSX.Element {
   return (
     <Screen
       density="compact"
+      landmark="none"
       header={
         <Row justify="between" align="center">
           <Text as="h3" variant="heading">
@@ -282,7 +287,7 @@ function ScreenDemo(): JSX.Element {
       }
     >
       <Breadcrumb
-        label="Zoom"
+        label="Where in the screen"
         items={[
           {id: 'run', label: 'run', press: noop},
           {id: 'candidate', label: 'padding'},

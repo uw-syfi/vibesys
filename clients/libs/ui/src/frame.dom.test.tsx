@@ -21,6 +21,7 @@ import {
   Screen,
   Thought,
   Thread,
+  type ThreadItem,
   ToolGroup,
   type ToolLine,
 } from './index.js';
@@ -97,6 +98,13 @@ describe('Screen', () => {
     );
     expect(one(compact.container, 'main').getAttribute('data-density')).toBe('compact');
     expect(compact.container.textContent).toBe('Headbody');
+    const inner = await mount(
+      <Screen header="Head" landmark="none">
+        body
+      </Screen>,
+    );
+    expect(inner.container.querySelector('main')).toBeNull();
+    expect(one(inner.container, '.vs-screen').getAttribute('data-density')).toBe('comfortable');
   });
 });
 
@@ -371,7 +379,7 @@ describe('Gantt', () => {
     expect(opened).toEqual(['s1', 'row']);
   });
 
-  test('keeps every bar and segment inside the axis, whatever the times', async () => {
+  test('never gives a bar or a segment a negative length, whatever the times', async () => {
     const cases: readonly [number, number][] = [
       [-5, 3],
       [8, 40],
@@ -388,16 +396,16 @@ describe('Gantt', () => {
     );
     const {container} = await mount(<Gantt label="Over time" from={0} to={10} rows={rows} />);
     for (const element of all(container, '.vs-gantt-bar, .vs-gantt-seg')) {
-      const from = Number.parseFloat(
-        element.style.getPropertyValue('--gantt-from') ||
-          element.style.getPropertyValue('--seg-from'),
-      );
       const span = Number.parseFloat(
         element.style.getPropertyValue('--gantt-span') ||
           element.style.getPropertyValue('--seg-span'),
       );
-      expect(from).toBeGreaterThanOrEqual(0);
       expect(span).toBeGreaterThanOrEqual(0);
+    }
+    for (const segment of all(container, '.vs-gantt-seg')) {
+      const from = Number.parseFloat(segment.style.getPropertyValue('--seg-from'));
+      const span = Number.parseFloat(segment.style.getPropertyValue('--seg-span'));
+      expect(from).toBeGreaterThanOrEqual(0);
       expect(from + span).toBeLessThanOrEqual(100.01);
     }
   });
@@ -622,5 +630,205 @@ describe('Breadcrumb figure', () => {
       />,
     );
     expect(one(container, '.vs-crumb-figure').textContent).toBe('5.72x');
+  });
+});
+
+const MANY = 10_000;
+/** The most rows of a windowed list that may be in the DOM at once, far fewer than `MANY`. */
+const DRAWN_AT_MOST = 120;
+
+describe('at scale: windowed lists draw a bounded number of rows', () => {
+  test('PickList: 10k rows, and the keys reach the last row', async () => {
+    const picked: string[] = [];
+    const ids = Array.from({length: MANY}, (_, index) => `r${index}`);
+    const {container} = await mount(
+      <PickList label="Ideas" selected="r0">
+        {ids.map(id => (
+          <PickRow key={id} id={id} title={id} select={() => picked.push(id)} />
+        ))}
+      </PickList>,
+    );
+    const options = (): HTMLElement[] => all(container, '[role="option"]');
+    expect(options().length).toBeGreaterThan(0);
+    expect(options().length).toBeLessThan(DRAWN_AT_MOST);
+    expect(options()[0]?.getAttribute('aria-setsize')).toBe(String(MANY));
+    await press(options()[0] as HTMLElement, 'End');
+    const last = document.activeElement as HTMLElement;
+    expect(last.getAttribute('aria-posinset')).toBe(String(MANY));
+    expect(options().length).toBeLessThan(DRAWN_AT_MOST);
+    await press(last, 'Enter');
+    expect(picked).toEqual(['r9999']);
+    await press(last, 'Home');
+    expect((document.activeElement as HTMLElement).getAttribute('aria-posinset')).toBe('1');
+  });
+
+  test('PickList: arrows and pages step across the drawn window to any row', async () => {
+    const ids = Array.from({length: MANY}, (_, index) => `r${index}`);
+    const {container} = await mount(
+      <PickList label="Ideas" selected="r0">
+        {ids.map(id => (
+          <PickRow key={id} id={id} title={id} select={noop} />
+        ))}
+      </PickList>,
+    );
+    let at = 1;
+    for (const key of ['ArrowDown', 'ArrowDown', 'PageDown', 'ArrowUp']) {
+      const focused = (document.activeElement as HTMLElement).closest('[role="option"]');
+      const row = (focused ?? one(container, '[role="option"]')) as HTMLElement;
+      await press(row, key);
+      at = Number((document.activeElement as HTMLElement).getAttribute('aria-posinset'));
+    }
+    expect(at).toBeGreaterThan(3);
+  });
+
+  test('Thread: 10k entries', async () => {
+    const items: ThreadItem[] = Array.from({length: MANY}, (_, index) => ({
+      kind: 'message',
+      id: `m${index}`,
+      author: 'Worker',
+      variant: 'note',
+      text: `entry ${index}`,
+    }));
+    const {container} = await mount(<Thread label="Thread" items={items} />);
+    expect(all(container, 'li.vs-thread-row').length).toBeLessThan(DRAWN_AT_MOST);
+    expect(all(container, 'li.vs-thread-row').length).toBeGreaterThan(0);
+  });
+
+  test('LogPane: 50k lines, the tail drawn', async () => {
+    const lines = Array.from({length: 5 * MANY}, (_, index) => ({text: `line ${index}`}));
+    const {container} = await mount(<LogPane label="Log" lines={lines} />);
+    const drawn = all(container, '.vs-log-line');
+    expect(drawn.length).toBeLessThan(DRAWN_AT_MOST);
+    expect(drawn.at(-1)?.textContent).toBe('line 49999');
+  });
+
+  test('Narrative: 10k blocks', async () => {
+    const blocks = Array.from({length: MANY}, (_, index) => ({
+      id: `b${index}`,
+      said: index % 2 === 0,
+    }));
+    const {container} = await mount(
+      <Narrative label="Turn">
+        {blocks.map(block =>
+          block.said ? (
+            <Said key={block.id} text={block.id} />
+          ) : (
+            <Thought key={block.id} text={block.id} />
+          ),
+        )}
+      </Narrative>,
+    );
+    const drawn = all(container, '.vs-said, .vs-thought');
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.length).toBeLessThan(DRAWN_AT_MOST);
+  });
+
+  test('Gantt: 10k rows, and the keys reach the last row', async () => {
+    const opened: string[] = [];
+    const rows = Array.from({length: MANY}, (_, index) =>
+      row(`r${index}`, {press: () => opened.push(`r${index}`)}),
+    );
+    const {container} = await mount(<Gantt label="Over time" from={0} to={10} rows={rows} />);
+    const options = (): HTMLElement[] => all(container, '[role="option"]');
+    expect(options().length).toBeLessThan(DRAWN_AT_MOST);
+    await press(options()[0] as HTMLElement, 'End');
+    const last = document.activeElement as HTMLElement;
+    expect(last.getAttribute('aria-posinset')).toBe(String(MANY));
+    await press(last, 'Enter');
+    expect(opened).toEqual(['r9999']);
+  });
+
+  test('Gantt: many rows read as bars without pieces unless asked for the detail', async () => {
+    const piece = [{id: 's', start: 0, end: 5, kind: 'solid' as const, label: 's'}];
+    const rows = Array.from({length: 200}, (_, index) => row(`r${index}`, {segments: piece}));
+    const aggregated = await mount(<Gantt label="A" from={0} to={10} rows={rows} />);
+    expect(all(aggregated.container, '.vs-gantt-seg')).toHaveLength(0);
+    const detailed = await mount(<Gantt label="B" from={0} to={10} rows={rows} detail="full" />);
+    expect(all(detailed.container, '.vs-gantt-seg').length).toBeGreaterThan(0);
+  });
+
+  test('Chart: 600 points, hollow ones faint, one tab stop and arrows among the pickable', async () => {
+    const points = Array.from({length: 600}, (_, index) => ({
+      id: `p${index}`,
+      x: index,
+      y: (index * 7) % 50,
+      filled: index % 10 === 0,
+    }));
+    const {container} = await mount(<Chart label="Series" points={points} pick={noop} />);
+    const buttons = all(container, '[role="button"]');
+    expect(buttons).toHaveLength(600);
+    expect(buttons.filter(button => button.getAttribute('tabindex') === '0')).toHaveLength(1);
+    expect(all(container, '.vs-chart-point[data-faint]')).toHaveLength(540);
+    await press(buttons[0] as unknown as HTMLElement, 'ArrowRight');
+    expect(document.activeElement).toBe(buttons[1] as unknown as Element);
+    await press(buttons[1] as unknown as HTMLElement, 'End');
+    expect(document.activeElement).toBe(buttons[599] as unknown as Element);
+  });
+});
+
+function Zoomable() {
+  const [view, setView] = useState({from: 0, to: 100});
+  return (
+    <>
+      <Gantt
+        label="Over time"
+        from={0}
+        to={100}
+        view={view}
+        changeView={setView}
+        rows={[row('a', {start: 0, end: 100})]}
+      />
+      <output>{`${view.from}-${view.to}`}</output>
+    </>
+  );
+}
+
+describe('Gantt zoom and pan', () => {
+  const state = (container: HTMLElement): string => one(container, 'output').textContent ?? '';
+  const named = (container: HTMLElement, name: string): HTMLElement => {
+    const found = all(container, 'button').find(candidate => candidate.textContent === name);
+    if (found === undefined) throw new Error(`no ${name}`);
+    return found;
+  };
+
+  test('the buttons zoom about the middle, pan, and return to the whole range, never leaving it', async () => {
+    const {container} = await mount(<Zoomable />);
+    await click(named(container, 'Zoom in'));
+    expect(state(container)).toBe('25-75');
+    await click(named(container, 'Later'));
+    expect(state(container)).toBe('37.5-87.5');
+    for (let step = 0; step < 6; step++) await click(named(container, 'Later'));
+    expect(state(container)).toBe('50-100');
+    for (let step = 0; step < 6; step++) await click(named(container, 'Zoom in'));
+    const [from, to] = state(container).split('-').map(Number) as [number, number];
+    expect(to - from).toBeGreaterThanOrEqual(1);
+    await click(named(container, 'Whole range'));
+    expect(state(container)).toBe('0-100');
+    await click(named(container, 'Zoom out'));
+    expect(state(container)).toBe('0-100');
+  });
+
+  test('the keys do the same from the rows', async () => {
+    const {container} = await mount(<Zoomable />);
+    const rowEl = one(container, '[role="option"]');
+    await press(rowEl, '+');
+    expect(state(container)).toBe('25-75');
+    await press(rowEl, 'ArrowRight');
+    expect(state(container)).toBe('37.5-87.5');
+    await press(rowEl, '0');
+    expect(state(container)).toBe('0-100');
+  });
+
+  test('a bar is clipped by the view: it starts before it when the view is zoomed in', async () => {
+    const {container} = await mount(
+      <Gantt
+        label="Over time"
+        from={0}
+        to={100}
+        view={{from: 50, to: 100}}
+        rows={[row('a', {start: 0, end: 100})]}
+      />,
+    );
+    expect(one(container, '.vs-gantt-bar').style.getPropertyValue('--gantt-from')).toBe('-100.00%');
   });
 });

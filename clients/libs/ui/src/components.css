@@ -1093,6 +1093,13 @@ button.vs-stage-head {
 .vs-log-pane[data-size="sm"] {
   height: var(--log-sm);
 }
+.vs-log-line,
+.vs-log-gap {
+  display: block;
+}
+.vs-log-line {
+  min-height: var(--text-code-line);
+}
 .vs-log-line[data-stream="err"] {
   color: var(--log-err);
 }

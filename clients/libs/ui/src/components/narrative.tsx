@@ -1,30 +1,67 @@
-import type {JSX, ReactNode} from 'react';
+import {Children, type JSX, type ReactNode} from 'react';
 import {Icon} from './icon.js';
 import type {ToolState} from './message.js';
+import {InSlot, useSlot, useWindowed} from './windowing.js';
+
+/** The height a block is taken to have until it has been drawn and measured. */
+const ESTIMATED_BLOCK = 56;
 
 /**
  * A turn read as a narrative: `Thought`, `Said` and `ToolGroup` blocks in time order, the words
- * first and the tool calls folded between them. It scrolls inside its pane.
+ * first and the tool calls folded between them. It scrolls inside itself (`size` `fill` takes the
+ * height of its container) and draws only the blocks near the visible part, between spacers as
+ * tall as the rest, so a turn of any length costs a screenful. Give each block a stable `key`.
  */
 export function Narrative(props: {
   readonly label: string;
+  readonly size?: 'default' | 'fill';
   readonly children: ReactNode;
 }): JSX.Element {
+  const blocks = Children.toArray(props.children);
+  const win = useWindowed({
+    count: blocks.length,
+    keyOf: index => String((blocks[index] as {readonly key?: string} | undefined)?.key ?? index),
+    estimate: ESTIMATED_BLOCK,
+    follow: false,
+  });
   return (
-    <section className="vs-narrative" aria-label={props.label}>
-      {props.children}
+    <section
+      ref={win.scroller}
+      className="vs-narrative"
+      data-size={props.size ?? 'default'}
+      aria-label={props.label}
+      onScroll={win.scrolled}
+    >
+      <div aria-hidden="true" style={{height: win.before}} />
+      {blocks.slice(win.first, win.last).map((block, offset) => (
+        <InSlot
+          key={(block as {readonly key?: string}).key ?? win.first + offset}
+          slot={win.slotOf(win.first + offset)}
+        >
+          {block}
+        </InSlot>
+      ))}
+      <div aria-hidden="true" style={{height: win.after}} />
     </section>
   );
 }
 
 /** The thinking: muted and italic, so it stands apart from what was said. */
 export function Thought(props: {readonly text: string}): JSX.Element {
-  return <p className="vs-thought">{props.text}</p>;
+  return (
+    <p ref={useSlot()?.measure} className="vs-thought">
+      {props.text}
+    </p>
+  );
 }
 
 /** What was said, in body text. */
 export function Said(props: {readonly text: string}): JSX.Element {
-  return <p className="vs-said">{props.text}</p>;
+  return (
+    <p ref={useSlot()?.measure} className="vs-said">
+      {props.text}
+    </p>
+  );
 }
 
 /** One tool call inside a `ToolGroup`: its name, its subject and its outcome in a few words. */
@@ -71,10 +108,11 @@ export function ToolGroup(props: {
   readonly open: boolean;
   readonly toggle: (open: boolean) => void;
 }): JSX.Element {
+  const slot = useSlot();
   const failed = props.tools.filter(tool => tool.state === 'failed');
   const count = `${props.tools.length} ${props.tools.length === 1 ? 'tool' : 'tools'}`;
   return (
-    <div className="vs-toolgroup" data-open={props.open || undefined}>
+    <div ref={slot?.measure} className="vs-toolgroup" data-open={props.open || undefined}>
       <button
         type="button"
         className="vs-toolgroup-head"

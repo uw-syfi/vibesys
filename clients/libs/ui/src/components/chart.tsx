@@ -148,7 +148,9 @@ function Axes(props: {
  * `reference` line, a `playhead`, grid lines and labels at the ticks, and axis titles. Drawn in
  * `accent`, `muted` and `grid` only. `label` describes the chart for assistive technology. `size`
  * `strip` is a short, wide chart. Points with an `id` are buttons that call `pick(id)`; the one
- * whose id is `selected` is drawn larger and ringed.
+ * whose id is `selected` is drawn larger and ringed. The pickable points are one tab stop (the
+ * selected one, else the first); the arrows, Home and End move among them. With many points the
+ * hollow ones are small and faint and the filled ones lead.
  */
 export function Chart(props: {
   readonly label: string;
@@ -178,6 +180,10 @@ export function Chart(props: {
       ...(props.reference === undefined ? [] : [props.reference.y]),
     ],
   );
+  const pickable = props.points.filter(point => point.id !== undefined);
+  const stop = pickable.some(point => point.id === props.selected)
+    ? props.selected
+    : pickable[0]?.id;
   return (
     <svg
       className="vs-chart"
@@ -207,6 +213,8 @@ export function Chart(props: {
           point={point}
           at={at}
           selected={point.id !== undefined && point.id === props.selected}
+          stop={point.id !== undefined && point.id === stop}
+          dense={props.points.length > DENSE_ABOVE}
           pick={props.pick}
         />
       ))}
@@ -230,15 +238,22 @@ export function Chart(props: {
 
 const POINT_RADIUS = 5.5;
 const SELECTED_RADIUS = 8;
+/** With more points than this, the hollow ones are small and faint, so the kept ones lead. */
+const DENSE_ABOVE = 60;
+const FAINT_RADIUS = 3;
 
 /** One point; with an `id` and a `pick` it is a button. */
 function Point(props: {
   readonly point: ChartPoint;
   readonly at: Scale;
   readonly selected: boolean;
+  /** Whether this is the one point of the chart on the tab order. */
+  readonly stop: boolean;
+  readonly dense: boolean;
   readonly pick: ((id: string) => void) | undefined;
 }): JSX.Element {
   const {point, at, selected, pick} = props;
+  const faint = props.dense && !point.filled;
   const id = point.id;
   const cx = at.x(point.x);
   const cy = at.y(point.y);
@@ -246,9 +261,10 @@ function Point(props: {
     <circle
       className="vs-chart-point"
       data-filled={point.filled || undefined}
+      data-faint={faint || undefined}
       cx={cx}
       cy={cy}
-      r={POINT_RADIUS}
+      r={faint ? FAINT_RADIUS : POINT_RADIUS}
     />
   );
   if (id === undefined || pick === undefined) {
@@ -265,7 +281,7 @@ function Point(props: {
     <g
       className="vs-chart-pick"
       role="button"
-      tabIndex={0}
+      tabIndex={props.stop ? 0 : -1}
       aria-label={point.label ?? id}
       aria-pressed={selected}
       onClick={() => pick(id)}
@@ -273,6 +289,8 @@ function Point(props: {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           pick(id);
+        } else if (moveAmong(event.currentTarget, event.key)) {
+          event.preventDefault();
         }
       }}
     >
@@ -281,6 +299,26 @@ function Point(props: {
       {dot}
     </g>
   );
+}
+
+/** Moves the focus among a chart's pickable points by an arrow, Home or End; whether `key` did. */
+function moveAmong(current: SVGGElement, key: string): boolean {
+  const points = [
+    ...(current.ownerSVGElement?.querySelectorAll<SVGGElement>('.vs-chart-pick') ?? []),
+  ];
+  const index = points.indexOf(current);
+  const target: Record<string, number> = {
+    ArrowRight: index + 1,
+    ArrowUp: index + 1,
+    ArrowLeft: index - 1,
+    ArrowDown: index - 1,
+    Home: 0,
+    End: points.length - 1,
+  };
+  const at = target[key];
+  if (at === undefined) return false;
+  points[Math.max(0, Math.min(points.length - 1, at))]?.focus();
+  return true;
 }
 
 function SelectedPoint(props: {

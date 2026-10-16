@@ -1,9 +1,20 @@
-import {createContext, type FocusEvent, type JSX, type ReactNode, useContext, useId} from 'react';
+import {
+  Children,
+  createContext,
+  type FocusEvent,
+  isValidElement,
+  type JSX,
+  type ReactNode,
+  useContext,
+  useId,
+} from 'react';
+import {SIZE} from '../tokens/index.js';
 import {type Guide, Guides} from './guides.js';
-import {optionKeys} from './listbox.js';
+import {navigationKeys, pickKeys} from './listbox.js';
 import {Meter} from './meter.js';
 import {Chip, StatusDot, type StatusTone} from './status.js';
 import {Text} from './text.js';
+import {InSlot, useSlot, useWindowed} from './windowing.js';
 
 const SelectedRow = createContext<string | undefined>(undefined);
 
@@ -36,37 +47,67 @@ function Header(props: {readonly header: ListHeader; readonly id: string}): JSX.
   );
 }
 
+/** The id of a row element: its `id` prop, or its key. */
+function idOf(row: ReactNode, index: number): string {
+  if (!isValidElement(row)) return String(index);
+  const id = (row.props as {readonly id?: unknown}).id;
+  return typeof id === 'string' ? id : String(row.key ?? index);
+}
+
 /**
  * A list of `PickRow`s to choose from: a listbox with one tab stop, the `selected` row's id, or
- * the list itself, which passes the focus to its first row. Up and Down move the focus, Home and
- * End jump to the ends, Enter and Space pick. `header` is an optional small line over the rows
- * naming their columns (it describes the list to assistive technology).
+ * the list itself, which passes the focus to that row (or the first drawn). It scrolls inside
+ * itself (`size` `fill` takes the height of its container, the default at most a thread's) and
+ * draws only the rows near the visible part, between spacers as tall as the rest, so any number
+ * of rows costs a screenful. The keys reach every row, drawn or not: Up and Down step, Page Up
+ * and Down move a screenful, Home and End jump to the ends, Enter and Space pick. `header` is an
+ * optional small line over the rows naming their columns.
  */
 export function PickList(props: {
   readonly label: string;
   readonly selected?: string;
   readonly header?: ListHeader;
+  readonly size?: 'default' | 'fill';
   readonly children: ReactNode;
 }): JSX.Element {
   const headerId = useId();
-  const focusFirst = (event: FocusEvent<HTMLDivElement>): void => {
-    if (event.target === event.currentTarget) {
-      event.currentTarget.querySelector<HTMLElement>('[role="option"]')?.focus();
-    }
+  const rows = Children.toArray(props.children);
+  const ids = rows.map(idOf);
+  const win = useWindowed({
+    count: rows.length,
+    keyOf: index => ids[index] ?? String(index),
+    estimate: SIZE.row,
+    follow: false,
+  });
+  const selectedIndex = props.selected === undefined ? -1 : ids.indexOf(props.selected);
+  const drawn = selectedIndex >= win.first && selectedIndex < win.last;
+  const focusSelected = (event: FocusEvent<HTMLDivElement>): void => {
+    if (event.target !== event.currentTarget) return;
+    if (selectedIndex >= 0) win.reveal(selectedIndex, row => row.focus());
+    else win.reveal(0, row => row.focus());
   };
   return (
     <SelectedRow.Provider value={props.selected}>
-      <div className="vs-picklist">
+      <div className="vs-picklist" data-size={props.size ?? 'default'}>
         {props.header === undefined ? null : <Header header={props.header} id={headerId} />}
         <div
+          ref={win.scroller}
           className="vs-picklist-rows"
           role="listbox"
           aria-label={props.label}
           aria-describedby={props.header === undefined ? undefined : headerId}
-          tabIndex={props.selected === undefined ? 0 : -1}
-          onFocus={focusFirst}
+          tabIndex={drawn ? -1 : 0}
+          onFocus={focusSelected}
+          onScroll={win.scrolled}
+          onKeyDown={event => navigationKeys(event, win, rows.length)}
         >
-          {props.children}
+          <div aria-hidden="true" style={{height: win.before}} />
+          {rows.slice(win.first, win.last).map((row, offset) => (
+            <InSlot key={ids[win.first + offset]} slot={win.slotOf(win.first + offset)}>
+              {row}
+            </InSlot>
+          ))}
+          <div aria-hidden="true" style={{height: win.after}} />
         </div>
       </div>
     </SelectedRow.Provider>
@@ -140,13 +181,17 @@ export function PickRow(props: {
   readonly select: () => void;
 }): JSX.Element {
   const selected = props.id === useContext(SelectedRow);
+  const slot = useSlot();
   const hover = props.hover;
   return (
     <div
       className="vs-pickrow"
+      ref={slot?.measure}
       role="option"
       tabIndex={selected ? 0 : -1}
       aria-selected={selected}
+      aria-posinset={slot === null ? undefined : slot.index + 1}
+      aria-setsize={slot === null ? undefined : slot.size}
       data-fresh={props.fresh === true || undefined}
       data-path={props.path === true || undefined}
       data-stripe={props.stripe === true || undefined}
@@ -155,9 +200,7 @@ export function PickRow(props: {
       onMouseLeave={hover === undefined ? undefined : () => hover(false)}
       onFocus={hover === undefined ? undefined : () => hover(true)}
       onBlur={hover === undefined ? undefined : () => hover(false)}
-      onKeyDown={event => {
-        optionKeys(event, props.select);
-      }}
+      onKeyDown={event => pickKeys(event, props.select)}
     >
       <Guides guides={props.guides} />
       {props.state === undefined ? null : (

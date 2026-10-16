@@ -12,13 +12,16 @@ export type Density = 'comfortable' | 'compact';
 export function Screen(props: {
   readonly header: ReactNode;
   readonly density?: Density;
+  /** `main` (default) makes the screen the page's main landmark; `none` for one inside another. */
+  readonly landmark?: 'main' | 'none';
   readonly children: ReactNode;
 }): JSX.Element {
+  const Root = props.landmark === 'none' ? 'div' : 'main';
   return (
-    <main className="vs-screen" data-density={props.density ?? 'comfortable'}>
+    <Root className="vs-screen" data-density={props.density ?? 'comfortable'}>
       <div className="vs-screen-header">{props.header}</div>
       <div className="vs-screen-body">{props.children}</div>
-    </main>
+    </Root>
   );
 }
 

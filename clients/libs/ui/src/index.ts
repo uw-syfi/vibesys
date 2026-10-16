@@ -29,7 +29,13 @@ export {
 } from './components/display.js';
 export {DotLegend} from './components/dot-legend.js';
 export {Field, TextInput} from './components/field.js';
-export {Gantt, type GanttRow, type GanttSegment, type GanttTick} from './components/gantt.js';
+export {
+  Gantt,
+  type GanttRow,
+  type GanttSegment,
+  type GanttTick,
+  type GanttView,
+} from './components/gantt.js';
 export type {Guide} from './components/guides.js';
 export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
 export {

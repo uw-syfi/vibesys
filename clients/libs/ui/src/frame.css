@@ -202,9 +202,17 @@ button.vs-crumb:focus-visible {
   gap: var(--space-1);
 }
 .vs-picklist-rows {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  max-height: var(--thread);
+  overflow-y: auto;
+}
+.vs-picklist[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.vs-picklist[data-size="fill"] > .vs-picklist-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 .vs-picklist-rows:focus-visible {
   outline: var(--focus-ring) solid var(--accent);
@@ -387,8 +395,7 @@ button.vs-crumb:focus-visible {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-3);
 }
-.vs-screen[data-density="compact"] .vs-picklist,
-.vs-screen[data-density="compact"] .vs-picklist-rows {
+.vs-screen[data-density="compact"] .vs-picklist {
   gap: 0;
 }
 .vs-screen[data-density="compact"] .vs-pickrow {
@@ -438,6 +445,44 @@ button.vs-crumb:focus-visible {
   display: flex;
   flex-direction: column;
 }
+.vs-gantt-zoom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+.vs-gantt-rows {
+  max-height: var(--thread);
+  overflow-y: auto;
+}
+.vs-gantt[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.vs-gantt[data-size="fill"] > .vs-gantt-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+.vs-gantt-zoom {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+.vs-gantt-rows {
+  max-height: var(--thread);
+  overflow-y: auto;
+}
+.vs-gantt[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.vs-gantt[data-size="fill"] > .vs-gantt-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
 .vs-gantt-row {
   display: grid;
   grid-template-columns: var(--gantt-label) 1fr var(--gantt-figure);
@@ -485,6 +530,7 @@ button.vs-crumb:focus-visible {
 }
 .vs-gantt-track {
   position: relative;
+  overflow: hidden;
   align-self: stretch;
   min-height: var(--row-dense);
 }
@@ -678,11 +724,18 @@ button.vs-crumb:focus-visible {
 /* --- narrative: a turn as thinking, text and folded tool lines ----------------------------------- */
 
 .vs-narrative {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
+  box-sizing: border-box;
   max-width: var(--column-main);
+  max-height: var(--thread);
   min-height: 0;
+  overflow-y: auto;
+}
+.vs-narrative[data-size="fill"] {
+  flex: 1 1 auto;
+  max-height: none;
+}
+.vs-narrative > * + * {
+  margin-top: var(--space-2);
 }
 .vs-thought,
 .vs-said {
@@ -765,4 +818,8 @@ button.vs-crumb:focus-visible {
   background: var(--selection);
   box-shadow: inset var(--focus-ring) 0 0 var(--accent);
   color: var(--text);
+}
+
+.vs-chart-point[data-faint] {
+  opacity: 0.45;
 }

@@ -1,5 +1,4 @@
-import {type JSX, type UIEvent, useRef, useState} from 'react';
-import {SIZE} from '../tokens/index.js';
+import {type JSX, useState} from 'react';
 import {
   Message,
   type MessageTone,
@@ -9,6 +8,7 @@ import {
 } from './message.js';
 import {NewBelow} from './new-below.js';
 import {Text} from './text.js';
+import {useWindowed} from './windowing.js';
 
 /** One entry of a thread: a heading that starts a section, a message, or a tool call. */
 export type ThreadItem =
@@ -42,40 +42,11 @@ export type ThreadItem =
 
 /** The height a row is taken to have until it has been drawn and measured. */
 const ESTIMATED_ROW = 72;
-/** Rows drawn beyond the visible ones on each side, so a scroll does not show a gap. */
-const OVERSCAN = 6;
 
 function startsOpen(item: ThreadItem): boolean {
   if (item.kind === 'heading') return true;
   if (item.startOpen !== undefined) return item.startOpen;
   return item.kind === 'message' && (item.variant === 'reply' || item.variant === 'note');
-}
-
-/** Where each item starts, and, last, the total height; `measured` holds the rows drawn so far. */
-function offsetsOf(items: readonly ThreadItem[], measured: ReadonlyMap<string, number>): number[] {
-  const offsets: number[] = [0];
-  let at = 0;
-  for (const item of items) {
-    at += measured.get(item.id) ?? ESTIMATED_ROW;
-    offsets.push(at);
-  }
-  return offsets;
-}
-
-/** The last index in `offsets` that is at or before `position`. */
-function indexAt(offsets: readonly number[], position: number): number {
-  let low = 0;
-  let high = offsets.length - 1;
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2);
-    if ((offsets[middle] ?? 0) <= position) low = middle;
-    else high = middle - 1;
-  }
-  return low;
-}
-
-function atBottom(element: HTMLElement): boolean {
-  return element.scrollHeight - element.scrollTop - element.clientHeight < 2;
 }
 
 function Row(props: {
@@ -139,47 +110,13 @@ export function Thread(props: {
   readonly size?: 'default' | 'fill';
 }): JSX.Element {
   const {items} = props;
-  const following = useRef(true);
-  const pane = useRef<HTMLUListElement | null>(null);
-  const measured = useRef(new Map<string, number>());
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
-  const [view, setView] = useState({top: 0, height: SIZE.thread});
-  const [, setMeasures] = useState(0);
-  const [behind, setBehind] = useState(false);
-
-  const offsets = offsetsOf(items, measured.current);
-  const total = offsets.at(-1) ?? 0;
-  const top = following.current ? Math.max(0, total - view.height) : view.top;
-  const first = Math.max(0, indexAt(offsets, top) - OVERSCAN);
-  const last = Math.min(items.length, indexAt(offsets, top + view.height) + 1 + OVERSCAN);
-
-  const follow = (element: HTMLUListElement | null): void => {
-    pane.current = element;
-    if (element === null) return;
-    if (element.clientHeight > 0 && element.clientHeight !== view.height) {
-      setView({top: view.top, height: element.clientHeight});
-    }
-    if (following.current) element.scrollTop = element.scrollHeight;
-  };
-  const scrolled = (event: UIEvent<HTMLUListElement>): void => {
-    const element = event.currentTarget;
-    following.current = atBottom(element);
-    setView({top: element.scrollTop, height: element.clientHeight || view.height});
-    setBehind(!following.current);
-  };
-  const jump = (): void => {
-    following.current = true;
-    setBehind(false);
-    if (pane.current !== null) pane.current.scrollTop = pane.current.scrollHeight;
-  };
-  const measure = (id: string, row: HTMLElement | null): void => {
-    if (row === null) return;
-    const height = row.offsetHeight;
-    if (height > 0 && measured.current.get(id) !== height) {
-      measured.current.set(id, height);
-      setMeasures(count => count + 1);
-    }
-  };
+  const win = useWindowed({
+    count: items.length,
+    keyOf: index => items[index]?.id ?? String(index),
+    estimate: ESTIMATED_ROW,
+    follow: true,
+  });
   const flip = (id: string): void => {
     const next = new Set(flipped);
     if (!next.delete(id)) next.add(id);
@@ -189,37 +126,34 @@ export function Thread(props: {
   return (
     <div className="vs-thread" data-size={props.size ?? 'default'}>
       <ul
-        ref={follow}
+        ref={win.scroller}
         className="vs-thread-pane"
         aria-label={props.label}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
         tabIndex={0}
-        onScroll={scrolled}
+        onScroll={win.scrolled}
       >
-        <li aria-hidden="true" className="vs-thread-gap" style={{height: offsets[first] ?? 0}} />
-        {items.slice(first, last).map((item, offset) => {
+        <li aria-hidden="true" className="vs-thread-gap" style={{height: win.before}} />
+        {items.slice(win.first, win.last).map((item, offset) => {
           const open = startsOpen(item) !== flipped.has(item.id);
+          const slot = win.slotOf(win.first + offset);
           return (
             <li
               key={item.id}
-              ref={row => measure(item.id, row)}
+              ref={slot.measure}
               className="vs-thread-row"
-              aria-posinset={first + offset + 1}
+              aria-posinset={slot.index + 1}
               aria-setsize={items.length}
             >
               <Row item={item} open={open} toggle={() => flip(item.id)} />
             </li>
           );
         })}
-        <li
-          aria-hidden="true"
-          className="vs-thread-gap"
-          style={{height: total - (offsets[last] ?? total)}}
-        />
+        <li aria-hidden="true" className="vs-thread-gap" style={{height: win.after}} />
       </ul>
-      {behind ? (
+      {win.behind ? (
         <span className="vs-thread-jump">
-          <NewBelow text="New below" press={jump} />
+          <NewBelow text="New below" press={win.jump} />
         </span>
       ) : null}
     </div>
