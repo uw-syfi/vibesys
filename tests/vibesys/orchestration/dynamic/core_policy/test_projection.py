@@ -172,6 +172,7 @@ def test_projection_copies_recorded_rounds_and_only_measured_numbers(
     for item in view.rounds:
         record = by_sequence[item.round_number]
         measured = bool(record.metrics)
+        assert item.attempts == 1
         assert item.official_evaluation is measured
         assert (item.perf_metric is not None) is measured
         if measured:
@@ -224,6 +225,30 @@ def test_each_recorded_round_is_an_attempt_under_its_workstream(snapshot: RunSna
         assert (node.headline_metrics == ()) is (not record.metrics)
     for root in _workstreams(tree):
         assert root.child_count == sum(node.parent_id == root.id for node in attempts)
+
+
+def test_profile_and_merge_workstreams_are_iterations_but_not_rounds() -> None:
+    """Non-implementation workstreams consume slots without claiming round events."""
+    plans = (
+        WorkPlan(kind=WorkKind.PROFILE, work_id="profile-input", question="where is time spent?"),
+        WorkPlan(kind=WorkKind.MERGE, work_id="merge-best", candidates=("a", "b")),
+    )
+    snapshot = RunSnapshot(
+        baseline=NotConfigured(),
+        finished=tuple(
+            FinishedWork(sequence=sequence, plan=plan, parent=_PARENT)
+            for sequence, plan in enumerate(plans, start=1)
+        ),
+    )
+
+    projection = project_run_snapshot(snapshot, experiment_revision=1)
+
+    assert projection.rounds == ()
+    assert isinstance(projection.iterations, IterationTree)
+    assert [(node.kind, node.id) for node in projection.iterations.nodes] == [
+        (IterationKind.WORKSTREAM, "workstream:profile-input"),
+        (IterationKind.WORKSTREAM, "workstream:merge-best"),
+    ]
 
 
 @settings(max_examples=examples(pr=10, nightly=100), deadline=None)
