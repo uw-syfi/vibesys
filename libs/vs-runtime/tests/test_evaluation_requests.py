@@ -138,6 +138,8 @@ class World:
         self.stack = stack
 
     observer: MeasurementObserver | None = None
+    executor: PollingEvaluationExecutor | None = None
+    """An executor over the stack's own, when a test watches what reaches it."""
 
     def requests(
         self, crash_at: int | None = None
@@ -153,7 +155,8 @@ class World:
             None if crash_at is None else 2 * crash_at,
         )
         store = ReceiptStore(cast("StateNamespace", faulting), threads=SimThreads())
-        return MeasurementRequests(self.stack.executor, store, self.observer), faulting
+        executor = self.stack.executor if self.executor is None else self.executor
+        return MeasurementRequests(executor, store, self.observer), faulting
 
 
 @asynccontextmanager
