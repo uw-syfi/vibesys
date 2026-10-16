@@ -4,6 +4,7 @@
  * replace only host/run/settings I/O so the journey needs no subprocess, socket, or user files.
  */
 import {app, BaseWindow, ipcMain, webContents} from 'electron';
+import {firstLoad} from './first-load.mjs';
 
 // Resolve after `test:e2e` builds the package. Keeping this entry outside the production graph
 // gives Playwright control without adding a test-only API to the shipped application.
@@ -278,7 +279,18 @@ function clickWelcomeButton(label) {
 }
 
 registerAppScheme();
-app.on('web-contents-created', (_event, contents) => confineContents(contents, log));
+/** First loads of the pages created while the app starts (the welcome view and the run page). */
+const startupLoads = [];
+let collectingStartupLoads = true;
+/** Resolves, once the app has created every startup page, with all of their first loads. */
+let startupCreated;
+const startupPagesCreated = new Promise(resolve => {
+  startupCreated = resolve;
+});
+app.on('web-contents-created', (_event, contents) => {
+  confineContents(contents, log);
+  if (collectingStartupLoads) startupLoads.push(firstLoad(contents));
+});
 app.on('window-all-closed', () => app.quit());
 
 // Playwright's Electron loader releases its substituted `app.whenReady()` only after attaching
@@ -328,10 +340,18 @@ void app.whenReady().then(() => {
     log,
   });
   appWindow.openRunPage(attached.runId, {hostLabel: attached.hostLabel, task: null});
+  collectingStartupLoads = false;
+  const loads = Promise.all(startupLoads);
+  loads.catch(() => {});
+  startupCreated({loads});
   desktop.chromeChanged();
 });
 
 globalThis.vibesysWelcomeRecoveryE2E = {
+  /** Resolves once the welcome view and the run page have each finished their first load. */
+  async startupPagesLoaded() {
+    await (await startupPagesCreated).loads;
+  },
   state() {
     // The control surface is installed before `app.whenReady()` finishes so Playwright can begin
     // polling immediately. Initialization may still be constructing AppWindow at that instant;
