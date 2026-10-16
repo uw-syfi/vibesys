@@ -170,6 +170,9 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "machine.describe": "machine_describe",
         "checkout.inspect": "checkout_inspect",
         "run.preflight": "preflight",
+        "examples.list": "examples",
+        "project.create_from_example": "examples",
+        "project.copy_out": "examples",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()

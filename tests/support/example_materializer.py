@@ -75,6 +75,14 @@ class FakeExampleMaterializer:
             target.write_text(text, encoding="utf-8")
         self.repositories[destination] = FakeRepository(f"clone {example}", frozenset(files))
 
+    def repository_root(self, path: Path) -> Path | None:
+        """The nearest directory at or above ``path`` holding ``.git``, as Git would find it."""
+        resolved = path.resolve()
+        return next(
+            (folder for folder in (resolved, *resolved.parents) if (folder / ".git").exists()),
+            None,
+        )
+
     def _maybe_fail(self, written: int) -> None:
         if self.fail_after is not None and written >= self.fail_after:
             message = f"injected failure after {written} files"
@@ -114,3 +122,17 @@ def check_copy_tracked_contract(
     empty.mkdir()
     materializer.copy_tracked(checkout, example, empty, message="start")
     assert _tree(empty) == expected
+
+
+def check_repository_root_contract(
+    materializer: ExampleMaterializer, repository: Path, outside: Path
+) -> None:
+    """Contract: a folder inside ``repository`` names its root; one outside any names none.
+
+    ``repository`` must be a Git repository with a ``nested`` folder, and ``outside`` a
+    directory in no repository.
+    """
+    nested = repository / "nested"
+    assert materializer.repository_root(nested) == repository.resolve()
+    assert materializer.repository_root(repository) == repository.resolve()
+    assert materializer.repository_root(outside) is None

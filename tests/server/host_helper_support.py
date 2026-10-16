@@ -14,6 +14,9 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC
 from typing import TYPE_CHECKING
 
+from tests.support.example_materializer import FakeExampleMaterializer
+
+from entrypoints.examples import HelperExampleProjects
 from server.host_api import (
     Checkout,
     DetachedLaunchFailure,
@@ -351,6 +354,7 @@ def fake_host(
         directories=directories or FakeDirectories(tree={HOME: {}}),
         launcher=launcher or FakeRunLauncher(failed_launch),
         preflight=FakeRunPreflight(),
+        examples=HelperExampleProjects(None, FakeExampleMaterializer()),
         checkout=FakeCheckout(),
         dialer=network,
         vibesys_version=VIBESYS_VERSION,

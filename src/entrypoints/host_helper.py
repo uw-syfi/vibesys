@@ -21,6 +21,7 @@ from datetime import UTC, datetime, tzinfo
 from functools import cache
 from typing import TYPE_CHECKING
 
+from entrypoints.examples import GitExampleMaterializer, HelperExampleProjects
 from entrypoints.launcher import headless_command, source_checkout_root
 from server.host_api import HarnessOption
 from server.host_helper import serve_channel
@@ -48,7 +49,9 @@ from server.registry import (
     instance_root,
 )
 from server.relay import FdSink, FdSource
+from vs_project.api import Git
 from vs_sim.api import (
+    OsProcesses,
     OsThreads,
     PidfdProcessSignaller,
     SubprocessLauncher,
@@ -129,6 +132,9 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
         directories=OsDirectories(),
         launcher=SubprocessRunLauncher(SubprocessLauncher(), headless_command),
         preflight=SubprocessRunPreflight(SubprocessLauncher(), headless_command),
+        examples=HelperExampleProjects(
+            source_checkout_root(), GitExampleMaterializer(Git(OsProcesses()))
+        ),
         checkout=GitCheckoutProbe(source_checkout_root(), SubprocessProbe()),
         dialer=network,
         vibesys_version=host_facts()[1],

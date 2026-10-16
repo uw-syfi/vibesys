@@ -428,6 +428,29 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "CopyOut",
       "type": "object"
     },
+    "CreatedProject": {
+      "additionalProperties": false,
+      "description": "A project made in its own new Git repository, and its tasks.",
+      "properties": {
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project",
+        "tasks"
+      ],
+      "title": "CreatedProject",
+      "type": "object"
+    },
     "DetachedLaunchFailure": {
       "additionalProperties": false,
       "description": "What ``vibesys --detach`` prints on stdout, as one line, when it starts nothing.\n\nOn success the line is a ``LiveInstanceRecord`` instead; a reader tells them\napart by ``outcome``, which a record never has. ``code`` is a\n``DetachedLaunchErrorCode`` or the code of the run's configuration\ndiagnostic (``invalid_arguments``, ``resume_not_found``, ...), and\n``exit_code`` is the process's exit status.",
@@ -596,6 +619,127 @@ const hostHelperSchema: Record<string, unknown> = {
         "resumable"
       ],
       "title": "EndRecord",
+      "type": "object"
+    },
+    "ExampleList": {
+      "additionalProperties": false,
+      "description": "``vibesys example list --json``: every catalogued example, by category then name.",
+      "properties": {
+        "version": {
+          "const": 1,
+          "default": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "checkout": {
+          "title": "Checkout",
+          "type": "string"
+        },
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/ExampleSummary"
+          },
+          "title": "Examples",
+          "type": "array"
+        }
+      },
+      "required": [
+        "checkout",
+        "examples"
+      ],
+      "title": "ExampleList",
+      "type": "object"
+    },
+    "ExampleSummary": {
+      "additionalProperties": false,
+      "description": "One example in ``vibesys example list --json``.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "category": {
+          "title": "Category",
+          "type": "string"
+        },
+        "tasks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tasks",
+          "type": "array"
+        },
+        "external_repo": {
+          "title": "External Repo",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "category",
+        "tasks",
+        "external_repo"
+      ],
+      "title": "ExampleSummary",
+      "type": "object"
+    },
+    "ExamplesListReply": {
+      "additionalProperties": false,
+      "description": "The checkout's example catalog.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "examples.list",
+          "default": "examples.list",
+          "title": "Type",
+          "type": "string"
+        },
+        "listing": {
+          "$ref": "#/$defs/ExampleList"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "listing"
+      ],
+      "title": "ExamplesListReply",
+      "type": "object"
+    },
+    "ExamplesListRequest": {
+      "additionalProperties": false,
+      "description": "The examples of the checkout this helper runs from, with their tasks.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "examples.list",
+          "default": "examples.list",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type"
+      ],
+      "title": "ExamplesListRequest",
       "type": "object"
     },
     "FailureReason": {
@@ -1005,6 +1149,12 @@ const hostHelperSchema: Record<string, unknown> = {
         "unknown_instance",
         "unknown_log_stream",
         "log_store_corrupt",
+        "unknown_example",
+        "examples_unavailable",
+        "destination_exists",
+        "destination_nested",
+        "not_nested",
+        "project_create_failed",
         "unknown_run",
         "unvetted_harness",
         "internal"
@@ -1026,7 +1176,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "machine_describe",
         "checkout_inspect",
         "preflight",
-        "run_options"
+        "run_options",
+        "examples"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -2524,6 +2675,152 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "PingRequest",
       "type": "object"
     },
+    "ProjectCopyOutReply": {
+      "additionalProperties": false,
+      "description": "The project copied out into its own repository.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "project.copy_out",
+          "default": "project.copy_out",
+          "title": "Type",
+          "type": "string"
+        },
+        "created": {
+          "$ref": "#/$defs/CreatedProject"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "created"
+      ],
+      "title": "ProjectCopyOutReply",
+      "type": "object"
+    },
+    "ProjectCopyOutRequest": {
+      "additionalProperties": false,
+      "description": "Copy ``source``, a folder inside another Git repository, into its own new one at ``destination``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "project.copy_out",
+          "default": "project.copy_out",
+          "title": "Type",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        },
+        "destination": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Destination",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "source",
+        "destination"
+      ],
+      "title": "ProjectCopyOutRequest",
+      "type": "object"
+    },
+    "ProjectCreateFromExampleReply": {
+      "additionalProperties": false,
+      "description": "The project made from the example.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "project.create_from_example",
+          "default": "project.create_from_example",
+          "title": "Type",
+          "type": "string"
+        },
+        "created": {
+          "$ref": "#/$defs/CreatedProject"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "created"
+      ],
+      "title": "ProjectCreateFromExampleReply",
+      "type": "object"
+    },
+    "ProjectCreateFromExampleRequest": {
+      "additionalProperties": false,
+      "description": "Copy ``example`` into its own new Git repository at ``destination`` (absent or empty).",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "project.create_from_example",
+          "default": "project.create_from_example",
+          "title": "Type",
+          "type": "string"
+        },
+        "example": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Example",
+          "type": "string"
+        },
+        "destination": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Destination",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "example",
+        "destination"
+      ],
+      "title": "ProjectCreateFromExampleRequest",
+      "type": "object"
+    },
     "ReasoningEffort": {
       "description": "A role's reasoning effort; ``default`` keeps the configured one.",
       "enum": [
@@ -3848,6 +4145,7 @@ const hostHelperSchema: Record<string, unknown> = {
       "discriminator": {
         "mapping": {
           "checkout.inspect": "#/$defs/CheckoutInspectRequest",
+          "examples.list": "#/$defs/ExamplesListRequest",
           "harnesses.list": "#/$defs/HarnessesListRequest",
           "hello": "#/$defs/HelloRequest",
           "instances.inspect": "#/$defs/InstancesInspectRequest",
@@ -3860,6 +4158,8 @@ const hostHelperSchema: Record<string, unknown> = {
           "machine.describe": "#/$defs/MachineDescribeRequest",
           "paths.complete": "#/$defs/PathsCompleteRequest",
           "ping": "#/$defs/PingRequest",
+          "project.copy_out": "#/$defs/ProjectCopyOutRequest",
+          "project.create_from_example": "#/$defs/ProjectCreateFromExampleRequest",
           "run.connect": "#/$defs/RunConnectRequest",
           "run.preflight": "#/$defs/RunPreflightRequest",
           "run.start": "#/$defs/RunStartRequest",
@@ -3930,6 +4230,15 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         {
           "$ref": "#/$defs/RunPreflightRequest"
+        },
+        {
+          "$ref": "#/$defs/ExamplesListRequest"
+        },
+        {
+          "$ref": "#/$defs/ProjectCreateFromExampleRequest"
+        },
+        {
+          "$ref": "#/$defs/ProjectCopyOutRequest"
         }
       ],
       "title": "Request"
@@ -3939,6 +4248,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "mapping": {
           "checkout.inspect": "#/$defs/CheckoutInspectReply",
           "error": "#/$defs/HelperError",
+          "examples.list": "#/$defs/ExamplesListReply",
           "harnesses.list": "#/$defs/HarnessesListReply",
           "hello": "#/$defs/HelloReply",
           "instances.changed": "#/$defs/InstancesChanged",
@@ -3952,6 +4262,8 @@ const hostHelperSchema: Record<string, unknown> = {
           "machine.describe": "#/$defs/MachineDescribeReply",
           "paths.complete": "#/$defs/PathsCompleteReply",
           "ping": "#/$defs/PingReply",
+          "project.copy_out": "#/$defs/ProjectCopyOutReply",
+          "project.create_from_example": "#/$defs/ProjectCreateFromExampleReply",
           "run.connect": "#/$defs/RunConnectReply",
           "run.preflight": "#/$defs/RunPreflightReply",
           "run.start": "#/$defs/RunStartReply",
@@ -4024,6 +4336,15 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/RunPreflightReply"
         },
         {
+          "$ref": "#/$defs/ExamplesListReply"
+        },
+        {
+          "$ref": "#/$defs/ProjectCreateFromExampleReply"
+        },
+        {
+          "$ref": "#/$defs/ProjectCopyOutReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -4059,7 +4380,10 @@ const hostHelperSchema: Record<string, unknown> = {
     "runs.read_events": "run_history",
     "machine.describe": "machine_describe",
     "checkout.inspect": "checkout_inspect",
-    "run.preflight": "preflight"
+    "run.preflight": "preflight",
+    "examples.list": "examples",
+    "project.create_from_example": "examples",
+    "project.copy_out": "examples"
   },
   "x-vibesys-feature-by-field": {
     "run.start": {

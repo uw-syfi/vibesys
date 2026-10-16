@@ -1,6 +1,6 @@
 {
   "id": "host-helper",
-  "description": "Host helper scenarios replayed over one channel each: in process against the helper core and shell on simulated I/O (tests/conformance/test_host_helper.py), and over stdio against a real helper command, python -m entrypoints.host_helper or VIBESYS_HOST_HELPER_COMMAND (tests/e2e/test_host_helper.py). Every scenario assumes an empty registry and no project at the paths it names. The logs group runs in process only, over a log store seeded with the streams tests/conformance/test_host_helper.py writes; the real helper serves logs once the vs_logs store is wired (live-log-visibility PR 2).",
+  "description": "Host helper scenarios replayed over one channel each: in process against the helper core and shell on simulated I/O (tests/conformance/test_host_helper.py), and over stdio against a real helper command, python -m entrypoints.host_helper or VIBESYS_HOST_HELPER_COMMAND (tests/e2e/test_host_helper.py). Every scenario assumes an empty registry and no project at the paths it names. The examples group runs in process only, against a helper with no example catalog (as from an installed distribution). The logs group runs in process only, over a log store seeded with the streams tests/conformance/test_host_helper.py writes; the real helper serves logs once the vs_logs store is wired (live-log-visibility PR 2).",
   "groups": {
     "handshake": [
       "helper-handshake",
@@ -22,6 +22,9 @@
       "helper-paths-missing",
       "helper-machine",
       "helper-preflight-project-missing"
+    ],
+    "examples": [
+      "helper-examples-unavailable"
     ],
     "logs": [
       "helper-logs-list",

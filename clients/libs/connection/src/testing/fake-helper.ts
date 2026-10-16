@@ -16,6 +16,7 @@ import {
   type ChannelEndOutcome,
   type Check,
   type CheckoutInspectReply,
+  type ExampleList,
   type HarnessOption,
   type HelperFeature,
   type HelperRequest,
@@ -113,6 +114,12 @@ export interface FakeHost {
   readonly checkouts: Map<string, CheckoutInspectReply['inspection']>;
   /** What `run.preflight` answers for a known project; replace it to fail a check. */
   preflight: Check[];
+  /**
+   * What `examples.list` answers, or `null` for a helper with no catalog (`examples_unavailable`,
+   * as from an installed distribution). `project.create_from_example` and `project.copy_out` add
+   * the project they make to `projects` and `directories`.
+   */
+  examples: ExampleList | null;
 }
 
 /** The checks a new `FakeHelper` answers: every one passes. */
@@ -200,6 +207,7 @@ export class FakeHelper {
     machine: FAKE_MACHINE,
     checkouts: new Map(),
     preflight: [...PASSING_CHECKS],
+    examples: null,
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
@@ -238,6 +246,7 @@ export class FakeHelper {
     'checkout_inspect',
     'preflight',
     'run_options',
+    'examples',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -549,6 +558,17 @@ class HelperSession {
       case 'run.preflight':
         this.#preflight(request);
         return;
+      case 'examples.list':
+        if (this.#helper.host.examples === null) {
+          this.#send({...this.#error(id, 'examples_unavailable', 'no catalog'), path: ''});
+          return;
+        }
+        this.#send({type: 'examples.list', request_id: id, listing: this.#helper.host.examples});
+        return;
+      case 'project.create_from_example':
+      case 'project.copy_out':
+        this.#createProject(request);
+        return;
       case 'checkout.inspect':
         this.#send({
           type: 'checkout.inspect',
@@ -731,6 +751,55 @@ class HelperSession {
       }
     }
     this.#project(request);
+  }
+
+  /**
+   * Make a project as the helper would: an example the catalog lists, or a folder that exists,
+   * into a destination nothing occupies yet. The new project defines the example's tasks.
+   */
+  #createProject(
+    request: Extract<HelperRequest, {type: 'project.create_from_example' | 'project.copy_out'}>,
+  ): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    const catalog = host.examples;
+    if (request.type === 'project.create_from_example' && catalog === null) {
+      this.#send({...this.#error(id, 'examples_unavailable', 'no catalog'), path: ''});
+      return;
+    }
+    const example = catalog?.examples.find(
+      entry => request.type === 'project.create_from_example' && entry.name === request.example,
+    );
+    const known =
+      request.type === 'project.copy_out'
+        ? host.directories.has(request.source)
+        : example !== undefined;
+    if (!known) {
+      const [code, path] =
+        request.type === 'project.copy_out'
+          ? (['path_missing', request.source] as const)
+          : (['unknown_example', catalog?.checkout ?? ''] as const);
+      this.#send({...this.#error(id, code, 'no such source'), path});
+      return;
+    }
+    if (host.directories.has(request.destination) || host.projects.has(request.destination)) {
+      this.#send({
+        ...this.#error(id, 'destination_exists', `${request.destination} exists`),
+        path: request.destination,
+      });
+      return;
+    }
+    const tasks =
+      request.type === 'project.copy_out'
+        ? [...(host.projects.get(request.source) ?? [])]
+        : [...(example?.tasks ?? [])];
+    host.projects.set(request.destination, tasks);
+    host.directories.set(request.destination, []);
+    this.#send({
+      type: request.type,
+      request_id: id,
+      created: {project: request.destination, tasks},
+    });
   }
 
   #preflight(request: Extract<HelperRequest, {type: 'run.preflight'}>): void {
