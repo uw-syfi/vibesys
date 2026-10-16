@@ -224,6 +224,27 @@ export class Desktop {
     });
   }
 
+  /** The requests about the run the window shows: which view, letting it go, retry. */
+  #answerShownRun(
+    request: Extract<
+      WelcomeRequest,
+      {readonly kind: 'show-run' | 'show-welcome' | 'release-run' | 'retry'}
+    >,
+  ): null {
+    switch (request.kind) {
+      case 'show-run':
+      case 'show-welcome':
+        this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');
+        return null;
+      case 'release-run':
+        this.#deps.window.releaseSurfaceRun();
+        return null;
+      case 'retry':
+        this.#deps.runs.retry();
+        return null;
+    }
+  }
+
   /** Answer one validated welcome request. */
   async #answer(request: WelcomeRequest, rendererGeneration: string): Promise<unknown> {
     const {hosts, runs} = this.#deps;
@@ -290,14 +311,9 @@ export class Desktop {
         return null;
       case 'show-run':
       case 'show-welcome':
-        this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');
-        return null;
       case 'release-run':
-        this.#deps.window.releaseSurfaceRun();
-        return null;
       case 'retry':
-        runs.retry();
-        return null;
+        return this.#answerShownRun(request);
       case 'preferences':
       case 'set-appearance':
       case 'set-notifications':
