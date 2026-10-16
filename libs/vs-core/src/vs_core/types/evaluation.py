@@ -593,6 +593,21 @@ class EvaluationState(Value):
         )
         return proofs[0] if len(proofs) == 1 else None
 
+    def measurements_of(self, candidate: RevisionRef) -> tuple[EvidenceRef, ...]:
+        """The trusted, successful official and baseline measurements of a revision.
+
+        These are what the revision is known to measure: an agent's own local validation
+        and profiling are left out. Ledger order is kept.
+        """
+        return tuple(
+            item
+            for item in self.evidence
+            if item.candidate == candidate
+            and item.purpose in ("official", "baseline")
+            and item.status == ObservationStatus.SUCCEEDED
+            and item.provenance == "trusted"
+        )
+
 
 class MeasurementRequested(Value):
     """Measurement requested lifecycle contract."""

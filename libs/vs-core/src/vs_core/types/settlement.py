@@ -22,6 +22,7 @@ from .common import (
     SettlementId,
     Value,
 )
+from .evaluation import EvidenceRef
 
 
 class AssessmentProposal(Value):
@@ -240,6 +241,13 @@ class AdoptRevision(RequestBase):
 
     kind: Literal["adopt_revision"] = "adopt_revision"
     selection: Selection
+    evidence: tuple[EvidenceRef, ...] = ()
+    """The selected revision's trusted measurements, by value, from core's evidence ledger.
+
+    They let the executor say what the adopted revision measured where it records the
+    adoption (see ``EvaluationState.measurements_of``). They decide nothing: adoption is
+    proven against the revision alone.
+    """
 
 
 class VerifyAdoption(RequestBase):

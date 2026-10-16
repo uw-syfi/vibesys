@@ -50,6 +50,7 @@ from vs_core.api import (
     WorkspaceObserved,
 )
 from vs_project.api import NestedRepositoryError
+from vs_runtime._adoption_commit import adoption_commit_message
 from vs_runtime._core_identity import core_identity
 from vs_runtime._core_requests import (
     ExecutionContext,
@@ -95,6 +96,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vs_core.api import Request
+    from vs_runtime._evidence_ledger import EvidenceLookup
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._workspaces import RuntimeWorkspace, RuntimeWorkspaces
     from vs_sim.api import BlockingRunner
@@ -215,13 +217,16 @@ class RuntimeWorkspaceRequests:
         store: ReceiptStore,
         run_invocations: RunInvocationProof,
         blocking: BlockingRunner,
+        evidence: EvidenceLookup,
     ) -> None:
         """Bind the workspaces to the shared store and to the proof run snapshots require.
 
         A run snapshot retains the root only after *run_invocations* proves the
         invocation's writer ended; a missing proof is Unknown and snapshots nothing.
-        *blocking* runs the executor's own disk checks off the event loop.
+        *blocking* runs the executor's own disk checks off the event loop. *evidence*
+        reads back what an adopted revision measured, for the commit that records it.
         """
+        self._evidence = evidence
         self._blocking = blocking
         self._workspaces = workspaces
         self._run_invocations = run_invocations
@@ -486,11 +491,30 @@ class RuntimeWorkspaceRequests:
                     accepted=True,
                     diagnostic="root workspace content differs from the selected revision",
                 )
-        elif not (resumed and applied):
-            failure = await self._materialize(root, commit)
-            if failure is not None:
-                return failure
+        else:
+            if not (resumed and applied):
+                failure = await self._materialize(root, commit)
+                if failure is not None:
+                    return failure
+            recorded = await self._record_adoption(root, request, commit)
+            if recorded is not None:
+                return recorded
         return _Facts(ObservationStatus.SUCCEEDED, accepted=True, revision=ref)
+
+    async def _record_adoption(
+        self, root: RuntimeWorkspace, request: AdoptRevision, commit: str
+    ) -> _Facts | None:
+        """Commit the adopted tree on the run's branch, so the run leaves the project clean.
+
+        The tree already equals the selection, so verification still holds afterwards. A
+        repeated or resumed adoption finds nothing left to commit and commits nothing.
+        """
+        message = adoption_commit_message(request, commit, self._evidence)
+        try:
+            await root.snapshot(message)
+        except NestedRepositoryError as error:
+            return _Facts(ObservationStatus.FAILED, accepted=True, diagnostic=str(error))
+        return None
 
     @staticmethod
     async def _materialize(

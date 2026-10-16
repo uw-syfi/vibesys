@@ -32,8 +32,10 @@ project/
 
 VibeSys commits candidate evolution and portable `.vibesys/state/runs/`
 metadata on a `vibesys-runs/<run-id>` branch, cut from the branch you had checked
-out when the run started. The run's branch stays checked out after it ends; the
-next run checks your branch out again first, so each run starts from your own
+out when the run started. A run that adopts a winner commits it on that branch,
+naming the candidate and what it measured; your own branch is never changed, so
+merge the run branch to keep the winner. The run's branch stays checked out after
+it ends; the next run checks your branch out again first, so each run starts from your own
 work. Machine-local metadata defaults to
 `~/.vibesys`; set `VIBESYS_STATE_HOME` to an absolute directory to override it.
 Existing `.vibesys/state/local/` metadata moves there on first open without

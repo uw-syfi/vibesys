@@ -193,6 +193,7 @@ def _adopt(context: SettlementContext, selection: Selection, round_: int) -> Out
         request_id=_adopt_id(selection, round_),
         scope=_run_scope(context.run),
         selection=selection,
+        evidence=context.evaluation.measurements_of(selection.revision),
     )
     return within(request, _limit(context.run))
 

@@ -291,6 +291,8 @@ extra host paths granted to the agent read-only. See
 
 VibeSys initializes Git when needed and creates one `vibesys-runs/<run-id>` branch
 per run, cut from the branch checked out when the run starts (its home branch).
+A run that adopts a winner commits it on its own branch, with a message naming
+the candidate and its measurements, and never writes to the home branch.
 The run's branch stays checked out after it ends; the next run checks the home
 branch out before cutting its own, and a resume checks out the run's branch. Every
 run stays listed and resumable from any branch, because run history is read from

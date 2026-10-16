@@ -817,3 +817,57 @@ def test_the_winner_decision_completes_as_failed_when_its_adoption_fails() -> No
     _executor_answer(run, adopt, core.ObservationStatus.REJECTED)
     assert run.failures()
     assert _completion(run, decision) == core.CompletionStatus.FAILED
+
+
+_RECORD = st.tuples(
+    st.sampled_from(("rev-a", "rev-b")),
+    st.sampled_from(("baseline", "local-validation", "official", "profile")),
+    st.sampled_from((core.ObservationStatus.SUCCEEDED, core.ObservationStatus.FAILED)),
+    st.sampled_from(("trusted", "self-report")),
+)
+_KIND_OF = {
+    "baseline": core.EvidenceKind.BENCHMARK,
+    "local-validation": core.EvidenceKind.LOCAL_VALIDATION,
+    "official": core.EvidenceKind.BENCHMARK,
+    "profile": core.EvidenceKind.PROFILING,
+}
+type _Record = tuple[
+    str,
+    Literal["baseline", "local-validation", "official", "profile"],
+    core.ObservationStatus,
+    Literal["trusted", "self-report"],
+]
+
+
+@settings(max_examples=examples(pr=30, nightly=300))
+@given(records=st.lists(_RECORD, max_size=6))
+def test_an_adoption_carries_exactly_the_winners_trusted_measurements(
+    records: list[_Record],
+) -> None:
+    """The executor names what the adopted revision measured, and nothing it did not."""
+    measured = tuple(
+        accuracy_proof(revision).model_copy(
+            update={
+                "evidence_id": core.EvidenceId(root=f"measured-{index}"),
+                "kind": _KIND_OF[purpose],
+                "purpose": purpose,
+                "status": status,
+                "provenance": provenance,
+                "acceptance_receipt": None,
+            }
+        )
+        for index, (revision, purpose, status, provenance) in enumerate(records)
+    )
+    state = world()
+    evaluation = core.EvaluationState(evidence=(*state.evaluation.evidence, *measured))
+    run = Run(state.model_copy(update={"evaluation": evaluation}))
+    (adopt,) = new_requests(run.propose(GOOD[0]))
+    assert isinstance(adopt, core.AdoptRevision)
+    assert adopt.evidence == tuple(
+        ref
+        for ref in evaluation.evidence
+        if ref.candidate == GOOD[0].revision
+        and ref.purpose in ("official", "baseline")
+        and ref.status is core.ObservationStatus.SUCCEEDED
+        and ref.provenance == "trusted"
+    )

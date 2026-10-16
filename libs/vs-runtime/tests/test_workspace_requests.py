@@ -67,6 +67,7 @@ from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
     ExecutorRole,
+    ReceiptEvidenceLedger,
     ReceiptStore,
     RequestExecutors,
     RuntimeWorkspaceRequests,
@@ -348,7 +349,11 @@ def _executor(
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
     return RuntimeWorkspaceRequests(
-        workspaces, chosen, SettledRunInvocations(), blocking=InlineBlockingRunner()
+        workspaces,
+        chosen,
+        SettledRunInvocations(),
+        blocking=InlineBlockingRunner(),
+        evidence=ReceiptEvidenceLedger(chosen),
     ), chosen
 
 
@@ -759,7 +764,11 @@ def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> N
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         store = _ENVS[workspaces].store()
         running = RuntimeWorkspaceRequests(
-            workspaces, store, RunningRunInvocations(), blocking=InlineBlockingRunner()
+            workspaces,
+            store,
+            RunningRunInvocations(),
+            blocking=InlineBlockingRunner(),
+            evidence=ReceiptEvidenceLedger(store),
         )
         request = SnapshotAndRetainRun(
             request_id=_rid("run-snap-wait"),
@@ -780,7 +789,11 @@ def test_run_snapshot_waits_for_proof_that_the_writer_ended(tmp_path: Path) -> N
         assert waiting.observation.revision is None
         assert _commits(workspaces) == commits
         settled = RuntimeWorkspaceRequests(
-            workspaces, store, SettledRunInvocations(), blocking=InlineBlockingRunner()
+            workspaces,
+            store,
+            SettledRunInvocations(),
+            blocking=InlineBlockingRunner(),
+            evidence=ReceiptEvidenceLedger(store),
         )
         done = await _run(settled, request)
         assert done.observation.observation.status is ObservationStatus.SUCCEEDED

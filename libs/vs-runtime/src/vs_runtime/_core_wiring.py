@@ -30,6 +30,7 @@ from vs_core.api import (
 from vs_runtime._core_loop import CoreRuntimeBindings
 from vs_runtime._core_requests import RequestExecutors
 from vs_runtime._evaluation_requests import MeasurementRequests
+from vs_runtime._evidence_ledger import ReceiptEvidenceLedger
 from vs_runtime._measurement_progress import (
     IgnoreMeasurement,
     MeasurementDecisions,
@@ -171,7 +172,9 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
         JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
     )
     executors = RequestExecutors(
-        workspaces=RuntimeWorkspaceRequests(workspaces, store, proof, blocking),
+        workspaces=RuntimeWorkspaceRequests(
+            workspaces, store, proof, blocking, ReceiptEvidenceLedger(store)
+        ),
         sessions=SessionRequestRouter(session.turns, session.lifecycle),
         evaluation=MeasurementRequests(
             measurement.executor, store, measurement.observer, measurement.decisions

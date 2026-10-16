@@ -35,6 +35,7 @@ from vs_core.api import (
 )
 from vs_runtime.api.core import (
     ExecutionResult,
+    ReceiptEvidenceLedger,
     ReceiptStore,
     RuntimeWorkspaceRequests,
     StoreWorkspaceReceipts,
@@ -154,7 +155,11 @@ class Host:
 
     def executor(self, store: ReceiptStore) -> RuntimeWorkspaceRequests:
         return RuntimeWorkspaceRequests(
-            self.env.hosts[-1], store, SettledRunInvocations(), blocking=InlineBlockingRunner()
+            self.env.hosts[-1],
+            store,
+            SettledRunInvocations(),
+            blocking=InlineBlockingRunner(),
+            evidence=ReceiptEvidenceLedger(store),
         )
 
     async def run(

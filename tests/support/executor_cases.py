@@ -80,6 +80,7 @@ from vs_runtime.api.core import (
     MeasurementRequests,
     NamespaceOperationReceipts,
     ObservationFactory,
+    ReceiptEvidenceLedger,
     ReceiptStore,
     RegisteredOperationRequests,
     RuntimeWorkspaceRequests,
@@ -476,7 +477,11 @@ class _WorkspacesWorld:
         faulting = FaultingNamespace(self.env.receipts_namespace(), crash_at)
         store = ReceiptStore(cast("StateNamespace", faulting), threads=OsThreads())
         executor = RuntimeWorkspaceRequests(
-            self.env.start_host(), store, SettledRunInvocations(), blocking=ThreadBlockingRunner()
+            self.env.start_host(),
+            store,
+            SettledRunInvocations(),
+            blocking=ThreadBlockingRunner(),
+            evidence=ReceiptEvidenceLedger(store),
         )
         context = context_for(request, lease=lease)
         if digest is not None:
