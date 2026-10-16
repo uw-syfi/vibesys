@@ -398,7 +398,7 @@ describe('the Map and the scrubber', () => {
     }
   });
 
-  test('the selection falls back to the root when the span is not in the trace at the view', () => {
+  test('the selection falls back to the root when the span is not in the trace at the view; facts are distinct', () => {
     for (const seed of SEEDS.slice(0, 60)) {
       const run = history(seed);
       const live = traceAt(run, null);
@@ -412,6 +412,8 @@ describe('the Map and the scrubber', () => {
             : (mapForest(trace)[0]?.span.id ?? null);
         expect(chosen?.id ?? null).toBe(expected);
         expect(mapDetail(trace, map)?.id ?? null).toBe(expected);
+        const keys = (mapDetail(trace, map)?.facts ?? []).map(fact => fact.key);
+        expect(new Set(keys).size).toBe(keys.length);
       }
     }
   });

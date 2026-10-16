@@ -166,7 +166,7 @@ export function waitingWords(wait: Waiting, spans: ReadonlyMap<string, Span>): s
   }
 }
 
-/** A try of the span's retry, in words: `#2 of 3 again: build failed`. */
+/** How a try of the span's retry went, in words: `again: build failed`, or `running`. */
 export function attemptWords(attempt: NonNullable<Span['attempts']>[number]): string {
   const outcome =
     attempt.outcome === null || attempt.outcome === undefined
@@ -174,7 +174,7 @@ export function attemptWords(attempt: NonNullable<Span['attempts']>[number]): st
       : plain(attempt.outcome).toLowerCase();
   const reason =
     attempt.reason === null || attempt.reason === undefined ? '' : `: ${attempt.reason}`;
-  return `#${attempt.n} of ${attempt.of} ${outcome}${reason}`;
+  return `${outcome}${reason}`;
 }
 
 /** A gate's measurement, in words: `41.2 · 1.18× the input`. */

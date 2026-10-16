@@ -43,6 +43,9 @@
       "path": "../../libs/run-state/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/run-state/tsconfig.trace.json"
+    },
+    {
       "path": "../../libs/machine/tsconfig.lib.json"
     },
     {

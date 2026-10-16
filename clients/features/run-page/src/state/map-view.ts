@@ -221,15 +221,14 @@ function stateFacts(span: Span, trace: RunTrace, start: number): MapFact[] {
     });
   }
   const waiting = ended(span) ? [] : (span.waiting_on ?? []);
-  for (const wait of waiting) {
-    facts.push({
-      key: 'Waiting on',
-      value: `${waitingWords(wait, trace.spans)}, since ${at(wait.since, start)}`,
-    });
+  if (waiting.length > 0) {
+    const words = waiting.map(
+      wait => `${waitingWords(wait, trace.spans)}, since ${at(wait.since, start)}`,
+    );
+    facts.push({key: 'Waiting on', value: words.join('; ')});
   }
-  const attempts = span.attempts ?? [];
-  if (attempts.length > 0) {
-    facts.push({key: 'Attempts', value: attempts.map(attemptWords).join('\n'), mono: true});
+  for (const attempt of span.attempts ?? []) {
+    facts.push({key: `Try ${attempt.n} of ${attempt.of}`, value: attemptWords(attempt)});
   }
   if (span.failure !== null && span.failure !== undefined) {
     facts.push({key: 'Failure', value: `${plain(span.failure.kind)}: ${span.failure.message}`});
@@ -251,6 +250,16 @@ function attrFacts(span: Span): MapFact[] {
     }));
 }
 
+/** Facts with distinct keys: an attribute named like a fact above it keeps its own row. */
+function distinct(facts: readonly MapFact[]): MapFact[] {
+  const seen = new Map<string, number>();
+  return facts.map(fact => {
+    const count = (seen.get(fact.key) ?? 0) + 1;
+    seen.set(fact.key, count);
+    return count === 1 ? fact : {...fact, key: `${fact.key} (${count})`};
+  });
+}
+
 /** The selected span's details: its state, times, waits, tries, attributes and links. */
 export function mapDetail(trace: RunTrace, map: MapState): MapDetail | null {
   const span = selectedSpan(trace, map);
@@ -268,13 +277,13 @@ export function mapDetail(trace: RunTrace, map: MapState): MapDetail | null {
     kind: kindWords(span),
     title: titleOf(span),
     state: verdictWords(span) ?? statusWords(span.status),
-    facts: [
+    facts: distinct([
       {key: 'Status', value: statusWords(span.status).label},
       ...stateFacts(span, trace, start),
       ...timeFacts(span, start),
       ...attrFacts(span),
       {key: 'Span', value: span.id, mono: true},
-    ],
+    ]),
     links,
   };
 }
