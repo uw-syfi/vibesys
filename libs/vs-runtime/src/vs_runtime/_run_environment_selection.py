@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Literal
 from vs_project.api import RunEnvironmentRecord, RunResourceRequest
 from vs_runtime._run_environment import (
     DockerEnvironment,
+    DockerEnvironmentConfig,
     HostEnvironment,
     ModalEnvironment,
     RunEnvironment,
@@ -22,6 +23,7 @@ from vs_runtime._run_environment import (
     SkyPilotEnvironment,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
+from vs_runtime._task_image_policy import editor_image_plan
 from vs_sandbox.api import backend_is_host_only
 
 if TYPE_CHECKING:
@@ -56,6 +58,11 @@ def resolve_run_environment_spec(
     """
     if spec.name != "docker" or platform != "darwin" or not backend_is_host_only(backend):
         return spec
+    # The host has no agent container to build a task image into: refuse it
+    # through the same decision every environment makes, never drop it.
+    editor_image_plan(
+        "host", task_dockerfile=spec.task_dockerfile, image=None, base_image=None, launch="fresh"
+    )
     log(
         f"[environment] the {backend.value} backend cannot be reached from Docker; "
         "running the agent on the host under Seatbelt"
@@ -125,8 +132,11 @@ def build_run_environment(spec: RunEnvironmentSpec) -> RunEnvironment:
         return SlurmEnvironment.from_options(spec.options)
     if spec.name == "slurm-gpu":
         # Deprecated alias: the old file, translated, opens the slurm environment.
+        image = spec.options.get("image")
         return SlurmEnvironment.from_slurm_gpu(
-            Path(str(spec.options["config_path"])), spec.resources
+            Path(str(spec.options["config_path"])),
+            spec.resources,
+            docker=DockerEnvironmentConfig(image=str(image) if image else None),
         )
     message = f"unknown run environment: {spec.name!r}"
     raise ValueError(message)

@@ -183,6 +183,10 @@ class RunEnvironmentSpec:
     name: str = "docker"
     options: Mapping[str, object] = field(default_factory=dict)
     resources: RunResourceRequest | None = None
+    #: The task Dockerfile the ``image`` option was built from, or ``None``
+    #: when the image is the operator's or the backend's. Not recorded: the
+    #: run record pins the built image itself.
+    task_dockerfile: Path | None = None
 
 
 @dataclass(frozen=True)

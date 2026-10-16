@@ -231,6 +231,7 @@ from vs_runtime._skills import (
     offered_skill_facts,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
+from vs_runtime._task_image_policy import EditorImagePlan, TaskImageError, editor_image_plan
 from vs_runtime._tool_location import ToolLocation, ToolSite
 from vs_runtime._trusted_evaluation import (
     ProtocolBenchmarkContract,
@@ -477,6 +478,7 @@ __all__ = [
     "DockerInDockerUnsupportedError",
     "DockerToolBuilder",
     "DurableEventJournal",
+    "EditorImagePlan",
     "EnvironmentStartup",
     "EnvironmentStartupSink",
     "EnvironmentStartupStage",
@@ -586,6 +588,7 @@ __all__ = [
     "StopGraceError",
     "StopTimer",
     "Switch",
+    "TaskImageError",
     "TerminalSignal",
     "ToolBuildOutputOpener",
     "ToolLocation",
@@ -632,6 +635,7 @@ __all__ = [
     "detect_macos_profiler",
     "discover_skill_dirs",
     "docker_evaluator_tools_root",
+    "editor_image_plan",
     "evaluator_agent_toolchains",
     "evaluator_container_setup",
     "evaluator_go_module_ready_path",

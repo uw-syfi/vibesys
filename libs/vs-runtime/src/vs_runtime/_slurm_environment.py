@@ -318,7 +318,6 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
 
     isolated = False
     uses_docker = True
-    backend_image: str | None = None
 
     def __init__(
         self,
@@ -340,6 +339,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         self._docker = DockerEnvironment(docker or DockerEnvironmentConfig())
         self._job_confinement = job_confinement
         self._deprecation = deprecation
+
+    @property
+    def backend_image(self) -> str | None:
+        """The editor container's image: the task image when the task has a Dockerfile."""
+        return self._docker.backend_image
 
     @property
     def deprecation(self) -> str | None:
@@ -391,14 +395,18 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     def from_options(cls, options: Mapping[str, object]) -> SlurmEnvironment:
         """Parse the operator file named by the options, once.
 
-        ``build_runner``, ``docker`` and ``orphan_reaper`` are unrecorded injection
-        seams for the agent image build, the Docker CLI and recovery.
+        ``image`` is the editor's base image (the task image, when the task has
+        a Dockerfile), recorded with the run. ``build_runner``, ``docker`` and
+        ``orphan_reaper`` are unrecorded injection seams for the agent image
+        build, the Docker CLI and recovery.
         """
         value = options.get("config_path", "~/.config/vibesys/slurm.toml")
         build_runner = options.get("build_runner")
+        image = options.get("image")
         return cls(
             load_slurm_operator_settings(Path(str(value))),
             docker=DockerEnvironmentConfig(
+                image=str(image) if image else None,
                 docker=cast("DockerCli | None", options.get("docker")),
                 build_runner=cast("DockerBuildRunner | None", build_runner),
                 orphan_reaper=cast("_OrphanReaper | None", options.get("orphan_reaper")),

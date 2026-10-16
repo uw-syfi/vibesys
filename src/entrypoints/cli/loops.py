@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from entrypoints.cli.config import _prepare_experiment_repository, load_config_and_skills
 from entrypoints.cli.environment import (
+    TaskImageBuild,
     _validate_run_environment_profiler,
     run_environment_spec_from_args,
 )
@@ -333,7 +334,9 @@ def _build_run_request(args: argparse.Namespace) -> RunRequest:
     with boot_trace.span("run_preamble"):
         request, config = validated_run_request(args)
         _prepare_experiment_repository(args, config)
-        run_environment = run_environment_spec_from_args(args, build_task_docker_image=True)
+        run_environment = run_environment_spec_from_args(
+            args, task_image=TaskImageBuild(backend=request.backend)
+        )
         if args.resume is not None:
             sys.stdout.write(f"Resuming VibeSys run {args.resume} in {request.project_root}/\n")
         return request.model_copy(

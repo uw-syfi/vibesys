@@ -337,7 +337,9 @@ def _register_defaults() -> None:
     rocm = import_module("vs_sandbox.rocm_backend")
     trainium = import_module("vs_sandbox.trainium_backend")
 
-    register_compute_backend(ComputeBackend.CUDA, cuda.CudaBackend, default_image=cuda.DEFAULT_IMAGE)
+    register_compute_backend(
+        ComputeBackend.CUDA, cuda.CudaBackend, default_image=cuda.DEFAULT_IMAGE
+    )
     register_compute_backend(
         ComputeBackend.METAL,
         local.metal_backend,

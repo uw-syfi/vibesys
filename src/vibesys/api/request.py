@@ -33,16 +33,20 @@ from vibesys.run.core_run import ensure_not_legacy_resume
 from vibesys.run.experiment_repo import origin_matches
 from vibesys.run.profilers import validate_run_request as validate_execution_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
-from vs_agent.api.images import build_task_image
+from vs_agent.api.images import DockerBuildRunner, build_task_image
 from vs_project.api import GitRemoteRepository
 from vs_runtime.api.infrastructure import (
+    EditorImagePlan,
     RunEnvironmentSpec,
+    TaskImageError,
     build_run_environment,
+    editor_image_plan,
     make_run_environment_spec,
     migrate_recorded_run_environment,
     resolve_run_environment_spec,
     run_environment_record,
 )
+from vs_sandbox.api import backend_default_image
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -64,12 +68,17 @@ def load_objective(bundle: InputBundle) -> str:
 
 __all__ = [
     "REPOSITORY_SLUG",
+    "DockerBuildRunner",
+    "EditorImagePlan",
     "InputBundle",
     "InputSynthesisError",
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
+    "TaskImageError",
+    "backend_default_image",
     "build_task_image",
     "default_skill_roots",
+    "editor_image_plan",
     "experiment_origin_matches",
     "generate_experiment_name",
     "load_objective",
