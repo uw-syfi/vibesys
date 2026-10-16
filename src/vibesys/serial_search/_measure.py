@@ -1,14 +1,24 @@
-"""The trusted gates of a candidate: measure it with the task's stages and read what they say."""
+"""The trusted gates of a candidate: measure it with the task's stages and read what they say.
+
+The measurement's span is the round's gate: it is labelled with the stages it ran and, once the
+evidence is read, with the candidate's headline value, its ratio to the input's and the verdict.
+"""
 
 from __future__ import annotations
 
+from vibesys.candidates.api import Baseline, Measured
 from vibesys.metrics import AcceptedReading, accept_readings
+from vibesys.search_spans.api import FAILED_CHECK, GATE, PASSED, SLOWER, GateAttrs
+from vibesys.serial_search._closing import beats_input, benchmark_outcome, failed_gate
 from vs_core.api.search import (
     EvidenceRef,
     Failed,
     Flow,
+    Label,
     MeasurementRecipe,
+    MeasurementResult,
     RevisionRef,
+    SpanId,
     Value,
     Workspace,
     trusted_keys,
@@ -36,17 +46,59 @@ class Unreadable(Value):
 type GateResult = Gated | NotMeasured | Unreadable
 
 
-async def measure_gates(ctx: Flow, ws: Workspace, revision: RevisionRef) -> GateResult:
+async def measure_gates(
+    ctx: Flow, ws: Workspace, revision: RevisionRef, baseline: Baseline
+) -> GateResult:
     """Measure ``revision`` with the task's stages, then have the evidence owner decode them.
 
     The backend measures again after an infrastructure failure, so what reaches here is the
-    candidate's own result or a measurement that ended without one.
+    candidate's own result or a measurement that ended without one. ``baseline`` is the input's
+    measurement, which the gate's label compares the candidate with.
     """
     terms = ctx.task.terms
     names = terms.measured
     recipe = MeasurementRecipe.of(ctx.facts)
     plan = recipe.plan(revision, purpose="official", now_at=ctx.clock.now(), stages=names)
-    found = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(names))
+    stage = ",".join(names)
+    label = Label(GATE, title=" + ".join(names), attrs=GateAttrs(stage=stage))
+    found = await ctx.evaluation.measure(
+        plan, workspace=ws, within=recipe.budget(names), label=label
+    )
+    gate = ctx.operation_span
+    result = await _gated(ctx, ws, revision, found)
+    if gate is not None and isinstance(result, Gated):
+        _label_reading(ctx, gate, stage, result.readings, baseline)
+    return result
+
+
+def _label_reading(
+    ctx: Flow,
+    gate: SpanId,
+    stage: str,
+    readings: tuple[AcceptedReading, ...],
+    baseline: Baseline,
+) -> None:
+    """Label the gate with what its readings say: the value, the ratio to the input's, the verdict.
+
+    It passed when every trusted gate passed and the candidate beats the input; it is slower when
+    it does not beat the input, and failed a check when a gate rejected it.
+    """
+    terms = ctx.task.terms
+    _, value = benchmark_outcome(readings)
+    seen = baseline.reading if isinstance(baseline, Measured) else None
+    base = seen.metrics[0].value if seen is not None and seen.metrics else None
+    if failed_gate(readings) is not None:
+        verdict = FAILED_CHECK
+    elif not beats_input(baseline, readings, terms):
+        verdict = SLOWER
+    else:
+        verdict = PASSED
+    ctx.label(GATE, span=gate, attrs=GateAttrs.measured(stage, value, base), verdict=verdict)
+
+
+async def _gated(
+    ctx: Flow, ws: Workspace, revision: RevisionRef, found: MeasurementResult | Failed
+) -> GateResult:
     if isinstance(found, Failed):
         return NotMeasured(feedback=f"the benchmark could not be measured ({found.reason.value})")
     keys = trusted_keys(found, scope=found.scope, candidate=revision, purpose="official")

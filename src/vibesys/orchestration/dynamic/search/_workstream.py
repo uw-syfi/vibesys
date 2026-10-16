@@ -25,13 +25,13 @@ from vibesys.orchestration.dynamic.search._outcomes import (
 )
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._spans import (
-    WORKSTREAM,
     label_outcome,
     workstream_attrs,
     workstream_title,
 )
 from vibesys.orchestration.dynamic.search._values import Failure, FailureKind
 from vibesys.orchestration.dynamic.search._work import do_work
+from vibesys.search_spans.api import WORKSTREAM
 from vs_core.api.search import (
     Assessment,
     Failed,

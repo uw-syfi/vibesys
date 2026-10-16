@@ -25,6 +25,7 @@ from vibesys.orchestration.multi.search._operations import VALIDATE_LOCAL_KIND
 from vibesys.orchestration.multi.search._prompts import PreRoundPrompt, ProfilerPrompt
 from vibesys.orchestration.multi.search._roles import IMPLEMENTER, JUDGE, PROFILER, ROUTER
 from vibesys.orchestration.profilers import ProfilerSummary
+from vibesys.search_spans.api import turn_label
 from vibesys.serial_search import api as serial
 from vibesys.serial_search.api import LastProfile, RoundDone, RoundStart
 from vs_core.api.search import (
@@ -113,7 +114,7 @@ async def _play(ctx: Flow, start: MultiRound) -> RoundDone:
         revalidation_required=active is not None and active.gate_revalidation_pending,
         feedback=feedback,
     )
-    settlement = await work(ctx, attempt)
+    settlement = await work(ctx, start, attempt)
     closed = attempt.close(settlement)
     ctx.publish(closed.search)
     return serial.round_done(
@@ -160,7 +161,7 @@ def _advice(ctx: Flow, config: MultiConfig, start: MultiRound) -> serial.Advise:
 
 async def route(router: Session, prompt: PreRoundPrompt) -> PreRoundDecision | None:
     """Ask whether fresh profile evidence is wanted; None when the router gave no answer."""
-    match await router.turn(prompt):
+    match await router.turn(prompt, label=turn_label(router)):
         case TurnFinished(reply=PreRoundDecision() as decision):
             return decision
         case Failed():
@@ -172,7 +173,7 @@ async def route(router: Session, prompt: PreRoundPrompt) -> PreRoundDecision | N
 
 async def profile(profiler: Session, prompt: ProfilerPrompt) -> LastProfile | None:
     """Ask for a profile; None when the profiler gave no answer."""
-    match await profiler.turn(prompt):
+    match await profiler.turn(prompt, label=turn_label(profiler)):
         case TurnFinished(reply=ProfilerSummary() as findings):
             return LastProfile(
                 source="profiler",
@@ -189,7 +190,7 @@ async def profile(profiler: Session, prompt: ProfilerPrompt) -> LastProfile | No
             raise TypeError(message)
 
 
-async def work(ctx: Flow, attempt: MultiAttempt) -> Settlement | None:
+async def work(ctx: Flow, start: RoundStart, attempt: MultiAttempt) -> Settlement | None:
     """Open the round's workspace, let the implementer work in it, settle it; core's settlement."""
 
     async def turn(session: Session, ws: Workspace) -> str | None:
@@ -200,9 +201,10 @@ async def work(ctx: Flow, attempt: MultiAttempt) -> Settlement | None:
 
     return await serial.work(
         ctx,
+        start,
         attempt,
-        implementer=IMPLEMENTER,
         room=serial.Room(
+            implementer=IMPLEMENTER,
             mode=workspace_mode_for(isolated_candidates=not attempt.config.exclusive_root),
             paid_turns=attempt.config.max_retries_per_round,
         ),
@@ -214,7 +216,7 @@ async def take_turn(ctx: Flow, attempt: MultiAttempt, session: Session, ws: Work
     """One paid turn: the reply, then the review, the validation and the gates it leads to."""
     prompt = attempt.prompt()
     attempt.turns += 1
-    match await session.turn(prompt):
+    match await session.turn(prompt, label=turn_label(session)):
         case TurnFinished(reply=ImplementerResponse() as reply, checkpoint=checkpoint):
             if isinstance(checkpoint, Declined):
                 return attempt.failed(
@@ -246,7 +248,9 @@ async def _onward(ctx: Flow, attempt: MultiAttempt, ws: Workspace, step: Next) -
     if step is Next.VALIDATE:
         step = await validate(ctx, attempt, ws)
     if step is Next.GATES and attempt.candidate is not None:
-        step = attempt.gated(await serial.measure_gates(ctx, ws, attempt.candidate))
+        step = attempt.gated(
+            await serial.measure_gates(ctx, ws, attempt.candidate, attempt.baseline)
+        )
     return step
 
 
@@ -255,7 +259,7 @@ async def review(ctx: Flow, attempt: MultiAttempt, ws: Workspace) -> Next:
     revision = attempt.candidate or attempt.base
     cited = () if attempt.candidate is None else ctx.evaluation.taken(ws, revision)
     judge = ctx.agents.session(JUDGE, workspace=ws, revision=revision)
-    match await judge.turn(attempt.judge_prompt(cited), revision=revision):
+    match await judge.turn(attempt.judge_prompt(cited), revision=revision, label=turn_label(judge)):
         case TurnFinished(reply=JudgeResponse() as verdict, invocation=invocation):
             return attempt.judged(verdict, invocation)
         case Failed():

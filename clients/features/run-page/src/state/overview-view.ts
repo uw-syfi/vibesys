@@ -135,14 +135,26 @@ function bestNumber(run: RunAtView, spans: readonly Span[], ended: boolean): Key
   };
 }
 
+/**
+ * The run's round: its latest planning call, or, for a search that plays rounds instead (each a
+ * workstream with a `round` attribute), its latest round. A round still choosing its hypothesis
+ * (no `hypothesis_id` yet) is planning.
+ */
 function roundNumber(index: SpanIndex): KeyNumber {
   const calls = index.spans.filter(span => kindOf(span) === 'planning_call');
-  if (calls.length === 0) return {label: 'Round', value: '–', sub: 'before the first plan'};
-  const latest = calls.reduce(
-    (best, span) => Math.max(best, numberAttr(span, 'call') ?? 0),
-    calls.length,
+  const rounds = index.spans.filter(
+    span => kindOf(span) === 'workstream' && numberAttr(span, 'round') !== null,
   );
-  const planning = calls.some(isOpen);
+  if (calls.length === 0 && rounds.length === 0) {
+    return {label: 'Round', value: '–', sub: 'before the first plan'};
+  }
+  const latest =
+    calls.length > 0
+      ? calls.reduce((best, span) => Math.max(best, numberAttr(span, 'call') ?? 0), calls.length)
+      : rounds.reduce((best, span) => Math.max(best, numberAttr(span, 'round') ?? 0), 0);
+  const planning =
+    calls.some(isOpen) ||
+    rounds.some(span => isOpen(span) && stringAttr(span, 'hypothesis_id') === null);
   const measuring = index.spans.some(span => kindOf(span) === 'gate' && isOpen(span));
   const sub = planning ? 'planning' : measuring ? 'measuring' : 'working';
   return {label: 'Round', value: String(latest), sub};

@@ -23,9 +23,17 @@ from vs_core.api.search import (
     NoWinner,
     RevisionRef,
     Settlement,
+    SpanId,
     TaskTerms,
     Value,
 )
+
+
+class KeptBy(Value):
+    """A revision a round kept, and the span of the round's workstream that kept it."""
+
+    revision_id: str
+    span: SpanId
 
 
 class RoundStart(Value):
@@ -37,6 +45,13 @@ class RoundStart(Value):
     ledger: LedgerJson
     last_profile: LastProfile | None = None
     baseline: candidates.Baseline
+    kept: tuple[KeptBy, ...] = ()
+    """The revisions earlier rounds kept, each with the workstream that kept it."""
+
+    def kept_by(self, revision: RevisionRef) -> SpanId | None:
+        """The span of the workstream that kept ``revision``; None for the input."""
+        found = (item.span for item in self.kept if item.revision_id == revision.revision_id.root)
+        return next(found, None)
 
 
 class Closed(Value):
@@ -108,6 +123,7 @@ class SerialRun:
     checkpoint: RevisionRef | None = None
     last_profile: LastProfile | None = None
     closed: list[Closed] = field(default_factory=list)
+    kept: list[KeptBy] = field(default_factory=list)
     failure: str | None = None
     stopped: bool = False
 
@@ -128,16 +144,19 @@ class SerialRun:
             ledger=self.ledger,
             last_profile=self.last_profile,
             baseline=self.baseline,
+            kept=tuple(self.kept),
         )
 
-    def finished(self, done: RoundDone) -> None:
-        """Fold a round that ended."""
+    def finished(self, done: RoundDone, span: SpanId | None) -> None:
+        """Fold a round that ended; ``span`` is the round's own, the workstream it labelled."""
         self.ledger = done.ledger
         self.counted += int(done.counted)
         if done.closed is not None:
             self.closed.append(done.closed)
         if done.checkpoint is not None:
             self.checkpoint = done.checkpoint
+            if span is not None:
+                self.kept.append(KeptBy(revision_id=done.checkpoint.revision_id.root, span=span))
         self.last_profile = done.last_profile or self.last_profile
         self.failure = done.failure or self.failure
         self.stopped = self.stopped or done.stopped

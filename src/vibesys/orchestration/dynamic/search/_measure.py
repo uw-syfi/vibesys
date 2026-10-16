@@ -25,7 +25,6 @@ from vibesys.orchestration.dynamic.search._reports import (
     InputOverdue,
     Released,
 )
-from vibesys.orchestration.dynamic.search._spans import GATE, GateAttrs
 from vibesys.orchestration.dynamic.search._values import (
     DropReason,
     Failure,
@@ -33,6 +32,7 @@ from vibesys.orchestration.dynamic.search._values import (
     Proof,
     WorkKind,
 )
+from vibesys.search_spans.api import GATE, GateAttrs
 from vs_core.api.search import (
     Failed,
     Flow,

@@ -4,8 +4,9 @@
  * selectors over the run trace's spans. Trajectories and counts are queries over spans: there is
  * no second record of the run's work.
  *
- * The selectors read the dynamic search's span kinds (`workstream`, `gate`); a run whose search
- * labels no spans yields empty trajectories and zero counts.
+ * The selectors read the span kinds every hypothesis search labels (`workstream`, `gate`; the
+ * vocabulary is `vibesys.search_spans`); a run whose search labels no spans yields empty
+ * trajectories and zero counts.
  */
 import type {RunEvent, RunOverview, RunSnapshot, Span} from '@vibesys/contracts';
 

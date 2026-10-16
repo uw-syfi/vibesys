@@ -27,17 +27,13 @@ from vibesys.orchestration.dynamic.search._run_state import (
     RunRecord,
     Scheduled,
 )
-from vibesys.orchestration.dynamic.search._spans import (
-    PLANNING_CALL,
-    PlanningAttrs,
-    turn_label,
-)
 from vibesys.orchestration.dynamic.search._values import (
     MergeRecord,
     PlanProblem,
     ProblemKind,
     WorkKind,
 )
+from vibesys.search_spans.api import PLANNING_CALL, PlanningAttrs, turn_label
 from vs_core.api.search import (
     Again,
     Failed,

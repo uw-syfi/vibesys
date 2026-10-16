@@ -21,7 +21,6 @@ from vibesys.orchestration.dynamic.search._outcomes import (
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
-from vibesys.orchestration.dynamic.search._spans import turn_label
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
@@ -29,6 +28,7 @@ from vibesys.orchestration.dynamic.search._values import (
     Failure,
     FailureKind,
 )
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import (
     Again,
     Declined,

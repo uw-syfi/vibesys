@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.candidates.api import space_of
 from vibesys.hypothesis import HypothesisConfig, OrchestratorPlan, rounds
+from vibesys.search_spans.api import turn_label
 from vibesys.serial_search._attribution import (
     OUTPUT_ARGUMENT,
     AttributionConfig,
@@ -27,6 +28,7 @@ from vibesys.serial_search._plans import accept_plan, base_commit, revision_of
 from vibesys.serial_search._prompts import PlanCorrection, PlanPrompt, correction_of, plan_prompt
 from vibesys.serial_search._roadmap import RoadmapUnavailable, put_roadmap, read_roadmap
 from vibesys.serial_search._roles import ORCHESTRATOR
+from vibesys.serial_search._spans import not_designed, round_begun
 from vs_core.api.search import (
     CaptureSpec,
     CommandCapture,
@@ -113,7 +115,7 @@ async def ask_plan(
     asked: PlanPrompt | PlanCorrection = prompt
     problem = "the designer did not answer"
     for _ in range(1 + PLAN_CORRECTIONS):
-        match await planner.turn(asked):
+        match await planner.turn(asked, label=turn_label(planner)):
             case TurnFinished(reply=OrchestratorPlan() as reply, invocation=turn):
                 accepted = accept_plan(hypotheses, ledger, reply, round_number=number)
                 if isinstance(accepted, OrchestratorPlan):
@@ -148,8 +150,26 @@ async def design(
     """Design a new hypothesis for the round: attribution, the search's own advice, the plan.
 
     The ledger returned has the hypothesis started in it; its base is the revision the ledger
-    chose to build on (the newest checkpoint, or a frontier parent the plan reverts to).
+    chose to build on (the newest checkpoint, or a frontier parent the plan reverts to). The
+    round's workstream is labelled while it designs, and rejected when no design comes of it.
     """
+    round_begun(ctx, start)
+    designed = await _design(
+        ctx, start, hypotheses=hypotheses, attribution=attribution, advise=advise
+    )
+    if isinstance(designed, NoDesign):
+        not_designed(ctx)
+    return designed
+
+
+async def _design(
+    ctx: Flow,
+    start: RoundStart,
+    *,
+    hypotheses: HypothesisConfig,
+    attribution: AttributionConfig | None,
+    advise: Advise | None,
+) -> Designed | NoDesign:
     terms = ctx.task.terms
     space = space_of(terms)
     ledger = start.ledger.decode(space)

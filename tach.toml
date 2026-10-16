@@ -1429,11 +1429,22 @@ from = ["vibesys.candidates"]
 expose = ["api", "api\\..*"]
 
 [[modules]]
+# The span vocabulary every hypothesis search labels its run trace with (planning calls,
+# workstreams, agent turns, gates), so clients read one set of kinds whatever the search.
+path = "vibesys.search_spans"
+layer = "roles_search"
+depends_on = ["vs_core"]
+
+[[interfaces]]
+from = ["vibesys.search_spans"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
 # Policy shared by the strategies that search one hypothesis at a time (single, multi): the
 # profile-guided attribution, the designer's view of the search so far and plan acceptance.
 path = "vibesys.serial_search"
 layer = "roles_search"
-depends_on = ["vs_core", "vs_issue_tracker", "vibesys.candidates", "vibesys.hypothesis", "vibesys.inputs", "vibesys.metrics", "vibesys.profile_focus"]
+depends_on = ["vs_core", "vs_issue_tracker", "vibesys.candidates", "vibesys.hypothesis", "vibesys.inputs", "vibesys.metrics", "vibesys.profile_focus", "vibesys.search_spans"]
 
 [[interfaces]]
 from = ["vibesys.serial_search"]
@@ -1443,7 +1454,7 @@ expose = ["api", "api\\..*"]
 # The dynamic search as one flow: its roles, its values and the pure helpers its flows share.
 path = "vibesys.orchestration.dynamic.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.inputs", "vibesys.metrics"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.dynamic.models", "vibesys.hypothesis", "vibesys.inputs", "vibesys.metrics", "vibesys.search_spans"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.search"]
@@ -1545,7 +1556,7 @@ from = ["vibesys.orchestration.single.models"]
 [[modules]]
 path = "vibesys.orchestration.single.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.single.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.review", "vibesys.serial_search"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.single.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.review", "vibesys.search_spans", "vibesys.serial_search"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.single.search"]
@@ -1604,7 +1615,7 @@ from = ["vibesys.orchestration.multi.models"]
 [[modules]]
 path = "vibesys.orchestration.multi.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.multi.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.review", "vibesys.serial_search", "vibesys.orchestration.profilers"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.orchestration.multi.models", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.review", "vibesys.search_spans", "vibesys.serial_search", "vibesys.orchestration.profilers"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.multi.search"]

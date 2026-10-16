@@ -31,7 +31,10 @@ role data). A search whose flows act on a system another library owns (an issue 
 `owned=` (the codecs of that library's operations); `ctx.owners.perform` sends one and returns the
 typed outcome or a `Failed`, and the declaration requires the host to provide an owner for each.
 A search that labels its spans passes `spans=` (its `SpanKind` declarations; see "Span labels").
-The dynamic search is the worked example (`src/vibesys/orchestration/dynamic/search/_spans.py`).
+The hypothesis searches share one vocabulary, `SPANS` in `vibesys.search_spans` (planning calls,
+workstreams, agent turns, gates), which the run page reads; each maps its own steps onto it: the
+dynamic search in `src/vibesys/orchestration/dynamic/search/_spans.py`, the serial searches
+(single, multi; each round is a workstream) in `src/vibesys/serial_search/_spans.py`.
 The id scheme derives from the search name.
 
 The root flow starts with the config and returns `None` or `NoWinner(reason)`. **A flow never

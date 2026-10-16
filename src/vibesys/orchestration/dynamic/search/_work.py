@@ -24,7 +24,6 @@ from vibesys.orchestration.dynamic.search._outcomes import (
 )
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, MERGER, PROFILER
-from vibesys.orchestration.dynamic.search._spans import turn_label
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Failure,
@@ -32,6 +31,7 @@ from vibesys.orchestration.dynamic.search._values import (
     MergeOutcome,
     WorkKind,
 )
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import Declined, Failed, Flow, RevisionRef, TurnFinished, Workspace
 
 _IMPLEMENTING = (ResumeStage.WORKING, ResumeStage.IMPLEMENTED)

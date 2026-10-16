@@ -4,7 +4,8 @@ Both serial searches give a round an isolated candidate workspace and ask the im
 one paid turn at a time, until the attempt is over or its paid turns are spent. What each turn
 does with the reply (a self-review, a judge, the trusted gates) is the search's; this is what
 they share. The workspace is a resource, so it always settles: with the assertion the attempt
-made, with a failure, or as cancelled when the operator stops the run.
+made, with a failure, or as cancelled when the operator stops the run. The round's workstream is
+named for the hypothesis as the work begins and gets its verdict from the settlement.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
+from vibesys.serial_search._spans import hypothesis_chosen, round_settled
 from vs_core.api.search import (
     Again,
     AttemptBudget,
@@ -32,6 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from vibesys.hypothesis import OrchestratorPlan
+    from vibesys.serial_search._run import RoundStart
     from vs_core.api.search import Assessment, RevisionRef, Session
 
 
@@ -57,8 +60,10 @@ type Turn = Callable[[Session, Workspace], Awaitable[str | None]]
 
 @dataclass(frozen=True)
 class Room:
-    """Where and for how long the implementer works in a round."""
+    """Who works in a round, where, and for how long."""
 
+    implementer: Role
+    """The role that implements the round's hypothesis in its workspace."""
     mode: WorkspaceMode
     """How the workspace opens: its own copy, or the run's root on a host without sandboxes."""
     paid_turns: int
@@ -66,12 +71,19 @@ class Room:
 
 
 async def work(
-    ctx: Flow, attempt: Attempting, *, implementer: Role, room: Room, turn: Turn
+    ctx: Flow, start: RoundStart, attempt: Attempting, *, room: Room, turn: Turn
 ) -> Settlement | None:
     """Open the round's workspace, ask the implementer in it, settle it; core's settlement.
 
     The result is None when the workspace could not be opened: nothing was settled.
     """
+    hypothesis_chosen(ctx, start, attempt.plan, attempt.base)
+    settlement = await _work(ctx, attempt, room=room, turn=turn)
+    round_settled(ctx, settlement)
+    return settlement
+
+
+async def _work(ctx: Flow, attempt: Attempting, *, room: Room, turn: Turn) -> Settlement | None:
     hypothesis = attempt.plan.hypothesis_id
     async with ctx.workspaces.open(
         attempt=attempt_id(hypothesis, attempt.number),
@@ -82,7 +94,7 @@ async def work(
         if isinstance(opened, NotOpened):
             attempt.failed(f"the workspace could not be opened ({opened.failed.reason.value})")
             return None
-        session = ctx.agents.session(implementer, workspace=opened, revision=attempt.base)
+        session = ctx.agents.session(room.implementer, workspace=opened, revision=attempt.base)
 
         async def ask(tries: Tries[str]) -> bool | Again[str]:
             del tries

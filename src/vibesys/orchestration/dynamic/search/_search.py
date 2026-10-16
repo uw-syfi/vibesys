@@ -57,8 +57,9 @@ from vibesys.orchestration.dynamic.search._run_state import (
     RunRecord,
     Scheduled,
 )
-from vibesys.orchestration.dynamic.search._spans import SPANS, BuildsOn
+from vibesys.orchestration.dynamic.search._spans import BuildsOn
 from vibesys.orchestration.dynamic.search._workstream import workstream
+from vibesys.search_spans.api import SPANS
 from vs_core.api.search import Flow, Group, NoWinner, StopRequested, TaskStopped, search
 
 

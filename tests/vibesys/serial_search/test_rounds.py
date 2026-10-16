@@ -107,13 +107,16 @@ def test_the_run_counts_the_rounds_that_used_one_and_starts_the_next_on_the_newe
     run = run_of(limit)
     for index, (counted, eligible, value) in enumerate(drawn, start=1):
         run.finished(
-            done(index, counted=counted, kept=closed(index, eligible=eligible, value=value))
+            done(index, counted=counted, kept=closed(index, eligible=eligible, value=value)),
+            f"flow:round#{index}",
         )
     assert run.counted == sum(counted for counted, _, _ in drawn)
     start = run.start()
     assert start.number == run.counted + 1
     expected = INPUT_REVISION if not drawn else RevisionRef.of_git_commit(f"c-{len(drawn)}")
     assert start.base == expected
+    # the next round builds on the workstream that kept its base; the input has none
+    assert start.kept_by(start.base) == (f"flow:round#{len(drawn)}" if drawn else None)
 
 
 @settings(max_examples=examples(pr=8, nightly=100))
@@ -124,7 +127,7 @@ def test_the_run_is_over_when_stopped_failed_or_out_of_rounds(
     run = run_of(limit)
     for index, (counted, eligible, value) in enumerate(drawn, start=1):
         run.finished(
-            done(index, counted=counted, kept=closed(index, eligible=eligible, value=value))
+            done(index, counted=counted, kept=closed(index, eligible=eligible, value=value)), None
         )
     if stopping or run.counted >= limit:
         assert run.over(stopping=stopping)
@@ -136,11 +139,11 @@ def test_the_run_is_over_when_stopped_failed_or_out_of_rounds(
 @given(failure=st.text(min_size=1, max_size=8))
 def test_a_failed_or_stopped_round_ends_the_run_for_good(failure: str) -> None:
     failed = run_of(5)
-    failed.finished(done(1, failure=failure))
+    failed.finished(done(1, failure=failure), None)
     assert failed.over(stopping=False)
     assert failed.failure == failure
     stopped = run_of(5)
-    stopped.finished(done(1, counted=False, stopped=True))
+    stopped.finished(done(1, counted=False, stopped=True), None)
     assert stopped.over(stopping=False)
 
 
@@ -151,7 +154,7 @@ def test_the_leader_is_the_input_unless_a_kept_round_is_eligible_and_then_one_of
 ) -> None:
     run = run_of(8)
     for index, (_, eligible, value) in enumerate(drawn, start=1):
-        run.finished(done(index, kept=closed(index, eligible=eligible, value=value)))
+        run.finished(done(index, kept=closed(index, eligible=eligible, value=value)), None)
     leader = run.leader()
     eligible_kept = [item.kept for item in run.closed if item.eligible]
     if not eligible_kept:
@@ -166,7 +169,7 @@ def test_the_leader_is_the_input_unless_a_kept_round_is_eligible_and_then_one_of
 def test_the_best_eligible_candidate_leads(drawn: list[tuple[bool, bool, float]]) -> None:
     run = run_of(8)
     for index, (_, eligible, value) in enumerate(drawn, start=1):
-        run.finished(done(index, kept=closed(index, eligible=eligible, value=value)))
+        run.finished(done(index, kept=closed(index, eligible=eligible, value=value)), None)
     eligible = [item for item in run.closed if item.eligible]
     leader = run.leader()
     if eligible:
@@ -180,7 +183,7 @@ def test_a_run_whose_input_is_trusted_ends_with_the_input_standing_when_nothing_
     None
 ):
     run = run_of(2)
-    run.finished(done(1, kept=closed(1, eligible=False, value=10.0)))
+    run.finished(done(1, kept=closed(1, eligible=False, value=10.0)), None)
     assert run.ending() is None
 
 
@@ -190,7 +193,7 @@ def test_a_failure_with_nothing_eligible_is_named_in_why_the_run_has_no_winner(
     failure: str,
 ) -> None:
     run = run_of(2)
-    run.finished(done(1, failure=failure))
+    run.finished(done(1, failure=failure), None)
     ending = run.ending()
     assert ending is not None
     assert failure in ending.reason

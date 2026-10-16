@@ -1,13 +1,9 @@
-"""The kinds of span the dynamic search labels, and the labels it gives them.
+"""The labels the dynamic search gives its spans, in the shared vocabulary (``search_spans``).
 
-The runtime records what ran; these say what it means: a planning call, a workstream (which
-hypothesis, built on which revision, accepted or rejected, linked to the workstream it builds
-on), an agent turn (which role and model) and a gate (a trusted measurement: its stages, the
-candidate's value and how it compares with the input, and whether it passed). Every label goes
-through ``ctx.label`` or ``label=``; nothing here builds a projection of its own.
+A planning call is a task of the root, a workstream is a task the root starts for a plan, each
+provider turn is an agent turn and a workstream's trusted measurement is its gate. Every label
+goes through ``ctx.label`` or ``label=``; nothing here builds a projection of its own.
 """
-
-from typing import Literal
 
 from vibesys.orchestration.dynamic.search._outcomes import (
     Closing,
@@ -19,74 +15,19 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     input_headline,
 )
 from vibesys.orchestration.dynamic.search._values import WorkKind
-from vs_core.api.search import (
-    Flow,
-    Label,
-    Session,
-    Settle,
-    SpanId,
-    SpanKind,
-    SpanLink,
-    Task,
-    Value,
+from vibesys.search_spans.api import (
+    ACCEPTED,
+    BUILDS_ON,
+    FAILED_CHECK,
+    GATE,
+    PASSED,
+    REJECTED,
+    SLOWER,
+    WORKSTREAM,
+    GateAttrs,
+    WorkstreamAttrs,
 )
-
-
-class PlanningAttrs(Value):
-    """A planning call: which call of the run it is."""
-
-    call: int
-
-
-class WorkstreamAttrs(Value):
-    """A workstream: the hypothesis it works on and the revision it builds on."""
-
-    hypothesis_id: str
-    parent_revision: str
-
-
-class AgentTurnAttrs(Value):
-    """An agent turn: the role asked and the model it runs on (None: the run's default).
-
-    The provider and the reasoning effort are the host's settings, which the search never sees.
-    """
-
-    role: str
-    model: str | None = None
-
-
-class GateAttrs(Value):
-    """A trusted measurement of a candidate: its stages, its value, and the ratio to the input's."""
-
-    stage: str
-    metric_value: float | None = None
-    vs_baseline: float | None = None
-    """The candidate's headline value divided by the input's; None while either is unknown."""
-
-
-ACCEPTED: Literal["accepted"] = "accepted"
-REJECTED: Literal["rejected"] = "rejected"
-PASSED: Literal["passed"] = "passed"
-FAILED_CHECK: Literal["failed_check"] = "failed_check"
-SLOWER: Literal["slower"] = "slower"
-BUILDS_ON: Literal["builds_on"] = "builds_on"
-
-PLANNING_CALL = SpanKind("planning_call", attrs=PlanningAttrs)
-WORKSTREAM = SpanKind(
-    "workstream", attrs=WorkstreamAttrs, verdicts=(ACCEPTED, REJECTED), links=(BUILDS_ON,)
-)
-AGENT_TURN = SpanKind("agent_turn", attrs=AgentTurnAttrs)
-GATE = SpanKind("gate", attrs=GateAttrs, verdicts=(PASSED, FAILED_CHECK, SLOWER))
-SPANS = (PLANNING_CALL, WORKSTREAM, AGENT_TURN, GATE)
-"""What ``@search("dynamic", spans=...)`` declares."""
-
-
-def turn_label(session: Session) -> Label:
-    """The label of each provider turn a session's ask makes."""
-    role = session.role
-    return Label(
-        AGENT_TURN, title=role.name, attrs=AgentTurnAttrs(role=role.name, model=role.model)
-    )
+from vs_core.api.search import Flow, Settle, SpanId, SpanLink, Task
 
 
 def workstream_title(w: WorkstreamStart) -> str:
@@ -136,9 +77,8 @@ def label_outcome(
         return
     span, stage = work.gate
     value, base = headline(closing), input_headline(work.baseline)
-    ratio = None if value is None or base is None or not base.value else value.value / base.value
-    attrs = GateAttrs(
-        stage=stage, metric_value=None if value is None else value.value, vs_baseline=ratio
+    attrs = GateAttrs.measured(
+        stage, None if value is None else value.value, None if base is None else base.value
     )
     if profile:
         ctx.label(GATE, span=span, attrs=attrs)

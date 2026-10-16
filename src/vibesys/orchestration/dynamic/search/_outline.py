@@ -11,8 +11,8 @@ from vibesys.orchestration.dynamic.models import PlanOutline
 from vibesys.orchestration.dynamic.search._prompts import OutlinePrompt
 from vibesys.orchestration.dynamic.search._roles import OUTLINER
 from vibesys.orchestration.dynamic.search._run_state import NoPlan, Outlined, RunRecord
-from vibesys.orchestration.dynamic.search._spans import turn_label
 from vibesys.orchestration.dynamic.search._values import PlanProblem, ProblemKind, Step
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import Failed, FailureReason, Flow, TurnFinished
 
 
