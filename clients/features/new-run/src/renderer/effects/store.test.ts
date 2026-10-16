@@ -26,6 +26,7 @@ function fakeBridge(
     copyOut: (_host, _source, destination) => ok({project: destination, tasks: ['a']}),
     startRun: () => record('startRun', {runId: 'run-2', instanceId: '00000000000c'}),
     helperFeatures: () => ok(features as readonly HelperFeature[]),
+    complete: () => ok({kind: 'unsupported' as const}),
   };
 }
 

@@ -63,6 +63,19 @@ export const SEED: FakeBridgeSeed = {
     ),
   ],
   recent: RECENT,
+  machines: [
+    {host: 'local', label: 'This Mac', checkout: '~/projs/vibesys'},
+    {host: 'ssh:chelan4', label: 'chelan4', checkout: '/home/me/vibesys'},
+  ],
+  directories: {
+    '/home/me/': [
+      {name: 'notes', path: '/home/me/notes', checkout: false, project: false},
+      {name: 'projects', path: '/home/me/projects', checkout: false, project: false},
+    ],
+    '/home/me/projects/': [
+      {name: 'queue-rs', path: '/home/me/projects/queue-rs', checkout: false, project: true},
+    ],
+  },
   newRun: {
     machine: {
       checkout: {root: '/home/me/vibesys', version: '0.9.0', commit: 'cc65df3', dirty: false},

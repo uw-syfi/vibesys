@@ -119,3 +119,33 @@ test('a machine whose VibeSys predates New run says so and is never asked to sta
   expect(started).toEqual([]);
   expect(preflights).toEqual([]);
 });
+
+test('the folder field completes paths on the machine', async ({page}) => {
+  await open(page);
+  await page.getByRole('radio', {name: 'Open a folder'}).check();
+  const field = page.getByLabel('Folder on chelan4');
+  await field.fill('/home/me/pro');
+  await page.getByRole('option', {name: '/home/me/projects/'}).click();
+  await expect(field).toHaveValue('/home/me/projects/');
+  await page.getByRole('option', {name: '/home/me/projects/queue-rs/'}).click();
+  await expect(field).toHaveValue('/home/me/projects/queue-rs/');
+  await page.getByRole('button', {name: 'Open', exact: true}).click();
+  await expect(page.getByLabel('Task', {exact: true})).toHaveValue('mpmc');
+  await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
+});
+
+test("Machines' New run here opens New run on that machine", async ({page}) => {
+  await open(page);
+  await expect(page.getByLabel('Run on')).toHaveValue('ssh:chelan4');
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: /^Machines/})
+    .click();
+  await page
+    .getByRole('tree', {name: 'Machines'})
+    .getByRole('treeitem', {name: 'This Mac'})
+    .click();
+  await page.getByRole('button', {name: 'New run here'}).click();
+  await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+  await expect(page.getByLabel('Run on')).toHaveValue('local');
+});

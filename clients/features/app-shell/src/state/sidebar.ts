@@ -13,7 +13,8 @@ import {endedStatus, liveDetail, liveStatus, type RunRowStatus, statusWord} from
 
 /** The screen the main area shows. */
 export type Screen =
-  | {readonly kind: 'new-run'}
+  /** New run; opened for a machine (Machines' "New run here"), it starts on that machine. */
+  | {readonly kind: 'new-run'; readonly machine?: HostKey}
   | {readonly kind: 'machines'}
   | {readonly kind: 'settings'}
   | {readonly kind: 'all-runs'}

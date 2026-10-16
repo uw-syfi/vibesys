@@ -2,7 +2,7 @@
  * What the New run screen shows, derived from the machine's snapshot: the facts about the machine,
  * the "Ready to start" items, why Start is disabled, and the one-line summary of the run.
  */
-import {type HostKey, type HostListing, hostFromKey, hostLabel} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
 import type {CheckState, KeyValueItem} from '@vibesys/ui';
 import {
@@ -22,10 +22,9 @@ export interface MachineOption {
   readonly label: string;
 }
 
-/** This machine and every host the app watches, by label. */
-export function machineOptions(listings: readonly HostListing[]): MachineOption[] {
-  const keys = ['local', ...listings.map(listing => listing.host).filter(key => key !== 'local')];
-  return [...new Set(keys)].map(key => ({value: key, label: machineLabel(key)}));
+/** This machine first, then each of `hosts` (the saved and watched machines) once, by label. */
+export function machineOptions(hosts: readonly HostKey[]): MachineOption[] {
+  return [...new Set(['local', ...hosts])].map(key => ({value: key, label: machineLabel(key)}));
 }
 
 export function machineLabel(key: HostKey): string {

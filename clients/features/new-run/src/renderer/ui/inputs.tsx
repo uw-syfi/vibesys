@@ -1,4 +1,6 @@
 /** The New run form's numbered cards: the machine, the project and task, the agent, the budget. */
+
+import {type CompletionAction, type CompletionState, suggestions} from '@vibesys/hosts';
 import {
   Banner,
   Button,
@@ -50,7 +52,11 @@ export function MachineCard(
       <Field label="Run on">
         <Select
           value={machine}
-          options={props.machines}
+          options={
+            props.machines.some(option => option.value === machine)
+              ? props.machines
+              : [...props.machines, {value: machine, label: machineLabel(machine)}]
+          }
           change={next => dispatch({type: 'machine', machine: next})}
         />
       </Field>
@@ -114,17 +120,30 @@ function RecentProject(props: CardProps): JSX.Element {
   );
 }
 
-function FolderProject(props: CardProps): JSX.Element {
-  const {context, dispatch} = props;
+/** The folder field's path completion: the hosts' completion reducer's state and its actions. */
+export interface FolderCompletion {
+  readonly state: CompletionState;
+  readonly dispatch: (action: CompletionAction) => void;
+}
+
+function FolderProject(props: CardProps & {readonly completion: FolderCompletion}): JSX.Element {
+  const {context, dispatch, completion} = props;
   const project = context.form.project;
   const [draft, setDraft] = useState(project?.source === 'folder' ? project.path : '');
+  const type = (value: string): void => {
+    setDraft(value);
+    completion.dispatch({type: 'input', field: 'project', host: context.form.machine, value});
+  };
+  const completions = suggestions(completion.state, 'project').map(value => ({value}));
   const open = (): void => {
-    if (draft.trim() !== '') dispatch({type: 'project', project: {source: 'folder', path: draft}});
+    // A completion ends in `/`; the project is the folder itself.
+    const path = draft.trim().replace(/(.)\/+$/, '$1');
+    if (path !== '') dispatch({type: 'project', project: {source: 'folder', path}});
   };
   return (
     <Stack gap="space-2">
       <Field label={`Folder on ${machineLabel(context.form.machine)}`}>
-        <PathInput value={draft} change={setDraft} completions={[]} placeholder="~/project" />
+        <PathInput value={draft} change={type} completions={completions} placeholder="~/project" />
       </Field>
       <Row>
         <Button text="Open" press={open} />
@@ -205,7 +224,9 @@ function TaskField(props: CardProps): JSX.Element | null {
 }
 
 /** 02: the project (a recent one, a folder, or an example) and its task. */
-export function ProjectCard(props: CardProps): JSX.Element {
+export function ProjectCard(
+  props: CardProps & {readonly completion: FolderCompletion},
+): JSX.Element {
   const [source, setSource] = useState<Source>(props.context.form.project?.source ?? 'recent');
   const {helper, form} = props.context;
   // A helper without `examples` cannot make one: the choice is not offered.

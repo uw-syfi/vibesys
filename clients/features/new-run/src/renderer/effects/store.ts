@@ -3,13 +3,14 @@
  * seen as a store the screen renders. A started run ends the machine; the store then hands the run
  * on and starts a fresh form, prefilled from the runs this user opened.
  */
-import type {HostKey} from '@vibesys/hosts';
+import type {CompletionAction, CompletionState, HostKey} from '@vibesys/hosts';
 import {settled, type WelcomeBridge, type WelcomeResult} from '@vibesys/ipc';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {createListenerDelivery, type Store} from '@vibesys/store';
 import {type Actor, createActor, fromPromise} from 'xstate';
 import {type NewRunEvent, type NewRunSnapshot, newRunMachine} from '../../state/index.js';
+import {createFolderCompletion} from './completion.js';
 
 /** The bridge calls the New run screen makes. */
 export type NewRunBridge = Pick<
@@ -23,6 +24,7 @@ export type NewRunBridge = Pick<
   | 'copyOut'
   | 'startRun'
   | 'helperFeatures'
+  | 'complete'
 >;
 
 /** What `call` answered, or a rejection with its error (a call that throws rejects too). */
@@ -81,7 +83,12 @@ export interface NewRunStoreOptions {
 export function createNewRunStore(
   bridge: NewRunBridge,
   options: NewRunStoreOptions,
-): {readonly store: Store<NewRunSnapshot, NewRunEvent>; readonly stop: () => void} {
+): {
+  readonly store: Store<NewRunSnapshot, NewRunEvent>;
+  /** The folder field's path completion. */
+  readonly completion: Store<CompletionState, CompletionAction>;
+  readonly stop: () => void;
+} {
   const logic = newRunLogic(bridge);
   const clock = clockFrom(options.schedule);
   const delivery = createListenerDelivery();
@@ -123,5 +130,6 @@ export function createNewRunStore(
       delivery.notify();
     },
   };
-  return {store, stop: () => current.stop()};
+  const completion = createFolderCompletion(bridge, options.schedule);
+  return {store, completion, stop: () => current.stop()};
 }

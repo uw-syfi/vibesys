@@ -47,6 +47,7 @@ export interface ShellStores {
   readonly newRun: ReturnType<typeof createNewRunStore>['store'];
   /** The page a run's live session runs in. */
   readonly page: RunPagePage;
+  readonly newRunCompletion: ReturnType<typeof createNewRunStore>['completion'];
 }
 
 const DEFAULT_APPEARANCE = {mode: 'system', light: 'paper', dark: 'ink'} as const;
@@ -80,22 +81,35 @@ export function createShellStores(
     schedule,
     started: run => sidebar.store.dispatch({type: 'select', screen: {kind: 'run', run}}),
   });
-  let recent = sidebar.store.getState().recent;
+  let {recent, selection} = sidebar.store.getState();
   sidebar.store.subscribe(() => {
-    const next = sidebar.store.getState().recent;
-    if (next === recent) return;
-    recent = next;
-    newRun.store.dispatch({type: 'recent', recent});
+    const next = sidebar.store.getState();
+    if (next.recent !== recent) {
+      recent = next.recent;
+      newRun.store.dispatch({type: 'recent', recent});
+    }
+    if (next.selection !== selection) {
+      selection = next.selection;
+      followMachine(newRun.store, selection);
+    }
   });
   return {
     sidebar,
     settings,
     machines: createMachinesStore(bridge),
     newRun: newRun.store,
+    newRunCompletion: newRun.completion,
     bridge,
     schedule,
     page,
   };
+}
+
+/** New run opened for a machine (Machines' "New run here") starts on it. */
+function followMachine(newRun: ShellStores['newRun'], selection: Screen): void {
+  if (selection.kind !== 'new-run' || selection.machine === undefined) return;
+  if (newRun.getState().context.form.machine === selection.machine) return;
+  newRun.dispatch({type: 'machine', machine: selection.machine});
 }
 
 function useStore<S, A>(store: Store<S, A>): S {
@@ -148,11 +162,12 @@ export function Shell(props: {
   readonly stores: ShellStores;
   readonly version: string;
 }): JSX.Element {
-  const {sidebar, settings, machines, newRun} = props.stores;
+  const {sidebar, settings, machines, newRun, newRunCompletion} = props.stores;
   const sidebarState = useStore(sidebar.store);
   const settingsState = useStore(settings);
   const machinesState = useStore(machines);
   const newRunState = useStore(newRun);
+  const completionState = useStore(newRunCompletion);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
   const screen = (selected: Screen): JSX.Element => {
     switch (selected.kind) {
@@ -161,7 +176,11 @@ export function Shell(props: {
           <NewRunScreen
             snapshot={newRunState}
             dispatch={newRun.dispatch}
-            machines={machineOptions(sidebarState.listings)}
+            machines={machineOptions([
+              ...machinesState.machines.map(machine => machine.host),
+              ...sidebarState.listings.map(listing => listing.host),
+            ])}
+            completion={{state: completionState, dispatch: newRunCompletion.dispatch}}
             hero={<Wordmark art={WORDMARK} label="VibeSys" align="center" tone="accent" />}
             chooseCheckout={() => select({kind: 'machines'})}
           />
@@ -173,8 +192,7 @@ export function Shell(props: {
           <MachinesScreen
             state={machinesState}
             dispatch={machines.dispatch}
-            // New run does not take a machine yet; it opens on its own until it lands.
-            newRun={() => sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run'}})}
+            newRun={host => select({kind: 'new-run', machine: host})}
           />
         );
       case 'run':

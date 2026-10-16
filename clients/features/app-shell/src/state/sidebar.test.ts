@@ -128,7 +128,12 @@ function randomAction(random: () => number): SidebarAction {
   const screen = pick(random, ['new-run', 'machines', 'settings', 'all-runs', 'run'] as const);
   return {
     type: 'select',
-    screen: screen === 'run' ? {kind: 'run', run: randomRun(random)} : {kind: screen},
+    screen:
+      screen === 'run'
+        ? {kind: 'run', run: randomRun(random)}
+        : screen === 'new-run' && random() < 0.5
+          ? {kind: 'new-run', machine: pick(random, ['local', 'ssh:chelan4'])}
+          : {kind: screen},
   };
 }
 

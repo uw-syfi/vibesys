@@ -15,7 +15,7 @@ import {
 } from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import type {NewRunEvent, NewRunSnapshot} from '../../state/index.js';
-import {AgentCard, BudgetCard, MachineCard, ProjectCard} from './inputs.js';
+import {AgentCard, BudgetCard, type FolderCompletion, MachineCard, ProjectCard} from './inputs.js';
 import {type MachineOption, type ReadinessFix, readiness, startBlocked, summary} from './view.js';
 
 type Dispatch = (event: NewRunEvent) => void;
@@ -86,6 +86,8 @@ export function NewRunScreen(props: {
   readonly hero: ReactNode;
   /** Open Machines, where the machine's VibeSys checkout is chosen. */
   readonly chooseCheckout: () => void;
+  /** The folder field's path completion. */
+  readonly completion: FolderCompletion;
 }): JSX.Element {
   const {snapshot, dispatch, chooseCheckout} = props;
   const {context} = snapshot;
@@ -109,7 +111,7 @@ export function NewRunScreen(props: {
         main={
           <Stack gap="space-4">
             <MachineCard {...cardProps} machines={props.machines} chooseCheckout={chooseCheckout} />
-            <ProjectCard key={context.form.machine} {...cardProps} />
+            <ProjectCard key={context.form.machine} {...cardProps} completion={props.completion} />
             <AgentCard {...cardProps} />
             <BudgetCard {...cardProps} />
           </Stack>
