@@ -15,6 +15,7 @@ import sys
 from typing import TYPE_CHECKING
 
 from entrypoints.cli.loops import validated_run_request
+from launch import orchestration_roles
 from server.host_preflight import (
     Check,
     CheckId,
@@ -65,6 +66,7 @@ def preflight_report(
     try:
         args = parse(argv)
         request, _config = validated_run_request(args)
+        roles = orchestration_roles(request.orchestration)
         accelerator = run_accelerator_unavailable(request, probe)
     except ConfigurationError as error:
         diagnostic = error.diagnostic
@@ -89,11 +91,13 @@ def preflight_report(
             uses_docker=run_environment_uses_docker(request.run_environment),
             agent_image=_not_checked(CheckId.AGENT_IMAGE),
             evaluator=_not_checked(CheckId.EVALUATOR_AVAILABLE),
+            roles=roles,
         )
     return valid_report(
         uses_docker=run_environment_uses_docker(request.run_environment),
         bundle=args.input_bundle,
         probe=probe,
+        roles=roles,
     )
 
 
@@ -106,13 +110,16 @@ def _invalid_settings(settings: SettingsInvalid) -> PreflightReport:
     )
 
 
-def valid_report(*, uses_docker: bool, bundle: InputBundle, probe: CommandProbe) -> PreflightReport:
+def valid_report(
+    *, uses_docker: bool, bundle: InputBundle, probe: CommandProbe, roles: tuple[str, ...]
+) -> PreflightReport:
     """The report for valid settings; the agent image is checked only where Docker runs."""
     return PreflightReport(
         settings=SettingsValid(),
         uses_docker=uses_docker,
         agent_image=agent_image_check(probe) if uses_docker else NO_AGENT_IMAGE,
         evaluator=evaluator_check(bundle),
+        roles=roles,
     )
 
 

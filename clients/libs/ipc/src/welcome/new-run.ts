@@ -45,6 +45,16 @@ export type Offered<T> =
   | {readonly kind: 'offered'; readonly value: T}
   | {readonly kind: 'unsupported'};
 
+/** What a preflight answers: the checks for the inputs, and the roles of the run's orchestration. */
+export interface PreflightResult {
+  readonly checks: readonly Check[];
+  /**
+   * The role ids the run's orchestration declares, in declaration order; null from a helper that
+   * does not take `run_roles`. Empty when the settings did not resolve an orchestration.
+   */
+  readonly roles: readonly string[] | null;
+}
+
 /** A run that started: its id and the server that drives it. */
 export interface StartedRun {
   readonly runId: string;
@@ -54,7 +64,7 @@ export interface StartedRun {
 /** The welcome bridge's requests the New run feature makes. */
 export interface NewRunWelcomeBridge {
   describeMachine(host: HostKey): Promise<WelcomeResult<Offered<MachineDescription>>>;
-  preflight(host: HostKey, inputs: RunInputs): Promise<WelcomeResult<Offered<readonly Check[]>>>;
+  preflight(host: HostKey, inputs: RunInputs): Promise<WelcomeResult<Offered<PreflightResult>>>;
   examples(host: HostKey): Promise<WelcomeResult<Offered<ExampleList>>>;
   createFromExample(
     host: HostKey,

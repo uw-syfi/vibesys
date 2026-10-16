@@ -20,15 +20,24 @@ import {type JSX, useState} from 'react';
 import {
   advancedProblem,
   type Budget,
+  defaultRole,
   type Effort,
   missingFeatures,
   type NewRunContext,
   type NewRunEvent,
   type ProjectChoice,
-  ROLES,
+  roleLabel,
+  roleSummary,
   vettedModels,
 } from '../../state/index.js';
-import {type MachineOption, machineFacts, machineLabel, recentProjects} from './view.js';
+import {
+  type MachineOption,
+  machineFacts,
+  machineLabel,
+  type RolesView,
+  recentProjects,
+  rolesView,
+} from './view.js';
 
 type Dispatch = (event: NewRunEvent) => void;
 
@@ -256,22 +265,27 @@ const EFFORTS: readonly {readonly value: Effort; readonly label: string}[] = [
   {value: 'high', label: 'High'},
 ];
 
-function RoleRows(props: CardProps & {readonly models: readonly string[]}): JSX.Element | null {
-  const {context, dispatch, models} = props;
+function RoleRows(
+  props: CardProps & {readonly models: readonly string[]; readonly roles: readonly string[]},
+): JSX.Element | null {
+  const {context, dispatch, models, roles} = props;
   const agent = context.form.agent;
   if (agent === null) return null;
   return (
     <Stack gap="space-3">
-      {ROLES.map(({role, label, does}) => {
-        const choice = agent.roles.find(each => each.role === role);
-        if (choice === undefined) return null;
+      {roles.map(role => {
+        const choice = agent.roles.find(each => each.role === role) ?? defaultRole(role);
+        const label = roleLabel(role);
+        const does = roleSummary(role);
         return (
           <Grid key={role} min="field" gap="space-3">
             <Stack gap="space-1">
               <Text variant="body-strong">{label}</Text>
-              <Text variant="small" tone="muted">
-                {does}
-              </Text>
+              {does === null ? null : (
+                <Text variant="small" tone="muted">
+                  {does}
+                </Text>
+              )}
             </Stack>
             <Field label={`${label} model`}>
               <Select
@@ -307,10 +321,45 @@ function rolesLabel(context: NewRunContext): string {
   return changed === 0 ? 'Roles: every role as the run' : `Roles: ${changed} changed`;
 }
 
+/** The role table's toggle and rows, or why the run's roles are not listed. */
+function RolesSection(props: CardProps & {readonly models: readonly string[]}): JSX.Element {
+  const {context} = props;
+  const [shown, setShown] = useState(false);
+  const view: RolesView = rolesView(context);
+  if (view.kind === 'unsupported') {
+    return (
+      <Text variant="small" tone="muted">
+        This machine's VibeSys does not report its agent roles, so every role runs as the run.
+        Update VibeSys on it to set a model per role.
+      </Text>
+    );
+  }
+  if (view.kind === 'pending') {
+    return (
+      <Text variant="small" tone="muted">
+        The roles are read from the machine with the first check of these inputs.
+      </Text>
+    );
+  }
+  return (
+    <>
+      <Row>
+        <Button
+          variant="quiet"
+          icon={shown ? 'chevron-down' : 'chevron-right'}
+          text={rolesLabel(context)}
+          expanded={shown}
+          press={() => setShown(!shown)}
+        />
+      </Row>
+      {shown ? <RoleRows {...props} roles={view.roles} /> : null}
+    </>
+  );
+}
+
 /** 03: the harness and vetted model every role runs, and each role's model and effort. */
 export function AgentCard(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
-  const [rolesShown, setRolesShown] = useState(false);
   const offers = context.harnesses?.for === context.form.machine ? context.harnesses.list : null;
   const agent = context.form.agent;
   if (offers === null) {
@@ -348,16 +397,7 @@ export function AgentCard(props: CardProps): JSX.Element {
           />
         </Field>
       </Grid>
-      <Row>
-        <Button
-          variant="quiet"
-          icon={rolesShown ? 'chevron-down' : 'chevron-right'}
-          text={rolesLabel(context)}
-          expanded={rolesShown}
-          press={() => setRolesShown(!rolesShown)}
-        />
-      </Row>
-      {rolesShown ? <RoleRows {...props} models={models} /> : null}
+      <RolesSection {...props} models={models} />
     </Card>
   );
 }

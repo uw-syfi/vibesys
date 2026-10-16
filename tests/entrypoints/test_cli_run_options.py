@@ -19,8 +19,9 @@ from entrypoints.cli.preflight import (
     preflight_report,
     valid_report,
 )
+from launch import built_in_orchestrations
 from server.host_api import MAX_RUN_SECONDS_FLAG, ROLE_MODEL_FLAG, ROLE_REASONING_EFFORT_FLAG
-from server.host_preflight import CheckId, CheckState, SettingsInvalid
+from server.host_preflight import CheckId, CheckState, SettingsInvalid, SettingsValid
 from vibesys.api import DomainName
 from vibesys.api.request import TaskImageError, run_environment_uses_docker
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -169,11 +170,40 @@ def test_a_run_that_needs_no_docker_needs_no_agent_image(tmp_path: Path) -> None
     args = cli.parse_cli_invocation(_argv(tmp_path)).args
     probe = ScriptedProbe(lambda _argv: None)
 
-    report = valid_report(uses_docker=False, bundle=args.input_bundle, probe=probe)
+    report = valid_report(uses_docker=False, bundle=args.input_bundle, probe=probe, roles=())
 
     assert (report.uses_docker, report.agent_image.state) == (False, CheckState.OK)
     assert report.agent_image.detail.startswith("not needed")
     assert probe.calls == []
+
+
+@pytest.mark.parametrize(
+    ("flags", "plugin_id"),
+    [
+        (["--inner-loop", "single-agent"], "single-agent"),
+        (["--inner-loop", "multi-agent"], "multi-agent"),
+        (["--outer-loop", "dynamic"], "dynamic"),
+        (["--outer-loop", "plain"], "plain"),
+        (["--outer-loop", "evolve"], "evolve"),
+    ],
+    ids=["single", "multi", "dynamic", "plain", "evolve"],
+)
+def test_preflight_reports_the_roles_the_orchestration_declares(
+    tmp_path: Path, flags: list[str], plugin_id: str
+) -> None:
+    """The roles are the plugin's declaration: the ids ``--role-model`` is checked against."""
+    report = preflight_report(
+        _argv(tmp_path, "--backend", "cpu", "--profiler", "none", *flags),
+        _parse,
+        ScriptedProbe(lambda _argv: None),
+    )
+
+    declared = tuple(
+        agent.id for agent in built_in_orchestrations().resolve(plugin_id).plugin.agents
+    )
+    assert isinstance(report.settings, SettingsValid)
+    assert declared
+    assert report.roles == declared
 
 
 _GPU_ROW = "0, GPU-1, NVIDIA A100, 10, 40960, 3\n"

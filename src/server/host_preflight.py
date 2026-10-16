@@ -8,7 +8,7 @@ same arguments ``run.start`` would launch with. Pydantic and the standard librar
 ``server.host_api``, which embeds these in the helper's messages.
 
 Public surface: ``CheckId``, ``CheckState``, ``ChooseCheckout``, ``CopyOut``, ``EditSetting``,
-``StartDocker``, ``Fix``, ``Check``, ``ReasoningEffort``, ``RoleOption``, ``RunResults``,
+``StartDocker``, ``Fix``, ``Check``, ``ReasoningEffort``, ``RoleName``, ``RoleOption``, ``RunResults``,
 ``RunOptions``, ``SettingsValid``, ``SettingsInvalid``, ``PreflightReport``, ``one_line``.
 """
 
@@ -112,12 +112,16 @@ class ReasoningEffort(StrEnum):
     HIGH = "high"
 
 
+RoleName = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=64)]
+"""An agent role's id, as an orchestration plugin declares it (``AgentRole.id``)."""
+
+
 class RoleOption(BaseModel):
     """One agent role's model and reasoning effort; ``model`` ``None`` keeps the run's model."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    role: Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9._-]*$", max_length=64)]
+    role: RoleName
     model: Annotated[str, StringConstraints(min_length=1, max_length=256)] | None = None
     reasoning_effort: ReasoningEffort = ReasoningEffort.DEFAULT
 
@@ -180,6 +184,9 @@ class PreflightReport(BaseModel):
     settings did not resolve one. Docker is not checked for a run that needs none."""
     agent_image: Check
     evaluator: Check
+    roles: tuple[RoleName, ...] = ()
+    """The role ids the run's orchestration plugin declares, in declaration order: what
+    ``RoleOption.role`` may name. Empty when the settings did not resolve an orchestration."""
 
 
 __all__ = [
@@ -193,6 +200,7 @@ __all__ = [
     "Fix",
     "PreflightReport",
     "ReasoningEffort",
+    "RoleName",
     "RoleOption",
     "RunOptions",
     "RunResults",

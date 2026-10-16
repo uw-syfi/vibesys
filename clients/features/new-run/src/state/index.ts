@@ -10,6 +10,7 @@ export {
   checksPass,
   DEFAULT_BUDGET,
   defaultAgent,
+  defaultRole,
   type Effort,
   type FactsFor,
   type Form,
@@ -22,7 +23,6 @@ export {
   type ProjectChoice,
   prefill,
   projectPath,
-  ROLES,
   type RoleChoice,
   recordedAgent,
   runInputs,
@@ -38,3 +38,10 @@ export {
   newRunMachine,
   type ProjectFix,
 } from './machine.js';
+export {
+  agentWithRoles,
+  formWithRoles,
+  roleLabel,
+  roleSummary,
+  rolesAfter,
+} from './roles.js';

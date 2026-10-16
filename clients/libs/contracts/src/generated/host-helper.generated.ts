@@ -143,6 +143,7 @@ export type Type19 = "run.preflight";
 export type Project4 = string;
 export type Task1 = string | null;
 export type Args1 = string[];
+export type WithRoles = boolean | null;
 export type RequestId20 = string;
 export type DeadlineMs20 = number;
 export type Type20 = "examples.list";
@@ -204,7 +205,8 @@ export type HelperFeature =
   | "checkout_inspect"
   | "preflight"
   | "run_options"
-  | "examples";
+  | "examples"
+  | "run_roles";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
@@ -475,6 +477,7 @@ export type Kind2 = "edit_setting";
 export type Key = string;
 export type Kind3 = "start_docker";
 export type Checks = Check[];
+export type Roles1 = string[] | null;
 export type RequestId43 = string;
 export type Type43 = "examples.list";
 export type Version12 = 1;
@@ -855,6 +858,7 @@ export interface RunPreflightRequest {
   args?: Args1;
   harness?: HarnessChoice | null;
   options?: RunOptions | null;
+  with_roles?: WithRoles;
 }
 /**
  * The examples of the checkout this helper runs from, with their tasks.
@@ -1393,6 +1397,7 @@ export interface RunPreflightReply {
   request_id: RequestId42;
   type: Type42;
   checks: Checks;
+  roles?: Roles1;
 }
 /**
  * One preflight check: its state, one line of detail, and the action that fixes it.

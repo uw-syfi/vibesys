@@ -209,6 +209,13 @@ def validate_descriptor(
     _validate_descriptor(descriptor, registry=_catalog(registry))
 
 
+def orchestration_roles(
+    descriptor: OrchestrationDescriptor, *, registry: OrchestrationRegistry | None = None
+) -> tuple[str, ...]:
+    """The role ids the selected orchestration plugin declares, in declaration order."""
+    return tuple(agent.id for agent in _catalog(registry).resolve(descriptor.id).plugin.agents)
+
+
 def validate_run_request(
     request: RunRequest, *, git: Git, registry: OrchestrationRegistry | None = None
 ) -> None:
@@ -232,6 +239,7 @@ __all__ = [
     "create_session",
     "default_runs",
     "open_run_store",
+    "orchestration_roles",
     "validate_descriptor",
     "validate_run_request",
 ]

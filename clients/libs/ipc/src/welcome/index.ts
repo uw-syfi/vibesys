@@ -185,6 +185,7 @@ export type {
   HarnessPick,
   NewRunWelcomeBridge,
   Offered,
+  PreflightResult,
   RoleOption,
   RunInputs,
   RunOptions,

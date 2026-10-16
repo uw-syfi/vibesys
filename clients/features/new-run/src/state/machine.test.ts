@@ -6,20 +6,25 @@ import type {
   MachineDescription,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
-import type {HarnessOffer, Offered} from '@vibesys/ipc';
+import type {HarnessOffer, Offered, PreflightResult, RunInputs} from '@vibesys/ipc';
 import {checkMachine} from '@vibesys/machine/testing';
 import type {RecentRun} from '@vibesys/runs';
 import type {Seeded} from '@vibesys/store/testing';
-import {createActor, fromPromise, type SnapshotFrom} from 'xstate';
+import {createActor, fromPromise, SimulatedClock, type SnapshotFrom} from 'xstate';
 import {
+  CHECK_DEBOUNCE_MS,
   checksPass,
+  formWithRoles,
   inputsKey,
   missingFeatures,
   type NewRunEvent,
   newRunMachine,
   offers,
-  ROLES,
+  prefill,
   recordedAgent,
+  roleLabel,
+  roleSummary,
+  rolesAfter,
   runInputs,
   splitWords,
   vettedModels,
@@ -69,6 +74,7 @@ const RECENT: readonly RecentRun[] = [
     },
   },
 ];
+const ROLE_IDS = ['multi-orchestrator', 'multi-profiler', 'multi-implementer', 'multi-judge'];
 const IDS = [
   'checkout_found',
   'project_own_repository',
@@ -97,6 +103,7 @@ function output(operation: string, random: Seeded): unknown {
     case 'features':
       // A current helper, one before examples, one before typed options, one before both.
       return random.pick([
+        ['run_options', 'preflight', 'examples', 'harnesses', 'run_roles'],
         ['run_options', 'preflight', 'examples', 'harnesses'],
         ['run_options', 'preflight', 'harnesses'],
         ['preflight', 'examples', 'harnesses'],
@@ -105,7 +112,14 @@ function output(operation: string, random: Seeded): unknown {
     case 'tasks':
       return random.pick([['mpmc', 'spsc'], ['spsc'], []]);
     case 'preflight':
-      return {kind: 'offered', value: checks(random)};
+      return {
+        kind: 'offered',
+        value: {
+          checks: checks(random),
+          // From a helper without `run_roles`, from settings that resolved none, or the run's own.
+          roles: random.pick([null, [], ROLE_IDS, ROLE_IDS.slice(1), ['plain-judge']]),
+        },
+      };
     case 'fix':
       return {project: random.pick(['/own/a', '/own/b']), tasks: ['mpmc']};
     default:
@@ -124,7 +138,7 @@ function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>
     {type: 'model', model: random.pick(vettedModels(OFFERS, agent?.provider ?? 'claude'))},
     {
       type: 'role',
-      role: {role: random.pick(ROLES).role, model: null, effort: random.pick(['default', 'high'])},
+      role: {role: random.pick(ROLE_IDS), model: null, effort: random.pick(['default', 'high'])},
     },
     {type: 'budget', budget: {rounds: random.pick([1, 2, 5]), timeLimitS: null, results: 'keep'}},
     {type: 'advanced', advanced: random.pick(['', '--max-in-flight 3', '--max-rounds 4', '"open'])},
@@ -185,6 +199,15 @@ function expectInputApplied(before: Snapshot, event: NewRunEvent, after: Snapsho
   if (event.type === 'project') expect(form.project).toEqual(event.project);
 }
 
+/** The form never sets a role the run does not have, once the run has reported its roles. */
+function unreportedRoles(snapshot: Snapshot): string[] {
+  const {form, roles} = snapshot.context;
+  if (form.agent === null || roles === null) return [];
+  return form.agent.roles
+    .filter(choice => !roles.includes(choice.role))
+    .map(choice => `role ${choice.role} is not the run's`);
+}
+
 describe('newRunMachine', () => {
   test('model: no stale work, Start only on passing checks for the current inputs', () => {
     checkMachine(
@@ -207,6 +230,7 @@ describe('newRunMachine', () => {
               problems.push(`model ${form.agent.model} is not vetted for ${form.agent.provider}`);
             }
           }
+          problems.push(...unreportedRoles(snapshot));
           if (form.project?.source === 'example' && runInputs(form) !== null) {
             problems.push('an example not yet created has run inputs');
           }
@@ -218,7 +242,9 @@ describe('newRunMachine', () => {
           expectInputApplied(before, event as NewRunEvent, after);
           expectAsksOnlyWhatHelperTakes(before, after);
           if (event.type === 'xstate.done.actor.preflight') {
-            expect(after.context.checks?.for).toBe(inputsKey(after.context.form) ?? undefined);
+            // The checks are for the inputs that were asked; the roles the run reports may then
+            // change the form, and the checks are no longer for it (Start waits for new ones).
+            expect(after.context.checks?.for).toBe(inputsKey(before.context.form) ?? undefined);
           }
         },
       },
@@ -335,5 +361,130 @@ describe('newRunMachine', () => {
     expect(form.task).toBe('mpmc');
     expect(form.agent).toMatchObject({provider: 'claude', model: 'claude-a'});
     actor.stop();
+  });
+});
+
+describe('the run reports its roles', () => {
+  /** An actor on a helper that reports `roles`, noting the inputs of each preflight in `asked`. */
+  function actorOn(roles: readonly string[], asked: RunInputs[], clock: SimulatedClock) {
+    return createActor(
+      newRunMachine.provide({
+        actors: {
+          describe: fromPromise<Offered<MachineDescription>, {readonly host: HostKey}>(
+            async () => ({kind: 'unsupported'}),
+          ),
+          examples: fromPromise<Offered<ExampleList>, {readonly host: HostKey}>(async () => ({
+            kind: 'unsupported',
+          })),
+          harnesses: fromPromise<readonly HarnessOffer[], {readonly host: HostKey}>(
+            async () => OFFERS,
+          ),
+          features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(async () => [
+            'run_options',
+            'preflight',
+            'examples',
+            'run_roles',
+          ]),
+          tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(
+            async () => ['spsc'],
+          ),
+          preflight: fromPromise<
+            Offered<PreflightResult>,
+            {readonly host: HostKey; readonly inputs: RunInputs}
+          >(async ({input}) => {
+            asked.push(input.inputs);
+            return {kind: 'offered', value: {checks: [], roles}};
+          }),
+        },
+      }),
+      {input: {machine: 'local', recent: RECENT}, clock},
+    );
+  }
+
+  function until(actor: ReturnType<typeof actorOn>, ready: (snapshot: Snapshot) => boolean) {
+    return new Promise<void>(resolve => {
+      if (ready(actor.getSnapshot())) {
+        resolve();
+        return;
+      }
+      const done = actor.subscribe(snapshot => {
+        if (ready(snapshot)) {
+          done.unsubscribe();
+          resolve();
+        }
+      });
+    });
+  }
+
+  const LOADED = {editing: {tasks: 'ready', harnesses: 'ready', helper: 'ready'}} as const;
+
+  test('they replace the role settings a recorded run had that this run lacks, and are asked again', async () => {
+    const asked: RunInputs[] = [];
+    const clock = new SimulatedClock();
+    const actor = actorOn(['multi-orchestrator', 'multi-implementer'], asked, clock);
+    actor.start();
+    actor.send({type: 'again', run: RECENT[2] as RecentRun});
+    await until(actor, snapshot => snapshot.matches(LOADED));
+    // The recorded run set `judge`, which the reported roles do not have.
+    expect(actor.getSnapshot().context.form.agent?.roles.map(role => role.role)).toEqual(['judge']);
+    clock.increment(CHECK_DEBOUNCE_MS);
+    await until(actor, snapshot => snapshot.context.roles !== null);
+    const {context} = actor.getSnapshot();
+    expect(context.roles).toEqual(['multi-orchestrator', 'multi-implementer']);
+    expect(context.form.agent?.roles).toEqual([
+      {role: 'multi-orchestrator', model: null, effort: 'default'},
+      {role: 'multi-implementer', model: null, effort: 'default'},
+    ]);
+    // The dropped setting changed the inputs: they are checked again, without it.
+    clock.increment(CHECK_DEBOUNCE_MS);
+    await until(actor, () => asked.length === 2);
+    expect(asked[0]?.options.roles).toEqual([
+      {role: 'judge', model: 'claude-a', reasoning_effort: 'high'},
+    ]);
+    expect(asked[1]?.options.roles).toEqual([]);
+    actor.stop();
+  });
+
+  test('an answer that names no roles leaves them unknown', async () => {
+    const asked: RunInputs[] = [];
+    const clock = new SimulatedClock();
+    const actor = actorOn([], asked, clock);
+    actor.start();
+    await until(actor, snapshot => snapshot.matches(LOADED));
+    clock.increment(CHECK_DEBOUNCE_MS);
+    await until(actor, () => asked.length === 1);
+    await until(actor, snapshot => snapshot.matches({editing: {checks: 'ready'}}));
+    expect(actor.getSnapshot().context.roles).toBeNull();
+    actor.stop();
+  });
+});
+
+describe('roles', () => {
+  test('a role id reads as a label, and only the roles this copy knows say what they do', () => {
+    expect(roleLabel('multi-implementer')).toBe('Multi implementer');
+    expect(roleSummary('multi-implementer')).toBe('Writes candidates');
+    expect(roleSummary('implementer')).toBe('Writes candidates');
+    expect(roleSummary('multi-unheard-of')).toBeNull();
+  });
+
+  test('the form follows the roles it is given, keeping the settings of the roles it already had', () => {
+    const agent = {
+      provider: 'claude',
+      model: 'claude-a',
+      roles: [
+        {role: 'a', model: 'claude-b', effort: 'high'},
+        {role: 'gone', model: null, effort: 'low'},
+      ],
+    } as const;
+    const form = {...prefill('local', []), agent};
+    const followed = formWithRoles(form, ['b', 'a']);
+    expect(followed.agent?.roles).toEqual([
+      {role: 'b', model: null, effort: 'default'},
+      {role: 'a', model: 'claude-b', effort: 'high'},
+    ]);
+    expect(formWithRoles(followed, ['b', 'a'])).toBe(followed);
+    expect(formWithRoles(form, null)).toBe(form);
+    expect(rolesAfter(['a'], [])).toEqual(['a']);
+    expect(rolesAfter(['a'], ['b'])).toEqual(['b']);
   });
 });

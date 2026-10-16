@@ -821,7 +821,11 @@ def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightRe
         docker=host.machine.docker(),
     )
     report = host.preflight.report(root, run_arguments(request))
-    return RunPreflightReply(request_id=request.request_id, checks=preflight_checks(facts, report))
+    return RunPreflightReply(
+        request_id=request.request_id,
+        checks=preflight_checks(facts, report),
+        roles=report.roles if request.with_roles else None,
+    )
 
 
 def _refusal(

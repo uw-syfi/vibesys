@@ -8,14 +8,13 @@
  * Start is enabled only when the checks are for the current inputs and none fails.
  */
 import type {
-  Check,
   CreatedProject,
   ExampleList,
   HelperFeature,
   MachineDescription,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
-import type {HarnessOffer, Offered, RunInputs, StartedRun} from '@vibesys/ipc';
+import type {HarnessOffer, Offered, PreflightResult, RunInputs, StartedRun} from '@vibesys/ipc';
 import {unprovided} from '@vibesys/machine';
 import type {RecentRun, RunStart} from '@vibesys/runs';
 import {and, assign, raise, type SnapshotFrom, setup} from 'xstate';
@@ -39,6 +38,7 @@ import {
   recordedAgent,
   runInputs,
 } from './form.js';
+import {formWithRoles, rolesAfter} from './roles.js';
 
 /** The fixes the screen performs itself; the rest are the shell's (Machines) or the user's. */
 export type ProjectFix =
@@ -55,6 +55,11 @@ export interface NewRunContext {
   readonly examples: {readonly for: HostKey; readonly value: Offered<ExampleList>} | null;
   readonly tasks: {readonly for: string; readonly list: readonly string[]} | null;
   readonly checks: ChecksFor | null;
+  /**
+   * The role ids the run's orchestration declares, from the latest preflight that reported any:
+   * null before one did, or from a helper that does not report them (`offers(..., 'run_roles')`).
+   */
+  readonly roles: readonly string[] | null;
   /** What the run being run again was started with: its agent is chosen from it once known. */
   readonly rerun: RunStart | null;
   /** Why the last load, fix or start failed, until the next input. */
@@ -108,7 +113,10 @@ function withInput(context: NewRunContext, event: InputEvent): Form {
     case 'task':
       return {...form, task: event.task};
     case 'provider':
-      return {...form, agent: defaultAgent(context.harnesses?.list ?? [], event.provider)};
+      return {
+        ...form,
+        agent: defaultAgent(context.harnesses?.list ?? [], context.roles ?? [], event.provider),
+      };
     case 'model':
       return withAgent(form, agent => ({...agent, model: event.model}));
     case 'role':
@@ -121,6 +129,23 @@ function withInput(context: NewRunContext, event: InputEvent): Form {
     case 'advanced':
       return {...form, advanced: event.advanced};
   }
+}
+
+/** What a preflight answer changes: the checks for the asked inputs, the roles, and the form. */
+function afterPreflight(context: NewRunContext, answer: Offered<PreflightResult>) {
+  const asked = inputsKey(context.form) ?? '';
+  if (answer.kind !== 'offered') {
+    // Only a helper that agreed to `preflight` is asked; none checks nothing.
+    return {checks: {for: asked, list: []}, roles: context.roles, form: context.form};
+  }
+  const roles =
+    answer.value.roles === null ? context.roles : rolesAfter(context.roles, answer.value.roles);
+  return {
+    checks: {for: asked, list: answer.value.checks},
+    roles,
+    // The form follows the run's roles: a setting for a role it does not have would fail the run.
+    form: formWithRoles(context.form, roles),
+  };
 }
 
 /** The task to pick from `list`: the one already chosen when it is offered, else the first. */
@@ -143,7 +168,7 @@ export const newRunMachine = setup({
       'tasks',
     ),
     preflight: unprovided<
-      Offered<readonly Check[]>,
+      Offered<PreflightResult>,
       {readonly host: HostKey; readonly inputs: RunInputs}
     >('preflight'),
     fix: unprovided<CreatedProject, {readonly host: HostKey; readonly fix: ProjectFix}>('fix'),
@@ -160,6 +185,9 @@ export const newRunMachine = setup({
       offers(context.helper, context.form.machine, 'preflight') &&
       offers(context.helper, context.form.machine, 'run_options'),
     offersExamples: ({context}) => offers(context.helper, context.form.machine, 'examples'),
+    // The roles the run reported change what is asked: check the inputs again.
+    rolesChangeInputs: ({context}, params: {readonly answer: Offered<PreflightResult>}) =>
+      inputsKey(afterPreflight(context, params.answer).form) !== inputsKey(context.form),
   },
   delays: {debounce: CHECK_DEBOUNCE_MS},
   actions: {
@@ -184,6 +212,7 @@ export const newRunMachine = setup({
     examples: null,
     tasks: null,
     checks: null,
+    roles: null,
     rerun: null,
     problem: null,
     started: null,
@@ -204,6 +233,7 @@ export const newRunMachine = setup({
             examples: null,
             tasks: null,
             checks: null,
+            roles: null,
             rerun: null,
             problem: null,
           })),
@@ -221,6 +251,7 @@ export const newRunMachine = setup({
             examples: null,
             tasks: null,
             checks: null,
+            roles: null,
             problem: null,
           })),
         },
@@ -413,16 +444,20 @@ export const newRunMachine = setup({
                   host: context.form.machine,
                   inputs: runInputs(context.form) as RunInputs,
                 }),
-                onDone: {
-                  target: 'ready',
-                  actions: assign(({context, event}) => ({
-                    checks:
-                      event.output.kind === 'offered'
-                        ? {for: inputsKey(context.form) ?? '', list: event.output.value}
-                        : // Only a helper that agreed to `preflight` is asked; none checks nothing.
-                          {for: inputsKey(context.form) ?? '', list: []},
-                  })),
-                },
+                onDone: [
+                  {
+                    guard: {
+                      type: 'rolesChangeInputs',
+                      params: ({event}) => ({answer: event.output}),
+                    },
+                    target: 'waiting',
+                    actions: assign(({context, event}) => afterPreflight(context, event.output)),
+                  },
+                  {
+                    target: 'ready',
+                    actions: assign(({context, event}) => afterPreflight(context, event.output)),
+                  },
+                ],
                 onError: {
                   target: 'ready',
                   actions: {type: 'fail', params: ({event}) => ({error: event.error})},

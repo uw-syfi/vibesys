@@ -50,35 +50,27 @@ export interface Form {
   readonly advanced: string;
 }
 
-/** The roles the run's agent plays, with what each does, in the order the table lists them. */
-export const ROLES: readonly {
-  readonly role: string;
-  readonly label: string;
-  readonly does: string;
-}[] = [
-  {role: 'orchestrator', label: 'Orchestrator', does: 'Plans each round'},
-  {role: 'profiler', label: 'Profiler', does: 'Finds hot spots'},
-  {role: 'implementer', label: 'Implementer', does: 'Writes candidates'},
-  {role: 'judge', label: 'Judge', does: 'Reviews results'},
-];
-
 export const DEFAULT_BUDGET: Budget = {rounds: null, timeLimitS: null, results: 'keep'};
 
 /** A role left at the run's model and the default effort. */
-function defaultRole(role: string): RoleChoice {
+export function defaultRole(role: string): RoleChoice {
   return {role, model: null, effort: 'default'};
 }
 
-/** The agent `offers` start with: the first provider's default model, every role the same. */
+/**
+ * The agent `offers` start with: the first provider's default model, every one of `roles` (the
+ * run's, as its helper reported them) left as the run.
+ */
 export function defaultAgent(
   offers: readonly HarnessOffer[],
+  roles: readonly string[],
   provider?: string,
 ): AgentChoice | null {
   const chosen = provider ?? offers[0]?.provider;
   const ofProvider = offers.filter(offer => offer.provider === chosen);
   const model = (ofProvider.find(offer => offer.default) ?? ofProvider[0])?.model;
   if (chosen === undefined || model === undefined) return null;
-  return {provider: chosen, model, roles: ROLES.map(({role}) => defaultRole(role))};
+  return {provider: chosen, model, roles: roles.map(defaultRole)};
 }
 
 /** The vetted models of `provider`, in offer order. */
@@ -156,19 +148,12 @@ export function recordedAgent(
   const offered =
     harness !== null &&
     offers.some(offer => offer.provider === harness.provider && offer.model === harness.model);
-  const base = defaultAgent(offers, offered ? harness.provider : undefined);
+  // The roles the run reports are not known yet: keep the recorded ones, which the run's own
+  // roles replace once reported (`formWithRoles`).
+  const base = defaultAgent(offers, [], offered ? harness.provider : undefined);
   if (base === null) return null;
   const agent = offered ? {...base, model: harness.model} : base;
-  const recorded = start?.options.roles ?? [];
-  const known = new Set(agent.roles.map(role => role.role));
-  const roles = [
-    ...agent.roles.map(role => {
-      const found = recorded.find(each => each.role === role.role);
-      return found === undefined ? role : roleChoice(found);
-    }),
-    ...recorded.filter(each => !known.has(each.role)).map(roleChoice),
-  ];
-  return {...agent, roles};
+  return {...agent, roles: (start?.options.roles ?? []).map(roleChoice)};
 }
 
 /** The flags a typed option sets, which Advanced may not repeat (as `run.start` refuses them). */

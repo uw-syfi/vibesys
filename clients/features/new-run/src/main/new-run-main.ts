@@ -14,7 +14,7 @@ import type {
   MachineDescription,
 } from '@vibesys/contracts/host-helper';
 import {type HostId, hostKey, hostLabel} from '@vibesys/hosts';
-import type {Offered, RunInputs, StartedRun, WelcomeRequest} from '@vibesys/ipc';
+import type {Offered, PreflightResult, RunInputs, StartedRun, WelcomeRequest} from '@vibesys/ipc';
 import type {StoredRecentRun} from '@vibesys/settings';
 
 /** The New run requests a view sends, as `@vibesys/ipc` parsed them. */
@@ -88,12 +88,7 @@ export class NewRunMain {
           reply => (reply as {machine: MachineDescription}).machine,
         );
       case 'preflight':
-        return this.#offered(
-          request.host,
-          {type: 'run.preflight', ...runFields(request.inputs)},
-          'Could not check the run',
-          reply => (reply as {checks: Check[]}).checks,
-        );
+        return this.#preflight(request.host, request.inputs);
       case 'examples':
         return this.#offered(
           request.host,
@@ -141,6 +136,29 @@ export class NewRunMain {
     return await lease.connection.request(
       request as Parameters<typeof lease.connection.request>[0],
     );
+  }
+
+  /** The checks for `inputs`, with the run's roles when the helper agreed to `run_roles`. */
+  async #preflight(host: HostId, inputs: RunInputs): Promise<Offered<PreflightResult>> {
+    try {
+      await using lease = await this.#deps.connect(host);
+      await lease.connection.ready();
+      const rolesToo = lease.connection.features?.includes('run_roles') === true;
+      const reply = (await lease.connection.request({
+        type: 'run.preflight',
+        ...runFields(inputs),
+        ...(rolesToo ? {with_roles: true} : {}),
+      })) as {checks: Check[]; roles?: string[] | null};
+      return {
+        kind: 'offered',
+        value: {checks: reply.checks, roles: rolesToo ? (reply.roles ?? []) : null},
+      };
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `Could not check the run on ${hostLabel(host)}`);
+    }
   }
 
   async #offered<T>(

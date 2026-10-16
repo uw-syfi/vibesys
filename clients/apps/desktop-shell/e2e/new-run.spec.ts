@@ -83,7 +83,7 @@ test('extra arguments may not repeat an option set above, and roles change the r
   await page.getByLabel('Extra arguments').fill('--max-in-flight 3');
   await page.getByLabel('Rounds').selectOption('5');
   await page.getByRole('button', {name: /^Roles:/}).click();
-  await page.getByLabel('Judge reasoning effort').selectOption('high');
+  await page.getByLabel('Multi judge reasoning effort').selectOption('high');
   await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
   await start(page).click();
   await expect(page.getByRole('tablist', {name: 'Run views'})).toBeVisible();
@@ -97,7 +97,7 @@ test('extra arguments may not repeat an option set above, and roles change the r
       options: {
         rounds: 5,
         results: 'keep',
-        roles: [{role: 'judge', model: null, reasoning_effort: 'high'}],
+        roles: [{role: 'multi-judge', model: null, reasoning_effort: 'high'}],
       },
       args: ['--max-in-flight', '3'],
     },
@@ -120,6 +120,20 @@ test('a machine whose VibeSys predates New run says so and is never asked to sta
   const {started, preflights} = await fakeNewRun(page);
   expect(started).toEqual([]);
   expect(preflights).toEqual([]);
+});
+
+test('a machine whose VibeSys does not report its roles says every role runs as the run', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await open(page, {
+    ...SEED,
+    newRun: {...newRun, features: ['run_options', 'preflight', 'examples']},
+  });
+  await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
+  await expect(page.getByText(/does not report its agent roles/)).toBeVisible();
+  await expect(page.getByRole('button', {name: /^Roles:/})).toHaveCount(0);
 });
 
 test('the folder field completes paths on the machine', async ({page}) => {

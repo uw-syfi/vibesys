@@ -114,6 +114,8 @@ export interface FakeHost {
   readonly checkouts: Map<string, CheckoutInspectReply['inspection']>;
   /** What `run.preflight` answers for a known project; replace it to fail a check. */
   preflight: Check[];
+  /** The role ids `run.preflight` reports the run's orchestration declares (`with_roles`). */
+  roles: string[];
   /**
    * What `examples.list` answers, or `null` for a helper with no catalog (`examples_unavailable`,
    * as from an installed distribution). `project.create_from_example` and `project.copy_out` add
@@ -121,6 +123,14 @@ export interface FakeHost {
    */
   examples: ExampleList | null;
 }
+
+/** The roles a new `FakeHelper` reports: those the multi orchestration declares. */
+const FAKE_ROLES: readonly string[] = [
+  'multi-orchestrator',
+  'multi-profiler',
+  'multi-implementer',
+  'multi-judge',
+];
 
 /** The checks a new `FakeHelper` answers: every one passes. */
 const PASSING_CHECKS: readonly Check[] = [
@@ -207,6 +217,7 @@ export class FakeHelper {
     machine: FAKE_MACHINE,
     checkouts: new Map(),
     preflight: [...PASSING_CHECKS],
+    roles: [...FAKE_ROLES],
     examples: null,
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
@@ -247,6 +258,7 @@ export class FakeHelper {
     'preflight',
     'run_options',
     'examples',
+    'run_roles',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -808,7 +820,13 @@ class HelperSession {
       this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
       return;
     }
-    this.#send({type: 'run.preflight', request_id: id, checks: [...this.#helper.host.preflight]});
+    const {host} = this.#helper;
+    this.#send({
+      type: 'run.preflight',
+      request_id: id,
+      checks: [...host.preflight],
+      ...(request.with_roles === true ? {roles: [...host.roles]} : {}),
+    });
   }
 
   /** The fake host records no runs, so every run of a known project is unknown. */

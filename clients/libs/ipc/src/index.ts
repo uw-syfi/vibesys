@@ -46,6 +46,7 @@ export {
   type Offered,
   type PathCompletion,
   type PreferencesView,
+  type PreflightResult,
   parseWelcomeRequest,
   type RoleOption,
   RUN_PORT_MESSAGE,

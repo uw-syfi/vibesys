@@ -72,7 +72,7 @@ from pydantic import (
 )
 
 from server.host_examples import CreatedProject, ExampleList
-from server.host_preflight import Check, RunOptions
+from server.host_preflight import Check, RoleName, RunOptions
 from vs_decode.api import Unreadable, decode_json
 
 PROTOCOL_VERSION = 1
@@ -768,6 +768,8 @@ class HelperFeature(StrEnum):
     """``run.start``'s and ``run.preflight``'s ``options``: rounds, time limit, results, roles."""
     EXAMPLES = "examples"
     """``examples.list``, ``project.create_from_example`` and ``project.copy_out``."""
+    RUN_ROLES = "run_roles"
+    """``run.preflight``'s ``with_roles``: the role ids the run's orchestration declares."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -943,6 +945,8 @@ class RunPreflightRequest(_HelperRequest):
     args: tuple[str, ...] = ()
     harness: HarnessChoice | None = None
     options: RunOptions | None = None
+    with_roles: bool | None = None
+    """Ask for ``roles`` in the reply. Sent only after ``hello`` returned ``run_roles``."""
 
 
 class RunStopRequest(_HelperRequest):
@@ -1163,7 +1167,11 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
 
 HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFeature]]] = {
     RunStartRequest: {"harness": HelperFeature.HARNESSES, "options": HelperFeature.RUN_OPTIONS},
-    RunPreflightRequest: {"harness": HelperFeature.HARNESSES, "options": HelperFeature.RUN_OPTIONS},
+    RunPreflightRequest: {
+        "harness": HelperFeature.HARNESSES,
+        "options": HelperFeature.RUN_OPTIONS,
+        "with_roles": HelperFeature.RUN_ROLES,
+    },
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
@@ -1671,6 +1679,12 @@ class RunPreflightReply(_HelperReply):
 
     type: Literal["run.preflight"] = "run.preflight"
     checks: tuple[Check, ...]
+    roles: Annotated[tuple[RoleName, ...] | None, Field(exclude_if=lambda roles: roles is None)] = (
+        None
+    )
+    """The role ids the run's orchestration declares, in declaration order: what a
+    ``RoleOption.role`` may name. Present only when the request set ``with_roles`` (feature
+    ``run_roles``), so a strict client that did not ask never sees the field."""
 
 
 class CheckoutInspectReply(_HelperReply):

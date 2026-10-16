@@ -1177,7 +1177,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "checkout_inspect",
         "preflight",
         "run_options",
-        "examples"
+        "examples",
+        "run_roles"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -3159,6 +3160,23 @@ const hostHelperSchema: Record<string, unknown> = {
           },
           "title": "Checks",
           "type": "array"
+        },
+        "roles": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 64,
+                "pattern": "^[a-z0-9][a-z0-9._-]*$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roles"
         }
       },
       "required": [
@@ -3236,6 +3254,18 @@ const hostHelperSchema: Record<string, unknown> = {
             }
           ],
           "default": null
+        },
+        "with_roles": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Roles"
         }
       },
       "required": [
@@ -4392,7 +4422,8 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "run.preflight": {
       "harness": "harnesses",
-      "options": "run_options"
+      "options": "run_options",
+      "with_roles": "run_roles"
     },
     "logs.list": {
       "span_id": "logs_by_span"

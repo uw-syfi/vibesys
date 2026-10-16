@@ -30,9 +30,11 @@ from server.host_api import (
     HarnessChoice,
     HelperError,
     HelperErrorCode,
+    HelperFeature,
     RunPreflightReply,
     RunPreflightRequest,
     RunStartRequest,
+    request_features,
 )
 from server.host_helper_machine import DOCKER_VERSION_COMMAND
 from server.host_helper_preflight import (
@@ -155,9 +157,11 @@ def _project(root: Path) -> Path:
     return root
 
 
-def _preflight(project: Path, **fields: object) -> tuple[object, FakeRunPreflight]:
+def _preflight(
+    project: Path, *, report: PreflightReport | None = None, **fields: object
+) -> tuple[object, FakeRunPreflight]:
     threads = SimThreads()
-    preflight = FakeRunPreflight()
+    preflight = FakeRunPreflight() if report is None else FakeRunPreflight(report_=report)
     host = replace(fake_host(threads, SimNetwork(threads)), preflight=preflight)
     request = RunPreflightRequest.model_validate(
         {"request_id": "p", "deadline_ms": 5000, "project": str(project), **fields}
@@ -197,6 +201,40 @@ def test_preflight_runs_the_run_check_with_the_arguments_run_start_would_launch(
             ),
         )
     ]
+
+
+_ROLE_NAMES = st.lists(
+    st.from_regex(r"[a-z0-9][a-z0-9._-]{0,20}", fullmatch=True), max_size=6, unique=True
+).map(tuple)
+
+
+@given(roles=_ROLE_NAMES, asked=st.sampled_from([None, True]))
+def test_the_reply_names_the_orchestrations_roles_exactly_when_they_were_asked_for(
+    tmp_path_factory: pytest.TempPathFactory, roles: tuple[str, ...], *, asked: bool | None
+) -> None:
+    """The roles are the run's own report; a client that did not ask never sees the field."""
+    report = PreflightReport(
+        settings=SettingsValid(),
+        uses_docker=False,
+        agent_image=Check(id=CheckId.AGENT_IMAGE, state=CheckState.OK, detail="cached"),
+        evaluator=Check(id=CheckId.EVALUATOR_AVAILABLE, state=CheckState.OK, detail="benchmark"),
+        roles=roles,
+    )
+    project = _project(tmp_path_factory.mktemp("proj"))
+
+    reply, _ = _preflight(project, report=report, with_roles=asked)
+
+    assert isinstance(reply, RunPreflightReply)
+    assert reply.roles == (roles if asked else None)
+    assert ('"roles"' in reply.model_dump_json()) is bool(asked)
+
+
+def test_asking_for_roles_needs_the_run_roles_feature() -> None:
+    request = RunPreflightRequest.model_validate(
+        {"request_id": "p", "deadline_ms": 5000, "project": "/p", "with_roles": True}
+    )
+
+    assert request_features(request) == (HelperFeature.PREFLIGHT, HelperFeature.RUN_ROLES)
 
 
 def test_preflight_refuses_args_that_repeat_a_typed_option_naming_it(tmp_path: Path) -> None:

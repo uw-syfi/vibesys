@@ -44,6 +44,8 @@ export interface FakeBridgeSeed {
     readonly projects: Readonly<Record<string, readonly string[]>>;
     /** What the helper agreed to in `hello`; every feature New run uses when not given. */
     readonly features?: readonly string[];
+    /** The roles the helper reports for a run (feature `run_roles`); the multi roles when not given. */
+    readonly roles?: readonly string[];
   };
 }
 
@@ -206,6 +208,13 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
     return ok({project, tasks});
   };
   const insideRepository = (project: string) => project.includes('/vibesys/');
+  const features = catalog?.features ?? ['run_options', 'preflight', 'examples', 'run_roles'];
+  const roles = catalog?.roles ?? [
+    'multi-orchestrator',
+    'multi-profiler',
+    'multi-implementer',
+    'multi-judge',
+  ];
   const preflight = (_host: string, inputs: {project: string}) => {
     newRun.preflights.push(inputs);
     const own = insideRepository(inputs.project)
@@ -218,27 +227,27 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
       : {id: 'project_own_repository', state: 'ok', detail: 'Its own repository.', fix: null};
     return ok({
       kind: 'offered',
-      value: [
-        {id: 'checkout_found', state: 'ok', detail: 'VibeSys 0.9.0 at ~/vibesys.', fix: null},
-        own,
-        {id: 'settings_valid', state: 'ok', detail: 'vibesys.yaml is valid.', fix: null},
-        {id: 'docker_reachable', state: 'ok', detail: 'Docker 27.3.1.', fix: null},
-        {
-          id: 'agent_image',
-          state: 'warn',
-          detail: 'No agent image was built here yet; the first run builds it.',
-          fix: null,
-        },
-      ],
+      value: {
+        checks: [
+          {id: 'checkout_found', state: 'ok', detail: 'VibeSys 0.9.0 at ~/vibesys.', fix: null},
+          own,
+          {id: 'settings_valid', state: 'ok', detail: 'vibesys.yaml is valid.', fix: null},
+          {id: 'docker_reachable', state: 'ok', detail: 'Docker 27.3.1.', fix: null},
+          {
+            id: 'agent_image',
+            state: 'warn',
+            detail: 'No agent image was built here yet; the first run builds it.',
+            fix: null,
+          },
+        ],
+        roles: features.includes('run_roles') ? roles : null,
+      },
     });
   };
   const page = window as unknown as {vibesysWelcome: object; fakeHost: object};
   Object.assign(page.vibesysWelcome, {
     describeMachine: () => offered(catalog?.machine),
-    helperFeatures: () =>
-      ok(
-        catalog === undefined ? [] : (catalog.features ?? ['run_options', 'preflight', 'examples']),
-      ),
+    helperFeatures: () => ok(catalog === undefined ? [] : features),
     harnesses: () => ok({kind: 'listed', harnesses: catalog?.harnesses ?? []}),
     examples: () => offered(catalog?.examples),
     tasks: (_host: string, project: string) => {

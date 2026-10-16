@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import type {HelperFeature} from '@vibesys/contracts/host-helper';
 import type {RecentRun, RunRef} from '@vibesys/runs';
-import {readiness, startBlocked} from '../ui/view.js';
+import {readiness, rolesView, startBlocked} from '../ui/view.js';
 import {createNewRunStore, type NewRunBridge} from './store.js';
 
 const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
@@ -10,6 +10,7 @@ const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
 function fakeBridge(
   features: readonly string[] = ['run_options', 'preflight', 'examples'],
   asked: string[] = [],
+  roles: readonly string[] | null = null,
 ): NewRunBridge {
   const record = <T>(name: string, value: T) => {
     asked.push(name);
@@ -21,7 +22,7 @@ function fakeBridge(
       ok({kind: 'listed' as const, harnesses: [{provider: 'claude', model: 'm', default: true}]}),
     examples: () => record('examples', {kind: 'unsupported' as const}),
     tasks: () => ok(['mpmc']),
-    preflight: () => record('preflight', {kind: 'offered' as const, value: []}),
+    preflight: () => record('preflight', {kind: 'offered' as const, value: {checks: [], roles}}),
     createFromExample: (_host, _example, destination) => ok({project: destination, tasks: ['a']}),
     copyOut: (_host, _source, destination) => ok({project: destination, tasks: ['a']}),
     startRun: () => record('startRun', {runId: 'run-2', instanceId: '00000000000c'}),
@@ -150,4 +151,35 @@ test('a helper older than New run is never asked to check or start, and Start sa
   await settle();
   expect(asked).toEqual([]);
   expect(store.getState().context.examples?.value).toEqual({kind: 'unsupported'});
+});
+
+test('the role table is read from the run: pending, then its roles, from a helper that reports them', async () => {
+  const clock = manualSchedule();
+  const roles = ['multi-orchestrator', 'multi-judge'];
+  const features = ['run_options', 'preflight', 'examples', 'run_roles'];
+  const {store} = createNewRunStore(fakeBridge(features, [], roles), {
+    recent: [recentRun('ssh:gpu', '/p', 2)],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  expect(rolesView(store.getState().context)).toEqual({kind: 'pending'});
+  clock.runDue();
+  await settle();
+  expect(rolesView(store.getState().context)).toEqual({kind: 'ready', roles});
+  expect(store.getState().context.form.agent?.roles.map(role => role.role)).toEqual(roles);
+});
+
+test('a helper that does not report roles gets an empty state, not the roles of another run', async () => {
+  const clock = manualSchedule();
+  const {store} = createNewRunStore(fakeBridge(), {
+    recent: [recentRun('ssh:gpu', '/p', 2)],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(rolesView(store.getState().context)).toEqual({kind: 'unsupported'});
+  expect(store.getState().context.form.agent?.roles).toEqual([]);
 });

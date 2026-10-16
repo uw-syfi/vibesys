@@ -14,6 +14,7 @@ import {
   missingFeatures,
   type NewRunContext,
   type NewRunSnapshot,
+  offers,
   projectPath,
 } from '../../state/index.js';
 
@@ -58,6 +59,24 @@ export function recentProjects(recent: readonly RecentRun[], machine: HostKey): 
     .filter(run => run.host === machine)
     .sort((left, right) => right.attachedAt - left.attachedAt);
   return [...new Set(runs.map(run => run.project))];
+}
+
+/**
+ * What the Agent card shows of the roles: the table of the run's roles, or why there is none. The
+ * roles are the run's orchestration's, read with the checks (`run_roles`); a machine whose helper
+ * does not report them keeps every role as the run.
+ */
+export type RolesView =
+  | {readonly kind: 'ready'; readonly roles: readonly string[]}
+  | {readonly kind: 'pending'}
+  | {readonly kind: 'unsupported'};
+
+export function rolesView(context: NewRunContext): RolesView {
+  if (context.roles !== null) return {kind: 'ready', roles: context.roles};
+  const known = context.helper?.for === context.form.machine;
+  return known && !offers(context.helper, context.form.machine, 'run_roles')
+    ? {kind: 'unsupported'}
+    : {kind: 'pending'};
 }
 
 const CHECK_LABELS: Readonly<Record<Check['id'], string>> = {

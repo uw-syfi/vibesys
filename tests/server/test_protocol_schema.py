@@ -189,7 +189,11 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
 
     assert gates == {
         "run.start": {"harness": "harnesses", "options": "run_options"},
-        "run.preflight": {"harness": "harnesses", "options": "run_options"},
+        "run.preflight": {
+            "harness": "harnesses",
+            "options": "run_options",
+            "with_roles": "run_roles",
+        },
         "logs.list": {"span_id": "logs_by_span"},
     }
     request_refs = document["properties"]["request"]["discriminator"]["mapping"]

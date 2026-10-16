@@ -35,11 +35,29 @@ describe('NewRunMain', () => {
     const machine = await main.answer({kind: 'describe-machine', host: LOCAL});
     expect(machine).toMatchObject({kind: 'offered', value: {hardware: {}}});
     const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
-    const checks = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
+    const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
       kind: 'offered';
-      value: {id: string; state: string}[];
+      value: {checks: {id: string; state: string}[]; roles: string[] | null};
     };
-    expect(checks.value.map(check => check.state).every(state => state !== 'fail')).toBe(true);
+    expect(answer.value.checks.map(check => check.state).every(state => state !== 'fail')).toBe(
+      true,
+    );
+    // The helper reports the roles of the run's orchestration, which the fake declares.
+    expect(answer.value.roles).toEqual(link.helper.host.roles);
+  });
+
+  test('a helper without run_roles is not asked for roles, and none are reported', async () => {
+    const {link, main} = subject();
+    link.helper.host.projects.set('/p', ['mpmc']);
+    link.helper.features.delete('run_roles');
+    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
+      kind: 'offered';
+      value: {roles: string[] | null};
+    };
+    expect(answer.value.roles).toBeNull();
+    const asked = link.helper.requests.filter(request => request.type === 'run.preflight');
+    expect(asked.map(request => 'with_roles' in request)).toEqual([false]);
   });
 
   test('starts a run with typed options and records it in Recent', async () => {
