@@ -207,7 +207,8 @@ function Startup(props: {readonly state: RunPageState}): JSX.Element | null {
   const stages = timelineView(state).map(stage => {
     const lines = streamLines(state, stage.streamId);
     return {
-      id: stage.id,
+      // Keyed by state too, so a stage that becomes active or fails opens, as a new one does.
+      id: `${stage.id} ${stage.state}`,
       state: stage.state,
       label: stage.label,
       ...(stage.streamId === null || lines.length === 0
