@@ -113,7 +113,14 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.showRun(), {kind: 'show-run'}],
     [bridge => bridge.showWelcome(), {kind: 'show-welcome'}],
     [bridge => bridge.retry(), {kind: 'retry'}],
-    [bridge => bridge.stop(key, instance, force), {kind: 'stop', host, instance, force}],
+    [
+      bridge => bridge.stop(key, instance, force),
+      {kind: 'stop', host, instance, force, confirmed: false},
+    ],
+    [
+      bridge => bridge.stopConfirmed(key, instance, force),
+      {kind: 'stop', host, instance, force, confirmed: true},
+    ],
     [bridge => bridge.preferences(), {kind: 'preferences'}],
     [bridge => bridge.setAppearance(appearance), {kind: 'set-appearance', appearance}],
     [bridge => bridge.setNotifications(force), {kind: 'set-notifications', enabled: force}],

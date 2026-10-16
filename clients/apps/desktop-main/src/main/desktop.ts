@@ -251,7 +251,7 @@ export class Desktop {
         await runs.resume(request.host, request.project, request.run);
         return null;
       case 'stop':
-        await runs.stop(request.host, request.instance, request.force);
+        await runs.stop(request.host, request.instance, request.force, request.confirmed);
         return null;
       case 'inspect':
         return hosts.inspect(request.host, request.instance, {

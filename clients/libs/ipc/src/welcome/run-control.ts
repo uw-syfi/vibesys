@@ -1,5 +1,6 @@
 /**
- * The run-control feature's welcome requests: attach, resume, stop, retry, and switching between
+ * The run-control feature's welcome requests: attach, resume, stop (with the app's question, or
+ * already confirmed by the view that asked), retry, and switching between
  * the run and the welcome view.
  */
 import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
@@ -14,6 +15,7 @@ export const RUN_CONTROL_CHANNELS = {
   showWelcome: 'vibesys:welcome:show-welcome',
   retry: 'vibesys:welcome:retry',
   stop: 'vibesys:welcome:stop',
+  stopConfirmed: 'vibesys:welcome:stop-confirmed',
 } as const;
 
 /** The welcome bridge's requests the run-control feature makes. */
@@ -24,6 +26,8 @@ export interface RunControlWelcomeBridge {
   showWelcome(): Promise<WelcomeResult<null>>;
   retry(): Promise<WelcomeResult<null>>;
   stop(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
+  /** Stop without the app's own question: the view already asked the user, who said yes. */
+  stopConfirmed(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
 }
 
 export type RunControlRequest =
@@ -40,6 +44,8 @@ export type RunControlRequest =
       readonly host: HostId;
       readonly instance: string;
       readonly force: boolean;
+      /** Whether the view already asked the user, so the app does not ask again. */
+      readonly confirmed: boolean;
     }
   | {readonly kind: 'show-run'}
   | {readonly kind: 'show-welcome'}
@@ -67,11 +73,13 @@ export function parseRunControlRequest(
         run: exactResumeRunId(third),
       };
     case RUN_CONTROL_CHANNELS.stop:
+    case RUN_CONTROL_CHANNELS.stopConfirmed:
       return {
         kind: 'stop',
         host: hostFromKey(first),
         instance: instance(second, 'stop'),
         force: forceStop(third),
+        confirmed: channel === RUN_CONTROL_CHANNELS.stopConfirmed,
       };
     case RUN_CONTROL_CHANNELS.showRun:
       return {kind: 'show-run'};

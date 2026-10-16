@@ -70,17 +70,21 @@ export class StopController {
   }
 
   /**
-   * Stop `target` after asking the user; `force` is the second, stronger stop offered after a
-   * failed one. Resolves once the host has answered (an accepted stop is still ending then).
+   * Stop `target` after asking the user, or without asking when the view that asked is already
+   * `confirmed` (the Run screen states what is lost in its own confirmation); `force` is the
+   * second, stronger stop offered after a failed or a hung one. Resolves once the host has
+   * answered (an accepted stop is still ending then).
    */
-  async request(target: StopTarget, force: boolean): Promise<void> {
+  async request(target: StopTarget, force: boolean, confirmed = false): Promise<void> {
     await this.#stop(
       target,
       force,
       requestedForce =>
-        this.#deps.confirm(
-          confirmText({label: target.label, host: target.hostLabel, force: requestedForce}),
-        ),
+        confirmed
+          ? Promise.resolve(true)
+          : this.#deps.confirm(
+              confirmText({label: target.label, host: target.hostLabel, force: requestedForce}),
+            ),
       () => true,
     );
   }
