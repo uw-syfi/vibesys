@@ -83,22 +83,35 @@ export function vettedModels(offers: readonly HarnessOffer[], provider: string):
   return offers.filter(offer => offer.provider === provider).map(offer => offer.model);
 }
 
-/** The form for `machine`, prefilled from the last run opened on it. */
-export function prefill(machine: HostKey, recent: readonly RecentRun[]): Form {
-  const last = recent
+/** The last run opened on `machine`, or null when none was. */
+export function lastRun(machine: HostKey, recent: readonly RecentRun[]): RecentRun | null {
+  return recent
     .filter(run => run.host === machine)
     .reduce<RecentRun | null>(
       (best, run) => (best === null || run.attachedAt > best.attachedAt ? run : best),
       null,
     );
-  return {
-    machine,
-    project: last === null ? null : {source: 'recent', path: last.project},
-    task: last?.task ?? null,
-    agent: null,
-    budget: DEFAULT_BUDGET,
-    advanced: '',
-  };
+}
+
+/**
+ * The form for `machine`, prefilled from the last run opened on it: the same as running that run
+ * again (`againForm`), so its budget and extra arguments are kept with its project and task, and
+ * its agent follows once the machine's harnesses are known (`recordedAgent`, from `lastRun`'s
+ * start).
+ */
+export function prefill(machine: HostKey, recent: readonly RecentRun[]): Form {
+  const last = lastRun(machine, recent);
+  if (last === null) {
+    return {
+      machine,
+      project: null,
+      task: null,
+      agent: null,
+      budget: DEFAULT_BUDGET,
+      advanced: '',
+    };
+  }
+  return {...againForm(last), machine};
 }
 
 /** `words` as one line of Advanced text, quoting a word that has spaces (`splitWords` reads it back). */

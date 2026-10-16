@@ -81,6 +81,7 @@ const hostHelperSchema: Record<string, unknown> = {
         }
       },
       "required": [
+        "kind",
         "task",
         "backend",
         "declared"
@@ -187,13 +188,28 @@ const hostHelperSchema: Record<string, unknown> = {
         "cause": {
           "anyOf": [
             {
-              "$ref": "#/$defs/BackendUnavailable"
+              "discriminator": {
+                "mapping": {
+                  "backend_unavailable": "#/$defs/BackendUnavailable",
+                  "project_dirty": "#/$defs/ProjectDirty"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/BackendUnavailable"
+                },
+                {
+                  "$ref": "#/$defs/ProjectDirty"
+                }
+              ]
             },
             {
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Cause"
         }
       },
       "required": [
@@ -209,6 +225,7 @@ const hostHelperSchema: Record<string, unknown> = {
       "enum": [
         "checkout_found",
         "project_own_repository",
+        "project_clean",
         "settings_valid",
         "docker_reachable",
         "agent_image",
@@ -1271,6 +1288,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "run_options",
         "examples",
         "run_roles",
+        "project_clean",
         "run_backend"
       ],
       "title": "HelperFeature",
@@ -2915,6 +2933,40 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "ProjectCreateFromExampleRequest",
       "type": "object"
     },
+    "ProjectDirty": {
+      "additionalProperties": false,
+      "description": "The project's repository has changes a run cannot start beside.\n\nA fact, not a sentence: the client words it. ``paths`` are relative to the project, sorted.",
+      "properties": {
+        "kind": {
+          "const": "project_dirty",
+          "default": "project_dirty",
+          "title": "Kind",
+          "type": "string"
+        },
+        "project": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Project",
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "maxLength": 4096,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "project",
+        "paths"
+      ],
+      "title": "ProjectDirty",
+      "type": "object"
+    },
     "ReasoningEffort": {
       "description": "A role's reasoning effort; ``default`` keeps the configured one.",
       "enum": [
@@ -3370,6 +3422,18 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "With Roles"
+        },
+        "with_project_clean": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "With Project Clean"
         },
         "with_backend": {
           "anyOf": [
@@ -4540,7 +4604,8 @@ const hostHelperSchema: Record<string, unknown> = {
       "harness": "harnesses",
       "options": "run_options",
       "with_roles": "run_roles",
-      "with_backend": "run_backend"
+      "with_backend": "run_backend",
+      "with_project_clean": "project_clean"
     },
     "logs.list": {
       "span_id": "logs_by_span"

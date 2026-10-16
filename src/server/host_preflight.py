@@ -42,6 +42,7 @@ class CheckId(StrEnum):
 
     CHECKOUT_FOUND = "checkout_found"
     PROJECT_OWN_REPOSITORY = "project_own_repository"
+    PROJECT_CLEAN = "project_clean"
     SETTINGS_VALID = "settings_valid"
     DOCKER_REACHABLE = "docker_reachable"
     AGENT_IMAGE = "agent_image"
@@ -74,8 +75,23 @@ class BackendUnavailable(BaseModel):
     """The backends the task's manifest declares; empty for a task that declares none."""
 
 
-Cause = BackendUnavailable
-"""Why a check failed, as data (a union as causes are added; ``kind`` discriminates)."""
+class ProjectDirty(BaseModel):
+    """The project's repository has changes a run cannot start beside.
+
+    A fact, not a sentence: the client words it. ``paths`` are relative to the project, sorted.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["project_dirty"] = "project_dirty"
+    project: Annotated[str, StringConstraints(min_length=1, max_length=4096)]
+    """The project directory."""
+    paths: tuple[Annotated[str, StringConstraints(min_length=1, max_length=4096)], ...]
+    """Every changed path (tracked or untracked), without those the run's own state accounts for."""
+
+
+Cause = Annotated[BackendUnavailable | ProjectDirty, Field(discriminator="kind")]
+"""Why a check failed, as data; ``kind`` discriminates."""
 
 
 def backend_unavailable_text(cause: BackendUnavailable) -> str:
@@ -224,7 +240,7 @@ class SettingsInvalid(BaseModel):
     code: str
     stage: str
     message: str
-    cause: Cause | None = None
+    cause: BackendUnavailable | None = None
     """The failure as data when it has a typed cause; ``message`` is the CLI's wording of it."""
 
 
@@ -243,6 +259,10 @@ class PreflightReport(BaseModel):
     backend: Backend | None = None
     """The compute backend the run resolved to (the task's), ``None`` when the settings did
     not resolve one."""
+    project_changes: tuple[str, ...] = ()
+    """The project repository's changes that would stop a new run at launch (what the run's own
+    tracker calls its baseline changes), relative to the project; empty for a clean one, a project
+    that is not a repository yet, and a resume."""
     roles: tuple[RoleName, ...] = ()
     """The role ids the run's orchestration plugin declares, in declaration order: what
     ``RoleOption.role`` may name. Empty when the settings did not resolve an orchestration."""
@@ -262,6 +282,7 @@ __all__ = [
     "EditSetting",
     "Fix",
     "PreflightReport",
+    "ProjectDirty",
     "ReasoningEffort",
     "RoleName",
     "RoleOption",

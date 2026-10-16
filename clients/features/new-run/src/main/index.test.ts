@@ -84,6 +84,21 @@ describe('NewRunMain', () => {
     expect(asked.map(request => 'with_backend' in request)).toEqual([false]);
   });
 
+  test('asks for the project_clean check only from a helper that has it', async () => {
+    const {link, main} = subject();
+    link.helper.host.projects.set('/p', ['mpmc']);
+    const inputs: RunInputs = {project: '/p', task: 'mpmc', harness: null, options: {}, args: []};
+    const ids = async () =>
+      (
+        (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
+          value: {checks: {id: string}[]};
+        }
+      ).value.checks.map(check => check.id);
+    expect(await ids()).toContain('project_clean');
+    link.helper.features.delete('project_clean');
+    expect(await ids()).not.toContain('project_clean');
+  });
+
   test('starts a run with typed options and records it in Recent', async () => {
     const {link, main, remembered} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);

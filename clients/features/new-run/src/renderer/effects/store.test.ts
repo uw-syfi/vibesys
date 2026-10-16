@@ -307,3 +307,108 @@ test('a helper without run_backend reports no backend, and the screen shows none
 
   expect(backendOf(state.context)).toBeNull();
 });
+
+test("the form prefilled from the last run on a machine keeps that run's model, rounds, time limit, results and extra arguments", async () => {
+  const clock = manualSchedule();
+  const start = {
+    harness: {provider: 'claude', model: 'm2'},
+    options: {rounds: 3, time_limit_s: 3600, results: 'publish_github' as const, roles: []},
+    args: ['--name', 'a b'],
+  };
+  const bridge: NewRunBridge = {
+    ...fakeBridge(),
+    harnesses: () =>
+      ok({
+        kind: 'listed' as const,
+        harnesses: [
+          {provider: 'claude', model: 'm', default: true},
+          {provider: 'claude', model: 'm2', default: false},
+        ],
+      }),
+  };
+  const {store} = createNewRunStore(bridge, {
+    recent: [{...recentRun('ssh:gpu', '/p', 2), start}],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  clock.runDue();
+  await settle();
+
+  const {form} = store.getState().context;
+
+  expect(form.agent?.model).toBe('m2');
+  expect(form.budget).toEqual({rounds: 3, timeLimitS: 3600, results: 'publish_github'});
+  expect(form.advanced).toBe('--name "a b"');
+});
+
+test("switching machines prefills from that machine's last run, budget and extra arguments included", async () => {
+  const clock = manualSchedule();
+  const start = {
+    harness: null,
+    options: {rounds: 5, results: 'keep' as const, roles: []},
+    args: ['--x'],
+  };
+  const {store} = createNewRunStore(fakeBridge(), {
+    recent: [recentRun('local', '/a', 3), {...recentRun('ssh:gpu', '/p', 2), start}],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  store.dispatch({type: 'machine', machine: 'ssh:gpu'});
+  await settle();
+
+  const {form} = store.getState().context;
+
+  expect(form.machine).toBe('ssh:gpu');
+  expect(form.budget.rounds).toBe(5);
+  expect(form.advanced).toBe('--x');
+});
+
+/** A bridge whose preflight finds the project's repository dirty, as a helper with project_clean. */
+function dirtyBridge(paths: readonly string[]): NewRunBridge {
+  return {
+    ...fakeBridge(),
+    preflight: () =>
+      ok({
+        kind: 'offered' as const,
+        value: {
+          checks: [
+            {
+              id: 'project_clean' as const,
+              state: 'fail' as const,
+              detail: `${paths.length} uncommitted path(s) in the project`,
+              cause: {kind: 'project_dirty' as const, project: '/work/queue-rs', paths: [...paths]},
+            },
+          ],
+          roles: null,
+          backend: null,
+        },
+      }),
+  };
+}
+
+test('a dirty project is worded for this screen from the typed fact, naming the project and its paths, and offers Check again', async () => {
+  const state = await checked(dirtyBridge(['a.py', 'b.py']));
+
+  const item = readiness(state).find(each => each.id === 'project_clean');
+
+  expect(item).toEqual({
+    id: 'project_clean',
+    state: 'fail',
+    label: 'Project changes',
+    detail:
+      'queue-rs has uncommitted changes (a.py, b.py). Commit or discard them in the project, then check again.',
+    fix: {kind: 'recheck'},
+  });
+  expect(startBlocked(state)).toBe('Fix the items marked above to start.');
+});
+
+test('a long list of dirty paths is cut with a count of the rest', async () => {
+  const paths = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+  const state = await checked(dirtyBridge(paths));
+
+  const item = readiness(state).find(each => each.id === 'project_clean');
+
+  expect(item?.detail).toContain('(a, b, c, d, e, and 2 more)');
+});

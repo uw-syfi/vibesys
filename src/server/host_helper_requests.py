@@ -114,6 +114,7 @@ from server.host_helper_preflight import (
     repeated_option,
     unvetted_role,
 )
+from server.host_preflight import BackendUnavailable, CheckId
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
@@ -833,12 +834,19 @@ def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightRe
         docker=host.machine.docker(),
     )
     report = host.preflight.report(root, run_arguments(request))
-    checks = preflight_checks(facts, report)
+    checks = tuple(
+        check
+        for check in preflight_checks(facts, report)
+        if request.with_project_clean or check.id is not CheckId.PROJECT_CLEAN
+    )
     return RunPreflightReply(
         request_id=request.request_id,
-        checks=checks
-        if request.with_backend
-        else tuple(check.model_copy(update={"cause": None}) for check in checks),
+        checks=tuple(
+            check.model_copy(update={"cause": None})
+            if isinstance(check.cause, BackendUnavailable) and not request.with_backend
+            else check
+            for check in checks
+        ),
         roles=report.roles if request.with_roles else None,
         backend=report.backend if request.with_backend else None,
     )

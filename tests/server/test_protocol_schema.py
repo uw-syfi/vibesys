@@ -194,6 +194,7 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
             "options": "run_options",
             "with_roles": "run_roles",
             "with_backend": "run_backend",
+            "with_project_clean": "project_clean",
         },
         "logs.list": {"span_id": "logs_by_span"},
     }

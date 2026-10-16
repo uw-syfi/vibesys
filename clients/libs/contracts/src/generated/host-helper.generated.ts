@@ -144,6 +144,7 @@ export type Project4 = string;
 export type Task1 = string | null;
 export type Args1 = string[];
 export type WithRoles = boolean | null;
+export type WithProjectClean = boolean | null;
 export type WithBackend = boolean | null;
 export type RequestId20 = string;
 export type DeadlineMs20 = number;
@@ -208,6 +209,7 @@ export type HelperFeature =
   | "run_options"
   | "examples"
   | "run_roles"
+  | "project_clean"
   | "run_backend";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
@@ -462,6 +464,7 @@ export type Type42 = "run.preflight";
 export type CheckId =
   | "checkout_found"
   | "project_own_repository"
+  | "project_clean"
   | "settings_valid"
   | "docker_reachable"
   | "agent_image"
@@ -481,6 +484,7 @@ export type Kind3 = "start_docker";
 export type Kind4 = "declare_build";
 export type Manifest = string;
 export type Outputs = string[];
+export type Cause = (BackendUnavailable | ProjectDirty) | null;
 export type Kind5 = "backend_unavailable";
 export type Task4 = string;
 /**
@@ -488,6 +492,9 @@ export type Task4 = string;
  */
 export type Backend = "cpu" | "cuda" | "rocm" | "metal" | "trainium";
 export type Declared = Backend[];
+export type Kind6 = "project_dirty";
+export type Project5 = string;
+export type Paths = string[];
 export type Checks = Check[];
 export type Roles1 = string[] | null;
 export type RequestId43 = string;
@@ -501,7 +508,7 @@ export type ExternalRepo = boolean;
 export type Examples = ExampleSummary[];
 export type RequestId44 = string;
 export type Type44 = "project.create_from_example";
-export type Project5 = string;
+export type Project6 = string;
 export type Tasks2 = string[];
 export type RequestId45 = string;
 export type Type45 = "project.copy_out";
@@ -579,19 +586,19 @@ export type Type48 = "run.start_compensation_failed";
 export type ExitStatus1 = 12;
 export type RequestId47 = string;
 export type Detail2 = string;
-export type Kind6 = "worker_start_refused";
+export type Kind7 = "worker_start_refused";
 export type InstanceId6 = string;
 export type Type49 = "run.start_compensation_failed";
 export type ExitStatus2 = 12;
 export type RequestId48 = string;
 export type Detail3 = string;
-export type Kind7 = "stop_failed";
+export type Kind8 = "stop_failed";
 export type InstanceId7 = string;
 export type Type50 = "run.start_compensation_failed";
 export type ExitStatus3 = 12;
 export type RequestId49 = string;
 export type Detail4 = string;
-export type Kind8 = "stop_unconfirmed";
+export type Kind9 = "stop_unconfirmed";
 export type Version13 = 1;
 export type Id6 = string;
 export type Outcome1 = "stopping" | "still_running" | "unsupported";
@@ -871,6 +878,7 @@ export interface RunPreflightRequest {
   harness?: HarnessChoice | null;
   options?: RunOptions | null;
   with_roles?: WithRoles;
+  with_project_clean?: WithProjectClean;
   with_backend?: WithBackend;
 }
 /**
@@ -1421,7 +1429,7 @@ export interface Check {
   state: CheckState;
   detail: Detail;
   fix?: Fix;
-  cause?: BackendUnavailable | null;
+  cause?: Cause;
 }
 /**
  * Pick another VibeSys checkout for this machine.
@@ -1463,10 +1471,20 @@ export interface DeclareBuild {
  * A fact, not a sentence: the client words it for its own controls, the CLI for its flags.
  */
 export interface BackendUnavailable {
-  kind?: Kind5;
+  kind: Kind5;
   task: Task4;
   backend: Backend;
   declared: Declared;
+}
+/**
+ * The project's repository has changes a run cannot start beside.
+ *
+ * A fact, not a sentence: the client words it. ``paths`` are relative to the project, sorted.
+ */
+export interface ProjectDirty {
+  kind: Kind6;
+  project: Project5;
+  paths: Paths;
 }
 /**
  * The checkout's example catalog.
@@ -1505,7 +1523,7 @@ export interface ProjectCreateFromExampleReply {
  * A project made in its own new Git repository, and its tasks.
  */
 export interface CreatedProject {
-  project: Project5;
+  project: Project6;
   tasks: Tasks2;
 }
 /**
@@ -1552,7 +1570,7 @@ export interface WorkerStartRefusedCompensationFailure {
   exit_status: ExitStatus1;
   request_id: RequestId47;
   detail: Detail2;
-  kind: Kind6;
+  kind: Kind7;
   instance_id: InstanceId6;
 }
 /**
@@ -1563,7 +1581,7 @@ export interface StopFailedCompensationFailure {
   exit_status: ExitStatus2;
   request_id: RequestId48;
   detail: Detail3;
-  kind: Kind7;
+  kind: Kind8;
   instance_id: InstanceId7;
 }
 /**
@@ -1577,7 +1595,7 @@ export interface StopUnconfirmedCompensationFailure {
   exit_status: ExitStatus3;
   request_id: RequestId49;
   detail: Detail4;
-  kind: Kind8;
+  kind: Kind9;
   stop_result: UnconfirmedInstanceStopResult;
 }
 /**

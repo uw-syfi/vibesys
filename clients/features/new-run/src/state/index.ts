@@ -17,6 +17,7 @@ export {
   type HelperFor,
   inputsKey,
   joinWords,
+  lastRun,
   missingFeatures,
   NEW_RUN_FEATURES,
   offers,

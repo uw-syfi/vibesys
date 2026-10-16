@@ -37,12 +37,16 @@ from vibesys.api import ComputeBackend, DomainName
 from vibesys.api.request import TaskImageError, run_environment_uses_docker
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.inputs import InputBundle, load_task
+from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sim.api import ProbeResult
 from vs_sim.api.testing import ScriptedProbe
 
 if TYPE_CHECKING:
     from argparse import Namespace
+    from collections.abc import Callable
+
+    from vs_project.api import GitRepository
 
 
 def _argv(tmp_path: Path, *extra: str) -> list[str]:
@@ -427,7 +431,11 @@ command = ["python", "-c", "print('1')"]
 
 
 def _preflight_of(
-    tmp_path: Path, project: Path, probe: ScriptedProbe, *flags: str
+    tmp_path: Path,
+    project: Path,
+    probe: ScriptedProbe,
+    *flags: str,
+    repository: Callable[[Path], GitRepository] | None = None,
 ) -> PreflightReport:
     argv = [
         "--outer-loop",
@@ -441,7 +449,7 @@ def _preflight_of(
         "none",
         *flags,
     ]
-    return preflight_report(argv, _parse, probe)
+    return preflight_report(argv, _parse, probe, repository)
 
 
 def test_a_cpu_task_on_a_host_without_a_gpu_passes_preflight_with_no_user_input(
@@ -520,3 +528,44 @@ def test_a_backend_flag_the_task_declares_overrides_its_preference(tmp_path: Pat
 
 def test_the_backend_enum_names_exactly_the_compute_backends() -> None:
     assert {b.value for b in Backend} == {b.value for b in ComputeBackend}
+
+
+def _committed_project(tmp_path: Path) -> tuple[Path, FakeGitRepositories]:
+    """A project that is its own repository with everything committed."""
+    project = _project_declaring(tmp_path, '"cpu"')
+    (project / ".git").mkdir()
+    disk = FakeGitRepositories()
+    repository = disk.repository(project)
+    repository.initialize(initial_branch="main")
+    repository.stage_all(["."])
+    repository.commit("baseline")
+    return project, disk
+
+
+def test_a_clean_project_repository_reports_no_changes(tmp_path: Path) -> None:
+    project, disk = _committed_project(tmp_path)
+
+    report = _preflight_of(tmp_path, project, ScriptedProbe(lambda _argv: None), repository=disk)
+
+    assert report.project_changes == ()
+
+
+def test_uncommitted_changes_in_the_project_repository_are_reported_by_path(
+    tmp_path: Path,
+) -> None:
+    """Regression: every check passed, then Start failed on ``must be clean``."""
+    project, disk = _committed_project(tmp_path)
+    (project / "src" / "queue.py").write_text("class Queue: pass\n")
+    (project / "notes.txt").write_text("draft\n")
+
+    report = _preflight_of(tmp_path, project, ScriptedProbe(lambda _argv: None), repository=disk)
+
+    assert report.project_changes == ("notes.txt", "src/queue.py")
+
+
+def test_a_project_that_is_no_repository_yet_reports_no_changes(tmp_path: Path) -> None:
+    project = _project_declaring(tmp_path, '"cpu"')
+
+    report = _preflight_of(tmp_path, project, ScriptedProbe(lambda _argv: None))
+
+    assert report.project_changes == ()

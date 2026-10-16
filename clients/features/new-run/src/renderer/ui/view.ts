@@ -106,9 +106,20 @@ export function backendOf(context: NewRunContext): Backend | null {
  * A failed check in words for this screen, from its typed cause when it has one: the app names
  * what to change here (the task or the machine), never a command-line flag.
  */
+/** How many changed paths a failure names before saying how many more there are. */
+const SHOWN_PATHS = 5;
+
 function causeDetail(check: Check, machine: HostKey): string | null {
   const cause = check.cause ?? null;
   if (cause === null) return null;
+  if (cause.kind === 'project_dirty') {
+    const shown = cause.paths.slice(0, SHOWN_PATHS).join(', ');
+    const more = cause.paths.length - SHOWN_PATHS;
+    return (
+      `${lastSegment(cause.project)} has uncommitted changes (${shown}` +
+      `${more > 0 ? `, and ${more} more` : ''}). Commit or discard them in the project, then check again.`
+    );
+  }
   const on = machineLabel(machine);
   const wants =
     cause.declared.length > 1
@@ -120,6 +131,7 @@ function causeDetail(check: Check, machine: HostKey): string | null {
 const CHECK_LABELS: Readonly<Record<Check['id'], string>> = {
   checkout_found: 'VibeSys checkout',
   project_own_repository: 'Project in its own repository',
+  project_clean: 'Project changes',
   settings_valid: 'Run settings',
   docker_reachable: 'Docker',
   agent_image: 'Agent image',
@@ -142,6 +154,8 @@ export type ReadinessFix =
   | {readonly kind: 'recheck'};
 
 function checkFix(check: Check, project: string | null): ReadinessFix | undefined {
+  // Changes in the project are committed or discarded outside this screen, then checked again.
+  if (check.cause?.kind === 'project_dirty') return {kind: 'recheck'};
   const fix = check.fix ?? null;
   if (fix === null) return undefined;
   if (fix.kind === 'copy_out') {

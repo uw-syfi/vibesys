@@ -37,6 +37,7 @@ from server.host_preflight import (
     CheckState,
     CopyOut,
     PreflightReport,
+    ProjectDirty,
     ReasoningEffort,
     RunOptions,
     RunResults,
@@ -145,6 +146,7 @@ def preflight_checks(facts: PreflightFacts, report: PreflightReport) -> tuple[Ch
     return (
         _checkout_check(facts),
         _repository_check(facts),
+        _clean_check(facts, report),
         _settings_check(report),
         _docker_check(facts.docker) if report.uses_docker is not False else _NO_DOCKER,
         report.agent_image,
@@ -201,6 +203,26 @@ def _repository_check(facts: PreflightFacts) -> Check:
         state=CheckState.FAIL,
         detail=one_line(f"the project is inside the Git repository {repository}", "nested"),
         fix=CopyOut(suggested_path=str(repository.parent / root.name)),
+    )
+
+
+def _clean_check(facts: PreflightFacts, report: PreflightReport) -> Check:
+    changes = report.project_changes
+    if not changes:
+        return Check(
+            id=CheckId.PROJECT_CLEAN,
+            state=CheckState.OK,
+            detail="the project has no uncommitted changes",
+        )
+    cause = ProjectDirty(project=str(facts.project_root), paths=changes)
+    return Check(
+        id=CheckId.PROJECT_CLEAN,
+        state=CheckState.FAIL,
+        detail=one_line(
+            f"{len(changes)} uncommitted path(s) in the project, starting with {changes[0]}",
+            "uncommitted changes",
+        ),
+        cause=cause,
     )
 
 

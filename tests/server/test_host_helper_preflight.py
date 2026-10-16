@@ -53,6 +53,7 @@ from server.host_preflight import (
     CheckState,
     CopyOut,
     PreflightReport,
+    ProjectDirty,
     ReasoningEffort,
     RoleOption,
     RunOptions,
@@ -185,7 +186,10 @@ def test_preflight_runs_the_run_check_with_the_arguments_run_start_would_launch(
     )
 
     assert isinstance(reply, RunPreflightReply)
-    assert [check.id for check in reply.checks] == list(CheckId)
+    # Without `with_project_clean` the reply is the one a client that predates that check expects.
+    assert [check.id for check in reply.checks] == [
+        check_id for check_id in CheckId if check_id is not CheckId.PROJECT_CLEAN
+    ]
     assert preflight.calls == [
         (
             project.resolve(),
@@ -445,3 +449,49 @@ def test_asking_for_the_backend_needs_the_run_backend_feature() -> None:
     )
 
     assert request_features(request) == (HelperFeature.PREFLIGHT, HelperFeature.RUN_BACKEND)
+
+
+def _report_with_changes(changes: tuple[str, ...]) -> PreflightReport:
+    return _failing_backend_report().model_copy(
+        update={"settings": SettingsValid(), "project_changes": changes}
+    )
+
+
+@given(changes=st.lists(st.from_regex(r"[a-z][a-z0-9_./]{0,20}", fullmatch=True), max_size=5))
+def test_a_dirty_project_fails_project_clean_naming_the_project_and_every_path(
+    tmp_path_factory: pytest.TempPathFactory, changes: list[str]
+) -> None:
+    """Regression: Ready to start was green and Start failed on ``must be clean``."""
+    project = _project(tmp_path_factory.mktemp("proj"))
+
+    reply, _ = _preflight(
+        project, report=_report_with_changes(tuple(changes)), with_project_clean=True
+    )
+
+    assert isinstance(reply, RunPreflightReply)
+    clean = next(check for check in reply.checks if check.id is CheckId.PROJECT_CLEAN)
+    if changes:
+        assert clean.state is CheckState.FAIL
+        assert clean.cause == ProjectDirty(project=str(project.resolve()), paths=tuple(changes))
+    else:
+        assert (clean.state, clean.cause) == (CheckState.OK, None)
+
+
+def test_the_clean_check_is_listed_in_check_order_only_when_asked_for(tmp_path: Path) -> None:
+    project = _project(tmp_path / "proj")
+
+    asked, _ = _preflight(project, with_project_clean=True)
+    unasked, _ = _preflight(project)
+
+    assert isinstance(asked, RunPreflightReply)
+    assert isinstance(unasked, RunPreflightReply)
+    assert [check.id for check in asked.checks] == list(CheckId)
+    assert CheckId.PROJECT_CLEAN not in [check.id for check in unasked.checks]
+
+
+def test_asking_for_the_clean_check_needs_the_project_clean_feature() -> None:
+    request = RunPreflightRequest.model_validate(
+        {"request_id": "p", "deadline_ms": 5000, "project": "/p", "with_project_clean": True}
+    )
+
+    assert request_features(request) == (HelperFeature.PREFLIGHT, HelperFeature.PROJECT_CLEAN)

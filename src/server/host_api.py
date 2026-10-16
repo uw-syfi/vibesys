@@ -770,6 +770,9 @@ class HelperFeature(StrEnum):
     """``examples.list``, ``project.create_from_example`` and ``project.copy_out``."""
     RUN_ROLES = "run_roles"
     """``run.preflight``'s ``with_roles``: the role ids the run's orchestration declares."""
+    PROJECT_CLEAN = "project_clean"
+    """``run.preflight``'s ``with_project_clean``: the ``project_clean`` check, which fails with a
+    typed ``project_dirty`` cause naming the changed paths."""
     RUN_BACKEND = "run_backend"
     """``run.preflight``'s ``with_backend``: the compute backend the run resolved to (the task's),
     and each failing check's typed ``cause``."""
@@ -950,6 +953,8 @@ class RunPreflightRequest(_HelperRequest):
     options: RunOptions | None = None
     with_roles: bool | None = None
     """Ask for ``roles`` in the reply. Sent only after ``hello`` returned ``run_roles``."""
+    with_project_clean: bool | None = None
+    """Ask for the ``project_clean`` check. Sent only after ``hello`` returned ``project_clean``."""
     with_backend: bool | None = None
     """Ask for ``backend`` in the reply and a ``cause`` on the checks that have one. Sent only
     after ``hello`` returned ``run_backend``."""
@@ -1178,6 +1183,7 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFe
         "options": HelperFeature.RUN_OPTIONS,
         "with_roles": HelperFeature.RUN_ROLES,
         "with_backend": HelperFeature.RUN_BACKEND,
+        "with_project_clean": HelperFeature.PROJECT_CLEAN,
     },
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
 }

@@ -36,14 +36,23 @@ from vibesys.api.request import (
     run_host_shortfall,
 )
 from vs_agent.api.images import AGENT_IMAGE_REPOSITORY
-from vs_sim.api import SubprocessProbe
+from vs_project.api import (
+    Git,
+    GitError,
+    GitTracker,
+    NullGitTrackerEvents,
+    open_git_repository,
+)
+from vs_sim.api import OsProcesses, SubprocessProbe
 
 if TYPE_CHECKING:
     from argparse import Namespace
     from collections.abc import Callable
+    from pathlib import Path
 
     from vibesys.api import RunRequest
     from vibesys.api.request import HostShortfall, InputBundle
+    from vs_project.api import GitRepository
     from vs_sim.api import CommandProbe
 
 DOCKER_TIMEOUT_SECONDS = 5.0
@@ -65,9 +74,16 @@ def run_preflight(argv: list[str], parse: Callable[[list[str]], Namespace]) -> N
 
 
 def preflight_report(
-    argv: list[str], parse: Callable[[list[str]], Namespace], probe: CommandProbe
+    argv: list[str],
+    parse: Callable[[list[str]], Namespace],
+    probe: CommandProbe,
+    repository: Callable[[Path], GitRepository] | None = None,
 ) -> PreflightReport:
-    """Validate ``argv`` as a run would, then check the agent image and the evaluator."""
+    """Validate ``argv`` as a run would, then check the agent image and the evaluator.
+
+    ``repository`` opens the project's repository (real Git by default) for the check that a
+    new run's baseline is clean.
+    """
     try:
         args = parse(argv)
         request, _config = validated_run_request(args, probe)
@@ -87,6 +103,48 @@ def preflight_report(
                 code=TASK_IMAGE_UNSUPPORTED, stage="run_environment", message=str(error)
             )
         )
+    changes = () if args.resume is not None else project_changes(request.project_root, repository)
+    report = _resolved_report(args, request, shortfall, probe, roles)
+    return report.model_copy(update={"project_changes": changes})
+
+
+PREFLIGHT_RUN_ID = "preflight"
+"""The run id the clean-baseline check reads the project's repository under; it starts no run."""
+
+
+def project_changes(
+    root: Path, repository: Callable[[Path], GitRepository] | None = None
+) -> tuple[str, ...]:
+    """The changes in the project's own repository that stop a new run at launch, sorted.
+
+    The run's own tracker decides (``GitTracker.baseline_changes``, the check
+    ``existing project repository must be clean`` makes), so a project this reports clean does
+    not fail that check. A project that is not a repository yet, or whose repository cannot be
+    read, reports none: the run creates the repository, and other checks name the rest.
+    """
+    if not (root / ".git").exists():
+        return ()
+    events = NullGitTrackerEvents()
+    opened = (
+        open_git_repository(root, git=Git(OsProcesses()), faults=events)
+        if repository is None
+        else repository(root)
+    )
+    tracker = GitTracker(root, events=events, run_id=PREFLIGHT_RUN_ID, repository=opened)
+    try:
+        return tuple(tracker.baseline_changes())
+    except (GitError, ValueError):
+        return ()
+
+
+def _resolved_report(
+    args: Namespace,
+    request: RunRequest,
+    shortfall: HostShortfall | None,
+    probe: CommandProbe,
+    roles: tuple[str, ...],
+) -> PreflightReport:
+    """The report for settings that resolved: the host's shortfall, else the image and evaluator."""
     backend = Backend(request.backend.value)
     if shortfall is not None:
         # The run stops on this before its image build, seconds after it starts.

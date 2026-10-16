@@ -139,6 +139,7 @@ const FAKE_ROLES: readonly string[] = [
 const PASSING_CHECKS: readonly Check[] = [
   {id: 'checkout_found', state: 'ok', detail: 'VibeSys 0.1.1 at /src/vibesys'},
   {id: 'project_own_repository', state: 'ok', detail: 'the project is its own Git repository'},
+  {id: 'project_clean', state: 'ok', detail: 'the project has no uncommitted changes'},
   {id: 'settings_valid', state: 'ok', detail: "the run's configuration is valid"},
   {id: 'docker_reachable', state: 'ok', detail: 'Docker 27.3.1'},
   {id: 'agent_image', state: 'ok', detail: 'an agent image is cached here'},
@@ -264,6 +265,7 @@ export class FakeHelper {
     'examples',
     'run_roles',
     'run_backend',
+    'project_clean',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -829,7 +831,10 @@ class HelperSession {
     this.#send({
       type: 'run.preflight',
       request_id: id,
-      checks: [...host.preflight],
+      // A helper answers the project_clean check only to a client that asked for it.
+      checks: host.preflight.filter(
+        check => request.with_project_clean === true || check.id !== 'project_clean',
+      ),
       ...(request.with_roles === true ? {roles: [...host.roles]} : {}),
       ...(request.with_backend === true && host.backend !== null ? {backend: host.backend} : {}),
     });

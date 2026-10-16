@@ -149,11 +149,13 @@ export class NewRunMain {
       await lease.connection.ready();
       const rolesToo = lease.connection.features?.includes('run_roles') === true;
       const backendToo = lease.connection.features?.includes('run_backend') === true;
+      const cleanToo = lease.connection.features?.includes('project_clean') === true;
       const reply = (await lease.connection.request({
         type: 'run.preflight',
         ...runFields(inputs),
         ...(rolesToo ? {with_roles: true} : {}),
         ...(backendToo ? {with_backend: true} : {}),
+        ...(cleanToo ? {with_project_clean: true} : {}),
       })) as {checks: Check[]; roles?: string[] | null; backend?: Backend | null};
       return {
         kind: 'offered',
