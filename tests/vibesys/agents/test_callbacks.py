@@ -10,7 +10,6 @@ from vibesys.events import AgentOutputChunkData, CoreEvent, ToolCallData, ToolRe
 from vs_agent.api import NULL_AGENT_EVENT_SINK, AgentEvent, AgentEventKind, RoundProgress
 from vs_agent.callbacks import (
     AgentLogger,
-    _default_context_window_lookup,
 )
 from vs_agent.client import _LoggerObserver
 from vs_sim.api.testing import ManualClock
@@ -271,58 +270,6 @@ class TestLogFile:
         assert log.flush.called
 
 
-class TestDefaultContextWindowLookup:
-    def test_claude_4_6_resolves_to_1m(self) -> None:
-
-        assert _default_context_window_lookup("claude-opus-4-6") == 1_000_000
-        assert _default_context_window_lookup("claude-sonnet-4-6") == 1_000_000
-
-    def test_older_claude_falls_back_to_200k(self) -> None:
-        # Regression guard: claude- fallback comes after the 4-6 entries
-
-        assert _default_context_window_lookup("claude-haiku-4-5") == 200_000
-        assert _default_context_window_lookup("claude-sonnet-4-5") == 200_000
-        assert _default_context_window_lookup("claude-opus-4-1") == 200_000
-
-    def test_gemini(self) -> None:
-
-        assert _default_context_window_lookup("gemini-2.5-flash") == 1_048_576
-        assert _default_context_window_lookup("gemini-3-pro") == 1_048_576
-
-    def test_gemma(self) -> None:
-
-        assert _default_context_window_lookup("gemma-2") == 8_192
-
-    def test_gpt5_4_resolves_to_1m(self) -> None:
-        # Regression guard: gpt-5.4 entry must come before gpt-5
-
-        assert _default_context_window_lookup("gpt-5.4") == 1_050_000
-        assert _default_context_window_lookup("gpt-5.4-pro") == 1_050_000
-
-    def test_gpt5_family_falls_back_to_400k(self) -> None:
-
-        assert _default_context_window_lookup("gpt-5") == 400_000
-        assert _default_context_window_lookup("gpt-5-mini") == 400_000
-        assert _default_context_window_lookup("gpt-5-nano") == 400_000
-        assert _default_context_window_lookup("gpt-5.2") == 400_000
-
-    def test_gpt4_and_o_series(self) -> None:
-
-        assert _default_context_window_lookup("gpt-4o") == 128_000
-        assert _default_context_window_lookup("gpt-4-turbo") == 128_000
-        assert _default_context_window_lookup("o1") == 200_000
-        assert _default_context_window_lookup("o3-mini") == 200_000
-        assert _default_context_window_lookup("o4-mini") == 200_000
-
-    def test_unknown_model_returns_none(self) -> None:
-
-        assert _default_context_window_lookup("unknown-model-xyz") is None
-
-    def test_none_model_name_returns_none(self) -> None:
-
-        assert _default_context_window_lookup(None) is None
-
-
 class TestPrefixFormat:
     def test_no_label_no_prefix_on_streaming(self, capsys: pytest.CaptureFixture[str]) -> None:
         # Existing behavior preserved: AgentLogger without agent_label produces no prefix
@@ -332,10 +279,10 @@ class TestPrefixFormat:
         assert "[" not in out
         assert "hello" in out
 
-    def test_prefix_with_label_and_known_model(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_prefix_with_label_and_a_known_window(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
             agent_label="Implementer",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -348,7 +295,7 @@ class TestPrefixFormat:
         logger = AgentLogger(
             agent_label="Implementer",
             progress=RoundProgress(3, 24),
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -359,10 +306,10 @@ class TestPrefixFormat:
             out,
         ), out
 
-    def test_prefix_with_gpt5_4(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_prefix_with_a_1_05m_window(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
             agent_label="Judge",
-            model_name="gpt-5.4",
+            context_window=1_050_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -371,7 +318,9 @@ class TestPrefixFormat:
         # 1_050_000 -> "1.0M" or "1.1M" depending on float rounding; accept either
         assert re.search(r"\[Judge \| \d+\.\ds \| 0/1\.\dM\]", out), out
 
-    def test_prefix_omits_max_when_model_unknown(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_prefix_omits_max_when_the_window_is_unknown(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         logger = AgentLogger(
             agent_label="X",
             model_name="unknown-future-model",
@@ -396,7 +345,7 @@ class TestPrefixFormat:
     def test_prefix_updates_after_update_usage(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
             agent_label="Implementer",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -409,7 +358,7 @@ class TestPrefixFormat:
     def test_tool_call_path_uses_dynamic_prefix(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
             agent_label="Implementer",
-            model_name="gpt-5.4",
+            context_window=1_050_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -419,39 +368,24 @@ class TestPrefixFormat:
         # Tool-call line should carry the dynamic prefix with elapsed and tokens
         assert re.search(r"\[Implementer \| \d+\.\ds \| 5k/1\.\dM\] → shell\(", out), out
 
-    def test_lookup_injection_overrides_default(self, capsys: pytest.CaptureFixture[str]) -> None:
-        # The user explicitly asked for an abstraction so the lookup can be stubbed.
+    def test_the_given_window_is_the_limit_shown(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
             agent_label="Test",
-            model_name="anything",
-            context_window_lookup=lambda _: 999_999,
+            context_window=999_999,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
         logger.log_text("x")
         out = _strip_ansi(capsys.readouterr().out)
-        # Used tokens still 0 (no usage update yet); max is the injected 999_999 → "999k"
+        # Used tokens still 0 (no usage update yet); max is the given 999_999 → "999k"
         assert "0/999k" in out, out
-
-    def test_default_lookup_used_when_not_injected(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        logger = AgentLogger(
-            agent_label="Test",
-            model_name="gpt-5.4",
-            event_sink=_rendering_sink(),
-            clock=ManualClock(),
-        )
-        logger.log_text("status")
-        out = _strip_ansi(capsys.readouterr().out)
-        assert "0/1.1M" in out
 
     def test_elapsed_time_advances(self, capsys: pytest.CaptureFixture[str]) -> None:
         # The logger reads the injected clock, so the elapsed value in the prefix is exact.
         clock = ManualClock(1000.0)
         logger = AgentLogger(
             agent_label="Implementer",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=clock,
         )
@@ -471,7 +405,7 @@ class TestUpdateUsagePublicHook:
     def test_update_usage_sets_input_tokens(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
             agent_label="Implementer",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -486,7 +420,7 @@ class TestUpdateUsagePublicHook:
         """The latest turn overwrites; usage does not accumulate."""
         logger = AgentLogger(
             agent_label="X",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -499,7 +433,7 @@ class TestUpdateUsagePublicHook:
     def test_update_usage_empty_dict_is_noop(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
             agent_label="X",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -512,7 +446,7 @@ class TestUpdateUsagePublicHook:
     def test_update_usage_none_is_noop(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
             agent_label="X",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -528,7 +462,7 @@ class TestUpdateUsagePublicHook:
         """A zero-count usage dict should not clobber a real prior value."""
         logger = AgentLogger(
             agent_label="X",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -542,7 +476,7 @@ class TestUpdateUsagePublicHook:
         """The formatted prefix includes the compact token count after an update."""
         logger = AgentLogger(
             agent_label="Implementer",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )
@@ -554,7 +488,7 @@ class TestUpdateUsagePublicHook:
     def test_update_usage_drives_tool_call_prefix(self, capsys: pytest.CaptureFixture[str]) -> None:
         logger = AgentLogger(
             agent_label="Implementer",
-            model_name="claude-sonnet-4-6",
+            context_window=1_000_000,
             event_sink=_rendering_sink(),
             clock=ManualClock(),
         )

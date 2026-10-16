@@ -14,6 +14,7 @@ from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.todos import todos_from_tool_call
 from vs_sim.api import Clock
 
+
 class AgentLogger:
     """Single event adapter for all agent activity: token streaming, tool calls, and tool results.
 

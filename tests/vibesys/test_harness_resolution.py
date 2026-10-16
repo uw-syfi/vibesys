@@ -7,10 +7,10 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vibesys.api import (
-    HARNESSES,
     Config,
     ConfigurationError,
     agent_spec_from_config,
+    harnesses,
     vetted_models,
 )
 from vibesys.composition import resolve_agent_specs
@@ -18,7 +18,7 @@ from vs_agent.api import SHIPPED_PROVIDERS
 from vs_runtime.api import AgentRole
 
 _ROLES = (AgentRole(id="worker", system_prompt="work"),)
-_VETTED_PROVIDERS = st.sampled_from(sorted({harness.provider for harness in HARNESSES}))
+_VETTED_PROVIDERS = st.sampled_from(sorted({harness.provider for harness in harnesses()}))
 _MODELS = st.text(min_size=1, max_size=40).filter(str.strip)
 
 
@@ -29,7 +29,9 @@ def test_a_provider_without_a_configured_model_runs_its_own_default(provider: st
 
 
 def test_claude_without_a_config_does_not_run_a_codex_model() -> None:
-    assert agent_spec_from_config(Config(), provider="claude").model == "claude-opus-5"
+    model = agent_spec_from_config(Config(), provider="claude").model
+    assert model == vetted_models("claude")[0]
+    assert model not in vetted_models("codex")
 
 
 @pytest.mark.parametrize(

@@ -58,7 +58,9 @@ def harnesses() -> tuple[Harness, ...]:
     agentshim names no model (Gemini today) runs only with that opt-out.
     """
     order = (DEFAULT_CLI_PROVIDER, *(p for p in SHIPPED_PROVIDERS if p != DEFAULT_CLI_PROVIDER))
-    return tuple(Harness(provider, model) for provider in order for model in vetted_models(provider))
+    return tuple(
+        Harness(provider, model) for provider in order for model in vetted_models(provider)
+    )
 
 
 class UnvettedHarnessError(ValueError):

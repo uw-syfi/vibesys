@@ -201,8 +201,8 @@ __all__ = [
     "check_harness",
     "create_session",
     "domain_modalities",
+    "harnesses",
     "load_config",
     "open_run_store",
-    "harnesses",
     "vetted_models",
 ]

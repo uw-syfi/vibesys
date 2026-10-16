@@ -271,6 +271,7 @@ __all__ = [
     "declare_provider_state_resources",
     "default_model",
     "describe_validation_error",
+    "harnesses",
     "inspect_invocation_journal",
     "materialize_skills",
     "native_schema",
@@ -284,7 +285,6 @@ __all__ = [
     "task_agent_host_resources",
     "todos_from_tool_call",
     "validate_env_names",
-    "harnesses",
     "vetted_models",
 ]
 
