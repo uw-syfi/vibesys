@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import sys
-
 import pytest
 
 from vs_sandbox.api import ComputeBackend, backend_provided
@@ -34,10 +32,19 @@ def test_cuda_is_provided_by_a_host_that_lists_a_gpu(monkeypatch: pytest.MonkeyP
     assert backend_provided(ComputeBackend.CUDA, _host(ProbeResult(0, _GPU_ROW)))
 
 
-@pytest.mark.parametrize(("platform", "expected"), [("darwin", True), ("linux", False)])
-def test_metal_is_provided_by_macos_only(
-    monkeypatch: pytest.MonkeyPatch, platform: str, *, expected: bool
+@pytest.mark.parametrize(
+    ("brand", "expected"),
+    [
+        (ProbeResult(0, "Apple M3 Pro\n"), True),
+        (ProbeResult(0, "Intel(R) Core(TM) i9\n"), False),
+        (ProbeResult(1, "", "unknown oid"), False),
+        (None, False),
+    ],
+    ids=["apple-silicon", "intel", "no-sysctl-key", "no-sysctl"],
+)
+def test_metal_is_provided_by_an_apple_silicon_host_only(
+    brand: ProbeResult | None, *, expected: bool
 ) -> None:
-    monkeypatch.setattr(sys, "platform", platform)
+    host = ScriptedProbe(lambda argv: brand if argv[0] == "sysctl" else None)
 
-    assert backend_provided(ComputeBackend.METAL, _host(None)) is expected
+    assert backend_provided(ComputeBackend.METAL, host) is expected

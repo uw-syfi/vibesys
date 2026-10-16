@@ -100,7 +100,7 @@ is mounted at runtime and is never part of the image build context.
 
 Task Dockerfiles are intentionally convention-based: they require no manifest
 field or image-build command. A task Dockerfile cannot be combined with
-`--docker-image`, and the `host` environment (Metal on macOS) refuses it,
+`--docker-image`, and the `host` environment (Metal on Apple Silicon) refuses it,
 because it has no container to build it into. A root `Dockerfile` never opts
 in, because that file commonly belongs to the candidate application.
 
@@ -281,7 +281,7 @@ A run takes its backend from the task, never from the CLI's default:
 - One backend declared: the run uses it.
 - Several declared, in preference order: the run uses the first this host
   provides (`cuda` needs an NVIDIA GPU, `rocm` a `/dev/kfd`, `trainium` Neuron
-  devices, `metal` macOS; `cpu` always). When the host provides none, the first
+  devices, `metal` Apple Silicon; `cpu` always). When the host provides none, the first
   is kept and `vibesys preflight` fails naming the task and that backend.
 - `--backend NAME` overrides the choice and must be one the task declares, else
   the run is refused before it starts.

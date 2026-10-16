@@ -15,7 +15,6 @@ compute backend supplies the right values for its platform inside
 
 from __future__ import annotations
 
-import sys
 from enum import StrEnum
 from functools import cache
 from importlib import import_module
@@ -380,6 +379,15 @@ def _trainium_backend(  # noqa: PLR0913
     )
 
 
+_APPLE_CPU_BRAND = ("sysctl", "-n", "machdep.cpu.brand_string")
+"""Names the CPU on macOS; Apple Silicon's brand starts with ``Apple`` (the helper's GPU query)."""
+
+
+def _apple_silicon_present(probe: CommandProbe) -> bool:
+    result = probe.run(_APPLE_CPU_BRAND, timeout_seconds=5.0)
+    return result is not None and result.returncode == 0 and result.stdout.startswith("Apple ")
+
+
 def _register_defaults() -> None:
     cuda = import_module("vs_sandbox.cuda_backend")
     local = import_module("vs_sandbox.local_compute_backend")
@@ -401,7 +409,7 @@ def _register_defaults() -> None:
         ComputeBackend.TRAINIUM, _trainium_backend, default_image=trainium.DEFAULT_IMAGE
     )
     register_compute_backend(ComputeBackend.ROCM, _rocm_backend, default_image=rocm.DEFAULT_IMAGE)
-    register_backend_presence(ComputeBackend.METAL, lambda _probe: sys.platform == "darwin")
+    register_backend_presence(ComputeBackend.METAL, _apple_silicon_present)
     register_backend_presence(
         ComputeBackend.TRAINIUM,
         lambda probe: bool(
