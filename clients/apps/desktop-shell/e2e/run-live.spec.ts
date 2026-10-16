@@ -2,6 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
+import {prototypeRun} from './fake-run-data.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 
 /**
@@ -81,6 +82,34 @@ async function push(page: Page, listing: unknown): Promise<void> {
 }
 
 test.use({colorScheme: 'dark'});
+
+test('a live run folds its trace and overview into the Overview and Work tabs', async ({page}) => {
+  await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeMachines, SEED);
+  await page.addInitScript(installFakeRun, {streams: [], text: {}});
+  await page.addInitScript(installFakeServer, prototypeRun(RUN_ID));
+  await page.goto('./shell.html');
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
+    .click();
+
+  const objective = page.getByRole('region', {name: 'Objective'});
+  await expect(objective.getByText(/Maximize trusted end-to-end throughput/)).toBeVisible();
+  await expect(page.getByRole('region', {name: 'Performance'})).toBeVisible();
+  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+  if (shots !== undefined)
+    await page.screenshot({path: `${shots}/ink-live-overview.png`, fullPage: true});
+
+  await page.getByRole('tab', {name: 'Work'}).click();
+  const rows = page.getByRole('table', {name: 'Workstreams'});
+  for (const id of ['W1', 'W2', 'W3', 'W4', 'W5', 'W6', 'W7']) {
+    await expect(rows.getByRole('cell', {name: id, exact: true}).first()).toBeVisible();
+  }
+  expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
+  if (shots !== undefined)
+    await page.screenshot({path: `${shots}/ink-live-work.png`, fullPage: true});
+});
 
 test('a live run pauses and resumes from the header over its session, and is let go', async ({
   page,

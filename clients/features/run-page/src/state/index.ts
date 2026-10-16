@@ -8,6 +8,7 @@
 export {
   EMPTY_RUN_FOLD,
   EMPTY_TRACE_LOG,
+  overviewAt,
   type RunData,
   type RunFold,
   type RunLink,

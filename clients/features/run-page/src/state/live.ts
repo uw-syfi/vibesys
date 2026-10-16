@@ -1,12 +1,14 @@
 /**
  * The run's own data on the Run screen: the link the window holds to a live run (attach, then the
  * session's connection), what the session reports, the run fold (`CoreState`), and the trace's
- * span events in sequence order, so every view folds the trace at the sequence it shows
- * (`traceAt`): the live end, or a past sequence the scrubber chose. History (an ended run's
+ * span events (and the `run_started` event that declares the run's overview) in sequence order,
+ * so every view folds the trace and the overview at the sequence it shows (`traceAt`, `overviewAt`):
+ * the live end, or a past sequence the scrubber chose. History (an ended run's
  * recorded events, `runs.read_events`) folds into the same slice, so the tabs have one source.
  */
-import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
+import type {RunEvent, RunOverview, RunSnapshot} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
+import {foldOverview, overviewFromSnapshot} from '@vibesys/run-state/overview';
 import {EMPTY_TRACE, foldTrace, type RunTrace, traceFromSnapshot} from '@vibesys/run-state/trace';
 
 /** The window's hold on the live run: none, being attached under a token, attached, or refused. */
@@ -33,12 +35,20 @@ export interface SessionView {
  */
 export interface TraceLog {
   readonly base: RunTrace;
+  /** The overview at the base (a snapshot's), or null before one declared it. */
+  readonly baseOverview: RunOverview | null;
   readonly events: readonly RunEvent[];
 }
 
-export const EMPTY_TRACE_LOG: TraceLog = {base: EMPTY_TRACE, events: []};
+export const EMPTY_TRACE_LOG: TraceLog = {base: EMPTY_TRACE, baseOverview: null, events: []};
 
-const SPAN_EVENTS: ReadonlySet<string> = new Set(['span_started', 'span_updated', 'span_ended']);
+/** The events the slice keeps: the trace's span events and the overview's declaration. */
+const SPAN_EVENTS: ReadonlySet<string> = new Set([
+  'span_started',
+  'span_updated',
+  'span_ended',
+  'run_started',
+]);
 
 /** What the session folded into its run, as the trace slice needs it. */
 export type RunData =
@@ -61,7 +71,7 @@ function appended(log: TraceLog, events: readonly RunEvent[]): TraceLog {
     last = at;
     if (SPAN_EVENTS.has(event.type)) added.push(event);
   }
-  return added.length === 0 ? log : {base: log.base, events: [...log.events, ...added]};
+  return added.length === 0 ? log : {...log, events: [...log.events, ...added]};
 }
 
 /** The trace slice after `data`. */
@@ -70,7 +80,7 @@ export function traceStep(log: TraceLog, data: RunData): TraceLog {
     case 'snapshot': {
       const base = traceFromSnapshot(data.snapshot);
       const after = log.events.filter(event => (event.sequence ?? 0) > base.sequence);
-      return {base, events: after};
+      return {base, baseOverview: overviewFromSnapshot(data.snapshot), events: after};
     }
     case 'events':
       return appended(log, data.events);
@@ -80,9 +90,17 @@ export function traceStep(log: TraceLog, data: RunData): TraceLog {
 }
 
 /** The trace at sequence `at` (at least the base's), or at the live end when `at` is null. */
+function eventsAt(log: TraceLog, at: number | null): readonly RunEvent[] {
+  return at === null ? log.events : log.events.filter(event => (event.sequence ?? 0) <= at);
+}
+
 export function traceAt(log: TraceLog, at: number | null): RunTrace {
-  const events = at === null ? log.events : log.events.filter(event => (event.sequence ?? 0) <= at);
-  return foldTrace(log.base, events);
+  return foldTrace(log.base, eventsAt(log, at));
+}
+
+/** The run's overview at sequence `at`, or at the live end when `at` is null. */
+export function overviewAt(log: TraceLog, at: number | null): RunOverview | null {
+  return foldOverview(log.baseOverview, eventsAt(log, at));
 }
 
 /** The run fold and trace a live or recorded run has produced so far. */

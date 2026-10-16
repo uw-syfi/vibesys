@@ -3,13 +3,13 @@
  * startup timeline, the log streams grouped by owner, and the stop and ended banners. The renderer
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
-import type {RunEvent, Span} from '@vibesys/contracts';
+import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
-import {traceAt} from './live.js';
+import {overviewAt, traceAt} from './live.js';
 import {
   commandable,
   type RunPageState,
@@ -376,6 +376,8 @@ export function endedView(state: RunPageState): EndedView | null {
 export interface ViewedRun {
   readonly core: CoreState | null;
   readonly trace: RunTrace;
+  /** The run's declared overview at the view, or null before one was declared. */
+  readonly overview: RunOverview | null;
   readonly spans: readonly Span[];
   readonly spanEvents: readonly RunEvent[];
   /** The sequence shown: null at the live end. */
@@ -388,6 +390,7 @@ export function viewedRun(state: RunPageState): ViewedRun {
   return {
     core: state.run.core,
     trace,
+    overview: overviewAt(state.run.trace, at),
     spans: traceSpans(trace),
     spanEvents: state.run.trace.events,
     at,
