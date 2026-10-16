@@ -10,6 +10,7 @@ import {
   Split,
   Stack,
   Text,
+  Thread,
   Tree,
   TreeRow,
 } from '@vibesys/ui';
@@ -23,6 +24,7 @@ import {
   type MapState,
   mapDetail,
   mapRows,
+  type TurnTranscript,
 } from '../../state/index.js';
 
 const FILTER_LABELS: Readonly<Record<MapFilter, string>> = {
@@ -132,14 +134,46 @@ function Detail(props: {
 }
 
 /**
- * The Map tab: the run's steps as a tree at the scrubber's view, a state filter, and the selected
- * step's details with the logs its owner names. `trace` is null until the run's trace reaches the
- * window; `logsOf` gives the log streams a span owns.
+ * The selected step's agent turns, one after another: messages, reasoning, and tool calls with
+ * their arguments and results. `transcript` is null until the run's fold reaches the window.
+ */
+function Turns(props: {
+  readonly stepId: string;
+  readonly transcript: TurnTranscript | null;
+}): JSX.Element {
+  const {stepId, transcript} = props;
+  return (
+    <Card section="Turn by turn">
+      {transcript === null ? (
+        <Text tone="muted">The run’s turns have not reached this window yet.</Text>
+      ) : transcript.turns === 0 ? (
+        <EmptyState
+          title="No agent turns for this step"
+          body="Messages, reasoning and tool calls appear here as the agents under this step take their turns."
+        />
+      ) : (
+        <Stack gap="space-3">
+          <Text tone="muted">
+            {transcript.turns === 1 ? '1 agent turn' : `${transcript.turns} agent turns`}
+          </Text>
+          <Thread key={stepId} label="Turn by turn" items={transcript.rows} />
+        </Stack>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The Map tab: the run's steps as a tree at the scrubber's view, a state filter, the selected
+ * step's details with the logs its owner names, and the agent turns under it, turn by turn.
+ * `trace` is null until the run's trace reaches the window; `logsOf` gives the log streams a span
+ * owns; `transcript` is the turns under the selected step.
  */
 export function MapTab(props: {
   readonly trace: RunTrace | null;
   readonly map: MapState;
   readonly logsOf: (spanId: string) => readonly LogStreamItem[];
+  readonly transcript: TurnTranscript | null;
   readonly actions: MapActions;
 }): JSX.Element {
   const {trace, map, actions} = props;
@@ -182,6 +216,7 @@ export function MapTab(props: {
         }
         aside={<Detail detail={detail} logs={props.logsOf(detail.id)} actions={actions} />}
       />
+      <Turns stepId={detail.id} transcript={props.transcript} />
     </Stack>
   );
 }

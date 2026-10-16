@@ -82,6 +82,12 @@ export {
   viewAtPosition,
 } from './scrub.js';
 export {
+  type TurnRow,
+  type TurnTranscript,
+  type TurnVoice,
+  turnTranscript,
+} from './turn-transcript.js';
+export {
   type EndedView,
   endedView,
   followedStreams,

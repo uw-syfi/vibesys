@@ -53,7 +53,8 @@ export type SizeToken =
   | 'check'
   | 'menu'
   | 'log'
-  | 'log-sm';
+  | 'log-sm'
+  | 'thread';
 export const SIZE: Readonly<Record<SizeToken, number>> = {
   'control-sm': 32,
   control: 40,
@@ -77,6 +78,7 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   menu: 220,
   log: 320,
   'log-sm': 160,
+  thread: 480,
 };
 
 export type RadiusToken = 'radius-sm' | 'radius' | 'radius-lg' | 'radius-full';

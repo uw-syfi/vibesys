@@ -32,6 +32,12 @@ export interface TranscriptEntry {
   readonly roundNumber?: number;
   readonly roundKey?: RoundKey;
   readonly turnId?: string;
+  /**
+   * The agent-turn span of the run trace this entry belongs to, as the server stamped it on the
+   * event (`RunEvent.span_id`). Entries join the trace by this id and by nothing else; an entry
+   * the server did not tie to a span has none.
+   */
+  readonly spanId?: string;
   readonly invocationId?: string;
   readonly startsTurn?: boolean;
   readonly toolCall?: string;
@@ -51,6 +57,13 @@ export interface TranscriptEntry {
 }
 
 export function eventToTranscriptEntry(event: RunEvent): TranscriptEntry | null {
+  const entry = projectedEntry(event);
+  const spanId = event.span_id;
+  if (entry === null || spanId === undefined || spanId === null) return entry;
+  return {...entry, spanId};
+}
+
+function projectedEntry(event: RunEvent): TranscriptEntry | null {
   const fields = transcriptFields(event);
   const dataEntry = eventDataToTranscriptEntry(event, fields);
   const entry = dataEntry === undefined ? eventTypeToTranscriptEntry(event, fields) : dataEntry;

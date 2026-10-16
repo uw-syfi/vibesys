@@ -4,3 +4,4 @@
  */
 export {type ChatThread, DEFAULT_CHAT_THREAD_ID} from '../state.js';
 export type {ToolResultPayload, TranscriptEntry} from '../transcript-fold.js';
+export {transcriptBySpan} from '../transcript-spans.js';

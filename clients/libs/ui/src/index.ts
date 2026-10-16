@@ -17,6 +17,7 @@ export {
 export {Banner, type BannerTone, Card} from './components/card.js';
 export {Chart, type ChartPoint, type ChartTick} from './components/chart.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
+export {Collapsible} from './components/collapsible.js';
 export {Dialog} from './components/dialog.js';
 export {
   EmptyState,
@@ -41,6 +42,13 @@ export {
 } from './components/layout.js';
 export {type LogLine, LogPane} from './components/log-pane.js';
 export {Menu, type MenuItem} from './components/menu.js';
+export {
+  Message,
+  type MessageTone,
+  type MessageVariant,
+  ToolCall,
+  type ToolState,
+} from './components/message.js';
 export {type Completion, PathInput} from './components/path-input.js';
 export {Scrubber, type ScrubberTick} from './components/scrubber.js';
 export {type ChoiceOption, SegmentedControl} from './components/segmented-control.js';
@@ -57,6 +65,7 @@ export {
   type WordmarkTone,
 } from './components/text.js';
 export {ThemeSwatch} from './components/theme-swatch.js';
+export {Thread, type ThreadItem} from './components/thread.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
 export {Checkbox, Switch} from './components/toggle.js';
 export {type RowChip, Tree, TreeRow} from './components/tree.js';

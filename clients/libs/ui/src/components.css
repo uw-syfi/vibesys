@@ -1078,6 +1078,161 @@ button.vs-stage-head {
   bottom: var(--space-4);
 }
 
+/* --- collapsible, message, tool call, thread ---------------------------------------------------- */
+
+.vs-collapsible {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.vs-collapsible-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-2) 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--text-body-strong-family);
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  font-weight: var(--text-body-strong-weight);
+  text-align: left;
+  cursor: pointer;
+}
+.vs-collapsible-head:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-collapsible-label {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-collapsible-label[data-mono] {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+}
+.vs-collapsible-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-left: var(--space-6);
+}
+
+.vs-message-text {
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vs-message[data-variant="reasoning"] .vs-message-text {
+  color: var(--muted);
+  font-style: italic;
+}
+.vs-message[data-variant="prompt"] .vs-message-text,
+.vs-message[data-variant="note"] .vs-message-text {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+}
+.vs-message[data-tone="err"] .vs-message-text {
+  color: var(--err);
+}
+
+.vs-code-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-code-block-body {
+  box-sizing: border-box;
+  max-height: var(--log-sm);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  overflow: auto;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--log-bg);
+  color: var(--log-text);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vs-code-block-body:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-tool-call[data-state="failed"] .vs-code-block-body {
+  color: var(--log-err);
+}
+
+.vs-thread {
+  position: relative;
+  min-width: 0;
+}
+.vs-thread-pane {
+  box-sizing: border-box;
+  height: var(--thread);
+  margin: 0;
+  padding: 0 var(--space-4);
+  list-style: none;
+  overflow: auto;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.vs-thread-pane:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-thread-row {
+  padding: var(--space-2) 0;
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-thread-gap {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-thread-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) 0 var(--space-1);
+}
+.vs-thread-jump {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+}
+
 /* --- scrubber ---------------------------------------------------------------------------------- */
 
 .vs-scrubber {

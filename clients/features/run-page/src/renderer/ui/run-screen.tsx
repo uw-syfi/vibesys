@@ -38,6 +38,7 @@ import {
   stopBannerView,
   streamLines,
   timelineView,
+  turnTranscript,
   viewedRun,
 } from '../../state/index.js';
 import {MapTab} from './map-tab.js';
@@ -351,12 +352,14 @@ function Panel(props: {
           dispatch={dispatch}
         />
       );
-    case 'map':
+    case 'map': {
+      const viewed = traceReached(state) ? viewedRun(state) : null;
       return (
         <MapTab
-          trace={traceReached(state) ? viewedRun(state).trace : null}
+          trace={viewed === null ? null : viewed.trace}
           map={state.map}
           logsOf={spanId => spanLogs(state, spanId)}
+          transcript={viewed === null ? null : turnTranscript(viewed.trace, viewed.core, state.map)}
           actions={{
             filter: filter => dispatch({type: 'map-filter', filter}),
             toggle: (id, open) => dispatch({type: 'map-toggle', id, open}),
@@ -365,6 +368,7 @@ function Panel(props: {
           }}
         />
       );
+    }
   }
 }
 

@@ -389,6 +389,10 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `CheckList` | `items: {id, state: 'ok' \| 'warn' \| 'fail' \| 'pending', label, detail?, fix?: {text, press}}[]`; each state has its own icon and word |
 | `Timeline` | `stages: {id, state: 'done' \| 'active' \| 'waiting' \| 'failed', label, elapsed?, quietFor?, body?}[]`; a body discloses, open at first for an active or failed stage |
 | `LogPane` | `label`, `lines: {text, stream?: 'out' \| 'err'}[]`, `size?`; follows the tail while at the bottom, offers "Jump to latest" when scrolled up; text only |
+| `Collapsible` | `label`, `summary?`, `leading?`, `mono?`, `open`, `toggle(open)`, children; the caller owns whether it is open, so a list that unmounts blocks keeps them open |
+| `Message` | `author`, `variant: 'reply' \| 'reasoning' \| 'prompt' \| 'note'`, `tone?: 'default' \| 'ok' \| 'err'`, `text`, `notice?`, `open`, `toggle`; plain text, closed it previews its first line |
+| `ToolCall` | `name`, `state: 'pending' \| 'ok' \| 'failed'`, `summary?`, `input: string \| null`, `output: string \| null`, `open`, `toggle` |
+| `Thread` | `label`, `items: ({kind: 'heading'} \| {kind: 'message'} \| {kind: 'tool'})[]` (each with a unique `id`); windowed over measured row heights, so any length costs a screenful; follows the tail, "Jump to latest" when scrolled up; keeps each block as the reader left it; give it a `key` per thread |
 | `Scrubber` | `label`, `value`, `last`, `position` (words), `live`, `pastLabel`, `ticks?`, `change`, `backToLive` |
 | `Stat` | `label`, `value`, `sub?` |
 | `Chart` | `label`, `points: {x, y, filled}[]`, `steps?`, `reference?: {y, label}`, `playhead?`, `xTicks?`, `yTicks?`, `xTitle?`; SVG in `accent`, `muted` and `grid` |
@@ -612,7 +616,7 @@ names a missing or extra one.
 | `@vibesys/contracts` | foundation | exists (pilot: generated run-protocol and host-helper types, the one schema walker, error taxonomy, `./host-helper` validation, `./testing` fixtures) | foundation item (#1869) |
 | `@vibesys/ui` | foundation | exists: the batch 1 components (`.`, `dom`; see [Components](#components)), today's primitives (`./legacy`) and the design tokens (`./tokens`, `./tokens.css`, `./fonts.css`, and the components' `./components.css`; see [Design tokens and themes](#design-tokens-and-themes)); the desktop and web features render the legacy primitives | domain packages (phase 5 of #1878) |
 | `@vibesys/store` | foundation | exists: `Step`, `Reducer`, `only`, `createStore` (`.`) and the fold model-test kit (`./testing`: `checkModel`, `Seeded`, `SEEDS`); domain-free | domain split (#1949) |
-| `@vibesys/run-state` | core | exists: the run event fold (`.`), with `./rounds`, `./performance`, and `./transcript` projections; depends on `contracts` only | domain split (#1949) |
+| `@vibesys/run-state` | core | exists: the run event fold (`.`), with `./rounds`, `./performance`, and `./transcript` projections (the run's transcript, and `transcriptBySpan`, which reads it by the span id the server stamped on each event); depends on `contracts` only | domain split (#1949) |
 | `@vibesys/core-state` | core | deleted: split into `store` and `run-state` | domain split (#1949) |
 | `@vibesys/transport` | core | exists: `.` and `./testing` (the shared `FakeClock`) are `neutral`, `./websocket` is `dom` | backend-client split (#1910) |
 | `@vibesys/transport-node` | domain | exists: the Unix-socket `ServerClient`; desktop's ssh and local-host links join it with the connection manager | backend-client split (#1910) |

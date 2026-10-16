@@ -204,6 +204,26 @@ test('a log pane follows the tail until scrolled up, then offers to jump to it',
   expect(await atEnd()).toBe(true);
 });
 
+test('a thread follows its tail until scrolled up, and opens a block from the keyboard', async ({
+  page,
+}) => {
+  await page.goto('./');
+  const pane = page.getByRole('list', {name: 'Turn by turn', exact: true});
+  await expect(pane.getByText('The batch handoff is slower under contention')).toBeVisible();
+  await pane.evaluate(element => {
+    element.scrollTop = 0;
+  });
+  await expect(page.getByRole('button', {name: 'Jump to latest'})).toBeVisible();
+  const reasoning = pane.getByRole('button', {name: /Reasoning/});
+  await reasoning.focus();
+  await expect(reasoning).toHaveAttribute('aria-expanded', 'false');
+  await page.keyboard.press('Enter');
+  await expect(reasoning).toHaveAttribute('aria-expanded', 'true');
+  await expect(pane.getByText('Padding costs memory but removes the false sharing.')).toBeVisible();
+  await page.getByRole('button', {name: 'Jump to latest'}).click();
+  await expect(pane.getByText('The batch handoff is slower under contention')).toBeVisible();
+});
+
 test('a scrubber steps with the arrow keys and goes back to live', async ({page}) => {
   await page.goto('./');
   const range = page.getByRole('slider', {name: 'Position', exact: true});

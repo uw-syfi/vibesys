@@ -3,7 +3,7 @@ import {expect, type Page, test} from '@playwright/test';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
-import {RUN_ID, traceEvents, W5_GATE} from './fake-trace.js';
+import {RUN_ID, traceEvents, turnEvents, W5_GATE} from './fake-trace.js';
 
 /**
  * The Run screen's Map and time scrubber against the Fake bridge and a fake run server whose
@@ -56,7 +56,8 @@ const SEED: FakeBridgeSeed = {
   ],
 };
 
-const EVENTS = traceEvents();
+const SPAN_EVENTS = traceEvents();
+const EVENTS = [...SPAN_EVENTS, ...turnEvents(SPAN_EVENTS.length)];
 
 const SERVER: FakeServerSeed = {
   runId: RUN_ID,
@@ -213,4 +214,37 @@ test('the Map shows the run as a tree, opens a step’s own logs, and replays it
   await page.getByRole('button', {name: 'Jump to end'}).click();
   await expect(main.getByText('End', {exact: true})).toBeVisible();
   await shot(page, 'ink-map-ended');
+});
+
+test('the Map shows the turns under a step, turn by turn, and none for a step without any', async ({
+  page,
+}) => {
+  await openMap(page);
+  const tree = page.getByRole('tree', {name: 'Run steps'});
+  const row = (name: string | RegExp) => tree.getByRole('treeitem', {name});
+  await row(/W5 · Combine W1 ring/).click();
+  const turns = page.getByRole('region', {name: 'Turn by turn'});
+  await expect(turns.getByText('1 agent turn')).toBeVisible();
+  const list = turns.getByRole('list', {name: 'Turn by turn'});
+  await expect(
+    list.getByText('I will pad each counter to its own line and re-measure.'),
+  ).toBeVisible();
+
+  // The reasoning starts closed; a tool call opens to its input and its result.
+  const reasoning = list.getByRole('button', {name: /Reasoning/});
+  await expect(reasoning).toHaveAttribute('aria-expanded', 'false');
+  await reasoning.click();
+  await expect(list.getByText('The head and tail counters share a cache line.')).toBeVisible();
+  const bash = list.getByRole('button', {name: /Bash/});
+  await expect(bash).toHaveAttribute('aria-expanded', 'false');
+  await bash.click();
+  await expect(list.getByText('"command": "cargo bench --bench queue"')).toBeVisible();
+  await expect(list.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
+  await noViolations(page);
+  await shot(page, 'ink-map-turns');
+
+  // Another workstream has no turn with a transcript, and says so.
+  await row(/W6 · Wait-free consumer path/).click();
+  await expect(turns.getByText('No agent turns for this step')).toBeVisible();
+  await noViolations(page);
 });

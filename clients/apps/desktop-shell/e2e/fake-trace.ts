@@ -277,3 +277,59 @@ export function traceEvents(): readonly Record<string, unknown>[] {
     };
   });
 }
+
+/**
+ * W5's agent turn as the server sends it after the span events: reasoning, a reply, and a tool call
+ * with its result, each stamped with the turn's span id. `after` is the last span event's sequence.
+ */
+export function turnEvents(after: number): readonly Record<string, unknown>[] {
+  const stamp = new Date(START + 1700 * 1000).toISOString().slice(0, 19);
+  const bodies: readonly (readonly [string, Record<string, unknown>])[] = [
+    [
+      'agent_output_chunk',
+      {
+        kind: 'agent_output_chunk',
+        channel: 'analysis',
+        content: 'The head and tail counters share a cache line. ',
+      },
+    ],
+    [
+      'agent_output_chunk',
+      {
+        kind: 'agent_output_chunk',
+        channel: 'assistant',
+        content: 'I will pad each counter to its own line and re-measure.',
+      },
+    ],
+    [
+      'tool_call',
+      {
+        kind: 'tool_call',
+        tool: 'Bash',
+        call_id: 'c1',
+        args: {command: 'cargo bench --bench queue'},
+      },
+    ],
+    [
+      'tool_result',
+      {
+        kind: 'tool_result',
+        tool: 'Bash',
+        call_id: 'c1',
+        content: 'queue/mpmc time: 41.2 ms',
+        is_error: false,
+      },
+    ],
+  ];
+  return bodies.map(([type, data], index) => ({
+    protocol_version: 1,
+    run_id: RUN_ID,
+    sequence: after + index + 1,
+    timestamp: `${stamp}+00:00`,
+    type,
+    invocation_id: 'inv-w5',
+    agent_kind: 'implementer',
+    span_id: 'op:w5-turn',
+    data,
+  }));
+}
