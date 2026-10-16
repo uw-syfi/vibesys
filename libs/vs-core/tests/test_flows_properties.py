@@ -6,12 +6,13 @@ agent sessions asked several times, workspaces that are kept, verified and measu
 choices), and so are the event orders (answer an open wait with a reply or a failure, move the
 clock, stop). The same orders drive two runs in lockstep: one live, one that writes its state to
 JSON and replays it in a new search after every step. They must agree on every decision, every
-state and what every flow waits for. A counterexample is printed as a timeline.
+state, what every flow waits for and the run trace's spans, ids and times; the trace stays well
+formed at every step. A counterexample is printed as a timeline.
 
 Once the generated events are spent the host stops the run and answers everything left. Then,
 besides the two runs agreeing: every workspace the host opened was settled exactly once, a session
 kept one conversation across its turns, and the winner the run adopted is the last one the live
-flow chose (the input when it chose none).
+flow chose (the input when it chose none), and no span is left running or waiting.
 """
 
 from __future__ import annotations
@@ -27,7 +28,18 @@ import vs_core.api as core
 from vs_core.api.testing import Prompt
 from vs_sim.api.testing import examples
 
-from .flow_support import FACTS, WORKER, Config, Plan, answer_of, ask, open_workspace, start
+from .flow_support import (
+    FACTS,
+    WORKER,
+    Config,
+    Plan,
+    answer_of,
+    ask,
+    assert_trace_ended,
+    assert_trace_well_formed,
+    open_workspace,
+    start,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Callable, Coroutine
@@ -439,6 +451,7 @@ def test_a_restart_after_every_step_equals_the_live_run(
     assert set(host.settled) <= set(host.opened)
     result = live.finished.result
     assert result.selection == selection_of(live_choices[-1] if live_choices else None)
+    assert_trace_ended(live.trace())
 
 
 def _both(
@@ -460,6 +473,8 @@ def _both(
     assert live.state == crashing.state
     assert live.open == crashing.open
     assert live.waiting() == crashing.waiting()
+    assert live.trace() == crashing.trace()
+    assert_trace_well_formed(live.trace(), live.view.now_at)
     return True
 
 
@@ -470,7 +485,7 @@ def _drain(live: FlowRun[Config], crashing: FlowRun[Config], host: Host) -> bool
         if waits:
             action = _reply(host, waits[0], 1)
         elif live.finished is None and live.sleeping_until:
-            target = max(live.sleeping_until)
+            target = max(*live.sleeping_until, live.view.now_at)  # the run clock never goes back
             action = _advance(target)
         else:
             return True

@@ -74,6 +74,15 @@ export interface ServerTransport {
    * latency is bounded by the redial schedule, not by this.
    */
   request(input: RequestInput, options?: RequestOptions): Promise<ProtocolResponse>;
+  /**
+   * Open one event subscription. Consumer callbacks are notification
+   * boundaries, never socket callbacks: an `onMessage` failure retires that
+   * subscription and is delivered to `onDisconnect` without being relabeled a
+   * peer parse fault; either callback's thrown value is contained and retained
+   * until terminal `close()`. `close()` reports those failures only after every
+   * acquired bounded socket owner has settled, preserving one by identity and
+   * several in delivery order.
+   */
   subscribe(
     afterSequence: number,
     onMessage: (message: ServerMessage) => void,

@@ -20,7 +20,7 @@ from typing import ClassVar, Literal
 from pydantic import BaseModel, Field
 
 from vibesys.orchestration.dynamic.search._plan import PlanCheck, PlanUpdate
-from vibesys.orchestration.dynamic.search._values import HandoffNote, WorkPlan
+from vibesys.orchestration.dynamic.search._values import HandoffNote, MergeRecord, WorkPlan
 from vs_core.api.search import (
     LifecycleClass,
     OperationDescriptor,
@@ -59,6 +59,8 @@ class WriteHandoff(OperationRequest):
     scheduled: tuple[WorkPlan, ...]
     updates: tuple[PlanUpdate, ...] = ()
     handoff: HandoffNote
+    merges: tuple[MergeRecord, ...] = ()
+    """Every merge finished by the time of the call, oldest first."""
 
 
 HANDOFF = OperationRegistration(
@@ -75,7 +77,9 @@ HANDOFF = OperationRegistration(
 """The handoff write, an operation the host's handoff owner performs for the search."""
 
 
-def handoff_request(call: int, check: PlanCheck) -> WriteHandoff:
+def handoff_request(
+    call: int, check: PlanCheck, merges: tuple[MergeRecord, ...] = ()
+) -> WriteHandoff:
     """The write a scheduled plan asks for."""
     return WriteHandoff(
         call=call,
@@ -83,4 +87,5 @@ def handoff_request(call: int, check: PlanCheck) -> WriteHandoff:
         scheduled=check.accepted,
         updates=check.updates,
         handoff=check.handoff,
+        merges=merges,
     )

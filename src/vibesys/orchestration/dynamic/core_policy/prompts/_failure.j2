@@ -22,6 +22,9 @@
 {%- elif kind == 'not-measured' and failure.dropped.value == 'superseded' %}its candidate was never measured: {% if failure.superseded_by %}`{{ failure.superseded_by }}`{% else %}a newer candidate{% endif %} submitted code that holds it first
 {%- elif kind == 'not-measured' and failure.dropped.value == 'restarted' %}its candidate was never measured: the run restarted and could not resume its work; its code is kept
 {%- elif kind == 'not-measured' %}its candidate was never measured: the run stopped first; its code is kept
+{%- elif kind == 'merge-refused' %}the merger refused to merge; its reason is in the merge's record
+{%- elif kind == 'merge-unsound' %}the merged commit did not pass the trusted accuracy check, so main did not move to it
+{%- elif kind == 'merge-regressed' %}the merged commit measured worse than main, or failed a benchmark check main passed, so main did not move to it
 {%- else %}{{ kind }}
 {%- endif %}
 {%- endmacro %}

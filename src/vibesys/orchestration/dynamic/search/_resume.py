@@ -18,6 +18,7 @@ from typing import Literal
 from vibesys.candidates.api import Baseline
 from vibesys.orchestration.dynamic.search._outcomes import (
     Closing,
+    MergeReport,
     Result,
     Work,
     WorkstreamStart,
@@ -64,6 +65,8 @@ class WorkstreamResume(Value):
     blockers: tuple[Blocker, ...] = ()
     carried: Result | None = None
     """The latest candidate the implementer made, reviewed or not (`Work.carried`)."""
+    merged: MergeReport | None = None
+    """The merger's commit, once a merge made one (`Work.merged`)."""
     result: Result | None = None
     measurement: MeasurementResult | None = None
     closing: Closing | None = None
@@ -75,6 +78,7 @@ class WorkstreamResume(Value):
         """What the workstream held when it checkpointed, but its workspace (reopened apart)."""
         return Work(
             carried=self.carried,
+            merged=self.merged,
             baseline=self.baseline,
             input_wait_since=self.input_wait_since,
             overdue_reported=self.overdue_reported,
@@ -100,8 +104,8 @@ def mark(  # noqa: PLR0913  # lint-waiver: LW-271016 [PLR0913]; each keyword is 
 ) -> None:
     """Checkpoint what the workstream established at ``stage`` in its open workspace.
 
-    The latest candidate it names is salvaged: kept as work in progress if a restart cannot give
-    the workspace back.
+    The latest candidate it names, or the merger's commit, is salvaged: kept as work in progress
+    if a restart cannot give the workspace back.
     """
     workspace = work.workspace
     if workspace is None:
@@ -114,6 +118,7 @@ def mark(  # noqa: PLR0913  # lint-waiver: LW-271016 [PLR0913]; each keyword is 
             stage=stage,
             blockers=blockers,
             carried=work.carried,
+            merged=work.merged,
             result=result,
             measurement=measurement,
             closing=closing,
@@ -123,9 +128,10 @@ def mark(  # noqa: PLR0913  # lint-waiver: LW-271016 [PLR0913]; each keyword is 
         )
     )
     candidate = result or work.carried
-    revision = None if candidate is None else candidate.candidate.revision
-    if candidate is not None and revision is not None:
-        salvage = salvage_of(candidate, ctx.task.terms)
+    closing = Closing(result=candidate, merge=work.merged)
+    revision = closing.candidate  # a merger's commit, else the implementer's latest
+    if revision is not None:
+        salvage = salvage_of(closing, ctx.task.terms)
         ctx.workspaces.salvage(
             workspace,
             revision,

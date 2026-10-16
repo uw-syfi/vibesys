@@ -1,6 +1,6 @@
 """The light host commands import only light modules.
 
-``vibesys example``, ``vibesys instances``, ``vibesys tasks`` and the host
+``vibesys example``, ``vibesys instances``, ``vibesys tasks``, ``vibesys evals`` and the host
 helper are what the desktop app runs on a host, once per action or channel, so
 their start-up time is the app's latency. The run engine (``vibesys.api`` and what it loads) takes about
 1.7 s to import; these commands must never pay for it. Tach cannot keep them
@@ -38,6 +38,7 @@ LIGHT_ENTRYPOINTS = (
     "entrypoints.examples",
     "entrypoints.instances",
     "entrypoints.tasks",
+    "entrypoints.evals",
     "entrypoints.detached_run",
     "entrypoints.host_helper",
 )
@@ -54,6 +55,7 @@ ALLOWED_FIRST_PARTY = (
     "entrypoints.example_catalog",
     "entrypoints.instances",
     "entrypoints.tasks",
+    "entrypoints.evals",
     "entrypoints.detached_run",
     "entrypoints.host_helper",
     "server",
@@ -71,14 +73,16 @@ ALLOWED_FIRST_PARTY = (
     "vs_project",
     "vs_decode",
     "vs_logs",
+    "vs_slurm",
 )
 """First-party modules, or packages with everything under them, the closure may hold.
 
-``vs_sim``, ``vs_project``, ``vs_decode`` and ``vs_logs`` are allowed whole: they are the
-light libraries the host commands are built on (``vs_decode`` imports only pydantic;
-``vs_logs``, which a detached run needs to buffer its narration before the engine loads and
-the host helper reads run logs with, only pydantic, ``vs_decode`` and ``vs_sim``), and their
-own boundaries are tach's job."""
+``vs_sim``, ``vs_project``, ``vs_decode``, ``vs_logs`` and ``vs_slurm`` are allowed whole:
+they are the light libraries the host commands are built on (``vs_decode`` imports only
+pydantic; ``vs_logs``, which a detached run needs to buffer its narration before the engine
+loads and the host helper reads run logs with, only pydantic, ``vs_decode`` and ``vs_sim``;
+``vs_slurm`` only pydantic, ``vs_decode`` and ``vs_sim``), and their own boundaries are
+tach's job."""
 
 
 def _module_file(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> Path | None:
@@ -178,7 +182,7 @@ def _within(name: str, prefixes: tuple[str, ...]) -> bool:
 def _allowed(name: str, roots: tuple[Path, ...] = SOURCE_ROOTS) -> bool:
     if _module_file(name, roots) is not None:
         exact = name in ALLOWED_FIRST_PARTY
-        whole_package = _within(name, ("vs_sim", "vs_project", "vs_decode", "vs_logs"))
+        whole_package = _within(name, ("vs_sim", "vs_project", "vs_decode", "vs_logs", "vs_slurm"))
         return (exact or whole_package) and not is_heavy(name)
     top = name.partition(".")[0]
     return (top in sys.stdlib_module_names or top in ALLOWED_THIRD_PARTY) and not is_heavy(name)

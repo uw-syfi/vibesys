@@ -1,9 +1,45 @@
 /**
- * Domain-free React primitives and the design tokens they are drawn with (`./tokens.css`). Props
- * in, events out: no I/O, no effect hooks, and no word of any one product's domain, so the desktop
- * views and the web page compose the same pieces.
+ * The design system: domain-free React components drawn only from the design tokens. Props are data
+ * and callbacks; variants are token names; no component takes `className` or `style`, so a screen
+ * composed from them needs no CSS of its own. An app imports `./tokens.css`, `./fonts.css` and
+ * `./components.css` once.
  */
-export {Button, type ButtonVariant} from './button.js';
-export {Combobox} from './combobox.js';
-export {Dialog} from './dialog.js';
-export {StatusChip, type Tone} from './status-chip.js';
+export {applyTheme, type ThemeTarget} from './apply-theme.js';
+export {
+  Button,
+  type ButtonAction,
+  type ButtonFace,
+  type ButtonProps,
+  type ButtonSize,
+  type ButtonVariant,
+} from './components/button.js';
+export {Banner, type BannerTone, Card} from './components/card.js';
+export {Field, TextInput} from './components/field.js';
+export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
+export {
+  type Align,
+  Grid,
+  type GridColumn,
+  type Justify,
+  Page,
+  type PageWidth,
+  Row,
+  Split,
+  Stack,
+} from './components/layout.js';
+export {type Completion, PathInput} from './components/path-input.js';
+export {type ChoiceOption, SegmentedControl} from './components/segmented-control.js';
+export {Select, type SelectOption} from './components/select.js';
+export {Chip, StatusDot, type StatusTone} from './components/status.js';
+export {Text, type TextElement, type TextTone, Wordmark} from './components/text.js';
+export {Checkbox, Switch} from './components/toggle.js';
+export type {
+  ColorRole,
+  ElevationLevel,
+  RadiusToken,
+  SizeToken,
+  SpaceToken,
+  TextStyle,
+  ThemeMode,
+  ThemeName,
+} from './tokens/index.js';

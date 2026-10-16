@@ -32,6 +32,8 @@ from vibesys.orchestration.dynamic.search._values import (
     DropReason,
     Failure,
     FailureKind,
+    MergeOutcome,
+    MergeSource,
     Proof,
     RoundRecord,
     Unreachable,
@@ -79,6 +81,10 @@ class WorkstreamStart(Value):
     config: DynamicConfig
     baseline: Baseline | None
     """The input's measurement when the workstream started; None while it was still being measured."""
+    merge: tuple[MergeSource, ...] = ()
+    """For a merge: the candidates to merge into ``parent`` (main), in order."""
+    rebase_onto: RevisionRef | None = None
+    """The run's main, when it advanced past the base of the hypothesis this continues."""
 
     @property
     def attempt(self) -> AttemptId:
@@ -92,13 +98,14 @@ class WorkstreamStart(Value):
 
     @property
     def implements(self) -> bool:
-        """Whether the workstream makes a candidate, rather than looking at the parent."""
+        """Whether the workstream implements a hypothesis, rather than merging or looking."""
         return self.plan.kind is WorkKind.IMPLEMENT
 
     @property
     def workspace(self) -> WorkspacePlan:
-        """An implementer works in an isolated child of the parent; others only read it."""
-        mode = WorkspaceMode.ISOLATED_CHILD if self.implements else WorkspaceMode.READ_ONLY_REVISION
+        """An implementer or a merger works in an isolated child of the parent; a profiler reads it."""
+        writes = self.plan.kind in {WorkKind.IMPLEMENT, WorkKind.MERGE}
+        mode = WorkspaceMode.ISOLATED_CHILD if writes else WorkspaceMode.READ_ONLY_REVISION
         return WorkspacePlan(mode=mode, base=self.parent)
 
     @property
@@ -160,6 +167,15 @@ class Unmeasured(Value):
     result: Result | None = None
 
 
+class MergeReport(Value):
+    """What the merger answered, with the commit core checkpointed when it merged."""
+
+    outcome: MergeOutcome
+    summary: str = ""
+    reason: str = ""
+    revision: RevisionRef | None = None
+
+
 class Evidence(Value):
     """The trusted readings of a candidate, and the evidence they were decoded from."""
 
@@ -177,6 +193,8 @@ class Closing(Value):
     evidence: Evidence = Evidence()
     cause: Failure | None = None
     unreachable: Unreachable | None = None
+    merge: MergeReport | None = None
+    """What a merge workstream's merger answered."""
 
     @property
     def readings(self) -> tuple[AcceptedReading, ...]:
@@ -185,7 +203,9 @@ class Closing(Value):
 
     @property
     def candidate(self) -> RevisionRef | None:
-        """The revision the attempt retained, if any."""
+        """The revision the attempt retained, if any: a merge's commit, else the candidate's."""
+        if self.merge is not None:
+            return self.merge.revision
         return None if self.result is None else self.result.candidate.revision
 
     def scored(self, plan: WorkPlan) -> bool:
@@ -236,6 +256,8 @@ class Work:
     """When, on the run clock, the workstream first waited on something that needs the input."""
     overdue_reported: bool = False
     """Whether its wait for the input has passed the run's limit (`_measure.while_input_pending`)."""
+    merged: MergeReport | None = None
+    """The merger's commit, once it made one, so a failed measurement still settles with it."""
 
     def ended(self, ended: "WorkEndedError") -> Closing:
         """The closing of work that did not finish: what it carried, with the failure."""
@@ -244,11 +266,12 @@ class Work:
             evidence=Evidence(proof=ended.proof),
             cause=ended.failure,
             unreachable=ended.unreachable,
+            merge=self.merged,
         )
 
     def stopped(self) -> Closing:
         """The closing of work the operator stopped."""
-        return Closing(result=self.carried, cause=STOPPED)
+        return Closing(result=self.carried, cause=STOPPED, merge=self.merged)
 
 
 class WorkEndedError(Exception):
@@ -292,6 +315,7 @@ class WorkstreamDone:
     result: Result | None = None
     evidence: Evidence = field(default_factory=Evidence)
     unreachable: Unreachable | None = None
+    merge: MergeReport | None = None
 
     @classmethod
     def stopped(cls, start: WorkstreamStart) -> "WorkstreamDone":
@@ -307,14 +331,25 @@ class WorkstreamDone:
 
     @classmethod
     def lost(
-        cls, start: WorkstreamStart, workspace: AttemptRef, result: Result | None
+        cls,
+        start: WorkstreamStart,
+        workspace: AttemptRef,
+        result: Result | None,
+        merge: MergeReport | None = None,
     ) -> "WorkstreamDone":
         """Resumed after a code change without its workspace: the restart settled it.
 
-        The restart settled it as the workstream's salvage said: a candidate's code is kept as
-        work in progress, unmeasured (`salvage_of`); its settlement reached no flow.
+        The restart settled it as the workstream's salvage said: a candidate's or a merger's
+        code is kept as work in progress, unmeasured (`salvage_of`); its settlement reached no
+        flow, so main does not move to a lost merge's commit.
         """
-        return cls(start, failure=RESTARTED, generation=workspace.generation, result=result)
+        return cls(
+            start,
+            failure=RESTARTED,
+            generation=workspace.generation,
+            result=result,
+            merge=merge,
+        )
 
     @classmethod
     def closed(
@@ -331,6 +366,7 @@ class WorkstreamDone:
             result=closing.result,
             evidence=closing.evidence,
             unreachable=closing.unreachable,
+            merge=closing.merge,
         )
 
 
@@ -343,8 +379,9 @@ def assertion(
     """The assessments, eligibility and retention the closing proposes for the workspace.
 
     A profile workstream measures a revision without proposing one, so it settles as ineligible
-    and discarded. A candidate is eligible when it passed the task's gates and beats the input,
-    so a closing that is scored (`Closing.scored`) needs the input's measurement (``baseline``).
+    and discarded. A candidate, an implementer's or a merger's commit, is retained when it passed
+    accuracy and is eligible when it passed the task's gates and beats the input, so a closing
+    that is scored (`Closing.scored`) needs the input's measurement (``baseline``).
     """
     if w.plan.kind is WorkKind.PROFILE:
         profile = reading_of(closing.readings, EvidenceKind.PROFILING)
@@ -383,12 +420,14 @@ UNSETTLED = frozenset({HypothesisOutcome.BLOCKED, HypothesisOutcome.IMPLEMENTATI
 """The implementer's own outcomes that make a candidate ineligible however it measured."""
 
 
-def salvage_of(result: Result, terms: TaskTerms) -> Settle:
-    """How a candidate's workspace settles if a restart cannot give it back to its workstream.
+def salvage_of(closing: Closing, terms: TaskTerms) -> Settle:
+    """How a workspace settles if a restart cannot give it back to its workstream.
 
-    As a candidate dropped unmeasured: never eligible, its code kept as work in progress.
+    ``closing`` carries what the workstream had made: its latest candidate, or a merger's
+    commit. It settles as a candidate dropped unmeasured: never eligible, its code kept as work
+    in progress.
     """
-    return _not_measured(Closing(result=result, cause=RESTARTED), terms)
+    return _not_measured(closing.model_copy(update={"cause": RESTARTED}), terms)
 
 
 def _unmeasured_step(closing: Closing, terms: TaskTerms) -> Settle:

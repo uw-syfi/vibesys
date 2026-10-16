@@ -5,7 +5,7 @@
 
 import type {ChromeState} from '@vibesys/ipc';
 import type {ResumeRunId} from '@vibesys/runs';
-import {Button, StatusChip, type Tone} from '@vibesys/ui';
+import {Button, StatusChip, type Tone} from '@vibesys/ui/legacy';
 import type {JSX} from 'react';
 import type {RunCommand} from '../../state/run-control.js';
 import {

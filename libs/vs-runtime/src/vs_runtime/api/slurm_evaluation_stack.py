@@ -57,6 +57,7 @@ if TYPE_CHECKING:
 
     from vs_runtime.api.core import StageOutputOpener
     from vs_runtime.contracts import CandidateWorkspace
+    from vs_sim.api import Sleeper
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 ADMISSION = DecisionId(root="admission-1")
@@ -180,6 +181,7 @@ async def build_stack(
     *,
     profile_command: tuple[str, ...] | None = None,
     stage_output: StageOutputOpener | None = None,
+    sleeper: Sleeper | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
@@ -187,6 +189,8 @@ async def build_stack(
 
     With ``profile_command`` the run can capture a profile, whose stdout is
     ``cluster.profile_output``. ``stage_output`` opens each stage's output stream.
+    ``sleeper`` paces the executor's polls of a running job; by default a pause
+    passes at once.
     """
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(
@@ -217,7 +221,7 @@ async def build_stack(
         stage_failure_text=render_stage_failure,
         clock=ManualClock(),
         # Pacing moves a timeline of its own, so polling never brings a deadline nearer.
-        sleeper=ManualClock(),
+        sleeper=sleeper or ManualClock(),
         cluster=cluster,
         stage_output=stage_output,
     )

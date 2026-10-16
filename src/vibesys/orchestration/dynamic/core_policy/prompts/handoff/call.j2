@@ -7,7 +7,11 @@
 
 ## Workstreams scheduled
 {% for item in scheduled %}
-{% if item.kind.value == "profile" %}
+{% if item.kind.value == "merge" %}
+- merge `{{ item.work_id }}` of {% for candidate in item.candidates %}`{{ candidate }}`{% if not loop.last %}, {% endif %}{% endfor %} into main
+  Instructions: {{ item.instructions }}
+  Watch for: {{ item.watch_for }}
+{% elif item.kind.value == "profile" %}
 - profile `{{ item.work_id }}` of {% if item.parent_hypothesis_id %}hypothesis `{{ item.parent_hypothesis_id }}`{% else %}the base revision{% endif %}: {{ item.question }}
   Decision impact: {{ item.decision_impact }}
 {% else %}
@@ -48,3 +52,14 @@ Expectations left out, because these workstreams were not scheduled: {% for work
 {% else %}
 none recorded
 {% endfor %}
+{% if merges %}
+
+## Merges so far
+{% for item in merges %}
+- merge `{{ item.merge_id }}` of {% for source in item.candidates %}`{{ source.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %}: {{ item.outcome.value }}{% if item.failure %} ({{ item.failure.kind.value }}){% endif %}{% if item.revision %}, commit `{{ item.revision.revision_id.root }}`{% endif %}{% if item.summary %}: {{ item.summary }}{% endif %}
+
+{% if item.reason %}
+  Why the merger refused: {{ item.reason }}
+{% endif %}
+{% endfor %}
+{% endif %}

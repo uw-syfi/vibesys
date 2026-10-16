@@ -53,7 +53,7 @@ def test_the_roles_that_work_on_a_candidate_are_asked_again_after_a_lost_turn() 
     asked once for a plan's steps, leaves it to core.
     """
     again = {role.name for role in ROLES if role.lost_turns > 0}
-    assert again == {"implementer", "judge", "profiler", "outliner"}
+    assert again == {"implementer", "judge", "profiler", "merger", "outliner"}
 
 
 @MODES

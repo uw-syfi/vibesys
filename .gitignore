@@ -43,6 +43,7 @@ clients/apps/web/test-results/
 clients/apps/web/.browser-dist/
 clients/apps/web/.desktop-dist/
 clients/apps/desktop-main/test-results/
+clients/apps/ui-gallery/test-results/
 # `tsc -b` build info for the check-only projects, and Turborepo's local cache and task logs.
 clients/**/.tsbuild/
 .turbo/

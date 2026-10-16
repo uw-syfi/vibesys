@@ -202,7 +202,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Full history without blobs: `check_frozen_ui` compares against the merge base with
+      # origin/main and reads only the frozen packages' files there.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Set up the TUI workspace
         uses: ./.github/actions/setup-tui
@@ -270,6 +275,17 @@ jobs:
         # Electron's native windows require a display; Playwright's dependency install above
         # provides Xvfb on this Linux runner. The wrapper owns the display for this one check group.
         run: xvfb-run -a ./support/repoctl/repoctl run-checks --group tui_e2e
+
+      # A gallery screenshot that differs from its baseline leaves the actual and the diff here, so
+      # a reviewer can see the change without rerunning it in the Linux image.
+      - name: Upload the gallery's screenshot differences
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ui-gallery-test-results
+          path: clients/apps/ui-gallery/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   queue-native:
     needs: changes

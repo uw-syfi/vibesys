@@ -72,6 +72,15 @@ host = "my-cluster"
 commands on `PATH`. Every transport process has the hard deadline configured by
 `transport_timeout_seconds`.
 
+Every job is submitted with `--no-requeue`, after the operator's
+`sbatch_arguments`, and `--requeue` there is rejected: VibeSys retries a failed
+job itself, and a scheduler requeue would rerun stages that already finished.
+A job's service runs in its own session. When the job script exits, it sends
+SIGTERM to the service's whole process group, sends SIGKILL
+`service_stop_grace_seconds` later (1 to 20, default 20), and exits at most
+5 seconds after that, so teardown ends before Slurm's default KillWait of
+30 seconds. A step that outlives KillWait drains the node.
+
 The local machine needs OpenSSH and rsync. The login host needs rsync and the
 Slurm commands named by the configuration, and `remote_workspace_root` must be
 writable and visible from compute nodes.

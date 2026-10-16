@@ -1,0 +1,84 @@
+import {createContext, type JSX, type ReactNode, useContext, useId} from 'react';
+
+/** What a `Field` gives the one control inside it: its id, what describes it, and its validity. */
+export interface FieldWiring {
+  readonly id: string;
+  /** The label's id, for a popup the control owns (a list of completions) to be named by. */
+  readonly labelId: string;
+  readonly describedBy: string | undefined;
+  readonly invalid: boolean;
+}
+
+const FieldContext = createContext<FieldWiring | null>(null);
+
+/** The wiring of the enclosing `Field`. A control outside one has no label, so this throws. */
+export function useFieldWiring(control: string): FieldWiring {
+  const wiring = useContext(FieldContext);
+  if (wiring === null) {
+    throw new Error(`${control} must be inside a Field, which gives it its label, help and error`);
+  }
+  return wiring;
+}
+
+/**
+ * A label, one control (`TextInput`, `PathInput` or `Select`), and help and error text the control
+ * is described by. With `error` the control is marked invalid.
+ */
+export function Field(props: {
+  readonly label: string;
+  readonly help?: string;
+  readonly error?: string;
+  readonly children: ReactNode;
+}): JSX.Element {
+  const id = useId();
+  const helpId = props.help === undefined ? undefined : `${id}-help`;
+  const errorId = props.error === undefined ? undefined : `${id}-error`;
+  const describedBy = [helpId, errorId].filter(Boolean).join(' ') || undefined;
+  const labelId = `${id}-label`;
+  const wiring: FieldWiring = {id, labelId, describedBy, invalid: errorId !== undefined};
+  return (
+    <div className="vs-field">
+      <label className="vs-field-label" id={labelId} htmlFor={id}>
+        {props.label}
+      </label>
+      <FieldContext.Provider value={wiring}>{props.children}</FieldContext.Provider>
+      {helpId === undefined ? null : (
+        <p className="vs-help" id={helpId}>
+          {props.help}
+        </p>
+      )}
+      {errorId === undefined ? null : (
+        <p className="vs-help" data-tone="err" id={errorId}>
+          {props.error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** A one-line text input; `mono` for paths and identifiers, `readOnly` for a value shown as set. */
+export function TextInput(props: {
+  readonly value: string;
+  readonly change?: (value: string) => void;
+  readonly placeholder?: string;
+  readonly mono?: boolean;
+  readonly readOnly?: boolean;
+}): JSX.Element {
+  const wiring = useFieldWiring('TextInput');
+  return (
+    <input
+      className="vs-input"
+      id={wiring.id}
+      type="text"
+      value={props.value}
+      placeholder={props.placeholder}
+      readOnly={props.readOnly}
+      spellCheck={false}
+      autoComplete="off"
+      data-mono={props.mono === true || undefined}
+      aria-describedby={wiring.describedBy}
+      aria-invalid={wiring.invalid || undefined}
+      onChange={event => props.change?.(event.target.value)}
+    />
+  );
+}

@@ -14,6 +14,7 @@ from vs_core.types.common import (
     DecisionId,
     RevisionRef,
     RunFacts,
+    Seconds,
     Value,
     WorkspaceMode,
 )
@@ -46,6 +47,8 @@ from vs_core.types.strategy import (
     Withdraw,
 )
 from vs_core.types.until import Failed
+
+from ._spans import RunTrace
 
 if TYPE_CHECKING:
     from vs_core._registry import OperationRegistry
@@ -103,6 +106,11 @@ class Step(Value):
     recorded: Recorded | None = None
     reads: tuple[str, ...] = ()
     digest: str
+    at: Seconds
+    """The run-clock time of the step: the time of every span transition it recorded.
+
+    An input like the event, so it is not in the digest; replay takes it from here.
+    """
 
 
 class Issued(Value):
@@ -220,6 +228,8 @@ class LiveFlows(Value):
     in_flight: tuple[InFlight, ...] = ()
     """The measurements the flows wait for: a restart gives each to the resumed flow that asks
     for it again, instead of measuring twice."""
+    trace: RunTrace
+    """The run's spans so far: a restart continues them."""
 
 
 class Waiting(Value):

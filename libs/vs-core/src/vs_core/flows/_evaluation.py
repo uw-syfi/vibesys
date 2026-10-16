@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from vs_core.types.common import AttemptRef, Scope, Seconds
 
     from ._kit import Kit
+    from ._labels import Label
     from ._workspaces import Workspace
 
 _REFS = TypeAdapter(tuple[EvidenceRef, ...])
@@ -59,11 +60,15 @@ class Evaluation:
         *,
         workspace: Workspace | None = None,
         within: Seconds | Within,
+        label: Label | None = None,
     ) -> MeasurementResult | Failed:
-        """Measure ``plan`` (in the workspace's scope, else the run's): its result, or the failure."""
+        """Measure ``plan`` (in the workspace's scope, else the run's): its result, or the failure.
+
+        ``label`` labels the measurement's span.
+        """
         scope = THIS_RUN if workspace is None else workspace.scope
         request = Measure(decision_id=DecisionId(root="measure"), scope=scope, plan=plan)
-        match await self._kit.wait(request, _within(within)):
+        match await self._kit.wait(request, _within(within), label):
             case MeasurementFinished(result=result):
                 return result
             case Failed() as failed:

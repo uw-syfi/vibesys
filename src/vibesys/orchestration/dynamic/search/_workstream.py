@@ -75,7 +75,7 @@ async def resumed(ctx: Flow, at: WorkstreamResume) -> WorkstreamDone:
     try:
         async with ctx.workspaces.reopen(at.workspace) as ws:
             if isinstance(ws, NotReopened):
-                return WorkstreamDone.lost(w, at.workspace, at.result or at.carried)
+                return WorkstreamDone.lost(w, at.workspace, at.result or at.carried, at.merged)
             work.workspace = ws
             closing = await close_with(ctx, w, ws, work, at)
     except Stopped:

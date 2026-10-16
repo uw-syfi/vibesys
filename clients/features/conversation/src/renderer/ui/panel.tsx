@@ -1,5 +1,5 @@
 import type {TranscriptEntry} from '@vibesys/run-state/transcript';
-import {Button, Dialog} from '@vibesys/ui';
+import {Button, Dialog} from '@vibesys/ui/legacy';
 import type {JSX, KeyboardEvent} from 'react';
 import type {ConversationEvent, ConversationState, Submission} from '../../state/index.js';
 

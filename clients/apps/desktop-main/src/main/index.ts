@@ -4,7 +4,7 @@
  * (`app-security.ts`), the settings store, the connection manager, the features, and the window.
  */
 import {homedir} from 'node:os';
-import {join} from 'node:path';
+import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
   ConnectionManager,
@@ -30,7 +30,8 @@ import {
 } from './app-security.js';
 import {AppStartup} from './app-startup.js';
 import {Desktop} from './desktop.js';
-import {type LaunchPlan, parseLaunch} from './launch-args.js';
+import type {LaunchPlan} from './launch-args.js';
+import {planFromSecondInstance, prepareLaunchHandoff} from './launch-handoff.js';
 import {WelcomeFeed} from './welcome-feed.js';
 import {rendererGeneration} from './welcome-ipc.js';
 import {AppWindow} from './window.js';
@@ -47,11 +48,6 @@ const NETWORK_POLL_MS = 5_000;
 
 function log(message: string): void {
   console.error(`vibesys-desktop: ${message}`);
-}
-
-/** The launch plan in `argv` (a process's own command line). */
-function planFrom(argv: readonly string[], cwd: string): LaunchPlan {
-  return parseLaunch(argv.slice(app.isPackaged ? 1 : 2), cwd);
 }
 
 function applicationMenu(): Menu {
@@ -163,9 +159,12 @@ async function connectionManager(): Promise<ConnectionManager> {
 }
 
 function main(): void {
-  let plan: LaunchPlan;
+  let ownLaunch: ReturnType<typeof prepareLaunchHandoff>;
   try {
-    plan = planFrom(process.argv, process.env['INIT_CWD'] ?? '.');
+    // Resolve here, in the process that owns this command line. A relative cwd handed to the
+    // existing primary would otherwise be resolved against that other process's working directory.
+    const cwd = resolve(process.env['INIT_CWD'] ?? '.');
+    ownLaunch = prepareLaunchHandoff(process.argv.slice(app.isPackaged ? 1 : 2), cwd);
   } catch (error) {
     log((error as Error).message);
     process.exit(2);
@@ -194,15 +193,19 @@ function main(): void {
   });
   // One instance per user-data directory, the settings files' only writer: a second launch hands
   // its command line to this one (`second-instance`) and exits.
-  if (!app.requestSingleInstanceLock()) {
+  if (!app.requestSingleInstanceLock(ownLaunch.handoff)) {
     log('VibeSys is already running; showing its window');
     lifecycle.quit(0);
     return;
   }
-  app.on('second-instance', (_event, argv, cwd) => {
+  app.on('second-instance', (_event, argv, cwd, additionalData) => {
     let second: LaunchPlan;
     try {
-      second = planFrom(argv, cwd);
+      second = planFromSecondInstance({
+        electronArgv: argv,
+        electronCwd: cwd,
+        additionalData,
+      });
     } catch (error) {
       log(`ignoring a second launch's arguments: ${(error as Error).message}`);
       return;
@@ -213,7 +216,7 @@ function main(): void {
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => app.quit());
   app.on('web-contents-created', (_event, contents) => confineContents(contents, log));
   app.on('window-all-closed', () => app.quit());
-  void startup.start(plan, lifecycle);
+  void startup.start(ownLaunch.plan, lifecycle);
 }
 
 main();

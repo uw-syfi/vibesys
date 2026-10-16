@@ -151,39 +151,49 @@ class AccessSettlement:
         before this returns, so before any dispatch can start.
         """
         self._in_flight.add(key)
-        if self.receipt(key) is not None:
-            return  # a replay keeps the first baseline, never the tree the turn left
+        begun = False
         try:
+            receipt = self.receipt(key)
+            if receipt is not None:
+                # A replay keeps the first baseline, never the tree the turn left. Repair
+                # an interrupted first begin that wrote the receipt before its workspace
+                # index; no provider call could have followed a begin that did not return.
+                if not receipt.settled:
+                    self._track(Path(receipt.workspace_path), key, add=True)
+                begun = True
+                return
             self.require_clear(workspace.path, key)
-        except AccessSettlementError:
-            self._in_flight.discard(key)
-            raise
-        try:
-            baseline = await await_session_operation(
-                asyncio.create_task(workspace.snapshot(f"{key.text}-input"))
+            try:
+                baseline = await await_session_operation(
+                    asyncio.create_task(workspace.snapshot(f"{key.text}-input"))
+                )
+            except RuntimeContractError as error:
+                raise AccessSettlementError(str(error)) from error
+            receipt = AccessReceipt(
+                workspace=workspace_ref,
+                grant=grant,
+                baseline=baseline,
+                workspace_path=str(workspace.path),
             )
-        except RuntimeContractError as error:
-            self._in_flight.discard(key)
-            raise AccessSettlementError(str(error)) from error
-        receipt = AccessReceipt(
-            workspace=workspace_ref,
-            grant=grant,
-            baseline=baseline,
-            workspace_path=str(workspace.path),
-        )
 
-        def keep_first(stored: AccessReceipt | None) -> tuple[AccessReceipt | None, None]:
-            return (receipt if stored is None else None), None
+            def keep_first(stored: AccessReceipt | None) -> tuple[AccessReceipt | None, None]:
+                return (receipt if stored is None else None), None
 
-        with self._store.exclusive():
-            self._store.modify(_ACCESS, "access", key.text, AccessReceipt, keep_first)
-            self._track(workspace.path, key, add=True)
+            with self._store.exclusive():
+                self._store.modify(_ACCESS, "access", key.text, AccessReceipt, keep_first)
+                self._track(workspace.path, key, add=True)
+            begun = True
+        finally:
+            if not begun:
+                self._in_flight.discard(key)
 
     def fence(self, key: AccessKey) -> None:
-        """The writer's fate is unknown: leave its durable fence in place.
+        """End this host's live ownership, exposing any remaining durable fence.
 
-        The record written by ``begin`` keeps the workspace out of snapshots once the
-        invocation is no longer in flight here; only ``settle`` clears it.
+        The record written by ``begin`` keeps the workspace out of snapshots once
+        the invocation is no longer in flight here. ``settle`` is the only operation
+        that clears that durable record, so this is safe after every post-begin exit,
+        including successful settlement, cancellation, and an unexpected exception.
         """
         self._in_flight.discard(key)
 
@@ -194,9 +204,18 @@ class AccessSettlement:
         the workspace. Raises ``AccessSettlementError`` when the revert cannot finish;
         the workspace then stays fenced and a retry resumes the same restoration.
         """
+        # Settlement is terminal for this host's writer ownership. Release it before
+        # any lookup, workspace I/O, or receipt write can fail; the durable receipt then
+        # remains visible to snapshots and peer turns in this same process.
+        self._in_flight.discard(key)
         receipt = self.receipt(key)
-        if receipt is None or receipt.settled:
-            return None if receipt is None else receipt.violation
+        if receipt is None:
+            return None
+        if receipt.settled:
+            # A prior call may have recorded settlement and then failed while removing
+            # the workspace index. Retrying finishes that release idempotently.
+            self._track(Path(receipt.workspace_path), key, add=False)
+            return receipt.violation
         workspace = await self._workspace_for(receipt.workspace)
         if workspace is None:
             message = "the turn's workspace is gone before its access settled"
@@ -225,7 +244,6 @@ class AccessSettlement:
                 _ACCESS, "access", key.text, latest.model_copy(update={"settled": True})
             )
             self._track(Path(receipt.workspace_path), key, add=False)
-        self._in_flight.discard(key)
         return latest.violation
 
     def _unsettled(self, workspace: Path) -> tuple[AccessKey, ...]:

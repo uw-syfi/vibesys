@@ -297,29 +297,6 @@
       "title": "AgentExecutionStartedData",
       "type": "object"
     },
-    "AgentInvocation": {
-      "additionalProperties": false,
-      "description": "One agent invocation, as the invocation events identify it.",
-      "properties": {
-        "kind": {
-          "const": "agent_invocation",
-          "default": "agent_invocation",
-          "title": "Kind",
-          "type": "string"
-        },
-        "invocation_id": {
-          "minLength": 1,
-          "title": "Invocation Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "invocation_id"
-      ],
-      "title": "AgentInvocation",
-      "type": "object"
-    },
     "AgentOutputChunkData": {
       "additionalProperties": false,
       "description": "Incremental output produced during agent execution.",
@@ -3206,10 +3183,8 @@
     "LogOwner": {
       "discriminator": {
         "mapping": {
-          "agent_invocation": "#/$defs/AgentInvocation",
           "gate_stage": "#/$defs/GateStage",
           "run_narration": "#/$defs/RunNarration",
-          "slurm_job": "#/$defs/SlurmJob",
           "startup_step": "#/$defs/StartupStep",
           "tool_build": "#/$defs/ToolBuild"
         },
@@ -3223,13 +3198,7 @@
           "$ref": "#/$defs/GateStage"
         },
         {
-          "$ref": "#/$defs/AgentInvocation"
-        },
-        {
           "$ref": "#/$defs/ToolBuild"
-        },
-        {
-          "$ref": "#/$defs/SlurmJob"
         },
         {
           "$ref": "#/$defs/RunNarration"
@@ -5068,35 +5037,6 @@
       "required": [
         "kind"
       ]
-    },
-    "SlurmJob": {
-      "additionalProperties": false,
-      "description": "A Slurm job an execution submitted; its log is the job's own output file.",
-      "properties": {
-        "kind": {
-          "const": "slurm_job",
-          "default": "slurm_job",
-          "title": "Kind",
-          "type": "string"
-        },
-        "execution_id": {
-          "minLength": 1,
-          "title": "Execution Id",
-          "type": "string"
-        },
-        "job_id": {
-          "minLength": 1,
-          "title": "Job Id",
-          "type": "string"
-        }
-      },
-      "required": [
-        "kind",
-        "execution_id",
-        "job_id"
-      ],
-      "title": "SlurmJob",
-      "type": "object"
     },
     "SnapshotQuery": {
       "additionalProperties": false,

@@ -189,8 +189,8 @@ class NarrationHandler(logging.Handler):
             return False
         try:
             sink.write(OutputStream.STDERR, line)
-        except (OSError, RuntimeError) as exc:
-            # A full disk, or a stream closed under the handler: degrade to stderr only.
+        except OSError as exc:
+            # A log stream never raises; another sink may (a full disk): degrade to stderr.
             self._state = _State.CLOSED
             self._sink = None
             self._warn(

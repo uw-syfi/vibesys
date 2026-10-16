@@ -42,6 +42,8 @@ from vibesys.orchestration.dynamic.search.api import (
     Failure,
     FailureKind,
     HandoffNote,
+    MainLine,
+    MainState,
     NoPlan,
     PlanCheck,
     PlanUpdate,
@@ -378,7 +380,7 @@ def test_the_record_checkpoints_every_field_it_holds() -> None:
     """A field added to the record or its queue is resumed after a code change, or is the run's.
 
     What the run fixes (config, input revision, task terms; the queue's slots and policy) is
-    given again on resume; verdicts not yet handed over are handed again (`decided_verdicts`).
+    given again on resume, and main is compared with the record's own input measurement; verdicts not yet handed over are handed again (`decided_verdicts`).
     """
     record = run_record()
     gate = {f"gate_{item.name}" for item in dataclasses.fields(type(record.gate))}
@@ -386,3 +388,5 @@ def test_the_record_checkpoints_every_field_it_holds() -> None:
     assert (held - {"gate"}) | gate == set(RecordState.model_fields)
     queue = {item.name for item in dataclasses.fields(EvaluationQueue)}
     assert queue - {"slots", "policy", "_verdicts"} == set(QueueState.model_fields)
+    main = {item.name for item in dataclasses.fields(MainLine)}
+    assert main - {"baseline"} == set(MainState.model_fields)

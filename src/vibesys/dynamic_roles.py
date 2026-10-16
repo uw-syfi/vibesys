@@ -8,7 +8,9 @@ search asks and the roles the host declares cannot drift apart.
 
 The implementer and the judge carry the bridged evaluation tool. The orchestrator and the
 implementer also carry the read-only queue status tool, so they can weigh how long a queued
-evaluation will wait when they choose and pace work. The profiler carries no tool.
+evaluation will wait when they choose and pace work. The profiler and the merger carry no tool.
+The merger writes its checkout of main and measures nothing itself: the search measures its
+commit with the trusted evaluations.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from vibesys.core_roles import (
     MEASURING_READER,
     MEASURING_WRITER,
     READER,
+    WRITER,
     RoleKind,
     core_role,
     reading_queue_status,
@@ -49,6 +52,7 @@ ORCHESTRATOR = _role(search.PLANNER, reading_queue_status(READER))
 IMPLEMENTER = _role(search.IMPLEMENTER, reading_queue_status(MEASURING_WRITER))
 JUDGE = _role(search.JUDGE, MEASURING_READER)
 PROFILER = _role(search.PROFILER, CONTINUING_READER)
+MERGER = _role(search.MERGER, WRITER)
 OUTLINER = _role(search.OUTLINER, READER)
 
-CORE_ROLES = (ORCHESTRATOR, IMPLEMENTER, JUDGE, PROFILER, OUTLINER)
+CORE_ROLES = (ORCHESTRATOR, IMPLEMENTER, JUDGE, PROFILER, MERGER, OUTLINER)

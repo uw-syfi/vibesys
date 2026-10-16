@@ -5,7 +5,8 @@ after a code change goes on from its checkpoint (``at``) rather than doing it ag
 """
 
 from vibesys.hypothesis import HypothesisOutcome
-from vibesys.orchestration.dynamic.search._briefs import profile_prompt
+from vibesys.orchestration.dynamic.models import MergeOutcomeKind, MergeResult
+from vibesys.orchestration.dynamic.search._briefs import merge_prompt, profile_prompt
 from vibesys.orchestration.dynamic.search._implement import (
     Conversation,
     implement_until_measurable,
@@ -14,6 +15,7 @@ from vibesys.orchestration.dynamic.search._measure import evidence_of, measureme
 from vibesys.orchestration.dynamic.search._outcomes import (
     Closing,
     Evidence,
+    MergeReport,
     Result,
     Work,
     WorkEndedError,
@@ -21,9 +23,15 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     ended_by,
 )
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
-from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, PROFILER
-from vibesys.orchestration.dynamic.search._values import AgentName, WorkKind
-from vs_core.api.search import Failed, Flow, RevisionRef, Workspace
+from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, MERGER, PROFILER
+from vibesys.orchestration.dynamic.search._values import (
+    AgentName,
+    Failure,
+    FailureKind,
+    MergeOutcome,
+    WorkKind,
+)
+from vs_core.api.search import Declined, Failed, Flow, RevisionRef, TurnFinished, Workspace
 
 _IMPLEMENTING = (ResumeStage.WORKING, ResumeStage.IMPLEMENTED)
 
@@ -35,6 +43,8 @@ async def do_work(
     try:
         if w.plan.kind is WorkKind.PROFILE:
             return await profile(ctx, w, ws, work, at)
+        if w.plan.kind is WorkKind.MERGE:
+            return await merge(ctx, w, ws, work, at)
         return await implement_and_measure(ctx, w, ws, work, at)
     except WorkEndedError as ended:
         return work.ended(ended)
@@ -86,6 +96,55 @@ async def profile(
             raise ended_by(failed, AgentName.PROFILER, plan=w.plan)
         mark(ctx, w, work, ResumeStage.READY)
     return Closing(evidence=await measured(ctx, w, ws, work, w.parent, at, None))
+
+
+async def merge(
+    ctx: Flow, w: WorkstreamStart, ws: Workspace, work: Work, at: WorkstreamResume | None
+) -> Closing:
+    """Have a new merger session merge the candidates on its checkout of main, then measure it.
+
+    The merger takes one turn. Its commit is measured with the trusted evaluations, like an
+    implementer's candidate; it becomes main once the workspace settles with it retained. A
+    refusal leaves main as it is and carries the merger's reason. A merge resumed after its
+    merger committed measures that commit without merging again.
+    """
+    if at is None or at.at(*_IMPLEMENTING):
+        merger = ctx.agents.session(MERGER, workspace=ws, revision=w.parent)
+        match await merger.turn(merge_prompt(w.plan, w.parent, w.merge)):
+            case TurnFinished(reply=MergeResult() as reply, checkpoint=checkpoint):
+                report = _merged(w, reply, checkpoint)
+            case Failed() as failed:
+                raise ended_by(failed, AgentName.MERGER, plan=w.plan)
+            case TurnFinished() as unexpected:
+                message = f"the merger answered with {type(unexpected.reply).__name__}"
+                raise TypeError(message)
+        if report.outcome is MergeOutcome.REFUSED:
+            return Closing(merge=report, cause=Failure(kind=FailureKind.MERGE_REFUSED))
+        work.merged = report
+        mark(ctx, w, work, ResumeStage.READY)
+    elif work.merged is not None:
+        report = work.merged
+    else:
+        message = f"a merge checkpointed at {at.stage.value} without the merger's commit"
+        raise ValueError(message)
+    if report.revision is None or not ctx.task.terms.measured:
+        return Closing(merge=report)
+    evidence = await measured(ctx, w, ws, work, report.revision, at, None)
+    return Closing(merge=report, evidence=evidence)
+
+
+def _merged(w: WorkstreamStart, reply: MergeResult, checkpoint: object) -> MergeReport:
+    """What the merger answered: its commit, or its refusal with the reason."""
+    if reply.outcome is MergeOutcomeKind.REFUSED:
+        return MergeReport(outcome=MergeOutcome.REFUSED, summary=reply.summary, reason=reply.reason)
+    if isinstance(checkpoint, Declined):
+        raise WorkEndedError(
+            Failure(kind=FailureKind.CHECKPOINT_DECLINED, declined=checkpoint.reason)
+        )
+    revision = getattr(checkpoint, "revision", None)
+    if revision is None or revision == w.parent:
+        raise WorkEndedError(Failure(kind=FailureKind.NO_CHANGED_CANDIDATE))
+    return MergeReport(outcome=MergeOutcome.MERGED, summary=reply.summary, revision=revision)
 
 
 async def measured(  # noqa: PLR0913  # lint-waiver: LW-271017 [PLR0913]; each argument is a distinct fact of the measurement (the flow, the work, what is measured, and where it resumes).

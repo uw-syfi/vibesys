@@ -24,7 +24,7 @@ starts over from there.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 
 from vs_core._ids import IdScheme
 from vs_core._registry import ContractError, OperationRegistration, OperationRegistry
@@ -33,6 +33,7 @@ from vs_core.types.strategy import SearchDeclaration
 
 from ._defs import FlowDef
 from ._errors import FlowCodeChanged
+from ._labels import SpanKind, declared
 from ._resource import kit_of
 from ._roles import Role, with_models
 from ._run import Wiring, _Run
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
     from vs_core.types.strategy import Decision
 
     from ._flow import Flow
+    from ._spans import RunTrace
     from ._state import LiveFlows
 
 type Root[C] = Callable[[Flow, C], Coroutine[Any, Any, NoWinner | None]]
@@ -71,6 +73,8 @@ class SearchDef[C]:
     """Operations other libraries' owners perform for the search (``ctx.owners.perform``)."""
     snapshot: type[Any] | None = None
     """What the root may checkpoint besides its config, and is restarted from (``search``)."""
+    spans: tuple[SpanKind, ...] = ()
+    """The kinds of span the search labels (``ctx.label``, ``label=`` on an aspect call)."""
 
     @property
     def ids(self) -> IdScheme:
@@ -123,17 +127,18 @@ class SearchDef[C]:
         return FlowDriver(self, config, registry)
 
 
-# lint-waiver: LW-271015 [PLR0913]; every keyword is one independent part of a search's declaration.
-# > Packing them into an options object would make every registration build one and gain no
-# > invariant; a separate ``with_snapshot`` call after the decorator splits one declaration in two.
-def search[C](  # noqa: PLR0913
-    name: str,
-    *,
-    config: type[C],
-    operations: StrategyOperations | None = None,
-    roles: tuple[Role, ...] = (),
-    owned: tuple[OperationRegistration, ...] = (),
-    snapshot: type[Any] | None = None,
+class Declarations(TypedDict, total=False):
+    """What a search declares beside its name and config (see ``search``)."""
+
+    operations: StrategyOperations | None
+    roles: tuple[Role, ...]
+    owned: tuple[OperationRegistration, ...]
+    spans: tuple[SpanKind, ...]
+    snapshot: type[Any] | None
+
+
+def search[C](
+    name: str, *, config: type[C], **declared_: Unpack[Declarations]
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """Register ``root`` as the search ``name``, run on a ``config`` model.
 
@@ -142,20 +147,30 @@ def search[C](  # noqa: PLR0913
     the verification, evidence and retention of workspaces and measurements, and the context
     types of the prompts. ``owned`` are the operations another library's owner performs
     for the search (an issue board, say): their codec is registered, the host must provide an
-    owner for each, and a flow asks one with ``ctx.owners.perform``.
+    owner for each, and a flow asks one with ``ctx.owners.perform``. ``spans`` are the kinds of
+    span the search labels: each with its attribute schema, verdicts and link relations.
 
     ``snapshot`` is a model the root may checkpoint besides its config: what it knows of the
     run, so a restart after a code change resumes it with that knowledge. The root then takes
     ``config | snapshot``: the config when the run starts, its latest checkpoint after a
     restart. Neither model may decode the other's JSON (give the snapshot a ``kind``).
     """
+    operations = declared_.get("operations")
+    roles = declared_.get("roles", ())
+    owned = declared_.get("owned", ())
+    spans = declared_.get("spans", ())
+    snapshot = declared_.get("snapshot")
     names = [role.name for role in roles]
     if len(set(names)) != len(names):
         message = f"roles of search {name!r} must have distinct names: {sorted(names)}"
         raise ContractError(("roles",), message)
 
+    declared(spans)  # two kinds with one name are refused at registration
+
     def register(root: Root[C]) -> SearchDef[C]:
-        return SearchDef(name, config, root, operations, roles, owned, snapshot)
+        return SearchDef(
+            name, config, root, operations, roles, owned, snapshot=snapshot, spans=spans
+        )
 
     return register
 
@@ -182,6 +197,7 @@ class FlowDriver[C]:
             definition.ids,
             definition.owned,
             {role.name: role for role in definition.roles},
+            declared(definition.spans),
         )
         root = definition.root
 
@@ -241,6 +257,7 @@ class FlowDriver[C]:
             recorded=kept,
             reads=run.reads,
             digest=digest(state.journal[-1].digest, item, run.reads, decisions),
+            at=run.trace.at,
         )
         new = state.model_copy(
             update={
@@ -258,6 +275,11 @@ class FlowDriver[C]:
         """The record the flows last published (``ctx.publish``), or None if none yet."""
         text = state.live.published
         return None if text is None else model.model_validate_json(text)
+
+    @staticmethod
+    def trace(state: FlowState) -> RunTrace:
+        """The run's spans in ``state``: every flow task and awaited operation so far."""
+        return state.live.trace
 
     def waiting(self, state: FlowState) -> tuple[Waiting, ...]:
         """What each suspended flow waits for in ``state``: its sources, as data."""
@@ -278,7 +300,9 @@ class FlowDriver[C]:
         decisions: list[Decision],
     ) -> FlowState:
         """The state whose journal has just its first step: the start of the flows."""
-        first = Step(reads=run.reads, digest=digest("", None, run.reads, decisions))
+        first = Step(
+            reads=run.reads, digest=digest("", None, run.reads, decisions), at=run.trace.at
+        )
         state = FlowState(
             schema_version=1,
             facts=facts,
@@ -301,11 +325,11 @@ class FlowDriver[C]:
             item = step.event or step.recorded
             try:
                 if item is not None:
-                    decisions = run.feed(item, None, step.reads)
+                    decisions = run.feed(item, None, step.reads, step.at)
                 elif state.base is None:
-                    decisions = run.start(None, step.reads)
+                    decisions = run.start(None, step.reads, step.at)
                 else:
-                    decisions = run.restore(state.base, None, step.reads)
+                    decisions = run.restore(state.base, None, step.reads, step.at)
             except FlowCodeChanged as changed:
                 raise FlowCodeChanged(index) from changed
             if digest(before, item, step.reads, decisions) != step.digest:

@@ -106,9 +106,11 @@ if TYPE_CHECKING:
         OperationRequest,
         Role,
         RunFacts,
+        RunTrace,
         RunView,
         SearchDef,
         Seconds,
+        SpanKind,
         Within,
     )
     from vs_core.flows._define import Root
@@ -149,10 +151,22 @@ FAKE_REGISTRY = FAKE_OPERATIONS.registry()
 
 
 def fake_search[C](
-    name: str, config: type[C], roles: tuple[Role, ...] = (), *, snapshot: type[Any] | None = None
+    name: str,
+    config: type[C],
+    roles: tuple[Role, ...] = (),
+    spans: tuple[SpanKind, ...] = (),
+    *,
+    snapshot: type[Any] | None = None,
 ) -> Callable[[Root[C]], SearchDef[C]]:
     """``@search`` over the fake namespace: renders are answered by ``FlowRun``."""
-    return search(name, config=config, operations=FAKE_OPERATIONS, roles=roles, snapshot=snapshot)
+    return search(
+        name,
+        config=config,
+        operations=FAKE_OPERATIONS,
+        roles=roles,
+        spans=spans,
+        snapshot=snapshot,
+    )
 
 
 def code_changed[C](definition: SearchDef[C]) -> SearchDef[C]:
@@ -320,6 +334,10 @@ class FlowRun[C]:
     def waiting(self) -> tuple[Waiting, ...]:
         """What each suspended flow waits for, as data: its path and its sources."""
         return self.driver.waiting(self.state)
+
+    def trace(self) -> RunTrace:
+        """The run's spans: every flow task and awaited operation so far."""
+        return self.driver.trace(self.state)
 
     def timeline(self) -> str:
         """The run so far as one line: ``worker.1:Plan ws-1/work.1:failed(timed-out) stop t=30``."""

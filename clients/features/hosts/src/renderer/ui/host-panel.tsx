@@ -4,7 +4,7 @@
  */
 
 import type {HostKey, HostListing, HostRun, HostSummary} from '@vibesys/hosts';
-import {Button} from '@vibesys/ui';
+import {Button} from '@vibesys/ui/legacy';
 import type {FormEvent, JSX, KeyboardEvent, ReactNode} from 'react';
 import type {CompletionAction, CompletionState} from '../../state/completion.js';
 import {type CheckoutForm, type HostAction, type HostState, hostLabelOf} from '../../state/host.js';

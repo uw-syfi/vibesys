@@ -8,6 +8,7 @@ the stage, while it runs; and each evaluator tool build's output to one ``ToolBu
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -27,6 +28,7 @@ from vibesys.run.logs import (
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationRequest,
+    EvaluationState,
     EvaluationStep,
     EvidenceFingerprints,
     EvidenceKind,
@@ -35,6 +37,7 @@ from vs_evaluation.api import (
 )
 from vs_evaluation.api.testing import InMemoryEvaluationNamespace
 from vs_logs.api import MemoryLogStore, StreamOutcome
+from vs_logs.api.testing import MemoryVolume, no_warning
 from vs_logs.read import Tail, reader_of
 from vs_runtime.api import (
     AccuracyEvaluation,
@@ -48,12 +51,13 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
     prepare_docker_evaluator_resources,
 )
-from vs_runtime.api.slurm_evaluation_stack import BENCHMARK_OUTPUT, build_stack
+from vs_runtime.api.slurm_evaluation_stack import BENCHMARK_OUTPUT, ScenarioCluster, build_stack
 from vs_runtime.api.testing import FakeEvaluation, FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api import CommandResult, SandboxKind
 from vs_sandbox.api.evaluator_tools import CargoGitToolSpec, EvaluatorToolError
 from vs_sandbox.api.testing import FakeComputeBackend, FakeLifecycleRunner
-from vs_sim.api.testing import ManualClock, SimThreads, arrival, yield_until
+from vs_sim.api.testing import Gate, ManualClock, SimThreads, arrival, yield_until
+from vs_slurm.api import SlurmJobStatus
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -67,6 +71,7 @@ _PRINTED: dict[Literal["accuracy", "benchmark"], tuple[bytes, bytes]] = {
     "benchmark": (b"warmup\nrps=41\n", b""),
 }
 _STAGES = (EvidenceKind.ACCURACY, EvidenceKind.BENCHMARK)
+_TERMINAL = frozenset({EvaluationState.SUCCEEDED, EvaluationState.FAILED, EvaluationState.CANCELED})
 _RETRIES = EvaluationRetries(infrastructure_attempts=2, ambiguous_attempts=1)
 
 
@@ -117,7 +122,7 @@ class _Hooks:
 
 
 def _store() -> MemoryLogStore[LogOwner]:
-    return MemoryLogStore(LOG_OWNER, threads=SimThreads())
+    return MemoryLogStore(LOG_OWNER, threads=SimThreads(), warn=no_warning)
 
 
 def _read(reader: LogReader[LogOwner], info: StreamInfo[LogOwner]) -> bytes:
@@ -203,25 +208,76 @@ async def test_each_gate_stage_writes_to_its_gate_stream_before_it_settles() -> 
     assert _read(reader, streams[1]) == b"".join(_PRINTED["benchmark"])
 
 
+class _HeldPacing:
+    """Pacing that holds the executor's own wait for a running job until the test opens it.
+
+    The executor's execution task, which opens and settles the stage streams, pauses here
+    between its looks at a running job. A poll collects an ended job by itself, so while
+    the task is held a poll reports the end before the task has collected the job.
+    """
+
+    def __init__(self) -> None:
+        self.entered = Gate()
+        self.release = Gate()
+
+    async def sleep(self, seconds: float) -> None:
+        del seconds
+        self.entered.open()
+        await self.release.wait()
+
+
+async def _execution_ended(executor: RetryingEvaluationExecutor) -> None:
+    """Wait until the execution task has settled the measurement, stage streams included.
+
+    A poll's end is no such proof: the poll collects the job apart from that task.
+    """
+    while True:
+        observed = await executor.inspect(_HANDLE)
+        if observed is not None and observed.state in _TERMINAL:
+            return
+        await executor.wait_for_change(_HANDLE, timeout_s=math.inf)
+
+
 @pytest.mark.asyncio
 async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires_it(
     tmp_path: Path,
 ) -> None:
-    """A stage run on the cluster lands under the same gate owners, through the same tries."""
+    """A stage run on the cluster lands under the same gate owners, through the same tries.
+
+    The host learns the end from a poll, which here comes before the execution task has
+    collected the job; the streams are whole once that task has settled.
+    """
     store = _store()
     tries = TryHandles()
-    stack = await build_stack(tmp_path, stage_output=tries.stage_output(stage_output_opener(store)))
+    cluster = ScenarioCluster()
+    cluster.states = (SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED)
+    pacing = _HeldPacing()
+    stack = await build_stack(
+        tmp_path,
+        cluster,
+        stage_output=tries.stage_output(stage_output_opener(store)),
+        sleeper=pacing,
+    )
     executor = RetryingEvaluationExecutor(
         stack.executor, _RETRIES, InMemoryEvaluationNamespace(), tries=tries
     )
 
-    await executor.submit(_request(stack.snapshot, "official", _STAGES), handle_id=_HANDLE)
-    await yield_until(
-        lambda: executor.poll(_HANDLE),
-        lambda polled: polled.phase is PollPhase.ENDED,
-        "the measurement to end",
-    )
-    await executor.close()
+    settled: asyncio.Future[None] | None = None
+    try:
+        await executor.submit(_request(stack.snapshot, "official", _STAGES), handle_id=_HANDLE)
+        # The execution task is the producer; it lives inside the executor, so follow it
+        # through the executor's settled state: if it ends without pausing, fail with that.
+        settled = asyncio.ensure_future(_execution_ended(executor))
+        await arrival(pacing.entered.wait(), settled)  # the task saw the job running, paused
+        polled = await executor.poll(_HANDLE)  # the job has completed; the poll collects it
+        assert polled.phase is PollPhase.ENDED
+        pacing.release.open()
+        await settled
+    finally:
+        pacing.release.open()
+        if settled is not None:
+            settled.cancel()
+        await executor.close()
 
     reader = reader_of(store, LOG_OWNER)
     streams = reader.list_streams()
@@ -230,6 +286,37 @@ async def test_each_slurm_gate_stage_writes_to_its_gate_stream_as_the_host_wires
         (GateStage(execution_id=_HANDLE, gate=GateKind.BENCHMARK, attempt=1), StreamOutcome.ENDED),
     ]
     assert [_read(reader, info) for info in streams] == [b"ok", BENCHMARK_OUTPUT.encode()]
+
+
+@pytest.mark.asyncio
+async def test_a_slurm_stage_whose_log_disk_is_full_still_measures(tmp_path: Path) -> None:
+    """Copying a stage's output into a full store loses log bytes, never the measurement."""
+    volume = MemoryVolume()
+    warnings: list[str] = []
+    store = MemoryLogStore(LOG_OWNER, threads=SimThreads(), warn=warnings.append, volume=volume)
+    tries = TryHandles()
+    stack = await build_stack(tmp_path, stage_output=tries.stage_output(stage_output_opener(store)))
+    executor = RetryingEvaluationExecutor(
+        stack.executor, _RETRIES, InMemoryEvaluationNamespace(), tries=tries
+    )
+    volume.capacity = 200  # the first stage's index record fits, and little else
+
+    await executor.submit(_request(stack.snapshot, "official", _STAGES), handle_id=_HANDLE)
+    ended = await yield_until(
+        lambda: executor.poll(_HANDLE),
+        lambda polled: polled.phase is PollPhase.ENDED,
+        "the measurement to end",
+    )
+    await _execution_ended(executor)
+    await executor.close()
+
+    assert ended.terminal is not None
+    assert ended.terminal.state is EvaluationState.SUCCEEDED
+    reader = reader_of(store, LOG_OWNER)
+    first = reader.list_streams()[0]
+    assert first.owner == GateStage(execution_id=_HANDLE, gate=GateKind.ACCURACY, attempt=1)
+    assert b"ok".startswith(_read(reader, first))
+    assert warnings
 
 
 @pytest.mark.asyncio

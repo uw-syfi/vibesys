@@ -3,11 +3,12 @@ import {unlink} from 'node:fs/promises';
 import {createServer, type Server, type Socket} from 'node:net';
 import {join} from 'node:path';
 import {afterEach, describe, it} from 'node:test';
-import {BackendClientError, ServerError} from '@vibesys/contracts';
+import {BackendClientError, ServerError, type ServerMessage} from '@vibesys/contracts';
 import type {AbortSignalLike, ControlChannelState} from '@vibesys/transport';
 import {FakeClock} from '@vibesys/transport/testing';
 import {type ClientClock, ServerClient, type ServerClientOptions} from './client.js';
 import {expect} from './test-support/expect.js';
+import {FakeClientNetwork} from './testing/index.js';
 
 /** One reported state as a short string; see `websocket.test.ts`'s `trace`. */
 function traceState(state: ControlChannelState): string {
@@ -379,6 +380,234 @@ describe('ServerClient', () => {
       await client.close();
       await close(server);
     }
+  });
+
+  it('settles a retiring dedicated socket before exposing a control observer failure', async () => {
+    const network = new FakeClientNetwork();
+    const clock = new FakeClock();
+    const observerError = new Error('control observer failed');
+    const connecting = ServerClient.connect('/run/server.sock', {
+      network,
+      clock,
+      closeGraceMs: 50,
+      reconnectDelaysMs: [],
+      onConnectionState: state => {
+        if (state.status === 'disconnected') throw observerError;
+      },
+    });
+    const controlSocket = network.connections[0];
+    if (controlSocket === undefined) throw new Error('The control dial did not open a socket');
+    controlSocket.connect();
+    const client = await connecting;
+
+    controlSocket.fail(new Error('control connection failed'));
+    await controlSocket.whenListenersReleased();
+    const chat = client.request({type: 'query.chat', text: 'still running'});
+    const chatSocket = network.connections[1];
+    if (chatSocket === undefined) throw new Error('The chat did not open a dedicated socket');
+    chatSocket.holdGracefulEnd();
+    chatSocket.connect();
+    const frame = chatSocket.writes[0];
+    if (frame === undefined) throw new Error('The chat request was not written');
+    const request = JSON.parse(frame) as {readonly request_id: string};
+    chatSocket.receive(
+      `${JSON.stringify({
+        protocol_version: 1,
+        request_id: request.request_id,
+        timestamp: '2026-01-01T00:00:00Z',
+        ok: true,
+        chat: {question: 'still running', answer: 'done', effect: 'none'},
+        events: [],
+      })}\n`,
+    );
+    await expect(chat).resolves.toMatchObject({ok: true});
+    expect(clock.pendingDelays()).toEqual([50]);
+
+    const closing = client.close();
+    const pending = {};
+    let closeOutcome: unknown = pending;
+    void closing.then(
+      () => {
+        closeOutcome = undefined;
+      },
+      error => {
+        closeOutcome = error;
+      },
+    );
+    for (let turn = 0; turn < 5; turn += 1) await Promise.resolve();
+
+    expect(closeOutcome).toBe(pending);
+    expect(chatSocket.closed).toBe(false);
+    expect(clock.pendingDelays()).toEqual([50]);
+
+    clock.runPending();
+    await expect(closing).rejects.toBe(observerError);
+    expect(chatSocket.closed).toBe(true);
+    expect(clock.pendingDelays()).toEqual([]);
+  });
+
+  it('contains both subscription observers and owns retirement before reentrant close', async () => {
+    const network = new FakeClientNetwork();
+    const messageFailure = new Error('message observer failed');
+    const disconnectFailure = new Error('disconnect observer failed');
+    const connecting = ServerClient.connect('/run/server.sock', {network});
+    const controlSocket = network.connections[0];
+    if (controlSocket === undefined) throw new Error('The control dial did not open a socket');
+    controlSocket.connect();
+    const client = await connecting;
+    let reentrantClose: Promise<void> | undefined;
+    const subscribing = client.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') throw messageFailure;
+      },
+      () => {
+        reentrantClose = client.close();
+        throw disconnectFailure;
+      },
+    );
+    const subscriptionSocket = network.connections[1];
+    if (subscriptionSocket === undefined) throw new Error('The subscription did not open a socket');
+    subscriptionSocket.connect();
+    const frame = subscriptionSocket.writes[0];
+    if (frame === undefined) throw new Error('The subscription request was not written');
+    const request = JSON.parse(frame) as Record<string, unknown>;
+    subscriptionSocket.receive(subscribedMessage(request));
+    const subscription = await subscribing;
+
+    let escaped: unknown;
+    try {
+      subscriptionSocket.receive(
+        `${JSON.stringify({
+          type: 'event_batch',
+          events: [],
+          history_after_sequence: 0,
+        })}\n`,
+      );
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    expect(subscriptionSocket.closed).toBe(true);
+    expect(subscriptionSocket.destroyCalls).toBe(1);
+    expect(subscriptionSocket.endCalls).toBe(0);
+    if (reentrantClose === undefined) throw new Error('The disconnect observer did not close');
+    expect(client.close()).toBe(reentrantClose);
+    const failure = await reentrantClose.catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([messageFailure, disconnectFailure]);
+    await expect(client.close()).rejects.toBe(failure);
+    await subscription.close();
+    expect(subscriptionSocket.destroyCalls).toBe(1);
+    expect(subscriptionSocket.endCalls).toBe(0);
+  });
+
+  it('contains a subscription disconnect observer and preserves its failure by identity', async () => {
+    const network = new FakeClientNetwork();
+    const observerFailure = new Error('disconnect observer failed');
+    const connecting = ServerClient.connect('/run/server.sock', {network});
+    const controlSocket = network.connections[0];
+    if (controlSocket === undefined) throw new Error('The control dial did not open a socket');
+    controlSocket.connect();
+    const client = await connecting;
+    const subscribing = client.subscribe(
+      0,
+      () => undefined,
+      () => {
+        throw observerFailure;
+      },
+    );
+    const subscriptionSocket = network.connections[1];
+    if (subscriptionSocket === undefined) throw new Error('The subscription did not open a socket');
+    subscriptionSocket.connect();
+    const frame = subscriptionSocket.writes[0];
+    if (frame === undefined) throw new Error('The subscription request was not written');
+    subscriptionSocket.receive(subscribedMessage(JSON.parse(frame) as Record<string, unknown>));
+    await subscribing;
+
+    let escaped: unknown;
+    try {
+      subscriptionSocket.peerEnd();
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    expect(subscriptionSocket.destroyCalls).toBe(0);
+    expect(subscriptionSocket.endCalls).toBe(0);
+    await expect(client.close()).rejects.toBe(observerFailure);
+  });
+
+  it('retires on message observer failure without relabeling valid peer data', async () => {
+    const network = new FakeClientNetwork();
+    const observerFailure = new Error('message observer failed');
+    const disconnects: Error[] = [];
+    const connecting = ServerClient.connect('/run/server.sock', {network});
+    const controlSocket = network.connections[0];
+    if (controlSocket === undefined) throw new Error('The control dial did not open a socket');
+    controlSocket.connect();
+    const client = await connecting;
+    const subscribing = client.subscribe(
+      0,
+      message => {
+        if (message.type === 'event_batch') throw observerFailure;
+      },
+      error => disconnects.push(error),
+    );
+    const subscriptionSocket = network.connections[1];
+    if (subscriptionSocket === undefined) throw new Error('The subscription did not open a socket');
+    subscriptionSocket.connect();
+    const frame = subscriptionSocket.writes[0];
+    if (frame === undefined) throw new Error('The subscription request was not written');
+    subscriptionSocket.receive(subscribedMessage(JSON.parse(frame) as Record<string, unknown>));
+    await subscribing;
+
+    subscriptionSocket.receive(
+      `${JSON.stringify({type: 'event_batch', events: [], history_after_sequence: 0})}\n`,
+    );
+
+    expect(disconnects).toEqual([observerFailure]);
+    expect(disconnects[0]).not.toBeInstanceOf(BackendClientError);
+    expect(subscriptionSocket.destroyCalls).toBe(1);
+    expect(subscriptionSocket.endCalls).toBe(0);
+    await expect(client.close()).rejects.toBe(observerFailure);
+  });
+
+  it('suppresses a subscription data callback queued before terminal close', async () => {
+    const network = new FakeClientNetwork();
+    const connecting = ServerClient.connect('/run/server.sock', {network});
+    const controlSocket = network.connections[0];
+    if (controlSocket === undefined) throw new Error('The control dial did not open a socket');
+    controlSocket.connect();
+    const client = await connecting;
+    const delivered: ServerMessage[] = [];
+    const subscribing = client.subscribe(0, message => delivered.push(message), noopDisconnect);
+    const subscriptionSocket = network.connections[1];
+    if (subscriptionSocket === undefined) throw new Error('The subscription did not open a socket');
+    subscriptionSocket.connect();
+    const frame = subscriptionSocket.writes[0];
+    if (frame === undefined) throw new Error('The subscription request was not written');
+    subscriptionSocket.receive(subscribedMessage(JSON.parse(frame) as Record<string, unknown>));
+    await subscribing;
+    delivered.length = 0;
+    const deliverQueued = subscriptionSocket.queueReceive(
+      `${JSON.stringify({type: 'event_batch', events: [], history_after_sequence: 0})}\n`,
+    );
+
+    const closing = client.close();
+    let escaped: unknown;
+    try {
+      deliverQueued();
+    } catch (error) {
+      escaped = error;
+    }
+
+    expect(escaped).toBeUndefined();
+    expect(delivered).toEqual([]);
+    expect(subscriptionSocket.endCalls).toBe(1);
+    expect(subscriptionSocket.destroyCalls).toBe(0);
+    await closing;
   });
 
   it('shares one retirement when a subscription and client close race', async () => {

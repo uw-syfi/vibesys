@@ -13,6 +13,7 @@ from vibesys.orchestration.dynamic.search._handoff import (
     WriteHandoff,
 )
 from vibesys.orchestration.dynamic.search._ids import planning_key, workstream_key
+from vibesys.orchestration.dynamic.search._main import MainLine, MainState
 from vibesys.orchestration.dynamic.search._operations import (
     INTERPRET_KIND,
     OPERATIONS,
@@ -62,6 +63,8 @@ from vibesys.orchestration.dynamic.search._prompts import (
     EvidenceCitation,
     ImplementPrompt,
     InputOverdueView,
+    MergeableRow,
+    MergePrompt,
     OutlinePrompt,
     PlannerCorrection,
     PlannerPrompt,
@@ -87,6 +90,7 @@ from vibesys.orchestration.dynamic.search._resume import ResumeStage, Workstream
 from vibesys.orchestration.dynamic.search._roles import (
     IMPLEMENTER,
     JUDGE,
+    MERGER,
     OUTLINER,
     PLANNER,
     PROFILER,
@@ -115,6 +119,10 @@ from vibesys.orchestration.dynamic.search._values import (
     FinishedWork,
     HandoffNote,
     HypothesisRecord,
+    MainMeasurement,
+    MergeOutcome,
+    MergeRecord,
+    MergeSource,
     Proof,
     RoundRecord,
     Step,
@@ -130,6 +138,7 @@ __all__ = [
     "INTERPRET_KIND",
     "JUDGE",
     "MAX_WIDTH",
+    "MERGER",
     "OPERATIONS",
     "OUTLINER",
     "PLANNER",
@@ -167,6 +176,14 @@ __all__ = [
     "InputOverdue",
     "InputOverdueView",
     "InterpretEvidence",
+    "MainLine",
+    "MainMeasurement",
+    "MainState",
+    "MergeOutcome",
+    "MergePrompt",
+    "MergeRecord",
+    "MergeSource",
+    "MergeableRow",
     "MetricRow",
     "NoPlan",
     "Outline",

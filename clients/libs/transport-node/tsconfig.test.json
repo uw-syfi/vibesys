@@ -17,6 +17,9 @@
       "path": "./tsconfig.lib.json"
     },
     {
+      "path": "./tsconfig.testing.json"
+    },
+    {
       "path": "../contracts/tsconfig.lib.json"
     },
     {

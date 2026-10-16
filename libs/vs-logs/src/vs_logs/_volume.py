@@ -7,13 +7,15 @@ relative, ``/``-separated, and built only by the store from validated stream ids
 
 from __future__ import annotations
 
+import errno
 import os
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from vs_sim.api import LocalFileSource, SourceWatch, check_read
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vs_sim.api import ByteSource
 
 
@@ -32,16 +34,16 @@ class Volume(Protocol):
         """Delete the file ``name`` if it exists."""
         ...
 
+    def truncate(self, name: str, size: int) -> None:
+        """Cut the file ``name`` to its first ``size`` bytes."""
+        ...
+
     def names(self, directory: str) -> list[str]:
         """The file names directly in ``directory``; empty when it does not exist."""
         ...
 
     def source(self, name: str) -> ByteSource:
         """A fresh source over ``name``; reading a missing one raises ``FileNotFoundError``."""
-        ...
-
-    def external(self, path: str) -> ByteSource:
-        """A fresh source over a file the store does not write (an adopted log)."""
         ...
 
 
@@ -77,6 +79,10 @@ class DirectoryVolume:
         """Unlink ``name``; a missing file is already removed."""
         (self._root / name).unlink(missing_ok=True)
 
+    def truncate(self, name: str, size: int) -> None:
+        """Truncate ``name`` in place; it needs no free space."""
+        os.truncate(self._root / name, size)
+
     def names(self, directory: str) -> list[str]:
         """File names in ``directory``."""
         path = self._root / directory
@@ -87,10 +93,6 @@ class DirectoryVolume:
     def source(self, name: str) -> ByteSource:
         """A :class:`~vs_sim.api.LocalFileSource` over ``name``."""
         return LocalFileSource(self._root / name)
-
-    def external(self, path: str) -> ByteSource:
-        """A :class:`~vs_sim.api.LocalFileSource` over ``path``."""
-        return LocalFileSource(Path(path))
 
 
 class _MemoryFile:
@@ -124,21 +126,52 @@ class _MemorySource:
 
 
 class MemoryVolume:
-    """Files in memory, with the same visibility rules as :class:`DirectoryVolume`."""
+    """Files in memory, with the same visibility rules as :class:`DirectoryVolume`.
 
-    def __init__(self) -> None:
-        """Start empty."""
+    With a ``capacity`` it is a disk that fills up: an append that does not fit writes
+    the bytes that do and raises ``OSError`` (``ENOSPC``), as a short write to a full
+    disk does, and a replacement that does not fit changes nothing and raises. A test
+    sets ``capacity`` at any time, to fill the disk while a store writes.
+    """
+
+    def __init__(self, *, capacity: int | None = None) -> None:
+        """Start empty, holding at most ``capacity`` bytes in all (no limit when ``None``)."""
         self._files: dict[str, _MemoryFile] = {}
+        self.capacity = capacity
+
+    @property
+    def used(self) -> int:
+        """The bytes every file holds together."""
+        return sum(len(file.data) for file in self._files.values())
+
+    def _free(self, freed: int = 0) -> int | None:
+        return None if self.capacity is None else max(0, self.capacity - self.used + freed)
 
     def append(self, name: str, data: bytes) -> None:
-        """Append ``data`` to ``name``."""
-        self._files.setdefault(name, _MemoryFile()).data += data
+        """Append ``data`` to ``name``; on a full volume, append what fits and raise."""
+        free = self._free()
+        target = self._files.setdefault(name, _MemoryFile())
+        if free is not None and len(data) > free:
+            target.data += data[:free]
+            raise OSError(errno.ENOSPC, f"no space left for {len(data)} bytes", name)
+        target.data += data
 
     def replace(self, name: str, data: bytes) -> None:
-        """Put a new file with ``data`` at ``name``."""
+        """Put a new file with ``data`` at ``name``, or raise and keep the old one."""
+        existing = self._files.get(name)
+        free = self._free(0 if existing is None else len(existing.data))
+        if free is not None and len(data) > free:
+            raise OSError(errno.ENOSPC, f"no space left for {len(data)} bytes", name)
         replacement = _MemoryFile()
         replacement.data += data
         self._files[name] = replacement
+
+    def truncate(self, name: str, size: int) -> None:
+        """Cut ``name`` to ``size`` bytes."""
+        found = self._files.get(name)
+        if found is None:
+            raise FileNotFoundError(name)
+        del found.data[size:]
 
     def remove(self, name: str) -> None:
         """Delete ``name``."""
@@ -156,7 +189,3 @@ class MemoryVolume:
     def source(self, name: str) -> ByteSource:
         """A source over ``name``."""
         return _MemorySource(self._files, name)
-
-    def external(self, path: str) -> ByteSource:
-        """A source over the memory file ``path`` (a test appends to it with :meth:`append`)."""
-        return _MemorySource(self._files, path)

@@ -20,6 +20,7 @@ from pydantic import (
 from vs_sandbox.agent_gpu import AgentGpuConfig
 from vs_slurm.api import (
     PORT_PLACEHOLDER,
+    LedgerPolicy,
     SlurmConfig,
     SlurmLocalTransport,
     SlurmService,
@@ -61,7 +62,10 @@ class SlurmExecutionPolicy(BaseModel):
     """Commands and setup selected by VibeSys for jobs on a remote cluster.
 
     ``agent_gpu``, when present, lets the agent run its own GPU commands as
-    Slurm jobs (see :func:`agent_gpu_capability`).
+    Slurm jobs (see :func:`agent_gpu_capability`). ``ledger``, when present
+    (the ``[vibesys.ledger]`` table), submits evaluations through the project's
+    evaluation ledger on the cluster, so a restarted run reattaches to its jobs
+    instead of cancelling and resubmitting them (#2757).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
@@ -73,6 +77,7 @@ class SlurmExecutionPolicy(BaseModel):
     accuracy_arguments: tuple[str, ...] = ()
     benchmark_arguments: tuple[str, ...] = ()
     agent_gpu: AgentGpuConfig | None = None
+    ledger: LedgerPolicy | None = None
 
     @field_validator("remote_python")
     @classmethod
