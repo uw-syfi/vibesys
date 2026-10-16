@@ -39,43 +39,70 @@ function span(id: string, parent: string | null, at: number, ended: boolean, kin
  * span, change and end, mixed with other events; some spans carry labels of kinds no client knows.
  */
 function journal(random: Seeded): RunEvent[] {
-  const events: RunEvent[] = [];
-  const open: string[] = [];
-  const known: string[] = [];
-  let sequence = 0;
-  const push = (type: string, data: RunEvent['data']) => {
-    sequence += 1;
-    events.push({
+  const writer = new Journal(random);
+  for (let step = 0; step < 4 + random.int(30); step += 1) writer.step(step);
+  return writer.events;
+}
+
+/** Writes one journal: each step starts, ends or updates a span, or records another event. */
+class Journal {
+  readonly events: RunEvent[] = [];
+  readonly #random: Seeded;
+  readonly #open: string[] = [];
+  readonly #known: string[] = [];
+
+  constructor(random: Seeded) {
+    this.#random = random;
+  }
+
+  step(step: number): void {
+    const choice = this.#random.int(4);
+    if (choice === 0 || this.#known.length === 0) this.#start(step);
+    else if (choice === 1 && this.#open.length > 0) this.#end(step);
+    else if (choice === 2) this.#update(step);
+    else this.#push('round_finished', null);
+  }
+
+  #start(step: number): void {
+    const random = this.#random;
+    const id = `${random.int(2) === 0 ? 'flow' : 'op'}:s${this.#known.length}`;
+    const parent = this.#known.length === 0 ? null : this.#pick(this.#known);
+    const kind = random.int(3) === 0 ? `kind-${random.int(5)}` : undefined;
+    this.#push('span_started', {kind: 'span_started', span: span(id, parent, step, false, kind)});
+    this.#known.push(id);
+    this.#open.push(id);
+  }
+
+  #end(step: number): void {
+    const id = this.#open.splice(this.#random.int(this.#open.length), 1)[0] as string;
+    this.#push('span_ended', {kind: 'span_ended', span: span(id, this.#parentOf(id), step, true)});
+  }
+
+  #update(step: number): void {
+    const id = this.#pick(this.#known);
+    const changed = span(id, this.#parentOf(id), step, false, 'later');
+    this.#push('span_updated', {kind: 'span_updated', span: changed});
+  }
+
+  /** The first span is the root; every other span hangs under it once it changes. */
+  #parentOf(id: string): string | null {
+    return id === this.#known[0] ? null : (this.#known[0] ?? null);
+  }
+
+  #pick(ids: readonly string[]): string {
+    return ids[this.#random.int(ids.length)] as string;
+  }
+
+  #push(type: string, data: RunEvent['data']): void {
+    this.events.push({
       protocol_version: 1,
       run_id: RUN_ID,
-      sequence,
+      sequence: this.events.length + 1,
       timestamp: '2026-01-01T00:00:00Z',
       type,
       data,
     } as RunEvent);
-  };
-  for (let step = 0; step < 4 + random.int(30); step += 1) {
-    const choice = random.int(4);
-    if (choice === 0 || known.length === 0) {
-      const id = `${random.int(2) === 0 ? 'flow' : 'op'}:s${known.length}`;
-      const parent = known.length === 0 ? null : (known[random.int(known.length)] ?? null);
-      const kind = random.int(3) === 0 ? `kind-${random.int(5)}` : undefined;
-      push('span_started', {kind: 'span_started', span: span(id, parent, step, false, kind)});
-      known.push(id);
-      open.push(id);
-    } else if (choice === 1 && open.length > 0) {
-      const id = open.splice(random.int(open.length), 1)[0] as string;
-      const parent = id === known[0] ? null : (known[0] ?? null);
-      push('span_ended', {kind: 'span_ended', span: span(id, parent, step, true)});
-    } else if (choice === 2) {
-      const id = known[random.int(known.length)] as string;
-      const parent = id === known[0] ? null : (known[0] ?? null);
-      push('span_updated', {kind: 'span_updated', span: span(id, parent, step, false, 'later')});
-    } else {
-      push('round_finished', null);
-    }
   }
-  return events;
 }
 
 /** The snapshot the server builds at `sequence`: the latest of each span, in start order. */
