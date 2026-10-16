@@ -42,6 +42,15 @@ class TaskImageError(ValueError):
         )
 
     @classmethod
+    def not_built(cls, environment: str, dockerfile: Path) -> TaskImageError:
+        """Describe a run environment selection that was not built from the task image."""
+        return cls(
+            f"the task declares {dockerfile}, but the {environment} run environment was "
+            f"selected without building it; build the selection with the task image "
+            f"(the CLI does) instead of running without it"
+        )
+
+    @classmethod
     def operator_image(cls, dockerfile: Path, image: str) -> TaskImageError:
         """Describe an explicit image paired with a task Dockerfile."""
         return cls(

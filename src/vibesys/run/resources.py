@@ -257,6 +257,7 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             run_environment_spec = resolve_run_environment_spec(
                 run_environment or make_run_environment_spec(),
                 backend,
+                task_dockerfile=bundle.dockerfile_path,
                 platform=sys.platform,
                 log=buffered_logs.append,
             )

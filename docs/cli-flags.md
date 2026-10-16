@@ -222,8 +222,8 @@ rejected when a root `.env*` file or `agent.toml` is recoverable from Git refs
 or reflogs.
 
 A task whose candidate is a container topology (`docker compose`, kind)
-declares `[environment] docker_in_docker = true`. Like a task `Dockerfile`, the
-key selects the local Docker evaluation environment; `--modal`, `--skypilot`,
+declares `[environment] docker_in_docker = true`. The key selects the local
+Docker evaluation environment; `--modal`, `--skypilot`,
 Slurm, and `--docker-image` conflict with it and the error names the key. The sandbox runs
 under Sysbox with a Docker daemon of its own and never mounts the host socket;
 a host without `sysbox-runc` fails early. See
@@ -513,13 +513,18 @@ recorded with the local environment before their removal continues in Docker whe
 resumed: the run log says so and the run record is rewritten to `docker`.
 
 A repository-native task may provide
-`.vibesys/tasks/<task>/Dockerfile`. Its presence (or `docker_in_docker = true`,
-below) automatically selects the
-Docker environment, builds with the task directory as its complete context,
-and uses the resulting immutable image ID. No manifest field or pre-build step
-is required. Explicit alternative environments and `--docker-image` conflict
-with this convention. A root Dockerfile is a candidate file and is not
-auto-detected.
+`.vibesys/tasks/<task>/Dockerfile`. Every environment whose agent runs in a
+local container (Docker, and the agent container of `--modal`, `--skypilot`
+and `--run-environment slurm`) builds it with the task directory as its
+complete context and the backend's default image as `BASE_IMAGE`, and runs the
+agent in the resulting immutable image ID, which the run records. No manifest
+field or pre-build step is required. `--docker-image` conflicts with this
+convention, and the `host` environment refuses it. Resume rebuilds the task
+image and refuses a different image ID, or a Dockerfile the record has no
+image for. `docker_in_docker = true` (below) still selects Docker only. A root
+Dockerfile is a candidate file and is not auto-detected. See
+[Running VibeSys](running-vibesys.md) for why a task image's `ENV` leaks into
+Slurm GPU jobs.
 
 `--docker-image` overrides the backend's default agent container image, including
 the local CPU editor image for Modal and SkyPilot.

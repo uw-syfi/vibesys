@@ -23,7 +23,7 @@ from vs_runtime._run_environment import (
     SkyPilotEnvironment,
 )
 from vs_runtime._slurm_environment import SlurmEnvironment
-from vs_runtime._task_image_policy import editor_image_plan
+from vs_runtime._task_image_policy import TaskImageError, editor_image_plan
 from vs_sandbox.api import backend_is_host_only
 
 if TYPE_CHECKING:
@@ -46,6 +46,7 @@ def resolve_run_environment_spec(
     spec: RunEnvironmentSpec,
     backend: ComputeBackend,
     *,
+    task_dockerfile: Path | None,
     platform: str,
     log: Callable[[str], None],
 ) -> RunEnvironmentSpec:
@@ -55,13 +56,19 @@ def resolve_run_environment_spec(
     declares itself host-only and ``platform`` (a ``sys.platform`` value) is
     macOS, where Seatbelt can confine it.  The choice follows from the backend
     alone, never from a flag, and every other spec is returned unchanged.
+
+    ``task_dockerfile`` is the Dockerfile the run's task declares. A spec not
+    built from it raises :class:`TaskImageError`, so no caller can open a run
+    that silently ignores the task image; nor can the host environment, which
+    has no container to build it into.
     """
+    if task_dockerfile is not None and spec.task_dockerfile != task_dockerfile:
+        raise TaskImageError.not_built(spec.name, task_dockerfile)
     if spec.name != "docker" or platform != "darwin" or not backend_is_host_only(backend):
         return spec
-    # The host has no agent container to build a task image into: refuse it
-    # through the same decision every environment makes, never drop it.
+    # The same decision every environment makes refuses the task image here.
     editor_image_plan(
-        "host", task_dockerfile=spec.task_dockerfile, image=None, base_image=None, launch="fresh"
+        "host", task_dockerfile=task_dockerfile, image=None, base_image=None, launch="fresh"
     )
     log(
         f"[environment] the {backend.value} backend cannot be reached from Docker; "

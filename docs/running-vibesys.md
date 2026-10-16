@@ -63,16 +63,34 @@ worktree. Keep `agent.toml` and root `.env*` files out of Git history.
 
 When the selected repository-native task contains a conventional
 `.vibesys/tasks/<task>/Dockerfile`, VibeSys builds it with that task directory
-as the complete build context and automatically selects Docker execution. The
-resolved immutable image ID is recorded with the run. Docker's native layer
-cache makes later launches incremental. The candidate repository is mounted at
-runtime and is never part of the image build context.
+as the complete build context, on top of the backend's default image (passed
+as the build argument `BASE_IMAGE`, so the Dockerfile may start with
+`ARG BASE_IMAGE` and `FROM ${BASE_IMAGE}`), and layers the agent on top. Every
+run environment whose agent runs in a local container does this the same way:
+Docker (the default), and the agent container of Modal, SkyPilot and Slurm. The
+resolved immutable image ID is recorded with the run, and resume rebuilds the
+task image and refuses to continue if it no longer matches the record, or if
+the run was recorded without a task image the task now declares. Docker's
+native layer cache makes later launches incremental. The candidate repository
+is mounted at runtime and is never part of the image build context.
 
 Task Dockerfiles are intentionally convention-based: they require no manifest
-field or image-build command. A task Dockerfile cannot be combined with another
-image source or a different run environment. `--run-environment docker` is
-redundant but accepted. A root `Dockerfile` never opts in, because that
-file commonly belongs to the candidate application.
+field or image-build command. A task Dockerfile cannot be combined with
+`--docker-image`, and the `host` environment (Metal on macOS) refuses it,
+because it has no container to build it into. A root `Dockerfile` never opts
+in, because that file commonly belongs to the candidate application.
+
+On Modal, SkyPilot and Slurm the task image is the agent's container only;
+evaluation runs where those environments run it. With Slurm and
+`[vibesys.agent_gpu]`, `vibesys-gpu` forwards the agent container's
+environment variables into each GPU job on the compute node
+(`libs/vs-sandbox/src/vs_sandbox/host_command_client.py` sends them,
+`job_environment` in `host_command_broker.py` keeps all but the container's
+identity variables such as `PATH` and `HOME`). An `ENV` line in the task
+Dockerfile therefore leaks into GPU jobs, where it may name paths that exist
+only in the image. Put settings the job needs somewhere it reads them on both
+sides instead, such as a `.pth` file in the project's virtual environment, and
+keep image `ENV` to values that are correct on the compute node too.
 
 All outer loops use this model. The agent always runs in a local Docker
 container. Modal, SkyPilot, and Slurm change where evaluation runs, not the task
@@ -163,9 +181,8 @@ A `microservices` task therefore opts in to a Docker daemon of its own with
 docker_in_docker = true
 ```
 
-The key selects the Docker run environment automatically, exactly like a
-task-owned `Dockerfile`. Modal, SkyPilot, or Slurm with the key is an error that
-names it. Without the key a task gets no container runtime at all: VibeSys
+The key selects the Docker run environment automatically. Modal, SkyPilot, or
+Slurm with the key is an error that names it. Without the key a task gets no container runtime at all: VibeSys
 never mounts or imports the host's Docker socket.
 
 ### Docker-in-Docker

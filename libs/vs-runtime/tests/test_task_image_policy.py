@@ -13,8 +13,10 @@ from vs_runtime.api.infrastructure import (
     EditorImagePlan,
     RunEnvironmentSpec,
     TaskImageError,
+    build_run_environment,
     editor_image_plan,
     resolve_run_environment_spec,
+    run_environment_record,
 )
 from vs_sandbox.api import ComputeBackend
 
@@ -117,13 +119,30 @@ def test_the_host_environment_refuses_a_task_dockerfile() -> None:
 
 def test_deriving_the_host_environment_refuses_a_built_task_image() -> None:
     """Regression: Metal on macOS dropped a task image when it derived ``host``."""
+    dockerfile = Path("/t/Dockerfile")
     spec = RunEnvironmentSpec(
-        name="docker",
-        options={"image": "sha256:" + "a" * 64},
-        task_dockerfile=Path("/t/Dockerfile"),
+        name="docker", options={"image": "sha256:" + "a" * 64}, task_dockerfile=dockerfile
     )
     with pytest.raises(TaskImageError, match="runs the agent on the host"):
-        resolve_run_environment_spec(spec, ComputeBackend.METAL, platform="darwin", log=print)
+        resolve_run_environment_spec(
+            spec, ComputeBackend.METAL, task_dockerfile=dockerfile, platform="darwin", log=print
+        )
+
+
+@given(
+    environment=st.sampled_from(_CONTAINER_ENVIRONMENTS),
+    backend=st.sampled_from(tuple(ComputeBackend)),
+    platform=st.sampled_from(("linux", "darwin")),
+)
+def test_a_selection_not_built_from_the_task_image_is_refused(
+    environment: str, backend: ComputeBackend, platform: str
+) -> None:
+    """Regression: a run opened with a task Dockerfile but no task image ignored it."""
+    spec = RunEnvironmentSpec(name=environment, options={})
+    with pytest.raises(TaskImageError, match="without building it"):
+        resolve_run_environment_spec(
+            spec, backend, task_dockerfile=Path("/t/Dockerfile"), platform=platform, log=print
+        )
 
 
 def test_an_unknown_environment_is_an_error() -> None:
@@ -131,3 +150,24 @@ def test_an_unknown_environment_is_an_error() -> None:
         editor_image_plan(
             "local", task_dockerfile=None, image=None, base_image=None, launch="fresh"
         )
+
+
+@pytest.mark.parametrize("environment", ["docker", "modal", "slurm"])
+def test_a_container_environment_runs_its_backend_on_the_image_option(
+    environment: str, tmp_path: Path
+) -> None:
+    """Regression: the Slurm editor ignored the task image and built from the backend default."""
+    image = "sha256:" + "d" * 64
+    options: dict[str, object] = {"image": image}
+    if environment == "slurm":
+        config = tmp_path / "slurm.toml"
+        config.write_text(
+            '[slurm]\nname = "cluster"\nremote_workspace_root = "/remote/runs"\n'
+            '[slurm.transport]\nkind = "ssh"\nhost = "cluster"\n',
+            encoding="utf-8",
+        )
+        options["config_path"] = str(config)
+    spec = RunEnvironmentSpec(name=environment, options=options)
+
+    assert build_run_environment(spec).backend_image == image
+    assert run_environment_record(spec).image == image

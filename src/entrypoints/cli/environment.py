@@ -140,10 +140,9 @@ def run_environment_spec_from_args(
             )
             raise ValueError(_exception_message_2)
 
-    task_dockerfile = dockerfile_path.absolute() if dockerfile_path is not None else None
     plan = editor_image_plan(
         requested_environment,
-        task_dockerfile=task_dockerfile,
+        task_dockerfile=dockerfile_path,
         image=args.docker_image,
         base_image=(backend_default_image(task_image.backend) if task_image is not None else None),
         launch="resume" if resuming else "fresh",
