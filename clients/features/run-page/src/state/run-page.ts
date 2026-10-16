@@ -13,10 +13,12 @@
  * (`@vibesys/run-session`) and reports what it says (`session`) and what it folded (`run`). Pause
  * and Resume are protocol commands, so they are offered only while the session can deliver one.
  */
+
+import type {RunEvent} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
-import type {CoreState} from '@vibesys/run-state';
+import {type CoreState, initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
 import {
   EMPTY_RUN_FOLD,
@@ -53,6 +55,31 @@ export type RunPhase =
   | {readonly kind: 'paused'; readonly by: 'user' | 'quota'}
   | {readonly kind: 'stopping'}
   | {readonly kind: 'ended'; readonly run: HostRun; readonly end: RunEnd};
+
+/** The most events one history page asks for. */
+export const HISTORY_PAGE_EVENTS = 500;
+
+/**
+ * An ended run's recorded events, read page by page (`runs.read_events`) into the run fold: not
+ * asked yet, a page awaited under a token, all read, not served by this host, or failed.
+ */
+export type RunHistory =
+  | {readonly kind: 'idle'}
+  | {readonly kind: 'reading'; readonly token: number; readonly from: number}
+  | {readonly kind: 'read'}
+  | {readonly kind: 'unsupported'}
+  | {readonly kind: 'failed'; readonly message: string};
+
+/** What one history read settled to. */
+export type HistoryReply =
+  | {
+      readonly kind: 'page';
+      readonly events: readonly RunEvent[];
+      readonly next: number;
+      readonly complete: boolean;
+    }
+  | {readonly kind: 'unsupported'}
+  | {readonly kind: 'failed'; readonly message: string};
 
 /** The page's own stop flow: confirming, or a stop sent and waiting for the run to end. */
 export type StopFlow =
@@ -126,6 +153,8 @@ export interface RunPageState {
   /** Why the last command the run refused failed, until the next one. */
   readonly notice: string | null;
   readonly map: MapState;
+  /** An ended run's recorded events, read into `run`. */
+  readonly history: RunHistory;
   readonly next: number;
 }
 
@@ -158,7 +187,8 @@ export type RunPageAction =
   | {readonly type: 'run-core'; readonly core: CoreState}
   | {readonly type: 'run-data'; readonly data: RunData}
   | {readonly type: 'command-refused'; readonly message: string}
-  | {readonly type: 'view'; readonly view: RunView};
+  | {readonly type: 'view'; readonly view: RunView}
+  | {readonly type: 'history'; readonly token: number; readonly reply: HistoryReply};
 
 export type RunPageRequest =
   | {readonly kind: 'stop'; readonly force: boolean}
@@ -173,7 +203,14 @@ export type RunPageRequest =
   /** Attach the live run's server `instance` to this window, answering `attached` with `token`. */
   | {readonly kind: 'attach'; readonly token: number; readonly instance: string}
   /** Let the attached run go (its session closes with it). */
-  | {readonly kind: 'release'};
+  | {readonly kind: 'release'}
+  /** Read the ended run's recorded events from `from`, answering `history` with `token`. */
+  | {
+      readonly kind: 'read-history';
+      readonly token: number;
+      readonly from: number;
+      readonly max: number;
+    };
 
 export interface RunPageStep {
   readonly state: RunPageState;
@@ -203,6 +240,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     view: {at: 'live'},
     notice: null,
     map: {filter: 'all', open: new Set(), selected: null},
+    history: {kind: 'idle'},
     next: 1,
   };
 }
@@ -301,6 +339,35 @@ function linked(state: RunPageState): RunPageStep {
   };
 }
 
+/** Ask for the next history page from `from`. */
+function readingFrom(state: RunPageState, from: number): RunPageStep {
+  const token = state.next;
+  return {
+    state: {...state, next: token + 1, history: {kind: 'reading', token, from}},
+    requests: [{kind: 'read-history', token, from, max: HISTORY_PAGE_EVENTS}],
+  };
+}
+
+/**
+ * An ended run reads its history once into the run fold; a run that is live again (a resume)
+ * gets its data from its session, and drops a history read in flight.
+ */
+function historyFor(state: RunPageState): RunPageStep {
+  if (state.record.kind === 'live') {
+    return {
+      state: state.history.kind === 'idle' ? state : {...state, history: {kind: 'idle'}},
+      requests: [],
+    };
+  }
+  if (state.record.kind === 'unlisted' && state.history.kind === 'reading') {
+    return {state: {...state, history: {kind: 'idle'}}, requests: []};
+  }
+  if (state.record.kind === 'ended' && state.history.kind === 'idle') {
+    return readingFrom({...state, run: EMPTY_RUN_FOLD}, 0);
+  }
+  return {state, requests: []};
+}
+
 function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
   const instanceChanged = recordInstance(state.record) !== recordInstance(record);
   const fenced: RunPageState = instanceChanged
@@ -308,7 +375,33 @@ function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
     : {...state, record};
   const link = linked(fenced);
   const step = recordStep(link.state, record);
-  return {state: step.state, requests: [...link.requests, ...step.requests]};
+  const history = historyFor(step.state);
+  return {
+    state: history.state,
+    requests: [...link.requests, ...step.requests, ...history.requests],
+  };
+}
+
+function withHistory(state: RunPageState, token: number, reply: HistoryReply): RunPageStep {
+  const {history} = state;
+  if (history.kind !== 'reading' || history.token !== token) return {state, requests: []};
+  if (reply.kind === 'unsupported') return {state: {...state, history: reply}, requests: []};
+  if (reply.kind === 'failed') {
+    return {state: {...state, history: {kind: 'failed', message: reply.message}}, requests: []};
+  }
+  const run: RunFold =
+    reply.events.length === 0
+      ? state.run
+      : {
+          core: reduceEventBatch(state.run.core ?? initialCoreState(), reply.events),
+          trace: traceStep(state.run.trace, {kind: 'events', events: reply.events}),
+        };
+  const folded = {...state, run};
+  // A page that read nothing new cannot advance: stop rather than ask for the same page again.
+  if (reply.complete || reply.next <= history.from) {
+    return {state: {...folded, history: {kind: 'read'}}, requests: []};
+  }
+  return readingFrom(folded, reply.next);
 }
 
 function recordStep(next: RunPageState, record: RunRecord): RunPageStep {
@@ -551,6 +644,8 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       return {state: {...state, notice: action.message}, requests: []};
     case 'view':
       return {state: {...state, view: action.view}, requests: []};
+    case 'history':
+      return withHistory(state, action.token, action.reply);
     default:
       return null;
   }
@@ -562,6 +657,9 @@ function liveProblems(state: RunPageState): string[] {
   const live = state.record.kind === 'live' ? state.record.run.id : null;
   const held = state.link.kind === 'none' ? null : state.link.instance;
   if (held !== live) problems.push(`the link holds ${held} while the live server is ${live}`);
+  if (state.history.kind === 'reading' && state.record.kind !== 'ended') {
+    problems.push('history is read for a run that is not ended');
+  }
   if (state.session !== null && state.link.kind !== 'attached') {
     problems.push('a session reports without an attached run');
   }

@@ -83,6 +83,7 @@ function fakePorts(stops: boolean[], app = new FakeApp()): RunPagePorts {
       app.observer = observer;
       return app.session();
     },
+    readHistory: () => Promise.resolve({kind: 'unsupported'}),
     resumeEnded: ignore,
     openWindow: ignore,
     archive: ignore,

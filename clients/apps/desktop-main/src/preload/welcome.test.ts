@@ -143,6 +143,10 @@ function cases(random: Seeded): Case[] {
       {kind: 'stop', host, instance, force, confirmed: true},
     ],
     [bridge => bridge.releaseRun(), {kind: 'release-run'}],
+    [
+      bridge => bridge.readEvents(key, path, name, token, 1 + (token % 1000)),
+      {kind: 'read-events', host, project: path, runId: name, from: token, max: 1 + (token % 1000)},
+    ],
     [bridge => bridge.preferences(), {kind: 'preferences'}],
     [bridge => bridge.setAppearance(appearance), {kind: 'set-appearance', appearance}],
     [bridge => bridge.setNotifications(force), {kind: 'set-notifications', enabled: force}],

@@ -8,6 +8,7 @@ import {
   endedView,
   FORCE_STOP_BOUND_MS,
   followedStreams,
+  HISTORY_PAGE_EVENTS,
   headerView,
   logGroups,
   MAP_FILTERS,
@@ -24,6 +25,7 @@ import {
   streamLines,
   timelineView,
   type Unavailable,
+  viewedRun,
 } from './index.js';
 
 const RUN = {host: 'ssh:chelan4', runId: '20261015-163047'} as const;
@@ -133,7 +135,7 @@ function runEvent(random: Seeded, sequence: number): RunEvent {
 
 /** What the attached run's session might report, current or late. */
 function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
-  switch (random.int(4)) {
+  switch (random.int(5)) {
     case 0:
       return {
         type: 'attached',
@@ -158,8 +160,23 @@ function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
           events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
         },
       };
-    default:
+    case 3:
       return {type: 'view', view: random.bool() ? {at: 'live'} : {at: random.int(30)}};
+    default:
+      return {
+        type: 'history',
+        token: random.pick(issued),
+        reply: random.pick([
+          {kind: 'unsupported'} as const,
+          {kind: 'failed', message: 'channel closed'} as const,
+          {
+            kind: 'page',
+            events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
+            next: random.int(40),
+            complete: random.bool(),
+          } as const,
+        ]),
+      };
   }
 }
 
@@ -195,9 +212,15 @@ function randomAction(random: Seeded, issued: readonly number[]): RunPageAction 
 }
 
 function issues(request: RunPageRequest): number | null {
-  return request.kind === 'arm-bound' || request.kind === 'list-logs' || request.kind === 'attach'
-    ? request.token
-    : null;
+  switch (request.kind) {
+    case 'arm-bound':
+    case 'list-logs':
+    case 'attach':
+    case 'read-history':
+      return request.token;
+    default:
+      return null;
+  }
 }
 
 function awaited(state: RunPageState) {
@@ -205,6 +228,7 @@ function awaited(state: RunPageState) {
     bound: state.stop.kind === 'stopping' ? state.stop.bound : null,
     logs: state.logs.kind === 'listing' ? state.logs.token : null,
     attach: state.link.kind === 'attaching' ? state.link.token : null,
+    history: state.history.kind === 'reading' ? state.history.token : null,
   };
 }
 
@@ -212,6 +236,7 @@ function reply(action: RunPageAction) {
   if (action.type === 'bound-elapsed') return {slot: 'bound', token: action.token};
   if (action.type === 'streams') return {slot: 'logs', token: action.token};
   if (action.type === 'attached') return {slot: 'attach', token: action.token};
+  if (action.type === 'history') return {slot: 'history', token: action.token};
   return null;
 }
 
@@ -437,6 +462,41 @@ describe('the run page store', () => {
       unsupported: false,
     });
     expect(mismatched.state.views).toEqual({});
+  });
+
+  test('an ended run reads its history page by page into the run, and the tabs see its spans', () => {
+    const span = (sequence: number, id: string, type: string): RunEvent =>
+      ({
+        sequence,
+        type,
+        timestamp: '2026-10-15T16:30:51Z',
+        data: {span: {id}},
+      }) as unknown as RunEvent;
+    const ended = fold(initial(), [{type: 'record', record: RECORDS[8] as RunRecord}]);
+    const first = ended.requests.find(request => request.kind === 'read-history');
+    expect(first).toMatchObject({from: 0, max: HISTORY_PAGE_EVENTS});
+    if (first?.kind !== 'read-history') throw new Error('no history asked');
+    const paged = fold(ended.state, [
+      {
+        type: 'history',
+        token: first.token,
+        reply: {kind: 'page', events: [span(1, 'a', 'span_started')], next: 2, complete: false},
+      },
+    ]);
+    const second = paged.requests.find(request => request.kind === 'read-history');
+    expect(second).toMatchObject({from: 2});
+    if (second?.kind !== 'read-history') throw new Error('no second page asked');
+    const read = fold(paged.state, [
+      {
+        type: 'history',
+        token: second.token,
+        reply: {kind: 'page', events: [span(2, 'b', 'span_started')], next: 3, complete: true},
+      },
+    ]).state;
+    expect(read.history).toEqual({kind: 'read'});
+    expect(viewedRun(read).spans.map(each => each.id)).toEqual(['a', 'b']);
+    expect(viewedRun({...read, view: {at: 1}}).spans.map(each => each.id)).toEqual(['a']);
+    expect(read.run.core).not.toBeNull();
   });
 });
 

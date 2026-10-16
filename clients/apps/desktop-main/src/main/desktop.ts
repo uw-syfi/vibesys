@@ -39,6 +39,7 @@ export interface DesktopDeps {
     | 'cancelInspectionOwner'
     | 'complete'
     | 'harnesses'
+    | 'readEvents'
     | 'host'
     | 'inspect'
     | 'logs'
@@ -225,18 +226,22 @@ export class Desktop {
     });
   }
 
-  /** The requests about the run the window shows: which view, letting it go, retry. */
-  #answerShownRun(
+  /** The requests about the run the window shows: which view, its history, letting it go, retry. */
+  async #answerShownRun(
     request: Extract<
       WelcomeRequest,
-      {readonly kind: 'show-run' | 'show-welcome' | 'release-run' | 'retry'}
+      {readonly kind: 'show-run' | 'show-welcome' | 'read-events' | 'release-run' | 'retry'}
     >,
-  ): null {
+  ): Promise<unknown> {
     switch (request.kind) {
       case 'show-run':
       case 'show-welcome':
         this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');
         return null;
+      case 'read-events': {
+        const {host, project, runId, from, max} = request;
+        return this.#deps.hosts.readEvents(host, project, runId, from, max);
+      }
       case 'release-run':
         this.#deps.window.releaseSurfaceRun();
         return null;
@@ -312,6 +317,7 @@ export class Desktop {
         return null;
       case 'show-run':
       case 'show-welcome':
+      case 'read-events':
       case 'release-run':
       case 'retry':
         return this.#answerShownRun(request);

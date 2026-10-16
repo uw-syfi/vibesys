@@ -60,6 +60,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.stop]: ['local', '0123456789ab', false],
   [WELCOME_CHANNELS.stopConfirmed]: ['local', '0123456789ab', false],
   [WELCOME_CHANNELS.releaseRun]: [],
+  [WELCOME_CHANNELS.readEvents]: ['local', '/srv/project', 'run-1', 0, 100],
   [WELCOME_CHANNELS.preferences]: [],
   [WELCOME_CHANNELS.setAppearance]: [{mode: 'dark', light: 'mist', dark: 'midnight'}],
   [WELCOME_CHANNELS.setNotifications]: [false],

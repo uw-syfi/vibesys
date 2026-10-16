@@ -100,6 +100,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
   stop = () => this.#ask('stop', null);
   stopConfirmed = () => this.#ask('stop-confirmed', null);
   releaseRun = () => this.#ask('release-run', null);
+  readEvents = () => this.#ask('read-events', {kind: 'unsupported'} as const);
   connectRun = (): void => undefined;
   onWake = (): void => undefined;
   inspect = () => {

@@ -17,7 +17,26 @@ export const RUN_CONTROL_CHANNELS = {
   stop: 'vibesys:welcome:stop',
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
   releaseRun: 'vibesys:welcome:release-run',
+  readEvents: 'vibesys:welcome:read-events',
 } as const;
+
+/** The most events one history page may ask for. */
+export const HISTORY_PAGE_MAX = 1000;
+
+/**
+ * One page of a run's recorded events (`runs.read_events`, feature `run_history`): the events from
+ * the asked sequence on, as the helper recorded them (the page validates each before folding it),
+ * where the next page starts, and whether the history is complete; or that this host's VibeSys
+ * does not serve history.
+ */
+export type RunHistoryPage =
+  | {
+      readonly kind: 'page';
+      readonly events: readonly unknown[];
+      readonly next: number;
+      readonly complete: boolean;
+    }
+  | {readonly kind: 'unsupported'};
 
 /**
  * The window message type that hands the shell page one run connection's port: `connectRun(id)`
@@ -46,6 +65,14 @@ export interface RunControlWelcomeBridge {
   onWake(listener: () => void): void;
   /** Let the attached run go: the view shows no live run now. Safe when none is attached. */
   releaseRun(): Promise<WelcomeResult<null>>;
+  /** One page of run `runId`'s recorded events in `project` on `host`, from `fromSequence`. */
+  readEvents(
+    host: HostKey,
+    project: string,
+    runId: string,
+    fromSequence: number,
+    max: number,
+  ): Promise<WelcomeResult<RunHistoryPage>>;
 }
 
 export type RunControlRequest =
@@ -68,10 +95,33 @@ export type RunControlRequest =
   | {readonly kind: 'show-run'}
   | {readonly kind: 'show-welcome'}
   | {readonly kind: 'retry'}
-  | {readonly kind: 'release-run'};
+  | {readonly kind: 'release-run'}
+  | {
+      readonly kind: 'read-events';
+      readonly host: HostId;
+      readonly project: string;
+      readonly runId: string;
+      readonly from: number;
+      readonly max: number;
+    };
 
 function forceStop(value: unknown): boolean {
   if (typeof value !== 'boolean') throw new Error('force stop must be a boolean');
+  return value;
+}
+
+function sequence(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error('the first sequence to read must be a non-negative integer');
+  }
+  return value;
+}
+
+function pageSize(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error('the page size must be a positive integer');
+  }
+  if (value > HISTORY_PAGE_MAX) throw new Error(`the page size is at most ${HISTORY_PAGE_MAX}`);
   return value;
 }
 
@@ -80,7 +130,7 @@ export function parseRunControlRequest(
   channel: ChannelOf<typeof RUN_CONTROL_CHANNELS>,
   args: readonly unknown[],
 ): RunControlRequest {
-  const [first, second, third] = args;
+  const [first, second, third, fourth, fifth] = args;
   switch (channel) {
     case RUN_CONTROL_CHANNELS.attach:
       return {kind: 'attach', host: hostFromKey(first), instance: instance(second, 'attach to')};
@@ -108,5 +158,14 @@ export function parseRunControlRequest(
       return {kind: 'retry'};
     case RUN_CONTROL_CHANNELS.releaseRun:
       return {kind: 'release-run'};
+    case RUN_CONTROL_CHANNELS.readEvents:
+      return {
+        kind: 'read-events',
+        host: hostFromKey(first),
+        project: project(second),
+        runId: exactResumeRunId(third),
+        from: sequence(fourth),
+        max: pageSize(fifth),
+      };
   }
 }

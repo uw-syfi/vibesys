@@ -7,12 +7,19 @@
  * window (`attach`, the same run control a run page uses) and its session runs over the window's
  * relay (`run-connection.ts`); Pause and Resume are commands on that session.
  */
-import {type DesktopBridge, settled, type WelcomeBridge, type WelcomeResult} from '@vibesys/ipc';
+import {validateRunEvent} from '@vibesys/contracts';
+import {
+  type DesktopBridge,
+  type RunHistoryPage,
+  settled,
+  type WelcomeBridge,
+  type WelcomeResult,
+} from '@vibesys/ipc';
 import type {LogListOutcome, LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
 import {type RunAction, WebSession, type WebSessionOptions} from '@vibesys/run-session';
 import {exactResumeRunId, type RunRef} from '@vibesys/runs';
 import type {AbortSignalLike} from '@vibesys/transport';
-import type {RunData} from '../../state/index.js';
+import type {HistoryReply, RunData} from '../../state/index.js';
 import type {LiveSession, SessionObserver} from './live-session.js';
 import {type PortMessages, welcomeRunBridge} from './run-connection.js';
 import type {RunPagePorts} from './store.js';
@@ -29,6 +36,7 @@ export type RunPageBridge = Pick<
   | 'releaseRun'
   | 'connectRun'
   | 'onWake'
+  | 'readEvents'
 >;
 
 /** The page the session runs in: where the preload's ports arrive, and the app's session wiring. */
@@ -50,6 +58,19 @@ export interface RunPageTarget {
 export interface RunPageNavigation {
   runAgain(): void;
   openWindow(): void;
+}
+
+/** A history page with each recorded event validated; an event that is not one fails the page. */
+function historyReply(page: RunHistoryPage): HistoryReply {
+  if (page.kind === 'unsupported') return page;
+  try {
+    return {...page, events: page.events.map(validateRunEvent)};
+  } catch (error) {
+    return {
+      kind: 'failed',
+      message: `the run's history holds an unreadable event: ${String(error)}`,
+    };
+  }
 }
 
 /** What one fold action of the session adds to the screen's trace slice. */
@@ -167,6 +188,12 @@ export function welcomeRunPorts(
     },
     release: () => void settled(bridge.releaseRun()),
     openSession: observer => openWebSession(bridge, page, observer),
+    readHistory: async (from, max) => {
+      const result = await settled(
+        bridge.readEvents(host, target.project, target.run.runId, from, max),
+      );
+      return result.ok ? historyReply(result.value) : {kind: 'failed', message: result.error};
+    },
     resumeEnded: () =>
       void settled(bridge.resume(host, target.project, exactResumeRunId(target.run.runId))),
     openWindow: () => navigation.openWindow(),

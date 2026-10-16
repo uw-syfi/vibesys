@@ -133,6 +133,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
       truncated: false,
     }),
     harnesses: async () => ({kind: 'unsupported'}),
+    readEvents: async () => ({kind: 'unsupported'}),
     inspect: async (_id, instanceId) => ({
       id: instanceId,
       state: 'ended',

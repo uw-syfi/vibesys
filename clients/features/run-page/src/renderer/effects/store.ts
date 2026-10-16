@@ -12,6 +12,7 @@ import type {ScheduleTimeout} from '@vibesys/machine';
 import {createStore, type Store} from '@vibesys/store';
 import {
   followedStreams,
+  type HistoryReply,
   type RunPageAction,
   type RunPageRequest,
   type RunPageSeed,
@@ -37,6 +38,8 @@ export interface RunPagePorts {
   release(): void;
   /** Open the attached run's session. */
   readonly openSession: OpenSession;
+  /** One page of the ended run's recorded events from `from`. */
+  readHistory(from: number, max: number): Promise<HistoryReply>;
   /** Resume an ended run that its end record says can resume. */
   resumeEnded(fromRound: number | null): void;
   openWindow(): void;
@@ -92,6 +95,19 @@ class Followers {
     });
     this.#followers.set(streamId, {instanceId, stop: () => actor.stop()});
   }
+}
+
+/** Read one history page; a read that throws settles as a failed page. */
+function readHistory(
+  ports: RunPagePorts,
+  request: Extract<RunPageRequest, {readonly kind: 'read-history'}>,
+  dispatch: Dispatch,
+): void {
+  const settle = (reply: HistoryReply): void =>
+    dispatch({type: 'history', token: request.token, reply});
+  void ports
+    .readHistory(request.from, request.max)
+    .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
 }
 
 function performCommand(ports: RunPagePorts, request: RunPageRequest): void {
@@ -165,6 +181,9 @@ export function createRunPageStore(
       case 'release':
         sessions.close();
         ports.release();
+        return;
+      case 'read-history':
+        readHistory(ports, request, dispatch);
         return;
       case 'pause':
       case 'resume':
