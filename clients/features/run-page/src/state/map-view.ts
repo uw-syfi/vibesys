@@ -87,7 +87,8 @@ function isWorkstream(node: MapNode): boolean {
   return node.span.label?.kind === 'workstream';
 }
 
-function spanRow(node: MapNode, depth: number, spans: ReadonlyMap<string, Span>): MapRow {
+function spanRow(node: MapNode, depth: number, walk: Walk): MapRow {
+  const {spans} = walk;
   const {span} = node;
   const status = statusWords(span.status);
   const verdict = verdictWords(span);
@@ -103,7 +104,7 @@ function spanRow(node: MapNode, depth: number, spans: ReadonlyMap<string, Span>)
     id: span.id,
     depth,
     title: titleOf(span),
-    subtitle: subtitleOf(span, spans, planned),
+    subtitle: subtitleOf(span, spans, planned, walk.start),
     state: status,
     chips: [...links, verdict ?? status],
   };
@@ -131,6 +132,8 @@ function groupRow(
 interface Walk {
   readonly map: MapState;
   readonly spans: ReadonlyMap<string, Span>;
+  /** The run's start on the run clock: its first root's. */
+  readonly start: number;
 }
 
 function matches(node: MapNode, filter: MapFilter): boolean {
@@ -164,13 +167,14 @@ function nodeRows(node: MapNode, depth: number, forced: boolean, walk: Walk): Ma
   const own = matches(node, walk.map.filter);
   const below = childRows(node, depth + 1, forced || (own && !root), walk);
   if (!(root || forced || own || below.length > 0)) return [];
-  return [spanRow(node, depth, walk.spans), ...below];
+  return [spanRow(node, depth, walk), ...below];
 }
 
 /** The Map's rows, top to bottom, for the trace and the page's filter and open groups. */
 export function mapRows(trace: RunTrace, map: MapState): readonly MapRow[] {
-  const walk: Walk = {map, spans: trace.spans};
-  return mapForest(trace).flatMap(root => nodeRows(root, 0, false, walk));
+  const roots = mapForest(trace);
+  const walk: Walk = {map, spans: trace.spans, start: roots[0]?.span.started_at ?? 0};
+  return roots.flatMap(root => nodeRows(root, 0, false, walk));
 }
 
 /** The selected span: the page's selection while it is in the trace, else the first root. */

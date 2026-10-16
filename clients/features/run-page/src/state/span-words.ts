@@ -192,7 +192,7 @@ function kindSubtitle(span: Span, children: number): string | null {
     case 'planning_call':
       return `${children} workstream${children === 1 ? '' : 's'} planned`;
     case 'gate':
-      return measured(attrs) ?? text(attrs, 'stage');
+      return measured(attrs);
     case 'workstream':
       return span.label?.reason == null ? null : plain(span.label.reason);
     default:
@@ -200,17 +200,41 @@ function kindSubtitle(span: Span, children: number): string | null {
   }
 }
 
-/** The span's subtitle: what it waits on, its try, its kind's own words, or its status. */
-export function subtitleOf(span: Span, spans: ReadonlyMap<string, Span>, children: number): string {
+/** How many workstreams the run has started, and how many of them are running. */
+function workstreams(spans: ReadonlyMap<string, Span>): string | null {
+  const all = [...spans.values()].filter(span => span.label?.kind === 'workstream');
+  if (all.length === 0) return null;
+  const running = all.filter(span => span.status === 'running').length;
+  return `${all.length} workstream${all.length === 1 ? '' : 's'} · ${running} running`;
+}
+
+/** When the span ran, relative to the run's start (`start`): how long it took, or when it began. */
+function timing(span: Span, start: number): string {
+  const end = span.ended_at;
+  return end === null || end === undefined
+    ? `Started ${duration(span.started_at - start)} into the run`
+    : `Took ${duration(end - span.started_at)}`;
+}
+
+/**
+ * The span's subtitle: what it waits on, its kind's own words, its try, its failure, an unknown
+ * kind's name, or when it ran. `start` is the run's start on the run clock.
+ */
+export function subtitleOf(
+  span: Span,
+  spans: ReadonlyMap<string, Span>,
+  children: number,
+  start: number,
+): string {
   const waiting = span.waiting_on ?? [];
   if (waiting.length > 0 && !ended(span)) {
     return `Waiting on ${waiting.map(wait => waitingWords(wait, spans).toLowerCase()).join(', ')}`;
   }
-  const own = kindSubtitle(span, children);
+  const own = span.parent === null ? workstreams(spans) : kindSubtitle(span, children);
   if (own !== null) return own;
   const attempt = (span.attempts ?? []).at(-1);
   if (attempt !== undefined && attempt.of > 1) return `Attempt ${attempt.n} of ${attempt.of}`;
   if (span.failure !== null && span.failure !== undefined) return span.failure.message;
   const kind = span.label?.kind;
-  return kind === undefined || kind in KINDS ? statusWords(span.status).label : plain(kind);
+  return kind === undefined || kind in KINDS ? timing(span, start) : plain(kind);
 }

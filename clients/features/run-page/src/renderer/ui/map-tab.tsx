@@ -88,9 +88,8 @@ function Detail(props: {
 }): JSX.Element {
   const {detail, logs, actions} = props;
   return (
-    <Card section="Step">
+    <Card section={detail.kind}>
       <Stack gap="space-3">
-        <Text variant="section">{detail.kind}</Text>
         <Text as="h3" variant="heading">
           {detail.title}
         </Text>
