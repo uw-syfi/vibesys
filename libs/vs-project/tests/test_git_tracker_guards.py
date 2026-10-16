@@ -508,6 +508,66 @@ def test_isolation_reports_exactly_what_the_agent_wrote_including_below_vibesys(
     assert tracker.pending_changes() == expected
 
 
+_EARLIER_RUN = ".vibesys/state/runs/earlier-run"
+_LEFTOVERS = tuple(
+    f"{_EARLIER_RUN}/{name}"
+    for name in ("core-store/store.json", "core-store/store.lock", "artifacts/objects/ab12")
+)
+
+
+@settings(
+    max_examples=examples(pr=5, nightly=40),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    left=st.dictionaries(st.sampled_from(_LEFTOVERS), st.sampled_from([b"", b"state"])),
+    writes=st.lists(
+        st.tuples(
+            st.sampled_from((*_LEFTOVERS, f"{_EARLIER_RUN}/stray.txt")),
+            st.sampled_from([None, b"state", b"agent"]),
+        ),
+        max_size=4,
+    ),
+)
+def test_run_state_an_earlier_process_left_is_not_the_agents(
+    tmp_path_factory: pytest.TempPathFactory,
+    left: dict[str, bytes],
+    writes: list[tuple[str, bytes | None]],
+) -> None:
+    """Regression: a second run stalled on its first orchestrator turn.
+
+    Every run leaves its store and artifacts untracked in the checkout. The next run's
+    isolation check reported them as the read-only agent's writes, could not restore them
+    and never settled the turn. What an earlier process left is the framework's while it
+    keeps its bytes; whatever the agent then creates or rewrites there is still reported.
+    """
+    root = tmp_path_factory.mktemp("project")
+    _committed_repository(root)
+    for path, content in left.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_bytes(content)
+    tracker = _tracker(root)
+    tracker.init(existing=False)
+    assert tracker.pending_changes() == []
+
+    final: dict[str, bytes | None] = dict(left)
+    for path, content in writes:
+        target = root / path
+        if content is None:
+            target.unlink(missing_ok=True)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(content)
+        final[path] = content
+
+    expected = sorted(
+        path
+        for path, content in final.items()
+        if content is not None and (path not in left or content != left[path])
+    )
+    assert tracker.pending_changes() == expected
+
+
 def test_an_agent_overwrite_of_a_framework_file_is_reported(tmp_path: Path) -> None:
     tracker = _initialized_tracker(tmp_path)
     project = _project(tmp_path, tracker)

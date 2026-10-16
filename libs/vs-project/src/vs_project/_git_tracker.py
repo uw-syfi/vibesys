@@ -143,6 +143,21 @@ class GitTracker:
             existing=existing,
             trusted_input_baseline=trusted_input_baseline,
         )
+        self._adopt_earlier_run_state()
+
+    def _adopt_earlier_run_state(self) -> None:
+        """Count the untracked run state earlier processes left below ``.vibesys`` as theirs.
+
+        Every run leaves its store, artifacts and publications in the checkout, never
+        committed (see ``baseline_changes``), and a resumed run finds its own. They are not
+        a change this run's agents made, and restoring the workspace never touches them,
+        so ``pending_changes`` reporting them would fail every isolated turn. Only the
+        bytes there now are adopted: an agent that rewrites one is still reported.
+        """
+        prefix = f"{self._state_integration.metadata_pathspec}/"
+        for path in self._git.unversioned_paths(include_ignored=False):
+            if path.startswith(prefix):
+                FRAMEWORK_WRITES.adopt(self.root / path)
 
     def add_worktree(self, worktree_dir: Path, commit: str) -> None:
         """Create a detached linked worktree at *commit*.
@@ -525,7 +540,8 @@ class GitTracker:
 
         The framework writes its own run state below ``.vibesys`` while a turn is in
         flight, so a path is not reported when it is exactly what the framework last
-        published there (see ``_framework_writes``). Any other change below
+        published there (see ``_framework_writes``), or what an earlier process left there
+        and this run found when it started (see ``init``). Any other change below
         ``.vibesys`` is reported like a change anywhere else: an isolated role must
         not rewrite framework state either.
         """

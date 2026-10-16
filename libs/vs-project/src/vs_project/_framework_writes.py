@@ -73,6 +73,26 @@ class FrameworkWrites:
         with self._lock:
             self._files[key] = frozenset({incoming})
 
+    def adopt(self, path: Path) -> None:
+        """Record the regular file at *path*, with the bytes it holds now, as the framework's.
+
+        For a file the framework wrote in an earlier process, such as the store another
+        run left in the checkout: it stays the framework's while it keeps these bytes, so
+        an agent that rewrites it is still caught. A file already recorded keeps its
+        record, and anything that is not a regular file is left unrecorded.
+        """
+        key = _key(path)
+        with self._lock:
+            if key in self._files:
+                return
+            try:
+                if key.is_symlink() or not key.is_file():
+                    return
+                digest = _digest(key.read_bytes())
+            except OSError:
+                return
+            self._files[key] = frozenset({digest})
+
     def claim_directory(self, path: Path) -> None:
         """Record a directory handed to a path-based library that writes in it itself.
 
