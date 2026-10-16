@@ -172,7 +172,11 @@ export function quotaBannerView(
     pause.resetsAt === null
       ? `${provider} gave no reset time.`
       : `${provider} expects capacity back at ${time(pause.resetsAt)}.`;
-  return {...offers, title: `Paused: ${provider} hit its ${limit}`, body: `${pause.detail}. ${reset}`};
+  return {
+    ...offers,
+    title: `Paused: ${provider} hit its ${limit}`,
+    body: `${pause.detail}. ${reset}`,
+  };
 }
 
 /** The banner under the header while a stop is being confirmed or is under way. */

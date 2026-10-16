@@ -268,24 +268,29 @@ function reply(action: RunPageAction) {
   return null;
 }
 
+/** Why a Pause or Resume was not on offer in `before` (header or quota banner), or null. */
+function commandNotOffered(
+  before: RunPageState,
+  request: Extract<RunPageRequest, {kind: 'pause' | 'resume'}>,
+): string | null {
+  const header = headerView(before);
+  const banner = quotaBannerView(before, String);
+  const offers =
+    request.kind === 'pause'
+      ? [header.pause, banner?.stopWaiting]
+      : request.when === 'now'
+        ? [header.resume, banner?.resumeNow]
+        : [banner?.wait];
+  const offered = offers.some(each => each?.shown === true && each.disabledReason === null);
+  return offered ? null : `${request.kind} was sent while not offered`;
+}
+
 /** Why `request` was not on offer in `before`, or null when it was. */
 function notOffered(before: RunPageState, request: RunPageRequest): string | null {
-  const header = headerView(before);
   switch (request.kind) {
-    case 'pause': {
-      const stopWaiting = quotaBannerView(before, String)?.stopWaiting;
-      const offered = [header.pause, stopWaiting].some(
-        each => each?.shown === true && each.disabledReason === null,
-      );
-      return offered ? null : 'pause was sent while not offered';
-    }
-    case 'resume': {
-      const banner = quotaBannerView(before, String);
-      const offer = request.when === 'now' ? (banner?.resumeNow ?? header.resume) : banner?.wait;
-      return offer?.shown === true && offer.disabledReason === null
-        ? null
-        : `resume (${request.when}) was sent while not offered`;
-    }
+    case 'pause':
+    case 'resume':
+      return commandNotOffered(before, request);
     case 'stop': {
       const banner = stopBannerView(before);
       const offered = !request.force || (banner.kind === 'stopping' && banner.forceOffered);
