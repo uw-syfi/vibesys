@@ -93,7 +93,7 @@ from vs_agent.provider_policy import (
     harnesses,
     vetted_models,
 )
-from vs_agent.provider_profiles import provider_binary
+from vs_agent.provider_profiles import launch_shell_environment, provider_binary
 from vs_agent.reply_limits import (
     MAX_REPLY_BYTES,
     MAX_WHITESPACE_RUN,
@@ -275,6 +275,7 @@ __all__ = [
     "describe_validation_error",
     "harnesses",
     "inspect_invocation_journal",
+    "launch_shell_environment",
     "materialize_skills",
     "native_schema",
     "native_schema_problems",

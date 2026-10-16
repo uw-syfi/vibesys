@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from types import ModuleType
 
     from agentshim import ProviderProfile
@@ -44,6 +45,18 @@ def provider_profile(provider: str) -> ProviderProfile:
 def provider_binary(provider: str) -> str:
     """The program name of *provider*'s CLI, as agentshim's profile names it."""
     return provider_profile(provider).binary
+
+
+def launch_shell_environment() -> Mapping[str, str]:
+    """The environment a run finds provider CLIs in: the interactive login shell's.
+
+    Provider CLIs are usually installed by a shell rc file that a non-interactive
+    process (an SSH command, a service) never sources, so the run reads ``PATH`` and
+    credentials from the shell a user would get. agentshim reads it once per process.
+    Whoever asks whether a provider CLI is installed asks here, so the answer is the
+    run's.
+    """
+    return _agentshim().interactive_env()
 
 
 def model_context_window(provider: str, model: str | None) -> int | None:

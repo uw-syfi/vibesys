@@ -373,16 +373,29 @@ def quiet_machine(
     script: Callable[[tuple[str, ...]], ProbeResult | None] = lambda _argv: None,
     *,
     installed: frozenset[str] = frozenset(),
+    installed_in: Mapping[str, frozenset[str]] | None = None,
+    launch_path: str = "/usr/bin",
 ) -> HostMachineProbe:
-    """The real machine probe over ``script``'s commands: 4 cores, ``installed`` programs on the path.
+    """The real machine probe over ``script``'s commands: 4 cores, programs on a search path.
 
     The default script answers no command, so the machine has no GPU and no Docker.
+    ``installed`` are the programs in ``/usr/bin`` and ``installed_in`` those in other
+    directories; ``launch_path`` is the ``PATH`` a run launches provider CLIs with.
     """
+    directories = {"/usr/bin": installed, **(installed_in or {})}
+
+    def which(program: str, path: str | None) -> str | None:
+        for directory in (path or "").split(":"):
+            if program in directories.get(directory, frozenset()):
+                return f"{directory}/{program}"
+        return None
+
     return HostMachineProbe(
         ScriptedProbe(script),
         cpu_cores=lambda: 4,
-        which=lambda program: f"/usr/bin/{program}" if program in installed else None,
+        which=which,
         harness_binaries=lambda: (("claude", "claude"), ("codex", "codex")),
+        launch_environment=lambda: {"PATH": launch_path},
     )
 
 

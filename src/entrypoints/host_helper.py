@@ -106,6 +106,18 @@ def harness_binaries() -> tuple[tuple[str, str], ...]:
     return tuple((provider, provider_binary(provider)) for provider in providers)
 
 
+def launch_environment() -> Mapping[str, str]:
+    """The environment a run finds provider CLIs in; loaded on first use."""
+    # lint-waiver: LW-271506 [PLC0415]; the helper answers hello without loading the agent library.
+    # > The same deferral as `harness_binaries`: `vs_agent.api` owns how a run finds a provider
+    # > CLI (the interactive login shell's environment), and the helper may itself have been
+    # > started by a non-login shell whose `PATH` lacks it; a copy of that lookup here would
+    # > drift from the run's.
+    from vs_agent.api import launch_shell_environment  # noqa: PLC0415
+
+    return launch_shell_environment()
+
+
 @cache
 def checkout_example_projects() -> ExampleProjects:
     """This checkout's example catalog and project maker; loaded on first use."""
@@ -174,8 +186,9 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
         machine=HostMachineProbe(
             SubprocessProbe(),
             cpu_cores=os.cpu_count,
-            which=shutil.which,
+            which=lambda program, path: shutil.which(program, path=path),
             harness_binaries=harness_binaries,
+            launch_environment=launch_environment,
         ),
         clock=epoch,
         timezone=local_timezone(epoch.now()),

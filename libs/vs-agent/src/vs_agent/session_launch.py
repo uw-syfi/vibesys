@@ -35,6 +35,7 @@ from vs_agent.host_resource_declarations import (
     prepare_provider_state,
 )
 from vs_agent.provider_policy import SHIPPED_PROVIDERS
+from vs_agent.provider_profiles import launch_shell_environment
 from vs_agent.session_environment import (
     dropped_launcher_names,
     session_environment,
@@ -83,7 +84,7 @@ the host one.
 """
 
 TRANSIENT_RETRY_DELAYS_S: tuple[float, ...] = (30.0, 60.0, 120.0, 240.0, 480.0)
-LAUNCH_SHELL_ENVIRONMENT: Callable[[], Mapping[str, str]] = agentshim.interactive_env
+LAUNCH_SHELL_ENVIRONMENT: Callable[[], Mapping[str, str]] = launch_shell_environment
 """The interactive login shell's environment, which agentshim reads once per process."""
 """Waits in seconds before each retry of a turn that failed on a transient provider error.
 

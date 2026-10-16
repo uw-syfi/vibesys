@@ -35,7 +35,7 @@ from server.host_api import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
     from vs_sim.api import CommandProbe
 
@@ -109,18 +109,24 @@ class HostMachineProbe:
         probe: CommandProbe,
         *,
         cpu_cores: Callable[[], int | None],
-        which: Callable[[str], str | None],
+        which: Callable[[str, str | None], str | None],
         harness_binaries: Callable[[], tuple[tuple[str, str], ...]],
+        launch_environment: Callable[[], Mapping[str, str]],
     ) -> None:
         """Bind the command probe and the host seams.
 
+        ``which(program, path)`` finds ``program`` on the ``path`` search path.
         ``harness_binaries`` lists each vetted provider with its CLI's program name, in
         offer order; it is read on first use, since the list lives in the agent library.
+        ``launch_environment`` is the environment a run finds provider CLIs in (the agent
+        library's interactive login shell's): the helper itself may have been started by a
+        non-login shell whose ``PATH`` lacks the directory a CLI was installed to.
         """
         self._probe = probe
         self._cpu_cores = cpu_cores
         self._which = which
         self._harness_binaries = harness_binaries
+        self._launch_environment = launch_environment
 
     def hardware(self) -> Hardware:
         """The CPU cores and the GPUs the first vendor tool that lists any reports."""
@@ -147,11 +153,12 @@ class HostMachineProbe:
         )
 
     def harness_clis(self) -> tuple[str, ...]:
-        """The vetted providers whose CLI program is on this machine's search path."""
+        """The vetted providers whose CLI program is on the search path a run launches with."""
+        path = self._launch_environment().get("PATH")
         return tuple(
             provider
             for provider, binary in self._harness_binaries()
-            if self._which(binary) is not None
+            if self._which(binary, path) is not None
         )
 
     def inspect_checkout(self, path: Path) -> CheckoutInspection:

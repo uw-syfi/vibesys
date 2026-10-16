@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -39,11 +40,16 @@ from server.host_api import (
     RunPhase,
     RunStatus,
 )
-from server.host_helper_machine import DOCKER_VERSION_COMMAND, HOST_GPU_QUERIES, release_of
+from server.host_helper_machine import (
+    DOCKER_VERSION_COMMAND,
+    HOST_GPU_QUERIES,
+    HostMachineProbe,
+    release_of,
+)
 from server.host_helper_requests import answer, run_counts
 from server.registry import FakeInstanceStore
 from vs_sim.api import ProbeResult
-from vs_sim.api.testing import SimNetwork, SimThreads
+from vs_sim.api.testing import ScriptedProbe, SimNetwork, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -144,6 +150,52 @@ def test_only_installed_harness_clis_are_listed_in_offer_order() -> None:
         "claude",
         "codex",
     )
+
+
+_HOME_BIN = "/home/user/.local/bin"
+_PROGRAMS = ("claude", "codex")
+
+
+@given(
+    in_usr_bin=st.sets(st.sampled_from(_PROGRAMS)),
+    in_home_bin=st.sets(st.sampled_from(_PROGRAMS)),
+    launch_sees_home=st.booleans(),
+)
+def test_a_harness_cli_is_installed_when_the_path_a_run_launches_with_holds_it(
+    in_usr_bin: set[str], in_home_bin: set[str], *, launch_sees_home: bool
+) -> None:
+    """Regression: ``~/.local/bin`` is on a login shell's ``PATH``, not on a non-login SSH one.
+
+    The helper's own ``PATH`` never decides; the run's launch environment does, and a
+    run launches provider CLIs with the interactive login shell's.
+    """
+    machine = quiet_machine(
+        installed=frozenset(in_usr_bin),
+        installed_in={_HOME_BIN: frozenset(in_home_bin)},
+        launch_path=f"/usr/bin:{_HOME_BIN}" if launch_sees_home else "/usr/bin",
+    )
+
+    visible = in_usr_bin | (in_home_bin if launch_sees_home else set())
+    assert machine.harness_clis() == tuple(program for program in _PROGRAMS if program in visible)
+
+
+def test_the_real_program_lookup_finds_a_cli_installed_outside_the_helpers_own_path(
+    tmp_path: Path,
+) -> None:
+    home_bin = tmp_path / ".local" / "bin"
+    home_bin.mkdir(parents=True)
+    codex = home_bin / "codex"
+    codex.write_text("#!/bin/sh\n")
+    codex.chmod(0o755)
+    machine = HostMachineProbe(
+        ScriptedProbe(lambda _argv: None),
+        cpu_cores=lambda: 1,
+        which=lambda program, path: shutil.which(program, path=path),
+        harness_binaries=lambda: (("claude", "claude"), ("codex", "codex")),
+        launch_environment=lambda: {"PATH": f"{tmp_path / 'empty'}:{home_bin}"},
+    )
+
+    assert machine.harness_clis() == ("codex",)
 
 
 def _checkout(root: Path, version: str | None, *, helper: bool = True) -> Path:
