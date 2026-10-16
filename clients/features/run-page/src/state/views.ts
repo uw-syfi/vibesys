@@ -264,12 +264,20 @@ function streamLabel(stream: LogStream): string {
 /** The run's streams by owner (startup steps, gate stages, tool builds, narration), oldest first. */
 export function logGroups(state: RunPageState): readonly LogGroup[] {
   const streams = streamsOf(state);
-  return GROUP_ORDER.map(name => ({
-    name,
-    streams: streams
+  return GROUP_ORDER.map(name => {
+    const items = streams
       .filter(stream => streamGroup(stream) === name)
-      .map(stream => ({id: stream.id, label: streamLabel(stream), live: stream.outcome === null})),
-  })).filter(group => group.streams.length > 0);
+      .map(stream => ({id: stream.id, label: streamLabel(stream), live: stream.outcome === null}));
+    // A step the run repeated (a restart, a resume) is numbered in order, oldest first.
+    const seen = new Map<string, number>();
+    const numbered = items.map(item => {
+      const total = items.filter(other => other.label === item.label).length;
+      const nth = (seen.get(item.label) ?? 0) + 1;
+      seen.set(item.label, nth);
+      return total === 1 ? item : {...item, label: `${item.label} · ${nth}`};
+    });
+    return {name, streams: numbered};
+  }).filter(group => group.streams.length > 0);
 }
 
 /** The stream the Logs tab shows: the selected one while it is listed, else the first. */

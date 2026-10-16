@@ -266,6 +266,30 @@ describe('the run page store', () => {
       'Run narration',
     ]);
     expect(timelineView(state).map(stage => stage.state)).toEqual(['done', 'done', 'active']);
+    const again = fold(state, [{type: 'record', record: RECORDS[2] as RunRecord}]).requests.find(
+      request => request.kind === 'list-logs',
+    );
+    if (again?.kind !== 'list-logs') throw new Error('no relisting asked');
+    const restarted = fold(state, [
+      {type: 'record', record: RECORDS[2] as RunRecord},
+      {
+        type: 'streams',
+        token: again.token,
+        outcome: {
+          ok: true,
+          instanceId: 'a1b2c3d4e5f6',
+          streams: [
+            ...STREAMS,
+            stream('s6', {kind: 'startup_step', stage: 'building_image'}, null),
+          ],
+        },
+      },
+    ]).state;
+    expect(logGroups(restarted)[0]?.streams.map(item => item.label)).toEqual([
+      'Building the agent image · 1',
+      'Starting the agent container',
+      'Building the agent image · 2',
+    ]);
     expect(followedStreams(state)).toEqual(['s1', 's2']);
     const narration = foldChunk(emptyLogView(), {
       offset: 0,
