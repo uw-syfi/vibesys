@@ -37,7 +37,7 @@ test('synchronous listener and diagnostic failures cannot change a durable recen
   await settings.updateRecent(current => remember(current, run(1)));
 
   expect(JSON.parse(filesystem.text('/settings/recent.json'))).toEqual({
-    version: 3,
+    version: 4,
     runs: [run(1)],
   });
   expect(heard).toEqual([1]);
@@ -67,7 +67,7 @@ test('rejected listener and diagnostic promises are terminally contained after c
   await Promise.resolve();
 
   expect(JSON.parse(filesystem.text('/settings/recent.json'))).toEqual({
-    version: 3,
+    version: 4,
     runs: [run(1)],
   });
   expect(heard).toEqual([1]);

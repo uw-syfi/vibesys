@@ -91,3 +91,43 @@ test('New run opened for a machine starts on it; opened plainly, it keeps its ma
   select({kind: 'new-run'});
   expect(machine()).toBe('ssh:gpu-box');
 });
+
+test('regression: Run again opens New run with the options the run was started with', () => {
+  const stores = createShellStores(
+    fakeBridge(),
+    {mode: 'light', onChange: () => undefined},
+    {setAttribute: () => undefined},
+    () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
+  );
+  const run = {host: 'ssh:gpu-box', runId: '20261015-163047'} as const;
+  stores.sidebar.store.dispatch({
+    type: 'recent',
+    recent: [
+      {
+        ...run,
+        hostLabel: 'gpu-box',
+        project: '/p/queue',
+        task: 'mpmc',
+        instanceId: null,
+        attachedAt: 1,
+        start: {
+          harness: null,
+          options: {rounds: 3, time_limit_s: 600, results: 'publish_github', roles: []},
+          args: ['--max-in-flight', '3'],
+        },
+      },
+    ],
+  });
+  stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run', again: run}});
+  const {form} = stores.newRun.getState().context;
+  expect(form.machine).toBe('ssh:gpu-box');
+  expect(form.task).toBe('mpmc');
+  expect(form.budget).toEqual({rounds: 3, timeLimitS: 600, results: 'publish_github'});
+  expect(form.advanced).toBe('--max-in-flight 3');
+});

@@ -1,5 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
+import {installFakeRun} from './fake-run.js';
 import {type FakeHostWindow, open, PROJECT, SEED} from './world.js';
 
 const ready = (page: Page) => page.getByRole('region', {name: 'Ready to start'});
@@ -148,4 +150,32 @@ test("Machines' New run here opens New run on that machine", async ({page}) => {
   await page.getByRole('button', {name: 'New run here'}).click();
   await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
   await expect(page.getByLabel('Run on')).toHaveValue('local');
+});
+
+test('Run again prefills the model, rounds and extra arguments the run was started with', async ({
+  page,
+}) => {
+  const start = {
+    harness: {provider: 'claude', model: 'claude-sonnet-4-5'},
+    options: {rounds: 4, time_limit_s: null, results: 'keep', roles: []},
+    args: ['--max-in-flight', '3'],
+  };
+  const recent = (SEED.recent ?? []).map(run =>
+    (run as {runId: string}).runId === '20261014-090000' ? {...(run as object), start} : run,
+  );
+  const seed = {...SEED, recent};
+  await page.addInitScript(installFakeBridge, seed);
+  await page.addInitScript(installFakeMachines, seed);
+  await page.addInitScript(installFakeNewRun, seed);
+  await page.addInitScript(installFakeRun, {streams: [], text: {}});
+  await page.goto('./shell.html');
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: /^\S+ queue-rs · spsc/})
+    .click();
+  await page.getByRole('button', {name: 'Run again', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+  await expect(page.getByLabel('Model', {exact: true})).toHaveValue('claude-sonnet-4-5');
+  await expect(page.getByLabel('Rounds')).toHaveValue('4');
+  await expect(page.getByLabel('Extra arguments')).toHaveValue('--max-in-flight 3');
 });

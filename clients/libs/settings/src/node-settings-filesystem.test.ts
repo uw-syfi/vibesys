@@ -29,13 +29,13 @@ describe('NodeSettingsFilesystem platform durability', () => {
           hosts: {...current.hosts, local: {checkout: '/project'}},
         })),
       ).resolves.toBe('committed');
-      await expect(settings.updateRecent(() => ({version: 3, runs: []}))).resolves.toBeUndefined();
+      await expect(settings.updateRecent(() => ({version: 4, runs: []}))).resolves.toBeUndefined();
 
       expect(JSON.parse(await readFile(hostsPath, 'utf8'))).toEqual({
         version: 2,
         hosts: {local: {checkout: '/project'}},
       });
-      expect(JSON.parse(await readFile(recentPath, 'utf8'))).toEqual({version: 3, runs: []});
+      expect(JSON.parse(await readFile(recentPath, 'utf8'))).toEqual({version: 4, runs: []});
       expect((await lstat(hostsPath)).mode & 0o777).toBe(0o600);
       expect((await lstat(recentPath)).mode & 0o777).toBe(0o600);
       expect((await readdir(directory)).some(name => name.endsWith('.tmp'))).toBeFalse();

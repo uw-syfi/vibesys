@@ -4,6 +4,7 @@
  * Pure functions of pushed data; the host is never asked again for them.
  */
 import {type HostKey, type HostListing, type HostRun, instanceObservation} from '@vibesys/hosts';
+import type {RunStart} from './run-start.js';
 
 /** A run the user attached to, as the views list it. */
 export interface RecentRun {
@@ -15,6 +16,8 @@ export interface RecentRun {
   /** Last known server instance, retained for diagnostics after registry tombstones expire. */
   readonly instanceId: string | null;
   readonly attachedAt: number;
+  /** What the app started it with, when the app started it; absent or null otherwise. */
+  readonly start?: RunStart | null;
 }
 
 /**

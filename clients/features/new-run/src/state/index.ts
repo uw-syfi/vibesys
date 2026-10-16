@@ -4,6 +4,7 @@ export type {Check, MachineDescription} from '@vibesys/contracts/host-helper';
 export {
   type AgentChoice,
   advancedProblem,
+  againForm,
   type Budget,
   type ChecksFor,
   checksPass,
@@ -14,6 +15,7 @@ export {
   type Form,
   type HelperFor,
   inputsKey,
+  joinWords,
   missingFeatures,
   NEW_RUN_FEATURES,
   offers,
@@ -22,6 +24,7 @@ export {
   projectPath,
   ROLES,
   type RoleChoice,
+  recordedAgent,
   runInputs,
   splitWords,
   vettedModels,

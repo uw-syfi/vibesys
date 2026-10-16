@@ -21,8 +21,11 @@ import {
 
 /** The screen the main area shows. */
 export type Screen =
-  /** New run; opened for a machine (Machines' "New run here"), it starts on that machine. */
-  | {readonly kind: 'new-run'; readonly machine?: HostKey}
+  /**
+   * New run; opened for a machine (Machines' "New run here"), it starts on that machine; opened
+   * to run `again` a run, it starts from that run's place and options.
+   */
+  | {readonly kind: 'new-run'; readonly machine?: HostKey; readonly again?: RunRef}
   | {readonly kind: 'machines'}
   | {readonly kind: 'settings'}
   | {readonly kind: 'all-runs'}

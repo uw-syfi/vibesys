@@ -28,7 +28,7 @@ import {
 import {shownTheme} from '@vibesys/feature-settings/state';
 import {hostFromKey, hostLabel} from '@vibesys/hosts';
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
-import type {RunRef} from '@vibesys/runs';
+import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, Wordmark} from '@vibesys/ui';
@@ -66,7 +66,8 @@ function mainWindowPlace(stores: ShellStores): RunPlace {
   return {
     unavailable: {},
     navigation: run => ({
-      runAgain: () => stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run'}}),
+      runAgain: () =>
+        stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run', again: run}}),
       openWindow: () => stores.sidebar.actions.openWindow(run),
     }),
   };
@@ -115,7 +116,7 @@ export function createShellStores(
     }
     if (next.selection !== selection) {
       selection = next.selection;
-      followMachine(newRun.store, selection);
+      followSelection(newRun.store, selection, next.recent);
     }
   });
   return {
@@ -130,9 +131,29 @@ export function createShellStores(
   };
 }
 
-/** New run opened for a machine (Machines' "New run here") starts on it. */
-function followMachine(newRun: ShellStores['newRun'], selection: Screen): void {
-  if (selection.kind !== 'new-run' || selection.machine === undefined) return;
+/**
+ * New run opened for a machine (Machines' "New run here") starts on it; opened to run a run again,
+ * it starts from that run as the recent list records it (its place and options).
+ */
+function followSelection(
+  newRun: ShellStores['newRun'],
+  selection: Screen,
+  recent: readonly RecentRun[],
+): void {
+  if (selection.kind !== 'new-run') return;
+  const again = selection.again;
+  if (again !== undefined) {
+    const run = recent.find(each => sameRun(each, again));
+    if (run !== undefined) {
+      newRun.dispatch({type: 'again', run});
+      return;
+    }
+    if (newRun.getState().context.form.machine !== again.host) {
+      newRun.dispatch({type: 'machine', machine: again.host});
+    }
+    return;
+  }
+  if (selection.machine === undefined) return;
   if (newRun.getState().context.form.machine === selection.machine) return;
   newRun.dispatch({type: 'machine', machine: selection.machine});
 }

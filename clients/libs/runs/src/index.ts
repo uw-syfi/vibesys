@@ -21,6 +21,14 @@ export {
 } from './resume-run.js';
 export {parseRunRef, type RunRef, sameRun} from './run-ref.js';
 export {
+  type HarnessPick,
+  parseRunStart,
+  parseStoredRunStart,
+  type RoleOption,
+  type RunOptions,
+  type RunStart,
+} from './run-start.js';
+export {
   confirmText,
   STOP_IDLE,
   type StopEvent,

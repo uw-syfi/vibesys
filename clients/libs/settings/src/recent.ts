@@ -7,7 +7,14 @@
  * expire; status still comes from the host's registry, never from this file.
  */
 import {type HostKey, hostFromKey, validHostPath} from '@vibesys/hosts';
-import {isInstanceId, isRunId, isTaskName, recentRunKey} from '@vibesys/runs';
+import {
+  isInstanceId,
+  isRunId,
+  isTaskName,
+  parseStoredRunStart,
+  type RunStart,
+  recentRunKey,
+} from '@vibesys/runs';
 import {object, onlyKeys, SettingsError} from './parse.js';
 
 /** One run the user opened, as `recent.json` stores it (the welcome view lists `RecentRun`). */
@@ -22,20 +29,24 @@ export interface StoredRecentRun {
   readonly instanceId: string | null;
   /** When the user last opened it, in milliseconds since the epoch. */
   readonly attachedAt: number;
+  /** What the app started the run with, so Run again can start from it; absent when it did not. */
+  readonly start?: RunStart;
 }
 
 export interface RecentFile {
-  readonly version: 3;
+  readonly version: 4;
   readonly runs: readonly StoredRecentRun[];
 }
 
-export const EMPTY_RECENT: RecentFile = {version: 3, runs: []};
+export const EMPTY_RECENT: RecentFile = {version: 4, runs: []};
 /** How many runs the list keeps. */
 const RECENT_LIMIT = 20;
 
 const V2_KEYS = ['host', 'project', 'task', 'runId', 'attachedAt'] as const;
 /** Version 1 also kept the server's instance id, and a run id only once its server reported one. */
-const KEYS = [...V2_KEYS, 'instanceId'] as const;
+const V3_KEYS = [...V2_KEYS, 'instanceId'] as const;
+/** Version 4 also keeps what the app started the run with. */
+const KEYS = [...V3_KEYS, 'start'] as const;
 
 function matching(
   value: unknown,
@@ -48,9 +59,9 @@ function matching(
 }
 
 /** Validate one entry, rejecting unknown keys. */
-function parseRun(value: unknown, path: string, version: 1 | 2 | 3): StoredRecentRun {
+function parseRun(value: unknown, path: string, version: 1 | 2 | 3 | 4): StoredRecentRun {
   const record = object(value, path);
-  onlyKeys(record, version === 2 ? V2_KEYS : KEYS, path);
+  onlyKeys(record, version === 2 ? V2_KEYS : version === 4 ? KEYS : V3_KEYS, path);
   const host = record['host'];
   try {
     hostFromKey(host);
@@ -61,6 +72,7 @@ function parseRun(value: unknown, path: string, version: 1 | 2 | 3): StoredRecen
   if (typeof attachedAt !== 'number' || !Number.isFinite(attachedAt) || attachedAt < 0) {
     throw new SettingsError(`${path}.attachedAt must be a non-negative number`);
   }
+  const start = version === 4 ? parseStart(record['start'], `${path}.start`) : null;
   const task =
     record['task'] === null
       ? null
@@ -80,7 +92,17 @@ function parseRun(value: unknown, path: string, version: 1 | 2 | 3): StoredRecen
             `${path}.instanceId`,
           ),
     attachedAt,
+    ...(start === null ? {} : {start}),
   };
+}
+
+function parseStart(value: unknown, path: string): RunStart | null {
+  if (value === null || value === undefined) return null;
+  try {
+    return parseStoredRunStart(value);
+  } catch (error) {
+    throw new SettingsError(`${path}: ${(error as Error).message}`);
+  }
 }
 
 /**
@@ -92,15 +114,15 @@ export function parseRecent(value: unknown): RecentFile {
   const record = object(value, 'recent.json');
   onlyKeys(record, ['version', 'runs'], 'recent.json');
   const version = record['version'];
-  if (version !== 1 && version !== 2 && version !== 3) {
-    throw new SettingsError('recent.json: version must be 3');
+  if (version !== 1 && version !== 2 && version !== 3 && version !== 4) {
+    throw new SettingsError('recent.json: version must be 4');
   }
   const runs = record['runs'];
   if (!Array.isArray(runs)) throw new SettingsError('recent.json: runs must be a list');
   const kept =
     version === 1 ? runs.filter(run => object(run, 'recent.json: runs[]')['runId'] != null) : runs;
   return {
-    version: 3,
+    version: 4,
     runs: kept.map((run, index) => parseRun(run, `recent.json: runs[${index}]`, version)),
   };
 }
@@ -115,13 +137,15 @@ function sameRun(a: StoredRecentRun, b: StoredRecentRun): boolean {
  */
 export function remember(file: RecentFile, run: StoredRecentRun, limit = RECENT_LIMIT): RecentFile {
   const previous = file.runs.find(entry => sameRun(entry, run));
+  const start = run.start ?? previous?.start;
   const merged: StoredRecentRun = {
     ...run,
     task: run.task ?? previous?.task ?? null,
     instanceId: run.instanceId ?? previous?.instanceId ?? null,
+    ...(start === undefined ? {} : {start}),
   };
   const rest = file.runs.filter(entry => !sameRun(entry, run));
-  return {version: 3, runs: [merged, ...rest].slice(0, Math.max(0, limit))};
+  return {version: 4, runs: [merged, ...rest].slice(0, Math.max(0, limit))};
 }
 
 export interface RecentInstance {
@@ -134,7 +158,7 @@ export interface RecentInstance {
 /** Preserve a newly inspected instance for an existing recent run without reordering it. */
 export function rememberInstance(file: RecentFile, inspected: RecentInstance): RecentFile {
   return {
-    version: 3,
+    version: 4,
     runs: file.runs.map(run =>
       recentRunKey(run) === recentRunKey(inspected)
         ? {...run, instanceId: inspected.instanceId}

@@ -6,7 +6,7 @@
 import type {Check, HelperFeature, MachineDescription} from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered, RoleOption, RunInputs} from '@vibesys/ipc';
-import type {RecentRun} from '@vibesys/runs';
+import type {RecentRun, RunStart} from '@vibesys/runs';
 
 /** Where the project comes from: a recent one, a folder on the machine, or a bundled example. */
 export type ProjectChoice =
@@ -102,6 +102,73 @@ export function prefill(machine: HostKey, recent: readonly RecentRun[]): Form {
     budget: DEFAULT_BUDGET,
     advanced: '',
   };
+}
+
+/** `words` as one line of Advanced text, quoting a word that has spaces (`splitWords` reads it back). */
+export function joinWords(words: readonly string[]): string {
+  return words
+    .map(word => {
+      if (!/\s/.test(word) && word !== '') return word;
+      return word.includes('"') ? `'${word}'` : `"${word}"`;
+    })
+    .join(' ');
+}
+
+/**
+ * The form for running `run` again: its machine, project and task, and the budget and extra
+ * arguments it was started with. The agent follows once the machine's harnesses are known
+ * (`recordedAgent`); a run the app did not start has no record, so only its place is kept.
+ */
+export function againForm(run: RecentRun): Form {
+  const start = run.start ?? null;
+  const options = start?.options;
+  return {
+    machine: run.host,
+    project: {source: 'recent', path: run.project},
+    task: run.task,
+    agent: null,
+    budget: {
+      rounds: options?.rounds ?? null,
+      timeLimitS: options?.time_limit_s ?? null,
+      results: options?.results ?? 'keep',
+    },
+    advanced: start === null ? '' : joinWords(start.args),
+  };
+}
+
+function roleChoice(option: RoleOption): RoleChoice {
+  return {
+    role: option.role,
+    model: option.model ?? null,
+    effort: option.reasoning_effort ?? 'default',
+  };
+}
+
+/**
+ * The agent a run was started with, among what `offers` vets: its harness and model when the
+ * machine still offers them (else the default), with the role settings it recorded.
+ */
+export function recordedAgent(
+  start: RunStart | null,
+  offers: readonly HarnessOffer[],
+): AgentChoice | null {
+  const harness = start?.harness ?? null;
+  const offered =
+    harness !== null &&
+    offers.some(offer => offer.provider === harness.provider && offer.model === harness.model);
+  const base = defaultAgent(offers, offered ? harness.provider : undefined);
+  if (base === null) return null;
+  const agent = offered ? {...base, model: harness.model} : base;
+  const recorded = start?.options.roles ?? [];
+  const known = new Set(agent.roles.map(role => role.role));
+  const roles = [
+    ...agent.roles.map(role => {
+      const found = recorded.find(each => each.role === role.role);
+      return found === undefined ? role : roleChoice(found);
+    }),
+    ...recorded.filter(each => !known.has(each.role)).map(roleChoice),
+  ];
+  return {...agent, roles};
 }
 
 /** The flags a typed option sets, which Advanced may not repeat (as `run.start` refuses them). */

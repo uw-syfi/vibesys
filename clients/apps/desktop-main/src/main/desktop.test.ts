@@ -208,7 +208,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     signIn: async () => undefined,
     tasks: async () => [],
   };
-  const recent: RecentFile = {version: 3, runs: []};
+  const recent: RecentFile = {version: 4, runs: []};
   const settings: DesktopDeps['settings'] = {
     onRecentChanged: () => () => undefined,
     recent: async () => recent,

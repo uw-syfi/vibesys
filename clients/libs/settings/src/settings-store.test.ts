@@ -126,7 +126,7 @@ describe('SettingsStore', () => {
 
       filesystem.setText(path, `${JSON.stringify({version: 2, runs: [version2Run(1)]})}\n`);
       await settings.updateRecent(current => remember(current, run(2)));
-      const expected = {version: 3 as const, runs: [run(2), migratedVersion2Run(1)]};
+      const expected = {version: 4 as const, runs: [run(2), migratedVersion2Run(1)]};
       expect(JSON.parse(filesystem.text(path))).toEqual(expected);
       expect(heard).toEqual([expected]);
     }
@@ -150,7 +150,7 @@ describe('SettingsStore', () => {
       version: 2,
       hosts: {'ssh:one': {checkout: '/one'}, 'ssh:two': {checkout: '/two'}},
     });
-    expect(await settings.recent()).toEqual({version: 3, runs: [run(2), run(1)]});
+    expect(await settings.recent()).toEqual({version: 4, runs: [run(2), run(1)]});
   });
 
   test('directory-synced host and recent updates survive a crash and a fresh store', async () => {
@@ -173,7 +173,7 @@ describe('SettingsStore', () => {
     filesystem.crash();
     const recovered = store(filesystem, directory).settings;
     expect((await recovered.hosts()).settings.hosts['local']).toEqual({checkout: '/project'});
-    expect(await recovered.recent()).toEqual({version: 3, runs: [run(1)]});
+    expect(await recovered.recent()).toEqual({version: 4, runs: [run(1)]});
     expect(filesystem.operations).toContainEqual({kind: 'sync-file', path: `${hostsPath}.0.tmp`});
     expect(filesystem.operations).toContainEqual({kind: 'sync-directory', path: directory});
     expect(filesystem.operations).toContainEqual({kind: 'sync-file', path: `${recentPath}.1.tmp`});
@@ -190,8 +190,8 @@ describe('SettingsStore', () => {
     );
 
     await settings.updateRecent(current => remember(current, run(1)));
-    expect(await settings.recent()).toEqual({version: 3, runs: [run(1)]});
-    expect(heard).toEqual([{version: 3, runs: [run(1)]}]);
+    expect(await settings.recent()).toEqual({version: 4, runs: [run(1)]});
+    expect(heard).toEqual([{version: 4, runs: [run(1)]}]);
     expect(filesystem.operations).toContainEqual({
       kind: 'directory-sync-unavailable',
       path: directory,
@@ -265,7 +265,7 @@ describe('SettingsStore', () => {
   test('a staged-file sync failure rejects a recent update without announcing it', async () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
-    const existing = {version: 3 as const, runs: [run(1)]};
+    const existing = {version: 4 as const, runs: [run(1)]};
     const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
     const {settings} = store(filesystem, directory);
     const heard: RecentFile[] = [];
@@ -303,7 +303,7 @@ describe('SettingsStore', () => {
   test('a directory sync failure does not announce an ambiguously replaced recent file', async () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
-    const existing = {version: 3 as const, runs: [run(1)]};
+    const existing = {version: 4 as const, runs: [run(1)]};
     const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
     const {settings} = store(filesystem, directory);
     const heard: RecentFile[] = [];
@@ -361,7 +361,7 @@ describe('SettingsStore', () => {
         expect(installed.isSymbolicLink()).toBeFalse();
         expect(installed.mode & 0o777).toBe(0o600);
         const written = JSON.parse(await readFile(path, 'utf8')) as {version?: unknown};
-        expect(written.version).toBe(targetName === 'hosts.json' ? 2 : 3);
+        expect(written.version).toBe(targetName === 'hosts.json' ? 2 : 4);
         expect((await lstat(planted)).isSymbolicLink()).toBeTrue();
         expect(await readFile(unrelated, 'utf8')).toBe('keep me\n');
         expect((await lstat(unrelated)).mode & 0o777).toBe(unrelatedMode);
@@ -462,7 +462,7 @@ describe('SettingsStore', () => {
 
     await settings.updateRecent(current => remember(current, run(2)));
     expect(JSON.parse(filesystem.text(path))).toEqual({
-      version: 3,
+      version: 4,
       runs: [run(2), migratedVersion2Run(1)],
     });
     expect(filesystem.operations.map(operation => operation.kind)).toEqual([
@@ -526,7 +526,7 @@ describe('SettingsStore', () => {
   test('regression: a failed recent-runs replace removes its staged file', async () => {
     const directory = '/settings';
     const path = join(directory, 'recent.json');
-    const existing = {version: 3 as const, runs: [run(1)]};
+    const existing = {version: 4 as const, runs: [run(1)]};
     const filesystem = new FakeSettingsFilesystem({[path]: `${JSON.stringify(existing)}\n`});
     const {settings} = store(filesystem, directory);
     const heard: RecentFile[] = [];

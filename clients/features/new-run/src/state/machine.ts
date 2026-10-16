@@ -17,10 +17,11 @@ import type {
 import type {HostKey} from '@vibesys/hosts';
 import type {HarnessOffer, Offered, RunInputs, StartedRun} from '@vibesys/ipc';
 import {unprovided} from '@vibesys/machine';
-import type {RecentRun} from '@vibesys/runs';
+import type {RecentRun, RunStart} from '@vibesys/runs';
 import {and, assign, raise, type SnapshotFrom, setup} from 'xstate';
 import {
   type AgentChoice,
+  againForm,
   type Budget,
   type ChecksFor,
   checksPass,
@@ -35,6 +36,7 @@ import {
   prefill,
   projectPath,
   type RoleChoice,
+  recordedAgent,
   runInputs,
 } from './form.js';
 
@@ -53,6 +55,8 @@ export interface NewRunContext {
   readonly examples: {readonly for: HostKey; readonly value: Offered<ExampleList>} | null;
   readonly tasks: {readonly for: string; readonly list: readonly string[]} | null;
   readonly checks: ChecksFor | null;
+  /** What the run being run again was started with: its agent is chosen from it once known. */
+  readonly rerun: RunStart | null;
   /** Why the last load, fix or start failed, until the next input. */
   readonly problem: string | null;
   readonly started: StartedRun | null;
@@ -60,6 +64,7 @@ export interface NewRunContext {
 
 export type NewRunEvent =
   | {readonly type: 'machine'; readonly machine: HostKey}
+  | {readonly type: 'again'; readonly run: RecentRun}
   | {readonly type: 'project'; readonly project: ProjectChoice}
   | {readonly type: 'task'; readonly task: string}
   | {readonly type: 'provider'; readonly provider: string}
@@ -179,6 +184,7 @@ export const newRunMachine = setup({
     examples: null,
     tasks: null,
     checks: null,
+    rerun: null,
     problem: null,
     started: null,
   }),
@@ -192,6 +198,23 @@ export const newRunMachine = setup({
           reenter: true,
           actions: assign(({context, event}) => ({
             form: prefill(event.machine, context.recent),
+            facts: null,
+            helper: null,
+            harnesses: null,
+            examples: null,
+            tasks: null,
+            checks: null,
+            rerun: null,
+            problem: null,
+          })),
+        },
+        // Run again: the run's place and options, its agent once the harnesses are known.
+        again: {
+          target: 'editing',
+          reenter: true,
+          actions: assign(({event}) => ({
+            form: againForm(event.run),
+            rerun: event.run.start ?? null,
             facts: null,
             helper: null,
             harnesses: null,
@@ -270,7 +293,7 @@ export const newRunMachine = setup({
                       harnesses: {for: context.form.machine, list: event.output},
                       form: {
                         ...context.form,
-                        agent: context.form.agent ?? defaultAgent(event.output),
+                        agent: context.form.agent ?? recordedAgent(context.rerun, event.output),
                       },
                     })),
                     raise({type: 'recheck'}),

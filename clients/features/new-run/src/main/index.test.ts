@@ -59,6 +59,7 @@ describe('NewRunMain', () => {
         runId: started.runId,
         instanceId: started.instanceId,
         attachedAt: 42,
+        start: {harness: null, options: {rounds: 2}, args: []},
       },
     ]);
   });

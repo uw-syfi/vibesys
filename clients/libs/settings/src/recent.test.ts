@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {recentRunKey} from '@vibesys/runs';
+import {type RunStart, recentRunKey} from '@vibesys/runs';
 import {remember as rememberRecentRun} from '@vibesys/settings';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
@@ -13,6 +13,25 @@ import {
 
 const HOSTS = ['local', 'ssh:gpu-box', 'ssh:me@node-1'];
 const RUN_IDS = ['run-1', 'run-2', 'run-3'];
+const STARTS: readonly (RunStart | null)[] = [
+  null,
+  {harness: null, options: {rounds: null, time_limit_s: null, results: null, roles: []}, args: []},
+  {
+    harness: {provider: 'claude', model: 'claude-opus-4-5'},
+    options: {
+      rounds: 3,
+      time_limit_s: 3600,
+      results: 'keep',
+      roles: [{role: 'judge', model: 'claude-sonnet-4-5', reasoning_effort: 'high'}],
+    },
+    args: ['--max-in-flight', '3'],
+  },
+];
+
+function pickStart(random: Seeded): {start?: RunStart} {
+  const start = random.pick(STARTS);
+  return start === null ? {} : {start};
+}
 
 function arbitraryRun(random: Seeded, attachedAt: number): StoredRecentRun {
   return {
@@ -22,6 +41,7 @@ function arbitraryRun(random: Seeded, attachedAt: number): StoredRecentRun {
     runId: random.pick(RUN_IDS),
     instanceId: random.int(16).toString(16).padStart(12, '0'),
     attachedAt,
+    ...pickStart(random),
   };
 }
 
@@ -38,7 +58,12 @@ describe('recent runs', () => {
         );
         file = remember(file, run, 4);
         const [first] = file.runs;
-        expect(first).toEqual({...run, task: run.task ?? previous?.task ?? null});
+        const start = run.start ?? previous?.start;
+        expect(first).toEqual({
+          ...run,
+          task: run.task ?? previous?.task ?? null,
+          ...(start === undefined ? {} : {start}),
+        });
         const keys = file.runs.map(recentRunKey);
         expect(new Set(keys).size).toBe(keys.length);
         expect(file.runs.length).toBeLessThanOrEqual(4);
@@ -89,7 +114,43 @@ describe('recent runs', () => {
     expect(() => parseRecent({version: 3, runs: [{...run, instanceId: 'bad'}]})).toThrow(
       'runs[0].instanceId',
     );
-    expect(() => parseRecent({version: 4, runs: []})).toThrow('version');
+    expect(() => parseRecent({version: 5, runs: []})).toThrow('version');
+  });
+
+  test('a start the run was begun with is validated, naming the key', () => {
+    const run = {
+      host: 'local',
+      project: '/p',
+      task: 'spsc',
+      runId: 'run-1',
+      instanceId: null,
+      attachedAt: 1,
+      start: {harness: null, options: {rounds: 0}, args: []},
+    };
+    expect(() => parseRecent({version: 4, runs: [run]})).toThrow(
+      'runs[0].start: options.rounds must be a positive whole number',
+    );
+    expect(() =>
+      parseRecent({version: 4, runs: [{...run, start: {harness: null, options: {}, extra: 1}}]}),
+    ).toThrow('runs[0].start: start.extra is not a known field');
+  });
+
+  test('a version 3 file migrates with no recorded start', () => {
+    const parsed = parseRecent({
+      version: 3,
+      runs: [
+        {
+          host: 'local',
+          project: '/p',
+          task: null,
+          runId: 'run-1',
+          instanceId: null,
+          attachedAt: 1,
+        },
+      ],
+    });
+    expect(parsed.version).toBe(4);
+    expect(parsed.runs[0]?.start).toBeUndefined();
   });
 
   test('a version 1 file keeps the runs it named and drops those saved before their id was known', () => {
@@ -108,7 +169,7 @@ describe('recent runs', () => {
       ],
     });
     expect(parsed).toEqual({
-      version: 3,
+      version: 4,
       runs: [
         {
           host: 'local',
@@ -137,7 +198,7 @@ describe('recent runs', () => {
       instanceId: '0123456789ab',
     });
     expect(located).toEqual({
-      version: 3,
+      version: 4,
       runs: [
         {
           host: 'local',

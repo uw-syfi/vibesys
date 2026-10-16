@@ -19,7 +19,9 @@ import {
   newRunMachine,
   offers,
   ROLES,
+  recordedAgent,
   runInputs,
+  splitWords,
   vettedModels,
 } from './index.js';
 
@@ -55,6 +57,16 @@ const RECENT: readonly RecentRun[] = [
     runId: 'r2',
     instanceId: null,
     attachedAt: 3,
+    start: {
+      harness: {provider: 'claude', model: 'claude-b'},
+      options: {
+        rounds: 4,
+        time_limit_s: 7200,
+        results: 'publish_github',
+        roles: [{role: 'judge', model: 'claude-a', reasoning_effort: 'high'}],
+      },
+      args: ['--max-in-flight', '3', '--note', 'two words'],
+    },
   },
 ];
 const IDS = [
@@ -116,6 +128,7 @@ function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>
     },
     {type: 'budget', budget: {rounds: random.pick([1, 2, 5]), timeLimitS: null, results: 'keep'}},
     {type: 'advanced', advanced: random.pick(['', '--max-in-flight 3', '--max-rounds 4', '"open'])},
+    {type: 'again', run: random.pick(RECENT)},
     {type: 'recheck'},
     {type: 'fix', fix: {kind: 'copy_out', source: '/p/queue', destination: '/own/a'}},
     {type: 'start'},
@@ -211,6 +224,74 @@ describe('newRunMachine', () => {
       },
       60,
     );
+  });
+
+  test('regression: running a run again keeps its model, budget, results and extra arguments', async () => {
+    const again = RECENT[2] as RecentRun;
+    const actor = createActor(
+      newRunMachine.provide({
+        actors: {
+          describe: fromPromise<Offered<MachineDescription>, {readonly host: HostKey}>(
+            async () => ({kind: 'unsupported'}),
+          ),
+          examples: fromPromise<Offered<ExampleList>, {readonly host: HostKey}>(async () => ({
+            kind: 'unsupported',
+          })),
+          harnesses: fromPromise<readonly HarnessOffer[], {readonly host: HostKey}>(
+            async () => OFFERS,
+          ),
+          features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(async () => [
+            'run_options',
+            'preflight',
+            'examples',
+          ]),
+          tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(
+            async () => ['mpmc', 'spsc'],
+          ),
+        },
+      }),
+      {input: {machine: 'local', recent: RECENT}},
+    );
+    actor.start();
+    actor.send({type: 'again', run: again});
+    await new Promise<void>(resolve => {
+      const done = actor.subscribe(snapshot => {
+        if (snapshot.matches({editing: {tasks: 'ready', harnesses: 'ready'}})) {
+          done.unsubscribe();
+          resolve();
+        }
+      });
+    });
+    const {form} = actor.getSnapshot().context;
+    expect(form.machine).toBe('ssh:gpu');
+    expect(form.project).toEqual({source: 'recent', path: '/q'});
+    expect(form.task).toBe('spsc');
+    expect(form.agent).toMatchObject({provider: 'claude', model: 'claude-b'});
+    expect(form.agent?.roles.find(role => role.role === 'judge')).toEqual({
+      role: 'judge',
+      model: 'claude-a',
+      effort: 'high',
+    });
+    expect(form.budget).toEqual({rounds: 4, timeLimitS: 7200, results: 'publish_github'});
+    expect(splitWords(form.advanced)).toEqual(['--max-in-flight', '3', '--note', 'two words']);
+    expect(runInputs(form)).toMatchObject({
+      harness: {provider: 'claude', model: 'claude-b'},
+      options: {rounds: 4, time_limit_s: 7200, results: 'publish_github'},
+      args: ['--max-in-flight', '3', '--note', 'two words'],
+    });
+    actor.stop();
+  });
+
+  test('running a run again whose harness is no longer offered falls back to the default', async () => {
+    const stale: RecentRun = {
+      ...(RECENT[2] as RecentRun),
+      start: {harness: {provider: 'claude', model: 'claude-gone'}, options: {}, args: []},
+    };
+    expect(recordedAgent(stale.start ?? null, OFFERS)).toMatchObject({
+      provider: 'claude',
+      model: 'claude-a',
+    });
+    expect(recordedAgent(null, OFFERS)).toMatchObject({provider: 'claude', model: 'claude-a'});
   });
 
   test('prefills from the last run on the machine and picks its default agent', async () => {

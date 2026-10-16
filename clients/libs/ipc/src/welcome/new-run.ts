@@ -9,10 +9,16 @@ import type {
   CreatedProject,
   ExampleList,
   HelperFeature,
-  HelperRequest,
   MachineDescription,
 } from '@vibesys/contracts/host-helper';
 import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
+import {
+  type HarnessPick,
+  parseRunStart,
+  type RoleOption,
+  type RunOptions,
+  type RunStart,
+} from '@vibesys/runs';
 import type {WelcomeResult} from './types.js';
 import {type ChannelOf, project} from './values.js';
 
@@ -26,21 +32,12 @@ export const NEW_RUN_CHANNELS = {
   helperFeatures: 'vibesys:welcome:helper-features',
 } as const;
 
-/** The typed options a run starts with (`run.start`'s `options`). */
-export type RunOptions = NonNullable<Extract<HelperRequest, {type: 'run.start'}>['options']>;
-/** One agent role's model and reasoning effort within the run's harness. */
-export type RoleOption = NonNullable<RunOptions['roles']>[number];
-/** A provider and one of its vetted models. */
-export type HarnessPick = NonNullable<Extract<HelperRequest, {type: 'run.start'}>['harness']>;
+export type {HarnessPick, RoleOption, RunOptions};
 
 /** What the inputs of a New run are: the checks are for exactly these, and a start uses them. */
-export interface RunInputs {
+export interface RunInputs extends RunStart {
   readonly project: string;
   readonly task: string;
-  readonly harness: HarnessPick | null;
-  readonly options: RunOptions;
-  /** Advanced arguments, split into words; none may repeat a typed option. */
-  readonly args: readonly string[];
 }
 
 /** What a helper offers when it is too old for a method. */
@@ -93,9 +90,6 @@ export type NewRunRequest =
   | {readonly kind: 'start-run'; readonly host: HostId; readonly inputs: RunInputs}
   | {readonly kind: 'helper-features'; readonly host: HostId};
 
-const EFFORTS = ['default', 'low', 'medium', 'high'] as const;
-const RESULTS = ['keep', 'publish_github'] as const;
-
 function record(value: unknown, what: string, keys: readonly string[]): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error(`${what} must be an object`);
@@ -113,77 +107,17 @@ function text(value: unknown, what: string): string {
   return value;
 }
 
-function count(value: unknown, what: string): number | null {
-  if (value === null || value === undefined) return null;
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${what} must be a positive whole number`);
-  }
-  return value;
-}
-
-function oneOf<T extends string>(value: unknown, values: readonly T[], what: string): T {
-  const found = values.find(each => each === value);
-  if (found === undefined) throw new Error(`${what} must be one of ${values.join(', ')}`);
-  return found;
-}
-
-function role(value: unknown, at: number): RoleOption {
-  const fields = record(value, `options.roles[${at}]`, ['role', 'model', 'reasoning_effort']);
-  const model = fields['model'];
-  return {
-    role: text(fields['role'], `options.roles[${at}].role`),
-    model: model === null || model === undefined ? null : text(model, `options.roles[${at}].model`),
-    reasoning_effort: oneOf(
-      fields['reasoning_effort'] ?? 'default',
-      EFFORTS,
-      `options.roles[${at}].reasoning_effort`,
-    ),
-  };
-}
-
-function options(value: unknown): RunOptions {
-  const fields = record(value, 'options', ['rounds', 'time_limit_s', 'results', 'roles']);
-  const roles = fields['roles'] ?? [];
-  if (!Array.isArray(roles)) throw new Error('options.roles must be a list');
-  return {
-    rounds: count(fields['rounds'], 'options.rounds'),
-    time_limit_s: count(fields['time_limit_s'], 'options.time_limit_s'),
-    results:
-      fields['results'] === null || fields['results'] === undefined
-        ? null
-        : oneOf(fields['results'], RESULTS, 'options.results'),
-    roles: roles.map(role),
-  };
-}
-
-function harness(value: unknown): HarnessPick | null {
-  if (value === null) return null;
-  const fields = record(value, 'harness', ['provider', 'model']);
-  return {
-    provider: text(fields['provider'], 'harness.provider'),
-    model: text(fields['model'], 'harness.model'),
-  };
-}
-
-function words(value: unknown): readonly string[] {
-  if (
-    !Array.isArray(value) ||
-    value.some(word => typeof word !== 'string' || word.includes('\n'))
-  ) {
-    throw new Error('args must be a list of one-line words');
-  }
-  return value as string[];
-}
-
 /** `value` as `RunInputs`, or an `Error` naming the first offending key. */
 function parseRunInputs(value: unknown): RunInputs {
   const fields = record(value, 'inputs', ['project', 'task', 'harness', 'options', 'args']);
   return {
     project: project(fields['project']),
     task: text(fields['task'], 'inputs.task'),
-    harness: harness(fields['harness']),
-    options: options(fields['options']),
-    args: words(fields['args']),
+    ...parseRunStart({
+      harness: fields['harness'],
+      options: fields['options'],
+      args: fields['args'],
+    }),
   };
 }
 

@@ -187,6 +187,7 @@ export class NewRunMain {
       runId: launch.run_id,
       instanceId: launch.id,
       attachedAt: this.#deps.now(),
+      start: {harness: inputs.harness, options: inputs.options, args: inputs.args},
     });
     return {runId: launch.run_id, instanceId: launch.id};
   }

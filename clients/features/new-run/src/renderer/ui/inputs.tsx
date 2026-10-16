@@ -375,6 +375,17 @@ const RESULTS: readonly {readonly value: Budget['results']; readonly label: stri
   {value: 'publish_github', label: 'Also publish to GitHub'},
 ];
 
+/** `options`, plus the form's own `value` when none of them is it (a run started with another one). */
+function withCurrent(
+  options: readonly {readonly value: string; readonly label: string}[],
+  value: string,
+  label: string,
+): {readonly value: string; readonly label: string}[] {
+  return options.some(option => option.value === value)
+    ? [...options]
+    : [...options, {value, label}];
+}
+
 function BudgetFields(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
   const {budget} = context.form;
@@ -385,20 +396,26 @@ function BudgetFields(props: CardProps): JSX.Element {
       <Field label="Rounds" help="Searches without rounds, such as evolve, take none.">
         <Select
           value={budget.rounds === null ? 'configured' : String(budget.rounds)}
-          options={ROUNDS.map(value => ({
-            value,
-            label: value === 'configured' ? 'As configured' : value,
-          }))}
+          options={withCurrent(
+            ROUNDS.map(value => ({
+              value,
+              label: value === 'configured' ? 'As configured' : value,
+            })),
+            budget.rounds === null ? 'configured' : String(budget.rounds),
+            String(budget.rounds),
+          )}
           change={value => change({rounds: value === 'configured' ? null : Number(value)})}
         />
       </Field>
       <Field label="Time limit">
         <Select
           value={budget.timeLimitS === null ? 'none' : String(budget.timeLimitS)}
-          options={TIME_LIMITS.map(({value, label}) => ({value, label}))}
-          change={value =>
-            change({timeLimitS: TIME_LIMITS.find(limit => limit.value === value)?.seconds ?? null})
-          }
+          options={withCurrent(
+            TIME_LIMITS.map(({value, label}) => ({value, label})),
+            budget.timeLimitS === null ? 'none' : String(budget.timeLimitS),
+            `${budget.timeLimitS} seconds`,
+          )}
+          change={value => change({timeLimitS: value === 'none' ? null : Number(value)})}
         />
       </Field>
     </Grid>
@@ -408,7 +425,9 @@ function BudgetFields(props: CardProps): JSX.Element {
 /** 04: rounds, time limit, where results go, and extra arguments. */
 export function BudgetCard(props: CardProps): JSX.Element {
   const {context, dispatch} = props;
-  const [advancedShown, setAdvancedShown] = useState(context.form.advanced !== '');
+  // Opened by the user, else shown whenever it holds arguments (a run started with some).
+  const [advancedChoice, setAdvancedChoice] = useState<boolean | null>(null);
+  const advancedShown = advancedChoice ?? context.form.advanced !== '';
   const problem = advancedProblem(context.form.advanced);
   return (
     <Card section="04 · Budget and results">
@@ -426,7 +445,7 @@ export function BudgetCard(props: CardProps): JSX.Element {
           icon={advancedShown ? 'chevron-down' : 'chevron-right'}
           text="Advanced"
           expanded={advancedShown}
-          press={() => setAdvancedShown(!advancedShown)}
+          press={() => setAdvancedChoice(!advancedShown)}
         />
       </Row>
       {advancedShown ? (
@@ -438,7 +457,10 @@ export function BudgetCard(props: CardProps): JSX.Element {
           <TextInput
             mono
             value={context.form.advanced}
-            change={advanced => dispatch({type: 'advanced', advanced})}
+            change={advanced => {
+              setAdvancedChoice(true);
+              dispatch({type: 'advanced', advanced});
+            }}
             placeholder="--max-in-flight 3"
           />
         </Field>
