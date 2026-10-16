@@ -311,6 +311,7 @@ remains in the project, while machine-local state defaults to `~/.vibesys`:
     │   ├── plain/                          # plain-loop portable cursor
     │   ├── evolve/                         # evolve population and policy state
     │   └── runtime/effective-objective.md  # objective plus run constraints
+    ├── agent-visible/<run-id>/            # documents agents read by path, e.g. planner handoff notes
     └── local/runs/<run-id>/worktrees/     # ignored temporary evolve worktrees
 
 ~/.vibesys/projects/<project-key>/

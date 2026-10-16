@@ -393,8 +393,10 @@ class LandlockSandbox(WorkspaceSandbox):
       diffs those paths against a trusted baseline and fails the round, so this
       is downgraded from prevention to detection rather than lost outright.
     * ``ProjectPathPolicy.hidden_paths`` — the agent may read ``agent.toml``,
-      root ``.env*``, and ``.vibesys/state/local``. Keep provider credentials
-      out of the project directory on such a host.
+      root ``.env*``, ``.vibesys/state/local``, and the run's record below
+      ``.vibesys/state/runs``, which it may also change. Keep provider credentials
+      out of the project directory on such a host, and do not rely on role
+      separation there.
 
     Residual channels, all verified by probing a live ruleset:
 

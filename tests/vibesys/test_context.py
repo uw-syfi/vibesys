@@ -306,7 +306,7 @@ def test_direct_run_uses_one_project_root_and_canonical_state(tmp_path: Path) ->
         policy = environment.request.project_path_policy
         state_paths = project_resources.project.state.sandbox_paths()
         assert state_paths.read_only_path in policy.read_only_paths
-        assert state_paths.hidden_path in policy.hidden_paths
+        assert set(state_paths.hidden_paths) <= set(policy.hidden_paths)
         assert project_resources.project.state.candidate_worktrees_directory(run_id).is_dir()
 
     manifest = Project.open(project).state.load_run(run_id)

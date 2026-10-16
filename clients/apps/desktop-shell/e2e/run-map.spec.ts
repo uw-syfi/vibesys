@@ -3,7 +3,7 @@ import {expect, type Page, test} from '@playwright/test';
 import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
-import {RUN_ID, traceEvents, turnEvents, W5_GATE} from './fake-trace.js';
+import {judgeEvents, RUN_ID, traceEvents, turnEvents, W5_GATE} from './fake-trace.js';
 
 /**
  * The Run screen's Map and time scrubber against the Fake bridge and a fake run server whose
@@ -57,7 +57,12 @@ const SEED: FakeBridgeSeed = {
 };
 
 const SPAN_EVENTS = traceEvents();
-const EVENTS = [...SPAN_EVENTS, ...turnEvents(SPAN_EVENTS.length)];
+const TURN_EVENTS = turnEvents(SPAN_EVENTS.length);
+const EVENTS = [
+  ...SPAN_EVENTS,
+  ...TURN_EVENTS,
+  ...judgeEvents(SPAN_EVENTS.length + TURN_EVENTS.length),
+];
 
 const SERVER: FakeServerSeed = {
   runId: RUN_ID,
@@ -225,7 +230,7 @@ test('a step picked far down the tree keeps its details and turns in view', asyn
   await row(/W5 · Combine W1 ring/).click();
   const details = page.getByRole('region', {name: 'Workstream'});
   const turns = page.getByRole('region', {name: 'Turn by turn'});
-  await expect(turns.getByText('1 agent turn')).toBeVisible();
+  await expect(turns.getByText('2 agent turns')).toBeVisible();
 
   // The tree is taller than the window; scrolled to its last row, the page has left the top of it.
   const last = tree.getByRole('treeitem').last();
@@ -254,7 +259,7 @@ test('the Map shows the turns under a step, turn by turn, and none for a step wi
   const row = (name: string | RegExp) => tree.getByRole('treeitem', {name});
   await row(/W5 · Combine W1 ring/).click();
   const turns = page.getByRole('region', {name: 'Turn by turn'});
-  await expect(turns.getByText('1 agent turn')).toBeVisible();
+  await expect(turns.getByText('2 agent turns')).toBeVisible();
   const list = turns.getByRole('list', {name: 'Turn by turn'});
   await expect(
     list.getByText('I will pad each counter to its own line and re-measure.'),
@@ -270,6 +275,16 @@ test('the Map shows the turns under a step, turn by turn, and none for a step wi
   await bash.click();
   await expect(list.getByText('"command": "cargo bench --bench queue"')).toBeVisible();
   await expect(list.getByText('queue/mpmc time: 41.2 ms')).toBeVisible();
+  // The judge's reply came as data: its analysis as text and its verdict as a badge, no braces.
+  await expect(list.getByText('Judge response')).toBeVisible();
+  await expect(list.getByText('pass', {exact: true})).toBeVisible();
+  await expect(
+    list.getByText('The current src/lib.rs matches the declared outcome', {exact: false}),
+  ).toBeVisible();
+  await expect(list.getByText('{"reply"', {exact: false})).toHaveCount(0);
+  await shot(page, 'ink-map-judge-reply');
+  await list.getByRole('button', {name: 'Raw'}).click();
+  await expect(list.getByText('"verdict": "pass"')).toBeVisible();
   await noViolations(page);
   await shot(page, 'ink-map-turns');
 

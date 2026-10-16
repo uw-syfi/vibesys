@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vs_sandbox.api import HostResource, HostResourceAccess
+
 if TYPE_CHECKING:
     from pathlib import Path
 
@@ -35,3 +37,25 @@ def materialize_objective_document(
 
     destination.write_text(objective)
     return destination
+
+
+def outside_objective(
+    objective: str | None, log_dir: Path
+) -> tuple[Path | None, tuple[HostResource, ...]]:
+    """Give an agent on the host a copy of the effective objective beside the run's logs.
+
+    The committed objective sits in the run's record below ``.vibesys/state/runs``, which
+    agent confinement hides, so the agent reads this copy instead, as a container agent
+    reads its mount. The committed document stays the authority: the copy carries exactly
+    the effective objective. Returns the copy and the read-only grant its confinement needs.
+    """
+    if objective is None:
+        return None, ()
+    log_dir.mkdir(parents=True, exist_ok=True)
+    copy = materialize_objective_document(
+        objective,
+        workspace=log_dir,
+        authored_document=None,
+        destination=log_dir / "effective-objective.md",
+    )
+    return copy, (HostResource(copy, HostResourceAccess.READ_ONLY),)

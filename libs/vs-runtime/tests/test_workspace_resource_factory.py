@@ -356,8 +356,10 @@ def test_candidate_environment_uses_the_runs_verified_objective(
             candidate = factory.create_candidate("candidate-1", revision)
             try:
                 assert Path(objective_paths[-1]).read_text() == agent_objective
-                if authored is not None:
-                    assert objective_paths[-1] == str(authored)
+                # The agent reads a copy beside the candidate's logs, never the committed
+                # document in the run's record, which agent confinement hides.
+                assert not Path(objective_paths[-1]).is_relative_to(root)
+                assert authored is None or objective_paths[-1] != str(authored)
                 configuration = AgentExecutionConfiguration(
                     "worker", AgentSpec(backend=AgentBackend.STUB)
                 )

@@ -25,11 +25,10 @@ def open_run_environment(
     environment: RunEnvironment, request: RunEnvironmentRequest
 ) -> RunEnvironmentSession:
     """Render product policy and open a prepared infrastructure environment."""
-    # Linked candidates omit ignored local state, but share the canonical
-    # confinement policy. Prepare its hidden root before any sandbox opens.
-    Project.open(request.workspace).state.candidate_worktrees_directory(request.run_id).mkdir(
-        parents=True, exist_ok=True
-    )
+    # Linked candidates omit ignored local state and any run record their revision
+    # predates, but share the canonical confinement policy. Prepare its hidden
+    # directories before any sandbox opens.
+    Project.open(request.workspace).state.prepare_hidden_directories(request.run_id)
     prepared = environment.prepare(request)
     facts = prepared.presentation_facts
     if isinstance(facts, HostEnvironmentFacts):

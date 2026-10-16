@@ -4,7 +4,15 @@ import {afterAll, beforeAll, describe, expect, test} from 'bun:test';
 import {Window} from 'happy-dom';
 import {act, type ReactNode, useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Collapsible, Message, Thread, type ThreadItem, ToolCall} from './index.js';
+import {
+  Collapsible,
+  Message,
+  type ReplyField,
+  StructuredReply,
+  Thread,
+  type ThreadItem,
+  ToolCall,
+} from './index.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -227,5 +235,98 @@ describe('Thread', () => {
   test('draws every item of a short thread', async () => {
     const {container} = await mount(<Thread label="Turns" items={items(5)} />);
     expect(container.querySelectorAll('.vs-thread-row').length).toBe(5);
+  });
+});
+
+const FIELDS: readonly ReplyField[] = [
+  {kind: 'badge', key: 'verdict', label: 'Verdict', value: 'pass', tone: 'ok'},
+  {kind: 'prose', key: 'analysis', label: 'Analysis', text: 'The edit is sound.'},
+  {kind: 'list', key: 'checks', label: 'Checks', items: ['build', 'tests']},
+  {
+    kind: 'group',
+    key: 'skill',
+    label: 'Skill',
+    fields: [{kind: 'fact', key: 'name', label: 'Name', value: 'rocprof'}],
+  },
+];
+
+function Reply(props: {readonly open?: boolean}) {
+  const [open, setOpen] = useState(props.open ?? true);
+  return (
+    <StructuredReply
+      author="Judge"
+      title="Judge response"
+      fields={FIELDS}
+      raw={'{\n  "verdict": "pass"\n}'}
+      open={open}
+      toggle={setOpen}
+    />
+  );
+}
+
+describe('StructuredReply', () => {
+  test('shows text as text, a choice as a badge, and a list as a list, with no braces', async () => {
+    const {container} = await mount(<Reply />);
+    expect(text(container)).toContain('Judge response');
+    expect(text(container)).toContain('pass');
+    expect(text(container)).toContain('The edit is sound.');
+    expect([...container.querySelectorAll('li')].map(item => item.textContent)).toEqual([
+      'build',
+      'tests',
+    ]);
+    expect(text(container)).not.toContain('{');
+  });
+
+  test('opens a nested record on request and shows the raw JSON behind a toggle', async () => {
+    const {container} = await mount(<Reply />);
+    expect(text(container)).not.toContain('rocprof');
+    await click(button(container, 'Skill'));
+    expect(text(container)).toContain('rocprof');
+    expect(text(container)).not.toContain('"verdict"');
+    const raw = button(container, 'Raw');
+    expect(raw.getAttribute('aria-expanded')).toBe('false');
+    await click(raw);
+    expect(raw.getAttribute('aria-expanded')).toBe('true');
+    expect(text(container)).toContain('"verdict": "pass"');
+  });
+
+  test('closed, it keeps its badges on the title line and hides its fields', async () => {
+    const {container} = await mount(<Reply open={false} />);
+    expect(text(container)).toContain('pass');
+    expect(text(container)).not.toContain('The edit is sound.');
+  });
+});
+
+describe('a tool call, closed and open', () => {
+  const long = Array.from({length: 60}, (_, index) => `line ${index}`).join('\n');
+
+  test('is one line closed: its name, its main argument and its result size', async () => {
+    const {container} = await mount(
+      <ToolCall
+        name="Read"
+        state="ok"
+        summary="src/lib.rs"
+        meta="60 lines"
+        input='{"file_path":"src/lib.rs"}'
+        output={long}
+        open={false}
+        toggle={() => undefined}
+      />,
+    );
+    expect(text(container)).toContain('Read');
+    expect(text(container)).toContain('src/lib.rs');
+    expect(text(container)).toContain('60 lines');
+    expect(text(container)).not.toContain('line 0');
+  });
+
+  test('shows the start of a long result open, and all of it on "Show more"', async () => {
+    const {container} = await mount(
+      <ToolCall name="Read" state="ok" input={null} output={long} open toggle={() => undefined} />,
+    );
+    expect(text(container)).toContain('line 19');
+    expect(text(container)).not.toContain('line 40');
+    await click(button(container, 'Show more'));
+    expect(text(container)).toContain('line 59');
+    expect(text(container)).not.toContain('Show more');
   });
 });

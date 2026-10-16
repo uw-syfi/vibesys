@@ -797,6 +797,38 @@ def test_local_environment_materializes_effective_objective_outside_workspace(
     assert not objective_path.is_relative_to(tmp_path / "workspace")
 
 
+def test_host_agent_reads_a_committed_objective_through_a_copy_outside_the_project(
+    tmp_path: Path,
+) -> None:
+    """The committed objective sits in the hidden run record, so a host agent gets a copy."""
+    backend = FakeBackend()
+    env = unconfined_host_environment()
+    effective = "Optimize the service.\n"
+    workspace = tmp_path / "workspace"
+    committed = workspace / ".vibesys/state/runs/run-123/runtime/effective-objective.md"
+    committed.parent.mkdir(parents=True)
+    committed.write_text(effective)
+
+    session = _open(
+        env,
+        _request(
+            tmp_path,
+            backend,
+            objective=effective,
+            objective_document=committed,
+            workspace=workspace,
+        ),
+    )
+
+    objective_path = Path(session.view.paths.objective)
+    assert objective_path == tmp_path / "logs" / "effective-objective.md"
+    assert objective_path.read_text() == effective
+    assert not objective_path.is_relative_to(workspace)
+    assert session.view.agent_host_resources == (
+        HostResource(objective_path, HostResourceAccess.READ_ONLY),
+    )
+
+
 def test_docker_environment_opens_one_started_sandbox_with_agent_paths(
     tmp_path: Path,
     fake_agent_image: list[dict[str, Any]],

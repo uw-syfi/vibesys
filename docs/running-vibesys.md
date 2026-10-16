@@ -40,7 +40,10 @@ work. Machine-local metadata defaults to
 `~/.vibesys`; set `VIBESYS_STATE_HOME` to an absolute directory to override it.
 Existing `.vibesys/state/local/` metadata moves there on first open without
 changing its file formats. Temporary evolve worktrees remain repository-local.
-The entire `.vibesys/` directory is read-only to coding agents.
+The entire `.vibesys/` directory is read-only to coding agents, and its
+`state/runs/` and `state/local/` are hidden from them: the run's record is the
+framework's, and `state/agent-visible/` holds the few documents an agent reads
+by path.
 
 ## Start a Task
 

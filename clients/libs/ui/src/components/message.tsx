@@ -1,4 +1,5 @@
-import type {JSX} from 'react';
+import {type JSX, useState} from 'react';
+import {Button} from './button.js';
 import {Collapsible} from './collapsible.js';
 import {Chip, StatusDot, type StatusTone} from './status.js';
 import {Text} from './text.js';
@@ -83,7 +84,24 @@ const TOOL_DOTS: Readonly<Record<ToolState, {readonly tone: StatusTone; readonly
   failed: {tone: 'err', word: 'Failed'},
 };
 
-function Code(props: {readonly label: string; readonly text: string}): JSX.Element {
+/** Lines of a long text shown before "Show more". */
+const VISIBLE_LINES = 20;
+const VISIBLE_CHARS = 3000;
+
+/** The start of `text` that is shown at first, and how many lines the rest holds. */
+function abridged(text: string): {readonly shown: string; readonly hiddenLines: number} {
+  const lines = text.split('\n');
+  if (lines.length <= VISIBLE_LINES && text.length <= VISIBLE_CHARS) {
+    return {shown: text, hiddenLines: 0};
+  }
+  const shown = lines.slice(0, VISIBLE_LINES).join('\n').slice(0, VISIBLE_CHARS);
+  return {shown, hiddenLines: Math.max(1, lines.length - shown.split('\n').length)};
+}
+
+/** A block of text on the log background; a long one shows its start, then all on request. */
+export function Code(props: {readonly label: string; readonly text: string}): JSX.Element {
+  const [all, setAll] = useState(false);
+  const {shown, hiddenLines} = abridged(props.text);
   return (
     <div className="vs-code-block">
       <Text variant="section">{props.label}</Text>
@@ -92,8 +110,18 @@ function Code(props: {readonly label: string; readonly text: string}): JSX.Eleme
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
         tabIndex={0}
       >
-        {props.text}
+        {all || hiddenLines === 0 ? props.text : `${shown}\n…`}
       </pre>
+      {all || hiddenLines === 0 ? null : (
+        <span>
+          <Button
+            size="sm"
+            variant="quiet"
+            text={`Show more (${hiddenLines} more line${hiddenLines === 1 ? '' : 's'})`}
+            press={() => setAll(true)}
+          />
+        </span>
+      )}
     </div>
   );
 }
@@ -101,13 +129,15 @@ function Code(props: {readonly label: string; readonly text: string}): JSX.Eleme
 /**
  * One call of a tool: its `name`, its state, the `input` it was given and the `output` it
  * returned, each shown as plain text when the reader opens the call. `input` is null for a call
- * that took none, and `output` is null until the result arrives. `summary` is a one-line preview
- * shown while the call is closed.
+ * that took none, and `output` is null until the result arrives. Closed, it is one line: the
+ * name, a `summary` of its main argument, and `meta` (the result's size, or why it failed). A long
+ * output shows its start and the rest on request.
  */
 export function ToolCall(props: {
   readonly name: string;
   readonly state: ToolState;
   readonly summary?: string;
+  readonly meta?: string;
   readonly input: string | null;
   readonly output: string | null;
   readonly open: boolean;
@@ -119,7 +149,8 @@ export function ToolCall(props: {
       <Collapsible
         label={props.name}
         mono
-        {...(props.open || props.summary === undefined ? {} : {summary: props.summary})}
+        {...(props.summary === undefined ? {} : {summary: props.summary})}
+        {...(props.meta === undefined ? {} : {meta: props.meta})}
         leading={<StatusDot tone={dot.tone} label={dot.word} />}
         open={props.open}
         toggle={props.toggle}
