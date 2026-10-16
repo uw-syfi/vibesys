@@ -202,6 +202,17 @@ class ParallelCandidateObstacle(StrEnum):
     BORROWED_SESSION = "borrowed_session"
 
 
+class RunEnvironmentSessionRole(StrEnum):
+    """The lifecycle role of one environment session within a run.
+
+    A run opens exactly one root session. Candidate and auxiliary workspaces
+    are children: they reuse run-scoped preparation and must not repeat it.
+    """
+
+    ROOT = "root"
+    CHILD = "child"
+
+
 @dataclass(frozen=True)
 class RunEnvironmentView:
     """Run-environment-neutral facts consumed by loops and agent construction."""
@@ -316,14 +327,17 @@ class RunEnvironmentRequest:
     # Host directories the run owns besides ``workspace``, such as the
     # directory holding its candidate worktrees. Agent tools bound once per
     # run (the profiler) may stage any of them to a remote executor. Only the
-    # root session has any: a candidate session's request clears them, so its
-    # brokers never reach a sibling candidate.
+    # candidate session's request clears them, so its brokers never reach a
+    # sibling candidate. A root may legitimately own none; ``session_role`` is
+    # the lifecycle discriminator.
     run_owned_roots: tuple[Path, ...] = ()
     environment_bind_mounts: tuple[EnvironmentBindMount, ...] = ()
     seeded_workspace_paths: tuple[str, ...] = ()
     log: Callable[[str], None] | None = None
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
     state_namespace: StateNamespace | None = None
+    session_role: RunEnvironmentSessionRole = RunEnvironmentSessionRole.ROOT
+    """Whether this request opens the run's one root session or a child workspace."""
     #: Root of the run's dedicated agent CLI homes; ``None`` when the run has
     #: no machine-local state (agents then keep the provider's default home).
     agent_homes_dir: Path | None = None

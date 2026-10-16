@@ -305,7 +305,7 @@ class SubmitBoundJob(_Document):
     """
 
     kind: Literal["submit_bound"] = "submit_bound"
-    job_id: Annotated[str, Field(pattern=r"^[0-9]+$")]
+    job_id: Annotated[str, Field(pattern=r"^[0-9]+$", max_length=32)]
     config_identity: str
     remote_workspace: str
     remote_status_path: str

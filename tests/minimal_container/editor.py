@@ -10,6 +10,7 @@ is a job), so the CUDA and ROCm bases are built and started without a device.
 
 from __future__ import annotations
 
+import json
 import secrets
 import sys
 import textwrap
@@ -52,7 +53,8 @@ from vs_sim.api import (
     SystemClock,
     UnixNetwork,
 )
-from vs_sim.api.testing import NO_PROCESSES, ScriptedProbe
+from vs_sim.api.testing import ScriptedProbe
+from vs_slurm.api import FakeConnector
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -73,17 +75,6 @@ PULL_TIMEOUT_SECONDS = 3600.0
 #: with its output in the error, not by pytest's limit with nothing.
 IMAGE_BUILD_BUDGET_SECONDS = 240.0
 
-#: Stands in for the Slurm shell (the transport's ``bash -c``): it receives an ``srun`` or
-#: ``scancel`` command line as one argument and runs what follows ``--`` right here.
-_FAKE_SLURM = textwrap.dedent(
-    """\
-    import os, shlex, sys
-    sys.argv = [sys.argv[0], *shlex.split(sys.argv[1])[1:]]
-    if "--" in sys.argv:
-        command = sys.argv[sys.argv.index("--") + 1 :]
-        os.execvp(command[0], command)
-    """
-)
 ACCURACY_SCRIPT = 'print("accuracy ok")\n'
 BENCHMARK_SCRIPT = textwrap.dedent(
     """\
@@ -200,8 +191,9 @@ def make_backend(base: Base, log_dir: Path) -> ComputeBackendImpl:
 
 
 def _slurm_config(directory: Path) -> Path:
-    fake = directory / "fake_slurm.py"
-    fake.write_text(_FAKE_SLURM, encoding="utf-8")
+    cluster = FakeConnector(directory / "cluster").state
+    shell = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(cluster), "shell"])
+    rsync = json.dumps([sys.executable, "-m", "vs_slurm.fake_connector", str(cluster), "rsync"])
     config = directory / "slurm.toml"
     config.write_text(
         textwrap.dedent(
@@ -212,7 +204,8 @@ def _slurm_config(directory: Path) -> Path:
 
             [slurm.transport]
             kind = "local"
-            shell_command = ["{sys.executable}", "{fake}"]
+            shell_command = {shell}
+            rsync_command = {rsync}
 
             [vibesys.agent_gpu]
             partitions = ["main"]
@@ -285,11 +278,11 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
 
 
 def _real_system() -> EnvironmentSystem:
-    """The host's own threads, sockets and processes; this test runs no Slurm program."""
+    """The host's own threads, sockets and processes, including the executable Fake cluster."""
     return EnvironmentSystem(
         threads=OsThreads(),
         network=UnixNetwork(),
         processes=OsProcesses(),
         launcher=SubprocessPipedProcessLauncher(),
-        slurm_processes=NO_PROCESSES,
+        slurm_processes=OsProcesses(),
     )

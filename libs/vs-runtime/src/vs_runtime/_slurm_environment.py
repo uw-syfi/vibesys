@@ -30,6 +30,7 @@ from vs_runtime._run_environment import (
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSession,
+    RunEnvironmentSessionRole,
     RunEnvironmentView,
     _command_argv,
     _make_host_sandbox,
@@ -70,6 +71,9 @@ from vs_sandbox.api.slurm import (
 )
 from vs_slurm.api import (
     SlurmConfig,
+    SlurmJobRunner,
+    SlurmLocalTransport,
+    probe_workspace_root,
     slurm_transport_broker_available,
     slurm_transport_broker_policy,
 )
@@ -441,6 +445,21 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Validate external policy before opening the editor container."""
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
+        if request.session_role is RunEnvironmentSessionRole.ROOT and isinstance(
+            self._settings.config.transport, SlurmLocalTransport
+        ):
+            runner = SlurmJobRunner(
+                self._settings.config,
+                processes=request.system.slurm_processes,
+                clock=request.clock,
+                scratch_root=request.log_dir / "slurm-workspace-root-probe",
+            )
+            probe_workspace_root(
+                runner,
+                state_root=request.log_dir / "slurm-workspace-root-probe",
+                run_id=request.run_id,
+                pause=request.system.threads.sleep,
+            )
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(
                 service_command=_slurm_service_command(self._settings.policy),

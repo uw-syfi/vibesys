@@ -151,6 +151,7 @@ def open_agent_execution_environment(  # noqa: PLR0913  # lint-waiver: LW-954433
     else:
         request = replace(
             base_request,
+            session_role=type(base_request.session_role).CHILD,
             agent_backend=(
                 agent_backend if agent_backend is not None else base_request.agent_backend
             ),

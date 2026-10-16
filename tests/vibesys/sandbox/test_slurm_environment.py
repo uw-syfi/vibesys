@@ -29,6 +29,7 @@ from vs_runtime.api.infrastructure import (
     EvaluatorGoModule,
     RunEnvironment,
     RunEnvironmentRequest,
+    RunEnvironmentSessionRole,
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
     evaluator_go_module_ready_path,
@@ -49,9 +50,10 @@ from vs_sandbox.api.slurm import (
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
 from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
+from vs_slurm.api import FakeConnector, SlurmWorkspaceRootProbeError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from vs_runtime.api.infrastructure import RunEnvironmentSession
 from vs_sim.api import DISCARD
@@ -187,6 +189,7 @@ def _request(
         agent_backend="stub",
         cli_provider=None,
         run_id="run-1",
+        session_role=RunEnvironmentSessionRole.CHILD,
         framework_root=framework_root or tmp_path / "framework",
         accuracy_command=accuracy,
         benchmark_command=benchmark,
@@ -364,6 +367,137 @@ def test_the_profiler_follows_the_capability_not_the_environment_name(tmp_path: 
         finally:
             session.close()
         (tmp_path / "logs" / "slurm-capture-plan.json").unlink(missing_ok=True)
+
+
+def _local_probe_environment(
+    tmp_path: Path, kind: str, monkeypatch: pytest.MonkeyPatch
+) -> SlurmEnvironment:
+    if kind == "local":
+        config = tmp_path / "slurm.toml"
+        config.write_text(
+            f'''[slurm]
+name = "test-cluster"
+remote_workspace_root = "{tmp_path / "remote"}"
+
+[slurm.transport]
+kind = "local"
+shell_command = ["fake-connector", "shell"]
+rsync_command = ["fake-connector", "rsync"]
+''',
+            encoding="utf-8",
+        )
+        return SlurmEnvironment(load_slurm_operator_settings(config))
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    config = tmp_path / "slurm-gpu.toml"
+    config.write_text(
+        """[slurm_gpu]
+partitions = ["main"]
+max_gpus = 8
+max_time_minutes = 120
+srun_command = ["fake-connector", "shell", "srun"]
+scancel_command = ["fake-connector", "shell", "scancel"]
+""",
+        encoding="utf-8",
+    )
+    return SlurmEnvironment.from_slurm_gpu(
+        config,
+        RunResourceRequest(accelerators_per_node=1, accelerator_backend="cuda"),
+    )
+
+
+@pytest.mark.parametrize("kind", ["local", "alias"])
+def test_local_slurm_root_prepares_once_without_run_owned_roots_and_children_never_prepare(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+) -> None:
+    connector = FakeConnector(tmp_path / "cluster")
+    threads = SimThreads()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = RunEnvironmentRequest(
+        log_dir=tmp_path / "logs",
+        workspace=workspace,
+        ref_dir=None,
+        backend=FakeComputeBackend(threads=threads),
+        agent_backend="stub",
+        cli_provider=None,
+        run_id="root-with-no-owned-roots",
+        framework_root=tmp_path,
+        clock=ManualClock(),
+        system=replace(idle_environment_system(), threads=threads, slurm_processes=connector),
+    )
+    environment = _local_probe_environment(tmp_path, kind, monkeypatch)
+
+    environment.prepare(request)
+    environment.prepare(request)
+
+    def outage_after_root_start(
+        _request: dict[str, object],
+        _answer: Callable[[dict[str, object]], dict[str, object]],
+    ) -> dict[str, object]:
+        raise OSError
+
+    connector.intercept(outage_after_root_start)
+    for index in range(3):
+        environment.prepare(
+            replace(
+                request,
+                log_dir=tmp_path / f"child-{index}-logs",
+                session_role=RunEnvironmentSessionRole.CHILD,
+            )
+        )
+
+    assert connector.submitted_job_ids() == ("5000",)
+
+
+def test_local_slurm_root_probe_diagnostic_is_closed_and_bounded(tmp_path: Path) -> None:
+    marker = "secret-boundary-marker"
+    connector = FakeConnector(tmp_path / "cluster")
+
+    def fail_with_untrusted_detail(
+        _request: dict[str, object],
+        _answer: Callable[[dict[str, object]], dict[str, object]],
+    ) -> dict[str, object]:
+        raise OSError(marker * 10_000)
+
+    connector.intercept(fail_with_untrusted_detail)
+    threads = SimThreads()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    config = tmp_path / "slurm.toml"
+    config.write_text(
+        f'''[slurm]
+name = "test-cluster"
+remote_workspace_root = "{tmp_path / "remote"}"
+
+[slurm.transport]
+kind = "local"
+shell_command = ["fake-connector", "shell"]
+rsync_command = ["fake-connector", "rsync"]
+''',
+        encoding="utf-8",
+    )
+    request = RunEnvironmentRequest(
+        log_dir=tmp_path / "logs",
+        workspace=workspace,
+        ref_dir=None,
+        backend=FakeComputeBackend(threads=threads),
+        agent_backend="stub",
+        cli_provider=None,
+        run_id="bounded-diagnostic",
+        framework_root=tmp_path,
+        clock=ManualClock(),
+        system=replace(idle_environment_system(), threads=threads, slurm_processes=connector),
+    )
+
+    with pytest.raises(SlurmWorkspaceRootProbeError) as failure:
+        SlurmEnvironment(load_slurm_operator_settings(config)).prepare(request)
+
+    assert marker not in str(failure.value)
+    assert len(str(failure.value)) < 200
 
 
 def test_connector_transport_offers_the_remote_profiler_capability(tmp_path: Path) -> None:

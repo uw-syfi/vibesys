@@ -39,6 +39,7 @@ from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import OsThreads
 from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock
+from vs_slurm.api import FakeConnector
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -47,11 +48,12 @@ if TYPE_CHECKING:
 
 _SLURM_LOCAL = """[slurm]
 name = "test-cluster"
-remote_workspace_root = "/shared/vibesys"
+remote_workspace_root = "{remote_workspace_root}"
 
 [slurm.transport]
 kind = "local"
-shell_command = ["bash", "-c"]
+shell_command = ["fake-connector", "shell"]
+rsync_command = ["fake-connector", "rsync"]
 """
 
 
@@ -102,14 +104,16 @@ def _request(root: Path, config: Path) -> RunRequest:
 def _facts(tmp_path: Path, plugin: OrchestrationPlugin) -> RunFacts:
     root = tmp_path / "project"
     _write_project(root)
+    remote = tmp_path / "remote"
+    remote.mkdir()
     config = tmp_path / "slurm.toml"
-    config.write_text(_SLURM_LOCAL, encoding="utf-8")
+    config.write_text(_SLURM_LOCAL.format(remote_workspace_root=remote), encoding="utf-8")
     integration = LocalRunIntegration(
         clock=ManualClock(),
         git=REAL_GIT,
         github=NO_GITHUB,
         threads=OsThreads(),
-        system=idle_environment_system(),
+        system=idle_environment_system(slurm_processes=FakeConnector(tmp_path / "cluster")),
     )
 
     async def exercise() -> RunFacts:

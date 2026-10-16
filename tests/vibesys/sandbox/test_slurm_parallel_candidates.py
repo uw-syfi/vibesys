@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,7 +21,11 @@ import pytest
 from tests.support.workspace_world import open_workspace_env
 
 from vibesys.run.environment import open_run_environment
-from vs_runtime.api.infrastructure import EnvironmentSystem, SlurmEnvironment
+from vs_runtime.api.infrastructure import (
+    EnvironmentSystem,
+    RunEnvironmentSessionRole,
+    SlurmEnvironment,
+)
 from vs_runtime.api.testing import DaemonBackend, daemon_docker_config, daemon_engine
 from vs_sandbox.api.slurm import BrokeredProcesses, load_slurm_operator_settings
 from vs_sim.api import (
@@ -118,6 +123,9 @@ def _run(
     environment = environment or _environment(tmp_path, backend)
 
     def open_session(request: RunEnvironmentRequest) -> RunEnvironmentSession:
+        # Startup probing has its own deterministic contract tests. This suite
+        # exercises the already-prepared root and its candidate brokers.
+        request = replace(request, session_role=RunEnvironmentSessionRole.CHILD)
         session = open_run_environment(environment, request)
         if opened is not None:
             opened.append(session)
