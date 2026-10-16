@@ -25,6 +25,9 @@
       "path": "../../libs/ipc/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/runs/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/store/tsconfig.lib.json"
     }
   ]

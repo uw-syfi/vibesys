@@ -1,9 +1,11 @@
 /**
- * Split a line of run arguments the way a POSIX shell splits words, without expanding anything:
- * blanks separate words, single quotes keep everything literally, double quotes keep everything but
- * `\"`, `\\`, `\$`, and `` \` ``, and a backslash outside quotes keeps the next character. The
- * welcome view's run-arguments field uses it, so `--goal "make it fast"` is two arguments, not four.
+ * Split and render the argument words shared by free-form starts and saved launch profiles.
+ *
+ * This is deliberately shell syntax without shell expansion: blanks separate words, single quotes
+ * keep everything literally, double quotes keep everything except the POSIX escapes for `"`, `\\`,
+ * `$`, and backticks, and an unquoted backslash keeps the next character. Nothing executes here.
  */
+
 export class ShellWordsError extends Error {
   override name = 'ShellWordsError';
 }
@@ -57,4 +59,20 @@ function doubleQuoted(line: string, start: number): [string, number] {
     }
   }
   throw new ShellWordsError('the arguments have an unclosed "');
+}
+
+/**
+ * Render `words` as one canonical shell-word line. Single quotes are used only when a word cannot
+ * be shown unquoted, and an embedded quote uses the standard `'\\''` boundary. Parsing the result
+ * with `shellWords` returns the exact input vector.
+ */
+export function canonicalShellWords(words: readonly string[]): string {
+  return words.map(canonicalWord).join(' ');
+}
+
+const UNQUOTED_WORD = /^[A-Za-z0-9_@%+=:,./-]+$/;
+
+function canonicalWord(word: string): string {
+  if (UNQUOTED_WORD.test(word)) return word;
+  return `'${word.replaceAll("'", `'\\''`)}'`;
 }

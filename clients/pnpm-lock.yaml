@@ -594,6 +594,9 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/runs':
+        specifier: workspace:*
+        version: link:../../libs/runs
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
