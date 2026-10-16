@@ -33,6 +33,46 @@ later provide the same metadata and entry-point names through a registry-backed
 resolver. Repository-specific checks and workloads belong with their task, not
 in this directory.
 
+## Go modules
+
+A source package whose entrypoints use `go run` declares its package-relative
+module root explicitly:
+
+```toml
+toolchains = ["go"]
+go_module = "."
+
+[entrypoints]
+example-check = ["go", "-C", "${PACKAGE_ROOT}", "run", "."]
+```
+
+The declared directory must contain both `go.mod` and `go.sum`; a `go run`
+entrypoint without this declaration is invalid package metadata. Module roots
+cannot live below package paths excluded from the immutable content digest
+(`.git`, `__pycache__`, or `target`). Local `replace` directives use Go's
+single-line or block form and may use a double-quoted path without escapes;
+every replacement module is checked recursively. An absolute target, a target
+outside the evaluator package, a target below a digest-excluded component, or
+an opaque replacement syntax is rejected with the declaring `go.mod` line and directive.
+This keeps every source file that can affect the module graph inside the package
+digest and therefore inside its cache identity. During trusted environment
+preparation, VibeSys downloads the complete module graph into an
+operator-owned cache keyed by the immutable evaluator-package digest, then
+verifies the graph with proxy and checksum-database access disabled. Docker
+builds a missing cache in a short-lived sandbox using the exact target image;
+local and remote environments prepare it through their existing pre-readiness
+setup boundary. Docker revalidates reused cache contents offline in the target
+image before every mount. Slurm stages the verified cache as a read-only
+support tree.
+
+Every trusted command from that package, including Python or shell wrappers
+that launch Go children, receives the prepared `GOMODCACHE` and runs with
+`GOPROXY=off`, `GOSUMDB=off`, `GOWORK=off`, `GOTOOLCHAIN=local`, and
+`-mod=readonly`. Candidate commands do not inherit this policy. This is why the
+hotel-correctness wrapper can compose the exact resolved microservice package
+through a temporary modfile without downloading dependencies when its gate
+starts.
+
 ## Cargo tools from Git
 
 An evaluator package may declare a Rust CLI installed from an immutable Git
@@ -69,7 +109,7 @@ receipt, and binary SHA256 verification. Modal and SkyPilot exclude reserved
 evaluator package, tool, and toolchain paths from candidate staging and replace
 the tool, toolchain, and bootstrap directories during setup. Cargo runs from a
 fresh working directory and ignores candidate Cargo, Rust, and Git configuration
-overrides. Remote Go evaluator launches disable parent `go.work` discovery, and
+overrides. Remote Go evaluator launches use only the prepared offline module cache, and
 the queue evaluator copies its trusted Rust helper to an isolated build directory
 before invoking Cargo.
 

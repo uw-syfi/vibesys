@@ -21,28 +21,34 @@ from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
 )
 
 from vibesys.run.environment import open_run_environment
+from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_project.api import RunResourceRequest
 from vs_runtime.api.infrastructure import (
+    DockerEnvironmentConfig,
     EnvironmentSystem,
+    EvaluatorGoModule,
     RunEnvironment,
     RunEnvironmentRequest,
     SlurmEnvironment,
     TrustedEvaluatorRequirements,
+    evaluator_go_module_ready_path,
     run_environment_deprecation,
 )
 from vs_runtime.api.testing import (
     DaemonBackend,
     daemon_docker_config,
     daemon_engine,
+    idle_environment_system,
 )
-from vs_sandbox.api import DockerSandbox, SandboxKind
+from vs_sandbox.api import ComputeBackendImpl, DockerSandbox, SandboxKind
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
     SlurmPolicyError,
     load_slurm_operator_settings,
 )
+from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
-from vs_sim.api.testing import NO_PROCESSES, ManualClock
+from vs_sim.api.testing import NO_PROCESSES, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -165,7 +171,7 @@ def _environment(tmp_path: Path, name: str, backend: DaemonBackend) -> RunEnviro
 
 def _request(
     tmp_path: Path,
-    backend: DaemonBackend,
+    backend: ComputeBackendImpl,
     *,
     accuracy: str | None = "python accuracy.py",
     benchmark: str | None = "python benchmark.py",
@@ -227,6 +233,51 @@ def test_the_agent_never_runs_on_the_host_for_either_slurm_environment(
         # Only an agent that may run GPU commands reaches a broker at all.
         has_broker = any(token.startswith("VIBESYS_COMMAND_BROKER_TOKEN=") for token in run)
         assert has_broker is (name not in ("slurm", "slurm-local"))
+    finally:
+        session.close()
+
+
+def test_slurm_prepares_a_go_only_evaluator_before_capturing_its_support_tree(
+    tmp_path: Path,
+) -> None:
+    backend = FakeComputeBackend(threads=SimThreads())
+    package_root = tmp_path / "evaluator-package"
+    package_root.mkdir()
+    cache_root = tmp_path / "operator-cache/go-modules/digest"
+    module = EvaluatorGoModule(
+        root=package_root,
+        cache_root=cache_root,
+        package_digest="sha256:" + "a" * 64,
+    )
+    requirements = TrustedEvaluatorRequirements(
+        package_root=package_root,
+        toolchains=frozenset({"go"}),
+        go_module=module,
+    )
+    cache_root.mkdir(parents=True)
+    evaluator_go_module_ready_path(module, cache_root).mkdir()
+    request = replace(
+        _request(tmp_path, backend),
+        evaluator_requirements=requirements,
+        system=idle_environment_system(),
+    )
+    config = tmp_path / "slurm-local.toml"
+    config.write_text(_SLURM_LOCAL_CONFIG, encoding="utf-8")
+    environment = SlurmEnvironment(
+        load_slurm_operator_settings(config),
+        docker=DockerEnvironmentConfig(build_runner=FakeDockerBuildRunner()),
+    )
+
+    session = open_run_environment(environment, request)
+    try:
+        assert [creation.kind for creation in backend.creations[:2]] == [
+            SandboxKind.LOCAL,
+            SandboxKind.DOCKER,
+        ]
+        assert backend.creations[0].lifecycle_hooks
+        cluster = session.view.cluster_evaluation
+        assert cluster is not None
+        assert cluster.plan.support_paths[".vibesys-evaluator-go-modules"] == cache_root
     finally:
         session.close()
 

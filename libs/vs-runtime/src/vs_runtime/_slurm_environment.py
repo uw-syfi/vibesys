@@ -43,6 +43,7 @@ from vs_runtime._run_environment import (
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation_preparation import (
+    REMOTE_EVALUATOR_GO_MODULES_ROOT,
     REMOTE_EVALUATOR_TOOLS_ROOT,
     TrustedEvaluationCommandPaths,
 )
@@ -463,8 +464,10 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 profiler_tree=profiler_tree,
                 workload_timeout_seconds=request.profile_timeout_seconds,
             )
-        # The trusted evaluation runs on the host, so its tools are installed there.
-        if request.evaluator_requirements.tools:
+        # Trusted evaluator dependencies are prepared on the host before their
+        # immutable trees are captured in the cluster staging plan.
+        requirements = request.evaluator_requirements
+        if requirements.tools or requirements.go_module is not None:
             _make_host_sandbox(request, ephemeral=True)
         plans = self._write_plans(
             request, config, policy, profiler_tree, remote_profiling=remote_profiling
@@ -528,6 +531,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     ".vibesys-evaluator-package" if requirements.package_root is not None else None
                 ),
                 runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+                runtime_go_module_cache_root=(
+                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
+                    if requirements.go_module is not None
+                    else None
+                ),
             ),
         )
         support_paths = {
@@ -535,6 +543,14 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             for name, path in (
                 (".vibesys-evaluator-package", requirements.package_root),
                 (".vibesys-evaluator-tools", requirements.tools_root),
+                (
+                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
+                    (
+                        requirements.go_module.cache_root
+                        if requirements.go_module is not None
+                        else None
+                    ),
+                ),
                 *(
                     (
                         (request.profiler_support_name, request.profiler_support_path),

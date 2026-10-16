@@ -74,13 +74,17 @@ from vs_runtime._objective_document import materialize_objective_document
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
+    REMOTE_EVALUATOR_GO_MODULES_ROOT,
     REMOTE_EVALUATOR_TOOLS_ROOT,
+    SANDBOX_EVALUATOR_GO_MODULES_ROOT,
     SANDBOX_EVALUATOR_TOOLS_ROOT,
+    EvaluatorGoModuleLifecycleHooks,
     TrustedEvaluationCommandPaths,
     TrustedEvaluatorRequirements,
     evaluator_agent_toolchains,
     prepare_trusted_evaluation_plan,
     remote_evaluator_setup_command,
+    required_evaluator_go_module_cache_root,
     required_evaluator_tools_root,
 )
 from vs_runtime._workspace_files import write_for_agent
@@ -751,6 +755,9 @@ def _make_host_sandbox(request: RunEnvironmentRequest, *, ephemeral: bool = Fals
     """
     requirements = request.evaluator_requirements
     hooks: list[SandboxLifecycleHooks] = []
+    if requirements.go_module is not None:
+        required_evaluator_go_module_cache_root(requirements, request.workspace)
+        hooks.append(EvaluatorGoModuleLifecycleHooks(requirements))
     if requirements.tools:
         hooks.append(
             EvaluatorToolLifecycleHooks(
@@ -786,6 +793,11 @@ def _host_evaluation_plan(request: RunEnvironmentRequest) -> TrustedEvaluationPl
             python_executable=sys.executable,
             runtime_package_root=(
                 str(requirements.package_root) if requirements.package_root is not None else None
+            ),
+            runtime_go_module_cache_root=(
+                str(required_evaluator_go_module_cache_root(requirements, request.workspace))
+                if requirements.go_module is not None
+                else None
             ),
         ),
     )
@@ -1243,6 +1255,11 @@ class SkyPilotEnvironment(DockerEnvironment):
                     ".vibesys-evaluator-package" if requirements.package_root is not None else None
                 ),
                 runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+                runtime_go_module_cache_root=(
+                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
+                    if requirements.go_module is not None
+                    else None
+                ),
             ),
         )
         commands: dict[str, tuple[str, ...]] = {}
@@ -1534,6 +1551,11 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
                     ".vibesys-evaluator-package" if requirements.package_root is not None else None
                 ),
                 runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+                runtime_go_module_cache_root=(
+                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
+                    if requirements.go_module is not None
+                    else None
+                ),
             ),
         )
         with _starting_container(request) as output:
@@ -1689,6 +1711,11 @@ def _isolated_paths(
                 else None
             ),
             runtime_tools_root=evaluator_tools_root,
+            runtime_go_module_cache_root=(
+                str(SANDBOX_EVALUATOR_GO_MODULES_ROOT)
+                if requirements.go_module is not None
+                else None
+            ),
         ),
     )
     return AgentPaths(
