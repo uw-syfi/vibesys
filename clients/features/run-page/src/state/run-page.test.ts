@@ -621,6 +621,33 @@ describe('the run page store', () => {
     expect(streamLines(shown, 's5')).toEqual([{text: '16:30:51 INFO run started', stream: 'out'}]);
   });
 
+  test("a measurement's candidate build is its own stream under Gates, before its check", () => {
+    const listed = fold(initial(), [{type: 'record', record: RECORDS[1] as RunRecord}]);
+    const list = listed.requests.find(request => request.kind === 'list-logs');
+    if (list?.kind !== 'list-logs') throw new Error('no listing asked');
+    const gate = (id: string, name: 'build' | 'accuracy' | 'benchmark'): LogStream =>
+      stream(id, {kind: 'gate_stage', execution_id: 'w5', gate: name, attempt: 1}, 'ended');
+    const {state} = fold(listed.state, [
+      {
+        type: 'streams',
+        token: list.token,
+        outcome: {
+          ok: true,
+          instanceId: 'a1b2c3d4e5f6',
+          streams: [gate('b1', 'build'), gate('b2', 'accuracy'), gate('b3', 'benchmark')],
+        },
+      },
+    ]);
+
+    const gates = logGroups(state).find(group => group.name === 'Gates');
+
+    expect(gates?.streams.map(item => item.label)).toEqual([
+      'candidate build · w5 · attempt 1',
+      'accuracy · w5 · attempt 1',
+      'benchmark · w5 · attempt 1',
+    ]);
+  });
+
   test('an instance replacement fences its old log listing and projected bytes', () => {
     const first = fold(initial(), [{type: 'record', record: RECORDS[1] as RunRecord}]);
     const firstList = first.requests.find(request => request.kind === 'list-logs');

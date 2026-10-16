@@ -112,7 +112,8 @@ function checkFix(check: Check, project: string | null): ReadinessFix | undefine
       : {kind: 'copy_out', source: project, destination: fix.suggested_path};
   }
   if (fix.kind === 'choose_checkout') return {kind: 'choose_checkout'};
-  // Docker and settings are changed outside this screen; then the inputs are checked again.
+  // Docker, settings and a task's missing [build] (declare_build, named in the detail) are
+  // changed outside this screen; then the inputs are checked again.
   return {kind: 'recheck'};
 }
 

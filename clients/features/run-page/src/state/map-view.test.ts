@@ -17,6 +17,7 @@ import {
   traceAt,
   viewAtPosition,
 } from './index.js';
+import {titleOf} from './span-words.js';
 
 const STATUSES: readonly Span['status'][] = [
   'pending',
@@ -641,5 +642,17 @@ describe('a dynamic run on the Map', () => {
       'Run · dynamic',
       'measure_the_input',
     ]);
+  });
+});
+
+describe('a gate that builds the candidate', () => {
+  test('reads its build stage as the candidate build, its other stages as they are', () => {
+    const gate = (title: string) =>
+      span('op:gate', ROOT, {type: 'operation', label: {kind: 'gate', title}});
+
+    expect(titleOf(gate('build + accuracy + benchmark'))).toBe(
+      'Gate · candidate build + accuracy + benchmark',
+    );
+    expect(titleOf(gate('accuracy + benchmark'))).toBe('Gate · accuracy + benchmark');
   });
 });

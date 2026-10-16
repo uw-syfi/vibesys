@@ -129,6 +129,55 @@ test('Start says why it waits: inputs missing, being checked, or an item to fix'
   expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
 });
 
+test('a task missing the build its evaluator requires fails Evaluator, fixed by checking again', async () => {
+  const clock = manualSchedule();
+  const detail =
+    'the evaluator requires the candidate build output queue-candidate.so, but the task declares no build';
+  const bridge: NewRunBridge = {
+    ...fakeBridge(),
+    preflight: () =>
+      ok({
+        kind: 'offered' as const,
+        value: {
+          checks: [
+            {
+              id: 'evaluator_available' as const,
+              state: 'fail' as const,
+              detail,
+              fix: {
+                kind: 'declare_build' as const,
+                manifest: '/p/.vibesys/tasks/mpmc/vibesys.input.toml',
+                outputs: ['queue-candidate.so'],
+              },
+            },
+          ],
+          roles: null,
+        },
+      }),
+  };
+  const {store} = createNewRunStore(bridge, {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  store.dispatch({type: 'project', project: {source: 'folder', path: '/p'}});
+  await settle();
+  clock.runDue();
+  await settle();
+
+  const evaluator = readiness(store.getState()).find(item => item.id === 'evaluator_available');
+
+  expect(evaluator).toEqual({
+    id: 'evaluator_available',
+    state: 'fail',
+    label: 'Evaluator',
+    detail,
+    fix: {kind: 'recheck'},
+  });
+  expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+});
+
 test('a helper older than New run is never asked to check or start, and Start says why', async () => {
   const clock = manualSchedule();
   const asked: string[] = [];

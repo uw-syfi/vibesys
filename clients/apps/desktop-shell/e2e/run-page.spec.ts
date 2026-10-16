@@ -90,6 +90,7 @@ const RUN: FakeRunSeed = {
   streams: [
     stream('s1', {kind: 'startup_step', stage: 'building_image'}, 'ended'),
     stream('s2', {kind: 'startup_step', stage: 'starting_container'}, null),
+    stream('s6', {kind: 'gate_stage', execution_id: 'w5', gate: 'build', attempt: 1}, 'ended'),
     stream('s3', {kind: 'gate_stage', execution_id: 'w5', gate: 'benchmark', attempt: 1}, null),
     stream('s4', {kind: 'tool_build', name: 'perf'}, 'ended'),
     stream('s5', {kind: 'run_narration'}, null),
@@ -99,6 +100,7 @@ const RUN: FakeRunSeed = {
     s2: '[docker] starting container\n[readiness] claude: binary ok\n',
     s3: 'vibesys-queue benchmark, 3 repetitions\nrepetition 1: 41.2 Mops/s\n',
     s4: 'perf: cached\n',
+    s6: 'cargo build --release --locked\nFinished release profile\n',
     s5: `${NARRATION}\n`,
   },
 };
@@ -161,6 +163,9 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   for (const group of ['Startup', 'Gates', 'Tool builds', 'Run narration']) {
     await expect(streams.getByRole('treeitem', {name: group, exact: true})).toBeVisible();
   }
+  // A measurement's candidate build is its own gate stream, before the gates after it.
+  await streams.getByRole('treeitem', {name: /candidate build · w5 · attempt 1/}).click();
+  await expect(page.getByText('Finished release profile')).toBeVisible();
   await streams
     .getByRole('treeitem', {name: /Run narration/})
     .last()

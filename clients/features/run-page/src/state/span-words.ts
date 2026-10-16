@@ -91,6 +91,17 @@ export function shortName(span: Span): string {
   return span.label?.title ?? span.name;
 }
 
+/** How a gate's stages read in its title: a task's build stage is the candidate build. */
+const GATE_STAGE_WORDS: Readonly<Record<string, string>> = {build: 'candidate build'};
+
+/** A gate's title (its stages joined by ` + `, as the search labels it) in words. */
+function gateTitle(title: string): string {
+  return title
+    .split(' + ')
+    .map(stage => GATE_STAGE_WORDS[stage] ?? stage)
+    .join(' + ');
+}
+
 /** The span's title on its row. */
 export function titleOf(span: Span): string {
   const label = span.label;
@@ -108,7 +119,7 @@ export function titleOf(span: Span): string {
       return model === null ? title : `${title} · ${model}`;
     }
     case 'gate':
-      return `Gate · ${title}`;
+      return `Gate · ${gateTitle(title)}`;
     default:
       return title;
   }

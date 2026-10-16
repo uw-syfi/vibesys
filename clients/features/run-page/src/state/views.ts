@@ -3,7 +3,7 @@
  * startup timeline, the log streams grouped by owner, and the stop and ended banners. The renderer
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
-import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
+import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import {endedLook, type HostRun, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
@@ -313,13 +313,31 @@ function streamGroup(stream: LogStream): LogGroupName {
   }
 }
 
+type GateKind = Extract<LogOwner, {kind: 'gate_stage'}>['gate'];
+
+/** A gate stage's name in a stream label; exhaustive, so a new gate kind is a compile error. */
+const GATE_WORDS: Readonly<Record<GateKind, string>> = {
+  validation: 'validation',
+  build: 'candidate build',
+  accuracy: 'accuracy',
+  benchmark: 'benchmark',
+};
+
+function isGateKind(value: unknown): value is GateKind {
+  return typeof value === 'string' && Object.hasOwn(GATE_WORDS, value);
+}
+
+function gateWords(gate: unknown): string {
+  return isGateKind(gate) ? GATE_WORDS[gate] : words(gate);
+}
+
 function streamLabel(stream: LogStream): string {
   const {owner} = stream;
   switch (owner['kind']) {
     case 'startup_step':
       return STAGES.find(stage => stage.id === owner['stage'])?.label ?? words(owner['stage']);
     case 'gate_stage':
-      return `${words(owner['gate'])} · ${String(owner['execution_id'])} · attempt ${String(owner['attempt'])}`;
+      return `${gateWords(owner['gate'])} · ${String(owner['execution_id'])} · attempt ${String(owner['attempt'])}`;
     case 'tool_build':
       return `Building ${String(owner['name'])}`;
     case 'run_narration':
