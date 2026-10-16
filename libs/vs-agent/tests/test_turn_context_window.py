@@ -18,10 +18,10 @@ from vs_agent.api import (
     AgentSessionKey,
     AgentSessionSpec,
     AgentTurnRequest,
+    NullAgentEventSink,
     SessionScope,
 )
 from vs_agent.api.testing import FakeProvider, assistant_text, usage
-from vs_agent.sink import NullAgentEventSink
 from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
@@ -35,7 +35,7 @@ class _WindowSink(NullAgentEventSink):
         self.windows: list[int | None] = []
 
     @override
-    def usage_update(  # lint-waiver: LW-271601 [PLR0913]; overrides AgentEventSink.usage_update, whose named-argument contract the sink must keep.
+    def usage_update(
         self,
         input_tokens: int,
         *,
