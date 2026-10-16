@@ -40,10 +40,26 @@ const CHANNELS: Channels = {
   showWelcome: 'vibesys:welcome:show-welcome',
   retry: 'vibesys:welcome:retry',
   stop: 'vibesys:welcome:stop',
+  stopConfirmed: 'vibesys:welcome:stop-confirmed',
+  releaseRun: 'vibesys:welcome:release-run',
+  readEvents: 'vibesys:welcome:read-events',
   preferences: 'vibesys:welcome:preferences',
   setAppearance: 'vibesys:welcome:set-appearance',
   setNotifications: 'vibesys:welcome:set-notifications',
   archive: 'vibesys:welcome:archive',
+  machines: 'vibesys:welcome:machines',
+  machine: 'vibesys:welcome:machine',
+  inspectCheckout: 'vibesys:welcome:inspect-checkout',
+  removeMachine: 'vibesys:welcome:remove-machine',
+  describeMachine: 'vibesys:welcome:describe-machine',
+  preflight: 'vibesys:welcome:preflight',
+  examples: 'vibesys:welcome:examples',
+  createFromExample: 'vibesys:welcome:create-from-example',
+  copyOut: 'vibesys:welcome:copy-out',
+  startRun: 'vibesys:welcome:start-run',
+  helperFeatures: 'vibesys:welcome:helper-features',
+  openRunWindow: 'vibesys:welcome:open-run-window',
+  showMainWindow: 'vibesys:welcome:show-main-window',
 };
 const EVENTS: Events = {
   chrome: 'vibesys:welcome:chrome',
@@ -54,6 +70,9 @@ const EVENTS: Events = {
 };
 const FIRST_PAINT_CHANNEL: typeof import('@vibesys/ipc').FIRST_PAINT_CHANNEL =
   'vibesys:welcome:first-paint';
+const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
+const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
+const RUN_PORT_MESSAGE: typeof import('@vibesys/ipc').RUN_PORT_MESSAGE = 'vibesys:run-port';
 
 /** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
 interface WelcomePreloadCapabilities {
@@ -62,6 +81,11 @@ interface WelcomePreloadCapabilities {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   /** Hear every value the main process sends on `channel`. */
   on(channel: string, listener: (value: unknown) => void): void;
+  /**
+   * Open one run connection: hand one end of a new channel to the main process and the other to
+   * the page, as a window message named `id`.
+   */
+  connectRun(id: string): void;
 }
 
 /** Build the page capability from its Electron boundary effects. */
@@ -96,10 +120,30 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     showWelcome: () => call(CHANNELS.showWelcome),
     retry: () => call(CHANNELS.retry),
     stop: (host, instance, force) => call(CHANNELS.stop, host, instance, force),
+    releaseRun: () => call(CHANNELS.releaseRun),
+    readEvents: (host, project, runId, fromSequence, max) =>
+      call(CHANNELS.readEvents, host, project, runId, fromSequence, max),
+    connectRun: id => capabilities.connectRun(id),
+    onWake: listener => capabilities.on(WAKE_CHANNEL, () => listener()),
+    stopConfirmed: (host, instance, force) => call(CHANNELS.stopConfirmed, host, instance, force),
     preferences: () => call(CHANNELS.preferences),
     setAppearance: appearance => call(CHANNELS.setAppearance, appearance),
     setNotifications: enabled => call(CHANNELS.setNotifications, enabled),
     archive: (run, archived) => call(CHANNELS.archive, run, archived),
+    machines: () => call(CHANNELS.machines),
+    machine: host => call(CHANNELS.machine, host),
+    inspectCheckout: (host, path) => call(CHANNELS.inspectCheckout, host, path),
+    removeMachine: host => call(CHANNELS.removeMachine, host),
+    describeMachine: host => call(CHANNELS.describeMachine, host),
+    preflight: (host, inputs) => call(CHANNELS.preflight, host, inputs),
+    examples: host => call(CHANNELS.examples, host),
+    createFromExample: (host, example, destination) =>
+      call(CHANNELS.createFromExample, host, example, destination),
+    copyOut: (host, source, destination) => call(CHANNELS.copyOut, host, source, destination),
+    startRun: (host, inputs) => call(CHANNELS.startRun, host, inputs),
+    helperFeatures: host => call(CHANNELS.helperFeatures, host),
+    openRunWindow: run => call(CHANNELS.openRunWindow, run),
+    showMainWindow: () => call(CHANNELS.showMainWindow),
     onChrome: on(EVENTS.chrome),
     onRecent: on(EVENTS.recent),
     onShowHost: on(EVENTS.showHost),
@@ -119,6 +163,12 @@ if (process.type === 'renderer') {
       invoke: (channel, ...args) => electron.ipcRenderer.invoke(channel, ...args),
       on: (channel, listener) =>
         electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
+      connectRun: id => {
+        const {port1: port, port2: remote} = new MessageChannel();
+        electron.ipcRenderer.postMessage(CONNECT_CHANNEL, null, [remote]);
+        // A port cannot cross the context bridge as a value; it can as this window's message.
+        window.postMessage({type: RUN_PORT_MESSAGE, id}, '*', [port]);
+      },
     }),
   );
   prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));

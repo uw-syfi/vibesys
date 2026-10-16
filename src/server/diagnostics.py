@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import re
 import uuid
 from enum import StrEnum
 from typing import Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+
+from vs_redaction.api import redact_diagnostic_text
 
 ValidationPath: TypeAlias = tuple[str | int, ...]
 ValidationPaths: TypeAlias = tuple[ValidationPath, ...]
@@ -68,26 +69,10 @@ class Diagnostic(BaseModel):
     # strings or integers so clients need not parse a lossy dotted rendering.
     validation_paths: ValidationPaths | None = None
 
-    @field_validator("summary", "detail", "hint", mode="before")
+    @field_validator("summary", "detail", "hint")
     @classmethod
-    def _redact_text(cls, value: object) -> object:
-        if isinstance(value, str):
-            return redact_diagnostic_text(value)
-        return value
-
-
-_SECRET_ASSIGNMENT = re.compile(
-    r"(?i)(\b(?:[A-Z][A-Z0-9_]*(?:TOKEN|PASSWORD|SECRET|KEY)|"
-    r"api[_-]?key|auth[_-]?token|password|secret|token)\b\s*[:=]\s*)"
-    r"([^\s,;]+)"
-)
-_BEARER_TOKEN = re.compile(r"(?i)(\bbearer\s+)[^\s,;]+")
-
-
-def redact_diagnostic_text(text: str) -> str:
-    """Redact common credential assignments before they cross the UI boundary."""
-    text = _SECRET_ASSIGNMENT.sub(r"\1[REDACTED]", text)
-    return _BEARER_TOKEN.sub(r"\1[REDACTED]", text)
+    def _redact_text(cls, value: str | None) -> str | None:
+        return None if value is None else redact_diagnostic_text(value)
 
 
 def exception_detail(error: BaseException) -> str:

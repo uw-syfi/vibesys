@@ -6,7 +6,8 @@
  *
  * `stopping` has two stages: the stop command has been sent (`accepted: false`), and the server
  * accepted it and exits on its own at its next safe point (`accepted: true`, the host's
- * `stopping` outcome: do not ask again, wait for the run to end). `error` carries the text to show
+ * `stopping` outcome: do not ask again, wait for the run to end, unless a view offers a force stop
+ * because the stop has hung past its bound). `error` carries the text to show
  * and whether a force stop is on offer. The functions here decide; `StopController` performs the
  * effects and feeds results back.
  */
@@ -20,7 +21,8 @@ export function stopKey(host: HostKey, instanceId: string): string {
 
 export type StopState =
   | {readonly phase: 'idle'}
-  | {readonly phase: 'confirming'; readonly force: boolean}
+  /** `accepted`: a force stop asked for while an accepted graceful stop is still ending. */
+  | {readonly phase: 'confirming'; readonly force: boolean; readonly accepted: boolean}
   | {readonly phase: 'stopping'; readonly force: boolean; readonly accepted: boolean}
   | {readonly phase: 'ended'}
   | {readonly phase: 'error'; readonly message: string; readonly canForce: boolean};
@@ -64,7 +66,8 @@ function effectOf(before: StopState, after: StopState): StopEffect {
   if (after.phase === 'confirming' && before.phase !== 'confirming') {
     return {kind: 'confirm', force: after.force};
   }
-  return before.phase === 'confirming' && after.phase === 'stopping'
+  // Declining a force stop returns to an accepted stop, which sends nothing.
+  return before.phase === 'confirming' && after.phase === 'stopping' && !after.accepted
     ? {kind: 'stop', force: before.force}
     : null;
 }
@@ -72,21 +75,44 @@ function effectOf(before: StopState, after: StopState): StopEffect {
 function transition(state: StopState, event: StopEvent): StopState {
   switch (state.phase) {
     case 'idle':
-      return event.type === 'request' && !event.force ? {phase: 'confirming', force: false} : state;
+      return event.type === 'request' && !event.force
+        ? {phase: 'confirming', force: false, accepted: false}
+        : state;
     case 'error':
       return event.type === 'request' && (!event.force || state.canForce)
-        ? {phase: 'confirming', force: event.force}
+        ? {phase: 'confirming', force: event.force, accepted: false}
         : state;
     case 'confirming':
-      if (event.type === 'cancel' || event.type === 'abandon') return STOP_IDLE;
-      return event.type === 'confirm'
-        ? {phase: 'stopping', force: state.force, accepted: false}
-        : state;
+      return afterQuestion(state, event);
     case 'stopping':
-      return state.accepted ? state : afterCommand(state, event);
+      return state.accepted ? afterAccepted(state, event) : afterCommand(state, event);
     case 'ended':
       return state;
   }
+}
+
+/** The user answered the stop question, or its owner withdrew it. */
+function afterQuestion(state: StopState, event: StopEvent): StopState {
+  if (state.phase !== 'confirming') return state;
+  if (event.type === 'cancel' || event.type === 'abandon') {
+    // Declining a force stop leaves the accepted graceful stop ending, as it was.
+    return state.accepted ? {phase: 'stopping', force: false, accepted: true} : STOP_IDLE;
+  }
+  return event.type === 'confirm'
+    ? {phase: 'stopping', force: state.force, accepted: false}
+    : state;
+}
+
+/**
+ * A graceful stop the server accepted and has not finished: the one thing that may still happen
+ * here is a force stop, which a view offers once the stop has hung past its bound (the Run screen
+ * times that on its injected clock). A forced stop is not forced again.
+ */
+function afterAccepted(state: StopState, event: StopEvent): StopState {
+  if (state.phase !== 'stopping' || state.force) return state;
+  return event.type === 'request' && event.force
+    ? {phase: 'confirming', force: true, accepted: true}
+    : state;
 }
 
 /** A stop command that is in flight: it fails, or the host reports what it observed. */

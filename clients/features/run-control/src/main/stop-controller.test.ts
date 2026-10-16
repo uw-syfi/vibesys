@@ -79,6 +79,15 @@ describe('StopController', () => {
     await w.host[Symbol.asyncDispose]();
   });
 
+  test('a stop the view already confirmed is sent without asking again', async () => {
+    const w = await world({answer: false});
+    await w.controller.request(TARGET, false, true);
+    expect(w.asked).toEqual([]);
+    expect(w.stops).toEqual([{force: false}]);
+    expect(w.controller.views()[KEY]?.phase).toBe('ended');
+    await w.host[Symbol.asyncDispose]();
+  });
+
   test('a declined confirmation stops nothing and leaves no flow', async () => {
     const w = await world({answer: false});
     await w.controller.request(TARGET, false);

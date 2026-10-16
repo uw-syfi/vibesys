@@ -130,6 +130,7 @@ def test_lifecycle_hooks_reject_target_install_failure(
                 + "root sandbox failure"
             ),
             truncated=True,
+            diagnostic_output="permission denied\nroot sandbox failure",
         )
     )
     lifecycle = SandboxLifecycle(

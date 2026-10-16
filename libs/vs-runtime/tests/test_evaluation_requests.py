@@ -45,11 +45,13 @@ from vs_runtime.api.core import (
     ExecutionContext,
     ExecutionResult,
     ExecutorRole,
+    MeasurementDecisions,
     MeasurementObserver,
     MeasurementRequests,
     ReceiptStore,
     RequestExecutors,
     SealedExecution,
+    StageRun,
     StageSettled,
     StageStarted,
     revision_ref,
@@ -65,6 +67,7 @@ from vs_runtime.api.slurm_evaluation_stack import (
     plan,
     submission,
 )
+from vs_sim.api import DISCARD
 from vs_sim.api.testing import SimThreads, examples, swept
 from vs_slurm.api import SlurmJobStatus
 
@@ -80,6 +83,7 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
     from vs_project.api import StateNamespace
+    from vs_sim.api import OutputSink
 
 # Each example builds real workspaces. A pull request draws a sample; the nightly depth
 # (`--depth=nightly`) searches deeper.
@@ -271,6 +275,31 @@ async def test_a_failed_benchmark_is_reported_failed_with_its_reason() -> None:
         by_stage = {e.stage_id: e for e in settled_events}
         assert by_stage["accuracy"].passed
         assert not by_stage["benchmark"].passed
+
+
+async def test_a_stage_of_a_submitted_measurement_names_the_decision_it_answers() -> None:
+    """A gate stage's output is named by the measurement's decision: its run-trace span."""
+    async with world() as w:
+        decisions = MeasurementDecisions()
+        _requests, faulting = w.requests()
+        store = ReceiptStore(cast("StateNamespace", faulting), threads=SimThreads())
+        requests = MeasurementRequests(w.stack.executor, store, decisions=decisions)
+        sub = submission("sub", candidate=w.stack.snapshot).model_copy(
+            update={"decision_id": DecisionId(root="measure-1")}
+        )
+        resource = resource_of(await requests.execute(sub, context_for(sub)))
+        opened: list[StageRun] = []
+
+        def opener(run: StageRun) -> contextlib.nullcontext[OutputSink]:
+            opened.append(run)
+            return contextlib.nullcontext(DISCARD)
+
+        with decisions.stage_output(opener)(StageRun(handle_id=resource.root, stage_id="accuracy")):
+            pass
+        with decisions.stage_output(opener)(StageRun(handle_id="unknown", stage_id="accuracy")):
+            pass
+
+        assert [run.decision_id for run in opened] == ["measure-1", None]
 
 
 # happy path

@@ -164,6 +164,7 @@ graph TD
     server --> vs_logs
     server --> vs_project
     server --> vs_prompts
+    server --> vs_redaction
     server --> vs_sim
     vibesys --> vs_agent
     vibesys --> vs_core
@@ -176,6 +177,7 @@ graph TD
     vibesys --> vs_mcp
     vibesys --> vs_project
     vibesys --> vs_prompts
+    vibesys --> vs_redaction
     vibesys --> vs_runtime
     vibesys --> vs_sandbox
     vibesys --> vs_sim
@@ -221,12 +223,14 @@ graph TD
     vs_runtime --> vs_mcp
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts
+    vs_runtime --> vs_redaction
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_sim
     vs_runtime --> vs_slurm
     vs_sandbox --> vs_decode
     vs_sandbox --> vs_evaluation
     vs_sandbox --> vs_project
+    vs_sandbox --> vs_redaction
     vs_sandbox --> vs_sim
     vs_sandbox --> vs_slurm
     vs_slurm --> vs_decode

@@ -30,6 +30,9 @@
     },
     {
       "path": "../ui/tsconfig.tokens.json"
+    },
+    {
+      "path": "../contracts/tsconfig.host-helper.json"
     }
   ]
 }

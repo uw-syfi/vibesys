@@ -30,6 +30,7 @@ from vs_runtime._run_environment import (
     _SkyPilotRunEnvironmentSession,
 )
 from vs_runtime.api.infrastructure import (
+    SANDBOX_EVALUATOR_GO_MODULES_ROOT,
     EvaluatorPackageRequirement,
     ResolvedEvaluatorPackage,
     RunEnvironment,
@@ -41,8 +42,9 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluatorRequirements,
     build_run_environment,
     docker_evaluator_tools_root,
-    load_evaluator_package,
+    evaluator_go_module_ready_path,
     make_run_environment_spec,
+    prepare_trusted_evaluator,
     run_environment_record,
 )
 from vs_runtime.api.infrastructure import (
@@ -71,6 +73,7 @@ from vs_sandbox.api.slurm import (
     load_slurm_operator_settings,
     read_slurm_capture_plan,
 )
+from vs_sandbox.api.testing import FakeLifecycleRunner
 from vs_sim.api import DISCARD, ProcessOutcome, ProcessSpec, UnixNetwork
 from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript
 
@@ -194,15 +197,24 @@ class FakeBackend:
 
     def __init__(self) -> None:
         self.sandbox = MagicMock()
+        self.evaluator_builder = FakeLifecycleRunner()
         self.calls: list[tuple[SandboxKind, dict[str, Any]]] = []
+        self.evaluator_builder_calls: list[tuple[SandboxKind, dict[str, Any]]] = []
 
     def make_sandbox(self, kind: SandboxKind, **kwargs: object) -> CommandRunner:
+        host_workspace = kwargs.get("host_workspace", "")
+        if (
+            kind is SandboxKind.DOCKER
+            and isinstance(host_workspace, str)
+            and Path(host_workspace).name == "evaluator-go-module-builder-workspace"
+        ):
+            self.evaluator_builder_calls.append((kind, kwargs))
+            return self.evaluator_builder
         self.calls.append((kind, kwargs))
         if kind is SandboxKind.DOCKER:
             # A real DockerSandbox derives agent_path from (host_workspace,
             # resources); give the mock the same behavior so AgentPaths
             # assertions exercise the real lookup instead of a bare Mock.
-            host_workspace = kwargs.get("host_workspace", "")
             resources = kwargs.get("resources", ())
             if not isinstance(host_workspace, str) or not isinstance(resources, (list, tuple)):
                 raise TypeError
@@ -251,13 +263,15 @@ def _request(tmp_path: Path, backend: FakeBackend, **overrides: object) -> RunEn
                 tools_root=cast("Path | None", tools_root)
             )
         else:
-            package = load_evaluator_package(cast("Path", package_root))
-            values["evaluator_requirements"] = TrustedEvaluatorRequirements(
-                package_root=package.root,
-                toolchains=frozenset(package.metadata.toolchains),
-                tools=package.metadata.tools,
-                tools_root=cast("Path | None", tools_root),
+            prepared = prepare_trusted_evaluator(
+                cast("Path", package_root),
+                cast("Path | None", tools_root) or tmp_path / "operator-tools",
             )
+            module = prepared.requirements.go_module
+            if module is not None:
+                module.cache_root.mkdir(parents=True)
+                evaluator_go_module_ready_path(module, module.cache_root).mkdir()
+            values["evaluator_requirements"] = prepared.requirements
     values.update(overrides)
     log_dir.mkdir(exist_ok=True)
     return RunEnvironmentRequest(**values)
@@ -841,16 +855,14 @@ def test_isolated_environment_mounts_and_translates_evaluator_package(
         )
     )
 
-    session = _open(
-        env,
-        _request(
-            tmp_path,
-            backend,
-            accuracy_command=command,
-            benchmark_command=command,
-            evaluator_package_root=package.root,
-        ),
+    request = _request(
+        tmp_path,
+        backend,
+        accuracy_command=command,
+        benchmark_command=command,
+        evaluator_package_root=package.root,
     )
+    session = _open(env, request)
 
     translated = session.view.paths.accuracy_command
     assert translated is not None
@@ -858,9 +870,22 @@ def test_isolated_environment_mounts_and_translates_evaluator_package(
     assert "${PROJECT_ROOT}" not in translated
     assert "/opt/vibesys-evaluator-package" in translated
     assert "/workspace" in translated
+    translated_arguments = shlex.split(translated)
+    assert translated_arguments[:3] == [
+        "env",
+        f"GOMODCACHE={SANDBOX_EVALUATOR_GO_MODULES_ROOT}",
+        "GOPROXY=off",
+    ]
     assert (
         str(package.root),
         "/opt/vibesys-evaluator-package",
+        True,
+    ) in _as_mount_tuples(backend.calls[0][1]["resources"])
+    module = request.evaluator_requirements.go_module
+    assert module is not None
+    assert (
+        str(module.cache_root),
+        str(SANDBOX_EVALUATOR_GO_MODULES_ROOT),
         True,
     ) in _as_mount_tuples(backend.calls[0][1]["resources"])
     # The evaluator package's declared toolchains (go, rust) are baked into

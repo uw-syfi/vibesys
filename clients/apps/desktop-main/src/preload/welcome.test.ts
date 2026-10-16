@@ -27,6 +27,7 @@ const createWelcomePreload = createRequire(import.meta.url)(
 class ParsingMain {
   readonly invoked = new Set<string>();
   readonly subscribed = new Map<string, (value: unknown) => void>();
+  readonly connected: string[] = [];
 
   readonly bridge: WelcomeBridge = createWelcomePreload({
     platform: 'test',
@@ -37,6 +38,9 @@ class ParsingMain {
       } catch (error) {
         return {ok: false, error: (error as Error).message, authNeeded: false};
       }
+    },
+    connectRun: id => {
+      this.connected.push(id);
     },
     on: (channel, listener) => {
       this.subscribed.set(channel, listener);
@@ -72,6 +76,23 @@ function cases(random: Seeded): Case[] {
   const force = random.pick([true, false]);
   const harness = random.pick([null, {provider: 'claude', model: 'claude-a'}]);
   const directory = path.endsWith('/') ? path : `${path}/`;
+  const inputs = {
+    project: path,
+    task: name,
+    harness: {provider: 'claude', model: 'claude-a'},
+    // As the main process reads them: every option present, null when the run's own applies.
+    options: random.pick([
+      {rounds: null, time_limit_s: null, results: null, roles: []},
+      {rounds: 2, time_limit_s: 3600, results: 'keep' as const, roles: []},
+      {
+        rounds: null,
+        time_limit_s: null,
+        results: 'publish_github' as const,
+        roles: [{role: 'judge', model: null, reasoning_effort: 'high' as const}],
+      },
+    ]),
+    args: random.pick([[], ['--max-in-flight', '3']]),
+  };
   const appearance = {
     mode: random.pick(['system', 'light', 'dark'] as const),
     light: random.pick(['paper', 'mist', 'sand'] as const),
@@ -113,7 +134,19 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.showRun(), {kind: 'show-run'}],
     [bridge => bridge.showWelcome(), {kind: 'show-welcome'}],
     [bridge => bridge.retry(), {kind: 'retry'}],
-    [bridge => bridge.stop(key, instance, force), {kind: 'stop', host, instance, force}],
+    [
+      bridge => bridge.stop(key, instance, force),
+      {kind: 'stop', host, instance, force, confirmed: false},
+    ],
+    [
+      bridge => bridge.stopConfirmed(key, instance, force),
+      {kind: 'stop', host, instance, force, confirmed: true},
+    ],
+    [bridge => bridge.releaseRun(), {kind: 'release-run'}],
+    [
+      bridge => bridge.readEvents(key, path, name, token, 1 + (token % 1000)),
+      {kind: 'read-events', host, project: path, runId: name, from: token, max: 1 + (token % 1000)},
+    ],
     [bridge => bridge.preferences(), {kind: 'preferences'}],
     [bridge => bridge.setAppearance(appearance), {kind: 'set-appearance', appearance}],
     [bridge => bridge.setNotifications(force), {kind: 'set-notifications', enabled: force}],
@@ -121,6 +154,28 @@ function cases(random: Seeded): Case[] {
       bridge => bridge.archive({host: key, runId: name}, force),
       {kind: 'archive', run: {host: key, runId: name}, archived: force},
     ],
+    [bridge => bridge.machines(), {kind: 'machines'}],
+    [bridge => bridge.machine(key), {kind: 'machine', host}],
+    [bridge => bridge.inspectCheckout(key, path), {kind: 'inspect-checkout', host, path}],
+    [bridge => bridge.removeMachine(key), {kind: 'remove-machine', host}],
+    [bridge => bridge.describeMachine(key), {kind: 'describe-machine', host}],
+    [bridge => bridge.preflight(key, inputs), {kind: 'preflight', host, inputs}],
+    [bridge => bridge.examples(key), {kind: 'examples', host}],
+    [
+      bridge => bridge.createFromExample(key, name, path),
+      {kind: 'create-from-example', host, example: name, destination: path},
+    ],
+    [
+      bridge => bridge.copyOut(key, path, `${directory}copy`),
+      {kind: 'copy-out', host, source: path, destination: `${directory}copy`},
+    ],
+    [bridge => bridge.startRun(key, inputs), {kind: 'start-run', host, inputs}],
+    [bridge => bridge.helperFeatures(key), {kind: 'helper-features', host}],
+    [
+      bridge => bridge.openRunWindow({host: key, runId: name}),
+      {kind: 'open-run-window', run: {host: key, runId: name}},
+    ],
+    [bridge => bridge.showMainWindow(), {kind: 'show-main-window'}],
   ];
 }
 
@@ -134,6 +189,18 @@ describe('the welcome contract', () => {
       }
       expect([...main.invoked].sort()).toEqual(Object.values(WELCOME_CHANNELS).sort());
     }
+  });
+
+  test('a run connection asks the preload for a channel, and a wake reaches the view', () => {
+    const main = new ParsingMain();
+    let woke = 0;
+    main.bridge.connectRun('run-1');
+    main.bridge.onWake(() => {
+      woke += 1;
+    });
+    main.subscribed.get('vibesys:wake')?.(undefined);
+    expect(main.connected).toEqual(['run-1']);
+    expect(woke).toBe(1);
   });
 
   test('every event the main process sends reaches the listener the view registered', () => {

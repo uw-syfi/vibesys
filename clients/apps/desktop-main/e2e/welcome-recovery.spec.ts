@@ -30,6 +30,7 @@ interface WelcomeInspection {
 }
 
 interface MainControl {
+  startupPagesLoaded(): Promise<void>;
   state(): RecoveryState;
   crashWelcome(): number;
   hasContents(id: number): boolean;
@@ -44,16 +45,31 @@ interface MainControl {
   closeUnauthorizedWelcome(): void;
 }
 
-async function bounded<T>(label: string, operation: Promise<T>): Promise<T> {
+/**
+ * Hang guard for the startup pages' first loads. A passing run never waits on it: the wait ends
+ * on the pages' load events. It only names the step when a load hangs, inside the test's 30 s.
+ */
+const LOAD_HANG_GUARD_MS = 25_000;
+
+async function bounded<T>(label: string, operation: Promise<T>, hangGuardMs = 8_000): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => reject(new Error(`timed out while ${label}`)), 8_000);
+    timeout = setTimeout(() => reject(new Error(`timed out while ${label}`)), hangGuardMs);
   });
   try {
     return await Promise.race([operation, expired]);
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
+}
+
+function startupPagesLoaded(app: ElectronApplication): Promise<void> {
+  return app.evaluate(() => {
+    const control = (globalThis as typeof globalThis & {vibesysWelcomeRecoveryE2E?: MainControl})
+      .vibesysWelcomeRecoveryE2E;
+    if (control === undefined) throw new Error('the welcome-recovery E2E control is unavailable');
+    return control.startupPagesLoaded();
+  });
 }
 
 function state(app: ElectronApplication): Promise<RecoveryState> {
@@ -167,9 +183,18 @@ test('a crashed welcome renderer is replaced once without losing its open run', 
   const args = [APP, ...electronRuntimeArgs()];
   const electronApp = await bounded('launching Electron', electron.launch({args}));
   try {
-    await expect
-      .poll(() => bounded('reading the initial shell state', state(electronApp)))
-      .toMatchObject({currentWelcomeUrl: WELCOME_URL, runUrl: RUN_URL, fatals: []});
+    // Wait on the startup pages' own load events, not on a poll for their URLs under a fixed
+    // deadline that a cold Electron start can outlast (see `first-load.mjs`).
+    await bounded(
+      'loading the welcome view and the run page',
+      startupPagesLoaded(electronApp),
+      LOAD_HANG_GUARD_MS,
+    );
+    expect(await bounded('reading the initial shell state', state(electronApp))).toMatchObject({
+      currentWelcomeUrl: WELCOME_URL,
+      runUrl: RUN_URL,
+      fatals: [],
+    });
     await expect
       .poll(() => bounded('inspecting the initial welcome document', inspectWelcome(electronApp)))
       // Nothing is drawn under the window's own controls (macOS's traffic lights).

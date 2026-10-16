@@ -143,7 +143,7 @@ def _pending_remote(state: Path, path: str) -> Path:
 def _pending_metadata(state: Path, command: str) -> str:
     lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
-    paths = {word for word in lexer if word.startswith("/") and word != "/dev/null"}
+    paths = {word for word in lexer if word.startswith("/") and word not in {"/", "/dev/null"}}
     if not paths:
         translated = command
     else:
@@ -431,6 +431,33 @@ def _connector_process_result(response: ConnectorResponse, *, max_output_bytes: 
     return ProcessOutcome(0, payload, b"")
 
 
+def _plain_process_result(
+    returncode: int,
+    stdout: str,
+    stderr: str,
+    *,
+    max_output_bytes: int,
+) -> ProcessRun:
+    """Apply the process contract's per-stream bound to a fake local command."""
+    out = stdout.encode()
+    err = stderr.encode()
+    if len(out) > max_output_bytes:
+        return ProcessOutputTooLarge(
+            max_output_bytes,
+            OutputStream.STDOUT,
+            out[:max_output_bytes],
+            err[:max_output_bytes],
+        )
+    if len(err) > max_output_bytes:
+        return ProcessOutputTooLarge(
+            max_output_bytes,
+            OutputStream.STDERR,
+            out,
+            err[:max_output_bytes],
+        )
+    return ProcessOutcome(returncode, out, err)
+
+
 def handle(state: Path, request: dict[str, object]) -> dict[str, object]:
     """Record one connector request and return its protocol response.
 
@@ -538,6 +565,19 @@ class FakeConnector:
         self._dispatch_callbacks: dict[str, Callable[[], None]] = {}
         self._dispatched: set[str] = set()
         self._intercept: ConnectorIntercept | None = None
+        self._refused_downloads: set[str] = set()
+
+    def submitted_job_ids(self) -> tuple[str, ...]:
+        """Return scheduler identities accepted by this fake, in numeric order."""
+        ids = {job.job_id for job in self._jobs.values()}
+        ids.update(
+            path.name for path in (self.state / _JOBS_DIRECTORY).glob("*") if path.name.isdecimal()
+        )
+        return tuple(sorted(ids, key=int))
+
+    def refuse_download(self, remote_name: str) -> None:
+        """Fail local-transport downloads whose source ends in ``remote_name``."""
+        self._refused_downloads.add(remote_name)
 
     def forget_name_history(self, operation_id: str | None = None) -> None:
         """Expire name-based scheduler history while retaining numeric job observations."""
@@ -613,8 +653,59 @@ class FakeConnector:
         self._intercept = intercept
 
     def run(self, spec: ProcessSpec, *, timeout: float | None, output: OutputSink) -> ProcessRun:
-        """Answer a connector request without a transport subprocess; it takes no time."""
+        """Answer connector or explicit fake local-transport commands without a process."""
         del timeout
+        try:
+            marker = spec.argv.index("fake-connector")
+        except ValueError:
+            marker = -1
+        if marker >= 0 and spec.argv[marker + 1 : marker + 2] == ("shell",):
+            request: ConnectorRequest = {
+                "version": 1,
+                "operation": "exec",
+                "command": spec.argv[-1],
+            }
+            response = (
+                self._answer(request)
+                if self._intercept is None
+                else self._intercept(request, self._answer)
+            )
+            run = _plain_process_result(
+                int(str(response["returncode"])),
+                str(response["stdout"]),
+                str(response["stderr"]),
+                max_output_bytes=spec.max_output_bytes,
+            )
+            return forward_output(run, output)
+        local_rsync = marker >= 0 and spec.argv[marker + 1 : marker + 2] == ("rsync",)
+        rsync_index = marker + 2
+        if not local_rsync:
+            rsync_index = next(
+                (
+                    index + 1
+                    for index, argument in enumerate(spec.argv)
+                    if Path(argument).name == "rsync"
+                ),
+                -1,
+            )
+            local_rsync = rsync_index > 0
+        if local_rsync:
+            arguments = list(spec.argv[rsync_index:])
+            with (self.state / REQUESTS_FILE).open("a", encoding="utf-8") as log:
+                log.write(json.dumps({"operation": "rsync", "argv": arguments}) + "\n")
+            operands = arguments[arguments.index("--") + 1 :]
+            refused = any(
+                operands[0].rstrip("/").endswith(name) for name in self._refused_downloads
+            )
+            if not refused:
+                _rsync(self.state, arguments)
+            run = _plain_process_result(
+                23 if refused else 0,
+                "",
+                "scripted download failure" if refused else "",
+                max_output_bytes=spec.max_output_bytes,
+            )
+            return forward_output(run, output)
         request = _decode_connector_request(spec.input)
         response = (
             self._answer(request)
@@ -637,8 +728,11 @@ class FakeConnector:
                 log.write(json.dumps({**request, "command": query}) + "\n")
             if response["returncode"] == 0:
                 response = {**response, "stdout": str(response["stdout"]) + end}
-        if response["stdout"] == "CREATED" and tokens[:2] == ["mkdir", "-p"]:
-            plan = self._plans.get(hashlib.sha256(Path(tokens[2]).name.encode()).hexdigest()[:32])
+        if response["stdout"] == "CREATED" and "intent.json" in str(request.get("command", "")):
+            operation_id = (
+                Path(next(token for token in tokens if "intent.pending." in token)).parents[1].name
+            )
+            plan = self._plans.get(hashlib.sha256(operation_id.encode()).hexdigest()[:32])
             if plan is not None and plan.lost_claim_reply:
                 raise OSError(_LOST_CLAIM_REPLY)
         if "sbatch" in tokens:

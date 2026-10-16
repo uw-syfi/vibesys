@@ -226,10 +226,13 @@ either the method's result, whose `type` is the request's, or `HelperError` (`ty
 | `runs.list` | `project` | the project's runs (`run_id`, `task`, `display_name`, `created_at`) with the `phase` of the server on this host that drives or last drove each, and its `instance_id` while live | Gives Recent rows status and lets resume name a concrete run. A run whose server left no record here has no phase. |
 | `runs.read_events` | `project`, `run_id`, `from_sequence` (from 1), `max` (1 to 500) | `events: [RunEvent as JSON]`, `next_sequence`, `complete` | A run's recorded events, live or ended, read from its journal (`run-events.jsonl` in the run's log directory) so an ended run opens with its map, overview and scrubber; the live path keeps `run.connect`. Oldest first, at most `max` events and 512 KiB of journal per page (an event longer than that alone comes alone, so every read progresses); `complete` says the page reached the end of what is recorded now, and `next_sequence` is the next page's `from_sequence`. A line that does not decode (a live writer's unfinished tail) ends the journal there. The client narrows each event with the run protocol's generated `RunEvent`. `unknown_run` names a run the project does not have; `project_missing` as for `runs.list`; a run that journaled nothing has no events. Gated by feature `run_history`. The reader decodes each line with `vs_decode` on the helper's light import path, so `hello` stays light; a line longer than a helper line (1 MiB) ends the readable journal. |
 | `run.start` | `project`, `task`, `args: [str]`, `resume: {run_id} \| {latest: true} \| null`, `harness: {provider, model} \| null`, `options: {rounds, time_limit_s, results: keep \| publish_github, roles: [{role, model \| null, reasoning_effort: default \| low \| medium \| high}]} \| null` | `{instance_id, run_id, socket_path, phase}` or `DetachedLaunchFailure` | Allocates or resolves `run_id` before detaching (see [Run identity](#run-identity)); returns once the record is published, not when the run is ready. `args` holding `--allow-unvetted-model`, or any abbreviation argparse accepts, is `invalid_request`: a run started here never opts out of the vetted harnesses. `harness` (gated by feature `harnesses`; absent or null keeps the project's configuration) must be a pair `harnesses.list` offers, else `unvetted_harness` naming the provider's vetted models; it becomes `--cli-provider` and `--model`, so `args` may then hold neither. `options` (gated by feature `run_options`; every field optional, unset keeps the configuration) become the run's own flags: `rounds` is `--max-rounds`, `time_limit_s` is `--max-run-seconds` (overriding `[run].max_run_seconds`), `results` is `--local` (keep) or `--publish` (publish under the generated repository name), and each role is `--role-model ROLE=MODEL` and `--role-reasoning-effort ROLE=EFFORT` (overriding `agent.roles.ROLE`). `args` holding a flag of an option that is set, or an abbreviation of one, is `invalid_request` naming it (`--repo` counts as a results flag). With `harness`, a role's model must be one of its vetted models, else `unvetted_harness`; without one, the run's own validation names `agent.roles.ROLE.model`. |
-| `run.preflight` | `project`, `task`, `args`, `harness`, `options` (as `run.start`) | `checks: [{id, state: ok \| warn \| fail, detail, fix: Fix \| null}]`, one per `id` in order: `checkout_found`, `project_own_repository`, `settings_valid`, `docker_reachable`, `agent_image`, `evaluator_available`; `Fix` is `{kind: choose_checkout} \| {kind: copy_out, suggested_path} \| {kind: edit_setting, key} \| {kind: start_docker}` | Start is enabled exactly when no check is `fail`. The arguments are refused as `run.start` refuses them. `settings_valid`, `agent_image` and `evaluator_available` come from `vibesys preflight ARGS`, run in the project with exactly the arguments `run.start` would launch (same interpreter, same directory): it runs the run's own `validated_run_request` (the configuration, the task, the orchestration's options and roles), so a run that passes does not fail its configuration at launch, and a failure's detail is the diagnostic's first line, naming the key. `agent_image` is `ok` when an agent image was built on the machine before (a build reuses its layers) and `warn` that one will be built otherwise. `project_own_repository` fails, with `copy_out` beside the containing repository, when the project sits inside another Git repository. `docker_reachable` fails with `start_docker`. Gated by feature `preflight`. |
+| `run.preflight` | `project`, `task`, `args`, `harness`, `options` (as `run.start`) | `checks: [{id, state: ok \| warn \| fail, detail, fix: Fix \| null}]`, one per `id` in order: `checkout_found`, `project_own_repository`, `settings_valid`, `docker_reachable`, `agent_image`, `evaluator_available`; `Fix` is `{kind: choose_checkout} \| {kind: copy_out, suggested_path} \| {kind: edit_setting, key} \| {kind: start_docker}` | Start is enabled exactly when no check is `fail`. The arguments are refused as `run.start` refuses them. `settings_valid`, `agent_image` and `evaluator_available` come from `vibesys preflight ARGS`, run in the project with exactly the arguments `run.start` would launch (same interpreter, same directory): it runs the run's own `validated_run_request` (the configuration, the task, the orchestration's options and roles), so a run that passes does not fail its configuration at launch, and a failure's detail is the diagnostic's first line, naming the key. `agent_image` is `ok` when an agent image was built on the machine before (a build reuses its layers) and `warn` that one will be built otherwise. `project_own_repository` fails, with `copy_out` beside the containing repository, when the project sits inside another Git repository. `docker_reachable` fails with `start_docker`. Both `docker_reachable` and `agent_image` apply only when the run's resolved run environment starts local Docker containers (`RunEnvironment.uses_docker`, which `vibesys preflight` reports): for one that does not (the host environment), each is `ok` with a `not needed` detail, so every check id is always present and an unreachable Docker never blocks such a run. When the settings resolve no environment, Docker is checked. Gated by feature `preflight`. |
 | `harnesses.list` | none | `harnesses: [{provider, model, default}]`, each provider's default first | The vetted provider and model pairs (`vs_agent`'s `harnesses()`), for the start sheet's model picker. Gated by feature `harnesses`. The helper loads the agent library only when this or a `run.start` with `harness` arrives, so `hello` stays light. |
 | `machine.describe` | none | `machine: {checkout: {root, version, commit, dirty} \| null, hardware: {cpu_cores, gpus: [{vendor, model}], accelerator: cpu \| cuda \| rocm \| metal}, docker: {reachable: true, version} \| {reachable: false, reason}, harness_clis: [provider], runs: {live, ended_today}}` | For the Machines and New run screens. `checkout` is the helper's own (what starts runs here), `null` from an installed distribution. GPUs come from the first vendor tool that lists any (`nvidia-smi`, `rocm-smi`, Apple Silicon's CPU brand), which names `accelerator`; `cpu` exactly when none is listed. `docker` asks the daemon for its server version, so `reachable` proves the daemon answers; `reason` is one line. `harness_clis` are the vetted providers whose CLI program is on the helper's search path, in offer order. `ended_today` counts tombstones since the host's local midnight. Each fact's command has 5 s; one that cannot run counts as absent. Gated by feature `machine_describe`; the agent library loads only when it is asked, so `hello` stays light. |
 | `checkout.inspect` | `path` | `inspection: {state: found, root, version, commit, dirty, compatible} \| {state: not_found} \| {state: too_old, version, min}` | Whether a path (`~` and a relative path as for `paths.complete`) holds a VibeSys checkout: its `pyproject.toml` names `vibesys`. `too_old` when its version's release segment is below `MIN_CHECKOUT_VERSION` (or it declares none, `version` empty); `compatible` says it ships the host helper the app starts from a checkout. Path completion stays `paths.complete`. Gated by feature `checkout_inspect`. |
+| `examples.list` | none | `listing: {version, checkout, examples: [{name, category, tasks, external_repo}]}` | The catalog (`examples/registry.toml`) of the checkout this helper runs from, the same document `vibesys example list --json` prints. `examples_unavailable` from an installed distribution or an invalid catalog. Gated by feature `examples`. |
+| `project.create_from_example` | `example`, `destination` | `created: {project, tasks}` | Copies the example's tracked files (or clones an external example at its pinned commit) into its own new Git repository with one commit, as `vibesys example new` does. `destination` (as typed, like `paths.complete`) must be absent or an empty directory (`destination_exists`) and outside the checkout (`destination_nested`); `unknown_example` lists the matches for an ambiguous or unknown name; a failed copy is `project_create_failed` and leaves nothing behind. Each error names its path. Gated by feature `examples`. |
+| `project.copy_out` | `source`, `destination` | `created: {project, tasks}` | Makes a folder that sits inside another Git repository its own: copies its tracked files into a new repository at `destination` with one commit (files never added to the containing repository stay behind). `destination` must not exist (`destination_exists`) nor lie inside the containing repository (`destination_nested`); a `source` in no other repository is `not_nested`, a missing one `path_missing`. Nothing is left behind on failure; each error names its path. It is the action of `run.preflight`'s `copy_out` fix. Gated by feature `examples`. |
 | `run.stop` | `instance_id`, `force` | `InstanceStopResult` | Same outcomes as `vibesys instances stop`. |
 | `run.connect` | `instance_id`, `role: control \| subscribe \| chat` | `{run_id, protocol_version}` then relay | Run channels only; `channel_busy` while another request or watch is open. The run's `run_id` comes back here, so the page never derives it. Bytes the client sends before the reply are relayed after it. A failed connect (`run_gone`, `connect_denied`, `connect_failed`) leaves the channel a request channel. |
 | `ping` | none | an empty reply | Control channel liveness for the supervisor. |
@@ -416,7 +419,7 @@ One closed union, owned by `server.host_api` and folded by the existing pure lif
 | `starting {stage, progress}` | `stage` is `resolving`, `building_image`, or `starting_container`. `progress` is `{done, total \| null, label}` when the stage reports it. | no |
 | `running` | Ready and executing (`RunStatus.RUNNING`; also `pausing`, `paused` as today). | no |
 | `stopping` | A stop was accepted; the run ends at its next boundary. | no |
-| `stopped` | Stopped by request, state persisted, resumable. | yes |
+| `stopped` | Stopped by request; its result and measurements are kept, and it has ended for good: not resumable (Pause is how a run continues later). | yes |
 | `failed {reason}` | `reason` is a `Diagnostic` (code, stage, message, log path). | yes |
 | `finished` | Completed (`RunStatus.COMPLETED`). | yes |
 
@@ -459,8 +462,14 @@ Facts enter once:
   `force_stopped` when the server was terminated, `stopped` for a stop that left work unsettled,
   and `failed` otherwise. `reason` is one line (at most 200 characters): core's account of the
   result, else the failure's message. `resumable` is whether the run's durable core record exists
-  and is not terminal, so a run that recorded a result is not resumable; `resume_from_round` is
-  then its finished rounds plus one. A core run reports these as the `run_ending` event just
+  and is not terminal and no stop ended it: a run that recorded a result is not resumable, and
+  neither is any stopped run (`stopped`, including one whose drain outlived its grace bound, and
+  `force_stopped`), since a stop ends a run for good. `resume_from_round` is then its finished
+  rounds plus one. A force stop records the stop request in the run's state
+  (`ProjectState.record_stop_request`) before the server is signalled, so a resume of a
+  force-stopped run commits that stop first, starts no new work, and only finishes the drain and
+  ends; `vibesys --resume` refuses a run whose record is terminal (`run_ended`, "run ended; start
+  a new run"). A core run reports these as the `run_ending` event just
   before it ends; a run that failed before core started reports none and is not resumable. A
   crashed server's burial records `failed`, resumable, with no round. `end` is absent on a
   tombstone upgraded from version 4 and when a completed run reported no ending, so the UI falls
@@ -488,7 +497,7 @@ Facts enter once:
     server wrote nothing as it died, and the lock carries no time. Its 24 hours run from then.
 
 The UI renders only the phase: Retry appears only on a link failure, never on an ended phase;
-Resume appears only on `stopped`, `failed`, and `finished`.
+Resume appears only on an ended run whose `end` says `resumable` (a failure or a crash), never on a stopped or finished one.
 
 ## Connection manager
 
@@ -568,30 +577,93 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 The redesigned window (`VIBESYS_DESKTOP_SHELL=next`, #2827) follows the same rules: the sidebar
 store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived runs, and the
 Settings store (`@vibesys/feature-settings`) saves each change under a token, so a slow save
-cannot undo a newer choice. Both have invariants checked over seeded action sequences. The theme
+cannot undo a newer choice. Both have invariants checked over seeded action sequences.
+
+The New run screen (`@vibesys/feature-new-run`) is an XState machine: its preflight checks are
+asked for the inputs' key and kept only for that key, so Start is enabled only when the checks
+shown are for the inputs now and none fails, and a reply for older inputs is never shown. Its
+model test checks that, and that an input never restarts what the machine offers.
+
+The Machines store (`@vibesys/feature-machines`) keeps the saved machines and derives each one's
+status from its last report rather than storing one: `Sign in` when the connection waits for
+credentials, `Checkout not found` when the bootstrap reports no
+VibeSys checkout at the saved path (the connection manager's `incompatible` phase carries that as
+a typed `checkout` problem, `missing` or `too-old`), `Can't connect` for any other failure, and
+otherwise `Ready` with what `machine.describe` says. Adding a machine or changing its checkout is
+the hosts feature's `setCheckout`, which starts the helper from the path before it saves it; path
+suggestions are `paths.complete`, each listed checkout labelled with its version by
+`checkout.inspect`, so they need a helper already running on that host (This Mac, or a machine
+whose checkout works). Its invariants are checked over seeded action sequences.
+
+The Run screen (`@vibesys/feature-run-page`) has one store per shown run, a reducer over the run's
+registry record (from the host's watch, through the sidebar's listings) and its log streams. The
+phase is the record's: the screen never shows a phase the host did not report, except that a Stop
+it sent shows as stopping until the record says so. Stopping, by this window or anyone else, arms a
+two-minute bound (`FORCE_STOP_BOUND_MS`) on the shell's injected clock under a request token;
+"Force stop" is offered only when that token returns while the run is still stopping, so a late
+bound for an earlier stop is dropped. The screen's Stop confirmation states what is lost (a
+stopped run ends for good; Pause is the resumable path), so it sends `stopConfirmed`, which runs
+the same stop flow without the app's native question; the stop flow lets a view force an accepted
+graceful stop. The ended banner reads the end record and offers Resume, naming
+`resume_from_round`, only when it says `resumable`. Logs are grouped by their owner (startup
+steps, gate stages, tool builds, narration) and read over the welcome bridge's `logs`, which the
+main process serves from the host's logs channel until the screen lets it go; the startup
+timeline is built from the startup steps' streams. "Open in new window" opens the run in a
+window of its own (see "Windows and notifications").
+
+A live run is attached to the window under a token (the store's `link`), through the same
+`RunControl.attach` a run page uses. Under the app shell the window binds that run to the surface
+itself (`AppWindow` with `SHELL_URL`): no run page opens, the run IPC registry admits the shell
+document's connects, and the wake goes to it. The shell's `connectRun` hands main one end of a new
+channel and the page the other, as a window message (`RUN_PORT_MESSAGE`), because a port cannot
+cross the context bridge; the page speaks the relay's credit protocol over it
+(`@vibesys/ipc`'s `openPortSocket`) and the app shapes it as the session's transport. While the
+run is attached, the store keeps its `WebSession` open (bootstrap, stream, recovery stay in
+`@vibesys/run-session`'s machine) and folds what it reports: the session's state, the run fold, and
+the trace's span events in sequence order (the session's `onRunAction`), so the tabs fold the trace
+at the sequence they show (`viewedRun`). Pause and Resume are protocol commands on that session,
+offered only while its controls are up. Leaving the run releases it (`releaseRun`), and a new
+shell document detaches the run the old one held. An ended run opens from its recorded history
+instead: the store reads `runs.read_events` (feature `run_history`, through the welcome bridge's
+`readEvents`) page by page under a token, validates each event, and folds the pages into the same
+`run` slice, so the tabs have one source; an older host answers `unsupported`. Its invariants (force offered only while stopping
+and only after its bound, no stop flow outliving the live run, the link holding exactly the live
+server, no session report without an attached run, trace events in increasing sequence, commands
+sent only when offered) are checked over seeded action sequences with stale replies. The theme
 is in the first paint: the welcome preload asks the main process synchronously for the stored
 theme and the window controls' inset (`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and
 sets them on the root element before the page's scripts run.
 
-## Multiple run windows
+## Windows and notifications
 
-Each `AppWindow` holds one `#run` view and binds to at most one run at a time (`openRunPage`
-always replaces whatever the window showed before). `RunControl` and `RunIpcRegistry` key every
-binding, navigation claim, and IPC admission by `run_id` rather than by one shared slot
-(`clients/features/run-control/src/main/run-control.ts`, `clients/apps/desktop-main/src/main/
-run-ipc.ts`), so two independent `AppWindow`s attached to two different runs cannot cross-detach or
-cross-admit each other's connection: a window's close detaches only the binding for the run it
-showed, and a window's IPC connect is admitted only for the run its own current page named. A
-Playwright spec (`clients/apps/desktop-main/e2e/two-windows.spec.ts`) constructs two `AppWindow`s
-directly against a fixture host connection and asserts no cross-run bleed on attach, content, or
-close.
+The app has one main window and, for each run the user opens with "Open in new window" (the Run
+screen's "⋯" menu and the sidebar row menu), one run window that shows the Run screen for that
+run alone, with no sidebar (`RunWindow` in `apps/desktop-shell`, chosen by the run in the page's
+query). Opening a run that already has a window focuses it. `RunWindows` (`run-windows.ts`) is the
+registry, keyed by run, and `openRunWindow` on the welcome bridge is its request.
 
-This keying is the safety prerequisite for concurrent windows, not the feature itself: the app does
-not yet construct more than one `AppWindow`. `index.ts`'s `openWindow()` creates exactly one at
-startup, and every run attach, start, or resume targets that same window, replacing its current run
-page. Wiring an actual multi-window user path needs a UX decision first (whether attaching always
-opens a fresh window, or only when the current one already shows a different run, and how the
-welcome view's window relates to run windows) and is tracked by #2615.
+Each `AppWindow` holds one `#run` view and binds to at most one run at a time. `RunControl` and
+`RunIpcRegistry` key every binding, navigation claim, and IPC admission by `run_id` rather than by
+one shared slot (`clients/features/run-control/src/main/run-control.ts`,
+`clients/apps/desktop-main/src/main/run-ipc.ts`), so windows attached to different runs cannot
+cross-detach or cross-admit each other's connection. `RunControl`'s `openPage` binds a run to the
+window showing it (`RunWindows.showing`) and any other run to the main window, so a run with a
+window of its own is live there. Closing a run window forgets it and detaches only that run's live
+connection; the run itself goes on. A Playwright spec
+(`clients/apps/desktop-main/e2e/two-windows.spec.ts`) constructs two `AppWindow`s against a
+fixture host connection and asserts no cross-run bleed on attach, content, or close.
+
+The welcome IPC has one handler per channel, because Electron allows one. `WelcomeRouter`
+registers each channel once and routes every request to the window whose current welcome document
+sent it, on that window's page; a sender that is no window's current document is refused. Each
+window has its own admission (document generations, replacement barrier, retirement), which ends
+when its native window closes. Requests that change the main window's own view (`show-run`,
+`show-welcome`) are refused from a run window. Pushed events (listings, preferences, the chrome)
+go to every window's surface.
+
+Known gaps: in a run window "Run again" only focuses the main window (`show-main-window`) instead
+of opening New run with the run's inputs there, and a notification click focuses the main window
+rather than the window of the run it names.
 
 The campaign workspace UI these run pages can render, and the live telemetry stream it folds, are
 designed in [campaign-workspace-ui.md](../design/campaign-workspace-ui.md) and

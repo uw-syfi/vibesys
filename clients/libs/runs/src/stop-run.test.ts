@@ -64,18 +64,20 @@ function checkStep(before: StopState, event: StopEvent, next: StopStep, accepted
   if (event.type === 'ended') expect(next.state.phase).toBe('ended');
   if (next.effect === null) return;
   if (next.effect.kind === 'confirm') {
-    expect(['idle', 'error']).toContain(before.phase);
+    expect(['idle', 'error', 'stopping']).toContain(before.phase);
     expect(event.type).toBe('request');
     expect(next.state.phase).toBe('confirming');
     if (next.state.phase !== 'confirming')
       throw new Error('confirmation request without its state');
     expect(next.effect.force).toBe(next.state.force);
+    // From a stop under way, only a force stop of an accepted graceful one is asked about.
+    if (before.phase === 'stopping') expect([before.accepted, before.force]).toEqual([true, false]);
     return;
   }
-  // A stop command is sent only from a confirmed dialog, and never after an accepted stop.
+  // A stop command is sent only from a confirmed dialog; after an accepted stop, only a forced one.
   expect(before.phase).toBe('confirming');
   expect(event.type).toBe('confirm');
-  expect(accepted).toBe(false);
+  if (accepted) expect(next.effect.force).toBe(true);
   expect(next.effect.force).toBe(before.phase === 'confirming' && before.force);
 }
 
@@ -142,7 +144,22 @@ describe('stop flow', () => {
     }
   });
 
-  test('a force stop cannot be requested without a failed graceful stop', () => {
+  test('an accepted stop that hangs can be forced once; declining keeps it ending', () => {
+    const accepted = run([
+      {type: 'request', force: false},
+      {type: 'confirm'},
+      {type: 'result', outcome: 'stopping'},
+    ]);
+    const asked = stopStep(accepted, {type: 'request', force: true});
+    expect(asked.effect).toEqual({kind: 'confirm', force: true});
+    expect(stopStep(asked.state, {type: 'cancel'}).state).toEqual(accepted);
+    const forced = stopStep(asked.state, {type: 'confirm'});
+    expect(forced.effect).toEqual({kind: 'stop', force: true});
+    const ending = stopStep(forced.state, {type: 'result', outcome: 'stopping'}).state;
+    expect(stopStep(ending, {type: 'request', force: true}).effect).toBeNull();
+  });
+
+  test('a force stop cannot be requested without a failed or accepted graceful stop', () => {
     expect(stopStep(STOP_IDLE, {type: 'request', force: true})).toEqual({
       state: STOP_IDLE,
       effect: null,

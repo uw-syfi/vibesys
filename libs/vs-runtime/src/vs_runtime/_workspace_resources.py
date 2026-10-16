@@ -11,6 +11,7 @@ from vs_runtime._agent_execution import (
     AgentExecutionScope,
     open_agent_execution_environment,
 )
+from vs_runtime._run_environment import RunEnvironmentSessionRole
 from vs_runtime._trusted_evaluation import (
     TrustedEvaluationPlan,
     create_trusted_evaluation_executor,
@@ -151,6 +152,7 @@ class WorkspaceResourceFactory:
                     # A candidate session may reach only its own worktree: the run's
                     # other candidates are not its to read or write through a broker.
                     run_owned_roots=(),
+                    session_role=RunEnvironmentSessionRole.CHILD,
                     git_history_root=self._project.git.history_root,
                     log=project.logger.lprint,
                 )

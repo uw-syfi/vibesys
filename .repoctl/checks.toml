@@ -149,7 +149,7 @@ commands = [
 # The example evaluators' build-and-run tests (cargo, make and go compile native code, then the
 # real Go evaluator judges it): tests that request a native build fixture carry the
 # `native_build` marker (root conftest.py), which the Python shards deselect. They run here, on
-# the examples path, whenever an example, the evaluator SDK or the queue evaluator changes.
+# the examples path, whenever an example, the evaluator SDK, or a reusable evaluator changes.
 [[check_groups]]
 name = "examples_native_evaluator_tests"
 trigger_job = "examples"
@@ -165,6 +165,7 @@ commands = [
     "tests/architecture/test_unordered_map_evaluator.py",
     "tests/examples/test_prioqueue_evaluator.py",
     "tests/examples/test_queue_evaluator.py",
+    "tests/e2e/test_bundled_go_evaluator_offline.py",
     "tests/e2e/test_kvstore_default_gate_e2e.py",
   ],
 ]

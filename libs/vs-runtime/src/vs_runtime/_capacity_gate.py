@@ -12,8 +12,11 @@ from vs_runtime._quota_policy import (
     QuotaPolicy,
     Switch,
     WaitFor,
+    capacity_returns_at,
+    capacity_wait,
     decide_quota,
 )
+from vs_runtime._run_control import CapacityWake
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -26,7 +29,7 @@ if TYPE_CHECKING:
         AgentTurnRequest,
         ProviderSwitchReason,
     )
-    from vs_runtime._run_control import RunControlChannel
+    from vs_runtime._run_control import CapacityWaitEnd, RunControlChannel
     from vs_sim.api import Clock, Threads
 
 
@@ -41,6 +44,14 @@ class CapacityTimer(Protocol):
         """Park the paused run for at most ``seconds``; True when something resumed it first.
 
         A wait that times out resumes the run itself. A stop request raises.
+        """
+        ...
+
+    def wait_for_capacity(self, seconds: float, request: int) -> CapacityWaitEnd:
+        """Wait at most ``seconds`` for capacity under the operator's ``request``.
+
+        As :meth:`RunControlChannel.wait_for_capacity`: an elapsed wait resumes the run, and
+        the operator ends it sooner by resuming, pausing, or asking again.
         """
         ...
 
@@ -60,6 +71,10 @@ class ControlCapacityTimer:
     def wait_resumed(self, seconds: float) -> bool:
         """Park on the control channel for at most ``seconds``."""
         return self._control.wait_resumed(seconds)
+
+    def wait_for_capacity(self, seconds: float, request: int) -> CapacityWaitEnd:
+        """Wait on the control channel for at most ``seconds``."""
+        return self._control.wait_for_capacity(seconds, request)
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +135,7 @@ class PolicyCapacityGate:
         self._fallback = handling.fallback
         self._timer = timer
         self._waited = 0.0
+        self._capacity_requested = False
 
     def wait_for_capacity(
         self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, attempt: int
@@ -128,6 +144,7 @@ class PolicyCapacityGate:
         context = Attribution(role, turn.label, turn.invocation_id)
         if attempt == 1:
             self._waited = 0.0
+            self._capacity_requested = False
         if self._fallback.replaced(error.provider):
             self._abandon(
                 error,
@@ -156,8 +173,7 @@ class PolicyCapacityGate:
             by_operator = self._timer.wait_resumed(decision.seconds)
             self._waited += self._timer.now() - now
         else:
-            self._control.wait_while_paused()
-            by_operator = True
+            by_operator = self._hold(error, context)
         if self._control.consume_fallback_request() and self._fallback.target is not None:
             self._switch_or_abandon(
                 error, "operator", "the operator resumed with the fallback", context
@@ -165,6 +181,38 @@ class PolicyCapacityGate:
         self._events.quota_resumed(
             error.provider, "operator" if by_operator else "wait_elapsed", context
         )
+
+    def _hold(self, error: AgentQuotaError, context: Attribution) -> bool:
+        """Park for the operator, or until capacity returns when the operator asked to wait.
+
+        True when the operator ended the pause, False when capacity should be back. A turn
+        sent again after such a wait that stops on the limit again waits again by itself,
+        polling at the policy's retry interval when the provider gives no reset time.
+        """
+        try:
+            request = self._control.park_for_capacity(waiting=self._capacity_requested)
+            while request is not None:
+                self._capacity_requested = True
+                now = self._timer.now()
+                back = capacity_returns_at(resets_at=error.resets_at, now=now)
+                self._events.quota_waiting(error.provider, back, context)
+                wait = capacity_wait(self._policy, resets_at=error.resets_at, now=now)
+                end = self._timer.wait_for_capacity(wait, request)
+                match end.wake:
+                    case CapacityWake.ELAPSED:
+                        return False
+                    case CapacityWake.RESUMED:
+                        self._events.quota_wait_cancelled(error.provider, "resumed", context)
+                        return True
+                    case CapacityWake.CANCELLED:
+                        self._events.quota_wait_cancelled(error.provider, "paused", context)
+                        self._capacity_requested = False
+                        request = self._control.park_for_capacity()
+                    case CapacityWake.REARMED:
+                        request = end.request
+            return True
+        finally:
+            self._control.leave_capacity()
 
     def _switch_or_abandon(
         self,

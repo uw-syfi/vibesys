@@ -30,6 +30,7 @@ from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
     OsDirectories,
+    ProjectStopIntents,
     StoreLogReader,
     SubprocessRunLauncher,
     SubprocessRunPreflight,
@@ -48,7 +49,9 @@ from server.registry import (
     instance_root,
 )
 from server.relay import FdSink, FdSource
+from vs_project.api import Git
 from vs_sim.api import (
+    OsProcesses,
     OsThreads,
     PidfdProcessSignaller,
     SubprocessLauncher,
@@ -59,7 +62,10 @@ from vs_sim.api import (
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+    from pathlib import Path
 
+    from server.host_examples import CreatedProject, ExampleList
+    from server.host_helper_requests import ExampleProjects
     from vs_sim.api import Threads
 
 _STDIN_FD = 0
@@ -100,6 +106,35 @@ def harness_binaries() -> tuple[tuple[str, str], ...]:
     return tuple((provider, provider_binary(provider)) for provider in providers)
 
 
+@cache
+def checkout_example_projects() -> ExampleProjects:
+    """This checkout's example catalog and project maker; loaded on first use."""
+    # lint-waiver: LW-271505 [PLC0415]; the helper answers hello without loading the example machinery.
+    # > `entrypoints.examples` brings argparse, configparser and the catalog reader; at module
+    # > level every channel would load them before `hello`, past the helper's module ceiling
+    # > (`tests/e2e/test_host_helper.py`). Moving the machinery into the helper would split the
+    # > one implementation `vibesys example` uses, and the same deferral serves `harnesses`.
+    from entrypoints.examples import GitExampleMaterializer, HelperExampleProjects  # noqa: PLC0415
+
+    return HelperExampleProjects(source_checkout_root(), GitExampleMaterializer(Git(OsProcesses())))
+
+
+class ExampleProjectsOnUse:
+    """The helper's ``ExampleProjects``, which loads the example machinery on its first request."""
+
+    def list(self) -> ExampleList:
+        """Every catalogued example with its tasks."""
+        return checkout_example_projects().list()
+
+    def create(self, example: str, destination: Path) -> CreatedProject:
+        """Copy ``example`` into its own new Git repository at ``destination``."""
+        return checkout_example_projects().create(example, destination)
+
+    def copy_out(self, source: Path, destination: Path) -> CreatedProject:
+        """Copy ``source``'s tracked files into their own new Git repository at ``destination``."""
+        return checkout_example_projects().copy_out(source, destination)
+
+
 def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperHost:
     """This host as the helper sees it; ``PermissionError`` when the registry root is unsafe."""
     network = UnixNetwork()
@@ -124,11 +159,13 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
             signaller=PidfdProcessSignaller(),
             clock=threads,
             pause=threads.sleep,
+            intents=ProjectStopIntents(),
         ),
         projects=FileProjects(),
         directories=OsDirectories(),
         launcher=SubprocessRunLauncher(SubprocessLauncher(), headless_command),
         preflight=SubprocessRunPreflight(SubprocessLauncher(), headless_command),
+        examples=ExampleProjectsOnUse(),
         checkout=GitCheckoutProbe(source_checkout_root(), SubprocessProbe()),
         dialer=network,
         vibesys_version=host_facts()[1],

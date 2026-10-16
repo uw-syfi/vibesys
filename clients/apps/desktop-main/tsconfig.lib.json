@@ -29,6 +29,9 @@
       "path": "../../features/hosts/tsconfig.main.json"
     },
     {
+      "path": "../../features/machines/tsconfig.main.json"
+    },
+    {
       "path": "../../features/run-control/tsconfig.main.json"
     },
     {
@@ -51,6 +54,9 @@
     },
     {
       "path": "../../features/settings/tsconfig.main.json"
+    },
+    {
+      "path": "../../features/new-run/tsconfig.main.json"
     }
   ]
 }

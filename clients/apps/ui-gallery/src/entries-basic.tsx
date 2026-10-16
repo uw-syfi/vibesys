@@ -168,7 +168,12 @@ export const BASIC_ENTRIES = {
     ),
   },
   Split: {
-    render: () => <Split main={<Box label="main" />} aside={<Box label="aside" />} />,
+    render: () => (
+      <Stack>
+        <Split main={<Box label="main" />} aside={<Box label="aside" />} />
+        <Split main={<Box label="main" />} aside={<Box label="aside first" />} asideFirst />
+      </Stack>
+    ),
   },
   Grid: {
     render: () => (

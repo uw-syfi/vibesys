@@ -7,7 +7,15 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, NonNegativeInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    NonNegativeInt,
+    field_validator,
+    model_validator,
+)
 
 import vs_agent.api as _agent_api
 
@@ -22,6 +30,7 @@ from vs_agent.api import (
     ToolResultPayload,
 )
 from vs_core.api import EndReason, SpanId, WireSpan
+from vs_redaction.api import redact_diagnostic_text
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
 
 CommandResultPayload = _agent_api.CommandResultPayload
@@ -58,6 +67,8 @@ class CoreEventType(StrEnum):
     QUOTA_PAUSED = "quota_paused"
     QUOTA_RESUMED = "quota_resumed"
     QUOTA_ABANDONED = "quota_abandoned"
+    QUOTA_WAITING = "quota_waiting"
+    QUOTA_WAIT_CANCELLED = "quota_wait_cancelled"
     PROVIDER_SWITCHED = "provider_switched"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
@@ -201,6 +212,59 @@ class AgentExecutionFinishedData(EventPayload):
     error: str | None = None
 
 
+class EvaluatorIdentity(BaseModel):
+    """The evaluator package a run measures with, as the task's manifest pins it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+
+
+class ObjectiveOverview(BaseModel):
+    """What the run optimizes: the task's objective and the metric it is judged on.
+
+    ``unit`` and ``direction`` come from the run's own measurements and objectives once it has
+    them; ``correctness_check`` is the argv of the check a candidate must pass (empty when the
+    task gates on none).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    text: str
+    """The task's ``OBJECTIVE.md``, as Markdown."""
+    metric: str | None = None
+    unit: str | None = None
+    direction: Literal["max", "min"] | None = None
+    correctness_check: tuple[str, ...] = ()
+
+
+class BenchmarkVersions(BaseModel):
+    """What measured the run.
+
+    ``evaluator`` is the evaluator package when the task pins one; a source-tree evaluator has
+    no version, so it is None.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    evaluator: EvaluatorIdentity | None = None
+
+
+class RunOverview(BaseModel):
+    """The run's objective and what measures it: the Overview's header facts.
+
+    One definition for the core event and the wire: the run's ``run_started`` event carries it,
+    and the server's snapshot carries it with the unit and direction its measurements add.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    overview_version: Literal[1] = 1
+    objective: ObjectiveOverview
+    benchmarks: BenchmarkVersions = BenchmarkVersions()
+
+
 class RunStartedData(EventPayload):
     """Initial input and loop settings for a core run."""
 
@@ -211,6 +275,8 @@ class RunStartedData(EventPayload):
     # Policy-owned role hints let frontends seed per-round placeholders.
     # Empty when the policy does not declare roles.
     expected_roles: tuple[str, ...] = ()
+    overview: RunOverview | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The run's objective and evaluator, as the task's input bundle declares them."""
 
 
 class StartupProgressData(EventPayload):
@@ -427,6 +493,27 @@ class QuotaResumedData(EventPayload):
     reason: Literal["operator", "wait_elapsed"] = "operator"
 
 
+class QuotaWaitingData(EventPayload):
+    """At the operator's request, the run paused on a capacity limit resumes when capacity returns.
+
+    ``resumes_at`` is the epoch second it resumes (the provider's reset time plus a margin),
+    ``None`` when the provider gave no reset time and the run tries again after the quota
+    policy's retry interval. A later request replaces this one.
+    """
+
+    kind: Literal["quota_waiting"] = "quota_waiting"
+    provider: str
+    resumes_at: float | None = None
+
+
+class QuotaWaitCancelledData(EventPayload):
+    """The operator ended a wait for capacity: ``resumed`` the run now, or ``paused`` it again."""
+
+    kind: Literal["quota_wait_cancelled"] = "quota_wait_cancelled"
+    provider: str
+    reason: Literal["resumed", "paused"]
+
+
 class ProviderSwitchedData(EventPayload):
     """The run replaced a provider by its fallback.
 
@@ -461,6 +548,11 @@ class SubprocessOutputData(EventPayload):
     process_kind: str
     stream: OutputStream
     content: str
+
+    @field_validator("content")
+    @classmethod
+    def _redact_content(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
 
 
 class JudgeResultData(EventPayload):
@@ -537,8 +629,8 @@ class GateFinishedData(EventPayload):
 
     ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
     ``unit`` keeps the historical fallback of the metric name when the
-    contract declares no unit. ``output_tail`` carries the trailing command
-    output on failure. ``round_label`` groups the per-recipe local-validation
+    contract declares no unit. ``output_tail`` carries bounded, credential-redacted
+    trailing command output on failure. ``round_label`` groups the per-recipe local-validation
     gates of one attempt back together, so a client folds them into a
     pass-fraction itself rather than the backend aggregating one.
     """
@@ -556,6 +648,11 @@ class GateFinishedData(EventPayload):
     round_label: str | None = None
     source: FrameworkSource = FrameworkSource.GATES
     source_label: str | None = None
+
+    @field_validator("output_tail")
+    @classmethod
+    def _redact_output_tail(cls, value: str | None) -> str | None:
+        return None if value is None else redact_diagnostic_text(value)
 
 
 class WorkspaceSnapshotData(EventPayload):
@@ -671,6 +768,11 @@ class WorkstreamFailureData(BaseModel):
     limit: int | None = None
     text: str = ""
 
+    @field_validator("text")
+    @classmethod
+    def _redact_text(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
+
 
 class WorkstreamFinishedData(EventPayload):
     """One workstream (one dynamic-run round) ended; its typed failure, if any.
@@ -769,6 +871,8 @@ CoreEventData = Annotated[
     | QuotaPausedData
     | QuotaResumedData
     | QuotaAbandonedData
+    | QuotaWaitingData
+    | QuotaWaitCancelledData
     | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData

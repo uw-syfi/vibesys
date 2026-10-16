@@ -126,6 +126,9 @@ class AgentQuotaError(RuntimeError):
 type QuotaResumeReason = Literal["operator", "wait_elapsed"]
 """Who ended a quota pause: the operator, or the policy's wait running out."""
 
+type QuotaWaitCancelReason = Literal["resumed", "paused"]
+"""How the operator ended a wait for capacity: resumed the run now, or paused it again."""
+
 type ProviderSwitchReason = Literal["policy", "operator"]
 """Who switched the run to its fallback provider: the quota policy, or the operator."""
 

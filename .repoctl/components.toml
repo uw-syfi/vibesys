@@ -168,19 +168,26 @@ files = ["src/entrypoints/headless.py", "src/entrypoints/example_catalog.py", "s
 roots = ["src/vibesys/inputs"]
 
 # The build-and-run tests of the example evaluators (the `native_build` marker) run in the
-# examples job. They read the evaluator SDK and the queue evaluator, which live outside
-# `examples`, so a change there must select the job too.
+# examples job. They read the evaluator SDK and reusable evaluator packages, which live outside
+# `examples`, so a change there or in their offline preparation path must select the job too.
 [[components]]
 id = "native_evaluator_examples"
 files = [
+  "libs/vs-runtime/src/vs_runtime/_docker_evaluator_tools.py",
+  "libs/vs-runtime/src/vs_runtime/_evaluator_packages.py",
+  "libs/vs-runtime/src/vs_runtime/_run_environment.py",
+  "libs/vs-runtime/src/vs_runtime/_slurm_environment.py",
+  "libs/vs-runtime/src/vs_runtime/_trusted_evaluation_preparation.py",
+  "libs/vs-sandbox/src/vs_sandbox/modal_evaluator.py",
   "tests/architecture/test_stack_evaluator.py",
   "tests/architecture/test_ordered_map_evaluator.py",
   "tests/architecture/test_unordered_map_evaluator.py",
   "tests/examples/test_prioqueue_evaluator.py",
   "tests/examples/test_queue_evaluator.py",
+  "tests/e2e/test_bundled_go_evaluator_offline.py",
   "tests/e2e/test_kvstore_default_gate_e2e.py",
 ]
-roots = ["sdk/vs-evaluator", "resources/evaluators/queue"]
+roots = ["sdk/vs-evaluator", "resources/evaluators"]
 
 [[components]]
 id = "agent_image"

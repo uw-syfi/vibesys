@@ -1,10 +1,12 @@
 /**
  * The desktop's composition of its features over the one window: it routes each validated welcome
- * request to the feature that owns it (`hosts`, `run-control`), keeps the window's state
+ * request to the feature that owns it (`hosts`, `machines`, `new-run`, `run-control`, `settings`), keeps the window's state
  * (`ChromeState`) in step, and opens what a launch asked for.
  */
 
 import type {Hosts} from '@vibesys/feature-hosts/main';
+import type {MachinesMain} from '@vibesys/feature-machines/main';
+import type {NewRunMain} from '@vibesys/feature-new-run/main';
 import type {RunControl} from '@vibesys/feature-run-control/main';
 import type {PreferencesMain} from '@vibesys/feature-settings/main';
 import {shellWords} from '@vibesys/feature-start-run/state';
@@ -15,15 +17,24 @@ import {
   type WelcomeOverview,
   type WelcomeRequest,
 } from '@vibesys/ipc';
-import type {RecentRun} from '@vibesys/runs';
+import type {RecentRun, RunRef} from '@vibesys/runs';
 import type {RecentFile, SettingsStore} from '@vibesys/settings';
 import type {LaunchPlan} from './launch-args.js';
+import type {RunWindows} from './run-windows.js';
 import type {WelcomeFeed} from './welcome-feed.js';
-import {bindWelcomeIpc, type WelcomeIpc} from './welcome-ipc.js';
+import {
+  type WelcomeBinding,
+  type WelcomeDocument,
+  type WelcomeIpc,
+  WelcomeRouter,
+} from './welcome-ipc.js';
 import type {AppWindow} from './window.js';
 
 export interface DesktopDeps {
-  readonly window: Pick<AppWindow, 'focus' | 'mode' | 'sendWelcome' | 'setMode' | 'welcome'>;
+  readonly window: Pick<
+    AppWindow,
+    'focus' | 'mode' | 'releaseSurfaceRun' | 'sendWelcome' | 'setMode' | 'welcome'
+  >;
   readonly welcome: Pick<WelcomeFeed, 'chrome' | 'recent' | 'showHost' | 'snapshot'>;
   readonly hosts: Pick<
     Hosts,
@@ -34,6 +45,7 @@ export interface DesktopDeps {
     | 'cancelInspectionOwner'
     | 'complete'
     | 'harnesses'
+    | 'readEvents'
     | 'host'
     | 'inspect'
     | 'logs'
@@ -46,6 +58,7 @@ export interface DesktopDeps {
     | 'signIn'
     | 'tasks'
   >;
+  readonly machines: Pick<MachinesMain, 'machines' | 'report' | 'inspect' | 'remove'>;
   readonly runs: Pick<
     RunControl,
     | 'attach'
@@ -60,11 +73,45 @@ export interface DesktopDeps {
   >;
   readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recent'>;
   readonly preferences: Pick<PreferencesMain, 'answer'>;
+  readonly newRun: Pick<NewRunMain, 'answer'>;
   /** The page the window's trusted surface loads, the only one admitted to its requests. */
   readonly surfaceUrl: string;
+  /** The windows that each show one run, whose surface is the app shell's page (`shellUrl`). */
+  readonly runWindows: Pick<RunWindows, 'open' | 'sendWelcome'>;
+  readonly shellUrl: string;
   readonly welcomeIpc: WelcomeIpc;
   readonly log: (message: string) => void;
 }
+
+/** The requests of the redesigned window's Machines and New run screens, and its windows. */
+type ScreenRequest = Extract<
+  WelcomeRequest,
+  {
+    readonly kind:
+      | 'machines'
+      | 'machine'
+      | 'inspect-checkout'
+      | 'remove-machine'
+      | 'describe-machine'
+      | 'preflight'
+      | 'examples'
+      | 'create-from-example'
+      | 'copy-out'
+      | 'start-run'
+      | 'helper-features'
+      | 'open-run-window'
+      | 'show-main-window';
+  }
+>;
+
+/** Which window a surface belongs to: the main one, or one showing a single run. */
+type WindowRole = 'main' | 'run';
+
+/**
+ * Requests that change the main window's own view (which page it shows), refused from a run
+ * window, whose page is the Run screen alone.
+ */
+const MAIN_WINDOW_ONLY: ReadonlySet<WelcomeRequest['kind']> = new Set(['show-run', 'show-welcome']);
 
 /** The recent runs as the welcome view lists them. */
 function welcomeRecent(recent: RecentFile): RecentRun[] {
@@ -81,6 +128,8 @@ export class Desktop {
   #publishedMode: ChromeState['mode'];
   /** Fences a disk snapshot that overlaps a newer recent-run change event. */
   #recentGeneration = 0;
+  /** Every window's surface requests, routed by the window that sent each. */
+  readonly #router: WelcomeRouter;
 
   constructor(deps: DesktopDeps) {
     this.#deps = deps;
@@ -88,22 +137,40 @@ export class Desktop {
     deps.settings.onRecentChanged(recent => {
       const generation = ++this.#recentGeneration;
       const value = welcomeRecent(recent);
-      deps.window.sendWelcome(WELCOME_EVENTS.recent, deps.welcome.recent(value));
+      const event = deps.welcome.recent(value);
+      deps.window.sendWelcome(WELCOME_EVENTS.recent, event);
+      deps.runWindows.sendWelcome(WELCOME_EVENTS.recent, event);
       void this.#watchRecent(recent, generation);
     });
-    bindWelcomeIpc(
-      deps.welcomeIpc,
-      deps.window.welcome,
-      deps.surfaceUrl,
-      (request, rendererGeneration) => this.#answer(request, rendererGeneration),
-      rendererGeneration => {
+    this.#router = new WelcomeRouter(deps.welcomeIpc);
+    this.#router.bind(this.#binding(deps.window.welcome, deps.surfaceUrl, 'main'));
+  }
+
+  /**
+   * How a window's surface is answered: every request through `#answer`, and each replaced
+   * document's renderer-owned work retired, keyed by its generation, so windows never retire each
+   * other's work.
+   */
+  #binding(document: WelcomeDocument, url: string, window: WindowRole): WelcomeBinding {
+    const deps = this.#deps;
+    return {
+      document,
+      url,
+      answer: (request, rendererGeneration) => {
+        if (window === 'main') this.#welcomeRenderer = rendererGeneration;
+        else if (MAIN_WINDOW_ONLY.has(request.kind)) {
+          throw new Error(`${request.kind} is for the main window`);
+        }
+        return this.#answer(request, rendererGeneration);
+      },
+      revoke: rendererGeneration => {
         // Renderer-owned writes and starts lose authority in the navigation turn itself. A late
         // launch continuation must see cancellation before asynchronous retirement can begin.
         deps.hosts.retireInspectionOwner(rendererGeneration);
         deps.runs.retireStartOwner(rendererGeneration);
         if (this.#welcomeRenderer === rendererGeneration) this.#welcomeRenderer = null;
       },
-      async rendererGeneration => {
+      retire: async rendererGeneration => {
         const cleanups = [
           {
             name: 'checkout cancellation',
@@ -121,7 +188,15 @@ export class Desktop {
           deps.log(`could not retire checkout changes: ${failures.join('; ')}`);
         }
       },
-    );
+    };
+  }
+
+  /** Show `run` in a window of its own, answering that window's surface once it is new. */
+  #openRunWindow(run: RunRef): null {
+    const title = `VibeSys · ${hostLabel(hostFromKey(run.host))} · ${run.runId}`;
+    const {window, created} = this.#deps.runWindows.open(run, title);
+    if (created) this.#router.bind(this.#binding(window.welcome, this.#deps.shellUrl, 'run'));
+    return null;
   }
 
   /** The window's state, for the title strip. */
@@ -199,10 +274,34 @@ export class Desktop {
     });
   }
 
+  /** The requests about the run the window shows: which view, its history, letting it go, retry. */
+  async #answerShownRun(
+    request: Extract<
+      WelcomeRequest,
+      {readonly kind: 'show-run' | 'show-welcome' | 'read-events' | 'release-run' | 'retry'}
+    >,
+  ): Promise<unknown> {
+    switch (request.kind) {
+      case 'show-run':
+      case 'show-welcome':
+        this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');
+        return null;
+      case 'read-events': {
+        const {host, project, runId, from, max} = request;
+        return this.#deps.hosts.readEvents(host, project, runId, from, max);
+      }
+      case 'release-run':
+        this.#deps.window.releaseSurfaceRun();
+        return null;
+      case 'retry':
+        this.#deps.runs.retry();
+        return null;
+    }
+  }
+
   /** Answer one validated welcome request. */
   async #answer(request: WelcomeRequest, rendererGeneration: string): Promise<unknown> {
     const {hosts, runs} = this.#deps;
-    this.#welcomeRenderer = rendererGeneration;
     switch (request.kind) {
       case 'overview':
         return this.#overview();
@@ -251,7 +350,7 @@ export class Desktop {
         await runs.resume(request.host, request.project, request.run);
         return null;
       case 'stop':
-        await runs.stop(request.host, request.instance, request.force);
+        await runs.stop(request.host, request.instance, request.force, request.confirmed);
         return null;
       case 'inspect':
         return hosts.inspect(request.host, request.instance, {
@@ -265,16 +364,40 @@ export class Desktop {
         return null;
       case 'show-run':
       case 'show-welcome':
-        this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');
-        return null;
+      case 'read-events':
+      case 'release-run':
       case 'retry':
-        runs.retry();
-        return null;
+        return this.#answerShownRun(request);
       case 'preferences':
       case 'set-appearance':
       case 'set-notifications':
       case 'archive':
         return this.#deps.preferences.answer(request);
+      default:
+        // Every other request is a redesigned screen's (`ScreenRequest`), which the type checks.
+        return this.#screen(request);
+    }
+  }
+
+  /** Answer one request of the redesigned window's Machines or New run screen, or its windows. */
+  #screen(request: ScreenRequest): Promise<unknown> {
+    const {machines} = this.#deps;
+    switch (request.kind) {
+      case 'machines':
+        return machines.machines();
+      case 'machine':
+        return machines.report(request.host);
+      case 'inspect-checkout':
+        return machines.inspect(request.host, request.path);
+      case 'remove-machine':
+        return machines.remove(request.host);
+      case 'open-run-window':
+        return Promise.resolve(this.#openRunWindow(request.run));
+      case 'show-main-window':
+        this.#deps.window.focus();
+        return Promise.resolve(null);
+      default:
+        return this.#deps.newRun.answer(request);
     }
   }
 }

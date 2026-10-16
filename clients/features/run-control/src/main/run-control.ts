@@ -344,13 +344,14 @@ export class RunControl {
     await this.#launch(id, project, launch, this.#newClaim());
   }
 
-  /** Stop `instanceId` on `id` after asking. */
-  async stop(id: HostId, instanceId: string, force: boolean): Promise<void> {
+  /** Stop `instanceId` on `id` after asking, unless the view that asked was already `confirmed`. */
+  async stop(id: HostId, instanceId: string, force: boolean, confirmed: boolean): Promise<void> {
     const run = this.#bindingFor(id, instanceId);
     const label = run?.task ?? run?.runId ?? instanceId;
     await this.#stops.request(
       {host: hostKey(id), hostLabel: hostLabel(id), instanceId, label},
       force,
+      confirmed,
     );
   }
 

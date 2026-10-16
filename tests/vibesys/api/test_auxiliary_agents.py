@@ -36,7 +36,11 @@ from vs_agent.api import NULL_AGENT_EVENT_SINK, AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
-from vs_runtime.api.infrastructure import HostEnvironmentFacts, RunEnvironmentPresentation
+from vs_runtime.api.infrastructure import (
+    HostEnvironmentFacts,
+    RunEnvironmentPresentation,
+    RunEnvironmentSessionRole,
+)
 from vs_sandbox.api import EnvironmentBindMount, ProjectPathPolicy
 from vs_sim.api import OsThreads, ThreadBlockingRunner, UnixNetwork
 from vs_sim.api.testing import FakePipedProcessLauncher, ManualClock
@@ -58,6 +62,7 @@ class _EnvironmentRequest:
     agent_backend: str | None = "stub"
     cli_provider: str | None = "codex"
     project_path_policy: ProjectPathPolicy = field(default_factory=ProjectPathPolicy)
+    session_role: RunEnvironmentSessionRole = RunEnvironmentSessionRole.ROOT
 
 
 class _EnvironmentSession:

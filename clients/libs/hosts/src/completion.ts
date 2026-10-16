@@ -1,5 +1,5 @@
 /**
- * Path completion for the checkout and project fields: as the user types a path on a host, the
+ * Path completion for a host path field (a checkout, a project): as the user types a path on a host, the
  * directory it names is listed once (`paths.complete`), and the names in it are filtered here, on
  * every keystroke, without asking again. A new directory segment asks for that directory; the
  * shell waits a short pause (`COMPLETION_PAUSE_MS`) before asking, and a reply whose token is not
@@ -7,9 +7,29 @@
  * replace the current one.
  */
 
-import type {HostKey} from '@vibesys/hosts';
-import type {PathCompletion, WelcomeResult} from '@vibesys/ipc';
 import {only, type Step} from '@vibesys/store';
+import type {HostKey} from './host.js';
+
+/** What directory completion established: one listing, or that this helper does not support it. */
+export type PathCompletion =
+  | {
+      readonly kind: 'listed';
+      /** The directory that was listed. */
+      readonly directory: string;
+      readonly entries: readonly {
+        readonly name: string;
+        readonly path: string;
+        readonly checkout: boolean;
+        readonly project: boolean;
+      }[];
+      readonly truncated: boolean;
+    }
+  | {readonly kind: 'unsupported'};
+
+/** How a listing request ended: its completion, or a failure (which offers nothing). */
+export type CompletionResult =
+  | {readonly ok: true; readonly value: PathCompletion}
+  | {readonly ok: false; readonly error: string};
 
 type ListedCompletion = Extract<PathCompletion, {readonly kind: 'listed'}>;
 
@@ -48,7 +68,7 @@ export type CompletionAction =
       readonly type: 'reply';
       readonly field: CompletionField;
       readonly token: number;
-      readonly result: WelcomeResult<PathCompletion>;
+      readonly result: CompletionResult;
     };
 
 export type CompletionRequest = {

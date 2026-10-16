@@ -11,6 +11,7 @@ import {
   type Completion,
   Field,
   PathInput,
+  Scrubber,
   SegmentedControl,
   Select,
   StatusDot,
@@ -258,5 +259,36 @@ describe('StatusDot', () => {
     expect(
       [...container.querySelectorAll('[role="img"]')].map(dot => dot.getAttribute('aria-label')),
     ).toEqual(tones.map(tone => `State ${tone}`));
+  });
+});
+
+describe('Scrubber', () => {
+  test('reads its newest-position words, and offers the way back only in the past', async () => {
+    let backs = 0;
+    const scrubber = (live: boolean, ended: boolean) => (
+      <Scrubber
+        label="Run position"
+        value={live ? 4 : 2}
+        last={4}
+        live={live}
+        pastLabel="Replay"
+        position="16:39:12"
+        {...(ended ? {latestLabel: 'End', backLabel: 'Jump to end'} : {})}
+        change={() => undefined}
+        backToLive={() => {
+          backs += 1;
+        }}
+      />
+    );
+    const texts = (container: HTMLElement) =>
+      [...container.querySelectorAll('button, .vs-chip')].map(node => node.textContent);
+    expect(texts(await mount(scrubber(true, false)))).toEqual(['Live']);
+    expect(texts(await mount(scrubber(true, true)))).toEqual(['End']);
+    const past = await mount(scrubber(false, true));
+    expect(texts(past)).toEqual(['Replay', 'Jump to end']);
+    await click(past.querySelector('button') as Element);
+    expect(backs).toBe(1);
+    const range = past.querySelector('input[type="range"]');
+    expect(range?.getAttribute('aria-valuetext')).toBe('16:39:12');
   });
 });

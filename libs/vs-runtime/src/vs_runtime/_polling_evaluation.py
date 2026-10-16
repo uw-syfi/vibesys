@@ -38,6 +38,7 @@ from vs_evaluation.api import (
     evidence_identity,
     is_finished,
 )
+from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
 from vs_runtime._failure_classification import is_unsettled
 from vs_runtime._measurement_progress import StageRun
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
 class _SemanticStageObservation:
     evidence: TrustedEvidence
     completed: bool
+    operator_summary: str | None
 
 
 class PollingEvaluationExecutor:
@@ -151,6 +153,7 @@ class PollingEvaluationExecutor:
         workspace: CandidateWorkspace | None = None
         results: list[EvaluationStepResult] = []
         failure: str | None = None
+        operator_failure: str | None = None
         try:
             workspace = await self._workspaces.create_candidate(first.snapshot)
             self._publish(
@@ -171,12 +174,20 @@ class PollingEvaluationExecutor:
                         name=step.name,
                         state=StageState.SUCCEEDED if observed.completed else StageState.FAILED,
                         result=evidence.model_dump(mode="json"),
+                        operator_summary=observed.operator_summary,
                         failure_kind=None if observed.completed else StageFailureKind.EXECUTION,
                         failure=(
                             None
                             if observed.completed
                             else render_stage_failure(
                                 ((evidence.semantic_summary, evidence.kind),), None
+                            )
+                        ),
+                        operator_failure=(
+                            None
+                            if observed.completed
+                            else render_stage_failure(
+                                ((observed.operator_summary, evidence.kind),), None
                             )
                         ),
                     )
@@ -196,6 +207,9 @@ class PollingEvaluationExecutor:
                         failure = render_stage_failure(
                             ((evidence.semantic_summary, evidence.kind),), None
                         )
+                        operator_failure = render_stage_failure(
+                            ((observed.operator_summary, evidence.kind),), None
+                        )
                     break
                 if len(results) < len(request.stages):
                     # A waiting agent sees each finished stage and the one now running.
@@ -213,6 +227,7 @@ class PollingEvaluationExecutor:
                     state=EvaluationState.SUCCEEDED if failure is None else EvaluationState.FAILED,
                     stage_results=tuple(results),
                     failure=failure,
+                    operator_failure=operator_failure,
                 ),
             )
         except asyncio.CancelledError:
@@ -225,6 +240,7 @@ class PollingEvaluationExecutor:
             )
             raise
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-930049 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
+            raw_failure = render_evaluation_failure(str(error) or None, type(error).__name__)
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -233,7 +249,11 @@ class PollingEvaluationExecutor:
                     # Extensions may raise an exception without a message.
                     # Its type is still a failure fact; the existing template
                     # guarantees the terminal diagnostic stays nonempty.
-                    failure=render_evaluation_failure(str(error) or None, type(error).__name__),
+                    failure=raw_failure,
+                    operator_failure=redact_diagnostic_tail(
+                        raw_failure,
+                        max_chars=MAX_EVIDENCE_SUMMARY_CHARS,
+                    ),
                 ),
             )
         finally:
@@ -259,6 +279,7 @@ class PollingEvaluationExecutor:
                 EvidenceOutcome.PASSED if completed and result.passed else EvidenceOutcome.FAILED
             )
             summary = result.feedback
+            operator_summary = result.operator_feedback
             metrics: tuple[EvidenceMetric, ...] = ()
             partial = None
             kind = result.failure_kind
@@ -270,6 +291,7 @@ class PollingEvaluationExecutor:
                 EvidenceOutcome.PASSED if completed and result.passed else EvidenceOutcome.FAILED
             )
             summary = result.feedback
+            operator_summary = result.operator_feedback
             partial = result.partial_measurement
             metrics = tuple(
                 EvidenceMetric(
@@ -289,6 +311,8 @@ class PollingEvaluationExecutor:
             raise ValueError(message)
         if summary is not None:
             summary = summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
+        if operator_summary is not None:
+            operator_summary = operator_summary[-MAX_EVIDENCE_SUMMARY_CHARS:]
         evidence_id = evidence_identity(
             stage,
             EvidenceResultIdentity(
@@ -313,7 +337,11 @@ class PollingEvaluationExecutor:
             failure_kind=None if outcome is EvidenceOutcome.PASSED else kind,
             accepted_round=0,
         )
-        return _SemanticStageObservation(evidence=evidence, completed=completed)
+        return _SemanticStageObservation(
+            evidence=evidence,
+            completed=completed,
+            operator_summary=operator_summary,
+        )
 
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
         self._lifecycle.publish(handle_id, observation)

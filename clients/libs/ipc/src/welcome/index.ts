@@ -3,7 +3,7 @@
  * request, and the events the main process sends.
  *
  * The requests are grouped by the feature that makes them (`hosts.ts`, `start-run.ts`,
- * `run-control.ts`, `settings.ts`; the overview is the app's own), each group owning its channel names, the
+ * `run-control.ts`, `settings.ts`, `machines.ts`, `new-run.ts`, `windows.ts`; the overview is the app's own), each group owning its channel names, the
  * bridge methods its view calls, and the parser the main process runs on what arrives. This module
  * composes them: `WELCOME_CHANNELS` and `WelcomeBridge` are the union of the groups, and
  * `parseWelcomeRequest` sends a channel to its group's parser.
@@ -16,6 +16,18 @@ import {
   type HostsWelcomeBridge,
   parseHostsRequest,
 } from './hosts.js';
+import {
+  MACHINES_CHANNELS,
+  type MachinesRequest,
+  type MachinesWelcomeBridge,
+  parseMachinesRequest,
+} from './machines.js';
+import {
+  NEW_RUN_CHANNELS,
+  type NewRunRequest,
+  type NewRunWelcomeBridge,
+  parseNewRunRequest,
+} from './new-run.js';
 import {
   parseRunControlRequest,
   RUN_CONTROL_CHANNELS,
@@ -37,6 +49,12 @@ import {
 } from './start-run.js';
 import type {ChromeState, WelcomeEvent, WelcomeOverview, WelcomeResult} from './types.js';
 import {isChannelOf} from './values.js';
+import {
+  parseWindowsRequest,
+  WINDOWS_CHANNELS,
+  type WindowsRequest,
+  type WindowsWelcomeBridge,
+} from './windows.js';
 
 /** The app's own requests: the overview the welcome view loads first. */
 const APP_CHANNELS = {overview: 'vibesys:welcome:overview'} as const;
@@ -47,6 +65,9 @@ export const WELCOME_CHANNELS = {
   ...START_RUN_CHANNELS,
   ...RUN_CONTROL_CHANNELS,
   ...SETTINGS_CHANNELS,
+  ...MACHINES_CHANNELS,
+  ...NEW_RUN_CHANNELS,
+  ...WINDOWS_CHANNELS,
 } as const;
 
 type WelcomeChannel = (typeof WELCOME_CHANNELS)[keyof typeof WELCOME_CHANNELS];
@@ -74,10 +95,26 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.showWelcome]: 0,
   [WELCOME_CHANNELS.retry]: 0,
   [WELCOME_CHANNELS.stop]: 3,
+  [WELCOME_CHANNELS.stopConfirmed]: 3,
+  [WELCOME_CHANNELS.releaseRun]: 0,
+  [WELCOME_CHANNELS.readEvents]: 5,
   [WELCOME_CHANNELS.preferences]: 0,
   [WELCOME_CHANNELS.setAppearance]: 1,
   [WELCOME_CHANNELS.setNotifications]: 1,
   [WELCOME_CHANNELS.archive]: 2,
+  [WELCOME_CHANNELS.machines]: 0,
+  [WELCOME_CHANNELS.machine]: 1,
+  [WELCOME_CHANNELS.inspectCheckout]: 2,
+  [WELCOME_CHANNELS.removeMachine]: 1,
+  [WELCOME_CHANNELS.describeMachine]: 1,
+  [WELCOME_CHANNELS.preflight]: 2,
+  [WELCOME_CHANNELS.examples]: 1,
+  [WELCOME_CHANNELS.createFromExample]: 3,
+  [WELCOME_CHANNELS.copyOut]: 3,
+  [WELCOME_CHANNELS.startRun]: 2,
+  [WELCOME_CHANNELS.helperFeatures]: 1,
+  [WELCOME_CHANNELS.openRunWindow]: 1,
+  [WELCOME_CHANNELS.showMainWindow]: 0,
 } as const satisfies Readonly<Record<WelcomeChannel, number>>;
 
 /**
@@ -88,7 +125,10 @@ export interface WelcomeBridge
   extends HostsWelcomeBridge,
     StartRunWelcomeBridge,
     RunControlWelcomeBridge,
-    SettingsWelcomeBridge {
+    SettingsWelcomeBridge,
+    MachinesWelcomeBridge,
+    NewRunWelcomeBridge,
+    WindowsWelcomeBridge {
   readonly platform: string;
   overview(): Promise<WelcomeResult<WelcomeOverview>>;
   onChrome(listener: (event: WelcomeEvent<ChromeState>) => void): void;
@@ -104,7 +144,10 @@ export type WelcomeRequest =
   | HostsRequest
   | StartRunRequest
   | RunControlRequest
-  | SettingsRequest;
+  | SettingsRequest
+  | MachinesRequest
+  | NewRunRequest
+  | WindowsRequest;
 
 /**
  * The typed request on `channel` with `args` (as the welcome view's bridge sent them); throws an
@@ -124,12 +167,36 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
   if (isChannelOf(START_RUN_CHANNELS, channel)) return parseStartRunRequest(channel, args);
   if (isChannelOf(RUN_CONTROL_CHANNELS, channel)) return parseRunControlRequest(channel, args);
   if (isChannelOf(SETTINGS_CHANNELS, channel)) return parseSettingsRequest(channel, args);
+  if (isChannelOf(MACHINES_CHANNELS, channel)) return parseMachinesRequest(channel, args);
+  if (isChannelOf(NEW_RUN_CHANNELS, channel)) return parseNewRunRequest(channel, args);
+  if (isChannelOf(WINDOWS_CHANNELS, channel)) return parseWindowsRequest(channel, args);
   // `WELCOME_ARGUMENT_COUNTS` is exhaustive over the same composed channel object.
   throw new Error(`${JSON.stringify(channel)} is not a welcome request`);
 }
 
 export type {HostsWelcomeBridge, WelcomeInspection} from './hosts.js';
-export type {RunControlWelcomeBridge} from './run-control.js';
+export type {
+  CheckoutInspection,
+  MachineEntry,
+  MachineReport,
+  MachinesWelcomeBridge,
+} from './machines.js';
+export type {
+  HarnessPick,
+  NewRunWelcomeBridge,
+  Offered,
+  RoleOption,
+  RunInputs,
+  RunOptions,
+  StartedRun,
+} from './new-run.js';
+
+export {
+  HISTORY_PAGE_MAX,
+  RUN_PORT_MESSAGE,
+  type RunControlWelcomeBridge,
+  type RunHistoryPage,
+} from './run-control.js';
 export {
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
@@ -152,3 +219,4 @@ export {
   type WelcomeOverview,
   type WelcomeResult,
 } from './types.js';
+export {runOfWindow, runWindowUrl, type WindowsWelcomeBridge} from './windows.js';

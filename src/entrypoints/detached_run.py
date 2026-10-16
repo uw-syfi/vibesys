@@ -105,6 +105,10 @@ _PLAIN_REASONS: dict[RunEndOutcome, str] = {
 """The reason an end record gives when nothing more specific was reported."""
 
 
+_STOPS = frozenset({RunEndOutcome.STOPPED, RunEndOutcome.FORCE_STOPPED})
+"""Outcomes of an operator's stop, which ends a run for good: a resume only finishes the drain."""
+
+
 def pause_cause_after(
     pending: PauseCause | None, before: RunStatus, after: RunStatus
 ) -> PauseCause | None:
@@ -132,7 +136,8 @@ def end_record(
 
     A terminated server's run was force stopped; otherwise core's end reason names the
     outcome, else the ended phase does. A run with no durable record that ``ending``
-    vouched for is not resumable. A completed run that reported no ending has no end.
+    vouched for is not resumable, nor is a stopped one, however it stopped (Pause is how
+    a run continues later). A completed run that reported no ending has no end.
     """
     outcome = _outcome(phase, ending, terminated=terminated)
     if outcome is None:
@@ -140,7 +145,7 @@ def end_record(
     reported = ending.summary if ending is not None and ending.outcome is outcome else ""
     failure = "" if phase.reason is None else phase.reason.message
     reason = one_line(reported) or one_line(failure) or _PLAIN_REASONS[outcome]
-    resumable = ending is not None and ending.resumable
+    resumable = ending is not None and ending.resumable and outcome not in _STOPS
     return EndRecord(
         outcome=outcome,
         reason=reason,

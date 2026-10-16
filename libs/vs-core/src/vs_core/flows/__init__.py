@@ -81,6 +81,7 @@ from ._state import (
     RestartSettleReason,
     Waiting,
 )
+from ._trace import operation_span
 from ._winner import INPUT, EndReason, Input, Kept, NoWinner
 from ._workspaces import Assessment, NotOpened, NotReopened, Workspace, Workspaces
 
@@ -159,6 +160,7 @@ __all__ = [
     "flow",
     "hours",
     "minutes",
+    "operation_span",
     "reply_errors",
     "resource",
     "search",

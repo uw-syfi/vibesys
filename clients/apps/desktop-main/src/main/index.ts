@@ -16,13 +16,21 @@ import {
 } from '@vibesys/connection';
 import {RunNotifier} from '@vibesys/feature-app-shell/main';
 import {Hosts} from '@vibesys/feature-hosts/main';
-import {RunControl} from '@vibesys/feature-run-control/main';
+import {MachinesMain} from '@vibesys/feature-machines/main';
+import {NewRunMain} from '@vibesys/feature-new-run/main';
+import {type RelayPort, RunControl} from '@vibesys/feature-run-control/main';
 import {PreferencesMain} from '@vibesys/feature-settings/main';
 import type {HostId} from '@vibesys/hosts';
-import {FIRST_PAINT_CHANNEL, type FirstPaint, WELCOME_EVENTS} from '@vibesys/ipc';
+import {
+  FIRST_PAINT_CHANNEL,
+  type FirstPaint,
+  type RunLogsRequest,
+  WELCOME_EVENTS,
+  type WelcomeEvent,
+} from '@vibesys/ipc';
 import {remember, SettingsStore} from '@vibesys/settings';
 import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor} from 'electron';
-import {surfaceUrl} from './app-assets.js';
+import {SHELL_URL, surfaceUrl} from './app-assets.js';
 import {AppLaunches} from './app-launches.js';
 import {AppLifecycle, realTimers} from './app-lifecycle.js';
 import {
@@ -35,6 +43,7 @@ import {AppStartup} from './app-startup.js';
 import {Desktop} from './desktop.js';
 import type {LaunchPlan} from './launch-args.js';
 import {planFromSecondInstance, prepareLaunchHandoff} from './launch-handoff.js';
+import {RunWindows} from './run-windows.js';
 import {WelcomeFeed} from './welcome-feed.js';
 import {rendererGeneration} from './welcome-ipc.js';
 import {AppWindow} from './window.js';
@@ -77,6 +86,15 @@ function watchNetwork(manager: ConnectionManager): void {
   realTimers(poll, NETWORK_POLL_MS);
 }
 
+/** New run's requests, answered over the hosts' connections, recording each start in Recent. */
+function newRunMain(hosts: Hosts, settings: SettingsStore): NewRunMain {
+  return new NewRunMain({
+    connect: id => hosts.connection(id),
+    remember: run => settings.updateRecent(recent => remember(recent, run)),
+    now: () => Date.now(),
+  });
+}
+
 async function openWindow(
   manager: ConnectionManager,
   fatal: (error: Error) => void,
@@ -97,7 +115,7 @@ async function openWindow(
   const preferences = new PreferencesMain({
     store: settings,
     nativeTheme,
-    push: value => window.sendWelcome(WELCOME_EVENTS.preferences, welcome.preferences(value)),
+    push: value => windows.broadcast(WELCOME_EVENTS.preferences, welcome.preferences(value)),
   });
   await preferences.load();
   // The preload asks for this before the page's scripts run, so the first paint is in the theme
@@ -113,7 +131,7 @@ async function openWindow(
     enabled: () => preferences.notificationsEnabled(),
     notify: notice => {
       const notification = new Notification({title: notice.title, body: notice.body});
-      notification.on('click', () => window.focus());
+      notification.on('click', () => windows.main.focus());
       notification.show();
     },
   });
@@ -126,38 +144,34 @@ async function openWindow(
     log,
     push: listing => {
       notifier.listing(listing);
-      window.sendWelcome(WELCOME_EVENTS.listing, welcome.listing(listing));
+      windows.broadcast(WELCOME_EVENTS.listing, welcome.listing(listing));
     },
     retire: host => welcome.retireHost(host),
   });
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),
-    openPage: (runId, title) => window.openRunPage(runId, title),
-    confirm: text => window.confirmStop(text),
+    // A run shown in a window of its own is live there; any other run in the main window.
+    openPage: (runId, title) =>
+      (windows.runs.showing(runId) ?? windows.main).openRunPage(runId, title),
+    confirm: text => windows.main.confirmStop(text),
     remember: (run, current) => settings.updateRecent(recent => remember(recent, run), current),
     changed,
     log,
     now: () => Date.now(),
   });
-  const window = new AppWindow({
-    log,
-    surfaceUrl: surface,
-    connect: (port, runId) => runs.connect(port, runId),
-    logs: (runId, request) => runs.logs(runId, request),
-    closed: runId => {
-      runs.detach(runId);
-      changed();
-    },
-    fatal,
-  });
+  const windows = appWindows(runs, changed, surface, fatal);
   desktop = new Desktop({
-    window,
+    window: windows.main,
     welcome,
     hosts,
+    machines: machinesOver(settings, hosts),
     runs,
     settings,
     preferences,
+    newRun: newRunMain(hosts, settings),
     surfaceUrl: surface,
+    runWindows: windows.runs,
+    shellUrl: SHELL_URL,
     welcomeIpc: {
       handle: (channel, listener) =>
         ipcMain.handle(channel, (event, ...args) =>
@@ -177,6 +191,63 @@ async function openWindow(
   powerMonitor.on('resume', () => manager.wake());
   watchNetwork(manager);
   return desktop;
+}
+
+/**
+ * The app's windows: the main one, on the trusted `surface`, and the run windows, each the shell's
+ * Run screen alone; losing a run window's surface closes only that window. `broadcast` sends one
+ * ordered event to every window's surface.
+ */
+function appWindows(
+  runs: RunControl,
+  changed: () => void,
+  surface: string,
+  fatal: (error: Error) => void,
+) {
+  const shared = {
+    log,
+    connect: (port: RelayPort, runId: string) => runs.connect(port, runId),
+    logs: (runId: string, request: RunLogsRequest) => runs.logs(runId, request),
+    closed: (runId: string) => {
+      runs.detach(runId);
+      changed();
+    },
+  };
+  const main = new AppWindow({...shared, surfaceUrl: surface, fatal});
+  const runWindows = new RunWindows({
+    shellUrl: SHELL_URL,
+    create: (url, title, closed) => {
+      const runWindow: AppWindow = new AppWindow({
+        ...shared,
+        surfaceUrl: url,
+        title,
+        windowClosed: closed,
+        fatal: error => {
+          log(error.message);
+          runWindow.close();
+        },
+      });
+      return runWindow;
+    },
+  });
+  return {
+    main,
+    runs: runWindows,
+    broadcast<T>(channel: string, event: WelcomeEvent<T>): void {
+      main.sendWelcome(channel, event);
+      runWindows.sendWelcome(channel, event);
+    },
+  };
+}
+
+/** The machines, over the settings store and the hosts' checkouts and connections. */
+function machinesOver(settings: SettingsStore, hosts: Hosts): MachinesMain {
+  return new MachinesMain({
+    settings,
+    removeHost: id => hosts.remove(id),
+    checkout: id => hosts.checkout(id),
+    connection: id => hosts.connection(id),
+  });
 }
 
 async function connectionManager(): Promise<ConnectionManager> {

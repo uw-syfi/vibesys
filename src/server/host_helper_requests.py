@@ -46,6 +46,8 @@ from server.host_api import (
     DetachedLaunchFailure,
     DockerReachable,
     DockerUnreachable,
+    ExamplesListReply,
+    ExamplesListRequest,
     Hardware,
     HarnessesListReply,
     HarnessesListRequest,
@@ -77,6 +79,10 @@ from server.host_api import (
     PathsCompleteRequest,
     PingReply,
     PingRequest,
+    ProjectCopyOutReply,
+    ProjectCopyOutRequest,
+    ProjectCreateFromExampleReply,
+    ProjectCreateFromExampleRequest,
     ResumeLatest,
     ResumeRun,
     RunConnectReply,
@@ -119,6 +125,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from datetime import tzinfo
 
+    from server.host_examples import CreatedProject, ExampleList
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.relay import Dialer
@@ -309,6 +316,28 @@ class MachineProbe(Protocol):
         ...
 
 
+class ExampleProjects(Protocol):
+    """The example catalog of the checkout this helper runs from, and new projects.
+
+    Contract: ``create`` and ``copy_out`` leave nothing at ``destination`` when they fail,
+    and every failure is ``ProjectLookupError`` naming its path: ``examples_unavailable``,
+    ``unknown_example``, ``destination_exists``, ``destination_nested``, ``path_missing``,
+    ``not_nested`` or ``project_create_failed``.
+    """
+
+    def list(self) -> ExampleList:
+        """Every catalogued example with its tasks."""
+        ...
+
+    def create(self, example: str, destination: Path) -> CreatedProject:
+        """Copy ``example`` into its own new Git repository at ``destination``."""
+        ...
+
+    def copy_out(self, source: Path, destination: Path) -> CreatedProject:
+        """Copy ``source``'s tracked files into their own new Git repository at ``destination``."""
+        ...
+
+
 class RunPreflight(Protocol):
     """Runs the run's own preflight (``vibesys preflight``) in a project.
 
@@ -348,6 +377,7 @@ class HelperHost:
     """The run log store; ``None`` on a host that has none, which then does not offer ``logs``."""
     machine: MachineProbe
     preflight: RunPreflight
+    examples: ExampleProjects
     clock: Clock
     """Wall-clock epoch seconds, with ``timezone``: when ``machine.describe``'s day began."""
     timezone: tzinfo
@@ -623,7 +653,13 @@ def _answer(
             reply = _project_reply(request, host)
         case RunsReadEventsRequest():
             reply = _run_events_reply(request, host)
-        case MachineDescribeRequest() | CheckoutInspectRequest():
+        case (
+            MachineDescribeRequest()
+            | CheckoutInspectRequest()
+            | ExamplesListRequest()
+            | ProjectCreateFromExampleRequest()
+            | ProjectCopyOutRequest()
+        ):
             reply = _machine_reply(request, host)
         case RunStartRequest() | RunPreflightRequest():
             reply = (
@@ -669,11 +705,39 @@ def _project_reply(
             return RunsListReply(request_id=request_id, runs=summaries)
 
 
-def _machine_reply(
-    request: MachineDescribeRequest | CheckoutInspectRequest, host: HelperHost
-) -> MachineDescribeReply | CheckoutInspectReply:
-    """Answer one read of what this machine offers, or of what a path on it holds."""
+def _examples_reply(
+    request: ExamplesListRequest | ProjectCreateFromExampleRequest | ProjectCopyOutRequest,
+    host: HelperHost,
+) -> ExamplesListReply | ProjectCreateFromExampleReply | ProjectCopyOutReply:
+    """Answer one read of the example catalog, or make one new project."""
     match request:
+        case ExamplesListRequest(request_id=request_id):
+            return ExamplesListReply(request_id=request_id, listing=host.examples.list())
+        case ProjectCreateFromExampleRequest(
+            request_id=request_id, example=example, destination=destination
+        ):
+            created = host.examples.create(example, Path(_host_path(destination, host.directories)))
+            return ProjectCreateFromExampleReply(request_id=request_id, created=created)
+        case ProjectCopyOutRequest(request_id=request_id, source=source, destination=destination):
+            created = host.examples.copy_out(
+                Path(_host_path(source, host.directories)),
+                Path(_host_path(destination, host.directories)),
+            )
+            return ProjectCopyOutReply(request_id=request_id, created=created)
+
+
+def _machine_reply(
+    request: MachineDescribeRequest
+    | CheckoutInspectRequest
+    | ExamplesListRequest
+    | ProjectCreateFromExampleRequest
+    | ProjectCopyOutRequest,
+    host: HelperHost,
+) -> HelperReply:
+    """Answer what this machine offers, what a path on it holds, or make a project on it."""
+    match request:
+        case ExamplesListRequest() | ProjectCreateFromExampleRequest() | ProjectCopyOutRequest():
+            return _examples_reply(request, host)
         case MachineDescribeRequest(request_id=request_id):
             return MachineDescribeReply(request_id=request_id, machine=describe_machine(host))
         case CheckoutInspectRequest(request_id=request_id, path=path):

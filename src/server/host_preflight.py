@@ -175,6 +175,9 @@ class PreflightReport(BaseModel):
 
     version: Literal[1] = 1
     settings: SettingsValid | SettingsInvalid
+    uses_docker: bool | None
+    """Whether the run's environment starts local Docker containers; ``None`` when the
+    settings did not resolve one. Docker is not checked for a run that needs none."""
     agent_image: Check
     evaluator: Check
 

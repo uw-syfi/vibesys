@@ -53,7 +53,12 @@ from .connector_protocol import (
     SlurmConnectorResponse,
     SlurmConnectorSyncToRequest,
 )
-from .errors import SlurmError, SlurmSubmissionRejectedError, SlurmTransferInterruptedError
+from .errors import (
+    SlurmError,
+    SlurmSubmissionRejectedError,
+    SlurmTransferInterruptedError,
+    SlurmWorkspaceRootProbeError,
+)
 from .fake_cluster import FakeCluster, SecondsRange, SlurmTimingProfile
 from .fake_connector import REQUESTS_FILE, FakeConnector
 from .fake_ledger import FakeEvaluationLedger
@@ -201,6 +206,7 @@ from .transport_broker import (
     slurm_transport_broker_available,
     slurm_transport_broker_policy,
 )
+from .workspace_probe import probe_workspace_root
 
 __all__ = [
     "BATCH_RESULT_LAYOUT",
@@ -325,6 +331,7 @@ __all__ = [
     "SlurmTransportBrokerPolicy",
     "SlurmTransportRequestError",
     "SlurmTreeArtifact",
+    "SlurmWorkspaceRootProbeError",
     "Step",
     "SubmitBoundJob",
     "SubmitStep",
@@ -361,6 +368,7 @@ __all__ = [
     "parse_queue_row",
     "parse_queue_snapshot",
     "phase_of",
+    "probe_workspace_root",
     "queue_snapshot_command",
     "recorded_job_ids",
     "resolve_entries",

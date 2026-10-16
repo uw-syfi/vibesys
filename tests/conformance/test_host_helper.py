@@ -34,7 +34,8 @@ if TYPE_CHECKING:
 _RUNNER = "host-helper"
 _SCENARIOS = tuple(
     itertools.chain.from_iterable(
-        runner_group(_RUNNER, group) for group in ("handshake", "registry", "host-paths", "logs")
+        runner_group(_RUNNER, group)
+        for group in ("handshake", "registry", "host-paths", "examples", "logs")
     )
 )
 _LOGS = frozenset(runner_group(_RUNNER, "logs"))

@@ -243,6 +243,7 @@ def test_run_start_refuses_an_unvetted_role_model_before_launching(tmp_path: Pat
 
 _VALID = PreflightReport(
     settings=SettingsValid(),
+    uses_docker=True,
     agent_image=Check(id=CheckId.AGENT_IMAGE, state=CheckState.WARN, detail="will be built"),
     evaluator=Check(id=CheckId.EVALUATOR_AVAILABLE, state=CheckState.OK, detail="benchmark"),
 )
@@ -319,3 +320,32 @@ def test_the_repository_root_comes_from_git(tmp_path: Path) -> None:
     assert machine.repository_root(tmp_path / "proj") == tmp_path.resolve()
     assert machine.repository_root(tmp_path / "other") is None
     assert DOCKER_VERSION_COMMAND[0] == "docker"
+
+
+def test_a_run_that_needs_no_docker_is_not_blocked_by_an_unreachable_docker() -> None:
+    """Regression: every run failed ``docker_reachable`` without Docker, even one needing none."""
+    report = _VALID.model_copy(update={"uses_docker": False})
+
+    checks = preflight_checks(_facts(None, DockerUnreachable(reason="daemon down")), report)
+
+    assert all(check.state is not CheckState.FAIL for check in checks)
+    (docker,) = [check for check in checks if check.id is CheckId.DOCKER_REACHABLE]
+    assert (docker.state, docker.fix) == (CheckState.OK, None)
+    assert docker.detail.startswith("not needed")
+
+
+@given(
+    uses_docker=st.sampled_from([True, False, None]),
+    docker=st.sampled_from([DockerReachable(version="27"), DockerUnreachable(reason="down")]),
+)
+def test_docker_fails_exactly_when_the_run_may_need_it_and_it_is_unreachable(
+    *, uses_docker: bool | None, docker: DockerReachable | DockerUnreachable
+) -> None:
+    report = _VALID.model_copy(update={"uses_docker": uses_docker})
+
+    checks = preflight_checks(_facts(None, docker), report)
+
+    (check,) = [check for check in checks if check.id is CheckId.DOCKER_REACHABLE]
+    unreachable = isinstance(docker, DockerUnreachable)
+    assert (check.state is CheckState.FAIL) == (uses_docker is not False and unreachable)
+    assert [each.id for each in checks] == list(CheckId)

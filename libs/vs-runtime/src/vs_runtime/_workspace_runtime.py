@@ -46,6 +46,8 @@ class CommandExecutionResult(Protocol):
     exit_code: int | None
     truncated: bool
     stdout: str
+    diagnostic_output: str
+    diagnostic_stdout: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,6 +397,7 @@ def _command_result(result: CommandExecutionResult) -> CommandResult:
         output=result.output,
         exit_code=result.exit_code,
         truncated=result.truncated,
+        diagnostic_output=result.diagnostic_output,
     )
 
 
@@ -409,4 +412,5 @@ def _captured_result(
         output=captured.stdout,
         exit_code=command.exit_code,
         truncated=captured.truncated,
+        diagnostic_output=captured.diagnostic_stdout,
     )

@@ -71,6 +71,7 @@ from pydantic import (
     model_validator,
 )
 
+from server.host_examples import CreatedProject, ExampleList
 from server.host_preflight import Check, RunOptions
 from vs_decode.api import Unreadable, decode_json
 
@@ -765,6 +766,8 @@ class HelperFeature(StrEnum):
     """``run.preflight``: the closed checks that say whether a run can start, each with its fix."""
     RUN_OPTIONS = "run_options"
     """``run.start``'s and ``run.preflight``'s ``options``: rounds, time limit, results, roles."""
+    EXAMPLES = "examples"
+    """``examples.list``, ``project.create_from_example`` and ``project.copy_out``."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -1114,6 +1117,31 @@ class CheckoutInspectRequest(_HelperRequest):
     """A path as typed: ``~`` expands on the host, a relative path is under the home directory."""
 
 
+class ExamplesListRequest(_HelperRequest):
+    """The examples of the checkout this helper runs from, with their tasks."""
+
+    type: Literal["examples.list"] = "examples.list"
+
+
+class ProjectCreateFromExampleRequest(_HelperRequest):
+    """Copy ``example`` into its own new Git repository at ``destination`` (absent or empty)."""
+
+    type: Literal["project.create_from_example"] = "project.create_from_example"
+    example: Annotated[str, StringConstraints(min_length=1, max_length=256)]
+    """A name ``examples.list`` listed."""
+    destination: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_PATH_CHARACTERS)]
+    """A path as typed, as for ``paths.complete``."""
+
+
+class ProjectCopyOutRequest(_HelperRequest):
+    """Copy ``source``, a folder inside another Git repository, into its own new one at ``destination``."""
+
+    type: Literal["project.copy_out"] = "project.copy_out"
+    source: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_PATH_CHARACTERS)]
+    destination: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_PATH_CHARACTERS)]
+    """Must not exist."""
+
+
 HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
@@ -1127,6 +1155,9 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     MachineDescribeRequest: HelperFeature.MACHINE_DESCRIBE,
     CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
     RunPreflightRequest: HelperFeature.PREFLIGHT,
+    ExamplesListRequest: HelperFeature.EXAMPLES,
+    ProjectCreateFromExampleRequest: HelperFeature.EXAMPLES,
+    ProjectCopyOutRequest: HelperFeature.EXAMPLES,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
@@ -1168,7 +1199,10 @@ HelperRequest = Annotated[
     | RunsReadEventsRequest
     | MachineDescribeRequest
     | CheckoutInspectRequest
-    | RunPreflightRequest,
+    | RunPreflightRequest
+    | ExamplesListRequest
+    | ProjectCreateFromExampleRequest
+    | ProjectCopyOutRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1611,6 +1645,27 @@ CheckoutInspection = Annotated[
 ]
 
 
+class ExamplesListReply(_HelperReply):
+    """The checkout's example catalog."""
+
+    type: Literal["examples.list"] = "examples.list"
+    listing: ExampleList
+
+
+class ProjectCreateFromExampleReply(_HelperReply):
+    """The project made from the example."""
+
+    type: Literal["project.create_from_example"] = "project.create_from_example"
+    created: CreatedProject
+
+
+class ProjectCopyOutReply(_HelperReply):
+    """The project copied out into its own repository."""
+
+    type: Literal["project.copy_out"] = "project.copy_out"
+    created: CreatedProject
+
+
 class RunPreflightReply(_HelperReply):
     """Every check, in ``CheckId`` order; Start is enabled exactly when none is ``fail``."""
 
@@ -1668,6 +1723,18 @@ class HelperErrorCode(StrEnum):
     """``logs.read`` named a stream the instance does not have."""
     LOG_STORE_CORRUPT = "log_store_corrupt"
     """``logs.list`` or ``logs.read`` found the run's log index corrupt; asking again does not help."""
+    UNKNOWN_EXAMPLE = "unknown_example"
+    """``project.create_from_example`` named no example, or one ambiguously; the message lists."""
+    EXAMPLES_UNAVAILABLE = "examples_unavailable"
+    """The helper runs from no checkout with an example catalog, or the catalog is invalid."""
+    DESTINATION_EXISTS = "destination_exists"
+    """A new project's destination exists (and, for an example, is not an empty directory)."""
+    DESTINATION_NESTED = "destination_nested"
+    """A new project's destination lies inside a Git repository or the VibeSys checkout."""
+    NOT_NESTED = "not_nested"
+    """``project.copy_out``'s source is in no other Git repository: it can run where it is."""
+    PROJECT_CREATE_FAILED = "project_create_failed"
+    """Copying or committing failed; nothing is left at the destination, and the message says why."""
     UNKNOWN_RUN = "unknown_run"
     """``runs.read_events`` named a run the project does not have; the message names it."""
     UNVETTED_HARNESS = "unvetted_harness"
@@ -1714,6 +1781,9 @@ HelperReply = (
     | MachineDescribeReply
     | CheckoutInspectReply
     | RunPreflightReply
+    | ExamplesListReply
+    | ProjectCreateFromExampleReply
+    | ProjectCopyOutReply
 )
 """A request's result; its ``type`` is the request's."""
 

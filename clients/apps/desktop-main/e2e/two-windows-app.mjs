@@ -23,6 +23,7 @@
 import {Duplex} from 'node:stream';
 import {app, ipcMain, webContents} from 'electron';
 import {RunControl} from '@vibesys/feature-run-control/main';
+import {firstLoad} from './first-load.mjs';
 
 // Resolve after `test:e2e` builds the package, exactly as `welcome-recovery-app.mjs` does: this
 // entry sits outside the production graph, so Playwright drives it without a test-only API on the
@@ -52,6 +53,8 @@ const fatals = [];
 const windows = {};
 /** Each window's current run page `webContents.id`, correlated when `openPage` creates it. */
 const runPageContentsId = new Map();
+/** Each run page's first load, by run id: settles on the page's own load events. */
+const runPageLoads = new Map();
 
 function log(message) {
   logs.push(message);
@@ -252,7 +255,10 @@ void app.whenReady().then(() => {
       const before = new Set(webContents.getAllWebContents().map(contents => contents.id));
       const page = target.openRunPage(runId, title);
       const created = webContents.getAllWebContents().find(contents => !before.has(contents.id));
-      if (created !== undefined) runPageContentsId.set(runId, created.id);
+      if (created !== undefined) {
+        runPageContentsId.set(runId, created.id);
+        runPageLoads.set(runId, firstLoad(created));
+      }
       return page;
     },
     confirm: async () => true,
@@ -302,6 +308,12 @@ globalThis.vibesysTwoWindowsE2E = {
       .getAllWebContents()
       .filter(contents => contents.getURL() === RUN_URL && !contents.isDestroyed())
       .map(contents => contents.id);
+  },
+  /** Resolves once the run page `attach(label)` opened has loaded; rejects if it never will. */
+  async runPageLoaded(label) {
+    const load = runPageLoads.get(windowRunId(label));
+    if (load === undefined) throw new Error(`window ${label} has opened no run page`);
+    await load;
   },
   /** The run page `webContents.id` `attach(label)` opened, named rather than inferred by order. */
   contentsIdFor(label) {

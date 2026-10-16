@@ -51,6 +51,7 @@ interface MainControl {
   attach(label: WindowLabel): Promise<void>;
   windowState(label: WindowLabel): {readonly mode: 'welcome' | 'run'} | null;
   inspectRun(label: WindowLabel): Promise<RunInspection>;
+  runPageLoaded(label: WindowLabel): Promise<void>;
   runWebContentsIds(): readonly number[];
   contentsIdFor(label: WindowLabel): number | null;
   closeWindow(label: WindowLabel): void;
@@ -63,10 +64,16 @@ interface MainControl {
   channelStates(): Readonly<Record<string, {readonly aborted: boolean}>>;
 }
 
-async function bounded<T>(label: string, operation: Promise<T>): Promise<T> {
+/**
+ * Hang guard for a run page's first load. A passing run never waits on it: the wait ends on the
+ * page's load event. It only names the step when a load hangs, inside the test's own 30 s limit.
+ */
+const LOAD_HANG_GUARD_MS = 25_000;
+
+async function bounded<T>(label: string, operation: Promise<T>, hangGuardMs = 8_000): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<never>((_resolve, reject) => {
-    timeout = setTimeout(() => reject(new Error(`timed out while ${label}`)), 8_000);
+    timeout = setTimeout(() => reject(new Error(`timed out while ${label}`)), hangGuardMs);
   });
   try {
     return await Promise.race([operation, expired]);
@@ -97,6 +104,13 @@ function control(app: ElectronApplication) {
           .vibesysTwoWindowsE2E;
         if (api === undefined) throw new Error('the two-windows E2E control is unavailable');
         return api.inspectRun(label);
+      }, label),
+    runPageLoaded: (label: WindowLabel): Promise<void> =>
+      app.evaluate((_electron, label) => {
+        const api = (globalThis as typeof globalThis & {vibesysTwoWindowsE2E?: MainControl})
+          .vibesysTwoWindowsE2E;
+        if (api === undefined) throw new Error('the two-windows E2E control is unavailable');
+        return api.runPageLoaded(label);
       }, label),
     runWebContentsIds: (): Promise<readonly number[]> =>
       app.evaluate(() => {
@@ -172,8 +186,12 @@ test('two windows attached to two runs stay independent, and closing one leaves 
     expect(await bounded('reading shell state', api.state())).toMatchObject({fatals: []});
 
     // Each run page navigates asynchronously (`openRunPage` sets `mode` before its `loadURL`
-    // settles), so wait for both pages to exist before reading from them.
-    await expect.poll(() => bounded('listing run pages', api.runWebContentsIds())).toHaveLength(2);
+    // settles), so wait on each page's own load event before reading from them. Polling for the
+    // pages' URLs under expect.poll's 5 s deadline failed on a cold Electron start (PR #2885),
+    // when the first navigation took longer than that to commit.
+    await bounded("loading window a's run page", api.runPageLoaded('a'), LOAD_HANG_GUARD_MS);
+    await bounded("loading window b's run page", api.runPageLoaded('b'), LOAD_HANG_GUARD_MS);
+    expect(await bounded('listing run pages', api.runWebContentsIds())).toHaveLength(2);
     const idA = await bounded("reading window a's contents id", api.contentsIdFor('a'));
     const idB = await bounded("reading window b's contents id", api.contentsIdFor('b'));
     expect(idA).not.toBeNull();

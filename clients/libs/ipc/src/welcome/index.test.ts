@@ -58,10 +58,38 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.showWelcome]: [],
   [WELCOME_CHANNELS.retry]: [],
   [WELCOME_CHANNELS.stop]: ['local', '0123456789ab', false],
+  [WELCOME_CHANNELS.stopConfirmed]: ['local', '0123456789ab', false],
+  [WELCOME_CHANNELS.releaseRun]: [],
+  [WELCOME_CHANNELS.readEvents]: ['local', '/srv/project', 'run-1', 0, 100],
   [WELCOME_CHANNELS.preferences]: [],
   [WELCOME_CHANNELS.setAppearance]: [{mode: 'dark', light: 'mist', dark: 'midnight'}],
   [WELCOME_CHANNELS.setNotifications]: [false],
   [WELCOME_CHANNELS.archive]: [{host: 'local', runId: '20261015-163047'}, true],
+  [WELCOME_CHANNELS.openRunWindow]: [{host: 'ssh:chelan4', runId: '20261015-163047'}],
+  [WELCOME_CHANNELS.showMainWindow]: [],
+  [WELCOME_CHANNELS.machines]: [],
+  [WELCOME_CHANNELS.machine]: ['ssh:chelan4'],
+  [WELCOME_CHANNELS.inspectCheckout]: ['ssh:chelan4', '~/vibesys'],
+  [WELCOME_CHANNELS.removeMachine]: ['ssh:chelan4'],
+  [WELCOME_CHANNELS.describeMachine]: ['local'],
+  [WELCOME_CHANNELS.preflight]: [
+    'local',
+    {project: '/p', task: 'mpmc', harness: null, options: {rounds: 2}, args: []},
+  ],
+  [WELCOME_CHANNELS.examples]: ['local'],
+  [WELCOME_CHANNELS.helperFeatures]: ['ssh:chelan4'],
+  [WELCOME_CHANNELS.createFromExample]: ['local', 'queue-rs', '~/projects/queue-rs'],
+  [WELCOME_CHANNELS.copyOut]: ['local', '/p/inner', '/p-own'],
+  [WELCOME_CHANNELS.startRun]: [
+    'local',
+    {
+      project: '/p',
+      task: 'mpmc',
+      harness: {provider: 'claude', model: 'claude-a'},
+      options: {},
+      args: ['--x'],
+    },
+  ],
 };
 
 /** What every accepted request guarantees, whatever the view sent. */

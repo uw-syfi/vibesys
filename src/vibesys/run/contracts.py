@@ -204,6 +204,8 @@ class RoundFailureSummary(BaseModel):
     turns: int | None = None
     limit: int | None = None
     text: str = ""
+    operator_text: str | None = None
+    """Credential-safe projection used only by the public run event."""
 
 
 class RoundSummary(BaseModel):

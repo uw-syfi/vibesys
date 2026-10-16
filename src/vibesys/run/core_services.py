@@ -34,6 +34,7 @@ from vs_runtime.api.core import (
     CoreStartup,
     IgnoreCommits,
     IgnoreMeasurement,
+    MeasurementDecisions,
     MeasurementServices,
     OperationPorts,
     OwedSubmissions,
@@ -162,6 +163,8 @@ class CoreResources:
     network: Network
     """Serves the in-turn agent evaluation socket."""
     measurement_observer: MeasurementObserver = field(default_factory=IgnoreMeasurement)
+    measurement_decisions: MeasurementDecisions = field(default_factory=MeasurementDecisions)
+    """Which decision each measurement answers; the same one names stage output by its gate."""
     """Hears each measurement stage start and end, for the host's event stream."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
     """Hears each confirmed commit, for committed views and round events."""
@@ -205,6 +208,8 @@ class CoreServices:
     """The in-turn evaluation tool service, when the plan offers one; the run loop serves it."""
     profile_capture_withheld: bool = False
     """The plan would offer profile work, but the run environment cannot capture a profile."""
+    stop_requested: bool = False
+    """The operator force-stopped this run before (``record_stop_request``): it only ends."""
 
     async def close(self) -> None:
         """Release the evaluation executor; workspaces and the client close with the host."""
@@ -251,7 +256,9 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         threads=resources.threads,
         blocking=resources.blocking,
         workspaces=resources.workspaces,
-        measurement=MeasurementServices(resources.evaluation, resources.measurement_observer),
+        measurement=MeasurementServices(
+            resources.evaluation, resources.measurement_observer, resources.measurement_decisions
+        ),
         sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
         operations=catalog,
     )
@@ -270,6 +277,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         clock=resources.clock,
         agent_evaluation=bridge,
         profile_capture_withheld=plan.profile_capture_withheld,
+        stop_requested=resources.project.state.stop_requested(run_id),
     )
 
 

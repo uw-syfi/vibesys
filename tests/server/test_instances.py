@@ -51,6 +51,7 @@ from server.registry import (
     FakeInstanceLogs,
     FakeInstanceMetadataStore,
     FakeInstanceStore,
+    FakeStopIntents,
     FileInstanceHold,
     FileInstanceLogs,
     FileInstanceMetadataStore,
@@ -1031,12 +1032,49 @@ def test_stop_signals_a_live_server_and_waits_for_its_lock(
     clock = ManualClock()
 
     result = LiveRegistry(store, CLOCK).stop(
-        IDS[0], StopEffects(_UNANSWERED, signaller, clock, clock.advance)
+        IDS[0], StopEffects(_UNANSWERED, signaller, clock, clock.advance, FakeStopIntents())
     )
 
     assert result.outcome is StopOutcome.STOPPED
     assert signaller.signalled == [4242]
     assert LiveRegistry(store, CLOCK).list().instances == ()
+
+
+def test_a_signalled_stop_is_recorded_durably_before_the_signal(
+    serving: tuple[FakeInstanceStore, FakeInstanceHold],
+) -> None:
+    """A force stop keeps the stop request first: the killed server cannot commit it."""
+    store, hold = serving
+    intents = FakeStopIntents()
+    seen_at_signal: list[list[str]] = []
+
+    def terminated() -> None:
+        seen_at_signal.append(list(intents.recorded))
+        hold.release()
+
+    clock = ManualClock()
+    result = LiveRegistry(store, CLOCK).stop(
+        IDS[0],
+        StopEffects(_UNANSWERED, _ExitingSignaller(terminated), clock, clock.advance, intents),
+        force=True,
+    )
+
+    assert result.outcome is StopOutcome.STOPPED
+    assert seen_at_signal == [["run-1"]]
+
+
+def test_a_stop_that_signals_nothing_records_nothing() -> None:
+    store = FakeInstanceStore()
+    intents = FakeStopIntents()
+    clock = ManualClock()
+
+    result = LiveRegistry(store, CLOCK).stop(
+        IDS[0],
+        StopEffects(_UNANSWERED, _ExitingSignaller(lambda: None), clock, clock.advance, intents),
+    )
+
+    assert result.outcome is StopOutcome.NOT_RUNNING
+    assert intents.recorded == []
 
 
 def test_stop_reports_a_server_that_outlives_the_wait(
@@ -1046,7 +1084,10 @@ def test_stop_reports_a_server_that_outlives_the_wait(
     clock = ManualClock()
 
     result = LiveRegistry(store, CLOCK).stop(
-        IDS[0], StopEffects(_UNANSWERED, _ExitingSignaller(lambda: None), clock, clock.advance)
+        IDS[0],
+        StopEffects(
+            _UNANSWERED, _ExitingSignaller(lambda: None), clock, clock.advance, FakeStopIntents()
+        ),
     )
 
     assert result.outcome is StopOutcome.STILL_RUNNING
@@ -1063,7 +1104,8 @@ def test_stop_never_signals_a_dead_or_unknown_server(
 
     for instance_id in (IDS[0], IDS[1]):
         result = LiveRegistry(store, CLOCK).stop(
-            instance_id, StopEffects(_UNANSWERED, signaller, clock, clock.advance)
+            instance_id,
+            StopEffects(_UNANSWERED, signaller, clock, clock.advance, FakeStopIntents()),
         )
         assert result.outcome is StopOutcome.NOT_RUNNING
     assert signaller.signalled == []
@@ -1079,7 +1121,11 @@ def test_stop_reports_a_host_that_cannot_signal_safely(
     result = LiveRegistry(store, CLOCK).stop(
         IDS[0],
         StopEffects(
-            _UNANSWERED, _ExitingSignaller(lambda: None, supported=False), clock, clock.advance
+            _UNANSWERED,
+            _ExitingSignaller(lambda: None, supported=False),
+            clock,
+            clock.advance,
+            FakeStopIntents(),
         ),
     )
 
@@ -1224,6 +1270,7 @@ def _stop_against(
                 signaller,
                 threads,
                 threads.sleep,
+                FakeStopIntents(),
             ),
             force=force,
         )
@@ -1417,7 +1464,9 @@ def test_stop_signals_a_server_wedged_after_its_tombstone(
     registry = LiveRegistry(store, ManualClock(tombstone_age))
 
     result = registry.stop(
-        IDS[0], StopEffects(_UNANSWERED, signaller, clock, clock.advance), force=force
+        IDS[0],
+        StopEffects(_UNANSWERED, signaller, clock, clock.advance, FakeStopIntents()),
+        force=force,
     )
 
     assert result.outcome is StopOutcome.STOPPED
@@ -1443,7 +1492,7 @@ def test_stop_lets_an_exiting_server_finish_without_a_signal() -> None:
         hold.release()
 
     result = LiveRegistry(store, CLOCK).stop(
-        IDS[0], StopEffects(_UNANSWERED, signaller, clock, pause)
+        IDS[0], StopEffects(_UNANSWERED, signaller, clock, pause, FakeStopIntents())
     )
 
     assert result.outcome is StopOutcome.STOPPED
@@ -1501,7 +1550,9 @@ def test_every_reader_agrees_whether_a_holder_with_its_tombstone_is_running(age:
     signaller = _ExitingSignaller(hold.release)
     waits = ManualClock()
     result = registry.stop(
-        IDS[0], StopEffects(_UNANSWERED, signaller, waits, waits.advance), force=False
+        IDS[0],
+        StopEffects(_UNANSWERED, signaller, waits, waits.advance, FakeStopIntents()),
+        force=False,
     )
     assert result.outcome is StopOutcome.STOPPED
     assert (waits.now() >= STOP_TIMEOUT_SECONDS) is not running

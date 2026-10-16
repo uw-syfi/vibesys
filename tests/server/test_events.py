@@ -26,12 +26,15 @@ from server.events import (
     RoundFinishedData,
     RunConfiguredData,
     RunEvent,
+    SubprocessOutputData,
     TodoItemData,
     TodoUpdateData,
     ToolCallData,
     ToolResultData,
     UsageUpdateData,
     WorkspaceSnapshotData,
+    WorkstreamFailureData,
+    WorkstreamFailureKind,
     make_event,
 )
 
@@ -230,6 +233,21 @@ class TestBackwardCompatibility:
         with pytest.raises(ValueError, match="not_a_kind"):
             RunEvent.model_validate_json(raw)
 
+    def test_raw_subprocess_output_is_redacted_on_replay_and_round_trip(self) -> None:
+        raw = (
+            '{"protocol_version": 1, "sequence": 4, "run_id": "r", '
+            '"timestamp": "2026-01-01T00:00:00Z", "type": "subprocess_output", '
+            '"data": {"kind": "subprocess_output", "process_id": "benchmark-1", '
+            '"process_kind": "benchmark", "stream": "stderr", '
+            '"content": "TOKEN=recorded-secret\\nBearer recorded-bearer"}}'
+        )
+
+        event = RunEvent.model_validate_json(raw)
+
+        assert isinstance(event.data, SubprocessOutputData)
+        assert event.data.content == "TOKEN=[REDACTED]\nBearer [REDACTED]"
+        assert _round_trip(event) == event
+
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
 def test_benchmark_result_rejects_non_finite_value(value: float) -> None:
@@ -336,6 +354,51 @@ class TestFrameworkEventRoundTrip:
         assert restored.status is EventStatus.FAILED
         # A failed gate is an expected outcome, not a run fault: no diagnostic.
         assert restored.diagnostic is None
+
+    @pytest.mark.parametrize(
+        ("payload", "redacted"),
+        [
+            ("API_KEY=gate-secret\nfailed", "API_KEY=[REDACTED]\nfailed"),
+            ("request used Bearer gate-token", "request used Bearer [REDACTED]"),
+        ],
+    )
+    def test_gate_finished_redacts_credentials_from_output_tail(
+        self, payload: str, redacted: str
+    ) -> None:
+        event = GateFinishedData(gate=GateKind.ACCURACY, output_tail=payload)
+
+        assert event.output_tail == redacted
+
+    def test_workstream_failure_redacts_credentials_from_text(self) -> None:
+        failure = WorkstreamFailureData(
+            kind=WorkstreamFailureKind.NO_TRUSTED_EVIDENCE,
+            text="password: workstream-secret; TOKEN=second-secret",
+        )
+
+        assert failure.text == "password: [REDACTED]; TOKEN=[REDACTED]"
+
+    def test_byte_text_is_coerced_before_every_replay_redaction(self) -> None:
+        gate = GateFinishedData.model_validate(
+            {"gate": GateKind.ACCURACY, "output_tail": b"API_TOKEN=gate-bytes-secret"}
+        )
+        subprocess = SubprocessOutputData.model_validate(
+            {
+                "process_id": "accuracy-1",
+                "process_kind": "accuracy_checker",
+                "stream": "stderr",
+                "content": b"TOKEN=stream-bytes-secret",
+            }
+        )
+        failure = WorkstreamFailureData.model_validate(
+            {
+                "kind": WorkstreamFailureKind.NO_TRUSTED_EVIDENCE,
+                "text": b"password: workstream-bytes-secret",
+            }
+        )
+
+        assert gate.output_tail == "API_TOKEN=[REDACTED]"
+        assert subprocess.content == "TOKEN=[REDACTED]"
+        assert failure.text == "password: [REDACTED]"
 
     @pytest.mark.parametrize("value", [float("nan"), float("inf")])
     def test_gate_finished_rejects_non_finite_value(self, value: float) -> None:

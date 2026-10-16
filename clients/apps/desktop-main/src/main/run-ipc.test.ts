@@ -154,7 +154,7 @@ function expectAdmission(
 describe('RunIpcRegistry logs', () => {
   test("answers a logs request from the current run page with that window's run", async () => {
     const ipc = new FakeRunIpc();
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, () => {});
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], () => {});
     const first = new FakePage(41);
     const second = new FakePage(42);
     registry.register(first);
@@ -169,7 +169,7 @@ describe('RunIpcRegistry logs', () => {
   test('refuses a request from another sender or document, or one with an unknown key', async () => {
     const ipc = new FakeRunIpc();
     const refused: string[] = [];
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, message => refused.push(message));
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], message => refused.push(message));
     const page = new FakePage(41);
     registry.register(page);
 
@@ -192,7 +192,7 @@ describe('RunIpcRegistry', () => {
   test('admits only the current sender at the exact run resource', () => {
     const ipc = new FakeRunIpc();
     const refused: string[] = [];
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, message => refused.push(message));
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], message => refused.push(message));
     const page = new FakePage(41);
     registry.register(page);
 
@@ -238,7 +238,7 @@ describe('RunIpcRegistry', () => {
   test('ignores a connection event with no transferred port', () => {
     const ipc = new FakeRunIpc();
     const refused: string[] = [];
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, message => refused.push(message));
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], message => refused.push(message));
     const page = new FakePage(41);
     registry.register(page);
 
@@ -251,7 +251,7 @@ describe('RunIpcRegistry', () => {
   test('regression: a second window never steals or closes a port the first window owns', () => {
     const ipc = new FakeRunIpc();
     const refused: string[] = [];
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, message => refused.push(message));
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], message => refused.push(message));
     const first = new FakePage(41);
     const second = new FakePage(42);
     registry.register(first);
@@ -281,7 +281,7 @@ describe('RunIpcRegistry', () => {
   test('a port neither registered window claims is refused and closed exactly once', () => {
     const ipc = new FakeRunIpc();
     const refused: string[] = [];
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, message => refused.push(message));
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], message => refused.push(message));
     registry.register(new FakePage(41));
     registry.register(new FakePage(42));
 
@@ -295,7 +295,7 @@ describe('RunIpcRegistry', () => {
 
   test('withdrawing a registration stops it from competing for later connects', () => {
     const ipc = new FakeRunIpc();
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, () => {});
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], () => {});
     const page = new FakePage(41);
     const unregister = registry.register(page);
     unregister();
@@ -312,7 +312,7 @@ describe('RunIpcRegistry', () => {
     const ipc = new FakeRunIpc();
     const messages: unknown[] = [];
     let closes = 0;
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, () => {});
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], () => {});
     registry.register({
       currentSenderId: () => 41,
       logs: noLogs,
@@ -361,7 +361,7 @@ describe('RunIpcRegistry', () => {
     const ipc = new FakeRunIpc();
     const failures: string[] = [];
     const owner = new AbortController();
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, failure => failures.push(failure));
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], failure => failures.push(failure));
     registry.register({
       currentSenderId: () => 41,
       connect: port => connect(port, owner),
@@ -380,7 +380,7 @@ describe('RunIpcRegistry', () => {
 
   test('does not start a port its connection owner rejected', () => {
     const ipc = new FakeRunIpc();
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, () => {});
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], () => {});
     registry.register({currentSenderId: () => 41, connect: port => port.close(), logs: noLogs});
     const port = new FakePendingRunPort();
 
@@ -398,7 +398,7 @@ describe('RunIpcRegistry', () => {
   }) => {
     const ipc = new FakeRunIpc();
     let ownerCloses = 0;
-    const registry = new RunIpcRegistry(ipc, APP_ENTRY_URL, () => {});
+    const registry = new RunIpcRegistry(ipc, [APP_ENTRY_URL], () => {});
     registry.register({
       currentSenderId: () => 41,
       logs: noLogs,

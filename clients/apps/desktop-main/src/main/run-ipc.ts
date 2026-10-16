@@ -113,7 +113,8 @@ function describe(error: unknown): string {
 }
 
 /**
- * The one `ipcMain` listener this process installs for `expectedUrl`'s connect channel.
+ * The one `ipcMain` listener this process installs for the connect channel of the pages that show
+ * runs (`expectedUrls`: the run page, and the app shell, which shows a run in its own document).
  *
  * Every open window registers its admission for as long as it exists; `register`'s return value
  * withdraws it, which every registrant must call exactly once. A connect is admitted by whichever
@@ -123,18 +124,22 @@ function describe(error: unknown): string {
  * installed synchronously; only then does this boundary start Electron's queued delivery.
  */
 export class RunIpcRegistry {
-  readonly #expectedUrl: string;
+  readonly #expectedUrls: readonly string[];
   readonly #log: (message: string) => void;
   readonly #pages = new Set<RunPageAdmission>();
 
-  constructor(ipc: RunIpc, expectedUrl: string, log: (message: string) => void) {
-    this.#expectedUrl = expectedUrl;
+  constructor(ipc: RunIpc, expectedUrls: readonly string[], log: (message: string) => void) {
+    this.#expectedUrls = expectedUrls;
     this.#log = log;
     ipc.onConnect(event => this.#admit(event));
     ipc.onLogs(event => this.#logs(event));
   }
 
   /** Compete `page`'s admission for every future connect; its return value withdraws it. */
+  #expected(senderUrl: string | null): boolean {
+    return this.#expectedUrls.some(url => isSameAppPage(senderUrl, url));
+  }
+
   register(page: RunPageAdmission): () => void {
     this.#pages.add(page);
     return () => this.#pages.delete(page);
@@ -143,7 +148,7 @@ export class RunIpcRegistry {
   #admit(event: RunConnectEvent): void {
     const port = event.port;
     if (port === null) return;
-    if (isSameAppPage(event.senderUrl, this.#expectedUrl)) {
+    if (this.#expected(event.senderUrl)) {
       for (const page of this.#pages) {
         if (page.currentSenderId() !== event.senderId) continue;
         this.#activate(port, page);
@@ -161,7 +166,7 @@ export class RunIpcRegistry {
    */
   #logs(event: RunLogsEvent): Promise<unknown> {
     const request = parseRunLogsRequest(event.request);
-    if (request !== null && isSameAppPage(event.senderUrl, this.#expectedUrl)) {
+    if (request !== null && this.#expected(event.senderUrl)) {
       for (const page of this.#pages) {
         if (page.currentSenderId() === event.senderId) return page.logs(request);
       }

@@ -2,7 +2,10 @@ import {describe, expect, test} from 'bun:test';
 import type {HostAction, HostState} from '@vibesys/feature-hosts/state';
 import type {HostKey, HostListing} from '@vibesys/hosts';
 import type {
+  CheckoutInspection,
   ChromeState,
+  MachineEntry,
+  MachineReport,
   PreferencesView,
   WelcomeBridge,
   WelcomeEvent,
@@ -95,6 +98,11 @@ class FakeWelcomeBridge implements WelcomeBridge {
   showWelcome = () => this.#ask('show-welcome', null);
   retry = () => this.#ask('retry', null);
   stop = () => this.#ask('stop', null);
+  stopConfirmed = () => this.#ask('stop-confirmed', null);
+  releaseRun = () => this.#ask('release-run', null);
+  readEvents = () => this.#ask('read-events', {kind: 'unsupported'} as const);
+  connectRun = (): void => undefined;
+  onWake = (): void => undefined;
   inspect = () => {
     this.asked.push('inspect');
     const reply = new Deferred<WelcomeResult<WelcomeInspection>>();
@@ -150,6 +158,28 @@ class FakeWelcomeBridge implements WelcomeBridge {
     return this.preferences();
   };
   onPreferences = (_listener: (event: WelcomeEvent<PreferencesView>) => void) => {};
+  // The welcome view lists no machines (the redesigned window's Machines screen does).
+  machines = async (): Promise<WelcomeResult<MachineEntry[]>> => ({ok: true, value: []});
+  machine = async (): Promise<WelcomeResult<MachineReport>> => ({
+    ok: true,
+    value: {kind: 'ready', facts: null},
+  });
+  inspectCheckout = async (): Promise<WelcomeResult<CheckoutInspection>> => ({
+    ok: true,
+    value: {state: 'not_found'},
+  });
+  removeMachine = async (): Promise<WelcomeResult<MachineEntry[]>> => ({ok: true, value: []});
+  // New run is the redesigned shell's: this window never asks.
+  describeMachine = async () => ({ok: true as const, value: {kind: 'unsupported' as const}});
+  preflight = async () => ({ok: true as const, value: {kind: 'unsupported' as const}});
+  examples = async () => ({ok: true as const, value: {kind: 'unsupported' as const}});
+  createFromExample = async () => this.#refused();
+  copyOut = async () => this.#refused();
+  startRun = async () => this.#refused();
+  helperFeatures = async () => ({ok: true as const, value: []});
+  openRunWindow = async () => this.#refused();
+  showMainWindow = async () => this.#refused();
+  #refused = () => ({ok: false as const, error: 'not in this window', authNeeded: false});
 
   listenerCounts(): number[] {
     return [this.#chrome.length, this.#recent.length, this.#listing.length, this.#showHost.length];

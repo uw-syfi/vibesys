@@ -10,10 +10,12 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_evaluation.api import (
+    MAX_EVIDENCE_SUMMARY_CHARS,
     ContentDigest,
     EvaluationRequest,
     EvaluationState,
     EvaluationStep,
+    EvaluationStepResult,
     EvidenceFingerprints,
     EvidenceKind,
     EvidenceOutcome,
@@ -70,7 +72,7 @@ def _stats() -> st.SearchStrategy[ProfileStats]:
     )
 
 
-async def _profile(tmp_path: Path, stdout: str) -> TrustedEvidence:
+async def _profile_result(tmp_path: Path, stdout: str) -> EvaluationStepResult:
     cluster = ScenarioCluster()
     cluster.profile_output = stdout
     stack = await build_stack(tmp_path, cluster, profile_command=("python", "capture.py"))
@@ -101,6 +103,11 @@ async def _profile(tmp_path: Path, stdout: str) -> TrustedEvidence:
     (step,) = observed.stage_results
     assert step.result is not None
     await stack.executor.close()
+    return step
+
+
+async def _profile(tmp_path: Path, stdout: str) -> TrustedEvidence:
+    step = await _profile_result(tmp_path, stdout)
     return TrustedEvidence.model_validate(step.result)
 
 
@@ -129,6 +136,22 @@ async def test_a_capture_without_statistics_is_still_passed_evidence(tmp_path: P
     evidence = await _profile(tmp_path, f"summary text\n{PROFILE_END}\n")
     assert evidence.outcome is EvidenceOutcome.PASSED
     assert evidence.metrics == ()
+
+
+async def test_profile_keeps_raw_evidence_and_separate_operator_output(
+    tmp_path: Path,
+) -> None:
+    step = await _profile_result(
+        tmp_path,
+        "API_TOKEN=" + "profile-secret-" * 2_000 + f"\n{PROFILE_END}\n",
+    )
+    evidence = TrustedEvidence.model_validate(step.result)
+
+    assert evidence.semantic_summary is not None
+    assert "profile-secret" in evidence.semantic_summary
+    assert len(evidence.semantic_summary) <= MAX_EVIDENCE_SUMMARY_CHARS
+    assert step.stdout_tail is not None
+    assert "profile-secret" not in step.stdout_tail
 
 
 async def test_a_malformed_statistics_line_fails_the_profile_naming_the_problem(

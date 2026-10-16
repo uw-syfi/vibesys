@@ -69,6 +69,11 @@ export interface WebSessionOptions {
    */
   readonly connect: (hooks: TransportHooks) => RunConnection;
   readonly lifecycle: BrowserLifecycle;
+  /**
+   * Hear every action the session folds into its run, in fold order, after the fold: a page that
+   * folds more of the run than `CoreState` holds (the run trace) folds the same actions in step.
+   */
+  readonly onRunAction?: (action: RunAction) => void;
 }
 
 /** The new foreign-run rejection produced by one run-fold transition, if any. */
@@ -83,6 +88,7 @@ export class WebSession {
   readonly #actor: Actor<typeof sessionMachine>;
   readonly #connection: RunConnection;
   readonly #lifecycle: BrowserLifecycle;
+  readonly #onRunAction: (action: RunAction) => void;
   readonly #listeners = new Set<() => void>();
   /** The machine's newest snapshot: listeners hear only when it changes. */
   #snapshot: SessionSnapshot;
@@ -98,8 +104,9 @@ export class WebSession {
   #startupSettled: () => void = () => undefined;
   #closed: Promise<void> | null = null;
 
-  constructor({connect, lifecycle}: WebSessionOptions) {
+  constructor({connect, lifecycle, onRunAction}: WebSessionOptions) {
     this.#lifecycle = lifecycle;
+    this.#onRunAction = onRunAction ?? (() => undefined);
     // The machine runs before the connection opens, so a report made while connecting has a
     // machine to reach, and an action that throws always has an observer that releases.
     this.#actor = createActor(this.#provided());
@@ -181,7 +188,9 @@ export class WebSession {
   async ask(text: string, options: WebChatOptions = {}): Promise<ChatResult> {
     const response = await this.#connection.ask(text, options);
     if (this.#closed === null && !options.signal?.aborted) {
-      this.store.dispatch({type: 'response-events', events: response.events});
+      const action: RunAction = {type: 'response-events', events: response.events};
+      this.store.dispatch(action);
+      this.#onRunAction(action);
     }
     return response.chat;
   }
@@ -411,6 +420,7 @@ export class WebSession {
   /** Fold run data and report a deferred navigation result once run identity resolves against it. */
   #dispatchRun(action: RunAction): void {
     this.#reportIterationMismatch(this.store.dispatch(action));
+    this.#onRunAction(action);
   }
 
   /** Keep iteration projection failures on their independent session-health channel. */

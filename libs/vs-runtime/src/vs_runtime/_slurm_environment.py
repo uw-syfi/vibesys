@@ -25,15 +25,13 @@ from vs_runtime._host_command_bridge import (
 )
 from vs_runtime._job_tools import TOOLKIT_BIN_PATTERNS, find_job_tool, off_path_tools
 from vs_runtime._run_environment import (
-    AgentGpuFacts,
-    ClusterEvaluationFacts,
     DockerEnvironment,
     DockerEnvironmentConfig,
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSession,
+    RunEnvironmentSessionRole,
     RunEnvironmentView,
-    SlurmEnvironmentFacts,
     _command_argv,
     _make_host_sandbox,
     _NoopWorkspaceRecovery,
@@ -41,8 +39,14 @@ from vs_runtime._run_environment import (
     _PreparedRunEnvironment,
     _starting_container,
 )
+from vs_runtime._run_environment_facts import (
+    AgentGpuFacts,
+    ClusterEvaluationFacts,
+    SlurmEnvironmentFacts,
+)
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation_preparation import (
+    REMOTE_EVALUATOR_GO_MODULES_ROOT,
     REMOTE_EVALUATOR_TOOLS_ROOT,
     TrustedEvaluationCommandPaths,
 )
@@ -67,6 +71,9 @@ from vs_sandbox.api.slurm import (
 )
 from vs_slurm.api import (
     SlurmConfig,
+    SlurmJobRunner,
+    SlurmLocalTransport,
+    probe_workspace_root,
     slurm_transport_broker_available,
     slurm_transport_broker_policy,
 )
@@ -310,6 +317,7 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     """
 
     isolated = False
+    uses_docker = True
     backend_image: str | None = None
 
     def __init__(
@@ -437,6 +445,21 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Validate external policy before opening the editor container."""
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="slurm")
+        if request.session_role is RunEnvironmentSessionRole.ROOT and isinstance(
+            self._settings.config.transport, SlurmLocalTransport
+        ):
+            runner = SlurmJobRunner(
+                self._settings.config,
+                processes=request.system.slurm_processes,
+                clock=request.clock,
+                scratch_root=request.log_dir / "slurm-workspace-root-probe",
+            )
+            probe_workspace_root(
+                runner,
+                state_root=request.log_dir / "slurm-workspace-root-probe",
+                run_id=request.run_id,
+                pause=request.system.threads.sleep,
+            )
         return _PreparedRunEnvironment(
             SlurmEnvironmentFacts(
                 service_command=_slurm_service_command(self._settings.policy),
@@ -463,8 +486,10 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 profiler_tree=profiler_tree,
                 workload_timeout_seconds=request.profile_timeout_seconds,
             )
-        # The trusted evaluation runs on the host, so its tools are installed there.
-        if request.evaluator_requirements.tools:
+        # Trusted evaluator dependencies are prepared on the host before their
+        # immutable trees are captured in the cluster staging plan.
+        requirements = request.evaluator_requirements
+        if requirements.tools or requirements.go_module is not None:
             _make_host_sandbox(request, ephemeral=True)
         plans = self._write_plans(
             request, config, policy, profiler_tree, remote_profiling=remote_profiling
@@ -528,6 +553,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                     ".vibesys-evaluator-package" if requirements.package_root is not None else None
                 ),
                 runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+                runtime_go_module_cache_root=(
+                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
+                    if requirements.go_module is not None
+                    else None
+                ),
             ),
         )
         support_paths = {
@@ -535,6 +565,14 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
             for name, path in (
                 (".vibesys-evaluator-package", requirements.package_root),
                 (".vibesys-evaluator-tools", requirements.tools_root),
+                (
+                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
+                    (
+                        requirements.go_module.cache_root
+                        if requirements.go_module is not None
+                        else None
+                    ),
+                ),
                 *(
                     (
                         (request.profiler_support_name, request.profiler_support_path),

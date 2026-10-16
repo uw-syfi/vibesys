@@ -4,7 +4,7 @@ A VibeSys source checkout keeps runnable examples under ``examples/<category>/``
 Each is a project root whose tasks live in ``.vibesys/tasks/<task>/``, and each
 is declared once in ``examples/registry.toml``. This module owns that file's
 format (the one definition the CLI and the registry tests share) and turns it
-into an :class:`ExampleList`, the typed listing ``vibesys example list --json``
+into an :class:`~server.host_examples.ExampleList`, the typed listing ``vibesys example list --json``
 prints and the desktop helper reads.
 
 Reading the catalog never imports the run engine: ``vibesys example`` is a light
@@ -20,6 +20,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
+from server.host_examples import ExampleList, ExampleSummary
 from vs_project.api import Project, ProjectError
 
 REGISTRY_RELATIVE = PurePosixPath("examples/registry.toml")
@@ -119,32 +120,6 @@ class Registry(BaseModel):
             message = f"duplicate registry paths: {duplicates}"
             raise ValueError(message)
         return self
-
-
-class ExampleSummary(BaseModel):
-    """One example in ``vibesys example list --json``."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str
-    """The value ``vibesys example new`` accepts, e.g. ``data-structures/stack``."""
-    category: str
-    """The ``examples/<category>/`` directory the example is catalogued under."""
-    tasks: tuple[str, ...]
-    """Task names, sorted; empty for an external repository that is not fetched."""
-    external_repo: bool
-    """Whether ``example new`` clones another repository instead of copying files."""
-
-
-class ExampleList(BaseModel):
-    """``vibesys example list --json``: every catalogued example, by category then name."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    version: Literal[1] = 1
-    checkout: str
-    """The resolved VibeSys checkout whose ``examples/`` the listing was read from."""
-    examples: tuple[ExampleSummary, ...]
 
 
 class CatalogError(Exception):

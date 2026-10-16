@@ -1,10 +1,27 @@
 /**
  * `@vibesys/hosts`: the machines the app runs on, as pure, validated data shared by the main
  * process and the views: a host's identity and key, its label, the checkout and project path rules,
- * its registry listing, and what the window shows about its connection. No I/O.
+ * path completion for those paths, its registry listing, and what the window shows about its
+ * connection. No I/O.
  */
 
-export type {InstanceInspection} from '@vibesys/contracts/host-helper';
+export type {
+  CheckoutInspectReply,
+  InstanceInspection,
+  MachineDescription,
+} from '@vibesys/contracts/host-helper';
+export {
+  COMPLETION_EMPTY,
+  type CompletionAction,
+  type CompletionField,
+  type CompletionRequest,
+  type CompletionResult,
+  type CompletionState,
+  completionStep,
+  type PathCompletion,
+  splitPath,
+  suggestions,
+} from './completion.js';
 export type {ConnectionStatus} from './connection-status.js';
 export {
   type HostId,

@@ -5,6 +5,8 @@
  * with one read in flight (the control state), and `startLogFollower` runs that machine over a
  * `LogTransport` the composition provides. Neutral: no DOM, no Node.
  */
+
+export {type EscapeState, stripEscapes} from './escapes.js';
 export {
   DEFAULT_LOG_FOLLOW_CONFIG,
   type LogFollowConfig,

@@ -30,6 +30,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@vibesys/contracts": "workspace:*"
+    "@vibesys/contracts": "workspace:*",
+    "@vibesys/store": "workspace:*"
   }
 }

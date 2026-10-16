@@ -24,20 +24,10 @@ if TYPE_CHECKING:
     from tests.support.distribution_build import BuiltDistributions, BuiltWheel
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-INTERNAL_DISTRIBUTIONS = {
-    "vs-async-ops",
-    "vs-evaluator-protocol",
-    "vs-evaluation",
-    "vs-github",
-    "vs-issue-tracker",
-    "vs-core",
-    "vs-project",
-    "vs-prompts",
-    "vs-runtime",
-    "vs-sandbox",
-    "vs-slurm",
-    "vs-mcp",
-}
+INTERNAL_DISTRIBUTIONS = frozenset(
+    tomllib.loads(project.read_text())["project"]["name"]
+    for project in (PROJECT_ROOT / "libs").glob("*/pyproject.toml")
+)
 INTERNAL_IMPORT_PACKAGES = {
     "vs_async_ops",
     "vs_evaluator_protocol",

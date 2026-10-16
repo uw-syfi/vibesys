@@ -293,6 +293,25 @@ const runEventSchema: Record<string, unknown> = {
       "title": "BenchmarkResultData",
       "type": "object"
     },
+    "BenchmarkVersions": {
+      "additionalProperties": false,
+      "description": "What measured the run.\n\n``evaluator`` is the evaluator package when the task pins one; a source-tree evaluator has\nno version, so it is None.",
+      "properties": {
+        "evaluator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluatorIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "BenchmarkVersions",
+      "type": "object"
+    },
     "ChatData": {
       "additionalProperties": false,
       "description": "Completed answer and optional thread-turn identity.",
@@ -657,6 +676,28 @@ const runEventSchema: Record<string, unknown> = {
       "title": "EndReason",
       "type": "string"
     },
+    "EvaluatorIdentity": {
+      "additionalProperties": false,
+      "description": "The evaluator package a run measures with, as the task's manifest pins it.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "EvaluatorIdentity",
+      "type": "object"
+    },
     "EventStatus": {
       "description": "Lifecycle and command states reported in events.",
       "enum": [
@@ -713,6 +754,8 @@ const runEventSchema: Record<string, unknown> = {
         "quota_paused",
         "quota_resumed",
         "quota_abandoned",
+        "quota_waiting",
+        "quota_wait_cancelled",
         "provider_switched",
         "gate_started",
         "gate_finished",
@@ -843,7 +886,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "GateFinishedData": {
       "additionalProperties": false,
-      "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries the trailing command\noutput on failure. ``round_label`` groups the per-recipe local-validation\ngates of one attempt back together, so a client folds them into a\npass-fraction itself rather than the backend aggregating one.",
+      "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries bounded, credential-redacted\ntrailing command output on failure. ``round_label`` groups the per-recipe local-validation\ngates of one attempt back together, so a client folds them into a\npass-fraction itself rather than the backend aggregating one.",
       "properties": {
         "kind": {
           "const": "gate_finished",
@@ -1218,6 +1261,69 @@ const runEventSchema: Record<string, unknown> = {
       "title": "JudgeResultData",
       "type": "object"
     },
+    "ObjectiveOverview": {
+      "additionalProperties": false,
+      "description": "What the run optimizes: the task's objective and the metric it is judged on.\n\n``unit`` and ``direction`` come from the run's own measurements and objectives once it has\nthem; ``correctness_check`` is the argv of the check a candidate must pass (empty when the\ntask gates on none).",
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "max",
+                "min"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direction"
+        },
+        "correctness_check": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Correctness Check",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ObjectiveOverview",
+      "type": "object"
+    },
     "OutputData": {
       "additionalProperties": false,
       "description": "Captured line of server output and its stream.",
@@ -1499,6 +1605,71 @@ const runEventSchema: Record<string, unknown> = {
         "provider"
       ],
       "title": "QuotaResumedData",
+      "type": "object"
+    },
+    "QuotaWaitCancelledData": {
+      "additionalProperties": false,
+      "description": "The operator ended a wait for capacity: ``resumed`` the run now, or ``paused`` it again.",
+      "properties": {
+        "kind": {
+          "const": "quota_wait_cancelled",
+          "default": "quota_wait_cancelled",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "resumed",
+            "paused"
+          ],
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "provider",
+        "reason"
+      ],
+      "title": "QuotaWaitCancelledData",
+      "type": "object"
+    },
+    "QuotaWaitingData": {
+      "additionalProperties": false,
+      "description": "At the operator's request, the run paused on a capacity limit resumes when capacity returns.\n\n``resumes_at`` is the epoch second it resumes (the provider's reset time plus a margin),\n``None`` when the provider gave no reset time and the run tries again after the quota\npolicy's retry interval. A later request replaces this one.",
+      "properties": {
+        "kind": {
+          "const": "quota_waiting",
+          "default": "quota_waiting",
+          "title": "Kind",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "resumes_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resumes At"
+        }
+      },
+      "required": [
+        "kind",
+        "provider"
+      ],
+      "title": "QuotaWaitingData",
       "type": "object"
     },
     "RateLimitUpdateData": {
@@ -1924,6 +2095,32 @@ const runEventSchema: Record<string, unknown> = {
       "title": "RunInterruptedData",
       "type": "object"
     },
+    "RunOverview": {
+      "additionalProperties": false,
+      "description": "The run's objective and what measures it: the Overview's header facts.\n\nOne definition for the core event and the wire: the run's ``run_started`` event carries it,\nand the server's snapshot carries it with the unit and direction its measurements add.",
+      "properties": {
+        "overview_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Overview Version",
+          "type": "integer"
+        },
+        "objective": {
+          "$ref": "#/$defs/ObjectiveOverview"
+        },
+        "benchmarks": {
+          "$ref": "#/$defs/BenchmarkVersions",
+          "default": {
+            "evaluator": null
+          }
+        }
+      },
+      "required": [
+        "objective"
+      ],
+      "title": "RunOverview",
+      "type": "object"
+    },
     "RunStartedData": {
       "additionalProperties": false,
       "description": "Initial input and loop settings for a run.",
@@ -1961,6 +2158,17 @@ const runEventSchema: Record<string, unknown> = {
           },
           "title": "Expected Roles",
           "type": "array"
+        },
+        "overview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunOverview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -3258,6 +3466,8 @@ const runEventSchema: Record<string, unknown> = {
               "quota_abandoned": "#/$defs/QuotaAbandonedData",
               "quota_paused": "#/$defs/QuotaPausedData",
               "quota_resumed": "#/$defs/QuotaResumedData",
+              "quota_wait_cancelled": "#/$defs/QuotaWaitCancelledData",
+              "quota_waiting": "#/$defs/QuotaWaitingData",
               "rate_limit_update": "#/$defs/RateLimitUpdateData",
               "round_finished": "#/$defs/RoundFinishedData",
               "run_configured": "#/$defs/RunConfiguredData",
@@ -3379,6 +3589,12 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/QuotaAbandonedData"
+            },
+            {
+              "$ref": "#/$defs/QuotaWaitingData"
+            },
+            {
+              "$ref": "#/$defs/QuotaWaitCancelledData"
             },
             {
               "$ref": "#/$defs/ProviderSwitchedData"

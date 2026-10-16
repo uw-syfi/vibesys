@@ -64,6 +64,8 @@ _PRESENTATION_EVENTS = frozenset(
         EventType.QUOTA_PAUSED,
         EventType.QUOTA_RESUMED,
         EventType.QUOTA_ABANDONED,
+        EventType.QUOTA_WAITING,
+        EventType.QUOTA_WAIT_CANCELLED,
         EventType.PROVIDER_SWITCHED,
     }
 )

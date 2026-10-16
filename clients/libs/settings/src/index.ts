@@ -12,6 +12,7 @@ export {
   sshConfigHosts,
   sshHostPatternsMatch,
   withHostSettings,
+  withoutHost,
 } from './host-settings.js';
 export {
   DEFAULT_PREFERENCES,

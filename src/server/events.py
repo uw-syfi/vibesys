@@ -28,6 +28,7 @@ from pydantic import (
     FiniteFloat,
     ValidationError,
     WithJsonSchema,
+    field_validator,
     model_validator,
 )
 
@@ -44,8 +45,11 @@ from vibesys.api import (
     AgentOutputChannel,
     AgentStatusData,
     GateKind,
+    QuotaWaitCancelledData,
+    QuotaWaitingData,
     RunEndingData,
     RunFailedData,
+    RunOverview,
     SpanId,
     TodoItemData,
     ToolResultPayload,
@@ -57,6 +61,7 @@ from vibesys.api import (
 from vibesys.api import (
     JsonResultPayload as _JsonResultPayload,
 )
+from vs_redaction.api import redact_diagnostic_text
 
 CommandResultPayload = _CommandResultPayload
 JsonResultPayload = _JsonResultPayload
@@ -121,6 +126,8 @@ class EventType(StrEnum):
     QUOTA_PAUSED = "quota_paused"
     QUOTA_RESUMED = "quota_resumed"
     QUOTA_ABANDONED = "quota_abandoned"
+    QUOTA_WAITING = "quota_waiting"
+    QUOTA_WAIT_CANCELLED = "quota_wait_cancelled"
     PROVIDER_SWITCHED = "provider_switched"
     GATE_STARTED = "gate_started"
     GATE_FINISHED = "gate_finished"
@@ -346,6 +353,8 @@ class RunStartedData(EventPayload):
     # Policy-owned role hints let frontends seed per-round placeholders.
     # Empty when the policy does not declare roles.
     expected_roles: tuple[str, ...] = ()
+    overview: RunOverview | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The run's objective and evaluator; see ``vibesys.events.RunOverview``."""
 
 
 class RunInterruptedData(EventPayload):
@@ -550,6 +559,11 @@ class SubprocessOutputData(EventPayload):
     stream: OutputStream
     content: str
 
+    @field_validator("content")
+    @classmethod
+    def _redact_content(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
+
 
 class JudgeResultData(EventPayload):
     """Verdict and feedback returned by the judge.
@@ -609,8 +623,8 @@ class GateFinishedData(EventPayload):
 
     ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
     ``unit`` keeps the historical fallback of the metric name when the
-    contract declares no unit. ``output_tail`` carries the trailing command
-    output on failure. ``round_label`` groups the per-recipe local-validation
+    contract declares no unit. ``output_tail`` carries bounded, credential-redacted
+    trailing command output on failure. ``round_label`` groups the per-recipe local-validation
     gates of one attempt back together, so a client folds them into a
     pass-fraction itself rather than the backend aggregating one.
     """
@@ -628,6 +642,11 @@ class GateFinishedData(EventPayload):
     round_label: str | None = None
     source: FrameworkSource = FrameworkSource.GATES
     source_label: str | None = None
+
+    @field_validator("output_tail")
+    @classmethod
+    def _redact_output_tail(cls, value: str | None) -> str | None:
+        return None if value is None else redact_diagnostic_text(value)
 
 
 class WorkspaceSnapshotData(EventPayload):
@@ -730,6 +749,11 @@ class WorkstreamFailureData(BaseModel):
     limit: int | None = None
     text: str = ""
 
+    @field_validator("text")
+    @classmethod
+    def _redact_text(cls, value: str) -> str:
+        return redact_diagnostic_text(value)
+
 
 class WorkstreamFinishedData(EventPayload):
     """One workstream (one dynamic-run round) ended; its typed failure, if any.
@@ -820,6 +844,8 @@ EventData = Annotated[
     | QuotaPausedData
     | QuotaResumedData
     | QuotaAbandonedData
+    | QuotaWaitingData
+    | QuotaWaitCancelledData
     | ProviderSwitchedData
     | GateStartedData
     | GateFinishedData

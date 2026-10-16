@@ -11,6 +11,7 @@ from tests.support.example_materializer import (
     FakeExampleMaterializer,
     FakeRepository,
     check_copy_tracked_contract,
+    check_repository_root_contract,
 )
 
 from entrypoints import launcher
@@ -343,6 +344,15 @@ def test_the_fake_passes_the_copy_contract(checkout: Path, tmp_path: Path) -> No
     check_copy_tracked_contract(
         FakeExampleMaterializer(), checkout, PurePosixPath("examples/structures/stack"), tmp_path
     )
+
+
+def test_the_fake_passes_the_repository_root_contract(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    (repository / ".git").mkdir(parents=True)
+    (repository / "nested").mkdir()
+    (tmp_path / "outside").mkdir()
+
+    check_repository_root_contract(FakeExampleMaterializer(), repository, tmp_path / "outside")
 
 
 def test_launcher_runs_example_in_process_without_a_child(

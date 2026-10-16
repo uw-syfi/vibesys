@@ -1,0 +1,92 @@
+{
+  "id": "helper-examples-unavailable",
+  "protocol": "host-helper",
+  "title": "Examples on a helper with no catalog, and copying out a missing folder",
+  "description": "examples.list and project.create_from_example on a helper with no example catalog are answered examples_unavailable, and project.copy_out of a folder that does not exist is answered path_missing with the path.",
+  "role": "control",
+  "transports": [
+    "stdio"
+  ],
+  "steps": [
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 10000,
+        "client_versions": [
+          1,
+          1
+        ],
+        "features": [
+          "examples"
+        ],
+        "app_version": "conformance"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "hello",
+        "request_id": "h",
+        "protocol_version": 1,
+        "features": [
+          "examples"
+        ]
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "examples.list",
+        "request_id": "l",
+        "deadline_ms": 10000
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "l",
+        "code": "examples_unavailable"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "project.create_from_example",
+        "request_id": "e",
+        "deadline_ms": 10000,
+        "example": "data-structures/stack",
+        "destination": "/nonexistent-vibesys-conformance/stack"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "e",
+        "code": "examples_unavailable"
+      }
+    },
+    {
+      "dir": "c2s",
+      "frame": {
+        "type": "project.copy_out",
+        "request_id": "c",
+        "deadline_ms": 10000,
+        "source": "/nonexistent-vibesys-conformance/monorepo/queue",
+        "destination": "/nonexistent-vibesys-conformance/queue"
+      }
+    },
+    {
+      "dir": "s2c",
+      "expect": {
+        "type": "error",
+        "request_id": "c",
+        "code": "path_missing",
+        "path": "/nonexistent-vibesys-conformance/monorepo/queue"
+      }
+    }
+  ]
+}

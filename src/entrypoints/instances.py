@@ -25,6 +25,7 @@ from server.host_api import (
     LiveInstanceRecord,
     StopOutcome,
 )
+from server.host_helper_os import ProjectStopIntents
 from server.instances import ControlSocketStopRequester
 from server.registry import (
     FileInstanceLogs,
@@ -213,6 +214,7 @@ def main(argv: list[str] | None = None) -> int:
                 signaller=PidfdProcessSignaller(),
                 clock=threads,
                 pause=threads.sleep,
+                intents=ProjectStopIntents(),
             ),
         )
     except (InstanceLogError, InstanceMetadataError) as exc:

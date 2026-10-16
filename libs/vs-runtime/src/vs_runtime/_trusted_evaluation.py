@@ -37,6 +37,7 @@ from vs_evaluator_protocol.api import (
     parse_records,
     read_measurement,
 )
+from vs_redaction.api import redact_diagnostic_text
 from vs_runtime._failure_classification import (
     RecordState,
     TerminalSignal,
@@ -288,16 +289,23 @@ class TrustedAccuracyResult(BaseModel):
     passed: bool
     output: str = ""
     failure: str | None = None
+    operator_output: str = ""
+    operator_failure: str | None = None
     # Whose fault a failed command is: present exactly when it failed, with no default.
     failure_kind: BenchmarkFailureKind | None = None
     stdout: str = ""
     stderr: str = ""
+    operator_stdout: str = ""
+    operator_stderr: str = ""
     provisioned_volumes: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _failure_kind_exactly_when_failed(self) -> TrustedAccuracyResult:
         if self.passed != (self.failure_kind is None):
             message = "a trusted accuracy result carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if self.passed != (self.operator_failure is None):
+            message = "a failed accuracy result requires a separate operator-safe failure"
             raise ValueError(message)
         return self
 
@@ -312,12 +320,17 @@ class TrustedBenchmarkResult(BaseModel):
     passed: bool
     output: str = ""
     failure: str | None = None
+    operator_output: str = ""
+    operator_failure: str | None = None
     # Whose fault a failed run is: present exactly when the run failed, with no default.
     failure_kind: BenchmarkFailureKind | None = None
     # The validated evaluator error record's message, without transport framing.
     failure_reason: str | None = None
+    operator_failure_reason: str | None = None
     stdout: str = ""
     stderr: str = ""
+    operator_stdout: str = ""
+    operator_stderr: str = ""
     row: Mapping[str, FiniteFloat] | None = None
     metrics: Mapping[str, TrustedMetricDeclaration] = Field(default_factory=dict)
     # What a failed run measured before it stopped, as its evaluator reported it.
@@ -328,6 +341,12 @@ class TrustedBenchmarkResult(BaseModel):
     def _failure_kind_exactly_when_failed(self) -> TrustedBenchmarkResult:
         if self.passed != (self.failure_kind is None):
             message = "a trusted benchmark result carries a failure kind exactly when it failed"
+            raise ValueError(message)
+        if self.passed != (self.operator_failure is None):
+            message = "a failed benchmark result requires a separate operator-safe failure"
+            raise ValueError(message)
+        if (self.failure_reason is None) != (self.operator_failure_reason is None):
+            message = "a benchmark reason requires a separate operator-safe reason"
             raise ValueError(message)
         return self
 
@@ -450,22 +469,28 @@ class RuntimeTrustedEvaluation:
         command = self._plan.accuracy_command
         volumes, failure = self._provision()
         if failure is not None:
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedAccuracyResult(
                 command=command,
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
             )
         if changed := self._git.trusted_input_changes():
             failure = "Evaluator-owned files were modified: " + ", ".join(changed)
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedAccuracyResult(
                 command=command,
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         if command is None:
@@ -482,6 +507,11 @@ class RuntimeTrustedEvaluation:
             sink=sink,
         )
         output = execution_failure or result.output.strip()
+        operator_output = (
+            redact_diagnostic_text(execution_failure)
+            if execution_failure is not None
+            else result.diagnostic_output.strip()
+        )
         passed = execution_failure is None and result.exit_code == 0
         mutated = False
         if changed := self._git.trusted_input_changes():
@@ -489,6 +519,7 @@ class RuntimeTrustedEvaluation:
                 changed
             )
             output = f"{output}\n{mutation}".strip()
+            operator_output = f"{operator_output}\n{redact_diagnostic_text(mutation)}".strip()
             passed = False
             mutated = True
         return TrustedAccuracyResult(
@@ -497,6 +528,8 @@ class RuntimeTrustedEvaluation:
             passed=passed,
             output=output,
             failure=None if passed else output,
+            operator_output=operator_output,
+            operator_failure=None if passed else operator_output,
             # The exit status is the accuracy command's own verdict, so it leaves an outcome
             # whenever it reported one; a candidate that changed evaluator-owned files owns it.
             failure_kind=(
@@ -508,6 +541,8 @@ class RuntimeTrustedEvaluation:
             ),
             stdout=result.stdout,
             stderr=result.stderr,
+            operator_stdout=result.diagnostic_stdout,
+            operator_stderr=result.diagnostic_stderr,
             provisioned_volumes=volumes,
         )
 
@@ -522,12 +557,15 @@ class RuntimeTrustedEvaluation:
         command = self._plan.benchmark_command
         volumes, failure = self._provision()
         if failure is not None:
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedBenchmarkResult(
                 command=command,
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.INFRASTRUCTURE,
             )
         if contract is None:
@@ -538,21 +576,27 @@ class RuntimeTrustedEvaluation:
             )
         if command is None:
             failure = "Benchmark result contract is configured without a benchmark command."
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedBenchmarkResult(
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         if changed := self._git.trusted_input_changes():
             failure = "Evaluator-owned files were modified: " + ", ".join(changed)
+            operator_failure = redact_diagnostic_text(failure)
             return TrustedBenchmarkResult(
                 command=command,
                 executed=False,
                 passed=False,
                 output=failure,
                 failure=failure,
+                operator_output=operator_failure,
+                operator_failure=operator_failure,
                 failure_kind=BenchmarkFailureKind.WORKLOAD,
             )
         output_path = f"{_BENCHMARK_OUTPUT_PREFIX}{uuid.uuid4().hex}.json"
@@ -569,10 +613,16 @@ class RuntimeTrustedEvaluation:
                 cancel=cancel,
                 sink=sink,
             )
-            decoded = _Decoded(output=execution_failure or result.output.strip(), passed=False)
-            framed = decoded.output
+            raw_output = execution_failure or result.output.strip()
+            diagnostic_output = (
+                redact_diagnostic_text(execution_failure)
+                if execution_failure is not None
+                else result.diagnostic_output.strip()
+            )
+            decoded = _Decoded(output=raw_output, passed=False)
+            framed = raw_output
+            problem = None
             if execution_failure is None:
-                problem = None
                 if result.truncated:
                     # The sandbox keeps only the head of long output, which
                     # drops the framed result appended after the evaluator's
@@ -586,11 +636,18 @@ class RuntimeTrustedEvaluation:
                     exited_cleanly=result.exit_code == 0,
                 )
             output, passed, row = decoded.output, decoded.passed, decoded.row
+            operator_output = diagnostic_output
+            if problem is not None:
+                operator_output = f"{operator_output}\n{problem}".strip()
+            if decoded.violation is not None:
+                safe_violation = redact_diagnostic_text(decoded.violation)
+                operator_output = f"{operator_output}\n{safe_violation}".strip()
             if changed := self._git.trusted_input_changes():
                 mutation = "Evaluator-owned files changed during benchmark execution: " + ", ".join(
                     changed
                 )
                 output = f"{output}\n{mutation}".strip()
+                operator_output = f"{operator_output}\n{redact_diagnostic_text(mutation)}".strip()
                 passed = False
                 row = None
             return TrustedBenchmarkResult(
@@ -599,14 +656,21 @@ class RuntimeTrustedEvaluation:
                 passed=passed,
                 output=output,
                 failure=None if passed else output,
+                operator_output=operator_output,
+                operator_failure=None if passed else operator_output,
                 failure_kind=(
                     None
                     if passed
                     else _command_failure_kind(record_state(framed), result, execution_failure)
                 ),
                 failure_reason=decoded.reason,
+                operator_failure_reason=(
+                    None if decoded.reason is None else redact_diagnostic_text(decoded.reason)
+                ),
                 stdout=result.stdout,
                 stderr=result.stderr,
+                operator_stdout=result.diagnostic_stdout,
+                operator_stderr=result.diagnostic_stderr,
                 row=row,
                 metrics=decoded.metrics,
                 partial_measurement=decoded.partial,
@@ -649,6 +713,7 @@ class _Decoded:
     metrics: Mapping[str, TrustedMetricDeclaration] = field(default_factory=dict)
     partial: PartialMeasurement | None = None
     reason: str | None = None
+    violation: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -761,6 +826,7 @@ def _decode_framed(
         metrics=decoded.metrics,
         partial=decoded.partial,
         reason=decoded.reason,
+        violation=decoded.violation,
     )
 
 

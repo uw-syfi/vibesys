@@ -39,7 +39,11 @@ from .config import (
     SlurmSshTransport,
     shell_join_with_port,
 )
-from .errors import SlurmError, SlurmSubmissionRejectedError, SlurmTransferInterruptedError
+from .errors import (
+    SlurmError,
+    SlurmSubmissionRejectedError,
+    SlurmTransferInterruptedError,
+)
 from .job_teardown import start_in_own_session, teardown_shell
 from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
 from .remote_file import SlurmFileSource
@@ -74,7 +78,7 @@ if TYPE_CHECKING:
 
 # The whole line, newline included: an answer cut off mid-number ("Submitted batch
 # job 50" of job 5000) would otherwise name another job.
-_JOB_ID = re.compile(r"^Submitted batch job ([0-9]+)\r?\n", re.MULTILINE)
+_JOB_ID = re.compile(r"^Submitted batch job ([0-9]{1,32})\r?\n", re.MULTILINE)
 # The allocation's own exit status when its server never answered the readiness probe
 # (it exited or hung while starting), so no stage ran. The job script writes it.
 SERVICE_NOT_READY_EXIT_CODE = 70
@@ -241,7 +245,7 @@ class SlurmJobHandle(BaseModel):
     @field_validator("job_id")
     @classmethod
     def _numeric_job_id(cls, value: str) -> str:
-        if re.fullmatch(r"[0-9]+", value) is None:
+        if re.fullmatch(r"[0-9]{1,32}", value) is None:
             raise ValueError
         return value
 
@@ -930,7 +934,7 @@ class SlurmJobRunner:
 
     def cancel_job(self, job_id: str) -> None:
         """Request cancellation by scheduler identity without a collection locator."""
-        if re.fullmatch(r"[0-9]+", job_id) is None:
+        if re.fullmatch(r"[0-9]{1,32}", job_id) is None:
             raise SlurmError.invalid_job_id()
         self._transport.exec(f"scancel {job_id}")
 
@@ -1053,15 +1057,57 @@ class SlurmJobRunner:
         ids = {
             line.strip()
             for line in (active + "\n" + historical).splitlines()
-            if re.fullmatch(r"[0-9]+", line.strip())
+            if re.fullmatch(r"[0-9]{1,32}", line.strip())
         }
         if len(ids) > 1:
             raise SlurmError.operation_identity_ambiguous()
         return next(iter(ids), None)
 
+    def cleanup_operation(self, operation_id: str, *, content_identity: str) -> None:
+        """Remove one settled operation and its exact content-cache staging material.
+
+        Cleanup is deliberately narrower than a general cache eviction API.  It
+        accepts the caller's validated stable operation and content identities,
+        proves that the scheduler job is absent or terminal, removes only those
+        names, and then confirms they are absent.  Startup lifecycle probes use
+        this after every known outcome so their one-shot staging does not become
+        long-lived run state.
+        """
+        invocation = _safe_component(operation_id)
+        if re.fullmatch(r"[0-9a-f]{64}", content_identity) is None:
+            raise SlurmError.content_stage_failed()
+        job_id = self.find_operation(invocation)
+        if job_id is not None:
+            reading = self.inspect_job(job_id)
+            if reading.status == SlurmJobStatus.UNKNOWN or not reading.status.terminal:
+                raise SlurmError.job_not_terminal(job_id)
+        cluster_root = PurePosixPath(self._config.remote_workspace_root) / self._config.name
+        operation_root = cluster_root / invocation
+        cache_root = cluster_root / _CONTENT_CACHE_ROOT
+        cache_object = cache_root / content_identity
+        temporary = cache_root / f"{content_identity}.tmp.{invocation}.workspace"
+        lock = cache_root / f"{content_identity}.lock"
+        stale_pattern = f"{content_identity}.lock.stale.*"
+        paths = (operation_root, cache_object, temporary, lock)
+        quoted = " ".join(shlex.quote(path.as_posix()) for path in paths)
+        cache = shlex.quote(cache_root.as_posix())
+        pattern = shlex.quote(stale_pattern)
+        absent = " && ".join(f"[ ! -e {shlex.quote(path.as_posix())} ]" for path in paths)
+        response = self._transport.exec(
+            f"rm -rf -- {quoted} && "
+            f"if [ -d {cache} ]; then "
+            f"find {cache} -mindepth 1 -maxdepth 1 -name {pattern} -exec rm -rf -- {{}} +; "
+            "fi && "
+            f"if {absent} && "
+            f'[ -z "$(find {cache} -mindepth 1 -maxdepth 1 -name {pattern} '
+            "-print -quit 2>/dev/null)\" ]; then printf 'CLEAN'; else printf 'DIRTY'; fi"
+        )
+        if response.stdout.strip() != "CLEAN":
+            raise SlurmError.operation_cleanup_unconfirmed()
+
     def inspect_job(self, job_id: str) -> SchedulerReading:
         """Read scheduler state with queue reason and estimated start evidence."""
-        if re.fullmatch(r"[0-9]+", job_id) is None:
+        if re.fullmatch(r"[0-9]{1,32}", job_id) is None:
             raise SlurmError.invalid_job_id()
         # Accounting, not the queue, is authoritative for an ended job: slurmctld
         # purges it after MinJobAge (300 s by default) and ``squeue -j`` then fails

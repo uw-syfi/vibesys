@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING
 import pytest
 
 from vs_runtime.api.infrastructure import (
+    REMOTE_EVALUATOR_GO_MODULES_ROOT,
     REMOTE_EVALUATOR_TOOLS_ROOT,
+    EvaluatorGoModule,
     EvaluatorPackageError,
     PreparedTrustedEvaluator,
     ProtocolBenchmarkContract,
@@ -21,6 +23,8 @@ from vs_runtime.api.infrastructure import (
     docker_evaluator_tools_root,
     evaluator_agent_toolchains,
     evaluator_container_setup,
+    evaluator_go_module_ready_path,
+    evaluator_go_module_setup_command,
     prepare_trusted_evaluation_plan,
     prepare_trusted_evaluator,
     remote_evaluator_setup_command,
@@ -85,6 +89,25 @@ check = [{command}]
     return root
 
 
+def _write_go_evaluator_package(root: Path) -> Path:
+    root.mkdir()
+    (root / "go.mod").write_text("module example.com/evaluator\n\ngo 1.21\n", encoding="utf-8")
+    (root / "go.sum").write_text("", encoding="utf-8")
+    (root / "vibesys.evaluator.toml").write_text(
+        """schema_version = 1
+name = "vibesys-evaluator-test"
+version = "1.0.0"
+protocol_version = 1
+toolchains = ["go"]
+go_module = "."
+[entrypoints]
+check = ["go", "-C", "${PACKAGE_ROOT}", "run", "."]
+""",
+        encoding="utf-8",
+    )
+    return root
+
+
 def test_trusted_evaluator_preparation_is_empty_without_a_package(tmp_path: Path) -> None:
     prepared = prepare_trusted_evaluator(None, tmp_path / "unused-cache")
 
@@ -124,6 +147,25 @@ def test_trusted_evaluator_preparation_omits_cache_for_package_without_tools(
     assert prepared.requirements.tools == {}
     assert prepared.requirements.tools_root is None
     assert prepared.tool_roots == ()
+
+
+def test_trusted_evaluator_preparation_keys_go_cache_by_immutable_package(
+    tmp_path: Path,
+) -> None:
+    package_root = _write_go_evaluator_package(tmp_path / "package")
+    cache_root = tmp_path / "operator-cache"
+
+    prepared = prepare_trusted_evaluator(package_root, cache_root)
+
+    module = prepared.requirements.go_module
+    assert module is not None
+    assert module.root == package_root
+    assert module.package_digest.startswith("sha256:")
+    assert module.cache_root == (
+        cache_root / "go-modules" / module.package_digest.removeprefix("sha256:")
+    )
+    assert prepared.requirements.tools_root is None
+    assert prepared.tool_roots == (module.cache_root,)
 
 
 def test_trusted_evaluator_preparation_preserves_package_validation_errors(
@@ -182,6 +224,156 @@ def test_preparation_lowers_commands_without_replacing_the_plan_contract(tmp_pat
     assert prepared.benchmark_timeout_seconds == 19
     assert prepared.benchmark_contract == ProtocolBenchmarkContract()
     assert plan.accuracy_command != prepared.accuracy_command
+
+
+def test_go_evaluator_commands_are_forced_onto_the_prepared_offline_cache(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "evaluator-package"
+    module_root = package_root / "module"
+    cache_root = tmp_path / "operator-cache"
+    requirements = TrustedEvaluatorRequirements(
+        package_root=package_root,
+        toolchains=frozenset({"go"}),
+        go_module=EvaluatorGoModule(
+            root=module_root,
+            cache_root=cache_root,
+            package_digest="sha256:" + "a" * 64,
+        ),
+    )
+
+    prepared = prepare_trusted_evaluation_plan(
+        TrustedEvaluationPlan(
+            accuracy_command=shlex.join(("python3", str(package_root / "wrapper.py")))
+        ),
+        requirements,
+        TrustedEvaluationCommandPaths(
+            source_project_root=tmp_path / "workspace",
+            runtime_project_root="/workspace",
+            python_executable="python3",
+            runtime_package_root="/opt/evaluator",
+            runtime_go_module_cache_root="/opt/go-modules",
+        ),
+    )
+
+    assert shlex.split(prepared.accuracy_command or "") == [
+        "env",
+        "GOMODCACHE=/opt/go-modules",
+        "GOPROXY=off",
+        "GOSUMDB=off",
+        "GOWORK=off",
+        "GOENV=off",
+        "GOTOOLCHAIN=local",
+        "GOFLAGS=-mod=readonly -buildvcs=false",
+        "python3",
+        "/opt/evaluator/wrapper.py",
+    ]
+
+
+def test_relative_remote_go_cache_is_resolved_before_exec(tmp_path: Path) -> None:
+    package_root = tmp_path / "evaluator-package"
+    requirements = TrustedEvaluatorRequirements(
+        package_root=package_root,
+        toolchains=frozenset({"go"}),
+        go_module=EvaluatorGoModule(
+            root=package_root,
+            cache_root=tmp_path / "operator-cache",
+            package_digest="sha256:" + "c" * 64,
+        ),
+    )
+
+    prepared = prepare_trusted_evaluation_plan(
+        TrustedEvaluationPlan(accuracy_command="python3 wrapper.py"),
+        requirements,
+        TrustedEvaluationCommandPaths(
+            source_project_root=tmp_path / "workspace",
+            runtime_project_root=".",
+            python_executable="python3",
+            runtime_package_root=".vibesys-evaluator-package",
+            runtime_go_module_cache_root=str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
+        ),
+    )
+
+    command = shlex.split(prepared.accuracy_command or "")
+    assert command[:2] == ["sh", "-c"]
+    assert 'exec env "GOMODCACHE=$cache_root"' in command[2]
+    assert command[4:] == [
+        str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
+        "python3",
+        "wrapper.py",
+    ]
+
+
+def test_go_module_setup_downloads_before_an_explicit_offline_verification(
+    tmp_path: Path,
+) -> None:
+    package_root = tmp_path / "evaluator-package"
+    requirements = TrustedEvaluatorRequirements(
+        package_root=package_root,
+        toolchains=frozenset({"go"}),
+        go_module=EvaluatorGoModule(
+            root=package_root / "module",
+            cache_root=tmp_path / "operator-cache",
+            package_digest="sha256:" + "b" * 64,
+        ),
+    )
+
+    command = evaluator_go_module_setup_command(
+        requirements,
+        runtime_package_root=".vibesys-evaluator-package",
+        runtime_cache_root=str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
+    )
+
+    assert command.index("mod download all") < command.index("GOPROXY=off")
+    assert "GOFLAGS='-mod=readonly -buildvcs=false'" in command
+    assert "mod verify" in command
+    assert '["go", "-C", module_root, "list", "-deps", "./..."]' in command
+    assert "if process is not None:\n        begin_interrupt()" in command
+    assert command.index("process = subprocess.Popen") < command.index(
+        "if interrupted is not None:\n        begin_interrupt()"
+    )
+    assert (
+        "wait_without_reaping(process)\n"
+        "    # From here onward every path is cleanup. A first late signal may record\n"
+        "    # interruption, but must not raise from inside the finally block.\n"
+        "    unwinding = True\n"
+        "except InterruptedError:"
+    ) in command
+    assert (
+        "unwinding = True\n"
+        "    # Make cleanup one-shot before control leaves the interrupted operation.\n"
+        "    # A second handled signal must never raise from inside the finally block.\n"
+        "    signal.pthread_sigmask(signal.SIG_BLOCK, handled_signals)\n"
+        "    for handled in handled_signals:\n"
+        "        signal.signal(handled, signal.SIG_IGN)\n"
+        "    raise InterruptedError"
+    ) in command
+    assert "os.WEXITED | os.WNOWAIT" in command
+    assert "start_new_session=True" in command
+    assert "os.killpg(process.pid, signal.SIGTERM)" in command
+    assert "os.killpg(process.pid, signal.SIGKILL)" in command
+    assert command.index("os.killpg(process.pid, signal.SIGKILL)") < command.index(
+        "leader_status = process.wait()"
+    )
+    assert "failed to prepare evaluator Go modules" in command
+    assert "vibesys-evaluator-go-verify-" in command
+    assert "fcntl.LOCK_EX | fcntl.LOCK_NB" in command
+    assert "finally:" in command
+    assert ".verification-build." not in command
+    assert "$ready.tmp." not in command
+    assert "$$" not in command
+
+
+def test_go_module_readiness_marker_is_an_atomic_digest_named_directory(tmp_path: Path) -> None:
+    module = EvaluatorGoModule(
+        root=tmp_path / "package",
+        cache_root=tmp_path / "cache",
+        package_digest="sha256:" + "d" * 64,
+    )
+
+    assert evaluator_go_module_ready_path(module, module.cache_root) == (
+        module.cache_root / f".vibesys-ready.{module.package_digest}"
+    )
 
 
 def test_preparation_rejects_invalid_shell_and_missing_runtime_package_root(

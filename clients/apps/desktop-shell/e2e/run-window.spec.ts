@@ -1,0 +1,103 @@
+import {type BrowserContext, expect, type Page, test} from '@playwright/test';
+import {
+  type FakeBridgeSeed,
+  type FakeWindows,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeNewRun,
+  installFakeWindows,
+} from './fake-bridge.js';
+import {installFakeRun} from './fake-run.js';
+import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {listed, SEED, server} from './world.js';
+
+/**
+ * Open in new window: the Run screen's "⋯" and the sidebar row menu ask main to show the run in a
+ * window of its own (the Fake opens a browser window on the run's page, as main opens an
+ * `AppWindow`). That window shows the Run screen alone, for the run its URL names, and is live
+ * there; the main window leaves the run for New run. Asking again focuses the window.
+ */
+
+const RUN_ID = '20261015-163047';
+
+const WINDOW_SEED: FakeBridgeSeed = {
+  ...SEED,
+  listings: [listed([server('00000000000a', RUN_ID, 'running')], [])],
+};
+
+const SERVER: FakeServerSeed = {
+  runId: RUN_ID,
+  batch: {
+    type: 'event_batch',
+    events: [{timestamp: '2026-10-15T16:30:51Z', type: 'server_ready', sequence: 1}],
+    through_sequence: 1,
+    store_id: 'store-1',
+    history_after_sequence: 0,
+  },
+  snapshot: {run_id: RUN_ID, sequence: 1, status: 'running'},
+};
+
+/** Every page in `context`, the run windows too, gets the Fake bridge before its scripts. */
+async function install(context: BrowserContext): Promise<void> {
+  await context.addInitScript(installFakeBridge, WINDOW_SEED);
+  await context.addInitScript(installFakeMachines, WINDOW_SEED);
+  await context.addInitScript(installFakeNewRun, WINDOW_SEED);
+  await context.addInitScript(installFakeWindows);
+  await context.addInitScript(installFakeRun, {streams: [], text: {}});
+  await context.addInitScript(installFakeServer, SERVER);
+}
+
+async function windows(page: Page): Promise<FakeWindows> {
+  return page.evaluate(
+    () => (window as unknown as {fakeHost: {windows: FakeWindows}}).fakeHost.windows,
+  );
+}
+
+async function commands(page: Page): Promise<string[]> {
+  return page.evaluate(() => [
+    ...(window as unknown as {fakeHost: {commands: string[]}}).fakeHost.commands,
+  ]);
+}
+
+const sidebar = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
+
+test('a run opens in a window of its own, shown alone and live there', async ({page, context}) => {
+  await install(context);
+  await page.goto('./shell.html');
+  await sidebar(page)
+    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
+    .click();
+  await expect(page.getByRole('tablist', {name: 'Run views'})).toBeVisible();
+
+  const opening = context.waitForEvent('page');
+  await page.getByRole('button', {name: 'More actions'}).click();
+  await page.getByRole('menuitem', {name: 'Open in new window'}).click();
+  const runWindow = await opening;
+  await runWindow.waitForLoadState();
+
+  // The main window leaves the run for New run; the new one shows the run, with no sidebar.
+  await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+  expect(new URL(runWindow.url()).search).toBe(`?host=ssh%3Achelan4&run=${RUN_ID}`);
+  await expect(runWindow.getByRole('tablist', {name: 'Run views'})).toBeVisible();
+  await expect(runWindow.getByText(`chelan4 · ${RUN_ID}`)).toBeVisible();
+  await expect(sidebar(runWindow)).toHaveCount(0);
+  // The run is live in its window (it attached there), and the main window let it go.
+  await expect.poll(() => commands(runWindow)).toContain('attach 00000000000a');
+  await expect.poll(() => commands(page)).toContain('release');
+  // It is its own window already: it does not offer another.
+  await runWindow.getByRole('button', {name: 'More actions'}).click();
+  await expect(runWindow.getByRole('menuitem', {name: 'Open in new window'})).toHaveCount(0);
+  await runWindow.keyboard.press('Escape');
+
+  // Asking again, from the sidebar row's menu, focuses that window rather than opening another.
+  await sidebar(page).getByRole('button', {name: 'More for queue-rs · mpmc'}).click();
+  await page.getByRole('menuitem', {name: 'Open in new window'}).click();
+  await expect
+    .poll(async () => (await windows(page)).opened)
+    .toEqual([`ssh:chelan4 ${RUN_ID}`, `ssh:chelan4 ${RUN_ID}`]);
+  expect(context.pages()).toHaveLength(2);
+
+  // Closing it leaves the main window as it was.
+  await runWindow.close();
+  await expect(page.getByRole('heading', {name: 'New run'})).toBeVisible();
+});
