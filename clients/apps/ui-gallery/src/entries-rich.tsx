@@ -308,6 +308,18 @@ function ScrubberDemo(): JSX.Element {
         change={noop}
         backToLive={noop}
       />
+      <Scrubber
+        label="Position, ended"
+        value={30}
+        last={40}
+        live={false}
+        pastLabel="Replay"
+        latestLabel="End"
+        backLabel="Jump to end"
+        position="Step 30 of 40"
+        change={noop}
+        backToLive={noop}
+      />
     </Stack>
   );
 }
