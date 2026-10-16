@@ -90,7 +90,7 @@ def _check_always(host: Host) -> None:
     where = host.run.timeline()
     if record is None or record.baseline is None:
         assert not _before_the_input(host), f"work before the input was measured: {where}"
-    held = rules.max_in_flight + rules.max_backlog
+    held = rules.max_in_flight + rules.backlog
     assert len(host.unsettled) <= held, f"too many attempts open: {where}"
     measuring = _candidates_measuring(host) + bool(host.input_waits())
     assert measuring <= rules.slots, f"more trusted measurements than slots: {where}"
@@ -108,7 +108,9 @@ def _check_always(host: Host) -> None:
 @given(
     story=steps(),
     stop=stops(),
-    width=st.tuples(st.integers(1, 3), st.integers(1, 3), st.integers(1, 3), st.integers(0, 3)),
+    width=st.tuples(
+        st.integers(1, 3), st.integers(1, 3), st.integers(1, 3), st.none() | st.integers(0, 3)
+    ),
     measured=st.sampled_from(["measured", "failed-workload", "no-evidence", "lost"]),
 )
 def test_the_root_keeps_its_promises_whatever_core_answers_and_whenever_the_operator_stops(
@@ -116,7 +118,7 @@ def test_the_root_keeps_its_promises_whatever_core_answers_and_whenever_the_oper
     restarting: bool,
     story: list[Step],
     stop: Stop | None,
-    width: tuple[int, int, int, int],
+    width: tuple[int, int, int, int | None],
     measured: Literal["measured", "failed-workload", "no-evidence", "lost"],
 ) -> None:
     rounds, in_flight, slots, backlog = width

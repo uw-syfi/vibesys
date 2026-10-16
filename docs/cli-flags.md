@@ -60,7 +60,11 @@ once. `--max-rounds N` supplies `N` admissions per slot, so the dynamic search
 may admit at most `N * M` workstreams whose workspaces open. A workstream that
 fails parent verification or workspace admission is refunded and does not
 consume that budget; an operator stop before the workspace opens is not
-refunded.
+refunded. A workstream whose candidate waits for its trusted measurement parks
+and gives its agent slot to new work, so planning and implementing go on while
+measurements queue. `--max-backlog K` caps how many workstreams park at once
+(default: every waiting one, up to 32); `--max-backlog 0` keeps each agent slot
+held until its workstream ends.
 
 A dynamic **round** is the durable result of an implementation workstream
 recorded under a hypothesis. Profile and merge workstreams still appear in the
