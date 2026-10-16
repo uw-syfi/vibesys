@@ -64,16 +64,15 @@ def resolve_run_environment_spec(
     """
     if task_dockerfile is not None and spec.task_dockerfile != task_dockerfile:
         raise TaskImageError.not_built(spec.name, task_dockerfile)
-    if derived_environment_name(spec.name, backend, platform=platform) != "host":
+    derived = derived_environment_name(spec.name, backend, platform=platform)
+    if task_dockerfile is not None:
+        # The same decision every environment makes refuses the task image in
+        # an environment without an agent container, selected or derived.
+        editor_image_plan(
+            derived, task_dockerfile=task_dockerfile, image=None, launch="fresh", facts=None
+        )
+    if derived == spec.name:
         return spec
-    # The same decision every environment makes refuses the task image here.
-    editor_image_plan(
-        "host",
-        task_dockerfile=task_dockerfile,
-        image=None,
-        launch="fresh",
-        facts=None,
-    )
     log(
         f"[environment] the {backend.value} backend cannot be reached from Docker; "
         "running the agent on the host under Seatbelt"

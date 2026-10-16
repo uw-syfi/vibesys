@@ -199,6 +199,32 @@ def test_a_pre_reference_run_resumes_only_on_its_recorded_id(recorded: str, buil
             plan.resolve(built)
 
 
+@given(
+    environment=st.sampled_from(_ENVIRONMENTS),
+    backend=st.sampled_from(tuple(ComputeBackend)),
+    platform=st.sampled_from(("linux", "darwin")),
+)
+def test_a_selection_that_derives_nothing_is_returned_unchanged(
+    environment: str, backend: ComputeBackend, platform: str
+) -> None:
+    """Regression: an explicitly selected ``host`` spec lost its options (its injected
+    sandbox builder) as if it had been derived from ``docker``."""
+    spec = RunEnvironmentSpec(name=environment, options={"marker": object()})
+    resolved = resolve_run_environment_spec(
+        spec, backend, task_dockerfile=None, platform=platform, log=print
+    )
+    derived = environment == "docker" and platform == "darwin" and resolved.name == "host"
+    assert derived or resolved is spec
+
+
+def test_a_selected_host_environment_refuses_a_task_dockerfile() -> None:
+    spec = RunEnvironmentSpec(name="host", task_dockerfile=_DOCKERFILE)
+    with pytest.raises(TaskImageError, match="runs the agent on the host"):
+        resolve_run_environment_spec(
+            spec, ComputeBackend.CPU, task_dockerfile=_DOCKERFILE, platform="linux", log=print
+        )
+
+
 def test_deriving_the_host_environment_refuses_a_built_task_image() -> None:
     """Regression: Metal on macOS dropped a task image when it derived ``host``."""
     spec = RunEnvironmentSpec(
