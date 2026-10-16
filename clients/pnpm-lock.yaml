@@ -626,6 +626,46 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  features/run-page:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../libs/contracts
+      '@vibesys/hosts':
+        specifier: workspace:*
+        version: link:../../libs/hosts
+      '@vibesys/logs':
+        specifier: workspace:*
+        version: link:../../libs/logs
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../libs/machine
+      '@vibesys/runs':
+        specifier: workspace:*
+        version: link:../../libs/runs
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../../libs/store
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   features/run-view:
     dependencies:
       '@vibesys/contracts':

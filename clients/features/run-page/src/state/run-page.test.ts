@@ -1,0 +1,286 @@
+import {describe, expect, test} from 'bun:test';
+import type {LogStream} from '@vibesys/contracts/host-helper';
+import type {HostRun} from '@vibesys/hosts';
+import {emptyLogView, foldChunk} from '@vibesys/logs';
+import {checkModel, type Seeded} from '@vibesys/store/testing';
+import {
+  endedView,
+  FORCE_STOP_BOUND_MS,
+  followedStreams,
+  headerView,
+  logGroups,
+  RUN_TABS,
+  type RunPageAction,
+  type RunPageRequest,
+  type RunPageState,
+  type RunRecord,
+  runPageInitial,
+  runPageInvariants,
+  runPageStep,
+  runPhase,
+  stopBannerView,
+  streamLines,
+  timelineView,
+  type Unavailable,
+} from './index.js';
+
+const RUN = {host: 'ssh:chelan4', runId: '20261015-163047'} as const;
+
+function server(phase: HostRun['phase'], extra: Partial<HostRun> = {}): HostRun {
+  return {
+    id: 'a1b2c3d4e5f6',
+    projectRoot: '~/vibesys-projects/queue-rs',
+    runId: RUN.runId,
+    status: phase,
+    phase,
+    paused: phase === 'paused' ? 'user' : null,
+    end: null,
+    startedAt: 1,
+    reason: null,
+    ...extra,
+  };
+}
+
+const RECORDS: readonly RunRecord[] = [
+  {kind: 'unlisted'},
+  {kind: 'live', run: server('starting')},
+  {kind: 'live', run: server('running')},
+  {kind: 'live', run: server('pausing')},
+  {kind: 'live', run: server('paused')},
+  {kind: 'live', run: server('paused', {paused: 'quota'})},
+  {kind: 'live', run: server('stopping')},
+  {
+    kind: 'ended',
+    run: server('stopped', {
+      end: {outcome: 'stopped', reason: 'Stopped by you.', resumable: false},
+    }),
+  },
+  {
+    kind: 'ended',
+    run: server('failed', {
+      end: {
+        outcome: 'failed',
+        reason: 'W6’s benchmark timed out after 300 s.',
+        resumable: true,
+        resume_from_round: 2,
+      },
+    }),
+  },
+];
+
+function stream(id: string, owner: LogStream['owner'], outcome: LogStream['outcome']): LogStream {
+  return {id, owner, command: 'docker build .', retained_start: 0, size: 0, outcome};
+}
+
+const STREAMS: readonly LogStream[] = [
+  stream('s1', {kind: 'startup_step', stage: 'building_image'}, 'ended'),
+  stream('s2', {kind: 'startup_step', stage: 'starting_container'}, null),
+  stream('s3', {kind: 'gate_stage', execution_id: 'w5', gate: 'benchmark', attempt: 1}, null),
+  stream('s4', {kind: 'tool_build', name: 'perf'}, 'failed'),
+  stream('s5', {kind: 'run_narration'}, null),
+];
+
+function initial(unavailable: Unavailable = {}): RunPageState {
+  return runPageInitial({
+    identity: RUN,
+    title: {project: '~/vibesys-projects/queue-rs', task: 'mpmc'},
+    hostLabel: 'chelan4',
+    unavailable,
+  });
+}
+
+function fold(state: RunPageState, actions: readonly RunPageAction[]) {
+  const requests: RunPageRequest[] = [];
+  let current = state;
+  for (const action of actions) {
+    const step = runPageStep(current, action);
+    current = step.state;
+    requests.push(...step.requests);
+  }
+  return {state: current, requests};
+}
+
+const USER_ACTIONS: readonly RunPageAction[] = [
+  {type: 'ask-stop'},
+  {type: 'cancel-stop'},
+  {type: 'confirm-stop'},
+  {type: 'force-stop'},
+  {type: 'stop-failed'},
+  {type: 'pause'},
+  {type: 'resume'},
+  {type: 'resume-ended'},
+  {type: 'open-window'},
+  {type: 'archive'},
+  {type: 'run-again'},
+  {type: 'view-logs'},
+  {type: 'select-stream', streamId: 's3'},
+];
+
+function randomAction(random: Seeded, issued: readonly number[]): RunPageAction {
+  switch (random.int(6)) {
+    case 0:
+      return {type: 'record', record: random.pick(RECORDS)};
+    case 1:
+      return {type: 'bound-elapsed', token: random.pick(issued)};
+    case 2:
+      return {
+        type: 'streams',
+        token: random.pick(issued),
+        outcome: random.bool()
+          ? {ok: true, instanceId: 'a1b2c3d4e5f6', streams: STREAMS.slice(0, random.int(6))}
+          : {ok: false, failure: {code: 'transport', message: 'channel closed'}},
+      };
+    case 3:
+      return {type: 'tab', tab: random.pick(RUN_TABS)};
+    default:
+      return random.pick(USER_ACTIONS);
+  }
+}
+
+function issues(request: RunPageRequest): number | null {
+  return request.kind === 'arm-bound' || request.kind === 'list-logs' ? request.token : null;
+}
+
+function awaited(state: RunPageState) {
+  return {
+    bound: state.stop.kind === 'stopping' ? state.stop.bound : null,
+    logs: state.logs.kind === 'listing' ? state.logs.token : null,
+  };
+}
+
+function reply(action: RunPageAction) {
+  if (action.type === 'bound-elapsed') return {slot: 'bound', token: action.token};
+  if (action.type === 'streams') return {slot: 'logs', token: action.token};
+  return null;
+}
+
+/** Why `request` was not on offer in `before`, or null when it was. */
+function notOffered(before: RunPageState, request: RunPageRequest): string | null {
+  const header = headerView(before);
+  switch (request.kind) {
+    case 'pause':
+      return header.pause.shown && header.pause.disabledReason === null
+        ? null
+        : 'pause was sent while not offered';
+    case 'resume':
+      return header.resume.shown ? null : 'resume was sent while not offered';
+    case 'stop': {
+      const banner = stopBannerView(before);
+      const offered = !request.force || (banner.kind === 'stopping' && banner.forceOffered);
+      return offered ? null : 'force stop was sent while not offered';
+    }
+    case 'resume-ended':
+      return endedView(before)?.resume == null ? 'resume of a run that cannot resume' : null;
+    case 'arm-bound':
+      return request.ms === FORCE_STOP_BOUND_MS
+        ? null
+        : 'the force bound is not the documented one';
+    default:
+      return null;
+  }
+}
+
+/** Each step's commands are ones the screen offered in the state before it. */
+function offeredOnly(
+  before: RunPageState,
+  _action: RunPageAction,
+  after: RunPageState,
+  requests: readonly RunPageRequest[],
+): void {
+  const problems = requests.map(request => notOffered(before, request)).filter(Boolean);
+  if (problems.length > 0) throw new Error(problems.join('; '));
+  if (stopBannerView(after).kind === 'stopping' && runPhase(after).kind !== 'stopping')
+    throw new Error('a stopping banner outside stopping');
+}
+
+describe('the run page store', () => {
+  test('holds its invariants over seeded action sequences, stale replies included', () => {
+    for (const unavailable of [{}, {pause: 'no', logs: 'no', 'open-window': 'no'}]) {
+      checkModel({
+        initial: initial(unavailable),
+        step: runPageStep,
+        action: randomAction,
+        issues,
+        awaited,
+        reply,
+        invariants: runPageInvariants,
+        also: offeredOnly,
+      });
+    }
+  });
+
+  test('offers force stop only after the bound elapses while stopping', () => {
+    const live = {type: 'record', record: RECORDS[2]} as RunPageAction;
+    const asked = fold(initial(), [live, {type: 'ask-stop'}, {type: 'confirm-stop'}]);
+    expect(asked.requests).toContainEqual({kind: 'stop', force: false});
+    const arm = asked.requests.find(request => request.kind === 'arm-bound');
+    if (arm?.kind !== 'arm-bound') throw new Error('no bound armed');
+    expect(stopBannerView(asked.state)).toMatchObject({kind: 'stopping', forceOffered: false});
+    // A stale bound changes nothing.
+    expect(runPageStep(asked.state, {type: 'bound-elapsed', token: arm.token + 99}).state).toBe(
+      asked.state,
+    );
+    const elapsed = fold(asked.state, [{type: 'bound-elapsed', token: arm.token}]);
+    expect(stopBannerView(elapsed.state)).toMatchObject({kind: 'stopping', forceOffered: true});
+    const forced = fold(elapsed.state, [{type: 'force-stop'}]);
+    expect(forced.requests).toEqual([{kind: 'stop', force: true}]);
+    // The run ends: no stop flow survives, and a late bound is dropped.
+    const ended = fold(forced.state, [
+      {type: 'record', record: RECORDS[7] as RunRecord},
+      {type: 'bound-elapsed', token: arm.token},
+    ]);
+    expect(ended.state.stop).toEqual({kind: 'idle'});
+  });
+
+  test('a stop seen in the record (from anywhere) arms the same bound', () => {
+    const {state, requests} = fold(initial(), [{type: 'record', record: RECORDS[6] as RunRecord}]);
+    expect(runPhase(state).kind).toBe('stopping');
+    expect(requests.some(request => request.kind === 'arm-bound')).toBe(true);
+  });
+
+  test('the ended banner names the round to resume from only when resumable', () => {
+    const stopped = fold(initial(), [{type: 'record', record: RECORDS[7] as RunRecord}]).state;
+    expect(endedView(stopped)).toMatchObject({title: 'Stopped', resume: null});
+    const failed = fold(initial(), [{type: 'record', record: RECORDS[8] as RunRecord}]).state;
+    expect(endedView(failed)).toMatchObject({title: 'Failed', resume: 'Resume from round 2'});
+    expect(fold(failed, [{type: 'resume-ended'}]).requests).toEqual([
+      {kind: 'resume-ended', fromRound: 2},
+    ]);
+  });
+
+  test('groups streams by owner and builds the startup timeline from them', () => {
+    const listed = fold(initial(), [{type: 'record', record: RECORDS[1] as RunRecord}]);
+    const list = listed.requests.find(request => request.kind === 'list-logs');
+    if (list?.kind !== 'list-logs') throw new Error('no listing asked');
+    const {state} = fold(listed.state, [
+      {
+        type: 'streams',
+        token: list.token,
+        outcome: {ok: true, instanceId: 'a1b2c3d4e5f6', streams: STREAMS},
+      },
+    ]);
+    expect(logGroups(state).map(group => group.name)).toEqual([
+      'Startup',
+      'Gates',
+      'Tool builds',
+      'Run narration',
+    ]);
+    expect(timelineView(state).map(stage => stage.state)).toEqual(['done', 'done', 'active']);
+    expect(followedStreams(state)).toEqual(['s1', 's2']);
+    const narration = foldChunk(emptyLogView(), {
+      offset: 0,
+      data: '{"at":"2026-10-15T16:30:51+00:00","level":"INFO","logger":"vibesys","thread":"main","message":"run started"}\n',
+      next_offset: 120,
+      eof: true,
+      closed: false,
+      truncated_before: false,
+      pipes: [],
+    });
+    const shown = fold(state, [
+      {type: 'log-view', streamId: 's5', view: narration},
+      {type: 'view-logs'},
+    ]).state;
+    expect(shown.tab).toBe('logs');
+    expect(streamLines(shown, 's5')).toEqual([{text: '16:30:51 INFO run started', stream: 'out'}]);
+  });
+});

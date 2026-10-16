@@ -1,0 +1,344 @@
+/**
+ * What the Run screen shows, as selectors over `RunPageState`: the header's words and actions, the
+ * startup timeline, the log streams grouped by owner, and the stop and ended banners. The renderer
+ * maps these onto `@vibesys/ui` components and decides nothing itself.
+ */
+import type {LogStream} from '@vibesys/contracts/host-helper';
+import type {RunEnd} from '@vibesys/hosts';
+import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
+import {type RunPageState, runPhase, type StopFlow, type Unavailable} from './run-page.js';
+
+export type Tone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
+
+/** A button the header shows: enabled, or disabled with the reason. */
+export interface Offer {
+  readonly shown: boolean;
+  readonly disabledReason: string | null;
+}
+
+export interface HeaderView {
+  readonly title: string;
+  readonly subtitle: string;
+  readonly status: {readonly label: string; readonly tone: Tone};
+  readonly pause: Offer;
+  readonly resume: Offer;
+  readonly stop: Offer;
+  readonly openWindow: Offer;
+  readonly archive: Offer;
+}
+
+function projectName(path: string): string {
+  return path.split('/').filter(Boolean).at(-1) ?? path;
+}
+
+const ENDED: Readonly<Record<NonNullable<RunEnd>['outcome'], {label: string; tone: Tone}>> = {
+  adopted: {label: 'Finished', tone: 'ok'},
+  'kept-input': {label: 'Finished · kept the input', tone: 'ok'},
+  'no-winner': {label: 'Finished · no winner', tone: 'ok'},
+  deadline: {label: 'Finished · time limit', tone: 'ok'},
+  'finish-refused': {label: 'Finished · not adopted', tone: 'warn'},
+  'adoption-failed': {label: 'Failed to adopt', tone: 'err'},
+  failed: {label: 'Failed', tone: 'err'},
+  stopped: {label: 'Stopped', tone: 'neutral'},
+  force_stopped: {label: 'Force stopped', tone: 'neutral'},
+};
+
+/** An ended run's words, from its end record or, on an older tombstone, its last phase. */
+function endedStatus(phase: string, end: RunEnd): {label: string; tone: Tone} {
+  if (end !== null) return ENDED[end.outcome];
+  if (phase === 'failed') return {label: 'Failed', tone: 'err'};
+  if (phase === 'stopped') return {label: 'Stopped', tone: 'neutral'};
+  return {label: 'Finished', tone: 'ok'};
+}
+
+function status(state: RunPageState): {label: string; tone: Tone} {
+  const phase = runPhase(state);
+  switch (phase.kind) {
+    case 'unlisted':
+      return {label: 'Looking for the run', tone: 'neutral'};
+    case 'starting':
+      return {label: 'Starting', tone: 'live'};
+    case 'running':
+      return phase.pausing
+        ? {label: 'Pausing at the next step', tone: 'warn'}
+        : {label: 'Running', tone: 'live'};
+    case 'paused':
+      return phase.by === 'quota'
+        ? {label: 'Paused · usage limit', tone: 'warn'}
+        : {label: 'Paused by you', tone: 'warn'};
+    case 'stopping':
+      return {label: 'Stopping…', tone: 'warn'};
+    case 'ended':
+      return endedStatus(phase.run.phase, phase.end);
+  }
+}
+
+function offer(shown: boolean, unavailable?: string): Offer {
+  return {shown, disabledReason: unavailable ?? null};
+}
+
+export function headerView(state: RunPageState): HeaderView {
+  const phase = runPhase(state);
+  const {project, task} = state.title;
+  const name = projectName(project);
+  const unavailable: Unavailable = state.unavailable;
+  return {
+    title: task === null ? name : `${name} · ${task}`,
+    subtitle: `${state.hostLabel} · ${state.identity.runId}`,
+    status: status(state),
+    pause: offer(phase.kind === 'running' && !phase.pausing, unavailable.pause),
+    resume: offer(phase.kind === 'paused', unavailable.pause),
+    stop: offer(
+      (phase.kind === 'starting' || phase.kind === 'running' || phase.kind === 'paused') &&
+        state.stop.kind === 'idle',
+    ),
+    openWindow: offer(true, unavailable['open-window']),
+    archive: offer(phase.kind === 'ended'),
+  };
+}
+
+/** The banner under the header while a stop is being confirmed or is under way. */
+export type StopBannerView =
+  | {readonly kind: 'none'}
+  | {readonly kind: 'confirm'; readonly title: string; readonly body: string}
+  | {
+      readonly kind: 'stopping';
+      readonly title: string;
+      readonly body: string;
+      readonly forceOffered: boolean;
+    };
+
+const MINUTES = 2;
+
+export function stopBannerView(state: RunPageState): StopBannerView {
+  const stop: StopFlow = state.stop;
+  if (stop.kind === 'confirming') {
+    return {
+      kind: 'confirm',
+      title: 'Stop this run?',
+      body:
+        'A stopped run ends for good and cannot be resumed. Agent turns in progress are discarded; ' +
+        'results measured so far are kept. To continue later, pause the run instead.',
+    };
+  }
+  if (runPhase(state).kind !== 'stopping') return {kind: 'none'};
+  const forceOffered = stop.kind === 'stopping' && stop.forceOffered;
+  return {
+    kind: 'stopping',
+    title: 'Stopping · waiting for the run to reach a safe point',
+    body: forceOffered
+      ? `Force stop ends it now and discards the work in progress. It is offered because stopping has taken over ${MINUTES} minutes.`
+      : 'Running steps finish first, then the run stops.',
+    forceOffered,
+  };
+}
+
+/** One startup stage of the timeline, in `Timeline`'s terms. */
+export interface StageView {
+  readonly id: string;
+  readonly state: 'done' | 'active' | 'waiting' | 'failed';
+  readonly label: string;
+  /** The stream whose lines the stage's body shows, when it wrote one. */
+  readonly streamId: string | null;
+}
+
+const STAGES = [
+  {id: 'building_image', label: 'Building the agent image'},
+  {id: 'starting_container', label: 'Starting the agent container'},
+] as const;
+
+function streamsOf(state: RunPageState): readonly LogStream[] {
+  return state.logs.kind === 'listed' || state.logs.kind === 'listing' ? state.logs.streams : [];
+}
+
+function startupStream(streams: readonly LogStream[], stage: string): LogStream | undefined {
+  return streams
+    .filter(stream => stream.owner['kind'] === 'startup_step' && stream.owner['stage'] === stage)
+    .at(-1);
+}
+
+function streamState(stream: LogStream | undefined, starting: boolean): StageView['state'] {
+  if (stream === undefined) return starting ? 'waiting' : 'done';
+  if (stream.outcome === null) return starting ? 'active' : 'done';
+  return stream.outcome === 'ended' ? 'done' : 'failed';
+}
+
+/** The startup timeline: resolving, then each startup step the run's logs record. */
+export function timelineView(state: RunPageState): readonly StageView[] {
+  const starting = runPhase(state).kind === 'starting';
+  const streams = streamsOf(state);
+  const stages: StageView[] = STAGES.map(stage => {
+    const stream = startupStream(streams, stage.id);
+    return {
+      id: stage.id,
+      label: stage.label,
+      state: streamState(stream, starting),
+      streamId: stream?.id ?? null,
+    };
+  });
+  // A later stage that started means the ones before it are done, logged or not (a cached image).
+  const lastStarted = stages.reduce(
+    (last, stage, index) => (stage.state === 'waiting' ? last : index),
+    -1,
+  );
+  const settled = stages.map((stage, index) =>
+    index < lastStarted && stage.state === 'waiting' ? {...stage, state: 'done' as const} : stage,
+  );
+  const resolving: StageView = {
+    id: 'resolving',
+    label: 'Resolving the project and task',
+    state: starting && lastStarted < 0 ? 'active' : 'done',
+    streamId: null,
+  };
+  return [resolving, ...settled];
+}
+
+/** Which streams the screen needs followed now: the startup steps while starting, and the open one. */
+export function followedStreams(state: RunPageState): readonly string[] {
+  const ids = new Set<string>();
+  if (runPhase(state).kind === 'starting') {
+    for (const stage of timelineView(state)) if (stage.streamId !== null) ids.add(stage.streamId);
+  }
+  if (state.tab === 'logs') {
+    const shown = shownStream(state);
+    if (shown !== null) ids.add(shown);
+  }
+  return [...ids];
+}
+
+export type LogGroupName = 'Startup' | 'Gates' | 'Tool builds' | 'Run narration' | 'Other';
+const GROUP_ORDER: readonly LogGroupName[] = [
+  'Startup',
+  'Gates',
+  'Tool builds',
+  'Run narration',
+  'Other',
+];
+
+export interface LogStreamItem {
+  readonly id: string;
+  readonly label: string;
+  readonly live: boolean;
+}
+
+export interface LogGroup {
+  readonly name: LogGroupName;
+  readonly streams: readonly LogStreamItem[];
+}
+
+function words(value: unknown): string {
+  return typeof value === 'string' ? value.replaceAll('_', ' ') : String(value);
+}
+
+function streamGroup(stream: LogStream): LogGroupName {
+  switch (stream.owner['kind']) {
+    case 'startup_step':
+      return 'Startup';
+    case 'gate_stage':
+      return 'Gates';
+    case 'tool_build':
+      return 'Tool builds';
+    case 'run_narration':
+      return 'Run narration';
+    default:
+      return 'Other';
+  }
+}
+
+function streamLabel(stream: LogStream): string {
+  const {owner} = stream;
+  switch (owner['kind']) {
+    case 'startup_step':
+      return STAGES.find(stage => stage.id === owner['stage'])?.label ?? words(owner['stage']);
+    case 'gate_stage':
+      return `${words(owner['gate'])} · ${String(owner['execution_id'])} · attempt ${String(owner['attempt'])}`;
+    case 'tool_build':
+      return `Building ${String(owner['name'])}`;
+    case 'run_narration':
+      return 'Run narration';
+    default:
+      return stream.command;
+  }
+}
+
+/** The run's streams by owner (startup steps, gate stages, tool builds, narration), oldest first. */
+export function logGroups(state: RunPageState): readonly LogGroup[] {
+  const streams = streamsOf(state);
+  return GROUP_ORDER.map(name => ({
+    name,
+    streams: streams
+      .filter(stream => streamGroup(stream) === name)
+      .map(stream => ({id: stream.id, label: streamLabel(stream), live: stream.outcome === null})),
+  })).filter(group => group.streams.length > 0);
+}
+
+/** The stream the Logs tab shows: the selected one while it is listed, else the first. */
+export function shownStream(state: RunPageState): string | null {
+  const ids = logGroups(state).flatMap(group => group.streams.map(stream => stream.id));
+  if (state.selected !== null && ids.includes(state.selected)) return state.selected;
+  return ids[0] ?? null;
+}
+
+export interface LogLineView {
+  readonly text: string;
+  readonly stream: 'out' | 'err';
+}
+
+function narrationText(text: string): string {
+  const record = decodeNarrationLine(text);
+  if (record.kind === 'raw') return record.text;
+  const {at, level, message} = record.line;
+  return `${at.slice(11, 19)} ${level} ${message}`;
+}
+
+/** A stream's lines for `LogPane`: stderr marked, narration records as one readable line each. */
+export function streamLines(state: RunPageState, streamId: string | null): readonly LogLineView[] {
+  if (streamId === null) return [];
+  const view: LogView | undefined = state.views[streamId];
+  if (view === undefined) return [];
+  const isNarration =
+    streamsOf(state).find(stream => stream.id === streamId)?.owner['kind'] === 'run_narration';
+  return logViewRecords(view).map(line => ({
+    text: isNarration ? narrationText(line.text) : line.text,
+    stream: line.runs.some(run => run.pipe === 'stderr') ? 'err' : 'out',
+  }));
+}
+
+/** What the Logs tab says instead of lines, when it has none to show. */
+export function logsNotice(state: RunPageState): string | null {
+  if (state.unavailable.logs !== undefined) return state.unavailable.logs;
+  switch (state.logs.kind) {
+    case 'failed':
+      return state.logs.unsupported
+        ? 'This machine’s VibeSys does not serve logs. Update its checkout to read them here.'
+        : `Could not list the run’s logs: ${state.logs.message}`;
+    case 'idle':
+    case 'listing':
+      return state.logs.kind === 'listing' && state.logs.streams.length > 0
+        ? null
+        : 'Looking for the run’s logs…';
+    case 'listed':
+      return state.logs.streams.length === 0 ? 'The run has not written any logs yet.' : null;
+  }
+}
+
+export interface EndedView {
+  readonly title: string;
+  readonly tone: 'neutral' | 'ok' | 'warn' | 'err';
+  readonly reason: string;
+  /** "Resume from round N", only when the end record says the run can resume. */
+  readonly resume: string | null;
+}
+
+/** The ended banner, from the end record. */
+export function endedView(state: RunPageState): EndedView | null {
+  const phase = runPhase(state);
+  if (phase.kind !== 'ended') return null;
+  const {label, tone} = endedStatus(phase.run.phase, phase.end);
+  const end = phase.end;
+  const reason = end?.reason ?? phase.run.reason ?? 'The run’s record does not say why it ended.';
+  const round = end?.resume_from_round ?? null;
+  const resume =
+    end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;
+  return {title: label, tone: tone === 'live' ? 'neutral' : tone, reason, resume};
+}

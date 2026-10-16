@@ -73,6 +73,8 @@
         "features/app-shell/src/**/*.tsx",
         "features/settings/src/**/*.ts",
         "features/settings/src/**/*.tsx",
+        "features/run-page/src/**/*.ts",
+        "features/run-page/src/**/*.tsx",
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],
