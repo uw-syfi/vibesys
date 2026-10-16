@@ -122,3 +122,13 @@ def test_the_current_claude_models_are_vetted() -> None:
     """Regression: a hand-kept list refused ``claude-opus-5-5`` without the opt-out."""
     for model in ("claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"):
         assert AgentSpec(provider="claude", model=model).model == model
+
+
+def test_codex_vets_the_gpt_6_families_its_cli_lists_and_keeps_its_default() -> None:
+    """The ids ``codex debug models`` (codex-cli 0.160.0) lists, the default still first."""
+    models = vetted_models("codex")
+
+    for model in ("gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"):
+        assert model in models
+        assert AgentSpec(provider="codex", model=model).model == model
+    assert default_model("codex") == "gpt-5.6-sol"

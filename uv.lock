@@ -40,11 +40,11 @@ members = [
 
 [[package]]
 name = "agentshim"
-version = "0.18.1"
+version = "0.18.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a6/ca/fb2f1a2e0bb55c300070cd281a893caca510baf88aa9b6fe4afbbb559da7/agentshim-0.18.1.tar.gz", hash = "sha256:3b1dda47da07654b3e0b9d27f40a507f9f7f61e387193ea95818be507bec951d", size = 263687, upload-time = "2026-10-16T06:04:00.079Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/03/b0/a4ab1cf45819486e4a80e70e8240bee89ffa279b16f52158cbb4005b30dc/agentshim-0.18.2.tar.gz", hash = "sha256:03c158b527fbff9d2a1948c7e46d5c73b48efc29f1cb130287ad070be45665be", size = 263808, upload-time = "2026-10-16T15:36:00.986Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/16/d4/6ee7a1b32500ac6f3cfaf266f2267dc969638d8c2135f608526a8dc48361/agentshim-0.18.1-py3-none-any.whl", hash = "sha256:ca3421ddf3c96428b909e5028a6fa2795bdddd93b4e4d24d4047b7a5bbef1501", size = 307229, upload-time = "2026-10-16T06:03:58.685Z" },
+    { url = "https://files.pythonhosted.org/packages/32/75/a696b440f65a248c338b1c0f65603142ade5cdcee659f0bf824eafc8a3eb/agentshim-0.18.2-py3-none-any.whl", hash = "sha256:1222ee7575f1dd9d6d8c4179a715ddf01166c7aea339b64806d23f36e91c8adf", size = 307233, upload-time = "2026-10-16T15:35:59.489Z" },
 ]
 
 [[package]]
@@ -2941,7 +2941,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.18.1,<0.19" },
+    { name = "agentshim", specifier = ">=0.18.2,<0.19" },
     { name = "cbor2", specifier = "<6" },
     { name = "cryptography", specifier = "<50" },
     { name = "huggingface-hub" },
@@ -3001,7 +3001,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentshim", specifier = ">=0.18.1,<0.19" },
+    { name = "agentshim", specifier = ">=0.18.2,<0.19" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-faults", editable = "libs/vs-faults" },
