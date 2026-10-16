@@ -9,10 +9,11 @@ when a model ships: the hand-kept context-window table had no Claude 5 entry,
 so a 1M-token model showed a 200k limit, and the hand-kept vetted list refused
 ``claude-opus-5-5``.
 
-This scans every string constant (docstrings included) in the product trees,
-``src/`` and each library's ``src/``, for a model-id literal or a bare model
-alias. The operator still names models in configuration and flags; that is
-data, not code.
+This scans every string constant (docstrings included) in the Python product
+trees, ``src/`` and each library's ``src/``, for a model-id literal or a bare
+model alias, and the text of every TypeScript client source (``clients/**/src``,
+tests and generated code excluded) for a model-id literal. The operator still
+names models in configuration and flags; that is data, not code.
 """
 
 from __future__ import annotations
@@ -42,7 +43,15 @@ MODEL_ALIAS = re.compile(r"(?:opus|sonnet|haiku|fable)(?:\[1m\])?", re.IGNORECAS
 #: model literal, each with why. Shrink-only: remove an entry when its site
 #: goes, never add one to make a new literal pass; read the fact from
 #: ``vs_agent.api`` instead.
-ALLOWLIST: dict[tuple[str, str], str] = {}
+ALLOWLIST: dict[tuple[str, str], str] = {
+    (
+        "clients/tui/src/agent-runtime-label.ts",
+        "gpt-5",
+    ): "a doc-comment example of how a model id the backend sends is displayed; no fact is read from it",
+}
+
+#: TypeScript files under a client ``src/`` that are not product code.
+_TS_NON_PRODUCT = re.compile(r"(\.test\.tsx?$|/testing/|/__tests__/|/generated/|/fixtures/)")
 
 
 def model_literals(tree: ast.AST) -> list[tuple[int, str]]:
@@ -62,18 +71,50 @@ def product_python_files(root: Path) -> list[Path]:
     return [path for tree in trees if tree.is_dir() for path in python_files(tree)]
 
 
-def violations(root: Path) -> list[str]:
-    """``path:line: literal`` for every model literal outside :data:`ALLOWLIST`."""
-    found: list[str] = []
+def client_typescript_files(root: Path) -> list[Path]:
+    """Every TypeScript product file of the clients under ``root``: ``clients/**/src``, no tests."""
+    clients = root / "clients"
+    if not clients.is_dir():
+        return []
+    return [
+        path
+        for pattern in ("**/src/**/*.ts", "**/src/**/*.tsx")
+        for path in sorted(clients.glob(pattern))
+        if "node_modules" not in path.parts
+        and not _TS_NON_PRODUCT.search(path.relative_to(root).as_posix())
+    ]
+
+
+def typescript_model_literals(text: str) -> list[tuple[int, str]]:
+    """``(line, match)`` of every model id in TypeScript source ``text``."""
+    return [
+        (line, match.group(0))
+        for line, source_line in enumerate(text.splitlines(), start=1)
+        for match in MODEL_ID.finditer(source_line)
+    ]
+
+
+def all_model_literals(root: Path) -> list[tuple[str, int, str]]:
+    """``(path, line, literal)`` of every model literal in the product trees, allowlisted or not."""
+    found: list[tuple[str, int, str]] = []
     for path in product_python_files(root):
         relative = path.relative_to(root).as_posix()
         tree = parse_source(path.read_text(encoding="utf-8"), relative)
-        found.extend(
-            f"{relative}:{line}: {literal!r}"
-            for line, literal in model_literals(tree)
-            if (relative, literal) not in ALLOWLIST
-        )
+        found.extend((relative, line, literal) for line, literal in model_literals(tree))
+    for path in client_typescript_files(root):
+        relative = path.relative_to(root).as_posix()
+        text = path.read_text(encoding="utf-8")
+        found.extend((relative, line, literal) for line, literal in typescript_model_literals(text))
     return found
+
+
+def violations(root: Path) -> list[str]:
+    """``path:line: literal`` for every model literal outside :data:`ALLOWLIST`."""
+    return [
+        f"{relative}:{line}: {literal!r}"
+        for relative, line, literal in all_model_literals(root)
+        if (relative, literal) not in ALLOWLIST
+    ]
 
 
 @pytest.mark.parametrize(
@@ -117,13 +158,28 @@ def test_the_detector_ignores_other_text(source: str) -> None:
 
 
 def test_the_scan_covers_the_product_trees_only(tmp_path: Path) -> None:
-    for relative in ("src/a.py", "libs/vs-x/src/vs_x/b.py", "libs/vs-x/tests/c.py", "tests/d.py"):
+    planted = (
+        "src/a.py",
+        "libs/vs-x/src/vs_x/b.py",
+        "libs/vs-x/tests/c.py",
+        "tests/d.py",
+        "clients/libs/x/src/e.ts",
+        "clients/features/y/src/ui/f.tsx",
+        "clients/libs/x/src/e.test.ts",
+        "clients/libs/x/src/testing/fake.ts",
+        "clients/libs/x/src/generated/g.ts",
+        "clients/libs/x/node_modules/z/src/h.ts",
+        "clients/tui/dev/fixtures/i.ts",
+    )
+    for relative in planted:
         (tmp_path / relative).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / relative).write_text("M = 'claude-opus-5-5'\n", encoding="utf-8")
 
-    assert [line.split(":")[0] for line in violations(tmp_path)] == [
-        "src/a.py",
+    assert sorted(line.split(":")[0] for line in violations(tmp_path)) == [
+        "clients/features/y/src/ui/f.tsx",
+        "clients/libs/x/src/e.ts",
         "libs/vs-x/src/vs_x/b.py",
+        "src/a.py",
     ]
 
 
@@ -137,16 +193,6 @@ def test_no_model_knowledge_in_product_code() -> None:
 
 
 def test_every_allowlisted_site_still_has_its_literal() -> None:
-    found = set(violations_including_allowed(REPO))
+    found = {(relative, literal) for relative, _, literal in all_model_literals(REPO)}
     stale = [site for site in ALLOWLIST if site not in found]
     assert not stale, f"remove these stale ALLOWLIST entries: {stale}"
-
-
-def violations_including_allowed(root: Path) -> list[tuple[str, str]]:
-    """``(path, literal)`` of every model literal, allowlisted or not."""
-    return [
-        (relative, literal)
-        for path in product_python_files(root)
-        for relative in [path.relative_to(root).as_posix()]
-        for _, literal in model_literals(parse_source(path.read_text(encoding="utf-8"), relative))
-    ]
