@@ -75,11 +75,28 @@ commands on `PATH`. Every transport process has the hard deadline configured by
 Every job is submitted with `--no-requeue`, after the operator's
 `sbatch_arguments`, and `--requeue` there is rejected: VibeSys retries a failed
 job itself, and a scheduler requeue would rerun stages that already finished.
-A job's service runs in its own session. When the job script exits, it sends
-SIGTERM to the service's whole process group, sends SIGKILL
-`service_stop_grace_seconds` later (1 to 20, default 20), and exits at most
-5 seconds after that, so teardown ends before Slurm's default KillWait of
-30 seconds. A step that outlives KillWait drains the node.
+A job's service and its command each run in a session of their own (so the
+compute node needs `setsid`, which util-linux provides). When the job script
+exits, it sends SIGTERM to every process of both sessions, SIGKILL
+`service_stop_grace_seconds` later (1 to 20, default 20), and then waits until
+none of them is left, for at most `process_exit_wait_seconds` (1 to 1800,
+default 120). A process Slurm finds still running when the script has exited
+can make Slurm's step kill fail ("Kill task failed") and drain the node; a CUDA
+process holding a large GPU allocation can take tens of seconds to exit after
+SIGKILL. A zombie does not count as running. When a process outlives the wait,
+the script lists it (`ps` output) on the job's stderr and exits with code 71
+(`PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE`), so the evaluation is not reused.
+
+The grace plus the wait must be shorter than a `--time`/`-t` limit in
+`sbatch_arguments`: an explicit wait that does not fit is rejected, and the
+default wait shrinks to the limit minus the grace minus 1 second. VibeSys's
+own run deadline, `job_timeout_seconds`, is not checked against them, but should
+leave the same room after the command ends: a cancel during teardown no longer
+interrupts the script, and Slurm kills it KillWait (30 s by default) later.
+Slurm's own SIGTERM, at a cancel or the time limit, runs the same teardown, and
+the grace keeps the script's SIGKILL 10 s ahead of Slurm's default KillWait.
+A setup script is sourced into the job script itself, so a background process
+it starts is not part of either session and is left to Slurm.
 
 The local machine needs OpenSSH and rsync. The login host needs rsync and the
 Slurm commands named by the configuration, and `remote_workspace_root` must be

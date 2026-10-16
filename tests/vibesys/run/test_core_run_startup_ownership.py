@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
+from vibesys.events import CoreEventType, RunEndingData
 from vibesys.run.core_run import drive_core_run
 from vibesys.run.core_services import ClosableEvaluation, CoreServices
 from vibesys.run.host import CoreHost
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vibesys.events import CoreEventData
     from vibesys.run.integration import LocalRunIntegration
     from vs_core.api import CoreState
     from vs_runtime.api import Evaluation, RunFacts
@@ -94,9 +96,23 @@ class _FollowingWorkspaces:
         assert self.holds is not None
 
 
+@dataclass
+class _Events:
+    """Collects the events a core run emits."""
+
+    emitted: list[tuple[CoreEventType, CoreEventData | None]] = field(default_factory=list)
+
+    def emit(
+        self, event_type: CoreEventType, text: str = "", *, data: CoreEventData | None = None
+    ) -> None:
+        del text
+        self.emitted.append((event_type, data))
+
+
 @dataclass(frozen=True)
 class _Integration:
     control: object
+    events: _Events = field(default_factory=_Events)
 
 
 def _declared_state() -> CoreState:
@@ -162,6 +178,14 @@ def test_a_bridge_startup_failure_closes_the_bridge_and_releases_the_run_lease(
     assert bridge.closed
     assert bridge.shell is not None
     assert not bridge.shell.holds_lease(now_at=clock.now())
+    # The run recorded no result, so a resume continues it from its first round.
+    events = cast("_Integration", integration).events
+    assert events.emitted == [
+        (
+            CoreEventType.RUN_ENDING,
+            RunEndingData(reason=None, resumable=True, rounds_finished=0),
+        )
+    ]
 
 
 @pytest.mark.parametrize("start_error", [BridgeStartError, BridgeStartCancelled])

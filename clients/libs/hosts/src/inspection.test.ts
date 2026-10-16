@@ -6,7 +6,7 @@ const ID = '0123456789ab';
 
 function record(id = ID): LiveInstanceRecord {
   return {
-    version: 4,
+    version: 5,
     id,
     status: 'serving',
     phase: {status: 'running', stage: null, progress: null, reason: null},

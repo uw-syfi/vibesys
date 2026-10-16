@@ -176,6 +176,46 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "DetachedLaunchFailure",
       "type": "object"
     },
+    "EndRecord": {
+      "additionalProperties": false,
+      "description": "How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.\n\n``resumable`` says whether a resume continues the run: its durable record exists and\nis not terminal. ``resume_from_round`` is the round that resume starts at, when the\nserver knew it (a crashed server did not say).",
+      "properties": {
+        "outcome": {
+          "$ref": "#/$defs/RunEndOutcome"
+        },
+        "reason": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Reason",
+          "type": "string"
+        },
+        "resumable": {
+          "title": "Resumable",
+          "type": "boolean"
+        },
+        "resume_from_round": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resume From Round"
+        }
+      },
+      "required": [
+        "outcome",
+        "reason",
+        "resumable"
+      ],
+      "title": "EndRecord",
+      "type": "object"
+    },
     "FailureReason": {
       "additionalProperties": false,
       "description": "Why a run failed: the diagnostic it ended with.",
@@ -535,6 +575,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "unknown_instance",
         "unknown_log_stream",
         "log_store_corrupt",
+        "unknown_run",
         "unvetted_harness",
         "internal"
       ],
@@ -550,7 +591,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "logs",
         "logs_cancel",
         "harnesses",
-        "logs_by_span"
+        "logs_by_span",
+        "run_history"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -764,11 +806,11 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "InstanceList": {
       "additionalProperties": false,
-      "description": "``vibesys instances list --json``: the detached servers on this node (version 4).",
+      "description": "``vibesys instances list --json``: the detached servers on this node (version 5).",
       "properties": {
         "version": {
-          "const": 4,
-          "default": 4,
+          "const": 5,
+          "default": 5,
           "title": "Version",
           "type": "integer"
         },
@@ -1148,11 +1190,11 @@ const hostHelperSchema: Record<string, unknown> = {
     "JsonValue": {},
     "LiveInstanceRecord": {
       "additionalProperties": false,
-      "description": "What a detached server publishes about itself (version 4).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal. When the server\nexits it leaves its last record, with an ended phase and ``ended_at``, as a\ntombstone the registry keeps for a day.",
+      "description": "What a detached server publishes about itself (version 5).\n\n``run_id`` is allocated by the launcher before the server starts, so the\nrecord names its run from the first time it is published. ``phase`` is the\nrun's lifecycle as the server folds it from its journal, and ``paused`` who\npaused it while it is paused. When the server exits it leaves its last\nrecord, with an ended phase, ``ended_at`` and ``end``, as a tombstone the\nregistry keeps for a day.",
       "properties": {
         "version": {
-          "const": 4,
-          "default": 4,
+          "const": 5,
+          "default": 5,
           "title": "Version",
           "type": "integer"
         },
@@ -1206,6 +1248,28 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Ended At"
+        },
+        "paused": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PauseCause"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "end": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EndRecord"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "hostname": {
           "title": "Hostname",
@@ -1810,6 +1874,15 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "PathsCompleteRequest",
       "type": "object"
     },
+    "PauseCause": {
+      "description": "Who paused a paused run.",
+      "enum": [
+        "user",
+        "quota"
+      ],
+      "title": "PauseCause",
+      "type": "string"
+    },
     "PingReply": {
       "additionalProperties": false,
       "description": "The channel is alive.",
@@ -1973,6 +2046,22 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "RunConnectRequest",
       "type": "object"
+    },
+    "RunEndOutcome": {
+      "description": "Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.\n\nThe first seven are ``vs_core``'s ``EndReason`` values, copied because this module\nmay not import the core (``tests/server/test_run_end_record.py`` keeps them equal).",
+      "enum": [
+        "adopted",
+        "kept-input",
+        "no-winner",
+        "adoption-failed",
+        "stopped",
+        "deadline",
+        "finish-refused",
+        "failed",
+        "force_stopped"
+      ],
+      "title": "RunEndOutcome",
+      "type": "string"
     },
     "RunList": {
       "additionalProperties": false,
@@ -2410,6 +2499,107 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunsListRequest",
       "type": "object"
     },
+    "RunsReadEventsReply": {
+      "additionalProperties": false,
+      "description": "One page of a run's recorded events, oldest first.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "runs.read_events",
+          "default": "runs.read_events",
+          "title": "Type",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "next_sequence": {
+          "exclusiveMinimum": 0,
+          "title": "Next Sequence",
+          "type": "integer"
+        },
+        "complete": {
+          "title": "Complete",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "events",
+        "next_sequence",
+        "complete"
+      ],
+      "title": "RunsReadEventsReply",
+      "type": "object"
+    },
+    "RunsReadEventsRequest": {
+      "additionalProperties": false,
+      "description": "A page of one run's recorded events, from its journal on disk, live or ended.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "runs.read_events",
+          "default": "runs.read_events",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "from_sequence": {
+          "exclusiveMinimum": 0,
+          "title": "From Sequence",
+          "type": "integer"
+        },
+        "max": {
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Max",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id",
+        "from_sequence",
+        "max"
+      ],
+      "title": "RunsReadEventsRequest",
+      "type": "object"
+    },
     "StartupProgress": {
       "additionalProperties": false,
       "description": "How far a startup stage has come: ``done`` of ``total`` steps, now on ``label``.\n\n``total`` is ``None`` when the stage does not know it. ``label`` names the\nstep now running (an image build's Dockerfile instruction), as data.",
@@ -2818,6 +3008,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "run.start": "#/$defs/RunStartRequest",
           "run.stop": "#/$defs/RunStopRequest",
           "runs.list": "#/$defs/RunsListRequest",
+          "runs.read_events": "#/$defs/RunsReadEventsRequest",
           "tasks.list": "#/$defs/TasksListRequest"
         },
         "propertyName": "type"
@@ -2870,6 +3061,9 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         {
           "$ref": "#/$defs/HarnessesListRequest"
+        },
+        {
+          "$ref": "#/$defs/RunsReadEventsRequest"
         }
       ],
       "title": "Request"
@@ -2894,6 +3088,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "run.start": "#/$defs/RunStartReply",
           "run.stop": "#/$defs/RunStopReply",
           "runs.list": "#/$defs/RunsListReply",
+          "runs.read_events": "#/$defs/RunsReadEventsReply",
           "tasks.list": "#/$defs/TasksListReply"
         },
         "propertyName": "type"
@@ -2948,6 +3143,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/HarnessesListReply"
         },
         {
+          "$ref": "#/$defs/RunsReadEventsReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -2979,7 +3177,8 @@ const hostHelperSchema: Record<string, unknown> = {
     "logs.list": "logs",
     "logs.read": "logs",
     "logs.cancel": "logs_cancel",
-    "harnesses.list": "harnesses"
+    "harnesses.list": "harnesses",
+    "runs.read_events": "run_history"
   },
   "x-vibesys-feature-by-field": {
     "run.start": {

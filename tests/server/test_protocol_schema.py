@@ -157,6 +157,7 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "logs.read": "logs",
         "logs.cancel": "logs_cancel",
         "harnesses.list": "harnesses",
+        "runs.read_events": "run_history",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()

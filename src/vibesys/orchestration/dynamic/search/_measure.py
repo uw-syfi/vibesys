@@ -175,6 +175,11 @@ async def measurement_of(
     new work meanwhile. A stop while it waits ends it unmeasured (`FailureKind.NOT_MEASURED`),
     so its reviewed code is kept as work in progress, as a superseded candidate's is.
 
+    The measurement is dispatched only once a slot is bound to it and the input's measurement
+    has landed (`the_input`): the workstream waits for both parked, so its agent slot may go to
+    new work meanwhile. A stop while it waits ends it unmeasured (`FailureKind.NOT_MEASURED`),
+    so its reviewed code is kept as work in progress, as a superseded candidate's is.
+
     The backend measures again after an infrastructure failure, so a result that reaches here
     is the candidate's own; a measurement that ended without one is a failure of the workstream.
     One that ended with a result still holds its slot until `evidence_of` releases it, so the
@@ -195,6 +200,7 @@ async def measurement_of(
         raise WorkEndedError(stopped) from None
     plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=names)
     found = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(names))
+    ctx.channel(REPORTS).send(Released(key=w.key))
     if isinstance(found, Failed):
         ctx.channel(REPORTS).send(Released(key=w.key))
         raise ended_by(found, None)

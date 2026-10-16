@@ -21,7 +21,7 @@ from vs_agent.api import (
     TodoItemData,
     ToolResultPayload,
 )
-from vs_core.api import SpanId, WireSpan
+from vs_core.api import EndReason, SpanId, WireSpan
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
 
 CommandResultPayload = _agent_api.CommandResultPayload
@@ -37,6 +37,7 @@ class CoreEventType(StrEnum):
     ITERATIONS_CHANGED = "iterations_changed"
     RUN_FINISHED = "run_finished"
     RUN_FAILED = "run_failed"
+    RUN_ENDING = "run_ending"
     INVOCATION_STARTED = "invocation_started"
     INVOCATION_FINISHED = "invocation_finished"
     AGENT_EXECUTION_STARTED = "agent_execution_started"
@@ -283,6 +284,22 @@ class RunFailedData(EventPayload):
 
     kind: Literal["run_failed"] = "run_failed"
     failure: RunFailure
+
+
+class RunEndingData(EventPayload):
+    """How a core run's durable record stands as the run ends, emitted once just before its end.
+
+    ``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended
+    without one (an error, or a stop that left work unsettled). ``resumable`` is whether a
+    resume continues it: its record is not terminal. ``rounds_finished`` counts its
+    workstreams (rounds) that reached their end. ``summary`` is core's account of the result.
+    """
+
+    kind: Literal["run_ending"] = "run_ending"
+    reason: EndReason | None
+    summary: str = ""
+    resumable: bool
+    rounds_finished: NonNegativeInt
 
 
 ExperimentsChangeReason = Literal[
@@ -735,6 +752,7 @@ CoreEventData = Annotated[
     | RunStartedData
     | RunStartupProgressData
     | RunFailedData
+    | RunEndingData
     | ExperimentsChangedData
     | IterationsChangedData
     | PhaseData

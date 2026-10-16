@@ -38,14 +38,19 @@ from typing import TYPE_CHECKING
 
 from entrypoints.launcher import source_checkout_root
 from server.host_api import (
+    EndRecord,
     FailureReason,
     InstanceInspectionMetadata,
     InstanceStatus,
     LiveInstanceRecord,
+    PauseCause,
+    RunEndingFact,
+    RunEndOutcome,
     RunPhase,
     RunStatus,
     StartupFact,
     StartupStage,
+    one_line,
 )
 from server.registry import (
     FileInstanceMetadataStore,
@@ -84,11 +89,88 @@ so a fast build does not rewrite the record per step.
 """
 
 
+_PAUSE_STATUSES = frozenset({RunStatus.PAUSING, RunStatus.PAUSED})
+
+_PLAIN_REASONS: dict[RunEndOutcome, str] = {
+    RunEndOutcome.ADOPTED: "The chosen candidate was adopted.",
+    RunEndOutcome.KEPT_INPUT: "Nothing beat the input; the input was kept.",
+    RunEndOutcome.NO_WINNER: "The search ended with no winner.",
+    RunEndOutcome.ADOPTION_FAILED: "The chosen winner could not be adopted.",
+    RunEndOutcome.STOPPED: "Stopped by request.",
+    RunEndOutcome.DEADLINE: "The run deadline passed.",
+    RunEndOutcome.FINISH_REFUSED: "Core refused the run's result.",
+    RunEndOutcome.FAILED: "The run failed.",
+    RunEndOutcome.FORCE_STOPPED: "Force stopped before a safe point.",
+}
+"""The reason an end record gives when nothing more specific was reported."""
+
+
+def pause_cause_after(
+    pending: PauseCause | None, before: RunStatus, after: RunStatus
+) -> PauseCause | None:
+    """The cause a pause waits under once the run moved from ``before`` to ``after``.
+
+    A cause is reported before the pause it explains (``quota_paused`` comes ahead of the
+    status change), so it is kept until the run leaves its pause.
+    """
+    if before in _PAUSE_STATUSES and after not in _PAUSE_STATUSES:
+        return None
+    return pending
+
+
+def paused_by(phase: RunPhase, pending: PauseCause | None) -> PauseCause | None:
+    """Who paused a run in ``phase``: the reported cause, else the operator."""
+    if phase.status is not RunStatus.PAUSED:
+        return None
+    return pending or PauseCause.USER
+
+
+def end_record(
+    phase: RunPhase, ending: RunEndingFact | None, *, terminated: bool
+) -> EndRecord | None:
+    """The tombstone's ``end`` for a run that ended in ``phase``; ``None`` when nothing names it.
+
+    A terminated server's run was force stopped; otherwise core's end reason names the
+    outcome, else the ended phase does. A run with no durable record that ``ending``
+    vouched for is not resumable. A completed run that reported no ending has no end.
+    """
+    outcome = _outcome(phase, ending, terminated=terminated)
+    if outcome is None:
+        return None
+    reported = ending.summary if ending is not None and ending.outcome is outcome else ""
+    failure = "" if phase.reason is None else phase.reason.message
+    reason = one_line(reported) or one_line(failure) or _PLAIN_REASONS[outcome]
+    resumable = ending is not None and ending.resumable
+    return EndRecord(
+        outcome=outcome,
+        reason=reason,
+        resumable=resumable,
+        resume_from_round=ending.rounds_finished + 1 if ending is not None and resumable else None,
+    )
+
+
+def _outcome(
+    phase: RunPhase, ending: RunEndingFact | None, *, terminated: bool
+) -> RunEndOutcome | None:
+    if terminated:
+        return RunEndOutcome.FORCE_STOPPED
+    if ending is not None and ending.outcome is not None:
+        return ending.outcome
+    match phase.status:
+        case RunStatus.STOPPED:
+            return RunEndOutcome.STOPPED
+        case RunStatus.FAILED:
+            return RunEndOutcome.FAILED
+        case _:
+            return None
+
+
 class RecordPublisher:
     """Keep a held instance's record current, and leave it as the tombstone.
 
     The record's phase is folded here (``RunPhase.advance``) from the facts the
-    server reports; ``end`` writes the final record. A change of startup
+    server reports, and ``paused`` with it (``paused_by``); ``end`` writes the final
+    record with its ``end`` (``end_record``). A change of startup
     progress alone is written at most once per
     ``PROGRESS_WRITE_INTERVAL_SECONDS``: one arriving sooner is held, and a
     worker on ``threads`` writes the latest held phase when the interval ends,
@@ -115,6 +197,9 @@ class RecordPublisher:
         self._threads = threads
         self._lock = self._threads.lock()
         self._held: RunPhase | None = None
+        self._pause_cause: PauseCause | None = None
+        self._ending: RunEndingFact | None = None
+        self._terminated = False
         self._flush_scheduled = False
         self._written_at = self._threads.now()
         hold.publish(record)
@@ -158,6 +243,7 @@ class RecordPublisher:
         with self._lock:
             current = self._held or self._record.phase
             phase = current.advance(status=status, failure=failure, startup=startup)
+            self._pause_cause = pause_cause_after(self._pause_cause, current.status, phase.status)
             if phase == current:
                 return
             written = self._record.phase
@@ -171,11 +257,31 @@ class RecordPublisher:
                 return
             self._publish(phase=phase)
 
+    def pausing_for(self, cause: PauseCause) -> None:
+        """The run pauses for ``cause``; a run already paused now reports it."""
+        with self._lock:
+            self._pause_cause = cause
+            phase = self._held or self._record.phase
+            if paused_by(phase, cause) != self._record.paused:
+                self._publish(phase=phase)
+
+    def ending(self, fact: RunEndingFact) -> None:
+        """Keep how the run's durable record stood as it ended, for the tombstone."""
+        with self._lock:
+            self._ending = fact
+
+    def terminated(self) -> None:
+        """The server was terminated; its tombstone reports a force stop."""
+        with self._lock:
+            self._terminated = True
+
     def end(self) -> None:
-        """Write the tombstone: the phase the run ended in, or ``SERVER_EXITED``."""
+        """Write the tombstone: the phase the run ended in, or ``SERVER_EXITED``, and its end."""
         self.observe(failure=SERVER_EXITED)
         with self._lock:
-            self._publish(ended_at=self._clock.now())
+            phase = self._held or self._record.phase
+            end = end_record(phase, self._ending, terminated=self._terminated)
+            self._publish(phase=phase, ended_at=self._clock.now(), end=end)
 
     def _flush(self, wait: float) -> None:
         """Write the held phase once the interval since the latest write has passed.
@@ -195,10 +301,13 @@ class RecordPublisher:
                         self._publish(phase=self._held)
                     return
 
-    def _publish(self, **update: object) -> None:
-        """Write the record with ``update``; the caller holds ``self._lock``."""
-        if "phase" not in update and self._held is not None:
-            update["phase"] = self._held
+    def _publish(self, phase: RunPhase | None = None, **update: object) -> None:
+        """Write the record at ``phase`` (else the held or written one) with ``update``.
+
+        ``paused`` follows the phase written. The caller holds ``self._lock``.
+        """
+        written = phase or self._held or self._record.phase
+        update |= {"phase": written, "paused": paused_by(written, self._pause_cause)}
         self._held = None
         self._record = LiveInstanceRecord.model_validate({**self._record.model_dump(), **update})
         self._written_at = self._threads.now()

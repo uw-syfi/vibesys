@@ -45,6 +45,13 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from server.chat.factory import ChatAgentBuilder
+    from server.host_api import (
+        FailureReason,
+        PauseCause,
+        RunEndingFact,
+        RunStatus,
+        StartupFact,
+    )
     from server.run_attachment import AgentSelection
     from server.settings import InteractiveSetupDefaults
     from vibesys.api import RunRecord, RunView
@@ -54,6 +61,44 @@ if TYPE_CHECKING:
 
 REQUEST_TIME = datetime(2026, 1, 1, tzinfo=UTC)
 """The stamp a test gives a request or response it builds."""
+
+
+class RecordingObserver:
+    """A ``ServerLifecycleObserver`` that notes each fact it is told, in order, in ``facts``."""
+
+    def __init__(self) -> None:
+        """Start with no facts."""
+        self.facts: list[object] = []
+
+    def resolved(self, *, project_root: Path, task: str) -> None:
+        """The invocation resolved; not noted."""
+        del project_root, task
+
+    def listening(self) -> None:
+        """Note ``"listening"``."""
+        self.facts.append("listening")
+
+    def observe(
+        self,
+        *,
+        status: RunStatus | None = None,
+        failure: FailureReason | None = None,
+        startup: StartupFact | None = None,
+    ) -> None:
+        """Note the one fact given."""
+        self.facts.append(status or failure or startup)
+
+    def pausing_for(self, cause: PauseCause) -> None:
+        """Note the pause's cause."""
+        self.facts.append(cause)
+
+    def ending(self, fact: RunEndingFact) -> None:
+        """Note the run's ending."""
+        self.facts.append(fact)
+
+    def terminated(self) -> None:
+        """Note ``"terminated"``."""
+        self.facts.append("terminated")
 
 
 class _ControlBridge:

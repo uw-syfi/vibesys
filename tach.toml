@@ -162,7 +162,7 @@ depends_on = ["server.events"]
 
 [[modules]]
 path = "server.journal"
-depends_on = ["server.events", "server.diagnostics", "vs_sim.api"]
+depends_on = ["server.host_api", "server.events", "server.diagnostics", "vs_sim.api"]
 
 [[modules]]
 path = "server.read_model"
@@ -196,7 +196,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["server.host_api", "server.host_helper_logs", "server.registry", "server.relay", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_logs", "server.registry", "server.relay", "vs_sim.api"]
 
 [[modules]]
 # The host helper's `logs` feature: chunking, tails and the long poll over the LogReader role.

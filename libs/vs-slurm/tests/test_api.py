@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from vs_sim.api import DISCARD, OutputSink, ProcessOutcome, ProcessRun, ProcessSpec, ProcessTimedOut
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
+    PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE,
     SCHEDULER_READ_END,
     SlurmBatchHandle,
     SlurmBatchRequest,
@@ -865,31 +866,60 @@ def _submitted_service_job(tmp_path: Path, config: SlurmConfig) -> tuple[str, st
     return connector.uploaded_script, submissions[0]
 
 
-@given(grace=st.integers(min_value=1, max_value=20))
+@given(grace=st.integers(min_value=1, max_value=20), exit_wait=st.integers(1, 1800))
 @settings(max_examples=examples(pr=5, nightly=20), deadline=None)
-def test_service_teardown_signals_its_whole_group_and_is_bounded(grace: int) -> None:
-    """Regression (2026-10-15): the script waited unbounded on the service's parent pid only.
+def test_teardown_ends_every_session_the_job_started_and_outlives_them_within_a_bound(
+    grace: int, exit_wait: int
+) -> None:
+    """Regressions (2026-10-15, 2026-10-16): teardown left processes for Slurm to kill.
 
-    A vLLM server whose workers ignored the parent's SIGTERM outlived Slurm's KillWait, and
-    Slurm drained the node. The service now runs in its own session; teardown sends TERM to
-    its process group, gives it the configured grace, then KILLs the group and stops waiting
-    after a fixed bound. Running the script under bash is the real-tier test in
-    ``tests/e2e/test_slurm_service_teardown.py``.
+    First the script waited unbounded on the service's parent pid only; then it sent
+    SIGKILL to the service's group and exited 5 s later, while vLLM workers holding GPU
+    memory were still exiting, and Slurm's step kill failed and drained the node. The
+    service and the command now each run in a session of their own; teardown signals every
+    live process of both, waits for the last one to exit up to the configured exit wait,
+    and fails the job naming any left. Running the script under bash, with a worker held
+    in its exit, is the real-tier test in ``tests/e2e/test_slurm_service_teardown.py``.
     """
     with tempfile.TemporaryDirectory() as temporary:
         script, _submission = _submitted_service_job(
-            Path(temporary), _config(service_stop_grace_seconds=grace)
+            Path(temporary),
+            _config(
+                service_stop_grace_seconds=grace,
+                process_exit_wait_seconds=exit_wait,
+                sbatch_arguments=(),
+            ),
         )
 
-    assert 'setsid python -m server --port "${PORT}" > .vs-slurm-service.log 2>&1 &' in script
-    teardown = script[script.index("stop_service() {") : script.index("trap stop_service EXIT")]
-    term = teardown.index('kill -TERM -- "-$service_pid"')
-    kill = teardown.index('kill -KILL -- "-$service_pid"')
-    assert f"service_deadline=$((SECONDS + {grace}))" in teardown[term:kill]
-    assert "service_deadline=$((SECONDS + 5))" in teardown[kill:]
-    assert teardown.count('[ "$SECONDS" -lt "$service_deadline" ]') == 2
-    assert "wait" not in teardown.replace("service_deadline", "")
-    assert "trap 'exit 143' TERM" in script
+    lines = script.splitlines()
+    service = lines.index('setsid python -m server --port "${PORT}" > .vs-slurm-service.log 2>&1 &')
+    command = lines.index("setsid python check.py &")
+    assert lines[service + 1 : service + 3] == [
+        "service_pid=$!",
+        'vs_groups="$vs_groups $service_pid"',
+    ]
+    assert lines[command + 1 : command + 5] == [
+        "command_pid=$!",
+        'vs_groups="$vs_groups $command_pid"',
+        'wait "$command_pid"',
+        "job_status=$?",
+    ]
+    trap = lines.index("trap vs_stop_groups EXIT")
+    assert trap < service < command
+    assert lines[trap + 1] == "trap 'exit 143' TERM"
+    teardown = "\n".join(lines[lines.index("vs_stop_groups() {") : trap])
+    term = teardown.index("vs_signal TERM")
+    kill = teardown.index("vs_signal KILL")
+    assert teardown.index("trap '' TERM") < term
+    assert f"deadline=$((SECONDS + {grace}))" in teardown[term:kill]
+    assert f"deadline=$((SECONDS + {exit_wait}))" in teardown[kill:]
+    assert teardown.count('while vs_live && [ "$SECONDS" -lt "$deadline" ]') == 2
+    failure = teardown[teardown.index("vs_live || return 0") :]
+    assert f"still alive {exit_wait} s after SIGKILL" in failure
+    assert f"exit {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE}" in failure
+    assert f"printf '%s\\n' {PROCESSES_OUTLIVED_TEARDOWN_EXIT_CODE} > " in failure
+    # Zombies are not alive: a zombie's parent, maybe outside the job, decides when it goes.
+    assert "$4 !~ /^Z/" in script
 
 
 def test_jobs_are_submitted_without_scheduler_requeue(tmp_path: Path) -> None:
@@ -911,21 +941,27 @@ def test_operator_sbatch_arguments_cannot_turn_requeue_back_on(arguments: tuple[
 
 @given(grace=st.one_of(st.integers(max_value=0), st.integers(min_value=21)))
 def test_service_stop_grace_outside_its_range_is_rejected_by_name(grace: int) -> None:
-    """The grace plus the 5 s reap bound must stay under Slurm's default KillWait of 30 s."""
+    """On Slurm's SIGTERM the script's SIGKILL must come 10 s before Slurm's, at KillWait 30 s."""
     with pytest.raises(ValidationError, match="service_stop_grace_seconds"):
         _config(service_stop_grace_seconds=grace)
 
 
-def test_service_stop_grace_defaults_to_its_maximum_and_loads_from_the_operator_file(
-    tmp_path: Path,
-) -> None:
-    assert _config().service_stop_grace_seconds == 20
+@given(exit_wait=st.one_of(st.integers(max_value=0), st.integers(min_value=1801)))
+def test_process_exit_wait_outside_its_range_is_rejected_by_name(exit_wait: int) -> None:
+    with pytest.raises(ValidationError, match="process_exit_wait_seconds"):
+        _config(process_exit_wait_seconds=exit_wait, sbatch_arguments=())
+
+
+def test_teardown_bounds_default_and_load_from_the_operator_file(tmp_path: Path) -> None:
+    config = _config()
+    assert (config.service_stop_grace_seconds, config.process_exit_wait_seconds) == (20, 120)
     path = tmp_path / "slurm.toml"
     path.write_text(
         """[slurm]
 name = "research-cluster"
 remote_workspace_root = "/operator/runs"
 service_stop_grace_seconds = "10"
+process_exit_wait_seconds = 300
 
 [slurm.transport]
 kind = "ssh"
@@ -939,7 +975,70 @@ host = "cluster.example"
         path.read_text(encoding="utf-8").replace('"10"', "10"),
         encoding="utf-8",
     )
-    assert load_slurm_config(path).service_stop_grace_seconds == 10
+    loaded = load_slurm_config(path)
+    assert (loaded.service_stop_grace_seconds, loaded.process_exit_wait_seconds) == (10, 300)
+
+
+def _time_limit_spellings(seconds: int) -> list[str]:
+    """Every ``sbatch`` spelling of a time limit of ``seconds`` (a whole number of them)."""
+    days, rest = divmod(seconds, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    spellings = [
+        f"{seconds // 60}:{secs}",
+        f"{hours + 24 * days}:{minutes:02d}:{secs:02d}",
+        f"{days}-{hours}:{minutes}:{secs}",
+    ]
+    if secs == 0:
+        spellings.extend([str(seconds // 60), f"{days}-{hours}:{minutes}"])
+        if minutes == 0:
+            spellings.append(f"{days}-{hours}")
+    return spellings
+
+
+@given(
+    limit=st.integers(1, 3 * 86400),
+    grace=st.integers(1, 20),
+    exit_wait=st.integers(1, 1800),
+    spelling=st.data(),
+    form=st.sampled_from(["--time={}", "-t{}", "--time {}", "-t {}"]),
+)
+def test_teardown_must_fit_inside_the_sbatch_time_limit_in_any_spelling(
+    limit: int, grace: int, exit_wait: int, spelling: st.DataObject, form: str
+) -> None:
+    """The script waits up to grace plus exit wait at its end; Slurm's limit must allow it."""
+    value = spelling.draw(st.sampled_from(_time_limit_spellings(limit)))
+    arguments = ("-p", "gpu", *form.format(value).split(" "))
+    settings_ = {"service_stop_grace_seconds": grace, "process_exit_wait_seconds": exit_wait}
+    if grace + exit_wait < limit:
+        assert _config(sbatch_arguments=arguments, **settings_).process_exit_wait_seconds == (
+            exit_wait
+        )
+    else:
+        with pytest.raises(ValidationError, match="process_exit_wait_seconds"):
+            _config(sbatch_arguments=arguments, **settings_)
+
+
+@given(limit_minutes=st.integers(1, 4 * 60), grace=st.integers(1, 20))
+def test_the_default_exit_wait_shrinks_to_fit_the_sbatch_time_limit(
+    limit_minutes: int, grace: int
+) -> None:
+    config = _config(sbatch_arguments=("-t", str(limit_minutes)), service_stop_grace_seconds=grace)
+    expected = min(120, limit_minutes * 60 - grace - 1)
+    assert config.process_exit_wait_seconds == expected
+    assert grace + config.process_exit_wait_seconds < limit_minutes * 60
+
+
+@pytest.mark.parametrize("value", ["0", "INFINITE", "unlimited", "0:0"])
+def test_no_time_limit_leaves_teardown_unbounded_by_it(value: str) -> None:
+    config = _config(sbatch_arguments=("--time", value), process_exit_wait_seconds=1800)
+    assert config.process_exit_wait_seconds == 1800
+
+
+@pytest.mark.parametrize("arguments", [("-t", "20m"), ("--time=1:2:3:4",), ("-t",), ("--time=",)])
+def test_an_unreadable_time_limit_is_rejected_by_name(arguments: tuple[str, ...]) -> None:
+    with pytest.raises(ValidationError, match="sbatch_arguments"):
+        _config(sbatch_arguments=arguments)
 
 
 @pytest.mark.parametrize("path", ["/outside/out.json", "../out.json", "nested/../out.json"])

@@ -33,6 +33,7 @@ from server.events import (
     RunEvent,
     make_event,
 )
+from server.host_api import RUN_EVENTS_FILE
 from vs_sim.api import utc_datetime
 
 if TYPE_CHECKING:
@@ -206,7 +207,7 @@ class WireJournal:
                 raise FileNotFoundError(log_dir)
         else:
             log_dir.mkdir(parents=True, exist_ok=True)
-        events_path = log_dir / "run-events.jsonl"
+        events_path = log_dir / RUN_EVENTS_FILE
         if read_only and not events_path.is_file():
             raise FileNotFoundError(events_path)
         listener_failures: ListenerFailures = []

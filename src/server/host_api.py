@@ -17,7 +17,8 @@ registry.
 Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
 ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
-``RunPhase``, ``InstanceStatus``,
+``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``one_line``,
+``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
 ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``, ``TaskSummary``,
@@ -27,7 +28,9 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 (``LOGS_READ_MAX_BYTES``, ``LOGS_READ_MIN_BYTES``, ``LOGS_WAIT_MAX_MS``),
 ``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``,
 ``HELPER_FIELD_FEATURES``, ``request_features``, ``HelperFeature``,
-``HelperRequest`` (``parse_helper_request``) and its members, ``HelperMessage``
+``HelperRequest`` (``parse_helper_request``) and its members, the run history
+read's limits (``RUN_EVENTS_READ_MAX``, ``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE`` and
+``RunEventDocument``, ``HelperMessage``
 and its members, ``HelperErrorCode``, the harness choice (``HarnessOption``,
 ``HarnessChoice``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``,
 ``UNVETTED_MODEL_FLAG``), and a relayed channel's end: ``ChannelEndOutcome``,
@@ -81,8 +84,8 @@ InstanceId = Annotated[str, StringConstraints(pattern=INSTANCE_ID_PATTERN)]
 RunId = Annotated[str, StringConstraints(min_length=1)]
 """The durable run a server drives; ``vs_project`` owns its full syntax."""
 
-RECORD_VERSION = 4
-"""The registry record version this checkout writes; it also reads version 3."""
+RECORD_VERSION = 5
+"""The registry record version this checkout writes; it also reads versions 3 and 4."""
 
 
 class RunStatus(StrEnum):
@@ -252,6 +255,97 @@ _MAX_IDENTITY_CHARACTERS = 255
 _StartedAt = Annotated[float, Field(ge=0, le=ECMASCRIPT_DATE_MAX_SECONDS, allow_inf_nan=False)]
 
 
+class RunEndOutcome(StrEnum):
+    """Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.
+
+    The first seven are ``vs_core``'s ``EndReason`` values, copied because this module
+    may not import the core (``tests/server/test_run_end_record.py`` keeps them equal).
+    """
+
+    ADOPTED = "adopted"
+    """The chosen candidate was adopted."""
+    KEPT_INPUT = "kept-input"
+    """Nothing beat the input, and the input was adopted as it stood."""
+    NO_WINNER = "no-winner"
+    """The search ended with no winner."""
+    ADOPTION_FAILED = "adoption-failed"
+    """Core would not adopt the chosen winner."""
+    STOPPED = "stopped"
+    """The operator stopped the run."""
+    DEADLINE = "deadline"
+    """The run deadline passed."""
+    FINISH_REFUSED = "finish-refused"
+    """Core refused the result."""
+    FAILED = "failed"
+    """The run failed before it recorded a result: an error, a startup failure, or a crash."""
+    FORCE_STOPPED = "force_stopped"
+    """The server was terminated (a force stop) and ended without reaching a safe point."""
+
+
+END_REASON_MAX_CHARACTERS = 200
+"""The longest ``EndRecord.reason``; a longer account is cut to this with an ellipsis."""
+
+OneLine = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=END_REASON_MAX_CHARACTERS, pattern=r"^[^\n\r]*$"),
+]
+
+
+def one_line(text: str) -> str | None:
+    """The first non-blank line of ``text``, cut to ``END_REASON_MAX_CHARACTERS``; ``None`` if blank."""
+    line = next((each.strip() for each in text.splitlines() if each.strip()), None)
+    if line is None or len(line) <= END_REASON_MAX_CHARACTERS:
+        return line
+    return line[: END_REASON_MAX_CHARACTERS - 1] + "\u2026"
+
+
+class EndRecord(BaseModel):
+    """How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.
+
+    ``resumable`` says whether a resume continues the run: its durable record exists and
+    is not terminal. ``resume_from_round`` is the round that resume starts at, when the
+    server knew it (a crashed server did not say).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    outcome: RunEndOutcome
+    reason: OneLine
+    resumable: bool
+    resume_from_round: PositiveInt | None = None
+
+    @model_validator(mode="after")
+    def _round_only_when_resumable(self) -> EndRecord:
+        if self.resume_from_round is not None and not self.resumable:
+            message = "resume_from_round is set only when the run is resumable"
+            raise ValueError(message)
+        return self
+
+
+class RunEndingFact(BaseModel):
+    """How a run's durable record stood as it ended, as its server reports it to the record.
+
+    ``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended
+    without one; ``summary`` is core's account of that result.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    outcome: RunEndOutcome | None
+    summary: str = ""
+    resumable: bool
+    rounds_finished: NonNegativeInt
+
+
+class PauseCause(StrEnum):
+    """Who paused a paused run."""
+
+    USER = "user"
+    """An operator's pause."""
+    QUOTA = "quota"
+    """A provider capacity limit (``quota_paused``)."""
+
+
 class InstanceStatus(StrEnum):
     """How far a live server has come; run status itself is on its socket."""
 
@@ -262,18 +356,19 @@ class InstanceStatus(StrEnum):
 
 
 class LiveInstanceRecord(BaseModel):
-    """What a detached server publishes about itself (version 4).
+    """What a detached server publishes about itself (version 5).
 
     ``run_id`` is allocated by the launcher before the server starts, so the
     record names its run from the first time it is published. ``phase`` is the
-    run's lifecycle as the server folds it from its journal. When the server
-    exits it leaves its last record, with an ended phase and ``ended_at``, as a
-    tombstone the registry keeps for a day.
+    run's lifecycle as the server folds it from its journal, and ``paused`` who
+    paused it while it is paused. When the server exits it leaves its last
+    record, with an ended phase, ``ended_at`` and ``end``, as a tombstone the
+    registry keeps for a day.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[4] = RECORD_VERSION
+    version: Literal[5] = RECORD_VERSION
     id: InstanceId
     status: InstanceStatus
     phase: RunPhase
@@ -284,6 +379,12 @@ class LiveInstanceRecord(BaseModel):
     pid: PositiveInt
     started_at: _StartedAt
     ended_at: float | None = None
+    paused: PauseCause | None = None
+    """Who paused the run; a version 5 server sets it whenever ``phase`` is ``paused``."""
+    end: EndRecord | None = None
+    """How the run ended. A version 5 server sets it on every tombstone, and a crashed
+    server's burial does; it is absent on a tombstone upgraded from version 4 and when a
+    completed run reported no ending."""
     hostname: str
     protocol_version: Literal[1] = PROTOCOL_VERSION
     vibesys_version: str
@@ -300,6 +401,12 @@ class LiveInstanceRecord(BaseModel):
         if self.ended_at is not None and not self.phase.status.has_ended:
             message = "ended_at is set only on a record whose phase has ended"
             raise ValueError(message)
+        if self.end is not None and not self.phase.status.has_ended:
+            message = "end is set only on a record whose phase has ended"
+            raise ValueError(message)
+        if self.paused is not None and self.phase.status is not RunStatus.PAUSED:
+            message = "paused is set only on a record whose phase is paused"
+            raise ValueError(message)
         return self
 
 
@@ -312,8 +419,6 @@ class UnreadableRecord(BaseModel):
     version: int | None
 
 
-_UPGRADED_RECORD_VERSION = 3
-"""The earlier record version this reader still reads, through ``_upgrade_v3``."""
 _JSON_OBJECT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
 MAX_RECORD_BYTES = 1024 * 1024
 """The largest instance record ``parse_record`` reads; a longer one is unreadable."""
@@ -331,13 +436,39 @@ def _upgrade_v3(record: LiveInstanceRecord) -> LiveInstanceRecord | None:
     return record
 
 
+def _upgrade_v4(record: LiveInstanceRecord) -> LiveInstanceRecord | None:
+    """A version 4 record read as version 5, or ``None`` if it uses what version 4 lacked.
+
+    Version 5 only added ``paused`` and ``end``, both optional, so a version 4
+    record is a version 5 record without them.
+    """
+    if record.paused is not None or record.end is not None:
+        return None
+    return record
+
+
+_UPGRADE_STEPS: Final = ((3, _upgrade_v3), (4, _upgrade_v4))
+"""Each step reads a record of its version as the next version's, oldest first."""
+_UPGRADED_RECORD_VERSIONS: Final = frozenset(since for since, _ in _UPGRADE_STEPS)
+"""The earlier record versions this reader still reads, through ``_upgrade``."""
+
+
+def _upgrade(record: LiveInstanceRecord, version: int) -> LiveInstanceRecord | None:
+    """``record``, parsed from a document of ``version``, upgraded step by step to this version."""
+    upgraded: LiveInstanceRecord | None = record
+    for since, step in _UPGRADE_STEPS:
+        if upgraded is not None and version <= since:
+            upgraded = step(upgraded)
+    return upgraded
+
+
 def parse_record(instance_id: str, raw: str | bytes) -> LiveInstanceRecord | UnreadableRecord:
     """Parse one stored record, strictly, if it is of a version this reader knows.
 
     Total: any content, invalid UTF-8 included when given as bytes, is a record
     or an ``UnreadableRecord``.
 
-    A version 3 record is upgraded (``_upgrade_v3``). Records of earlier
+    A version 3 or 4 record is upgraded (``_upgrade``). Records of earlier
     versions predate phases and tombstones and are not upgraded: their servers
     report no phase this reader could stand behind.
     """
@@ -350,28 +481,28 @@ def parse_record(instance_id: str, raw: str | bytes) -> LiveInstanceRecord | Unr
     if not isinstance(version, int) or isinstance(version, bool):
         return UnreadableRecord(id=instance_id, version=None)
     record: LiveInstanceRecord | None = None
-    if version in {_UPGRADED_RECORD_VERSION, RECORD_VERSION}:
+    if version in _UPGRADED_RECORD_VERSIONS | {RECORD_VERSION}:
         try:
             record = LiveInstanceRecord.model_validate({**document, "version": RECORD_VERSION})
         except ValidationError:
             record = None
-    if record is not None and version == _UPGRADED_RECORD_VERSION:
-        record = _upgrade_v3(record)
+    if record is not None and version in _UPGRADED_RECORD_VERSIONS:
+        record = _upgrade(record, version)
     if record is None or record.id != instance_id:
         return UnreadableRecord(id=instance_id, version=version)
     return record
 
 
 class InstanceList(BaseModel):
-    """``vibesys instances list --json``: the detached servers on this node (version 4)."""
+    """``vibesys instances list --json``: the detached servers on this node (version 5)."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    version: Literal[4] = 4
+    version: Literal[5] = 5
     instances: tuple[LiveInstanceRecord, ...]
     """Servers alive now."""
     ended: tuple[LiveInstanceRecord, ...] = ()
-    """Servers that exited in the last day, with the phase they ended in."""
+    """Servers that exited in the last day, with the phase they ended in and their ``end``."""
     unreadable: tuple[UnreadableRecord, ...] = ()
     """Live servers whose record this reader cannot interpret (another version, or corrupt)."""
     unverified: tuple[InstanceId, ...] = ()
@@ -620,6 +751,8 @@ class HelperFeature(StrEnum):
     """``harnesses.list`` and ``run.start``'s ``harness``: start a run on a vetted provider and model."""
     LOGS_BY_SPAN = "logs_by_span"
     """``logs.list``'s ``span_id``: only the streams whose owner names that run-trace span."""
+    RUN_HISTORY = "run_history"
+    """``runs.read_events``: a run's recorded events, read from disk in bounded pages."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -899,6 +1032,34 @@ class LogsCancelRequest(_HelperRequest):
     read_id: RequestId
 
 
+RUN_EVENTS_READ_MAX: Final = 500
+"""The most events one ``runs.read_events`` may ask for."""
+RUN_EVENTS_READ_MAX_BYTES: Final = 512 * 1024
+"""The most journal bytes one ``runs.read_events`` reply carries, so it stays a helper line.
+
+A page stops before the event that would pass it; an event longer than this alone is
+returned alone, so every read makes progress."""
+
+RUN_EVENTS_FILE: Final = "run-events.jsonl"
+"""The run's event journal, one ``RunEvent`` per line, in the run's log directory."""
+
+RunEventDocument = dict[str, JsonValue]
+"""One recorded run event as JSON: the run protocol's ``RunEvent``, which a client narrows
+with its generated type. The helper passes it through so it never imports the protocol."""
+
+
+class RunsReadEventsRequest(_HelperRequest):
+    """A page of one run's recorded events, from its journal on disk, live or ended."""
+
+    type: Literal["runs.read_events"] = "runs.read_events"
+    project: str
+    """The project directory on the host; ``~`` expands to the helper's home."""
+    run_id: RunId
+    from_sequence: PositiveInt
+    """The first sequence to return; a run's first event is sequence 1."""
+    max: Annotated[int, Field(ge=1, le=RUN_EVENTS_READ_MAX)]
+
+
 HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
@@ -908,6 +1069,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     LogsReadRequest: HelperFeature.LOGS,
     LogsCancelRequest: HelperFeature.LOGS_CANCEL,
     HarnessesListRequest: HelperFeature.HARNESSES,
+    RunsReadEventsRequest: HelperFeature.RUN_HISTORY,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
@@ -944,7 +1106,8 @@ HelperRequest = Annotated[
     | LogsListRequest
     | LogsReadRequest
     | LogsCancelRequest
-    | HarnessesListRequest,
+    | HarnessesListRequest
+    | RunsReadEventsRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1064,6 +1227,17 @@ class RunsListReply(_HelperReply):
 
     type: Literal["runs.list"] = "runs.list"
     runs: RunList
+
+
+class RunsReadEventsReply(_HelperReply):
+    """One page of a run's recorded events, oldest first."""
+
+    type: Literal["runs.read_events"] = "runs.read_events"
+    events: tuple[RunEventDocument, ...]
+    next_sequence: PositiveInt
+    """The ``from_sequence`` of the next page."""
+    complete: bool
+    """The page reached the end of what the journal holds now."""
 
 
 class RunStartReply(_HelperReply):
@@ -1278,6 +1452,8 @@ class HelperErrorCode(StrEnum):
     """``logs.read`` named a stream the instance does not have."""
     LOG_STORE_CORRUPT = "log_store_corrupt"
     """``logs.list`` or ``logs.read`` found the run's log index corrupt; asking again does not help."""
+    UNKNOWN_RUN = "unknown_run"
+    """``runs.read_events`` named a run the project does not have; the message names it."""
     UNVETTED_HARNESS = "unvetted_harness"
     """``run.start``'s ``harness`` is not one ``harnesses.list`` offers; only sent with ``harnesses``."""
     INTERNAL = "internal"
@@ -1318,6 +1494,7 @@ HelperReply = (
     | LogsReadReply
     | LogsCancelReply
     | HarnessesListReply
+    | RunsReadEventsReply
 )
 """A request's result; its ``type`` is the request's."""
 
