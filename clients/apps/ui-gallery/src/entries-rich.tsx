@@ -13,6 +13,7 @@ import {
   LogPane,
   Menu,
   type MenuItem,
+  Prose,
   Row,
   Scrubber,
   SidebarItem,
@@ -371,6 +372,23 @@ export const RICH_ENTRIES = {
           {key: 'Builds on', value: 'Pad the counters'},
         ]}
       />
+    ),
+  },
+  Prose: {
+    render: () => (
+      <Card section="Objective">
+        <Prose
+          blocks={[
+            {kind: 'heading', text: 'Make the queue faster'},
+            {
+              kind: 'paragraph',
+              text: 'Maximize trusted end-to-end throughput of the MPMC queue without breaking it.',
+            },
+            {kind: 'list', ordered: false, items: ['Pass the correctness check', 'Stay lock-free']},
+            {kind: 'list', ordered: true, items: ['Measure the baseline', 'Beat it']},
+          ]}
+        />
+      </Card>
     ),
   },
   CheckList: {render: () => <CheckList items={CHECKS} />},

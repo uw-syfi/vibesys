@@ -18,7 +18,14 @@ export {Banner, type BannerTone, Card} from './components/card.js';
 export {Chart, type ChartPoint, type ChartTick} from './components/chart.js';
 export {type CheckItem, CheckList, type CheckState} from './components/check-list.js';
 export {Dialog} from './components/dialog.js';
-export {EmptyState, KeyValue, type KeyValueItem, Stat} from './components/display.js';
+export {
+  EmptyState,
+  KeyValue,
+  type KeyValueItem,
+  Prose,
+  type ProseBlock,
+  Stat,
+} from './components/display.js';
 export {Field, TextInput} from './components/field.js';
 export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
 export {
