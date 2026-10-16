@@ -249,3 +249,43 @@ def test_folding_the_span_changes_of_every_step_gives_the_trace(
             break
         before = after
         run.reply(run.expect_turn("go"), Plan(n=1))
+
+
+@pytest.mark.parametrize("restarting", [False, True], ids=["live", "restarting"])
+def test_a_flow_labels_the_spans_it_started_once_their_answers_are_in(*, restarting: bool) -> None:
+    async def child(ctx: core.Flow) -> None:
+        await ctx.agents.session(WORKER).turn(Prompt(text="go"), within=10.0)
+        turn = ctx.operation_span
+        assert turn is not None
+        ctx.label(TURN, span=turn, attrs={"role": "worker"})
+
+    async def root(ctx: core.Flow, _config: Config) -> None:
+        async with ctx.group() as tasks:
+            task = tasks.start("c", child)
+            assert task.span is not None
+            ctx.label(WORKSTREAM, span=task.span, title="started by the root")
+            async for _ in tasks:
+                pass
+
+    run = FlowRun.start(search_of(root), Config(), restarting=restarting)
+    play(run)
+    labels = {s.id: s.label for s in run.trace().spans if s.label is not None}
+    assert labels["flow:c/#1"] == core.SpanLabel(kind="workstream", title="started by the root")
+    turn = next(s for s in run.trace().spans if s.name == "worker")
+    assert labels[turn.id] == core.SpanLabel(kind="agent_turn", attrs_json='{"role":"worker"}')
+
+
+def test_a_flow_cannot_label_a_span_it_did_not_start() -> None:
+    assert refused(lambda ctx: ctx.label(TURN, span="flow:nowhere/#1")) == "label.span"
+
+    async def child(ctx: core.Flow) -> None:
+        ctx.label(WORKSTREAM, span=ROOT)
+
+    async def root(ctx: core.Flow, _config: Config) -> None:
+        async with ctx.group() as tasks:
+            tasks.start("c", child)
+            async for _ in tasks:
+                pass
+
+    with pytest.raises(core.ContractError, match="its own span or one it started"):
+        FlowRun.start(search_of(root), Config())

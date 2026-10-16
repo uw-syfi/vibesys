@@ -149,6 +149,11 @@ class Trace:
         """Whether the run has recorded the span ``span_id``."""
         return span_id in self._spans
 
+    def parent_of(self, span_id: SpanId) -> SpanId | None:
+        """The parent of ``span_id``; None for the root or a span the run never recorded."""
+        found = self._spans.get(span_id)
+        return None if found is None else found.parent
+
     def label_of(self, span_id: SpanId) -> SpanLabel | None:
         """The span's label so far."""
         return self._spans[span_id].label

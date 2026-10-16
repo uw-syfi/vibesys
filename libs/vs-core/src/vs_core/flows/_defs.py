@@ -99,6 +99,8 @@ class _Task:
     signals: list[Signal] = field(default_factory=list)
     span: SpanId | None = None
     """The task's span in the run trace, from the moment it starts."""
+    last_operation: SpanId | None = None
+    """The span of the operation the task issued last."""
 
     @property
     def span_id(self) -> SpanId:

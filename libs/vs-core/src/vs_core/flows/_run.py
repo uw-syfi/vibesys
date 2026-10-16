@@ -394,6 +394,8 @@ class _Run:
                 )
             case work:
                 self.trace.operation_started(task.span_id, pending.decision, _label(work))
+        if not isinstance(pending.work, Finish):
+            task.last_operation = operation_span(pending.decision)
         if label is not None:
             self.label(operation_span(pending.decision), label.kind, label.fields())
         return pending

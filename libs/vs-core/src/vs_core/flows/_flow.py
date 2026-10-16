@@ -188,14 +188,30 @@ class Flow:
         """This flow's span in the run trace: what another span's link names it by."""
         return self._kit.task.span_id
 
-    def label(self, kind: SpanKind, **fields: Unpack[LabelFields]) -> None:
-        """Label this flow's span as ``kind`` (declared at ``@search``).
+    @property
+    def operation_span(self) -> SpanId | None:
+        """The span of the operation this flow issued last (a turn, a measurement), if any.
 
-        ``fields`` (``title``, ``links``, ``attrs``, ``verdict``, ``reason``) replace those
-        they name; the rest keep their values. An undeclared kind, attribute, relation or
-        verdict, or a link to a span the run has not recorded, is a ``ContractError``.
+        What a flow labels once the operation has answered, with what only its answer says.
         """
-        self._run.label(self.span, kind, fields)
+        return self._kit.task.last_operation
+
+    def label(
+        self, kind: SpanKind, *, span: SpanId | None = None, **fields: Unpack[LabelFields]
+    ) -> None:
+        """Label a span as ``kind`` (declared at ``@search``): this flow's own, by default.
+
+        ``span`` may name a span this flow started instead: a task it started in a group, or an
+        operation it issued. ``fields`` (``title``, ``links``, ``attrs``, ``verdict``,
+        ``reason``) replace those they name; the rest keep their values. An undeclared kind,
+        attribute, relation or verdict, a link to a span the run has not recorded, or a span
+        this flow did not start, is a ``ContractError``.
+        """
+        target = self.span if span is None else span
+        if target != self.span and self._run.trace.parent_of(target) != self.span:
+            message = f"a flow labels its own span or one it started, not {target}"
+            raise ContractError(("label", "span"), message)
+        self._run.label(target, kind, fields)
 
     def checkpoint(self, snapshot: object) -> None:
         """Record ``snapshot``: where a code change may resume this flow (see ``flow``)."""
