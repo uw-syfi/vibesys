@@ -24,17 +24,20 @@ REAL_GIT = Git(REAL_PROCESSES)
 
 
 def _refuse(spec: ProcessSpec) -> Never:
-    message = f"this test runs no GitHub CLI command, but ran {' '.join(spec.argv)}"
+    message = f"this test runs no such command, but ran {' '.join(spec.argv)}"
     raise AssertionError(message)
 
 
 def _no_time(seconds: float) -> Never:
-    message = f"a refused GitHub CLI command took {seconds:g} s"
+    message = f"a refused command took {seconds:g} s"
     raise AssertionError(message)
 
 
 NO_GITHUB = GitHubCLI(FakeProcesses(_refuse, pass_time=_no_time))
 """A GitHub CLI for a run that never reaches GitHub; any command fails the test."""
+
+NO_GIT = Git(FakeProcesses(_refuse, pass_time=_no_time))
+"""Git for a test that never runs a Git command; any command fails the test."""
 
 
 def real_git_tracker(  # noqa: PLR0913  # lint-waiver: LW-261403 [PLR0913]; mirrors GitTracker's keywords one to one.

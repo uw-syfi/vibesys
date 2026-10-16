@@ -225,7 +225,6 @@
 {"path": "tests/vibesys/api/test_request.py", "rule": "real_impl", "count": 2}
 {"path": "tests/vibesys/api/test_run_store_v5.py", "rule": "real_impl", "count": 5}
 {"path": "tests/vibesys/api/test_runs.py", "rule": "real_impl", "count": 9}
-{"path": "tests/vibesys/api/test_runtime_commit_events.py", "rule": "real_impl", "count": 4}
 {"path": "tests/vibesys/backends/test_backend_registry_imports.py", "rule": "real_impl", "count": 4}
 {"path": "tests/vibesys/loops/test_rocprof_compute.py", "rule": "real_impl", "count": 1}
 {"path": "tests/vibesys/orchestration/test_declared_memory.py", "rule": "real_impl", "count": 2}

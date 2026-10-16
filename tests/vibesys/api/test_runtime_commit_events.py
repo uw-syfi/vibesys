@@ -15,7 +15,7 @@ from typing import Literal
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
-from tests.support.real_git import NO_GITHUB, REAL_GIT
+from tests.support.real_git import NO_GIT, NO_GITHUB
 
 from vibesys.api import IterationKind, IterationStatus, IterationSummary, IterationTree
 from vibesys.events import (
@@ -39,6 +39,17 @@ from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api.testing import ManualClock, SimThreads, examples
 
 _FAILURE_TEXT_LIMIT = 4000
+
+
+def _integration() -> LocalRunIntegration:
+    """A run integration that runs no Git or GitHub command: these tests only observe commits."""
+    return LocalRunIntegration(
+        clock=ManualClock(),
+        git=NO_GIT,
+        github=NO_GITHUB,
+        threads=SimThreads(),
+        system=idle_environment_system(),
+    )
 
 
 class _FakeAgentState(BaseModel):
@@ -115,13 +126,7 @@ def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
 
 
 def test_commit_projection_preserves_semantics_and_publication_order() -> None:
-    integration = LocalRunIntegration(
-        clock=ManualClock(),
-        git=REAL_GIT,
-        github=NO_GITHUB,
-        threads=SimThreads(),
-        system=idle_environment_system(),
-    )
+    integration = _integration()
     order: list[str] = []
     captured: list[CoreEvent] = []
 
@@ -168,13 +173,7 @@ def test_commit_projection_preserves_semantics_and_publication_order() -> None:
 
 def test_workstream_finished_carries_a_typed_bounded_redacted_failure() -> None:
     """The commit producer preserves typed failures and sanitizes their bounded text."""
-    integration = LocalRunIntegration(
-        clock=ManualClock(),
-        git=REAL_GIT,
-        github=NO_GITHUB,
-        threads=SimThreads(),
-        system=idle_environment_system(),
-    )
+    integration = _integration()
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)
     observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
@@ -264,13 +263,7 @@ def test_commit_events_property_no_double_emission_and_semantic_changes(
             _FakeAgentState(round_numbers=tuple(round_numbers), active=active, revision=revision)
         )
 
-    integration = LocalRunIntegration(
-        clock=ManualClock(),
-        git=REAL_GIT,
-        github=NO_GITHUB,
-        threads=SimThreads(),
-        system=idle_environment_system(),
-    )
+    integration = _integration()
     observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)
@@ -310,13 +303,7 @@ def test_commit_events_property_no_double_emission_and_semantic_changes(
 
 
 def test_a_commit_of_another_namespace_projects_nothing() -> None:
-    integration = LocalRunIntegration(
-        clock=ManualClock(),
-        git=REAL_GIT,
-        github=NO_GITHUB,
-        threads=SimThreads(),
-        system=idle_environment_system(),
-    )
+    integration = _integration()
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)
     observer = integration.core_commit_observer("probe", _FakeProjector(), "other-namespace")
@@ -345,13 +332,7 @@ def test_a_commit_whose_view_cannot_be_built_warns_once_and_loses_no_round(
     process before it, so none of those rounds is announced again, even when the first commit
     after the restart cannot be built.
     """
-    integration = LocalRunIntegration(
-        clock=ManualClock(),
-        git=REAL_GIT,
-        github=NO_GITHUB,
-        threads=SimThreads(),
-        system=idle_environment_system(),
-    )
+    integration = _integration()
     observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)
