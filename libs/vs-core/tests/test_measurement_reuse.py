@@ -112,7 +112,7 @@ def record(
         kind = core.EvidenceKind.BENCHMARK
     source = request.request_id if reused is None else reused
     assert source is not None
-    return core.EvidenceRef(
+    made = core.EvidenceRef(
         evidence_id=core.EvidenceId(root=f"{source.root}-{stage}"),
         kind=kind,
         purpose=request.plan.purpose,
@@ -131,9 +131,9 @@ def record(
                 digest="sha256:result",
             ),
         ),
-        # Named only on a reuse, so this helper also builds records on code without reuse.
-        **({} if reused is None else {"reused_from": reused}),
     )
+    # Named only on a reuse, so this helper also builds records on code without reuse.
+    return made if reused is None else made.model_copy(update={"reused_from": reused})
 
 
 def ended(
@@ -223,6 +223,7 @@ def test_an_official_measurement_of_the_agents_evaluated_commit_submits_no_secon
     assert agent is not None
     asked = official(state, plan(purpose="official", candidate=revision("0027142")))
     (submission,) = [r for r in asked.requests if isinstance(r, core.SubmitMeasurement)]
+    assert agent.request_id is not None
     reused = submission.model_dump(mode="json").get("reuses")
     assert reused == agent.request_id.model_dump(mode="json"), "a second measurement ran"
 
@@ -316,9 +317,10 @@ def test_a_reusing_submission_takes_only_its_runs_own_records() -> None:
     reload_at=st.integers(min_value=0, max_value=5),
 )
 def test_an_official_measurement_reuses_exactly_the_scopes_one_latest_conclusive_run(
+    *,
     runs: list[tuple[int, int, Outcome]],
     target: tuple[int, int],
-    input_known: bool,  # noqa: FBT001
+    input_known: bool,
     reload_at: int,
 ) -> None:
     """Any sequence of agent runs of inputs (two commits each), with a reload anywhere.
