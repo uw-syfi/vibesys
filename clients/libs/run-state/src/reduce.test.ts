@@ -2978,7 +2978,7 @@ describe('quota state', () => {
     });
   });
 
-  it('folds the operator\'s wait for capacity into the pause it waits out, until cancelled', () => {
+  it("folds the operator's wait for capacity into the pause it waits out, until cancelled", () => {
     const waiting = (sequence: number, resumesAt: number | null): RunEvent =>
       fixtureEvent(sequence, 'quota_waiting', {
         data: {

@@ -283,7 +283,11 @@ function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): Q
       // A wait belongs to the pause it waits out; one with no pause folded has nothing to show.
       return quota.pause === null
         ? quota
-        : {...quota, sequence, pause: {...quota.pause, waiting: {resumesAt: data.resumes_at ?? null}}};
+        : {
+            ...quota,
+            sequence,
+            pause: {...quota.pause, waiting: {resumesAt: data.resumes_at ?? null}},
+          };
     case 'quota_wait_cancelled':
       return quota.pause === null
         ? quota
