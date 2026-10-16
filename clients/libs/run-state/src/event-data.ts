@@ -142,6 +142,7 @@ const EVENT_DATA_HANDLERS = {
   span_started: ignoredEventData,
   span_updated: ignoredEventData,
   span_ended: ignoredEventData,
+  run_ending: ignoredEventData,
 } satisfies Record<EventDataKind, EventDataHandlers>;
 
 export function eventDataHandlers(data: RunEvent['data']): EventDataHandlers | null | undefined {

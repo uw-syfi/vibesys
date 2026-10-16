@@ -9,7 +9,7 @@ import {
 import {expect} from './test-support/expect.js';
 
 const RECORD = {
-  version: 4,
+  version: 5,
   id: '0123456789ab',
   status: 'serving',
   phase: {status: 'failed', stage: null, reason: {code: 'x', stage: 'startup', message: 'm'}},
@@ -40,7 +40,7 @@ const VALID: readonly Record<string, unknown>[] = [
     type: 'instances.changed',
     watch_id: 'w',
     listing: {
-      version: 4,
+      version: 5,
       instances: [RECORD],
       ended: [],
       unreadable: [{id: 'abcdefabcdef', version: null}],

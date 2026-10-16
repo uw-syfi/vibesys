@@ -24,7 +24,7 @@ const target: InspectorTarget = {
 
 function inspection(overrides: Partial<InstanceInspection> = {}): InstanceInspection {
   const record: LiveInstanceRecord = {
-    version: 4,
+    version: 5,
     id: target.instanceId,
     status: 'serving',
     phase: {status: 'running', stage: null, progress: null, reason: null},

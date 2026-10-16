@@ -139,7 +139,7 @@ function refusedArgument(start: Extract<HelperRequest, {type: 'run.start'}>): st
 
 export function record(id: string, runId: string, project = '/p'): LiveInstanceRecord {
   return {
-    version: 4,
+    version: 5,
     id,
     status: 'serving',
     phase: {status: 'running', stage: null, reason: null},
@@ -344,7 +344,7 @@ export class FakeHelper {
 
   listing(): InstanceList {
     return {
-      version: 4,
+      version: 5,
       instances: [...this.host.instances],
       ended: [...this.host.ended],
       unreadable: [...this.host.unreadable],

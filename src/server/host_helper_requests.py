@@ -23,19 +23,20 @@ Public surface: ``answer``, ``connect``, ``negotiate``, ``Negotiated``,
 
 from __future__ import annotations
 
-import json
 import posixpath
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, assert_never
 
+from pydantic import TypeAdapter
+
 from server.host_api import (
     CLI_PROVIDER_FLAG,
+    HELPER_LINE_MAX_BYTES,
     HELPER_PROTOCOL_VERSIONS,
     MODEL_FLAG,
     PATHS_COMPLETE_CAP,
-    RUN_EVENTS_READ_MAX_BYTES,
     UNVETTED_MODEL_FLAG,
     Checkout,
     DetachedLaunchFailure,
@@ -90,6 +91,7 @@ from server.relay import (
     ChannelEndOutcome,
     dial,
 )
+from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
@@ -180,10 +182,11 @@ class Projects(Protocol):
         """The project's resolved root, once it is known to define tasks."""
         ...
 
-    def run_journal(self, project: Path, run_id: str) -> Path:
-        """Where the project's run ``run_id`` journals its events; the file may not exist yet.
+    def run_events(self, project: Path, run_id: str, from_sequence: int, limit: int) -> EventPage:
+        """A page of run ``run_id``'s journal (``event_page`` under ``RUN_EVENTS_READ_MAX_BYTES``).
 
-        Raises ``ProjectLookupError`` with ``unknown_run`` when the project has no such run.
+        A run that journaled nothing has an empty, complete page. Raises
+        ``ProjectLookupError`` with ``unknown_run`` when the project has no such run.
         """
         ...
 
@@ -391,6 +394,7 @@ class EventPage:
     complete: bool
 
 
+_EVENT_DOCUMENT: TypeAdapter[RunEventDocument] = TypeAdapter(RunEventDocument)
 _SEQUENCE_PREFIX = re.compile(rb'"sequence":(\d+)[,}]')
 _SEQUENCE_PREFIX_BYTES = 96
 
@@ -433,28 +437,10 @@ def _sequence_prefix(line: bytes) -> int | None:
 
 
 def _journal_event(line: bytes) -> RunEventDocument | None:
-    try:
-        event = json.loads(line)
-    except ValueError:
-        return None
-    if not isinstance(event, dict) or type(event.get("sequence")) is not int:
+    event = decode_json(line, _EVENT_DOCUMENT, source="run event", max_bytes=HELPER_LINE_MAX_BYTES)
+    if isinstance(event, Unreadable) or type(event.get("sequence")) is not int:
         return None
     return event
-
-
-def read_run_events(request: RunsReadEventsRequest, journal: Path) -> RunsReadEventsReply:
-    """Answer ``runs.read_events`` from the run's journal file; a run that journaled nothing has none."""
-    try:
-        with journal.open("rb") as lines:
-            page = event_page(lines, request.from_sequence, request.max, RUN_EVENTS_READ_MAX_BYTES)
-    except FileNotFoundError:
-        page = EventPage((), request.from_sequence, complete=True)
-    return RunsReadEventsReply(
-        request_id=request.request_id,
-        events=page.events,
-        next_sequence=page.next_sequence,
-        complete=page.complete,
-    )
 
 
 def _abbreviates(token: str, flag: str) -> bool:
@@ -566,9 +552,8 @@ def _answer(
             reply = _instances_reply(request, host)
         case TasksListRequest() | RunsListRequest():
             reply = _project_reply(request, host)
-        case RunsReadEventsRequest(project=project, run_id=run_id):
-            journal = host.projects.run_journal(Path(_host_path(project, host.directories)), run_id)
-            reply = read_run_events(request, journal)
+        case RunsReadEventsRequest():
+            reply = _run_events_reply(request, host)
         case RunStartRequest():
             reply = _start(request, host)
         case RunStopRequest(instance_id=instance_id, force=force):
@@ -607,6 +592,18 @@ def _project_reply(
             root, runs = host.projects.runs(project)
             summaries = run_summaries(root, runs, host.registry.list())
             return RunsListReply(request_id=request_id, runs=summaries)
+
+
+def _run_events_reply(request: RunsReadEventsRequest, host: HelperHost) -> RunsReadEventsReply:
+    """Answer one page of a run's recorded events."""
+    project = Path(_host_path(request.project, host.directories))
+    page = host.projects.run_events(project, request.run_id, request.from_sequence, request.max)
+    return RunsReadEventsReply(
+        request_id=request.request_id,
+        events=page.events,
+        next_sequence=page.next_sequence,
+        complete=page.complete,
+    )
 
 
 def _start(request: RunStartRequest, host: HelperHost) -> RunStartReply | HelperError:

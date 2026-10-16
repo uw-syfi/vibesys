@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from tests.server.support import REQUEST_TIME, sim_platform
+from tests.server.support import REQUEST_TIME, RecordingObserver, sim_platform
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 from websockets.sync.client import connect
 
@@ -33,7 +33,6 @@ from server.api.service import RunApi, RunControlUnavailableError
 from server.chat.manager import ChatManager
 from server.controller import RunController
 from server.execution import ExecutionTracker
-from server.host_api import FailureReason, RunStatus, StartupFact
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.runtime import ServerRuntime
@@ -274,23 +273,11 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
     )
     control = _SessionControlStub(integration.control)
 
-    class Observer:
-        def resolved(self, *, project_root: Path, task: str) -> None:
-            del project_root, task
-
+    class Observer(RecordingObserver):
         def listening(self) -> None:
             response = runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
             assert response.ack is not None
             assert (response.ack.action, response.ack.status) == ("stop", "pending")
-
-        def observe(
-            self,
-            *,
-            status: RunStatus | None = None,
-            failure: FailureReason | None = None,
-            startup: StartupFact | None = None,
-        ) -> None:
-            del status, failure, startup
 
     runtime = ServerRuntime(
         run_id="run-1",
@@ -336,25 +323,13 @@ def test_startup_rejects_commands_that_require_an_active_session(
 ) -> None:
     """No mutating command is acknowledged unless its effect can be retained."""
 
-    class Observer:
+    class Observer(RecordingObserver):
         failure: RunControlUnavailableError | None = None
-
-        def resolved(self, *, project_root: Path, task: str) -> None:
-            del project_root, task
 
         def listening(self) -> None:
             with pytest.raises(RunControlUnavailableError) as raised:
                 runtime.api.execute(command)
             self.failure = raised.value
-
-        def observe(
-            self,
-            *,
-            status: RunStatus | None = None,
-            failure: FailureReason | None = None,
-            startup: StartupFact | None = None,
-        ) -> None:
-            del status, failure, startup
 
     observer = Observer()
     runtime = ServerRuntime(

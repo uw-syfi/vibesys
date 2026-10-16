@@ -73,7 +73,7 @@ def test_pages_of_any_size_concatenate_to_the_journal_from_where_reading_began(
         if page.complete:
             break
     assert page.complete
-    assert read == [event for event in journal if event["sequence"] >= start]
+    assert read == journal[start - 1 :]  # sequence n is the journal's n-th event
 
 
 def test_a_page_never_passes_its_byte_bound_unless_one_event_alone_does() -> None:

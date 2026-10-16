@@ -22,6 +22,7 @@ from pydantic import TypeAdapter
 
 from server.host_api import (
     RUN_EVENTS_FILE,
+    RUN_EVENTS_READ_MAX_BYTES,
     Checkout,
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
@@ -45,11 +46,13 @@ from server.host_helper_logs import (
     UnknownLogStreamError,
 )
 from server.host_helper_requests import (
+    EventPage,
     PathHints,
     ProjectLookupError,
     ProjectRun,
     Scan,
     ScannedEntry,
+    event_page,
 )
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project, ProjectError
@@ -107,13 +110,18 @@ class FileProjects:
         """The project's root, once it is known to define tasks."""
         return self._initialized(project).root
 
-    def run_journal(self, project: Path, run_id: str) -> Path:
-        """Where run ``run_id`` journals its events, once the project is known to have the run."""
+    def run_events(self, project: Path, run_id: str, from_sequence: int, limit: int) -> EventPage:
+        """A page of run ``run_id``'s journal, once the project is known to have the run."""
         root, runs = self.runs(project)
         if all(run.run_id != run_id for run in runs):
             message = f"{root} has no run {run_id!r}"
             raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
-        return Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
+        journal = Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
+        try:
+            with journal.open("rb") as lines:
+                return event_page(lines, from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES)
+        except FileNotFoundError:
+            return EventPage((), from_sequence, complete=True)
 
     def _open(self, project: Path) -> Project:
         try:

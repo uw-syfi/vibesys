@@ -301,13 +301,13 @@ class RecordPublisher:
                         self._publish(phase=self._held)
                     return
 
-    def _publish(self, **update: object) -> None:
-        """Write the record with ``update``; the caller holds ``self._lock``."""
-        if "phase" not in update and self._held is not None:
-            update["phase"] = self._held
-        phase = update.get("phase", self._record.phase)
-        if isinstance(phase, RunPhase):
-            update["paused"] = paused_by(phase, self._pause_cause)
+    def _publish(self, phase: RunPhase | None = None, **update: object) -> None:
+        """Write the record at ``phase`` (else the held or written one) with ``update``.
+
+        ``paused`` follows the phase written. The caller holds ``self._lock``.
+        """
+        written = phase or self._held or self._record.phase
+        update |= {"phase": written, "paused": paused_by(written, self._pause_cause)}
         self._held = None
         self._record = LiveInstanceRecord.model_validate({**self._record.model_dump(), **update})
         self._written_at = self._threads.now()
