@@ -65,7 +65,10 @@ export interface UsageMeter {
  * `resetsAt` is when the provider said capacity returns and `resumesAt` when the
  * run's quota policy resumes it by itself, both epoch seconds or `null`.
  * `fallback` is the provider and model an operator may resume with, `null` when
- * the run has none configured.
+ * the run has none configured. `waiting` is the operator's request to resume when capacity
+ * returns (`quota_waiting`), with when the run expects to (`resumesAt`, epoch seconds, `null` when
+ * the provider gave no reset time); `null` when no wait is under way (none asked, or
+ * `quota_wait_cancelled`).
  */
 export interface QuotaPause {
   readonly provider: string;
@@ -75,6 +78,7 @@ export interface QuotaPause {
   readonly resumesAt: number | null;
   readonly policy: string | null;
   readonly fallback: {readonly provider: string; readonly model: string | null} | null;
+  readonly waiting: {readonly resumesAt: number | null} | null;
 }
 
 /**
