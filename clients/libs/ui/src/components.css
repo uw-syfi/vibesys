@@ -1219,13 +1219,20 @@ button.vs-stage-head {
   max-width: var(--sidebar);
   max-height: 100%;
   overflow-y: auto;
-  padding: var(--space-5) var(--space-4);
+  /* The window's own controls (macOS's traffic lights) sit over the column's top: start below them. */
+  padding: calc(var(--space-5) + var(--chrome-inset-height, var(--space-0))) var(--space-4)
+    var(--space-5);
+  /* The column's background moves the window; its controls stay controls. */
+  -webkit-app-region: drag;
   border-right: var(--hairline) solid var(--line);
   background: var(--panel-2);
   color: var(--text);
   font-family: var(--text-body-family);
   font-size: var(--text-body-size);
   line-height: var(--text-body-line);
+}
+.vs-app-nav :is(a, button, input, select, textarea, [tabindex]) {
+  -webkit-app-region: no-drag;
 }
 .vs-app-nav-top,
 .vs-app-nav-footer {

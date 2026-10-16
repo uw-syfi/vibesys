@@ -567,7 +567,8 @@ store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived
 Settings store (`@vibesys/feature-settings`) saves each change under a token, so a slow save
 cannot undo a newer choice. Both have invariants checked over seeded action sequences. The theme
 is in the first paint: the welcome preload asks the main process synchronously for the stored
-theme (`THEME_SYNC_CHANNEL`) and sets it on the root element before the page's scripts run.
+theme and the window controls' inset (`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and
+sets them on the root element before the page's scripts run.
 
 ## Multiple run windows
 

@@ -13,18 +13,20 @@ const [
   {WelcomeFeed},
   {rendererGeneration},
   {AppWindow},
+  {chromeInset},
 ] = await Promise.all([
   import(new URL('../dist/main/app-security.js', import.meta.url)),
   import(new URL('../dist/main/desktop.js', import.meta.url)),
   import(new URL('../dist/main/welcome-feed.js', import.meta.url)),
   import(new URL('../dist/main/welcome-ipc.js', import.meta.url)),
   import(new URL('../dist/main/window.js', import.meta.url)),
+  import(new URL('../dist/main/window-chrome.js', import.meta.url)),
 ]);
 
 const WELCOME_URL = 'app://vibesys/welcome.html';
-// The welcome preload asks for the theme to paint in before the page's scripts run.
-ipcMain.on('vibesys:welcome:theme', event => {
-  event.returnValue = 'paper';
+// The welcome preload asks for what the first paint needs before the page's scripts run.
+ipcMain.on('vibesys:welcome:first-paint', event => {
+  event.returnValue = {theme: 'paper', chromeInset: chromeInset(process.platform)};
 });
 const RUN_URL = 'app://vibesys/desktop.html';
 const CREDIT_BYTES = 16 * 1024 * 1024;
@@ -225,6 +227,21 @@ function inspectWelcomeContents(contents) {
       const text = selector => Array.from(document.querySelectorAll(selector), element => element.textContent?.trim() ?? '');
       return {
         titleStripVisible: visible(document.querySelector('#title-strip')),
+        // Controls and text drawn under the window's own controls (the inset the preload set).
+        underChrome: (() => {
+          const style = getComputedStyle(document.documentElement);
+          const width = Number.parseFloat(style.getPropertyValue('--chrome-inset-width')) || 0;
+          const height = Number.parseFloat(style.getPropertyValue('--chrome-inset-height')) || 0;
+          const drawn = Array.from(document.querySelectorAll('body *')).filter(element =>
+            element.matches('a, button, input, select, textarea, [tabindex]:not([tabindex="-1"])') ||
+            Array.from(element.childNodes).some(node => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== ''));
+          return drawn.flatMap(element => {
+            const box = element.getBoundingClientRect();
+            return visible(element) && box.left < width && box.top < height
+              ? [element.tagName + ' ' + (element.textContent ?? '').trim().slice(0, 20)]
+              : [];
+          });
+        })(),
         headings: text('h1, h2, h3'),
         buttons: text('button'),
         bodyText: document.body.textContent ?? '',

@@ -14,8 +14,9 @@ const PAGE_FOREGROUND = '#e9edf5';
 /** `--desktop-titlebar-height` in `clients/apps/web/src/styles.css`. */
 export const TITLEBAR_HEIGHT = 40;
 
-/** macOS traffic lights are 12px discs; this centers them vertically in the strip. */
+/** macOS traffic lights are three 12px discs 8px apart; this centers them vertically in the strip. */
 const TRAFFIC_LIGHT_SIZE = 12;
+const TRAFFIC_LIGHT_GAP = 8;
 const TRAFFIC_LIGHT_INSET = 16;
 
 export interface WindowChrome {
@@ -27,6 +28,24 @@ export interface WindowChrome {
     readonly symbolColor: string;
     readonly height: number;
   };
+}
+
+/** The top-left rectangle the window controls cover, which a page keeps clear, in CSS pixels. */
+export interface ChromeInset {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * What the window controls cover on `platform`: on macOS the traffic lights, from the window's
+ * edge to the last light plus the same margin again, over the strip's height; elsewhere nothing,
+ * since the title-bar overlay draws the controls at the top right of the strip the pages already
+ * leave.
+ */
+export function chromeInset(platform: string): ChromeInset {
+  if (platform !== 'darwin') return {width: 0, height: 0};
+  const lights = 3 * TRAFFIC_LIGHT_SIZE + 2 * TRAFFIC_LIGHT_GAP;
+  return {width: 2 * TRAFFIC_LIGHT_INSET + lights, height: TITLEBAR_HEIGHT};
 }
 
 /** The chrome options for `BrowserWindow` on `platform` (a `process.platform` value). */

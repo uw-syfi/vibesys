@@ -3,7 +3,7 @@
   "extends": "../../tools/tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
-    "lib": ["ES2022", "DOM"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,

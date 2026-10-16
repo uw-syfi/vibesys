@@ -131,9 +131,10 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
 export type {HostsWelcomeBridge, WelcomeInspection} from './hosts.js';
 export type {RunControlWelcomeBridge} from './run-control.js';
 export {
+  FIRST_PAINT_CHANNEL,
+  type FirstPaint,
   type PreferencesView,
   type SettingsWelcomeBridge,
-  THEME_SYNC_CHANNEL,
 } from './settings.js';
 export type {
   HarnessChoice,

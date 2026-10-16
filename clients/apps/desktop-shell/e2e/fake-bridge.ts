@@ -8,6 +8,8 @@
 
 export interface FakeBridgeSeed {
   readonly theme: string;
+  /** The window controls' inset the preload sets, as main reports it for the platform. */
+  readonly chromeInset: {readonly width: number; readonly height: number};
   readonly appearance: {readonly mode: string; readonly light: string; readonly dark: string};
   readonly listings: readonly unknown[];
   readonly recent: readonly unknown[];
@@ -82,6 +84,14 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
   const paint = new MutationObserver(() => {
     if (document.documentElement === null) return;
     document.documentElement.setAttribute('data-theme', seed.theme);
+    document.documentElement.style.setProperty(
+      '--chrome-inset-width',
+      `${seed.chromeInset.width}px`,
+    );
+    document.documentElement.style.setProperty(
+      '--chrome-inset-height',
+      `${seed.chromeInset.height}px`,
+    );
     paint.disconnect();
   });
   paint.observe(document, {childList: true});

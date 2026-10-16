@@ -19,7 +19,7 @@ import {Hosts} from '@vibesys/feature-hosts/main';
 import {RunControl} from '@vibesys/feature-run-control/main';
 import {PreferencesMain} from '@vibesys/feature-settings/main';
 import type {HostId} from '@vibesys/hosts';
-import {THEME_SYNC_CHANNEL, WELCOME_EVENTS} from '@vibesys/ipc';
+import {FIRST_PAINT_CHANNEL, type FirstPaint, WELCOME_EVENTS} from '@vibesys/ipc';
 import {remember, SettingsStore} from '@vibesys/settings';
 import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor} from 'electron';
 import {surfaceUrl} from './app-assets.js';
@@ -38,6 +38,7 @@ import {planFromSecondInstance, prepareLaunchHandoff} from './launch-handoff.js'
 import {WelcomeFeed} from './welcome-feed.js';
 import {rendererGeneration} from './welcome-ipc.js';
 import {AppWindow} from './window.js';
+import {chromeInset} from './window-chrome.js';
 
 /** The repository checkout this app was built in: This Mac's VibeSys checkout by default. */
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url)).replace(
@@ -99,9 +100,14 @@ async function openWindow(
     push: value => window.sendWelcome(WELCOME_EVENTS.preferences, welcome.preferences(value)),
   });
   await preferences.load();
-  // The preload asks for this before the page's scripts run, so the first paint is in the theme.
-  ipcMain.on(THEME_SYNC_CHANNEL, event => {
-    event.returnValue = preferences.theme();
+  // The preload asks for this before the page's scripts run, so the first paint is in the theme
+  // and clear of the window controls.
+  ipcMain.on(FIRST_PAINT_CHANNEL, event => {
+    const firstPaint: FirstPaint = {
+      theme: preferences.theme(),
+      chromeInset: chromeInset(process.platform),
+    };
+    event.returnValue = firstPaint;
   });
   const notifier = new RunNotifier({
     enabled: () => preferences.notificationsEnabled(),

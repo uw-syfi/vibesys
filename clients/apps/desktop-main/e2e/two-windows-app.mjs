@@ -35,9 +35,9 @@ const [{confineContents, lockDownSession, registerAppScheme, serveBundledUi}, {A
 
 const RUN_URL = 'app://vibesys/desktop.html';
 const HOST = {kind: 'local'};
-// The welcome preload asks for the theme to paint in before the page's scripts run.
-ipcMain.on('vibesys:welcome:theme', event => {
-  event.returnValue = 'paper';
+// The welcome preload asks for what the first paint needs before the page's scripts run.
+ipcMain.on('vibesys:welcome:first-paint', event => {
+  event.returnValue = {theme: 'paper', chromeInset: {width: 84, height: 40}};
 });
 
 /** One simulated run: its identity, and the distinguishing content its fixture server answers. */

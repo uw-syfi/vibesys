@@ -4,7 +4,7 @@
  * it, and every change is also pushed as the `preferences` event.
  */
 import {parseRunRef, type RunRef} from '@vibesys/runs';
-import {type Appearance, parseAppearance} from '@vibesys/ui/tokens';
+import {type Appearance, parseAppearance, type ThemeName} from '@vibesys/ui/tokens';
 import type {WelcomeResult} from './types.js';
 import type {ChannelOf} from './values.js';
 
@@ -16,10 +16,22 @@ export const SETTINGS_CHANNELS = {
 } as const;
 
 /**
- * The channel the welcome preload asks on, synchronously and before the page's scripts run, for the
- * theme to paint in, so the first paint is already in it.
+ * The channel the welcome preload asks on, synchronously and before the page's scripts run, for what
+ * the first paint needs (`FirstPaint`), so it is already in the stored theme and clear of the
+ * window controls.
  */
-export const THEME_SYNC_CHANNEL = 'vibesys:welcome:theme';
+export const FIRST_PAINT_CHANNEL = 'vibesys:welcome:first-paint';
+
+/** What a page needs before its first paint. */
+export interface FirstPaint {
+  /** The stored theme, for the system's mode now. */
+  readonly theme: ThemeName;
+  /**
+   * The top-left rectangle the window's own controls cover (macOS's traffic lights and their
+   * margin), in CSS pixels; zero where the controls are drawn elsewhere.
+   */
+  readonly chromeInset: {readonly width: number; readonly height: number};
+}
 
 /** The preferences the views read: the appearance, notifications, and the runs archived. */
 export interface PreferencesView {

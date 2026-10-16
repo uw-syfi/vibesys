@@ -18,6 +18,7 @@ interface RecoveryState {
 
 interface WelcomeInspection {
   readonly titleStripVisible: boolean;
+  readonly underChrome: readonly string[];
   readonly headings: readonly string[];
   readonly buttons: readonly string[];
   readonly bodyText: string;
@@ -171,7 +172,8 @@ test('a crashed welcome renderer is replaced once without losing its open run', 
       .toMatchObject({currentWelcomeUrl: WELCOME_URL, runUrl: RUN_URL, fatals: []});
     await expect
       .poll(() => bounded('inspecting the initial welcome document', inspectWelcome(electronApp)))
-      .toMatchObject({titleStripVisible: true});
+      // Nothing is drawn under the window's own controls (macOS's traffic lights).
+      .toMatchObject({titleStripVisible: true, underChrome: []});
 
     const before = await bounded('reading the ready shell state', state(electronApp));
     expect(before.currentWelcomeId).not.toBeNull();

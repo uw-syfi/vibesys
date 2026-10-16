@@ -28,6 +28,8 @@ export {
 } from './run-logs.js';
 export {
   type ChromeState,
+  FIRST_PAINT_CHANNEL,
+  type FirstPaint,
   type HarnessChoice,
   type HarnessListing,
   type HarnessOffer,
@@ -40,7 +42,6 @@ export {
   type StartOutcome,
   type StartRunWelcomeBridge,
   settled,
-  THEME_SYNC_CHANNEL,
   WELCOME_CHANNELS,
   WELCOME_EVENTS,
   type WelcomeBridge,

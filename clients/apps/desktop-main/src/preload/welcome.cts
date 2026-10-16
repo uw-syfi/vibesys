@@ -6,14 +6,14 @@
  * `@vibesys/ipc`'s `parseWelcomeRequest` (`welcome.test.ts` holds the two to the same arguments).
  * Five events come back: the window's state (`onChrome`), the recent runs (`onRecent`), a host to
  * show (`onShowHost`), a host's runs as its helper pushed them (`onListing`), and the preferences
- * (`onPreferences`). Before the page's scripts run it asks, synchronously, for the theme to paint in
- * and sets it on the document, so the first paint is already in the persisted theme. Sandboxed
+ * (`onPreferences`). Before the page's scripts run it asks, synchronously, for what the first paint needs
+ * (the stored theme and the window controls' inset) and sets it on the document. Sandboxed
  * preloads cannot be ES modules or import local files, hence `.cts` and the channel names repeated
  * here; the types keep them in step. It loads only Electron (the package-graph checker's
  * `preload-sandbox`): the payload types come from the bridge interface, which types every member
  * below.
  */
-import type {WelcomeBridge, WelcomeEvent, WelcomeResult} from '@vibesys/ipc';
+import type {FirstPaint, WelcomeBridge, WelcomeEvent, WelcomeResult} from '@vibesys/ipc';
 
 type Channels = typeof import('@vibesys/ipc').WELCOME_CHANNELS;
 type Events = typeof import('@vibesys/ipc').WELCOME_EVENTS;
@@ -52,8 +52,8 @@ const EVENTS: Events = {
   listing: 'vibesys:welcome:listing',
   preferences: 'vibesys:welcome:preferences-changed',
 };
-const THEME_SYNC_CHANNEL: typeof import('@vibesys/ipc').THEME_SYNC_CHANNEL =
-  'vibesys:welcome:theme';
+const FIRST_PAINT_CHANNEL: typeof import('@vibesys/ipc').FIRST_PAINT_CHANNEL =
+  'vibesys:welcome:first-paint';
 
 /** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
 interface WelcomePreloadCapabilities {
@@ -121,19 +121,25 @@ if (process.type === 'renderer') {
         electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
     }),
   );
-  paintInStoredTheme(electron.ipcRenderer.sendSync(THEME_SYNC_CHANNEL));
+  prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
 }
 
 /**
- * Set `theme` on the root element as the parser inserts it, before the first paint. A preload runs
- * before the document has a root element, so this waits for it with a mutation observer, whose
- * callback runs before the page renders.
+ * Set the stored theme and the window controls' inset (`--chrome-inset-width`,
+ * `--chrome-inset-height`) on the root element as the parser inserts it, before the first paint. A
+ * preload runs before the document has a root element, so this waits for it with a mutation
+ * observer, whose callback runs before the page renders.
  */
-function paintInStoredTheme(theme: unknown): void {
-  if (typeof theme !== 'string') return;
+function prepareFirstPaint(reply: unknown): void {
+  const firstPaint = reply as FirstPaint | undefined;
+  if (firstPaint === undefined || firstPaint === null) return;
   const apply = (): boolean => {
-    document.documentElement?.setAttribute('data-theme', theme);
-    return document.documentElement !== null;
+    const root = document.documentElement;
+    if (root === null) return false;
+    root.setAttribute('data-theme', firstPaint.theme);
+    root.style.setProperty('--chrome-inset-width', `${firstPaint.chromeInset.width}px`);
+    root.style.setProperty('--chrome-inset-height', `${firstPaint.chromeInset.height}px`);
+    return true;
   };
   if (apply()) return;
   const observer = new MutationObserver(() => {
