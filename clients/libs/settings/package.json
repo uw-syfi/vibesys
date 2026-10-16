@@ -33,7 +33,8 @@
   },
   "dependencies": {
     "@vibesys/hosts": "workspace:*",
-    "@vibesys/runs": "workspace:*"
+    "@vibesys/runs": "workspace:*",
+    "@vibesys/ui": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

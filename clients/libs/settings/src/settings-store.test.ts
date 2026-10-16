@@ -17,6 +17,7 @@ function store(
   const settings = new SettingsStore({
     settingsPath: join(directory, 'hosts.json'),
     recentPath: join(directory, 'recent.json'),
+    preferencesPath: join(directory, 'preferences.json'),
     log: message => logged.push(message),
     ...(filesystem === undefined ? {} : {filesystem}),
   });

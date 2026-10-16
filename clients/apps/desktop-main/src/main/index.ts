@@ -84,6 +84,7 @@ async function openWindow(
   const settings = new SettingsStore({
     settingsPath: join(userData, 'hosts.json'),
     recentPath: join(userData, 'recent.json'),
+    preferencesPath: join(userData, 'preferences.json'),
     log,
   });
   let desktop: Desktop | null = null;

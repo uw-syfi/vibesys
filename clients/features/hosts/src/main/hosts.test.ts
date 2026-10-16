@@ -230,6 +230,7 @@ function subject(filesystem: SshConfigFilesystem): Hosts {
   const settings = new SettingsStore({
     settingsPath: '/unused/hosts.json',
     recentPath: '/unused/recent.json',
+    preferencesPath: '/unused/preferences.json',
     log: () => {},
   });
   return new Hosts({
@@ -252,6 +253,7 @@ function completionSubject(link: FakeLink): {
   const settings = new SettingsStore({
     settingsPath: '/settings/hosts.json',
     recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
     filesystem: new FakeSettingsFilesystem(),
     log: () => {},
   });
@@ -375,6 +377,7 @@ describe('Hosts checkout changes', () => {
     const settings = new SettingsStore({
       settingsPath: join(directory, 'hosts.json'),
       recentPath: join(directory, 'recent.json'),
+      preferencesPath: join(directory, 'preferences.json'),
       filesystem,
       log: () => {},
     });
@@ -426,6 +429,7 @@ describe('Hosts checkout changes', () => {
     const settings = new SettingsStore({
       settingsPath: join(directory, 'hosts.json'),
       recentPath: join(directory, 'recent.json'),
+      preferencesPath: join(directory, 'preferences.json'),
       filesystem,
       log: () => {},
     });
@@ -472,6 +476,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -518,6 +523,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -559,6 +565,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -605,6 +612,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -658,6 +666,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -700,6 +709,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -740,6 +750,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -781,6 +792,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -822,6 +834,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -859,6 +872,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -899,6 +913,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -948,6 +963,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -998,6 +1014,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -1047,6 +1064,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -1100,6 +1118,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath,
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -1159,6 +1178,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath,
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -1196,6 +1216,7 @@ describe('Hosts desired set', () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem,
       log: () => {},
     });
@@ -1239,6 +1260,7 @@ describe('Hosts inspection changes', () => {
     const settings = new SettingsStore({
       settingsPath: join(directory, 'hosts.json'),
       recentPath: join(directory, 'recent.json'),
+      preferencesPath: join(directory, 'preferences.json'),
       filesystem,
       log: () => {},
     });
@@ -1290,6 +1312,7 @@ describe('Hosts inspection changes', () => {
     const settings = new SettingsStore({
       settingsPath: join(directory, 'hosts.json'),
       recentPath: join(directory, 'recent.json'),
+      preferencesPath: join(directory, 'preferences.json'),
       filesystem,
       log: () => {},
     });
@@ -1342,6 +1365,7 @@ describe('Hosts inspection changes', () => {
     const settings = new SettingsStore({
       settingsPath: join(directory, 'hosts.json'),
       recentPath: join(directory, 'recent.json'),
+      preferencesPath: join(directory, 'preferences.json'),
       filesystem,
       log: () => {},
     });
@@ -1511,6 +1535,7 @@ function inspectorHosts(manager: ConnectionManager): Hosts {
     settings: new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
       filesystem: new FakeSettingsFilesystem(),
       log: () => {},
     }),

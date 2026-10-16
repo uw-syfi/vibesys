@@ -68,6 +68,7 @@ function subject(filesystem: SshConfigFilesystem): Hosts {
     settings: new SettingsStore({
       settingsPath: '/unused/hosts.json',
       recentPath: '/unused/recent.json',
+      preferencesPath: '/unused/preferences.json',
       log: () => {},
     }),
     localCheckout: '/vibesys',
@@ -356,6 +357,7 @@ describe('Hosts.aliases OpenSSH includes', () => {
       settings: new SettingsStore({
         settingsPath: '/unused/hosts.json',
         recentPath: '/unused/recent.json',
+        preferencesPath: '/unused/preferences.json',
         log: () => {},
       }),
       localCheckout: '/vibesys',

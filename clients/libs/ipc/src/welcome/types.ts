@@ -23,6 +23,8 @@ export const WELCOME_EVENTS = {
   showHost: 'vibesys:welcome:show-host',
   /** A host's runs changed (`HostListing`), as its helper pushed them. */
   listing: 'vibesys:welcome:listing',
+  /** The preferences changed (`PreferencesView`): the settings store wrote them. */
+  preferences: 'vibesys:welcome:preferences-changed',
 } as const;
 
 /** One ordered welcome event from the main process. */

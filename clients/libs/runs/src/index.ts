@@ -19,6 +19,7 @@ export {
   resumeArguments,
   resumeDecision,
 } from './resume-run.js';
+export {parseRunRef, type RunRef, sameRun} from './run-ref.js';
 export {
   confirmText,
   STOP_IDLE,

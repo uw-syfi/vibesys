@@ -12,6 +12,12 @@ body {
   background: var(--bg);
   color: var(--text);
 }
+/* The window is the document: a `Page` or an `AppFrame` in the root element fills it and scrolls. */
+html,
+body,
+body > div:first-child {
+  height: 100%;
+}
 
 .vs-page,
 .vs-page *,
@@ -1193,4 +1199,124 @@ button.vs-stage-head {
 }
 .vs-sidebar-more:hover {
   color: var(--text);
+}
+
+/* --- app frame --------------------------------------------------------------------------------- */
+
+.vs-app-frame {
+  display: flex;
+  flex-wrap: wrap;
+  height: 100%;
+  background: var(--bg);
+}
+.vs-app-nav {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 var(--sidebar);
+  flex-direction: column;
+  justify-content: space-between;
+  gap: var(--space-5);
+  max-width: var(--sidebar);
+  max-height: 100%;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-4);
+  border-right: var(--hairline) solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-app-nav-top,
+.vs-app-nav-footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.vs-app-nav-footer {
+  gap: var(--space-1);
+  padding-top: var(--space-4);
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-app-main {
+  flex: 999 1 var(--column-main);
+  min-width: 0;
+  max-height: 100%;
+}
+
+/* --- theme swatch ------------------------------------------------------------------------------ */
+
+.vs-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  border: var(--focus-ring) solid transparent;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vs-swatch:hover {
+  background: var(--panel-2);
+}
+.vs-swatch[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+.vs-swatch:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-swatch-preview {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  height: calc(var(--control) * 2);
+  padding: var(--space-3);
+  border: var(--hairline) solid var(--swatch-line);
+  border-radius: var(--radius);
+  background: var(--swatch-bg);
+}
+.vs-swatch-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.vs-swatch-accent {
+  flex: none;
+  width: var(--dot);
+  height: var(--dot);
+  border-radius: var(--radius-full);
+  background: var(--swatch-accent);
+}
+.vs-swatch-bar {
+  display: block;
+  height: calc(var(--dot) - var(--space-1));
+  border-radius: var(--radius-sm);
+}
+.vs-swatch-bar[data-tone="text"] {
+  background: var(--swatch-text);
+}
+.vs-swatch-bar[data-tone="muted"] {
+  background: var(--swatch-muted);
+}
+.vs-swatch-bar[data-tone="panel"] {
+  height: var(--dot);
+  background: var(--swatch-panel);
+}
+.vs-swatch-bar[data-width="wide"] {
+  width: 60%;
+}
+.vs-swatch-bar[data-width="most"] {
+  width: 80%;
+}
+.vs-swatch-bar[data-width="half"] {
+  width: 45%;
+}
+.vs-swatch-bar[data-width="full"] {
+  width: 100%;
 }

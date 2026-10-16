@@ -20,6 +20,7 @@ function server(id: number, startedAt: number, status: string, runId = 'run-1'):
     projectRoot: '/p',
     runId,
     status,
+    phase: 'running',
     startedAt,
     reason: null,
   };

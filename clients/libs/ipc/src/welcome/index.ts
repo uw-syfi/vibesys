@@ -3,7 +3,7 @@
  * request, and the events the main process sends.
  *
  * The requests are grouped by the feature that makes them (`hosts.ts`, `start-run.ts`,
- * `run-control.ts`; the overview is the app's own), each group owning its channel names, the
+ * `run-control.ts`, `settings.ts`; the overview is the app's own), each group owning its channel names, the
  * bridge methods its view calls, and the parser the main process runs on what arrives. This module
  * composes them: `WELCOME_CHANNELS` and `WelcomeBridge` are the union of the groups, and
  * `parseWelcomeRequest` sends a channel to its group's parser.
@@ -23,6 +23,13 @@ import {
   type RunControlWelcomeBridge,
 } from './run-control.js';
 import {
+  type PreferencesView,
+  parseSettingsRequest,
+  SETTINGS_CHANNELS,
+  type SettingsRequest,
+  type SettingsWelcomeBridge,
+} from './settings.js';
+import {
   parseStartRunRequest,
   START_RUN_CHANNELS,
   type StartRunRequest,
@@ -39,6 +46,7 @@ export const WELCOME_CHANNELS = {
   ...HOSTS_CHANNELS,
   ...START_RUN_CHANNELS,
   ...RUN_CONTROL_CHANNELS,
+  ...SETTINGS_CHANNELS,
 } as const;
 
 type WelcomeChannel = (typeof WELCOME_CHANNELS)[keyof typeof WELCOME_CHANNELS];
@@ -66,6 +74,10 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.showWelcome]: 0,
   [WELCOME_CHANNELS.retry]: 0,
   [WELCOME_CHANNELS.stop]: 3,
+  [WELCOME_CHANNELS.preferences]: 0,
+  [WELCOME_CHANNELS.setAppearance]: 1,
+  [WELCOME_CHANNELS.setNotifications]: 1,
+  [WELCOME_CHANNELS.archive]: 2,
 } as const satisfies Readonly<Record<WelcomeChannel, number>>;
 
 /**
@@ -75,13 +87,15 @@ const WELCOME_ARGUMENT_COUNTS = {
 export interface WelcomeBridge
   extends HostsWelcomeBridge,
     StartRunWelcomeBridge,
-    RunControlWelcomeBridge {
+    RunControlWelcomeBridge,
+    SettingsWelcomeBridge {
   readonly platform: string;
   overview(): Promise<WelcomeResult<WelcomeOverview>>;
   onChrome(listener: (event: WelcomeEvent<ChromeState>) => void): void;
   onRecent(listener: (event: WelcomeEvent<readonly RecentRun[]>) => void): void;
   onShowHost(listener: (event: WelcomeEvent<HostKey>) => void): void;
   onListing(listener: (event: WelcomeEvent<HostListing>) => void): void;
+  onPreferences(listener: (event: WelcomeEvent<PreferencesView>) => void): void;
 }
 
 /** One welcome request, validated: what the main process acts on. */
@@ -89,7 +103,8 @@ export type WelcomeRequest =
   | {readonly kind: 'overview'}
   | HostsRequest
   | StartRunRequest
-  | RunControlRequest;
+  | RunControlRequest
+  | SettingsRequest;
 
 /**
  * The typed request on `channel` with `args` (as the welcome view's bridge sent them); throws an
@@ -108,12 +123,18 @@ export function parseWelcomeRequest(channel: string, args: readonly unknown[]): 
   if (isChannelOf(HOSTS_CHANNELS, channel)) return parseHostsRequest(channel, args);
   if (isChannelOf(START_RUN_CHANNELS, channel)) return parseStartRunRequest(channel, args);
   if (isChannelOf(RUN_CONTROL_CHANNELS, channel)) return parseRunControlRequest(channel, args);
+  if (isChannelOf(SETTINGS_CHANNELS, channel)) return parseSettingsRequest(channel, args);
   // `WELCOME_ARGUMENT_COUNTS` is exhaustive over the same composed channel object.
   throw new Error(`${JSON.stringify(channel)} is not a welcome request`);
 }
 
 export type {HostsWelcomeBridge, WelcomeInspection} from './hosts.js';
 export type {RunControlWelcomeBridge} from './run-control.js';
+export {
+  type PreferencesView,
+  type SettingsWelcomeBridge,
+  THEME_SYNC_CHANNEL,
+} from './settings.js';
 export type {
   HarnessChoice,
   HarnessListing,

@@ -58,6 +58,10 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.showWelcome]: [],
   [WELCOME_CHANNELS.retry]: [],
   [WELCOME_CHANNELS.stop]: ['local', '0123456789ab', false],
+  [WELCOME_CHANNELS.preferences]: [],
+  [WELCOME_CHANNELS.setAppearance]: [{mode: 'dark', light: 'mist', dark: 'midnight'}],
+  [WELCOME_CHANNELS.setNotifications]: [false],
+  [WELCOME_CHANNELS.archive]: [{host: 'local', runId: '20261015-163047'}, true],
 };
 
 /** What every accepted request guarantees, whatever the view sent. */

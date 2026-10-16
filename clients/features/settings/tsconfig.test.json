@@ -1,0 +1,35 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "types": [
+      "bun",
+      "node"
+    ],
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.state.json"
+    },
+    {
+      "path": "./tsconfig.renderer.json"
+    },
+    {
+      "path": "./tsconfig.main.json"
+    },
+    {
+      "path": "../../libs/settings/tsconfig.testing.json"
+    }
+  ]
+}

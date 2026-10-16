@@ -131,8 +131,9 @@ function text(
 }
 
 export const TYPE: Readonly<Record<TextStyle, TextSpec>> = {
-  // The ASCII wordmark only: it is set tight so its rows join, and scaled down at narrow widths.
-  display: text('mono', 11, 11, 400),
+  // The ASCII wordmark only, at the prototype's 13 px on a 1.08 line so its rows read as letters
+  // rather than one block; scaled down at narrow widths.
+  display: text('mono', 13, 14, 400),
   title: text('sans', 24, 30, 600, {tracking: -0.01}),
   heading: text('sans', 18, 24, 600),
   body: text('sans', 14, 20, 400),

@@ -4,8 +4,10 @@
  * It exposes one function per welcome request (`@vibesys/ipc`'s `WelcomeBridge`); each is an
  * `invoke` the main process answers only for the welcome view's own web contents, and parses with
  * `@vibesys/ipc`'s `parseWelcomeRequest` (`welcome.test.ts` holds the two to the same arguments).
- * Four events come back: the window's state (`onChrome`), the recent runs (`onRecent`), a host to
- * show (`onShowHost`), and a host's runs as its helper pushed them (`onListing`). Sandboxed
+ * Five events come back: the window's state (`onChrome`), the recent runs (`onRecent`), a host to
+ * show (`onShowHost`), a host's runs as its helper pushed them (`onListing`), and the preferences
+ * (`onPreferences`). Before the page's scripts run it asks, synchronously, for the theme to paint in
+ * and sets it on the document, so the first paint is already in the persisted theme. Sandboxed
  * preloads cannot be ES modules or import local files, hence `.cts` and the channel names repeated
  * here; the types keep them in step. It loads only Electron (the package-graph checker's
  * `preload-sandbox`): the payload types come from the bridge interface, which types every member
@@ -38,13 +40,20 @@ const CHANNELS: Channels = {
   showWelcome: 'vibesys:welcome:show-welcome',
   retry: 'vibesys:welcome:retry',
   stop: 'vibesys:welcome:stop',
+  preferences: 'vibesys:welcome:preferences',
+  setAppearance: 'vibesys:welcome:set-appearance',
+  setNotifications: 'vibesys:welcome:set-notifications',
+  archive: 'vibesys:welcome:archive',
 };
 const EVENTS: Events = {
   chrome: 'vibesys:welcome:chrome',
   recent: 'vibesys:welcome:recent',
   showHost: 'vibesys:welcome:show-host',
   listing: 'vibesys:welcome:listing',
+  preferences: 'vibesys:welcome:preferences-changed',
 };
+const THEME_SYNC_CHANNEL: typeof import('@vibesys/ipc').THEME_SYNC_CHANNEL =
+  'vibesys:welcome:theme';
 
 /** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
 interface WelcomePreloadCapabilities {
@@ -87,10 +96,15 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     showWelcome: () => call(CHANNELS.showWelcome),
     retry: () => call(CHANNELS.retry),
     stop: (host, instance, force) => call(CHANNELS.stop, host, instance, force),
+    preferences: () => call(CHANNELS.preferences),
+    setAppearance: appearance => call(CHANNELS.setAppearance, appearance),
+    setNotifications: enabled => call(CHANNELS.setNotifications, enabled),
+    archive: (run, archived) => call(CHANNELS.archive, run, archived),
     onChrome: on(EVENTS.chrome),
     onRecent: on(EVENTS.recent),
     onShowHost: on(EVENTS.showHost),
     onListing: on(EVENTS.listing),
+    onPreferences: on(EVENTS.preferences),
   };
 }
 
@@ -98,6 +112,9 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
 // remains in this file. Bun tests have no Electron renderer process and exercise the factory above.
 if (process.type === 'renderer') {
   const electron: typeof import('electron') = require('electron');
+  // The page's first paint is in the persisted theme: ask for it before any of its scripts run.
+  const theme: unknown = electron.ipcRenderer.sendSync(THEME_SYNC_CHANNEL);
+  if (typeof theme === 'string') document.documentElement.setAttribute('data-theme', theme);
   electron.contextBridge.exposeInMainWorld(
     'vibesysWelcome',
     createWelcomePreload({

@@ -19,6 +19,7 @@ test('synchronous listener and diagnostic failures cannot change a durable recen
   const settings = new SettingsStore({
     settingsPath: '/settings/hosts.json',
     recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
     filesystem,
     log: message => {
       logged.push(message);
@@ -49,6 +50,7 @@ test('rejected listener and diagnostic promises are terminally contained after c
   const settings = new SettingsStore({
     settingsPath: '/settings/hosts.json',
     recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
     filesystem,
     log: message => {
       logged.push(message);
@@ -83,6 +85,7 @@ test('recent delivery snapshots registration for the current event', async () =>
   const settings = new SettingsStore({
     settingsPath: '/settings/hosts.json',
     recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
     filesystem: new FakeSettingsFilesystem(),
     log: () => {},
   });

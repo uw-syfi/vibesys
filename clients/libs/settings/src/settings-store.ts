@@ -1,10 +1,10 @@
 /**
- * The app's settings files, `hosts.json` (per-host checkouts) and `recent.json` (runs this user
- * opened), and their one writer.
+ * The app's settings files, `hosts.json` (per-host checkouts), `recent.json` (runs this user
+ * opened) and `preferences.json` (appearance, notifications, archived runs), and their one writer.
  *
  * Guarantees:
  *
- * - **One writer.** Every update goes through this store, one at a time across both files, so an
+ * - **One writer.** Every update goes through this store, one at a time across the files, so an
  *   update always reads what the one before it wrote and none drops another's change. With the
  *   app's single-instance lock (`apps/desktop-main`), no other process writes these files.
  * - **Atomic replacement with platform durability.** The text goes to a sibling file and is
@@ -12,9 +12,10 @@
  *   never a partial write. POSIX systems also flush the parent directory before success. Node does
  *   not expose that operation on Windows, where a successful update promises atomic visibility but
  *   not crash-durable publication of the renamed directory entry.
- * - **Changes are announced.** `onRecentChanged` listeners hear every update of the recent runs, so
- *   no view has a refresh path to forget. A failing listener is logged without skipping the other
- *   listeners or changing the outcome of an update that already committed.
+ * - **Changes are announced.** `onRecentChanged` and `onPreferencesChanged` listeners hear every
+ *   update of the recent runs and the preferences, so no view has a refresh path to forget. A
+ *   failing listener is logged without skipping the other listeners or changing the outcome of an
+ *   update that already committed.
  * - **Invalid files are ignored by reads and reported** in the same host-settings snapshot; updates
  *   reject them before writing, so the bytes remain available for repair.
  *
@@ -24,11 +25,13 @@ import {randomUUID} from 'node:crypto';
 import {open, readFile, rename, unlink} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {EMPTY_SETTINGS, parseSettings, type SettingsFile} from './host-settings.js';
+import {DEFAULT_PREFERENCES, type Preferences, parsePreferences} from './preferences.js';
 import {EMPTY_RECENT, parseRecent, type RecentFile} from './recent.js';
 
 export interface SettingsStoreOptions {
   readonly settingsPath: string;
   readonly recentPath: string;
+  readonly preferencesPath: string;
   readonly log: (message: string) => void;
   readonly filesystem?: SettingsFilesystem;
 }
@@ -81,6 +84,7 @@ export class SettingsStore {
   /** The last update; each update starts after it settles. */
   #queue: Promise<void> = Promise.resolve();
   readonly #recentListeners = new Set<(recent: RecentFile) => void>();
+  readonly #preferencesListeners = new Set<(preferences: Preferences) => void>();
 
   constructor(options: SettingsStoreOptions) {
     this.#options = options;
@@ -135,6 +139,47 @@ export class SettingsStore {
     }
   }
 
+  /** The preferences, read afresh; the defaults when the file is absent or invalid. */
+  async preferences(): Promise<Preferences> {
+    return (await this.#readPreferences()).value;
+  }
+
+  async #readPreferences(): Promise<ReadResult<Preferences>> {
+    const path = this.#options.preferencesPath;
+    const read = await readText(this.#filesystem, path);
+    if (read.kind === 'missing') return {value: DEFAULT_PREFERENCES, failure: null};
+    if (read.kind === 'failed') {
+      const failure = readFailure(path, read.error);
+      this.#log(failure.message);
+      return {value: DEFAULT_PREFERENCES, failure};
+    }
+    try {
+      return {value: parsePreferences(JSON.parse(read.text) as unknown), failure: null};
+    } catch (error) {
+      const failure = invalidFile(path, error);
+      this.#log(`ignoring ${failure.message}`);
+      return {value: DEFAULT_PREFERENCES, failure};
+    }
+  }
+
+  /** Replace the preferences with `update` of the current ones, then tell the listeners. */
+  updatePreferences(update: (preferences: Preferences) => Preferences): Promise<Preferences> {
+    return this.#serialize(async () => {
+      const read = await this.#readPreferences();
+      if (read.failure !== null) throw read.failure;
+      const next = update(read.value);
+      await writeJson(this.#filesystem, this.#options.preferencesPath, next);
+      this.#notify(this.#preferencesListeners, next, 'preferences');
+      return next;
+    });
+  }
+
+  /** Hear every committed preferences update; failures are logged, results are not awaited. */
+  onPreferencesChanged(listener: (preferences: Preferences) => void): () => void {
+    this.#preferencesListeners.add(listener);
+    return () => this.#preferencesListeners.delete(listener);
+  }
+
   /**
    * Replace the host settings with `update` of the current ones. `current` is checked at the
    * atomic-replace boundary so a cancelled checkout validation cannot commit staged settings.
@@ -169,7 +214,7 @@ export class SettingsStore {
         (await writeJson(this.#filesystem, this.#options.recentPath, next, current)) === 'cancelled'
       )
         return;
-      this.#notifyRecent(next);
+      this.#notify(this.#recentListeners, next, 'recent-runs');
     });
   }
 
@@ -180,15 +225,15 @@ export class SettingsStore {
   }
 
   /** Deliver a committed value without letting a non-owning observer rewrite its outcome. */
-  #notifyRecent(recent: RecentFile): void {
-    for (const listener of [...this.#recentListeners]) {
+  #notify<T>(listeners: ReadonlySet<(value: T) => void>, value: T, what: string): void {
+    for (const listener of [...listeners]) {
       try {
-        const notified = listener(recent);
+        const notified = listener(value);
         void Promise.resolve(notified).catch(error => {
-          this.#log(`could not notify a recent-runs listener: ${errorMessage(error)}`);
+          this.#log(`could not notify a ${what} listener: ${errorMessage(error)}`);
         });
       } catch (error) {
-        this.#log(`could not notify a recent-runs listener: ${errorMessage(error)}`);
+        this.#log(`could not notify a ${what} listener: ${errorMessage(error)}`);
       }
     }
   }

@@ -5,6 +5,7 @@
  * `./components.css` once.
  */
 export {applyTheme, type ThemeTarget} from './apply-theme.js';
+export {AppFrame} from './components/app-frame.js';
 export {
   Button,
   type ButtonAction,
@@ -42,6 +43,7 @@ export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {Table, type TableColumn} from './components/table.js';
 export {Tabs} from './components/tabs.js';
 export {Text, type TextElement, type TextTone, Wordmark} from './components/text.js';
+export {ThemeSwatch} from './components/theme-swatch.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
 export {Checkbox, Switch} from './components/toggle.js';
 export {type RowChip, Tree, TreeRow} from './components/tree.js';

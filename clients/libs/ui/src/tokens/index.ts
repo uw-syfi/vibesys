@@ -5,6 +5,14 @@
  * internal to this package: only `scripts/tokens-css.ts` and the tests import it.
  */
 export {
+  APPEARANCE_MODES,
+  type Appearance,
+  type AppearanceMode,
+  effectiveTheme,
+  parseAppearance,
+  themesOf,
+} from './appearance.js';
+export {
   CONTRAST_PAIRS,
   type ContrastPair,
   contrastRatio,

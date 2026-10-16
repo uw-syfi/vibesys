@@ -85,6 +85,7 @@ function listing(host: 'local' | 'ssh:worker', runId: string): HostListing {
         projectRoot: `/projects/${runId}`,
         runId,
         status: 'running',
+        phase: 'running',
         startedAt: 1,
         reason: null,
       },

@@ -121,6 +121,7 @@ describe('instanceObservation', () => {
     projectRoot: '/p',
     runId: `run-${id}`,
     status: 'running',
+    phase: 'running',
     startedAt: 1,
     reason: null,
   });

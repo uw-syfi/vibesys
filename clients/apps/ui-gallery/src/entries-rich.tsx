@@ -1,4 +1,5 @@
 import {
+  AppFrame,
   Button,
   Card,
   Chart,
@@ -23,6 +24,7 @@ import {
   type TableColumn,
   Tabs,
   Text,
+  ThemeSwatch,
   Timeline,
   Tree,
   TreeRow,
@@ -38,6 +40,25 @@ const MENU: readonly MenuItem[] = [
   {id: 'docs', label: 'Read the guide', href: '#menu'},
   {id: 'delete', label: 'Delete', danger: true, press: noop},
 ];
+
+function SwatchDemo(): JSX.Element {
+  const [light, setLight] = useState<'paper' | 'mist' | 'sand'>('mist');
+  return (
+    <Grid min="swatch">
+      {(['paper', 'mist', 'sand', 'ink', 'midnight', 'terminal'] as const).map(theme => (
+        <ThemeSwatch
+          key={theme}
+          theme={theme}
+          label={theme[0]?.toUpperCase() + theme.slice(1)}
+          selected={theme === light || theme === 'ink'}
+          press={() => {
+            if (theme === 'paper' || theme === 'mist' || theme === 'sand') setLight(theme);
+          }}
+        />
+      ))}
+    </Grid>
+  );
+}
 
 function DialogDemo(): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -301,6 +322,25 @@ const POINTS = [
 
 /** The data display, navigation and overlay components (batch 2 of the design system). */
 export const RICH_ENTRIES = {
+  AppFrame: {
+    render: () => (
+      <AppFrame
+        label="Sections"
+        nav={
+          <SidebarSection title="Navigate">
+            <SidebarItem label="First" icon="plus" href="#first" active />
+            <SidebarItem label="Second" icon="folder" href="#second" />
+          </SidebarSection>
+        }
+        footer={<SidebarItem label="Settings" icon="gear" href="#settings" />}
+      >
+        <Card>
+          <Text>The main area holds a Page.</Text>
+        </Card>
+      </AppFrame>
+    ),
+  },
+  ThemeSwatch: {render: () => <SwatchDemo />},
   Menu: {
     render: () => (
       <Row gap="space-3">

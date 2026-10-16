@@ -956,7 +956,8 @@ export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/logs': null,
   '@vibesys/ipc': null,
   '@vibesys/connection': null,
-  '@vibesys/settings': ['./main'],
+  // Its entries are node-only, so `runtime-reachability` already keeps it in `./main` entries.
+  '@vibesys/settings': null,
 };
 /** A strict app imports the stylesheets of `@vibesys/ui` once, in its entry wiring. */
 const STRICT_APP_STYLESHEETS = ['./tokens.css', './fonts.css', './components.css'];

@@ -9,6 +9,7 @@ function store(directory: string, directorySync: DirectorySyncCapability): Setti
   return new SettingsStore({
     settingsPath: join(directory, 'hosts.json'),
     recentPath: join(directory, 'recent.json'),
+    preferencesPath: join(directory, 'preferences.json'),
     filesystem: new NodeSettingsFilesystem({directorySync}),
     log: () => {},
   });

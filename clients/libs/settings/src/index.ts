@@ -1,6 +1,7 @@
 /**
- * The app's settings: per-host checkouts (`hosts.json`) and the runs this user opened
- * (`recent.json`), validated, with `SettingsStore` as their one writer.
+ * The app's settings: per-host checkouts (`hosts.json`), the runs this user opened
+ * (`recent.json`) and the preferences (`preferences.json`), validated, with `SettingsStore` as
+ * their one writer.
  */
 export {
   type SshConfigDirective,
@@ -12,6 +13,13 @@ export {
   sshHostPatternsMatch,
   withHostSettings,
 } from './host-settings.js';
+export {
+  DEFAULT_PREFERENCES,
+  isArchived,
+  type Preferences,
+  parsePreferences,
+  withArchived,
+} from './preferences.js';
 export {
   type RecentFile,
   remember,
