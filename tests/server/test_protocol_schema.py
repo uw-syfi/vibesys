@@ -160,6 +160,7 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "runs.read_events": "run_history",
         "machine.describe": "machine_describe",
         "checkout.inspect": "checkout_inspect",
+        "run.preflight": "preflight",
     }
     request_tags = document["properties"]["request"]["discriminator"]["mapping"]
     assert gates.keys() <= request_tags.keys()
@@ -175,7 +176,8 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
     gates = document["x-vibesys-feature-by-field"]
 
     assert gates == {
-        "run.start": {"harness": "harnesses"},
+        "run.start": {"harness": "harnesses", "options": "run_options"},
+        "run.preflight": {"harness": "harnesses", "options": "run_options"},
         "logs.list": {"span_id": "logs_by_span"},
     }
     request_refs = document["properties"]["request"]["discriminator"]["mapping"]

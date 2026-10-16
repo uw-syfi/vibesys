@@ -18,6 +18,7 @@ import csv
 import re
 import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from server.host_api import (
@@ -35,7 +36,6 @@ from server.host_api import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from vs_sim.api import CommandProbe
 
@@ -172,6 +172,16 @@ class HostMachineProbe:
             dirty=dirty,
             compatible=path.joinpath(*_HOST_HELPER_ENTRYPOINT).is_file(),
         )
+
+    def repository_root(self, path: Path) -> Path | None:
+        """The root of the Git repository ``path`` is in, or ``None`` when git names none."""
+        result = self._probe.run(
+            ("git", "-C", str(path), "rev-parse", "--show-toplevel"),
+            timeout_seconds=_GIT_TIMEOUT_SECONDS,
+        )
+        if result is None or result.returncode != 0 or not result.stdout.strip():
+            return None
+        return Path(result.stdout.strip()).resolve()
 
     def _gpu_models(self, query: GpuQuery) -> tuple[str, ...]:
         result = self._probe.run(query.argv, timeout_seconds=PROBE_TIMEOUT_SECONDS)

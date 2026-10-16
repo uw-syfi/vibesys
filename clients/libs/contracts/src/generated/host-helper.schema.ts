@@ -82,6 +82,89 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "ChannelEndOutcome",
       "type": "string"
     },
+    "Check": {
+      "additionalProperties": false,
+      "description": "One preflight check: its state, one line of detail, and the action that fixes it.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/CheckId"
+        },
+        "state": {
+          "$ref": "#/$defs/CheckState"
+        },
+        "detail": {
+          "maxLength": 300,
+          "minLength": 1,
+          "pattern": "^[^\\n\\r]*$",
+          "title": "Detail",
+          "type": "string"
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "choose_checkout": "#/$defs/ChooseCheckout",
+                  "copy_out": "#/$defs/CopyOut",
+                  "edit_setting": "#/$defs/EditSetting",
+                  "start_docker": "#/$defs/StartDocker"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ChooseCheckout"
+                },
+                {
+                  "$ref": "#/$defs/CopyOut"
+                },
+                {
+                  "$ref": "#/$defs/EditSetting"
+                },
+                {
+                  "$ref": "#/$defs/StartDocker"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fix"
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "detail"
+      ],
+      "title": "Check",
+      "type": "object"
+    },
+    "CheckId": {
+      "description": "What a preflight check is about; closed.",
+      "enum": [
+        "checkout_found",
+        "project_own_repository",
+        "settings_valid",
+        "docker_reachable",
+        "agent_image",
+        "evaluator_available"
+      ],
+      "title": "CheckId",
+      "type": "string"
+    },
+    "CheckState": {
+      "description": "How a check came out; Start is enabled exactly when none is ``fail``.",
+      "enum": [
+        "ok",
+        "warn",
+        "fail"
+      ],
+      "title": "CheckState",
+      "type": "string"
+    },
     "Checkout": {
       "additionalProperties": false,
       "description": "The VibeSys source checkout the helper runs from.",
@@ -306,6 +389,45 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "CheckoutTooOld",
       "type": "object"
     },
+    "ChooseCheckout": {
+      "additionalProperties": false,
+      "description": "Pick another VibeSys checkout for this machine.",
+      "properties": {
+        "kind": {
+          "const": "choose_checkout",
+          "default": "choose_checkout",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "ChooseCheckout",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
+    },
+    "CopyOut": {
+      "additionalProperties": false,
+      "description": "Copy the project into its own repository (``project.copy_out``), at the suggested path.",
+      "properties": {
+        "kind": {
+          "const": "copy_out",
+          "default": "copy_out",
+          "title": "Kind",
+          "type": "string"
+        },
+        "suggested_path": {
+          "title": "Suggested Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "suggested_path"
+      ],
+      "title": "CopyOut",
+      "type": "object"
+    },
     "DetachedLaunchFailure": {
       "additionalProperties": false,
       "description": "What ``vibesys --detach`` prints on stdout, as one line, when it starts nothing.\n\nOn success the line is a ``LiveInstanceRecord`` instead; a reader tells them\napart by ``outcome``, which a record never has. ``code`` is a\n``DetachedLaunchErrorCode`` or the code of the run's configuration\ndiagnostic (``invalid_arguments``, ``resume_not_found``, ...), and\n``exit_code`` is the process's exit status.",
@@ -412,6 +534,28 @@ const hostHelperSchema: Record<string, unknown> = {
         "reason"
       ],
       "title": "DockerUnreachable",
+      "type": "object"
+    },
+    "EditSetting": {
+      "additionalProperties": false,
+      "description": "Edit the named setting.",
+      "properties": {
+        "kind": {
+          "const": "edit_setting",
+          "default": "edit_setting",
+          "title": "Kind",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "key"
+      ],
+      "title": "EditSetting",
       "type": "object"
     },
     "EndRecord": {
@@ -880,7 +1024,9 @@ const hostHelperSchema: Record<string, unknown> = {
         "logs_by_span",
         "run_history",
         "machine_describe",
-        "checkout_inspect"
+        "checkout_inspect",
+        "preflight",
+        "run_options"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -2378,6 +2524,17 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "PingRequest",
       "type": "object"
     },
+    "ReasoningEffort": {
+      "description": "A role's reasoning effort; ``default`` keeps the configured one.",
+      "enum": [
+        "default",
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "ReasoningEffort",
+      "type": "string"
+    },
     "ResumeLatest": {
       "additionalProperties": false,
       "description": "Resume the project's current or latest run; the launch resolves it before detaching.",
@@ -2408,6 +2565,41 @@ const hostHelperSchema: Record<string, unknown> = {
         "run_id"
       ],
       "title": "ResumeRun",
+      "type": "object"
+    },
+    "RoleOption": {
+      "additionalProperties": false,
+      "description": "One agent role's model and reasoning effort; ``model`` ``None`` keeps the run's model.",
+      "properties": {
+        "role": {
+          "maxLength": 64,
+          "pattern": "^[a-z0-9][a-z0-9._-]*$",
+          "title": "Role",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "maxLength": 256,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        },
+        "reasoning_effort": {
+          "$ref": "#/$defs/ReasoningEffort",
+          "default": "default"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "RoleOption",
       "type": "object"
     },
     "RunConnectReply": {
@@ -2548,6 +2740,59 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunList",
       "type": "object"
     },
+    "RunOptions": {
+      "additionalProperties": false,
+      "description": "What the New run screen sets on a run; ``None`` (or no role) keeps the configuration.",
+      "properties": {
+        "rounds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rounds"
+        },
+        "time_limit_s": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Time Limit S"
+        },
+        "results": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunResults"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "roles": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RoleOption"
+          },
+          "title": "Roles",
+          "type": "array"
+        }
+      },
+      "title": "RunOptions",
+      "type": "object"
+    },
     "RunPhase": {
       "additionalProperties": false,
       "description": "A run's lifecycle status with the detail its status needs.\n\n``stage`` (and, when the stage reports it, ``progress``) says where a\n``starting`` run is; ``reason`` says why a ``failed`` one ended. None of\nthem is present for any other status.",
@@ -2594,6 +2839,125 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "RunPhase",
       "type": "object"
+    },
+    "RunPreflightReply": {
+      "additionalProperties": false,
+      "description": "Every check, in ``CheckId`` order; Start is enabled exactly when none is ``fail``.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.preflight",
+          "default": "run.preflight",
+          "title": "Type",
+          "type": "string"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/Check"
+          },
+          "title": "Checks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "checks"
+      ],
+      "title": "RunPreflightReply",
+      "type": "object"
+    },
+    "RunPreflightRequest": {
+      "additionalProperties": false,
+      "description": "Whether the run ``run.start`` would launch with these inputs can start, check by check.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "run.preflight",
+          "default": "run.preflight",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "task": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task"
+        },
+        "args": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "harness": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HarnessChoice"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project"
+      ],
+      "title": "RunPreflightRequest",
+      "type": "object"
+    },
+    "RunResults": {
+      "description": "Where a run's results go: kept on the machine, or also published to GitHub.",
+      "enum": [
+        "keep",
+        "publish_github"
+      ],
+      "title": "RunResults",
+      "type": "string"
     },
     "RunRole": {
       "description": "Which run-protocol connection a run channel carries (``WP-ROLES``).",
@@ -2732,6 +3096,17 @@ const hostHelperSchema: Record<string, unknown> = {
           "anyOf": [
             {
               "$ref": "#/$defs/HarnessChoice"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunOptions"
             },
             {
               "type": "null"
@@ -3061,6 +3436,23 @@ const hostHelperSchema: Record<string, unknown> = {
       ],
       "title": "RunsReadEventsRequest",
       "type": "object"
+    },
+    "StartDocker": {
+      "additionalProperties": false,
+      "description": "Start Docker on the machine.",
+      "properties": {
+        "kind": {
+          "const": "start_docker",
+          "default": "start_docker",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "title": "StartDocker",
+      "type": "object",
+      "required": [
+        "kind"
+      ]
     },
     "StartupProgress": {
       "additionalProperties": false,
@@ -3469,6 +3861,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "paths.complete": "#/$defs/PathsCompleteRequest",
           "ping": "#/$defs/PingRequest",
           "run.connect": "#/$defs/RunConnectRequest",
+          "run.preflight": "#/$defs/RunPreflightRequest",
           "run.start": "#/$defs/RunStartRequest",
           "run.stop": "#/$defs/RunStopRequest",
           "runs.list": "#/$defs/RunsListRequest",
@@ -3534,6 +3927,9 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         {
           "$ref": "#/$defs/CheckoutInspectRequest"
+        },
+        {
+          "$ref": "#/$defs/RunPreflightRequest"
         }
       ],
       "title": "Request"
@@ -3557,6 +3953,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "paths.complete": "#/$defs/PathsCompleteReply",
           "ping": "#/$defs/PingReply",
           "run.connect": "#/$defs/RunConnectReply",
+          "run.preflight": "#/$defs/RunPreflightReply",
           "run.start": "#/$defs/RunStartReply",
           "run.stop": "#/$defs/RunStopReply",
           "runs.list": "#/$defs/RunsListReply",
@@ -3624,6 +4021,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/CheckoutInspectReply"
         },
         {
+          "$ref": "#/$defs/RunPreflightReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -3658,11 +4058,17 @@ const hostHelperSchema: Record<string, unknown> = {
     "harnesses.list": "harnesses",
     "runs.read_events": "run_history",
     "machine.describe": "machine_describe",
-    "checkout.inspect": "checkout_inspect"
+    "checkout.inspect": "checkout_inspect",
+    "run.preflight": "preflight"
   },
   "x-vibesys-feature-by-field": {
     "run.start": {
-      "harness": "harnesses"
+      "harness": "harnesses",
+      "options": "run_options"
+    },
+    "run.preflight": {
+      "harness": "harnesses",
+      "options": "run_options"
     },
     "logs.list": {
       "span_id": "logs_by_span"

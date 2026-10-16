@@ -41,6 +41,7 @@ from server.host_helper_logs import (
 from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import HelperHost, PathHints, Scan, ScannedEntry
+from server.host_preflight import Check, CheckId, CheckState, PreflightReport, SettingsValid
 from server.instances import ControlSocketStopRequester
 from server.registry import (
     FakeInstanceLogs,
@@ -125,6 +126,26 @@ class FakeRunLauncher:
     ) -> LiveInstanceRecord | DetachedLaunchFailure:
         self.calls.append((project, arguments))
         return self.outcome(project, arguments)
+
+
+@dataclass
+class FakeRunPreflight:
+    """A ``RunPreflight`` that answers ``report`` and notes each project and arguments asked."""
+
+    report_: PreflightReport = field(
+        default_factory=lambda: PreflightReport(
+            settings=SettingsValid(),
+            agent_image=Check(id=CheckId.AGENT_IMAGE, state=CheckState.OK, detail="cached"),
+            evaluator=Check(
+                id=CheckId.EVALUATOR_AVAILABLE, state=CheckState.OK, detail="benchmark command"
+            ),
+        )
+    )
+    calls: list[tuple[Path, tuple[str, ...]]] = field(default_factory=list)
+
+    def report(self, project: Path, arguments: tuple[str, ...]) -> PreflightReport:
+        self.calls.append((project, arguments))
+        return self.report_
 
 
 @dataclass(frozen=True)
@@ -329,6 +350,7 @@ def fake_host(
         projects=FileProjects(),
         directories=directories or FakeDirectories(tree={HOME: {}}),
         launcher=launcher or FakeRunLauncher(failed_launch),
+        preflight=FakeRunPreflight(),
         checkout=FakeCheckout(),
         dialer=network,
         vibesys_version=VIBESYS_VERSION,

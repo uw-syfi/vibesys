@@ -7,6 +7,7 @@ launch runs the command line the ``vibesys`` launcher would. Like the helper, th
 is light (``tests/architecture/test_light_entrypoints.py``).
 
 Public surface: ``FileProjects``, ``OsDirectories``, ``SubprocessRunLauncher``,
+``SubprocessRunPreflight``,
 ``GitCheckoutProbe``, and ``StoreLogReader`` with ``run_streams_directory``.
 """
 
@@ -45,6 +46,7 @@ from server.host_helper_logs import (
     UnknownLogStreamError,
 )
 from server.host_helper_machine import git_state, vibesys_version
+from server.host_helper_preflight import preflight_unavailable
 from server.host_helper_requests import (
     EventPage,
     PathHints,
@@ -54,6 +56,7 @@ from server.host_helper_requests import (
     ScannedEntry,
     event_page,
 )
+from server.host_preflight import PreflightReport
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project, ProjectError
 from vs_sim.api import ProcessSpec
@@ -241,6 +244,46 @@ class SubprocessRunLauncher:
         tail = outcome.stderr.decode("utf-8", errors="replace").strip()[-_LAUNCH_OUTPUT_TAIL:]
         summary = f"the launch exited with status {outcome.returncode} and printed no record"
         return _launch_failure(f"{summary}: {tail}" if tail else summary, outcome.returncode)
+
+
+class SubprocessRunPreflight:
+    """Runs ``vibesys preflight`` with the run's arguments, as ``run.start`` would launch them.
+
+    ``command`` is the launcher's ``headless_command``, so the preflight runs the same code,
+    under the same interpreter and in the same directory, as the run it checks.
+    """
+
+    def __init__(
+        self, processes: ProcessLauncher, command: Callable[[Sequence[str]], list[str]]
+    ) -> None:
+        """Start processes through ``processes``; build each command line with ``command``."""
+        self._processes = processes
+        self._command = command
+
+    def report(self, project: Path, arguments: tuple[str, ...]) -> PreflightReport:
+        """The report ``vibesys preflight ARGUMENTS`` prints in ``project``."""
+        try:
+            return asyncio.run(self._report(project, arguments))
+        except OSError as error:
+            return preflight_unavailable(f"could not start the preflight: {error}")
+
+    async def _report(self, project: Path, arguments: tuple[str, ...]) -> PreflightReport:
+        process = await self._processes.start(
+            ProcessSpec(argv=tuple(self._command(("preflight", *arguments))), cwd=project)
+        )
+        outcome = await process.wait()
+        lines = outcome.stdout.decode("utf-8", errors="replace").strip().splitlines()
+        decoded = decode_json(
+            lines[-1] if lines else "",
+            PreflightReport,
+            source="preflight output",
+            max_bytes=_LAUNCH_RECORD_LIMIT,
+        )
+        if not isinstance(decoded, Unreadable):
+            return decoded
+        tail = outcome.stderr.decode("utf-8", errors="replace").strip()[-_LAUNCH_OUTPUT_TAIL:]
+        summary = f"the preflight exited with status {outcome.returncode} and printed no report"
+        return preflight_unavailable(f"{summary}: {tail}" if tail else summary)
 
 
 def _launch_failure(message: str, status: int) -> DetachedLaunchFailure:

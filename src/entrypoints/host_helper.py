@@ -32,6 +32,7 @@ from server.host_helper_os import (
     OsDirectories,
     StoreLogReader,
     SubprocessRunLauncher,
+    SubprocessRunPreflight,
     run_streams_directory,
 )
 from server.host_helper_requests import HelperHost
@@ -127,6 +128,7 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
         projects=FileProjects(),
         directories=OsDirectories(),
         launcher=SubprocessRunLauncher(SubprocessLauncher(), headless_command),
+        preflight=SubprocessRunPreflight(SubprocessLauncher(), headless_command),
         checkout=GitCheckoutProbe(source_checkout_root(), SubprocessProbe()),
         dialer=network,
         vibesys_version=host_facts()[1],

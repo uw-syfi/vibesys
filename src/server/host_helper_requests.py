@@ -84,6 +84,8 @@ from server.host_api import (
     RunCounts,
     RunEventDocument,
     RunList,
+    RunPreflightReply,
+    RunPreflightRequest,
     RunsListReply,
     RunsListRequest,
     RunsReadEventsReply,
@@ -98,6 +100,14 @@ from server.host_api import (
     TasksListRequest,
 )
 from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_log
+from server.host_helper_preflight import (
+    PreflightFacts,
+    abbreviates,
+    option_arguments,
+    preflight_checks,
+    repeated_option,
+    unvetted_role,
+)
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
@@ -109,6 +119,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from datetime import tzinfo
 
+    from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.relay import Dialer
     from vs_sim.api import Clock, Connection
@@ -293,6 +304,21 @@ class MachineProbe(Protocol):
         """Whether ``path`` holds a VibeSys checkout this app can use."""
         ...
 
+    def repository_root(self, path: Path) -> Path | None:
+        """The root of the Git repository ``path`` is in, or ``None`` when it is in none."""
+        ...
+
+
+class RunPreflight(Protocol):
+    """Runs the run's own preflight (``vibesys preflight``) in a project.
+
+    Contract: never raises; a preflight that prints no report is ``preflight_unavailable``.
+    """
+
+    def report(self, project: Path, arguments: tuple[str, ...]) -> PreflightReport:
+        """What ``vibesys preflight ARGUMENTS`` reports, run in ``project``."""
+        ...
+
 
 class CheckoutProbe(Protocol):
     """Describes the VibeSys checkout this helper runs from."""
@@ -321,6 +347,7 @@ class HelperHost:
     logs: HelperLogs | None
     """The run log store; ``None`` on a host that has none, which then does not offer ``logs``."""
     machine: MachineProbe
+    preflight: RunPreflight
     clock: Clock
     """Wall-clock epoch seconds, with ``timezone``: when ``machine.describe``'s day began."""
     timezone: tzinfo
@@ -483,38 +510,35 @@ def _journal_event(line: bytes) -> RunEventDocument | None:
     return event
 
 
-def _abbreviates(token: str, flag: str) -> bool:
-    """Whether argparse reads ``token`` (``--name`` or ``--name=value``) as ``flag``.
-
-    Run options are parsed with argparse's default ``allow_abbrev``, so any
-    unambiguous prefix of a long option selects it.
-    """
-    name = token.split("=", 1)[0]
-    return name.startswith("--") and len(name) > len("--") and flag.startswith(name)
-
-
-def refused_argument(request: RunStartRequest) -> str | None:
+def refused_argument(request: RunStartRequest | RunPreflightRequest) -> str | None:
     """Why ``request``'s ``args`` cannot start a run, or ``None`` when they can.
 
     A run started through the helper never opts out of the vetted harness list,
-    and with ``harness`` its provider and model come from nowhere else.
+    with ``harness`` its provider and model come from nowhere else, and with
+    ``options`` no typed option is repeated as a flag.
     """
     refused: tuple[str, ...] = (UNVETTED_MODEL_FLAG,)
     if request.harness is not None:
         refused = (*refused, CLI_PROVIDER_FLAG, MODEL_FLAG)
     for token in request.args:
         for flag in refused:
-            if _abbreviates(token, flag):
+            if abbreviates(token, flag):
                 if flag == UNVETTED_MODEL_FLAG:
                     return f"{token} selects {flag}; runs started here use only vetted harnesses"
                 return f"{token} selects {flag}, which the chosen harness already sets"
-    return None
+    return repeated_option(request.args, request.options)
 
 
 def unvetted_harness(
-    request: RunStartRequest, harnesses: tuple[HarnessOption, ...]
+    request: RunStartRequest | RunPreflightRequest, harnesses: tuple[HarnessOption, ...]
 ) -> HelperError | None:
-    """``unvetted_harness`` naming the allowed models when ``request.harness`` is not offered."""
+    """``unvetted_harness`` naming the allowed models: for a harness not offered, or a role model.
+
+    A role's model must be one of the chosen harness's vetted models.
+    """
+    role = unvetted_role(request.options, request.harness, harnesses)
+    if role is not None:
+        return _error(request.request_id, HelperErrorCode.UNVETTED_HARNESS, role)
     choice = request.harness
     if choice is None or any(
         (option.provider, option.model) == (choice.provider, choice.model) for option in harnesses
@@ -528,14 +552,19 @@ def unvetted_harness(
     return _error(request.request_id, HelperErrorCode.UNVETTED_HARNESS, message)
 
 
-def launch_arguments(request: RunStartRequest) -> tuple[str, ...]:
-    """The ``vibesys`` arguments that start ``request`` detached; the resume target comes last."""
+def run_arguments(request: RunStartRequest | RunPreflightRequest) -> tuple[str, ...]:
+    """The ``vibesys`` run arguments ``request`` names: task, harness, typed options, then ``args``."""
     task = ("--task", request.task) if request.task is not None else ()
     harness = (
         ()
         if request.harness is None
         else (CLI_PROVIDER_FLAG, request.harness.provider, MODEL_FLAG, request.harness.model)
     )
+    return (*task, *harness, *option_arguments(request.options), *request.args)
+
+
+def launch_arguments(request: RunStartRequest) -> tuple[str, ...]:
+    """The ``vibesys`` arguments that start ``request`` detached; the resume target comes last."""
     match request.resume:
         case None:
             resume: tuple[str, ...] = ()
@@ -545,7 +574,7 @@ def launch_arguments(request: RunStartRequest) -> tuple[str, ...]:
             resume = ("--resume",)
         case _:
             assert_never(request.resume)
-    return ("--detach", *task, *harness, *request.args, *resume)
+    return ("--detach", *run_arguments(request), *resume)
 
 
 def _host_path(text: str, directories: Directories) -> str:
@@ -596,8 +625,12 @@ def _answer(
             reply = _run_events_reply(request, host)
         case MachineDescribeRequest() | CheckoutInspectRequest():
             reply = _machine_reply(request, host)
-        case RunStartRequest():
-            reply = _start(request, host)
+        case RunStartRequest() | RunPreflightRequest():
+            reply = (
+                _start(request, host)
+                if isinstance(request, RunStartRequest)
+                else _preflight(request, host)
+            )
         case RunStopRequest(instance_id=instance_id, force=force):
             result = host.registry.stop(instance_id, host.stop_effects, force=force)
             reply = RunStopReply(request_id=request_id, result=result)
@@ -650,20 +683,25 @@ def _machine_reply(
 
 def describe_machine(host: HelperHost) -> MachineDescription:
     """What this machine offers runs: its checkout, hardware, Docker, harness CLIs and runs."""
-    checkout = host.checkout.describe()
     return MachineDescription(
-        checkout=None
-        if checkout is None
-        else MachineCheckout(
-            root=checkout.root,
-            version=host.vibesys_version,
-            commit=checkout.commit,
-            dirty=checkout.dirty,
-        ),
+        checkout=_machine_checkout(host),
         hardware=host.machine.hardware(),
         docker=host.machine.docker(),
         harness_clis=host.machine.harness_clis(),
         runs=run_counts(host.registry.read(), host.clock.now(), host.timezone),
+    )
+
+
+def _machine_checkout(host: HelperHost) -> MachineCheckout | None:
+    """The helper's own checkout with its version; ``None`` from an installed distribution."""
+    checkout = host.checkout.describe()
+    if checkout is None:
+        return None
+    return MachineCheckout(
+        root=checkout.root,
+        version=host.vibesys_version,
+        commit=checkout.commit,
+        dirty=checkout.dirty,
     )
 
 
@@ -697,16 +735,41 @@ def _run_events_reply(request: RunsReadEventsRequest, host: HelperHost) -> RunsR
 
 def _start(request: RunStartRequest, host: HelperHost) -> RunStartReply | HelperError:
     """Launch ``request`` once its arguments and harness are acceptable."""
-    refusal = refused_argument(request)
+    refusal = _refusal(request, host)
     if refusal is not None:
-        return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, refusal)
-    if request.harness is not None:
-        unvetted = unvetted_harness(request, host.harnesses())
-        if unvetted is not None:
-            return unvetted
+        return refusal
     root = host.projects.require_initialized(Path(_host_path(request.project, host.directories)))
     launch = host.launcher.start(root, launch_arguments(request))
     return RunStartReply(request_id=request.request_id, launch=launch)
+
+
+def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightReply | HelperError:
+    """Check whether the run ``run.start`` would launch with these inputs can start."""
+    refusal = _refusal(request, host)
+    if refusal is not None:
+        return refusal
+    root = host.projects.require_initialized(Path(_host_path(request.project, host.directories)))
+    facts = PreflightFacts(
+        project_root=root,
+        repository_root=host.machine.repository_root(root),
+        checkout=_machine_checkout(host),
+        vibesys_version=host.vibesys_version,
+        docker=host.machine.docker(),
+    )
+    report = host.preflight.report(root, run_arguments(request))
+    return RunPreflightReply(request_id=request.request_id, checks=preflight_checks(facts, report))
+
+
+def _refusal(
+    request: RunStartRequest | RunPreflightRequest, host: HelperHost
+) -> HelperError | None:
+    """Why ``request``'s arguments, harness or role models cannot start a run, if they cannot."""
+    refusal = refused_argument(request)
+    if refusal is not None:
+        return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, refusal)
+    if request.harness is None and request.options is None:
+        return None
+    return unvetted_harness(request, host.harnesses())
 
 
 def _instances_reply(
