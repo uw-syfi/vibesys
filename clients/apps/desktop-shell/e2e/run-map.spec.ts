@@ -230,7 +230,7 @@ test('a step picked far down the tree keeps its details and turns in view', asyn
   await row(/W5 · Combine W1 ring/).click();
   const details = page.getByRole('region', {name: 'Workstream'});
   const turns = page.getByRole('region', {name: 'Turn by turn'});
-  await expect(turns.getByText('1 agent turn')).toBeVisible();
+  await expect(turns.getByText('2 agent turns')).toBeVisible();
 
   // The tree is taller than the window; scrolled to its last row, the page has left the top of it.
   const last = tree.getByRole('treeitem').last();
