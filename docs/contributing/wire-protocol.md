@@ -99,6 +99,27 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   `LogOwner.span_id` are additive within `PROTOCOL_VERSION` 1. A client that predates them counts
   the events as unknown kinds and ignores the new optional fields.
 
+## Run overview
+
+The run's header facts are one contract, `RunOverview` (`overview_version: 1`, defined once in
+`vibesys.events` and used by both the core event and the wire). The run's `run_started` event
+carries it, built from the task's input bundle (`vibesys.run.overview`):
+
+- `objective.text` is the task's `OBJECTIVE.md` (Markdown) and `objective.metric` the
+  benchmark's result metric.
+- `objective.correctness_check` is the argv of the accuracy check a candidate must pass.
+- `benchmarks.evaluator` is the evaluator package the manifest pins (`name`, `version`). It is
+  null for a source-tree evaluator, which has no version.
+
+`RunSnapshot.overview` is that declaration (the server keeps it from the journal, live and on
+replay), with `objective.unit` and `objective.direction` filled in from the run's own
+measurements and objectives once it has them. It is null before the run started. Trajectories and
+key numbers are not part of it. They are queries over the run trace's gate and workstream spans:
+`@vibesys/run-state/overview` provides `gateTrajectory`, `bestVsBaseline` and `workstreamCounts`
+beside `overviewFromSnapshot` and `foldOverview`. `query.performance` and `PerformanceContext`
+stay unchanged for the frozen web run page. Gate tools' own versions are not measured today, so
+the overview does not carry them.
+
 ## Framing and connection decisions
 
 Each decision below carries a stable token. The conformance corpus (`tests/conformance/`, see
