@@ -83,7 +83,10 @@ _SERVICE = textwrap.dedent(
     if child == 0:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
         ctypes.CDLL(None).prctl(0x59616D61, ctypes.c_ulong(-1), 0, 0, 0)
-        (root / "child.pid").write_text(str(os.getpid()))
+        child_pid = root / "child.pid"
+        pending_child_pid = root / ".child.pid.pending"
+        pending_child_pid.write_text(str(os.getpid()))
+        pending_child_pid.replace(child_pid)
         while (root / "traced").is_file() and not (root / "tracer").is_file():
             signal.sigtimedwait([], 0.05)
         os.write(writer, b"x")
@@ -150,7 +153,10 @@ _LEFTOVER = textwrap.dedent(
     root = pathlib.Path(sys.argv[1])
     if os.fork() == 0:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        (root / "leftover.pid").write_text(str(os.getpid()))
+        leftover_pid = root / "leftover.pid"
+        pending_leftover_pid = root / ".leftover.pid.pending"
+        pending_leftover_pid.write_text(str(os.getpid()))
+        pending_leftover_pid.replace(leftover_pid)
         while True:
             signal.pause()
     while not (root / "leftover.pid").is_file():
@@ -173,7 +179,10 @@ _THREADED = textwrap.dedent(
     if worker == 0:
         libc.prctl(0x59616D61, ctypes.c_ulong(-1), 0, 0, 0)
         def hold():
-            (root / "thread.tid").write_text(str(threading.get_native_id()))
+            thread_tid = root / "thread.tid"
+            pending_thread_tid = root / ".thread.tid.pending"
+            pending_thread_tid.write_text(str(threading.get_native_id()))
+            pending_thread_tid.replace(thread_tid)
             threading.Event().wait()
         threading.Thread(target=hold).start()
         while not (root / "tracer").is_file():
@@ -195,7 +204,9 @@ _ESCAPEE = textwrap.dedent(
     root = pathlib.Path(sys.argv[1])
     holder = (
         "import os, pathlib, signal, sys; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); signal.pause()"
+        "identity = pathlib.Path(sys.argv[1]); "
+        "pending = identity.with_name(f'.{identity.name}.pending'); "
+        "pending.write_text(str(os.getpid())); pending.replace(identity); signal.pause()"
     )
     if os.fork() == 0:
         os.setsid()
@@ -204,7 +215,10 @@ _ESCAPEE = textwrap.dedent(
             os.execve(sys.executable, [sys.executable, "-c", holder, str(root / "bare.pid")], {})
         while not (root / "bare.pid").is_file():
             signal.sigtimedwait([], 0.05)
-        (root / "escapee.pid").write_text(str(os.getpid()))
+        escapee_pid = root / "escapee.pid"
+        pending_escapee_pid = root / ".escapee.pid.pending"
+        pending_escapee_pid.write_text(str(os.getpid()))
+        pending_escapee_pid.replace(escapee_pid)
         while True:
             signal.pause()
     while not (root / "escapee.pid").is_file():
@@ -222,7 +236,9 @@ _NESTED = textwrap.dedent(
     root = pathlib.Path(sys.argv[1])
     holder = (
         "import os, pathlib, signal, sys; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-        "pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); signal.pause()"
+        "identity = pathlib.Path(sys.argv[1]); "
+        "pending = identity.with_name(f'.{identity.name}.pending'); "
+        "pending.write_text(str(os.getpid())); pending.replace(identity); signal.pause()"
     )
     env = {**os.environ, "SLURM_JOB_ID": "nested-" + os.environ["SLURM_JOB_ID"]}
     subprocess.Popen(
@@ -248,11 +264,17 @@ _LATE_ESCAPEE = textwrap.dedent(
     # pause() blocks.
     if os.fork() == 0:
         signal.pthread_sigmask(signal.SIG_BLOCK, [signal.SIGTERM])
-        (root / "leaver.pid").write_text(str(os.getpid()))
+        leaver_pid = root / "leaver.pid"
+        pending_leaver_pid = root / ".leaver.pid.pending"
+        pending_leaver_pid.write_text(str(os.getpid()))
+        pending_leaver_pid.replace(leaver_pid)
         signal.sigwait([signal.SIGTERM])
         if os.fork() == 0:
             os.setsid()
-            (root / "late.pid").write_text(str(os.getpid()))
+            late_pid = root / "late.pid"
+            pending_late_pid = root / ".late.pid.pending"
+            pending_late_pid.write_text(str(os.getpid()))
+            pending_late_pid.replace(late_pid)
             signal.sigwait([signal.SIGTERM])
             (root / "late-termed").write_text("yes")
             os._exit(0)
