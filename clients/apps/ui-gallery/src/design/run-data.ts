@@ -451,3 +451,100 @@ export const NARRATIVE: readonly Beat[] = [
     text: 'Padded head and tail to separate cache lines. cargo test and all 100 MPMC trials pass; asked for the official benchmark.',
   },
 ];
+
+/** An agent in the run: who started it, what it is doing, how many turns it has taken. */
+export interface Agent {
+  readonly id: string;
+  readonly role: string;
+  /** What it works on: the run, or the idea (candidate) it was started for. */
+  readonly subject: string;
+  readonly parent: string | null;
+  /** A second parent (fan-in): drawn once under `parent`, marked "+ also under" this one. */
+  readonly alsoUnder?: string;
+  readonly tone: 'live' | 'ok' | 'err';
+  readonly state: string;
+  readonly activity: string;
+  readonly turns: number;
+  readonly took: string;
+}
+
+export const AGENTS: readonly Agent[] = [
+  {
+    id: 'orch',
+    role: 'orchestrator',
+    subject: 'run',
+    parent: null,
+    tone: 'live',
+    state: 'running',
+    activity: 'waiting on the spin-backoff gate',
+    turns: 9,
+    took: '14m',
+  },
+  {
+    id: 'impl-padding',
+    role: 'implementer',
+    subject: 'mpmc-ring-padding',
+    parent: 'orch',
+    tone: 'ok',
+    state: 'done',
+    activity: 'Padded the counters; cargo test and 100 MPMC trials pass',
+    turns: 2,
+    took: '2m 02s',
+  },
+  {
+    id: 'probe-padding',
+    role: 'explorer',
+    subject: 'perf c2c',
+    parent: 'impl-padding',
+    tone: 'ok',
+    state: 'done',
+    activity: '41% HITM on the head/tail cache line',
+    turns: 1,
+    took: '38s',
+  },
+  {
+    id: 'judge-padding',
+    role: 'judge',
+    subject: 'mpmc-ring-padding',
+    parent: 'orch',
+    alsoUnder: 'impl-padding',
+    tone: 'ok',
+    state: 'done',
+    activity: 'Accept: 1.40× its parent, all checks pass',
+    turns: 1,
+    took: '19s',
+  },
+  {
+    id: 'impl-spin',
+    role: 'implementer',
+    subject: 'spin-backoff',
+    parent: 'orch',
+    tone: 'ok',
+    state: 'done',
+    activity: 'Exponential backoff in push and pop; asked for a measurement',
+    turns: 1,
+    took: '1m 31s',
+  },
+  {
+    id: 'impl-slot',
+    role: 'implementer',
+    subject: 'slot-arena',
+    parent: 'orch',
+    tone: 'live',
+    state: 'running',
+    activity: 'editing src/lib.rs',
+    turns: 1,
+    took: '46s',
+  },
+  {
+    id: 'impl-treiber',
+    role: 'implementer',
+    subject: 'treiber-stack',
+    parent: 'orch',
+    tone: 'err',
+    state: 'failed check',
+    activity: 'Lock-free stack; MPMC check lost 3 items in 100 trials',
+    turns: 2,
+    took: '2m 40s',
+  },
+];

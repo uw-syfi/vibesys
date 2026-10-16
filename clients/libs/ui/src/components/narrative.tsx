@@ -15,6 +15,8 @@ const ESTIMATED_BLOCK = 56;
 export function Narrative(props: {
   readonly label: string;
   readonly size?: 'default' | 'fill';
+  /** `end` opens scrolled to the last block and stays there until scrolled up (a live turn). */
+  readonly start?: 'top' | 'end';
   readonly children: ReactNode;
 }): JSX.Element {
   const blocks = Children.toArray(props.children);
@@ -22,7 +24,7 @@ export function Narrative(props: {
     count: blocks.length,
     keyOf: index => String((blocks[index] as {readonly key?: string} | undefined)?.key ?? index),
     estimate: ESTIMATED_BLOCK,
-    follow: false,
+    follow: props.start === 'end',
   });
   return (
     <section

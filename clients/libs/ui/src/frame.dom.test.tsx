@@ -19,6 +19,7 @@ import {
   PickRow,
   Said,
   Screen,
+  SearchBox,
   Thought,
   Thread,
   type ThreadItem,
@@ -602,18 +603,31 @@ describe('Narrative', () => {
 });
 
 describe('PickRow extras', () => {
-  test('shows the column it came from and an accent stripe when on the chain', async () => {
+  test('shows its trailing column, a link to its parent, and an accent stripe when on the chain', async () => {
     const {container} = await mount(
       <PickList label="Ideas" selected="a">
-        <PickRow id="a" title="a" from="input" stripe select={noop} />
+        <PickRow id="a" title="a" trail={{label: 'from input'}} stripe select={noop} />
         <PickRow id="b" title="b" select={noop} />
       </PickList>,
     );
     const [a, b] = all(container, '[role="option"]') as [HTMLElement, HTMLElement];
-    expect(one(a, '.vs-pickrow-from').textContent).toBe('input');
+    expect(one(a, '.vs-pickrow-trail').textContent).toBe('from input');
     expect(a.hasAttribute('data-stripe')).toBe(true);
     expect(b.hasAttribute('data-stripe')).toBe(false);
-    expect(b.querySelector('.vs-pickrow-from')).toBeNull();
+    expect(b.querySelector('.vs-pickrow-trail')).toBeNull();
+    const opened: string[] = [];
+    const linked = await mount(
+      <PickList label="Ideas" selected="a">
+        <PickRow
+          id="a"
+          title="a"
+          trail={{label: 'from input', press: () => opened.push('parent')}}
+          select={() => opened.push('row')}
+        />
+      </PickList>,
+    );
+    await click(one(linked.container, 'button.vs-pickrow-trail'));
+    expect(opened).toEqual(['parent']);
   });
 });
 
@@ -662,6 +676,29 @@ describe('at scale: windowed lists draw a bounded number of rows', () => {
     expect((document.activeElement as HTMLElement).getAttribute('aria-posinset')).toBe('1');
   });
 
+  test('PickList: the drawn rows stay bounded at 600, 10k and 100k, also after scrolling to the end', async () => {
+    const sizes: number[] = [];
+    for (const count of [600, MANY, 10 * MANY]) {
+      const ids = Array.from({length: count}, (_, index) => `r${index}`);
+      const {container} = await mount(
+        <PickList label="Ideas" selected="r0">
+          {ids.map(id => (
+            <PickRow key={id} id={id} title={id} select={noop} />
+          ))}
+        </PickList>,
+      );
+      const first = one(container, '[role="option"]');
+      sizes.push(all(container, '[role="option"]').length);
+      await press(first, 'End');
+      sizes.push(all(container, '[role="option"]').length);
+      expect((document.activeElement as HTMLElement).getAttribute('aria-posinset')).toBe(
+        String(count),
+      );
+    }
+    for (const size of sizes) expect(size).toBeLessThan(DRAWN_AT_MOST);
+    expect(new Set(sizes).size).toBeLessThanOrEqual(2);
+  });
+
   test('PickList: arrows and pages step across the drawn window to any row', async () => {
     const ids = Array.from({length: MANY}, (_, index) => `r${index}`);
     const {container} = await mount(
@@ -700,6 +737,18 @@ describe('at scale: windowed lists draw a bounded number of rows', () => {
     const drawn = all(container, '.vs-log-line');
     expect(drawn.length).toBeLessThan(DRAWN_AT_MOST);
     expect(drawn.at(-1)?.textContent).toBe('line 49999');
+  });
+
+  test('LogPane: 500k lines are as cheap as 50k, and it opens at the tail', async () => {
+    const counts: number[] = [];
+    for (const length of [5 * MANY, 50 * MANY]) {
+      const lines = Array.from({length}, (_, index) => ({text: `line ${index}`}));
+      const {container} = await mount(<LogPane label="Log" lines={lines} />);
+      const drawn = all(container, '.vs-log-line');
+      counts.push(drawn.length);
+      expect(drawn.at(-1)?.textContent).toBe(`line ${length - 1}`);
+    }
+    expect(counts[0]).toBe(counts[1] as number);
   });
 
   test('Narrative: 10k blocks', async () => {
@@ -745,6 +794,19 @@ describe('at scale: windowed lists draw a bounded number of rows', () => {
     expect(all(aggregated.container, '.vs-gantt-seg')).toHaveLength(0);
     const detailed = await mount(<Gantt label="B" from={0} to={10} rows={rows} detail="full" />);
     expect(all(detailed.container, '.vs-gantt-seg').length).toBeGreaterThan(0);
+  });
+
+  test('Chart: thousands of points are binned to a bounded number of dots, the kept ones all drawn', async () => {
+    const points = Array.from({length: 5000}, (_, index) => ({
+      x: index,
+      y: (index * 37) % 101,
+      filled: index % 250 === 0,
+    }));
+    const {container} = await mount(<Chart label="Series" points={points} />);
+    expect(all(container, '.vs-chart-point[data-filled]')).toHaveLength(20);
+    expect(all(container, '.vs-chart-point').length).toBeLessThanOrEqual(3000 + 20);
+    const few = await mount(<Chart label="Few" points={points.slice(0, 500)} />);
+    expect(all(few.container, '.vs-chart-point')).toHaveLength(500);
   });
 
   test('Chart: 600 points, hollow ones faint, one tab stop and arrows among the pickable', async () => {
@@ -830,5 +892,45 @@ describe('Gantt zoom and pan', () => {
       />,
     );
     expect(one(container, '.vs-gantt-bar').style.getPropertyValue('--gantt-from')).toBe('-100.00%');
+  });
+});
+
+function Filters() {
+  const [on, setOn] = useState(false);
+  const [text, setText] = useState('');
+  return (
+    <>
+      <DotLegend
+        items={[
+          {tone: 'ok', label: '2 kept'},
+          {tone: 'err', label: '5 rejected', on, toggle: setOn},
+        ]}
+      />
+      <SearchBox label="Search ideas" value={text} change={setText} placeholder="Search" />
+      <output>{`${on}:${text}`}</output>
+    </>
+  );
+}
+
+describe('filter chips and search', () => {
+  test('a legend item with a toggle is a pressed-state button; one without stays text', async () => {
+    const {container} = await mount(<Filters />);
+    const chips = all(container, 'button.vs-dotlegend-item');
+    expect(chips).toHaveLength(1);
+    expect(chips[0]?.getAttribute('aria-pressed')).toBe('false');
+    await click(chips[0] as HTMLElement);
+    expect(chips[0]?.getAttribute('aria-pressed')).toBe('true');
+    expect(one(container, 'output').textContent).toBe('true:');
+    expect(all(container, 'span.vs-dotlegend-item')).toHaveLength(1);
+  });
+
+  test('the search box is a named search field showing the text it is given', async () => {
+    const {container} = await mount(
+      <SearchBox label="Search ideas" value="seqlock" change={noop} placeholder="Search" />,
+    );
+    const input = one(container, 'input[type="search"]') as unknown as HTMLInputElement;
+    expect(input.getAttribute('aria-label')).toBe('Search ideas');
+    expect(input.getAttribute('placeholder')).toBe('Search');
+    expect(input.value).toBe('seqlock');
   });
 });

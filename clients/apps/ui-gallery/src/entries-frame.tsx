@@ -18,6 +18,7 @@ import {
   Row,
   Said,
   Screen,
+  SearchBox,
   Stack,
   Text,
   Thought,
@@ -271,6 +272,23 @@ function GanttDemo(): JSX.Element {
   );
 }
 
+function FilterDemo(): JSX.Element {
+  const [rejected, setRejected] = useState(false);
+  const [text, setText] = useState('');
+  return (
+    <Row gap="space-4" align="center">
+      <DotLegend
+        items={[
+          {tone: 'ok', label: '40 kept', on: true, toggle: noop},
+          {tone: 'live', label: '3 running', on: true, toggle: noop},
+          {tone: 'err', label: '557 rejected', on: rejected, toggle: setRejected},
+        ]}
+      />
+      <SearchBox label="Search ideas" value={text} change={setText} placeholder="Search ideas" />
+    </Row>
+  );
+}
+
 function ScreenDemo(): JSX.Element {
   const [selected, setSelected] = useState<string | undefined>('padding');
   return (
@@ -436,16 +454,8 @@ export const FRAME_ENTRIES = {
       </Text>
     ),
   },
-  DotLegend: {
-    render: () => (
-      <DotLegend
-        items={[
-          {tone: 'ok', label: '2 kept'},
-          {tone: 'err', label: '2 rejected'},
-          {tone: 'live', label: '2 running'},
-          {tone: 'neutral', label: '1 stopped'},
-        ]}
-      />
-    ),
+  DotLegend: {render: () => <FilterDemo />},
+  SearchBox: {
+    render: () => <Text tone="muted">The search field beside the legend filter chips above.</Text>,
   },
 } satisfies Partial<Record<ComponentName, GalleryEntry>>;

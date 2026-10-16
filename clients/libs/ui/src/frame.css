@@ -293,17 +293,6 @@ button.vs-crumb:focus-visible {
   flex: none;
   min-width: calc(var(--space-8) + var(--space-5));
 }
-.vs-pickrow-from {
-  flex: none;
-  width: var(--column-swatch);
-  overflow: hidden;
-  color: var(--muted);
-  font-family: var(--text-small-family);
-  font-size: var(--text-small-size);
-  line-height: var(--text-small-line);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .vs-pickrow[data-stripe] {
   border-left-color: var(--accent);
 }
@@ -822,4 +811,81 @@ button.vs-crumb:focus-visible {
 
 .vs-chart-point[data-faint] {
   opacity: 0.45;
+}
+
+/* --- flat lists: a trailing column ("from <parent>") -------------------------------------------- */
+
+.vs-pickrow-trail,
+.vs-listheader-col[data-fixed="trail"] {
+  flex: none;
+  width: var(--gantt-label);
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-listheader-col[data-fixed="figure"],
+.vs-pickrow:has(.vs-pickrow-trail) .vs-pickrow-figure {
+  min-width: var(--gantt-figure);
+  text-align: right;
+}
+.vs-pickrow-trail {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-family: var(--text-code-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+button.vs-pickrow-trail {
+  cursor: pointer;
+}
+button.vs-pickrow-trail:hover {
+  background: none;
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* --- filter chips and search ------------------------------------------------------------------- */
+
+button.vs-dotlegend-item {
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius-full);
+  background: none;
+  cursor: pointer;
+}
+button.vs-dotlegend-item[aria-pressed="true"] {
+  border-color: var(--line);
+  background: var(--panel-2);
+}
+button.vs-dotlegend-item[aria-pressed="false"] .vs-text {
+  text-decoration: line-through;
+}
+button.vs-dotlegend-item:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-searchbox {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--control-sm);
+  padding: 0 var(--space-2);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+.vs-searchbox input {
+  width: var(--column-swatch);
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--text);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+}
+.vs-searchbox:focus-within {
+  border-color: var(--accent);
 }

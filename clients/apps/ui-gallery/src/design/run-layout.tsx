@@ -24,7 +24,6 @@ import {
   KeyValue,
   LogPane,
   Menu,
-  Narrative,
   NewBelow,
   Pane,
   Panes,
@@ -32,7 +31,6 @@ import {
   PickRow,
   Row,
   type RowBar,
-  Said,
   Screen,
   Scrubber,
   SegmentedControl,
@@ -40,13 +38,12 @@ import {
   SidebarSection,
   Stack,
   Text,
-  Thought,
   ToolCall,
-  ToolGroup,
-  type ToolLine,
 } from '@vibesys/ui';
 import {type JSX, useEffect, useState} from 'react';
 import {
+  AGENTS,
+  type Agent,
   type Attempt,
   BEST,
   CANDIDATES,
@@ -64,14 +61,19 @@ import {
   type Step,
   TURN_ENTRIES,
 } from './run-data.js';
+import {type Turn, TurnNarrative} from './turn-narrative.js';
 
-type Mode = 'main' | 'timeline' | 'logs';
+const TURN: Turn = {beats: NARRATIVE, entries: TURN_ENTRIES};
+
+type Mode = 'main' | 'timeline' | 'agents' | 'logs';
 
 interface Zoom {
   readonly c: string | null;
   readonly step: string | null;
   readonly item: string | null;
   readonly mode: Mode;
+  /** The agent opened from the Agents face (its turns as narrative). */
+  readonly agent: string | null;
 }
 
 export interface DesignFlags {
@@ -82,7 +84,11 @@ export interface DesignFlags {
   readonly open: string | null;
 }
 
-/** `c` (candidate), `step`, `item`, `mode=logs`; `ended` and `narrow` are flags. */
+function modeOf(value: string | null): Mode {
+  return value === 'logs' || value === 'timeline' || value === 'agents' ? value : 'main';
+}
+
+/** `c` (candidate), `step`, `item`, `mode`, `agent`; `ended` and `narrow` are flags. */
 export function zoomFromQuery(search: string): {zoom: Zoom; flags: DesignFlags} {
   const query = new URLSearchParams(search);
   return {
@@ -90,12 +96,8 @@ export function zoomFromQuery(search: string): {zoom: Zoom; flags: DesignFlags} 
       c: query.get('c'),
       step: query.get('step'),
       item: query.get('item'),
-      mode:
-        query.get('mode') === 'logs'
-          ? 'logs'
-          : query.get('mode') === 'timeline'
-            ? 'timeline'
-            : 'main',
+      mode: modeOf(query.get('mode')),
+      agent: query.get('agent'),
     },
     flags: {
       ended: query.has('ended'),
@@ -106,9 +108,10 @@ export function zoomFromQuery(search: string): {zoom: Zoom; flags: DesignFlags} 
   };
 }
 
-const TOP: Zoom = {c: null, step: null, item: null, mode: 'main'};
+const TOP: Zoom = {c: null, step: null, item: null, mode: 'main', agent: null};
 
 function up(zoom: Zoom): Zoom {
+  if (zoom.agent !== null) return {...zoom, agent: null};
   if (zoom.item !== null) return {...zoom, item: null, mode: 'main'};
   if (zoom.step !== null) return {...zoom, step: null, mode: 'main'};
   if (zoom.c !== null) return {...zoom, c: null, mode: 'main'};
@@ -121,19 +124,34 @@ function candidate(id: string | null): Candidate | null {
   return CANDIDATES.find(c => c.id === id) ?? null;
 }
 
-/** The candidates in lineage order (depth first, parents before children), with their guides. */
-function lineage(): {readonly c: Candidate; readonly guides: Guide[]}[] {
-  const out: {c: Candidate; guides: Guide[]}[] = [];
+/** The ideas (candidates), newest first: a flat list, no tree. */
+function ideas(): readonly Candidate[] {
+  return [...CANDIDATES].reverse().sort((a, b) => b.startedAt - a.startedAt);
+}
+
+/** The kept candidate with the best value: the end of the winning path. */
+function best(): Candidate {
+  const kept = CANDIDATES.filter(c => c.outcome === 'kept' && c.value !== null);
+  return kept.reduce((top, c) => ((c.value ?? 0) > (top.value ?? 0) ? c : top));
+}
+
+/** The agents as a tree (depth first, parents before children), with their guides. */
+function agentTree(): {readonly a: Agent; readonly guides: Guide[]}[] {
+  const out: {a: Agent; guides: Guide[]}[] = [];
   const walk = (parent: string | null, prefix: Guide[]): void => {
-    const children = CANDIDATES.filter(c => c.parent === parent);
+    const children = AGENTS.filter(a => a.parent === parent);
     children.forEach((child, index) => {
       const last = index === children.length - 1;
-      out.push({c: child, guides: parent === null ? [] : [...prefix, last ? 'elbow' : 'tee']});
+      out.push({a: child, guides: parent === null ? [] : [...prefix, last ? 'elbow' : 'tee']});
       walk(child.id, parent === null ? [] : [...prefix, last ? 'blank' : 'pipe']);
     });
   };
   walk(null, []);
   return out;
+}
+
+function agentName(a: Agent): string {
+  return `${a.role} · ${a.subject}`;
 }
 
 function figureOf(c: Candidate): {figure: string; tone: 'ok' | 'err' | 'muted' | 'default'} {
@@ -184,7 +202,7 @@ function legend(ended: boolean): {tone: 'ok' | 'err' | 'live'; label: string}[] 
       ];
 }
 
-const KICKER = 'candidates · idea + code';
+const KICKER = 'ideas';
 
 /** Minutes in a duration like `1m 40s`, `32s` or `6m`. */
 function minutes(took: string): number {
@@ -348,7 +366,6 @@ function Header(props: {readonly flags: DesignFlags; readonly compactHero: boole
 
 function Hero(props: {
   readonly flags: DesignFlags;
-  readonly selected: string | null;
   readonly pick: (id: string) => void;
 }): JSX.Element {
   return (
@@ -372,7 +389,6 @@ function Hero(props: {
           label="Best total_ops_per_sec against minutes into the run; each measured candidate is a point"
           size="strip"
           points={POINTS}
-          {...(props.selected === null ? {} : {selected: props.selected})}
           pick={props.pick}
           steps={STEPS_LINE}
           reference={{y: INPUT, label: 'input'}}
@@ -396,23 +412,44 @@ function Timeline(props: {
       size="fill"
       view={view}
       changeView={setView}
-      nameLabel="candidate · built on"
+      nameLabel="idea"
       figureLabel="vs input"
       from={0}
       to={now(props.flags)}
       playhead={now(props.flags)}
       ticks={axisTicks(props.flags)}
-      rows={lineage().map(({c, guides}) =>
+      rows={ideas().map(c =>
         ganttRow(
           settled(c, props.flags.ended),
           props.flags,
-          guides,
+          [],
           false,
           () => props.go({...TOP, c: c.id}),
           step => props.go({...TOP, c: c.id, step}),
         ),
       )}
     />
+  );
+}
+
+/** One line naming the winning path, each name a link: `input → mpmc-ring-v1 → mpmc-ring-padding 5.72×`. */
+function WinningPath(props: {readonly open: (id: string) => void}): JSX.Element {
+  const top = best();
+  const chain = [...pathOf(top.id)].reverse();
+  return (
+    <Row gap="space-2" align="center">
+      <Text variant="small" tone="muted">
+        best path
+      </Text>
+      <Breadcrumb
+        label="Best path"
+        items={chain.map(id => ({
+          id,
+          label: id === top.id && top.value !== null ? `${id} ${ratio(top.value)}` : id,
+          press: () => props.open(id),
+        }))}
+      />
+    </Row>
   );
 }
 
@@ -425,26 +462,24 @@ function barOf(c: Candidate): RowBar | undefined {
 function badgesOf(c: Candidate): {label: string; tone: 'ok' | 'neutral'}[] {
   const attempts = c.attempts?.length ?? 1;
   return [
-    ...(c.id === 'mpmc-ring-padding' ? [{label: 'best', tone: 'ok' as const}] : []),
+    ...(c.id === best().id ? [{label: 'best', tone: 'ok' as const}] : []),
     ...(attempts > 1 ? [{label: `×${attempts}`, tone: 'neutral' as const}] : []),
   ];
 }
 
 function CandidateRow(props: {
   readonly c: Candidate;
-  readonly guides: readonly Guide[];
   readonly compact: boolean;
-  readonly path: boolean;
-  readonly hover: (on: boolean) => void;
-  readonly open: () => void;
+  readonly stripe: boolean;
+  readonly open: (id: string) => void;
 }): JSX.Element {
   const {c} = props;
   const fig = figureOf(c);
   const bar = props.compact ? undefined : barOf(c);
+  const parent = c.parent;
   return (
     <PickRow
       id={c.id}
-      guides={props.guides}
       title={c.id}
       mono
       {...(props.compact ? {} : {summary: c.hypothesis})}
@@ -453,10 +488,17 @@ function CandidateRow(props: {
       {...(bar === undefined ? {} : {bar})}
       figure={fig.figure}
       figureTone={fig.tone}
-      path={props.path}
-      hover={props.hover}
+      {...(props.compact
+        ? {}
+        : {
+            trail:
+              parent === null
+                ? {label: ''}
+                : {label: `from ${parent}`, press: () => props.open(parent)},
+          })}
+      stripe={props.stripe}
       fresh={c.fresh === true}
-      select={props.open}
+      select={() => props.open(c.id)}
     />
   );
 }
@@ -466,37 +508,120 @@ function CandidateList(props: {
   readonly compact: boolean;
   readonly ended: boolean;
   readonly open: (id: string) => void;
-  /** A row to hover from the start (the screenshot of the hover state). */
-  readonly hovered?: string | null;
 }): JSX.Element {
-  const [hovered, setHovered] = useState<string | null>(props.hovered ?? null);
-  const path = pathOf(hovered ?? props.selected);
+  const winning = pathOf(best().id);
   return (
     <PickList
-      label="Candidates"
+      label="Ideas"
       size="fill"
       {...(props.compact
         ? {}
         : {
             header: {
-              start: 'candidate · built on · idea',
-              end: [{label: 'vs best', bar: true}, {label: 'vs input'}],
+              start: 'idea',
+              end: [
+                {label: 'vs best', bar: true},
+                {label: 'vs input', fixed: 'figure'},
+                {label: 'from', fixed: 'trail'},
+              ],
             },
           })}
       {...(props.selected === null ? {} : {selected: props.selected})}
     >
-      {lineage().map(({c, guides}) => (
+      {ideas().map(raw => (
         <CandidateRow
-          key={c.id}
-          c={settled(c, props.ended)}
-          guides={guides}
+          key={raw.id}
+          c={settled(raw, props.ended)}
           compact={props.compact}
-          path={path.has(c.id)}
-          hover={on => setHovered(on ? c.id : null)}
-          open={() => props.open(c.id)}
+          stripe={winning.has(raw.id)}
+          open={props.open}
         />
       ))}
     </PickList>
+  );
+}
+
+/** The run's agents as a tree: who started whom, what each is doing, how many turns it has taken. */
+function AgentList(props: {
+  readonly selected: string | null;
+  readonly compact: boolean;
+  readonly open: (id: string) => void;
+}): JSX.Element {
+  return (
+    <PickList
+      label="Agents"
+      size="fill"
+      {...(props.compact
+        ? {}
+        : {
+            header: {
+              start: 'agent · started by the row above · now',
+              end: [
+                {label: 'turns', fixed: 'figure'},
+                {label: 'took', fixed: 'trail'},
+              ],
+            },
+          })}
+      {...(props.selected === null ? {} : {selected: props.selected})}
+    >
+      {agentTree().map(({a, guides}) => {
+        const also = AGENTS.find(other => other.id === a.alsoUnder);
+        return (
+          <PickRow
+            key={a.id}
+            id={a.id}
+            guides={guides}
+            lead={a.role}
+            title={a.subject}
+            mono
+            {...(props.compact ? {} : {summary: a.activity})}
+            state={{tone: a.tone, label: a.state}}
+            badges={
+              also === undefined
+                ? []
+                : [
+                    {
+                      label: props.compact ? '+1 parent' : `+ also under ${also.role}`,
+                      tone: 'neutral' as const,
+                    },
+                  ]
+            }
+            figure={`${a.turns}`}
+            figureTone="muted"
+            {...(props.compact ? {} : {trail: {label: a.took}})}
+            select={() => props.open(a.id)}
+          />
+        );
+      })}
+    </PickList>
+  );
+}
+
+/** One agent opened: its latest turn as narrative. */
+function AgentDetail(props: {readonly agent: Agent}): JSX.Element {
+  const {agent} = props;
+  const parent = AGENTS.find(a => a.id === agent.parent);
+  const also = AGENTS.find(a => a.id === agent.alsoUnder);
+  return (
+    <Pane
+      kicker={`agent · ${agent.role}`}
+      title={agent.subject}
+      width="fill"
+      enterKey={`agent ${agent.id}`}
+      meta={
+        <>
+          <Chip label={agent.state} tone={agent.tone} dot />
+          <Text variant="code" tone="muted">
+            {`${agent.turns} turns · ${agent.took}`}
+            {parent === undefined ? '' : ` · started by ${parent.role}`}
+            {also === undefined ? '' : ` · also fed by ${agentName(also)}`}
+          </Text>
+        </>
+      }
+    >
+      <Text variant="section">{`turn ${agent.turns} of ${agent.turns}`}</Text>
+      <TurnNarrative turn={TURN} selected={null} initiallyOpen={null} open={noop} />
+    </Pane>
   );
 }
 
@@ -687,66 +812,6 @@ function CandidateDetail(props: {
   );
 }
 
-function entryById(id: string): Entry {
-  const found = TURN_ENTRIES.find(e => e.id === id);
-  if (found === undefined) throw new Error(`no turn entry ${id}`);
-  return found;
-}
-
-/** The group holding a tool call, so opening that call at level 3 shows it in place. */
-function groupOf(id: string | null): string | null {
-  const beat = NARRATIVE.find(b => b.kind === 'tools' && b.tools.includes(id ?? ''));
-  return beat === undefined ? null : beat.id;
-}
-
-/**
- * The turn as the agent told it: thinking and text in time order, tool calls folded into one line
- * between paragraphs that opens in place. Pressing a tool row opens that call (level 3).
- */
-function TurnNarrative(props: {
-  readonly selected: string | null;
-  readonly initiallyOpen: string | null;
-  readonly open: (id: string) => void;
-}): JSX.Element {
-  const [opened, setOpened] = useState<ReadonlySet<string>>(
-    () =>
-      new Set(
-        [props.initiallyOpen, groupOf(props.selected)].filter((g): g is string => g !== null),
-      ),
-  );
-  const toggle = (group: string, on: boolean): void => {
-    const next = new Set(opened);
-    if (on) next.add(group);
-    else next.delete(group);
-    setOpened(next);
-  };
-  return (
-    <Narrative label="Turn transcript">
-      {NARRATIVE.map(beat => {
-        if (beat.kind === 'thinking') return <Thought key={beat.id} text={beat.text} />;
-        if (beat.kind === 'text') return <Said key={beat.id} text={beat.text} />;
-        const tools: ToolLine[] = beat.tools.map(entryById).map(e => ({
-          id: e.id,
-          name: e.name,
-          line: e.line,
-          ...(e.meta === undefined ? {} : {outcome: e.meta}),
-          state: e.state,
-          selected: props.selected === e.id,
-          press: () => props.open(e.id),
-        }));
-        return (
-          <ToolGroup
-            key={beat.id}
-            tools={tools}
-            open={opened.has(beat.id)}
-            toggle={on => toggle(beat.id, on)}
-          />
-        );
-      })}
-    </Narrative>
-  );
-}
-
 function TurnDetail(props: {
   readonly c: Candidate;
   readonly step: Step;
@@ -777,7 +842,12 @@ function TurnDetail(props: {
       ) : (
         <>
           <KeyValue items={REPLY_FACTS} />
-          <TurnNarrative selected={null} initiallyOpen={props.flags.open} open={props.openEntry} />
+          <TurnNarrative
+            turn={TURN}
+            selected={null}
+            initiallyOpen={props.flags.open}
+            open={props.openEntry}
+          />
           {running ? <NewBelow text="3 new" press={noop} /> : null}
         </>
       )}
@@ -867,6 +937,20 @@ interface LevelProps {
   readonly go: (zoom: Zoom) => void;
 }
 
+function AgentLevel(props: LevelProps & {readonly agent: Agent}): JSX.Element {
+  const {zoom, flags, go, agent} = props;
+  return (
+    <Panes>
+      {flags.narrow ? null : (
+        <Pane kicker="agents" title={`${AGENTS.length}`} width="list">
+          <AgentList selected={agent.id} compact open={id => go({...zoom, agent: id})} />
+        </Pane>
+      )}
+      <AgentDetail key={agent.id} agent={agent} />
+    </Panes>
+  );
+}
+
 function ItemLevel(props: LevelProps & {readonly step: Step; readonly entry: Entry}): JSX.Element {
   const {zoom, flags, go, step, entry} = props;
   return (
@@ -874,6 +958,7 @@ function ItemLevel(props: LevelProps & {readonly step: Step; readonly entry: Ent
       {flags.narrow ? null : (
         <Pane kicker={`agent turn · ${step.role}`} title={step.headline} width="list">
           <TurnNarrative
+            turn={TURN}
             key={entry.id}
             selected={entry.id}
             initiallyOpen={null}
@@ -937,42 +1022,59 @@ function CandidateLevel(props: LevelProps & {readonly c: Candidate}): JSX.Elemen
   );
 }
 
-function RunLevel(props: LevelProps): JSX.Element {
+/** The face of the run's list pane that the mode names. */
+function RunFace(props: LevelProps): JSX.Element {
   const {zoom, flags, go} = props;
+  if (zoom.mode === 'logs') return <RunLogs />;
+  if (zoom.mode === 'timeline') return <Timeline flags={flags} go={go} />;
+  if (zoom.mode === 'agents') {
+    return (
+      <AgentList
+        selected={null}
+        compact={false}
+        open={id => go({...TOP, mode: 'agents', agent: id})}
+      />
+    );
+  }
   return (
     <>
-      <Hero flags={flags} selected={null} pick={id => go({...TOP, c: id})} />
+      <WinningPath open={id => go({...TOP, c: id})} />
+      <CandidateList
+        selected={null}
+        compact={false}
+        ended={flags.ended}
+        open={id => go({...TOP, c: id})}
+      />
+    </>
+  );
+}
+
+function RunLevel(props: LevelProps): JSX.Element {
+  const {zoom, flags, go} = props;
+  const agents = zoom.mode === 'agents';
+  return (
+    <>
+      <Hero flags={flags} pick={id => go({...TOP, c: id})} />
       <Panes>
         <Pane
-          kicker={KICKER}
-          title={`${CANDIDATES.length}`}
+          kicker={agents ? 'agents' : KICKER}
+          title={agents ? `${AGENTS.length}` : `${CANDIDATES.length}`}
           width="fill"
-          meta={<DotLegend items={legend(flags.ended)} />}
+          meta={agents ? undefined : <DotLegend items={legend(flags.ended)} />}
           actions={
             <ModeSwitch
               mode={zoom.mode}
               options={[
-                {value: 'main', label: 'Lineage'},
+                {value: 'main', label: 'Ideas'},
                 {value: 'timeline', label: 'Timeline'},
+                {value: 'agents', label: 'Agents'},
                 {value: 'logs', label: 'Logs'},
               ]}
               change={mode => go({...zoom, mode})}
             />
           }
         >
-          {zoom.mode === 'logs' ? (
-            <RunLogs />
-          ) : zoom.mode === 'timeline' ? (
-            <Timeline flags={flags} go={go} />
-          ) : (
-            <CandidateList
-              selected={null}
-              compact={false}
-              ended={flags.ended}
-              hovered={flags.hover}
-              open={id => go({...TOP, c: id})}
-            />
-          )}
+          <RunFace {...props} />
         </Pane>
         {flags.ended ? null : <Running open={(cid, sid) => go({...TOP, c: cid, step: sid})} />}
       </Panes>
@@ -980,8 +1082,10 @@ function RunLevel(props: LevelProps): JSX.Element {
   );
 }
 
-/** The level the zoom names: a run, a candidate, a step, or one of its items. */
+/** The level the zoom names: the run, an agent, a candidate, a step, or one of its items. */
 function Body(props: LevelProps): JSX.Element {
+  const agent = AGENTS.find(a => a.id === props.zoom.agent) ?? null;
+  if (agent !== null) return <AgentLevel {...props} agent={agent} />;
   const c = candidate(props.zoom.c);
   const step = c?.steps.find(s => s.id === props.zoom.step) ?? null;
   const entry = TURN_ENTRIES.find(e => e.id === props.zoom.item) ?? null;
@@ -996,6 +1100,12 @@ function crumbs(zoom: Zoom, go: (zoom: Zoom) => void): Crumb[] {
   const step = c?.steps.find(s => s.id === zoom.step) ?? null;
   const entry = TURN_ENTRIES.find(e => e.id === zoom.item) ?? null;
   const items: {id: string; label: string; to: Zoom}[] = [{id: 'run', label: 'run', to: TOP}];
+  const agent = AGENTS.find(a => a.id === zoom.agent);
+  if (agent !== undefined)
+    items.push(
+      {id: 'agents', label: 'agents', to: {...TOP, mode: 'agents'}},
+      {id: 'agent', label: agentName(agent), to: zoom},
+    );
   if (c !== null) items.push({id: 'c', label: c.id, to: {...TOP, c: c.id}});
   if (c !== null && step !== null)
     items.push({id: 'step', label: step.role, to: {...TOP, c: c.id, step: step.id}});
@@ -1021,7 +1131,7 @@ export function RunLayoutDesign(props: {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
-  const zoomed = zoom.c !== null;
+  const zoomed = zoom.c !== null || zoom.agent !== null;
   return (
     <AppFrame label="Runs" nav={<Sidebar />}>
       <Screen density="compact" header={<Header flags={props.flags} compactHero={zoomed} />}>

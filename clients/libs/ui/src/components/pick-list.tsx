@@ -21,7 +21,10 @@ const SelectedRow = createContext<string | undefined>(undefined);
 /** One trailing column of a list's header: its name, `bar` wide as a row's bar. */
 export interface HeaderColumn {
   readonly label: string;
+  /** As wide as a row's bar. */
   readonly bar?: boolean;
+  /** As wide as a row's figure, or as a row's trail. */
+  readonly fixed?: 'figure' | 'trail';
 }
 
 /** The one-line caption of a list's columns: `start` over the names, `end` over the trailing columns. */
@@ -39,6 +42,7 @@ function Header(props: {readonly header: ListHeader; readonly id: string}): JSX.
           key={column.label}
           className="vs-listheader-col"
           data-bar={column.bar === true || undefined}
+          data-fixed={column.fixed}
         >
           {column.label}
         </span>
@@ -121,20 +125,20 @@ export interface RowBar {
   readonly label: string;
 }
 
-/** What follows a row's text: its badges, its `from` column, its bar and its figure. */
+/** What follows a row's text: its badges, its bar, its figure and its trail. */
 function Trail(props: {
   readonly badges?: readonly {readonly label: string; readonly tone: StatusTone}[];
-  readonly from?: string;
   readonly bar?: RowBar;
   readonly figure?: string;
   readonly figureTone?: 'default' | 'ok' | 'err' | 'muted';
+  readonly trail?: {readonly label: string; readonly press?: () => void};
 }): JSX.Element {
+  const trail = props.trail;
   return (
     <>
       {(props.badges ?? []).map(badge => (
         <Chip key={badge.label} label={badge.label} tone={badge.tone} />
       ))}
-      {props.from === undefined ? null : <span className="vs-pickrow-from">{props.from}</span>}
       {props.bar === undefined ? null : (
         <span className="vs-pickrow-bar">
           <Meter label={props.bar.label} value={props.bar.value} tone={props.bar.tone} />
@@ -144,6 +148,21 @@ function Trail(props: {
         <span className="vs-pickrow-figure" data-tone={props.figureTone ?? 'default'}>
           {props.figure}
         </span>
+      )}
+      {trail === undefined ? null : trail.press === undefined ? (
+        <span className="vs-pickrow-trail">{trail.label}</span>
+      ) : (
+        <button
+          type="button"
+          className="vs-pickrow-trail"
+          tabIndex={-1}
+          onClick={event => {
+            event.stopPropagation();
+            trail.press?.();
+          }}
+        >
+          {trail.label}
+        </button>
       )}
     </>
   );
@@ -173,8 +192,8 @@ export function PickRow(props: {
   /** Called when the pointer or the focus enters (true) or leaves (false) the row. */
   readonly hover?: (on: boolean) => void;
   readonly bar?: RowBar;
-  /** A muted column naming what this row came from (its parent), before the bar. */
-  readonly from?: string;
+  /** A muted last column after the figure, such as "from <parent>"; with `press` it is a link. */
+  readonly trail?: {readonly label: string; readonly press?: () => void};
   /** An accent stripe down the row's edge: it is on the chain the reader is led along (a winning path). */
   readonly stripe?: boolean;
   readonly badges?: readonly {readonly label: string; readonly tone: StatusTone}[];

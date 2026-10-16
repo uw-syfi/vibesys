@@ -11,6 +11,8 @@ export interface ChartPoint {
   readonly x: number;
   readonly y: number;
   readonly filled: boolean;
+  /** A minor point (a rejected try): small and faint. Without it, hollow points turn faint when there are many. */
+  readonly faint?: boolean;
 }
 
 /** A value on an axis and the text it is labelled with. */
@@ -150,7 +152,8 @@ function Axes(props: {
  * `strip` is a short, wide chart. Points with an `id` are buttons that call `pick(id)`; the one
  * whose id is `selected` is drawn larger and ringed. The pickable points are one tab stop (the
  * selected one, else the first); the arrows, Home and End move among them. With many points the
- * hollow ones are small and faint and the filled ones lead.
+ * hollow ones are small and faint and the filled ones lead; with thousands, the minor ones
+ * without an id are binned into at most a few thousand dots.
  */
 export function Chart(props: {
   readonly label: string;
@@ -207,7 +210,7 @@ export function Chart(props: {
         </g>
       )}
       {steps.length === 0 ? null : <path className="vs-chart-step" d={stepPath(steps, at)} />}
-      {props.points.map(point => (
+      {drawnPoints(props.points).map(point => (
         <Point
           key={point.id ?? `${point.x}:${point.y}`}
           point={point}
@@ -241,6 +244,38 @@ const SELECTED_RADIUS = 8;
 /** With more points than this, the hollow ones are small and faint, so the kept ones lead. */
 const DENSE_ABOVE = 60;
 const FAINT_RADIUS = 3;
+/** With more points than this, minor points without an id are binned, one dot per cell of a grid. */
+const BIN_ABOVE = 1000;
+const BIN_COLUMNS = 100;
+const BIN_ROWS = 30;
+
+/**
+ * The points to draw: all of them, or, above `BIN_ABOVE`, every filled or identified point and one
+ * faint dot for each occupied cell of a grid over the rest, so the node count is bounded.
+ */
+function drawnPoints(points: readonly ChartPoint[]): readonly ChartPoint[] {
+  if (points.length <= BIN_ABOVE) return points;
+  const xs = points.map(point => point.x);
+  const ys = points.map(point => point.y);
+  const [x0, x1] = extent(xs);
+  const [y0, y1] = extent(ys);
+  const cells = new Map<number, ChartPoint>();
+  const kept: ChartPoint[] = [];
+  for (const point of points) {
+    if (point.filled || point.id !== undefined) {
+      kept.push(point);
+      continue;
+    }
+    const column = Math.min(
+      BIN_COLUMNS - 1,
+      Math.floor(((point.x - x0) / (x1 - x0)) * BIN_COLUMNS),
+    );
+    const row = Math.min(BIN_ROWS - 1, Math.floor(((point.y - y0) / (y1 - y0)) * BIN_ROWS));
+    const cell = row * BIN_COLUMNS + column;
+    if (!cells.has(cell)) cells.set(cell, {...point, faint: true});
+  }
+  return [...cells.values(), ...kept];
+}
 
 /** One point; with an `id` and a `pick` it is a button. */
 function Point(props: {
@@ -253,7 +288,7 @@ function Point(props: {
   readonly pick: ((id: string) => void) | undefined;
 }): JSX.Element {
   const {point, at, selected, pick} = props;
-  const faint = props.dense && !point.filled;
+  const faint = point.faint ?? (props.dense && !point.filled);
   const id = point.id;
   const cx = at.x(point.x);
   const cy = at.y(point.y);
