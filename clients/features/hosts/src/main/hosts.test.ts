@@ -454,6 +454,89 @@ describe('Hosts checkout changes', () => {
     expect(manager.existing('ssh:alpha')).toBeNull();
   });
 
+  test('an ambiguous removal write still retires the connection matching its visible result', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const link = new FakeLink();
+    await using manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const retired: string[] = [];
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {
+        throw new Error('log failed');
+      },
+      push: () => {},
+      retire: key => {
+        retired.push(key);
+        throw new Error('retire failed');
+      },
+    });
+    await hosts.recent([ALPHA]);
+    expect(manager.existing('ssh:alpha')).not.toBeNull();
+    const persistence = new Error('directory sync failed');
+    filesystem.failNextDirectorySync('/settings/hosts.json', persistence);
+
+    await expect(hosts.remove(ALPHA)).rejects.toBe(persistence);
+
+    expect(settingsFor((await settings.hosts()).settings, ALPHA)).toBeNull();
+    expect(manager.existing('ssh:alpha')).toBeNull();
+    expect(retired).toEqual(['ssh:alpha']);
+  });
+
+  test('a failed removal preserves its persistence error when repair diagnostics also fail', async () => {
+    const filesystem = new FakeSettingsFilesystem();
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
+      filesystem,
+      log: () => {},
+    });
+    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
+    const manager = new ConnectionManager({
+      linkFor: () => new FakeLink(),
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: CONFIG,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {
+        throw new Error('diagnostic failed');
+      },
+      push: () => {},
+      retire: () => {},
+    });
+    await hosts.recent([ALPHA]);
+    await manager[Symbol.asyncDispose]();
+    const persistence = new Error('replace failed');
+    filesystem.failNextReplace('/settings/hosts.json', persistence);
+
+    await expect(hosts.remove(ALPHA)).rejects.toBe(persistence);
+
+    expect(settingsFor((await settings.hosts()).settings, ALPHA)?.checkout).toBe('/old');
+  });
+
   test('cancelling checkout validation cannot persist or replace a newer operation', async () => {
     const directory = '/settings';
     const filesystem = new FakeSettingsFilesystem();

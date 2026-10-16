@@ -257,10 +257,19 @@ export class Hosts {
             }`,
           );
       }
-      await this.#deps.settings.updateHosts(current => withoutHost(current, id));
+      let persistenceFailure: {readonly error: unknown} | null = null;
+      try {
+        await this.#deps.settings.updateHosts(current => withoutHost(current, id));
+      } catch (error) {
+        // Atomic replacement may already be visible when its directory sync reports failure.
+        // Reconcile from the authoritative file on both sides of that ambiguous boundary before
+        // releasing the mutation fence, while preserving the durability failure for the caller.
+        persistenceFailure = {error};
+      }
       this.#checkoutRevisions.set(key, {removed: true});
       this.#watchIntents.delete(key);
       await this.#repairDesired(key);
+      if (persistenceFailure !== null) throw persistenceFailure.error;
     } finally {
       this.#removing.delete(key);
     }
@@ -516,11 +525,24 @@ export class Hosts {
     for (const [key, watched] of this.#watched) {
       if (desired.has(key)) continue;
       this.#watched.delete(key);
-      watched.stop();
-      this.#deps.retire(key);
-      this.#retireLease(key, watched.lease);
+      this.#retireWatched(key, watched);
     }
     return generation;
+  }
+
+  /** Attempt every retirement step even when presentation cleanup itself reports a failure. */
+  #retireWatched(key: HostKey, watched: WatchedHost): void {
+    try {
+      watched.stop();
+    } catch (error) {
+      this.#logRetirementFailure(key, error);
+    }
+    try {
+      this.#deps.retire(key);
+    } catch (error) {
+      this.#logRetirementFailure(key, error);
+    }
+    this.#retireLease(key, watched.lease);
   }
 
   /** Observe cleanup without making a desired-set transition wait for connection resource I/O. */
@@ -565,9 +587,7 @@ export class Hosts {
       } catch (error) {
         // One host's acquisition failing (routinely: the manager disposing mid-shutdown) must
         // not stop this pass from reaching every other desired host.
-        this.#deps.log(
-          `could not connect ${hostLabel(hostFromKey(key))}: ${(error as Error).message}`,
-        );
+        this.#logConnectionFailure(key, error);
       }
     }
   }
@@ -592,9 +612,7 @@ export class Hosts {
       const watched = this.#watched.get(key);
       if (watched !== undefined) {
         this.#watched.delete(key);
-        watched.stop();
-        this.#deps.retire(key);
-        this.#retireLease(key, watched.lease);
+        this.#retireWatched(key, watched);
       }
       return;
     }
@@ -619,9 +637,19 @@ export class Hosts {
     try {
       await this.#acquireDesired(key, generation, undefined);
     } catch (error) {
+      this.#logConnectionFailure(key, error);
+    }
+  }
+
+  #logConnectionFailure(key: HostKey, error: unknown): void {
+    try {
       this.#deps.log(
-        `could not connect ${hostLabel(hostFromKey(key))}: ${(error as Error).message}`,
+        `could not connect ${hostLabel(hostFromKey(key))}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
+    } catch {
+      // A diagnostic must not replace the operation failure that triggered reconciliation.
     }
   }
 
