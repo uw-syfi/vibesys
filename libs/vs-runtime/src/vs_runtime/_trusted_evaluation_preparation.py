@@ -66,6 +66,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -135,16 +136,53 @@ with (scratch / ".recovery.lock").open("a+b") as recovery:
     fcntl.flock(lease.fileno(), fcntl.LOCK_EX)
 
 interrupted = None
+process = None
+unwinding = False
+
+
+def begin_interrupt():
+    global unwinding
+    if unwinding:
+        return
+    unwinding = True
+    # Make cleanup one-shot before control leaves the interrupted operation.
+    # A second handled signal must never raise from inside the finally block.
+    signal.pthread_sigmask(signal.SIG_BLOCK, handled_signals)
+    for handled in handled_signals:
+        signal.signal(handled, signal.SIG_IGN)
+    raise InterruptedError
 
 
 def stop(signum, _frame):
     global interrupted
-    interrupted = signum
-    raise InterruptedError
+    if interrupted is None:
+        interrupted = signum
+    # Popen can dispatch a signal after fork but before publishing the child
+    # handle. Record that signal without unwinding until the child is owned;
+    # afterwards unwinding is safe because the finally block can stop it.
+    if process is not None:
+        begin_interrupt()
 
 
-for handled in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+handled_signals = (signal.SIGHUP, signal.SIGINT, signal.SIGTERM)
+for handled in handled_signals:
     signal.signal(handled, stop)
+
+
+def wait_without_reaping(process, timeout=None):
+    # Observe leader exit while retaining its PID and process-group ownership.
+    options = os.WEXITED | os.WNOWAIT
+    if timeout is None:
+        return os.waitid(os.P_PID, process.pid, options)
+    deadline = time.monotonic() + timeout
+    while True:
+        result = os.waitid(os.P_PID, process.pid, options | os.WNOHANG)
+        if result is not None:
+            return result
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(0.05, remaining))
 
 environment = os.environ.copy()
 environment.update(
@@ -159,32 +197,44 @@ environment.update(
 )
 status = 1
 cleanup_error = None
-process = None
 try:
     process = subprocess.Popen(
         ["go", "-C", module_root, "list", "-deps", "./..."],
         env=environment,
+        start_new_session=True,
         stdout=subprocess.DEVNULL,
     )
-    status = process.wait()
+    if interrupted is not None:
+        begin_interrupt()
+    wait_without_reaping(process)
+    # From here onward every path is cleanup. A first late signal may record
+    # interruption, but must not raise from inside the finally block.
+    unwinding = True
 except InterruptedError:
     status = 128 + (interrupted or signal.SIGTERM)
 finally:
-    for handled in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+    signal.pthread_sigmask(signal.SIG_BLOCK, handled_signals)
+    for handled in handled_signals:
         signal.signal(handled, signal.SIG_IGN)
-    if process is not None and process.poll() is None:
+    if process is not None:
         try:
-            process.terminate()
+            os.killpg(process.pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
+        wait_without_reaping(process, timeout=5)
+        # The group leader can exit before descendants have honored TERM.
+        # Keep that leader unreaped so its numeric PGID cannot be reused, then
+        # always retire the isolated group before deleting its shared cache.
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            try:
-                process.kill()
-            except ProcessLookupError:
-                pass
-            process.wait()
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        leader_status = process.wait()
+        status = (
+            leader_status
+            if interrupted is None
+            else 128 + (interrupted or signal.SIGTERM)
+        )
     try:
         with (scratch / ".recovery.lock").open("a+b") as recovery:
             fcntl.flock(recovery.fileno(), fcntl.LOCK_EX)

@@ -328,8 +328,33 @@ def test_go_module_setup_downloads_before_an_explicit_offline_verification(
     assert "GOFLAGS='-mod=readonly -buildvcs=false'" in command
     assert "mod verify" in command
     assert '["go", "-C", module_root, "list", "-deps", "./..."]' in command
-    assert "process.terminate()" in command
-    assert "process.kill()" in command
+    assert "if process is not None:\n        begin_interrupt()" in command
+    assert command.index("process = subprocess.Popen") < command.index(
+        "if interrupted is not None:\n        begin_interrupt()"
+    )
+    assert (
+        "wait_without_reaping(process)\n"
+        "    # From here onward every path is cleanup. A first late signal may record\n"
+        "    # interruption, but must not raise from inside the finally block.\n"
+        "    unwinding = True\n"
+        "except InterruptedError:"
+    ) in command
+    assert (
+        "unwinding = True\n"
+        "    # Make cleanup one-shot before control leaves the interrupted operation.\n"
+        "    # A second handled signal must never raise from inside the finally block.\n"
+        "    signal.pthread_sigmask(signal.SIG_BLOCK, handled_signals)\n"
+        "    for handled in handled_signals:\n"
+        "        signal.signal(handled, signal.SIG_IGN)\n"
+        "    raise InterruptedError"
+    ) in command
+    assert "os.WEXITED | os.WNOWAIT" in command
+    assert "start_new_session=True" in command
+    assert "os.killpg(process.pid, signal.SIGTERM)" in command
+    assert "os.killpg(process.pid, signal.SIGKILL)" in command
+    assert command.index("os.killpg(process.pid, signal.SIGKILL)") < command.index(
+        "leader_status = process.wait()"
+    )
     assert "failed to prepare evaluator Go modules" in command
     assert "vibesys-evaluator-go-verify-" in command
     assert "fcntl.LOCK_EX | fcntl.LOCK_NB" in command

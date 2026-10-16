@@ -230,6 +230,8 @@ def test_interrupted_verification_cleans_scratch_and_recovers_abandoned_work(
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     go_log = tmp_path / "go-list-cache"
+    go_term_log = tmp_path / "go-term-handled"
+    go_descendant_ready = tmp_path / "go-descendant-ready"
     fake_go = fake_bin / "go"
     fake_go.write_text(
         """#!/bin/sh
@@ -237,9 +239,17 @@ case " $* " in
   *" list -deps ./... "*)
     printf '%s\\n' "$GOCACHE" > "$FAKE_GO_LOG"
     if [ "${FAKE_GO_INTERRUPT:-}" = 1 ]; then
-      trap 'exit 0' TERM
+      (
+        trap '' TERM
+        : > "$FAKE_GO_DESCENDANT_READY"
+        while :; do :; done
+      ) &
+      descendant=$!
+      trap 'printf "driver\\n" >> "$FAKE_GO_TERM_LOG"; exit 0' TERM
+      while [ ! -f "$FAKE_GO_DESCENDANT_READY" ]; do :; done
       kill -TERM "$PPID"
-      while :; do :; done
+      kill -HUP "$PPID"
+      wait "$descendant"
     fi
     ;;
 esac
@@ -256,6 +266,8 @@ exit 0
     environment = {
         **os.environ,
         "FAKE_GO_LOG": str(go_log),
+        "FAKE_GO_TERM_LOG": str(go_term_log),
+        "FAKE_GO_DESCENDANT_READY": str(go_descendant_ready),
         "PATH": f"{fake_bin}:{os.environ['PATH']}",
         "TMPDIR": str(runtime_scratch),
     }
@@ -273,6 +285,7 @@ exit 0
     assert "evaluator Go module cache cannot resolve the declared package offline" in (
         interrupted_diagnostic
     )
+    assert go_term_log.read_text(encoding="utf-8").splitlines() == ["driver"]
     assert go_log.is_file(), interrupted_diagnostic
     interrupted_cache = Path(go_log.read_text(encoding="utf-8").strip())
     assert not interrupted_cache.exists()
