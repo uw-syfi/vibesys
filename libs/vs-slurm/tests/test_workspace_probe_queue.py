@@ -323,20 +323,33 @@ def _refuse_sbatch(
             "version": 1,
             "returncode": 1,
             "stdout": "",
-            "stderr": "sbatch: error: invalid partition specified: nope\n",
+            "stderr": (
+                "Welcome to cayenne, private-banner-text\n"
+                "sbatch: error: invalid partition specified: nope\n"
+            ),
         }
     return answer(request)
 
 
-def test_an_sbatch_refusal_is_reported_in_sbatchs_own_words(tmp_path: Path) -> None:
+def test_an_sbatch_refusal_is_reported_in_sbatchs_own_words_and_a_resume_retries(
+    tmp_path: Path,
+) -> None:
     remote, connector = _setup(tmp_path)
     connector.intercept(_refuse_sbatch)
 
     with pytest.raises(
         SlurmWorkspaceRootProbeError,
-        match=(r"exit code 1 running sbatch: sbatch: error: invalid partition specified: nope"),
-    ):
+        match=r"rejected: .*exit code 1 running sbatch: sbatch: error: invalid partition",
+    ) as refused:
         _probe(_config(remote), connector, tmp_path)
+    assert "private-banner-text" not in str(refused.value)
+
+    # The refusal is a proven rejection, so resuming the run submits the probe again.
+    connector.intercept(None)
+    _probe(_config(remote), connector, tmp_path)
+
+    assert connector.submitted_job_ids() == (_FIRST_JOB_ID,)
+    _assert_cleaned(remote)
 
 
 def test_a_record_written_by_the_previous_release_is_still_read(tmp_path: Path) -> None:

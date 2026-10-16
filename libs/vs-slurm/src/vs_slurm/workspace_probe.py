@@ -385,6 +385,13 @@ class _ProbeLifecycle:
     def _run_locked(self) -> None:
         stored = _read(self._store)
         generation = 0 if stored is None else stored.generation
+        request, identity, node_token = self._bind(generation)
+        if stored is not None and (
+            stored.operation_id != self._operation_id
+            or stored.workspace_identity != identity
+            or stored.claim_identity != self._claim_identity
+        ):
+            raise SlurmWorkspaceRootProbeError.state_invalid()
         if stored is not None and stored.outcome == "unscheduled":
             # The scheduler never started that attempt and it was settled and cleaned
             # when recorded; confirm the cleanup, then retry under a fresh operation
@@ -392,15 +399,7 @@ class _ProbeLifecycle:
             _cleanup(self._runner, stored)
             generation += 1
             stored = None
-        self._operation_id = _operation_id(self._run_id, generation)
-        self._claim_identity = _claim_identity(self._state_root, self._operation_id)
-        request, identity, node_token, _returned = _request(self._store, self._operation_id)
-        if stored is not None and (
-            stored.operation_id != self._operation_id
-            or stored.workspace_identity != identity
-            or stored.claim_identity != self._claim_identity
-        ):
-            raise SlurmWorkspaceRootProbeError.state_invalid()
+            request, identity, node_token = self._bind(generation)
         state = stored or _ProbeState(
             generation=generation,
             operation_id=self._operation_id,
@@ -412,6 +411,13 @@ class _ProbeLifecycle:
             return
         state, handle = self._handle(request, state)
         self._verify(state, handle, node_token)
+
+    def _bind(self, generation: int) -> tuple[SlurmJobRequest, str, str]:
+        """Select ``generation``'s operation and prepare its payload."""
+        self._operation_id = _operation_id(self._run_id, generation)
+        self._claim_identity = _claim_identity(self._state_root, self._operation_id)
+        request, identity, node_token, _returned = _request(self._store, self._operation_id)
+        return request, identity, node_token
 
     def _finish_stored(self, state: _ProbeState) -> None:
         _cleanup(self._runner, state)
@@ -580,9 +586,7 @@ class _ProbeLifecycle:
         self._publish_or_fail(self._intent(accepted), accepted, handle)
         return accepted, handle
 
-    def _reject_before_submission(
-        self, state: _ProbeState, error: SlurmSubmissionRejectedError
-    ) -> NoReturn:
+    def _reject_before_submission(self, state: _ProbeState, error: SlurmError) -> NoReturn:
         rejecting = self._save_phase(state, "rejecting")
         self._publish_rejection(rejecting, cause=error)
 
@@ -618,6 +622,11 @@ class _ProbeLifecycle:
             handle = _remote_handle(self._runner, request, self._intent(state), evidence)
         except _BOUNDARY_FAILURES as recovery_error:
             _raise_unresolved(recovery_error)
+        if handle is None and isinstance(error, SlurmSbatchFailedError):
+            # sbatch ran, exited nonzero without printing a job id, and no job carries
+            # the probe's name: the scheduler refused it. Publishing the rejection
+            # leaves a retry point, so a resume submits again.
+            self._reject_before_submission(state, error)
         if handle is None:
             _raise_unresolved(error)
         return self._accept_handle(state, handle)
