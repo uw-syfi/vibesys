@@ -41,6 +41,7 @@ const CHANNELS: Channels = {
   retry: 'vibesys:welcome:retry',
   stop: 'vibesys:welcome:stop',
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
+  releaseRun: 'vibesys:welcome:release-run',
   preferences: 'vibesys:welcome:preferences',
   setAppearance: 'vibesys:welcome:set-appearance',
   setNotifications: 'vibesys:welcome:set-notifications',
@@ -65,6 +66,9 @@ const EVENTS: Events = {
 };
 const FIRST_PAINT_CHANNEL: typeof import('@vibesys/ipc').FIRST_PAINT_CHANNEL =
   'vibesys:welcome:first-paint';
+const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
+const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
+const RUN_PORT_MESSAGE: typeof import('@vibesys/ipc').RUN_PORT_MESSAGE = 'vibesys:run-port';
 
 /** Effects the sandbox grants this preload, injectable so the exposed bridge has a public Fake. */
 interface WelcomePreloadCapabilities {
@@ -73,6 +77,11 @@ interface WelcomePreloadCapabilities {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   /** Hear every value the main process sends on `channel`. */
   on(channel: string, listener: (value: unknown) => void): void;
+  /**
+   * Open one run connection: hand one end of a new channel to the main process and the other to
+   * the page, as a window message named `id`.
+   */
+  connectRun(id: string): void;
 }
 
 /** Build the page capability from its Electron boundary effects. */
@@ -107,6 +116,9 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     showWelcome: () => call(CHANNELS.showWelcome),
     retry: () => call(CHANNELS.retry),
     stop: (host, instance, force) => call(CHANNELS.stop, host, instance, force),
+    releaseRun: () => call(CHANNELS.releaseRun),
+    connectRun: id => capabilities.connectRun(id),
+    onWake: listener => capabilities.on(WAKE_CHANNEL, () => listener()),
     stopConfirmed: (host, instance, force) => call(CHANNELS.stopConfirmed, host, instance, force),
     preferences: () => call(CHANNELS.preferences),
     setAppearance: appearance => call(CHANNELS.setAppearance, appearance),
@@ -142,6 +154,12 @@ if (process.type === 'renderer') {
       invoke: (channel, ...args) => electron.ipcRenderer.invoke(channel, ...args),
       on: (channel, listener) =>
         electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
+      connectRun: id => {
+        const {port1: port, port2: remote} = new MessageChannel();
+        electron.ipcRenderer.postMessage(CONNECT_CHANNEL, null, [remote]);
+        // A port cannot cross the context bridge as a value; it can as this window's message.
+        window.postMessage({type: RUN_PORT_MESSAGE, id}, '*', [port]);
+      },
     }),
   );
   prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));

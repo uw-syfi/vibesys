@@ -25,7 +25,10 @@ import {bindWelcomeIpc, type WelcomeIpc} from './welcome-ipc.js';
 import type {AppWindow} from './window.js';
 
 export interface DesktopDeps {
-  readonly window: Pick<AppWindow, 'focus' | 'mode' | 'sendWelcome' | 'setMode' | 'welcome'>;
+  readonly window: Pick<
+    AppWindow,
+    'focus' | 'mode' | 'releaseSurfaceRun' | 'sendWelcome' | 'setMode' | 'welcome'
+  >;
   readonly welcome: Pick<WelcomeFeed, 'chrome' | 'recent' | 'showHost' | 'snapshot'>;
   readonly hosts: Pick<
     Hosts,
@@ -288,6 +291,9 @@ export class Desktop {
       case 'show-run':
       case 'show-welcome':
         this.#mode(request.kind === 'show-run' ? 'run' : 'welcome');
+        return null;
+      case 'release-run':
+        this.#deps.window.releaseSurfaceRun();
         return null;
       case 'retry':
         runs.retry();

@@ -27,6 +27,7 @@ const createWelcomePreload = createRequire(import.meta.url)(
 class ParsingMain {
   readonly invoked = new Set<string>();
   readonly subscribed = new Map<string, (value: unknown) => void>();
+  readonly connected: string[] = [];
 
   readonly bridge: WelcomeBridge = createWelcomePreload({
     platform: 'test',
@@ -37,6 +38,9 @@ class ParsingMain {
       } catch (error) {
         return {ok: false, error: (error as Error).message, authNeeded: false};
       }
+    },
+    connectRun: id => {
+      this.connected.push(id);
     },
     on: (channel, listener) => {
       this.subscribed.set(channel, listener);
@@ -138,6 +142,7 @@ function cases(random: Seeded): Case[] {
       bridge => bridge.stopConfirmed(key, instance, force),
       {kind: 'stop', host, instance, force, confirmed: true},
     ],
+    [bridge => bridge.releaseRun(), {kind: 'release-run'}],
     [bridge => bridge.preferences(), {kind: 'preferences'}],
     [bridge => bridge.setAppearance(appearance), {kind: 'set-appearance', appearance}],
     [bridge => bridge.setNotifications(force), {kind: 'set-notifications', enabled: force}],
@@ -174,6 +179,18 @@ describe('the welcome contract', () => {
       }
       expect([...main.invoked].sort()).toEqual(Object.values(WELCOME_CHANNELS).sort());
     }
+  });
+
+  test('a run connection asks the preload for a channel, and a wake reaches the view', () => {
+    const main = new ParsingMain();
+    let woke = 0;
+    main.bridge.connectRun('run-1');
+    main.bridge.onWake(() => {
+      woke += 1;
+    });
+    main.subscribed.get('vibesys:wake')?.(undefined);
+    expect(main.connected).toEqual(['run-1']);
+    expect(woke).toBe(1);
   });
 
   test('every event the main process sends reaches the listener the view registered', () => {

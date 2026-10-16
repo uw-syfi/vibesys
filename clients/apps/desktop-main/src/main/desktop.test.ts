@@ -169,6 +169,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     welcome: document,
     focus: () => undefined,
     setMode: () => undefined,
+    releaseSurfaceRun: () => undefined,
     sendWelcome: <T>(_channel: string, _event: WelcomeEvent<T>): void => undefined,
   };
   new Desktop({
