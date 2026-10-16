@@ -1,6 +1,5 @@
 import {
   type ExperimentCursor,
-  isServerRejection,
   type ProtocolResponse,
   type RunEvent,
   type RunSnapshot,
@@ -533,7 +532,7 @@ export class SocketSessionController implements SessionController {
       });
     } catch (error) {
       if (isIterationStoreReplaced(error)) return {kind: 'store-replaced'};
-      if (this.#iterationCapability === 'unknown' && isServerRejection(error)) {
+      if (this.#iterationCapability === 'unknown' && isLegacyUnsupportedIterationRequest(error)) {
         return {kind: 'unsupported'};
       }
       throw error;
@@ -1723,6 +1722,11 @@ function reportCaughtError(
 
 function isIterationStoreReplaced(error: unknown): error is ServerError {
   return error instanceof ServerError && error.diagnostic?.code === 'iteration_store_replaced';
+}
+
+/** Whether an old server rejected the iteration query before typed diagnostics existed. */
+function isLegacyUnsupportedIterationRequest(error: unknown): error is ServerError {
+  return error instanceof ServerError && error.diagnostic === null;
 }
 
 function isEventsStoreReplaced(error: unknown): error is ServerError {

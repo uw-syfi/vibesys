@@ -639,7 +639,7 @@ describe('session controller', () => {
     ]);
   });
 
-  it('falls back only when the initial iteration capability probe is rejected', async () => {
+  it('falls back only for a legacy untyped first iteration rejection', async () => {
     const transport = new FakeTransport();
     transport.iterationResponses.push(new ServerError('Unsupported protocol request'));
     const controller = new SocketSessionController(transport);
@@ -659,6 +659,39 @@ describe('session controller', () => {
       1,
     );
     expect(controller.state.errorBanner).toBeNull();
+  });
+
+  it.each([
+    'iteration_query_invalid',
+    'operation_failed',
+    'future_structured_failure',
+  ])('keeps a structured first iteration failure (%s) visible and retryable', async code => {
+    const transport = new FakeTransport();
+    const summary = `Structured iteration failure: ${code}`;
+    transport.iterationResponses.push(
+      new ServerError(summary, {code, summary, scope: 'request'}),
+      iterationPageResponse('recovered', null, 1, 1, null),
+    );
+    const controller = new SocketSessionController(transport);
+
+    await controller.start();
+    expect(controller.state.errorBanner).toMatchObject({message: summary, scope: 'request'});
+
+    transport.emit({
+      type: 'event',
+      event: {
+        ...event(13, 'iterations_changed'),
+        data: {kind: 'iterations_changed', revision: 'recovered'},
+      },
+    });
+    await waitForController(controller, state => state.iterations.revision === 'recovered');
+
+    expect(transport.requests.filter(request => request.type === 'query.iterations')).toHaveLength(
+      2,
+    );
+    expect(iterationRailRounds(controller.state)).toMatchObject([
+      {iterationLabel: 'Generation 1', status: 'completed'},
+    ]);
   });
 
   it('applies a replay batch before reconciling its active execution checkpoint', async () => {
