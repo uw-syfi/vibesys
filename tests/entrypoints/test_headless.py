@@ -31,7 +31,7 @@ from entrypoints.cli import (
 from entrypoints.cli.environment import TaskImageBuild
 from entrypoints.headless import main
 from vibesys.api.metrics import MetricSpace, Objective
-from vibesys.api.request import TaskImageError, backend_default_image
+from vibesys.api.request import TaskImageError, backend_default_image, task_image_reference
 from vibesys.config import Config
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -46,7 +46,7 @@ from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.core_run import RunEnd
-from vs_agent.api.testing import FakeDockerBuildRunner
+from vs_agent.api.testing import DockerBuildResult, FakeDockerBuildRunner, docker_build_result
 from vs_project.api import (
     AgentRoleExecutionRecord,
     OrchestrationDescriptor,
@@ -59,7 +59,10 @@ from vs_runtime.api import RunStatus as PluginRunStatus
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, run_environment_record
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
     from pathlib import Path
+
+    from vs_sim.api import OutputSink
 
 _LOOP_RUN_TARGETS = {
     "agent": "vibesys.api._session.run_plugin",
@@ -582,11 +585,15 @@ def test_task_dockerfile_builds_once_on_the_backend_base_for_every_container_env
         invocation.args, task_image=TaskImageBuild(backend=backend, runner=runner)
     )
 
+    reference = task_image_reference(
+        dockerfile.resolve(), base_image=backend_default_image(backend)
+    )
     assert spec.name == environment
-    assert spec.options["image"] == image_id
+    assert spec.options["image"] == reference
     assert spec.task_dockerfile == dockerfile.resolve()
-    assert run_environment_record(spec).image == image_id
+    assert run_environment_record(spec).image == reference
     (build,) = _docker_builds(runner)
+    assert reference in build
     assert f"BASE_IMAGE={backend_default_image(backend)}" in build
 
 
@@ -628,7 +635,9 @@ def test_each_outer_loop_builds_the_task_image_once(
     build.assert_called_once()
     assert build.call_args.args == (dockerfile.resolve(),)
     assert request.run_environment is not None
-    assert request.run_environment.options["image"] == image_id
+    assert request.run_environment.options["image"] == task_image_reference(
+        dockerfile.resolve(), base_image=build.call_args.kwargs["base_image"]
+    )
 
 
 @pytest.mark.parametrize("environment", _CONTAINER_ENVIRONMENTS)
@@ -1131,22 +1140,55 @@ def test_repository_resume_refuses_a_task_dockerfile_the_record_has_no_image_for
         parse_cli_invocation(["--resume", run_id])
 
 
-@pytest.mark.parametrize("environment", ["docker", "slurm"])
-@pytest.mark.parametrize("rebuild", ["reproduced", "changed"])
-def test_repository_resume_rebuilds_and_checks_the_recorded_task_image(
-    environment: Literal["docker", "slurm"],
-    rebuild: str,
+class _FakeDockerDaemon:
+    """The local images a resume inspects and rebuilds, by tag and by ID.
+
+    A build points its tag at ``next_id``, as a daemon whose build cache is gone
+    might; ``image inspect`` answers for a live tag or ID and fails otherwise.
+    """
+
+    def __init__(self, images: dict[str, str], *, next_id: str) -> None:
+        self.images = dict(images)
+        self.next_id = next_id
+        self.builds: list[tuple[str, ...]] = []
+
+    def run(
+        self, argv: Sequence[str], *, cwd: Path, timeout: float, output: OutputSink
+    ) -> DockerBuildResult:
+        del cwd, timeout, output
+        command = tuple(argv)
+        if command[1] == "build":
+            self.builds.append(command)
+            self.images[command[command.index("--tag") + 1]] = self.next_id
+            return docker_build_result(command)
+        if command[1:3] == ("image", "inspect"):
+            name = command[-1]
+            image_id = self.images.get(name) or (name if name in self.images.values() else "")
+            return docker_build_result(command, returncode=0 if image_id else 1, stdout=image_id)
+        if command[1:3] == ("image", "ls"):
+            return docker_build_result(command)
+        message = f"unscripted docker command: {command}"
+        raise AssertionError(message)
+
+
+_OLD_ID = f"sha256:{'a' * 64}"
+_NEW_ID = f"sha256:{'b' * 64}"
+
+
+def _resume_task_image(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    *,
+    environment: Literal["docker", "slurm"],
+    recorded: Callable[[Path], str],
+    daemon: Callable[[str], _FakeDockerDaemon],
+) -> tuple[Callable[[], RunEnvironmentSpec], _FakeDockerDaemon, str]:
+    """Record a run with a task image, then return a resume of it and its daemon."""
     project = tmp_path / "repository"
     project.mkdir()
-    task = _write_repository_task(project, "latency")
-    dockerfile = task / "Dockerfile"
+    dockerfile = _write_repository_task(project, "latency") / "Dockerfile"
     dockerfile.write_text("FROM python:3.12-bookworm\n")
-    recorded_image = f"sha256:{'a' * 64}"
-    reproduced = rebuild == "reproduced"
-    rebuilt_image = recorded_image if reproduced else f"sha256:{'b' * 64}"
+    image = recorded(dockerfile.resolve())
     slurm_config = (
         str(_write_slurm_operator_config(tmp_path / "operator-slurm.toml"))
         if environment == "slurm"
@@ -1158,27 +1200,110 @@ def test_repository_resume_rebuilds_and_checks_the_recorded_task_image(
         run_id,
         configuration=_agent_configuration(
             run_environment=RunEnvironmentRecord(
-                name=environment, image=recorded_image, config_path=slurm_config
+                name=environment, image=image, config_path=slurm_config
             )
         ),
         created_at=datetime(2026, 8, 11, 12, tzinfo=UTC),
         options=_RunFixtureOptions(task_name="latency"),
     )
     monkeypatch.chdir(project)
-
     args = parse_cli_invocation(["--resume", run_id]).args
-    runner = FakeDockerBuildRunner(image_id=rebuilt_image)
-    build = TaskImageBuild(backend=ComputeBackend.CUDA, runner=runner)
+    fake = daemon(image)
+    build = TaskImageBuild(backend=ComputeBackend.CUDA, runner=fake)
+    return (lambda: run_environment_spec_from_args(args, task_image=build)), fake, image
 
-    if reproduced:
-        spec = run_environment_spec_from_args(args, task_image=build)
-        assert spec.name == environment
-        assert run_environment_record(spec).image == recorded_image
+
+def _current_reference(dockerfile: Path) -> str:
+    return task_image_reference(dockerfile, base_image=backend_default_image(ComputeBackend.CUDA))
+
+
+@pytest.mark.parametrize("environment", ["docker", "slurm"])
+@pytest.mark.parametrize("recorded_image", ["present", "gone"])
+def test_resume_with_unchanged_task_inputs_runs_the_recorded_reference(
+    environment: Literal["docker", "slurm"],
+    recorded_image: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: a pruned build cache gave a new image ID and resume was refused.
+
+    A recorded image still in the daemon is reused without a build; once it
+    is gone, unchanged inputs rebuild it, and the new ID resumes.
+    """
+    present = recorded_image == "present"
+    resume, daemon, reference = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment=environment,
+        recorded=_current_reference,
+        daemon=lambda image: _FakeDockerDaemon(
+            {image: _OLD_ID} if present else {}, next_id=_NEW_ID
+        ),
+    )
+
+    spec = resume()
+
+    assert spec.name == environment
+    assert run_environment_record(spec).image == reference
+    if present:
+        assert daemon.builds == []
     else:
-        with pytest.raises(TaskImageError, match="Dockerfile or its build context changed"):
-            run_environment_spec_from_args(args, task_image=build)
-    (docker_build,) = _docker_builds(runner)
-    assert str(dockerfile.resolve()) in docker_build
+        (build,) = daemon.builds
+        assert reference in build
+        assert f"BASE_IMAGE={backend_default_image(ComputeBackend.CUDA)}" in build
+
+
+def _reference_then_edit(dockerfile: Path) -> str:
+    """Record the current reference, then change the Dockerfile after the run started."""
+    reference = _current_reference(dockerfile)
+    dockerfile.write_text("FROM python:3.13-bookworm\n")
+    return reference
+
+
+@pytest.mark.parametrize("environment", ["docker", "slurm"])
+def test_resume_refuses_changed_task_inputs_before_building(
+    environment: Literal["docker", "slurm"], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    resume, daemon, _ = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment=environment,
+        recorded=_reference_then_edit,
+        daemon=lambda image: _FakeDockerDaemon({image: _OLD_ID}, next_id=_NEW_ID),
+    )
+
+    with pytest.raises(TaskImageError, match="inputs changed"):
+        resume()
+    assert daemon.builds == []
+
+
+@pytest.mark.parametrize(
+    "case", ["present", "gone, rebuilt identically", "gone, rebuilt differently"]
+)
+def test_a_run_recorded_with_an_image_id_resumes_only_on_that_id(
+    case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A run from before input-keyed references rebuilds as it was built, without BASE_IMAGE."""
+    present = case == "present"
+    rebuilt = _NEW_ID if case.endswith("differently") else _OLD_ID
+    resumes = not case.endswith("differently")
+    resume, daemon, _ = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment="slurm",
+        recorded=lambda _dockerfile: _OLD_ID,
+        daemon=lambda image: _FakeDockerDaemon(
+            {"other:tag": image} if present else {}, next_id=rebuilt
+        ),
+    )
+
+    if resumes:
+        assert run_environment_record(resume()).image == _OLD_ID
+    else:
+        with pytest.raises(TaskImageError, match="predates input-keyed task images"):
+            resume()
+    assert len(daemon.builds) == (0 if present else 1)
+    assert not any(arg.startswith("BASE_IMAGE=") for build in daemon.builds for arg in build)
 
 
 def test_repository_resume_rejects_a_different_task(tmp_path: Path) -> None:
