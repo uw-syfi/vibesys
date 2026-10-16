@@ -122,8 +122,13 @@ def handoff_path(call: int) -> str:
 
 
 def config(**overrides: object) -> DynamicConfig:
-    """A one-round, one-wide config, overridden by the test."""
-    fields = {"max_rounds": 1, "max_in_flight": 1}
+    """A one-round, one-wide config with no backlog, overridden by the test.
+
+    A story steps its workstreams one after another, so a workstream waiting for its measurement
+    keeps its agent slot (``max_backlog=0``). The search's default parks it; the stories of the
+    evaluation queue and the root's properties run with a backlog.
+    """
+    fields = {"max_rounds": 1, "max_in_flight": 1, "max_backlog": 0}
     return DynamicConfig.model_validate({**fields, **overrides})
 
 
