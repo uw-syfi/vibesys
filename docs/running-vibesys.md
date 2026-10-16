@@ -69,23 +69,29 @@ as the build argument `BASE_IMAGE`, so the Dockerfile may start with
 run environment whose agent runs in a local container does this the same way:
 Docker (the default), and the agent container of Modal, SkyPilot and Slurm.
 
-The run records the task image as a local tag, `vibesys-task-build:<owner>-<digest>`,
-where `<owner>` identifies the task directory and `<digest>` covers the
-Dockerfile, every file in its build context, and the base image. On resume:
+The run records the task image as a local tag, `vibesys-task-build:<owner>-<digest>`.
+`<owner>` identifies the task directory and is used only to clean up that
+directory's older tags; a build never removes another task's tags. `<digest>`
+covers the base image and every file the build sends to Docker: the
+Dockerfile, `.dockerignore`, and the build context minus what `.dockerignore`
+excludes. Only `<digest>` decides whether the inputs changed, so a project
+copied elsewhere (as `--runs-dir` does) resumes. The run itself uses the
+image's immutable ID, read once at launch, so a later launch that removes the
+tag cannot affect a running run's agent containers. On resume:
 
 - if the recorded image is still in the local Docker daemon, it is reused and
-  nothing is built;
-- otherwise, if the inputs are unchanged, VibeSys rebuilds the same tag and
+  nothing is built. If the inputs changed since the run started (an edited
+  benchmark, say), VibeSys prints a notice and keeps the recorded image;
+- otherwise, if the inputs are unchanged, VibeSys rebuilds the image and
   continues, with a notice (the image ID may differ when Docker's build cache
   has been pruned);
-- if the inputs changed, or the run was recorded without a task image the task
-  now declares, resume refuses. A run recorded with the removed `local`
-  environment and continued in Docker falls in the second case.
+- if the image is gone and the inputs changed, or the run was recorded without
+  a task image the task now declares, resume refuses. A run recorded with the
+  removed `local` environment and continued in Docker falls in the second case.
 
 Runs recorded before tags held a bare image ID: they are reused while that ID
 is local, and otherwise rebuilt as they were then (without `BASE_IMAGE`) and
-refused unless the rebuild reproduces the recorded ID. A build removes only the
-same task directory's older tags, never another task's. Docker's native layer
+refused unless the rebuild reproduces the recorded ID. Docker's native layer
 cache makes later launches incremental. The candidate repository
 is mounted at runtime and is never part of the image build context.
 
