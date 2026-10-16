@@ -44,14 +44,27 @@ function columns(art: string): number {
   return Math.max(1, ...art.split('\n').map(line => [...line].length));
 }
 
+/** How a wordmark is colored: solid `accent`, or a gradient from `text` through `accent` to `muted`. */
+export type WordmarkTone = 'accent' | 'gradient';
+
 /**
- * Preformatted ASCII art in the `display` style, scaled down to fit its container's width. The art
- * is the caller's; `label` is its accessible name.
+ * Preformatted ASCII art in the `display` style, sized to its container's width (the art takes
+ * about three fifths of it, up to the style's size), set solid so its block glyphs join into
+ * letters. The art is the caller's; `label` is its accessible name.
  */
-export function Wordmark(props: {readonly art: string; readonly label: string}): JSX.Element {
+export function Wordmark(props: {
+  readonly art: string;
+  readonly label: string;
+  readonly align?: 'start' | 'center';
+  readonly tone?: WordmarkTone;
+}): JSX.Element {
   const style: StyleWithVars = {'--wordmark-columns': columns(props.art)};
   return (
-    <div className="vs-wordmark">
+    <div
+      className="vs-wordmark"
+      data-align={props.align ?? 'start'}
+      data-tone={props.tone ?? 'accent'}
+    >
       <pre className="vs-wordmark-art" role="img" aria-label={props.label} style={style}>
         {props.art}
       </pre>

@@ -366,7 +366,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `Split` | `main`, `aside`, `gap?`; the aside wraps under the main column when narrow |
 | `Grid` | `min: 'field' \| 'tile' \| 'swatch'`, `gap?`; auto-fit columns |
 | `Text` | `variant?: TextStyle` (not `style`, which strict code may not pass), `tone?: 'default' \| 'muted' \| 'ok' \| 'warn' \| 'err'`, `as?` (element), `id?` |
-| `Wordmark` | `art` (the caller's ASCII art), `label`; scaled to fit its width |
+| `Wordmark` | `art` (the caller's ASCII art), `label`, `align?: 'start' \| 'center'`, `tone?: 'accent' \| 'gradient'`; bold and solid, sized to its container's width |
 | `Icon` | `name: IconName` (closed set, `ICON_NAMES`), `label?` (decorative without one) |
 | `Button` | `text` or `icon` + `label`; one of `press`, `href` (renders `<a>`) or `submit`; `variant?: 'primary' \| 'secondary' \| 'quiet' \| 'danger'`, `size?: 'sm' \| 'md'`, `full?`, `disabledReason?`, `expanded?` |
 | `SegmentedControl` | `label`, `options: {value, label}[]`, `value`, `change`, `size?`; native radios, so one tab stop and arrow keys |

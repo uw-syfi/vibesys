@@ -6,9 +6,9 @@
   --font-sans: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --text-display-family: var(--font-mono);
-  --text-display-size: 13px;
-  --text-display-line: 14px;
-  --text-display-weight: 400;
+  --text-display-size: 30px;
+  --text-display-line: 30px;
+  --text-display-weight: 600;
   --text-display-tracking: 0em;
   --text-display-transform: none;
   --text-title-family: var(--font-sans);

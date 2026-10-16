@@ -201,7 +201,14 @@ export const BASIC_ENTRIES = {
       </Stack>
     ),
   },
-  Wordmark: {render: () => <Wordmark art={WORDMARK} label="VibeSys" />},
+  Wordmark: {
+    render: () => (
+      <Stack>
+        <Wordmark art={WORDMARK} label="VibeSys" align="center" tone="accent" />
+        <Wordmark art={WORDMARK} label="VibeSys, as a gradient" tone="gradient" />
+      </Stack>
+    ),
+  },
   Icon: {
     render: () => (
       <Row gap="space-4" wrap>

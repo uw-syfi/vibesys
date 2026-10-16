@@ -50,7 +50,7 @@ export function PlaceholderScreen(props: {
     <Page>
       <Card>
         <Stack gap="space-4">
-          <Wordmark art={WORDMARK} label="VibeSys" />
+          <Wordmark art={WORDMARK} label="VibeSys" align="center" tone="accent" />
           <Text as="h1" variant="title">
             New run
           </Text>

@@ -15,8 +15,6 @@ export type Screen =
   | {readonly kind: 'all-runs'}
   | {readonly kind: 'run'; readonly run: RunRef};
 
-export type {RunRowStatus};
-
 export interface RunRow {
   readonly run: RunRef;
   readonly title: string;

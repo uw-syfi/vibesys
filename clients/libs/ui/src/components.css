@@ -184,15 +184,27 @@ body > div:first-child {
   container-type: inline-size;
   min-width: 0;
 }
-/* A mono glyph is 0.6 of the font size wide, so the art fits when the size is the width / (0.6 * columns). */
+/*
+ * A mono glyph is 0.6 of the font size wide, so a size of width / columns sets the art at three
+ * fifths of the container's width, capped at the style's size.
+ */
 .vs-wordmark-art {
+  display: block;
+  width: max-content;
+  max-width: 100%;
   margin: 0;
   font-family: var(--text-display-family);
   font-weight: var(--text-display-weight);
-  font-size: min(var(--text-display-size), calc(100cqi / (0.6 * var(--wordmark-columns))));
+  font-size: min(var(--text-display-size), calc(100cqi / var(--wordmark-columns)));
   line-height: calc(var(--text-display-line) / var(--text-display-size));
   white-space: pre;
   overflow: hidden;
+  color: var(--accent);
+}
+.vs-wordmark[data-align="center"] .vs-wordmark-art {
+  margin: 0 auto;
+}
+.vs-wordmark[data-tone="gradient"] .vs-wordmark-art {
   background: linear-gradient(100deg, var(--text) 15%, var(--accent) 58%, var(--muted) 96%);
   -webkit-background-clip: text;
   background-clip: text;

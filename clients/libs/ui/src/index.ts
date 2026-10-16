@@ -42,7 +42,13 @@ export {SidebarItem, SidebarSection, type SidebarTarget} from './components/side
 export {Chip, StatusDot, type StatusTone} from './components/status.js';
 export {Table, type TableColumn} from './components/table.js';
 export {Tabs} from './components/tabs.js';
-export {Text, type TextElement, type TextTone, Wordmark} from './components/text.js';
+export {
+  Text,
+  type TextElement,
+  type TextTone,
+  Wordmark,
+  type WordmarkTone,
+} from './components/text.js';
 export {ThemeSwatch} from './components/theme-swatch.js';
 export {type Stage, type StageState, Timeline} from './components/timeline.js';
 export {Checkbox, Switch} from './components/toggle.js';
