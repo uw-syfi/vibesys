@@ -396,6 +396,33 @@
       "title": "AgentStatusData",
       "type": "object"
     },
+    "AgentTurnAttrs": {
+      "additionalProperties": false,
+      "description": "An agent turn: the role asked and the model it runs on (None: the run's default).\n\nThe provider and the reasoning effort are the host's settings, which the search never sees.",
+      "properties": {
+        "role": {
+          "title": "Role",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "title": "AgentTurnAttrs",
+      "type": "object"
+    },
     "AttemptOutcome": {
       "description": "How one try of ``ctx.retry`` ended. Closed.",
       "enum": [
@@ -1365,6 +1392,57 @@
       "title": "DiagnosticSeverity",
       "type": "string"
     },
+    "DynamicSpanAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTurnAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "planning_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workstream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "DynamicSpanAttributes",
+      "type": "object"
+    },
     "EndReason": {
       "description": "Why the framework ended the run as it did. Closed: the result's reason starts with it.",
       "enum": [
@@ -1976,6 +2054,45 @@
         "summary"
       ],
       "title": "FrameworkWarningData",
+      "type": "object"
+    },
+    "GateAttrs": {
+      "additionalProperties": false,
+      "description": "A trusted measurement of a candidate: its stages, its value, and the ratio to the input's.",
+      "properties": {
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "metric_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric Value"
+        },
+        "vs_baseline": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vs Baseline"
+        }
+      },
+      "required": [
+        "stage"
+      ],
+      "title": "GateAttrs",
       "type": "object"
     },
     "GateFinishedData": {
@@ -3603,6 +3720,21 @@
         "phase"
       ],
       "title": "PhaseData",
+      "type": "object"
+    },
+    "PlanningAttrs": {
+      "additionalProperties": false,
+      "description": "A planning call: which call of the run it is.",
+      "properties": {
+        "call": {
+          "title": "Call",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "call"
+      ],
+      "title": "PlanningAttrs",
       "type": "object"
     },
     "ProtocolErrorMessage": {
@@ -5390,6 +5522,24 @@
       "title": "SpanAttempt",
       "type": "object"
     },
+    "SpanAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "dynamic": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DynamicSpanAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "SpanAttributes",
+      "type": "object"
+    },
     "SpanEndedData": {
       "additionalProperties": false,
       "description": "A span ended.",
@@ -6446,6 +6596,26 @@
         "kind"
       ]
     },
+    "WorkstreamAttrs": {
+      "additionalProperties": false,
+      "description": "A workstream: the hypothesis it works on and the revision it builds on.",
+      "properties": {
+        "hypothesis_id": {
+          "title": "Hypothesis Id",
+          "type": "string"
+        },
+        "parent_revision": {
+          "title": "Parent Revision",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hypothesis_id",
+        "parent_revision"
+      ],
+      "title": "WorkstreamAttrs",
+      "type": "object"
+    },
     "WorkstreamFailureData": {
       "additionalProperties": false,
       "description": "One workstream's typed account of why it ended without a measured candidate.",
@@ -6572,7 +6742,6 @@
     }
   },
   "additionalProperties": false,
-  "description": "Root schema document for the public server protocol.",
   "properties": {
     "request": {
       "discriminator": {
@@ -6696,6 +6865,10 @@
     },
     "narration_line": {
       "$ref": "#/$defs/NarrationLine"
+    },
+    "span_attributes": {
+      "$ref": "#/$defs/SpanAttributes",
+      "default": null
     }
   },
   "required": [
