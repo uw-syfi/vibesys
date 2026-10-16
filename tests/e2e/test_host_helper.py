@@ -58,7 +58,9 @@ _SCENARIOS = tuple(
 # vs_logs reader itself loads on the first logs request, never for hello (asserted below).
 # vs_redaction and its api add 2 light, standard-library-only modules so every host diagnostic
 # boundary uses the same credential matcher instead of retaining a second implementation.
-_MODULE_CEILING = 338
+# The reservable worker implementation adds the standard-library-only ``queue`` and ``_queue``
+# modules so a refused native worker start can be reported before relay I/O is committed.
+_MODULE_CEILING = 340
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",

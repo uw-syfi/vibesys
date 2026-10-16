@@ -8,7 +8,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from vs_sim.concurrency import WorkerStartRefusedError
+from vs_sim.concurrency import WorkerReservationStateError, WorkerStartRefusedError
 from vs_sim.gate import arrival
 from vs_sim.loopback_http import HttpReply
 from vs_sim.output import OutputStream
@@ -29,7 +29,16 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_sim.clock import Sleeper
-    from vs_sim.concurrency import Condition, Event, Lock, ThreadLocal, Threads, Worker
+    from vs_sim.concurrency import (
+        Condition,
+        Event,
+        Lock,
+        ReservableThreads,
+        ThreadLocal,
+        Threads,
+        Worker,
+        WorkerReservation,
+    )
     from vs_sim.output import OutputSink
     from vs_sim.probes import ProbeResult
     from vs_sim.processes import ProcessRun
@@ -39,7 +48,9 @@ class RefusingThreads:
     """A Threads Fake that delegates every operation except scripted worker starts.
 
     ``refusals`` maps a worker name to how many matching starts should fail. The
-    wrapper leaves the delegate's scheduling and synchronization semantics intact.
+    wrapper leaves the delegate's scheduling and synchronization semantics intact. It
+    intentionally implements only the general :class:`Threads` role; use
+    :class:`RefusingReservableThreads` when callers need pre-start ownership.
     """
 
     def __init__(self, delegate: Threads, refusals: Mapping[str, int]) -> None:
@@ -49,11 +60,16 @@ class RefusingThreads:
 
     def spawn(self, target: Callable[[], object], *, name: str, daemon: bool = True) -> Worker:
         """Refuse a scripted start, otherwise spawn it through the delegate."""
-        remaining = self._remaining.get(name, 0)
-        if remaining > 0:
-            self._remaining[name] = remaining - 1
+        if self._refuses(name):
             raise WorkerStartRefusedError(name)
         return self._delegate.spawn(target, name=name, daemon=daemon)
+
+    def _refuses(self, name: str) -> bool:
+        remaining = self._remaining.get(name, 0)
+        if remaining <= 0:
+            return False
+        self._remaining[name] = remaining - 1
+        return True
 
     def lock(self) -> Lock:
         """Return a lock from the delegate."""
@@ -86,6 +102,54 @@ class RefusingThreads:
     def run_async[T](self, main: Coroutine[object, object, T]) -> T:
         """Run an async entrypoint through the delegate."""
         return self._delegate.run_async(main)
+
+
+class RefusingReservableThreads(RefusingThreads):
+    """A ReservableThreads Fake that scripts both direct and reserved start refusals."""
+
+    def __init__(self, delegate: ReservableThreads, refusals: Mapping[str, int]) -> None:
+        """Wrap a reservable delegate without narrowing :class:`RefusingThreads`."""
+        super().__init__(delegate, refusals)
+        self._reservable_delegate = delegate
+
+    def reserve(
+        self, target: Callable[[], object], *, name: str, daemon: bool = True
+    ) -> WorkerReservation:
+        """Prepare a worker whose start applies the same scripted refusal."""
+        return _RefusingWorkerReservation(
+            self._refuses,
+            self._reservable_delegate.reserve(target, name=name, daemon=daemon),
+        )
+
+
+class _RefusingWorkerReservation:
+    def __init__(
+        self,
+        refuses: Callable[[str], bool],
+        reservation: WorkerReservation,
+    ) -> None:
+        self._refuses = refuses
+        self._reservation = reservation
+        self._attempted = False
+        self._settled = False
+
+    @property
+    def name(self) -> str:
+        return self._reservation.name
+
+    def start(self) -> None:
+        if self._attempted or self._settled:
+            raise WorkerReservationStateError(self.name)
+        self._attempted = True
+        if self._refuses(self.name):
+            raise WorkerStartRefusedError(self.name)
+        self._reservation.start()
+
+    def settle(self) -> None:
+        if self._settled:
+            return
+        self._reservation.settle()
+        self._settled = True
 
 
 class InlineBlockingRunner:
