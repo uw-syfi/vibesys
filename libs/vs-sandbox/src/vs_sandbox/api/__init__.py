@@ -34,6 +34,7 @@ if TYPE_CHECKING:
         ContainerRuntimeUnavailableError,
         NestedDaemonError,
         require_sysbox_runtime,
+        sysbox_unavailable,
         workspace_container_root,
     )
     from vs_sandbox.cuda_backend import CudaAcceleratorUnavailableError, CudaBackend
@@ -249,6 +250,7 @@ __all__ = [
     "require_sysbox_runtime",
     "start_sandbox",
     "stop_sandbox",
+    "sysbox_unavailable",
     "toolchain_features",
     "workspace_container_root",
 ]
@@ -304,6 +306,7 @@ _LAZY_EXPORTS = {
     ),
     "NestedDaemonError": ("container_runtime", "NestedDaemonError"),
     "require_sysbox_runtime": ("container_runtime", "require_sysbox_runtime"),
+    "sysbox_unavailable": ("container_runtime", "sysbox_unavailable"),
     "workspace_container_root": ("container_runtime", "workspace_container_root"),
     "CudaAcceleratorUnavailableError": ("cuda_backend", "CudaAcceleratorUnavailableError"),
     "CudaBackend": ("cuda_backend", "CudaBackend"),

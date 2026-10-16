@@ -44,7 +44,10 @@ DOCKER_TIMEOUT_SECONDS = 5.0
 AGENT_IMAGES_COMMAND = ("docker", "image", "ls", "--quiet", AGENT_IMAGE_REPOSITORY)
 """Lists the agent images built on this machine; Docker reuses their layers in a new build."""
 ACCELERATOR_UNAVAILABLE = "accelerator_unavailable"
-"""The settings code when this host cannot give the run its compute backend's accelerator."""
+"""The settings code when this host lacks what the run checks before its image build.
+
+That is the compute backend's accelerator, or the Sysbox runtime a docker-in-docker task needs.
+"""
 TASK_IMAGE_UNSUPPORTED = "task_image_unsupported"
 """The settings code when the run cannot honor the task's Dockerfile as asked."""
 

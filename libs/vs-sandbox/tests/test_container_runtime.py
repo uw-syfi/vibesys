@@ -21,10 +21,18 @@ from vs_sandbox.api import (
     ContainerRuntimeUnavailableError,
     DockerSandbox,
     NestedDaemonError,
+    require_sysbox_runtime,
+    sysbox_unavailable,
     workspace_container_root,
 )
-from vs_sandbox.api.testing import FakeDockerEngine, ScriptedDockerCli
-from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads, examples
+from vs_sandbox.api.testing import (
+    FakeDockerEngine,
+    ScriptedDockerCli,
+    docker_missing,
+    docker_result,
+)
+from vs_sim.api import ProbeResult
+from vs_sim.api.testing import FakePipedProcessLauncher, ScriptedProbe, SimThreads, examples
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -313,3 +321,55 @@ def test_a_same_path_workspace_needs_no_container_runtime(
         assert "info" not in [call[1] for call in engine.calls]
     finally:
         sandbox.stop()
+
+
+_RUNTIME_LISTINGS = st.one_of(
+    st.lists(
+        st.sampled_from(["runc", "sysbox-runc", "nvidia", "kata"]), unique=True, max_size=4
+    ).map(lambda names: json.dumps({name: {} for name in names})),
+    st.sampled_from(["", "null", "[]", "junk", '{"runc": {}', "42"]),
+)
+_LISTING_REPLIES = st.tuples(
+    st.sampled_from([0, 0, 1, 125]),
+    _RUNTIME_LISTINGS,
+    st.sampled_from(["", "Cannot connect to the Docker daemon"]),
+)
+
+
+@given(reply=_LISTING_REPLIES)
+def test_preflight_asks_the_runs_own_sysbox_question_and_gets_its_answer(
+    reply: tuple[int, str, str],
+) -> None:
+    """Regression: a host with no Sysbox passed preflight, then the run stopped after Start.
+
+    The run raises from ``require_sysbox_runtime`` before its image build; the check made
+    ahead of it (``sysbox_unavailable``) reads the same ``docker info`` listing and gives
+    the run's message, for a reply the run accepts and one it refuses alike.
+    """
+    cli = ScriptedDockerCli()
+    cli.always(docker_result(*reply))
+    probe = ScriptedProbe(lambda _argv: ProbeResult(*reply))
+
+    try:
+        require_sysbox_runtime(cli)
+    except ContainerRuntimeUnavailableError as error:
+        runs_answer: str | None = str(error)
+    else:
+        runs_answer = None
+
+    assert sysbox_unavailable(probe) == runs_answer
+    assert probe.calls[0][0] == cli.argvs[0]
+
+
+def test_a_docker_that_cannot_answer_leaves_the_runtime_listing_unreadable() -> None:
+    cli = ScriptedDockerCli()
+    cli.always(docker_missing())
+    probe = ScriptedProbe(lambda _argv: None)
+
+    with pytest.raises(ContainerRuntimeUnavailableError) as raised:
+        require_sysbox_runtime(cli)
+
+    reason = sysbox_unavailable(probe)
+    assert reason is not None
+    assert "Could not list the Docker runtimes" in reason
+    assert "Could not list the Docker runtimes" in str(raised.value)

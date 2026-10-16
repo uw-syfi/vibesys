@@ -569,6 +569,14 @@ class RunEnvironment(CaptureRecoverySource, Protocol):
         """
         ...
 
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """Whether a run here needs this host's Docker daemon to register Sysbox.
+
+        Such a run checks it before its image build and stops when it is missing.
+        *docker_in_docker* is the task's ``[environment] docker_in_docker``.
+        """
+        ...
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve environment facts without starting owned resources."""
         ...
@@ -643,6 +651,11 @@ class HostEnvironment(_NoopWorkspaceRecovery):
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """No container: the host agent reaches the accelerator itself."""
+        del docker_in_docker
+        return False
+
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """No container, so no Sysbox (a docker-in-docker task is refused here)."""
         del docker_in_docker
         return False
 
@@ -926,6 +939,10 @@ class DockerEnvironment(NoCaptureRecovery):
         """The editor container gets the accelerator, unless Docker-in-Docker forbids it."""
         return attaches_accelerator(docker_in_docker=docker_in_docker)
 
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """A docker-in-docker sandbox runs under the host daemon's Sysbox runtime."""
+        return docker_in_docker
+
     def build_editor(
         self,
         request: RunEnvironmentRequest,
@@ -1172,6 +1189,11 @@ class SkyPilotEnvironment(DockerEnvironment):
         del docker_in_docker
         return False
 
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """SkyPilot refuses a docker-in-docker task, so it never needs Sysbox."""
+        del docker_in_docker
+        return False
+
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Resolve and validate SkyPilot resources without starting them."""
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="skypilot")
@@ -1351,6 +1373,11 @@ class ModalEnvironment(_NoopWorkspaceRecovery):
 
     def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
         """The local editor is CPU-only; the Modal deployment holds the accelerator."""
+        del docker_in_docker
+        return False
+
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """Modal refuses a docker-in-docker task, so it never needs Sysbox."""
         del docker_in_docker
         return False
 

@@ -249,3 +249,70 @@ def test_a_task_image_the_run_refuses_is_reported_as_invalid_settings() -> None:
         code=TASK_IMAGE_UNSUPPORTED, stage="run_environment", message=str(refusal)
     )
     assert probe.calls == []
+
+
+_DOCKER_INFO = ("docker", "info", "--format", "{{json .Runtimes}}")
+_DOCKER_IN_DOCKER_TASK = """\
+version = 1
+
+[agent]
+domain = "generic"
+
+[environment]
+docker_in_docker = true
+
+[accuracy]
+command = ["python", "-c", "print('ok')"]
+
+[benchmark]
+command = ["python", "-c", "print('1')"]
+"""
+
+
+def _docker_in_docker_project(root: Path) -> list[str]:
+    """A project whose task declares ``docker_in_docker``; the flags that select it."""
+    project = root / "project"
+    task = project / ".vibesys" / "tasks" / "latency"
+    task.mkdir(parents=True)
+    (task / "OBJECTIVE.md").write_text("Optimize latency.\n")
+    (task / "vibesys.input.toml").write_text(_DOCKER_IN_DOCKER_TASK)
+    return ["--project", str(project), "--task", "latency"]
+
+
+def _docker_runtimes(answer: ProbeResult | None) -> ScriptedProbe:
+    """A host whose ``docker info`` answers ``answer``; every other command is unavailable."""
+    return ScriptedProbe(lambda argv: answer if argv == _DOCKER_INFO else None)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        ProbeResult(0, '{"runc": {}}'),
+        ProbeResult(1, "", "Cannot connect to the Docker daemon"),
+        ProbeResult(0, "junk"),
+        None,
+    ],
+    ids=["no-sysbox", "daemon-down", "unreadable", "no-docker"],
+)
+def test_a_docker_in_docker_run_on_a_host_without_sysbox_fails_preflight(
+    tmp_path: Path, answer: ProbeResult | None
+) -> None:
+    """Regression: preflight passed, then the run stopped seconds after Start on Sysbox."""
+    argv = _docker_in_docker_project(tmp_path)
+
+    report = preflight_report(argv, _parse, _docker_runtimes(answer))
+
+    assert isinstance(report.settings, SettingsInvalid)
+    assert report.settings.code == ACCELERATOR_UNAVAILABLE
+    assert "sysbox-runc" in report.settings.message
+    assert "\n" not in report.settings.message
+
+
+def test_a_docker_in_docker_run_on_a_host_with_sysbox_passes_preflight(tmp_path: Path) -> None:
+    argv = _docker_in_docker_project(tmp_path)
+
+    report = preflight_report(
+        argv, _parse, _docker_runtimes(ProbeResult(0, '{"runc": {}, "sysbox-runc": {}}'))
+    )
+
+    assert report.settings.valid is True

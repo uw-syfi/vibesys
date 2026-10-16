@@ -342,6 +342,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         del docker_in_docker
         return False
 
+    def requires_sysbox_runtime(self, *, docker_in_docker: bool) -> bool:
+        """Slurm refuses a docker-in-docker task, so it never needs Sysbox."""
+        del docker_in_docker
+        return False
+
     def __init__(
         self,
         settings: SlurmOperatorSettings,

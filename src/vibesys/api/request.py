@@ -56,13 +56,14 @@ from vs_runtime.api.infrastructure import (
     resolve_run_environment_spec,
     run_environment_record,
 )
-from vs_sandbox.api import accelerator_unavailable, backend_default_image
+from vs_sandbox.api import accelerator_unavailable, backend_default_image, sysbox_unavailable
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vs_project.api import Git, OrchestrationDescriptor
+    from vs_runtime.api.infrastructure import RunEnvironment
     from vs_sim.api import CommandProbe
 
 
@@ -155,12 +156,27 @@ def run_environment_uses_docker(spec: RunEnvironmentSpec | None) -> bool:
 
 
 def run_accelerator_unavailable(request: RunRequest, probe: CommandProbe) -> str | None:
-    """Why this host cannot give `request`'s run the accelerator it needs, or `None`.
+    """Why this host cannot give `request`'s run what it needs before its image build, or `None`.
 
-    A run whose environment hands its agent the compute backend's accelerator here checks
-    that accelerator before its image build and stops when it is missing; this asks the
-    same question through `probe`, so a run that passes it does not stop on it at launch.
+    A run stops before its image build when its environment would hand the agent the
+    compute backend's accelerator and this host lacks it, or when its task needs
+    docker-in-docker and this host's Docker daemon registers no Sysbox. This asks both
+    questions through `probe`, with the run's own decisions and messages, so a run that
+    passes it does not stop on either at launch.
     """
+    environment = _run_environment_of(request)
+    docker_in_docker = request.input_bundle.docker_in_docker
+    if environment.attaches_backend_accelerator(docker_in_docker=docker_in_docker):
+        reason = accelerator_unavailable(request.backend, probe)
+        if reason is not None:
+            return reason
+    if environment.requires_sysbox_runtime(docker_in_docker=docker_in_docker):
+        return sysbox_unavailable(probe)
+    return None
+
+
+def _run_environment_of(request: RunRequest) -> RunEnvironment:
+    """The environment `request`'s run resolves to, as the run resolves it."""
     spec = resolve_run_environment_spec(
         request.run_environment or make_run_environment_spec(),
         request.backend,
@@ -168,12 +184,7 @@ def run_accelerator_unavailable(request: RunRequest, probe: CommandProbe) -> str
         platform=sys.platform,
         log=lambda _line: None,
     )
-    environment = build_run_environment(spec)
-    if not environment.attaches_backend_accelerator(
-        docker_in_docker=request.input_bundle.docker_in_docker
-    ):
-        return None
-    return accelerator_unavailable(request.backend, probe)
+    return build_run_environment(spec)
 
 
 def supported_profilers(spec: RunEnvironmentSpec) -> frozenset[ProfilerKind] | None:

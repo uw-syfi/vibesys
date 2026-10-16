@@ -25,10 +25,11 @@ from typing import TYPE_CHECKING
 from pydantic import JsonValue, TypeAdapter
 
 from vs_decode.api import decode_json
+from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
     from vs_sandbox.docker_cli import DockerCli
-from vs_sim.api import DISCARD
+    from vs_sim.api import CommandProbe
 
 #: The ``docker run --runtime`` name Sysbox registers with the host daemon.
 SYSBOX_DOCKER_RUNTIME = "sysbox-runc"
@@ -121,6 +122,10 @@ class NestedDaemonError(RuntimeError):
     """The Docker daemon inside a sandbox container did not become ready."""
 
 
+RUNTIME_LISTING_COMMAND = ("docker", "info", "--format", "{{json .Runtimes}}")
+"""The command whose output names the runtimes the Docker daemon registers."""
+
+
 def require_sysbox_runtime(docker: DockerCli) -> None:
     """Raise :class:`ContainerRuntimeUnavailableError` unless Sysbox is registered.
 
@@ -129,26 +134,53 @@ def require_sysbox_runtime(docker: DockerCli) -> None:
     """
     try:
         result = docker.run(
-            ["docker", "info", "--format", "{{json .Runtimes}}"],
+            list(RUNTIME_LISTING_COMMAND),
             timeout_seconds=_RUNTIME_PROBE_TIMEOUT_S,
             output=DISCARD,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ContainerRuntimeUnavailableError.runtime_unreadable(str(exc)) from exc
-    if result.returncode != 0:
-        raise ContainerRuntimeUnavailableError.runtime_unreadable(
-            result.stderr.strip() or f"exit {result.returncode}"
+    error = _sysbox_error(result.returncode, result.stdout, result.stderr)
+    if error is not None:
+        raise error
+
+
+def sysbox_unavailable(probe: CommandProbe) -> str | None:
+    """Why this host cannot run a docker-in-docker sandbox, asked through *probe*, or ``None``.
+
+    The same decision :func:`require_sysbox_runtime` makes before a run builds its
+    image, so a check made ahead of the run (``vibesys preflight``) agrees with the
+    run and gives its message.
+    """
+    result = probe.run(RUNTIME_LISTING_COMMAND, timeout_seconds=_RUNTIME_PROBE_TIMEOUT_S)
+    if result is None:
+        error = ContainerRuntimeUnavailableError.runtime_unreadable(
+            "docker did not answer in time or could not be started"
+        )
+    else:
+        error = _sysbox_error(result.returncode, result.stdout, result.stderr)
+    return None if error is None else str(error)
+
+
+def _sysbox_error(
+    returncode: int, stdout: str, stderr: str
+) -> ContainerRuntimeUnavailableError | None:
+    """What a finished runtime listing says about Sysbox: the error to raise, or ``None``."""
+    if returncode != 0:
+        return ContainerRuntimeUnavailableError.runtime_unreadable(
+            stderr.strip() or f"exit {returncode}"
         )
     runtimes = decode_json(
-        result.stdout.strip() or "null",
+        stdout.strip() or "null",
         _ANY_JSON,
         source="docker info Runtimes",
         max_bytes=_MAX_RUNTIME_LISTING_BYTES,
     )
     if not isinstance(runtimes, dict):
-        raise ContainerRuntimeUnavailableError.runtime_listing_unparseable(result.stdout.strip())
+        return ContainerRuntimeUnavailableError.runtime_listing_unparseable(stdout.strip())
     if SYSBOX_DOCKER_RUNTIME not in runtimes:
-        raise ContainerRuntimeUnavailableError.sysbox_missing([str(name) for name in runtimes])
+        return ContainerRuntimeUnavailableError.sysbox_missing([str(name) for name in runtimes])
+    return None
 
 
 def start_nested_daemon(
