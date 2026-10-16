@@ -17,7 +17,7 @@ registry.
 Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``,
 ``INSTANCE_ID_PATTERN``, ``InstanceId``, ``RunId``, ``RunStatus``,
 ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
-``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``one_line``,
+``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``one_line``,
 ``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
 ``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
 ``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
@@ -320,6 +320,21 @@ class EndRecord(BaseModel):
             message = "resume_from_round is set only when the run is resumable"
             raise ValueError(message)
         return self
+
+
+class RunEndingFact(BaseModel):
+    """How a run's durable record stood as it ended, as its server reports it to the record.
+
+    ``outcome`` is core's end reason when the run recorded a result, ``None`` when it ended
+    without one; ``summary`` is core's account of that result.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    outcome: RunEndOutcome | None
+    summary: str = ""
+    resumable: bool
+    rounds_finished: NonNegativeInt
 
 
 class PauseCause(StrEnum):

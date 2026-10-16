@@ -16,8 +16,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
-from vibesys.events import RunFailure, RunFailureKind
-from vs_core.api import EndReason, RetainedCandidate, RunResultProposal
+from vibesys.events import CoreEventType, RunEndingData, RunFailure, RunFailureKind
+from vs_core.api import AttemptPhase, EndReason, RetainedCandidate, RunResultProposal
+from vs_core.api import RunStatus as CoreRunStatus
 from vs_project.api import Project
 from vs_runtime.api import RunStatus
 from vs_runtime.api.core import (
@@ -165,11 +166,29 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
             # A crashed process cannot reach this line, so its restart waits out the lease
             # (see ``start_core_awaiting_lease``); any return or raise here frees it.
             shell.release_lease(now_at=services.clock.now())
+            integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(shell))
     if outcome.refusal is not None:
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
     status = _status_of(outcome.result, shell)
     return RunEnd(
         status, _failure_of(outcome.result, shell) if status is RunStatus.FAILED else None
+    )
+
+
+def run_ending(shell: CoreRuntime) -> RunEndingData:
+    """How the run's durable record stands now: its end reason, resumability and finished rounds."""
+    core = shell.record.envelope.core
+    result = core.run.result
+    reason = None
+    if result is not None:
+        reason = next((ending for ending in EndReason if _ended_by(result, ending)), None)
+    return RunEndingData(
+        reason=reason,
+        summary="" if result is None else result.reason,
+        resumable=core.run.status != CoreRunStatus.TERMINAL,
+        rounds_finished=sum(
+            1 for attempt in core.attempts.attempts if attempt.phase == AttemptPhase.TERMINAL
+        ),
     )
 
 

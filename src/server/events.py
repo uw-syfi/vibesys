@@ -44,6 +44,7 @@ from vibesys.api import (
     AgentOutputChannel,
     AgentStatusData,
     GateKind,
+    RunEndingData,
     RunFailedData,
     SpanId,
     TodoItemData,
@@ -110,6 +111,7 @@ class EventType(StrEnum):
     ROUND_FINISHED = "round_finished"
     RUN_FINISHED = "run_finished"
     RUN_FAILED = "run_failed"
+    RUN_ENDING = "run_ending"
     OUTPUT = "output"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
@@ -798,6 +800,7 @@ EventData = Annotated[
     | RunStartedData
     | RunStartupProgressData
     | RunFailedData
+    | RunEndingData
     | RunInterruptedData
     | RunStatusChangedData
     | ExperimentsChangedData

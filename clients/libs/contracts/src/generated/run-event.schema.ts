@@ -643,6 +643,20 @@ const runEventSchema: Record<string, unknown> = {
       "title": "DiagnosticSeverity",
       "type": "string"
     },
+    "EndReason": {
+      "description": "Why the framework ended the run as it did. Closed: the result's reason starts with it.",
+      "enum": [
+        "adopted",
+        "kept-input",
+        "no-winner",
+        "adoption-failed",
+        "stopped",
+        "deadline",
+        "finish-refused"
+      ],
+      "title": "EndReason",
+      "type": "string"
+    },
     "EventStatus": {
       "description": "Lifecycle and command states reported in events.",
       "enum": [
@@ -689,6 +703,7 @@ const runEventSchema: Record<string, unknown> = {
         "round_finished",
         "run_finished",
         "run_failed",
+        "run_ending",
         "output",
         "tool_call",
         "tool_result",
@@ -1747,6 +1762,50 @@ const runEventSchema: Record<string, unknown> = {
         "project_root"
       ],
       "title": "RunConfiguredData",
+      "type": "object"
+    },
+    "RunEndingData": {
+      "additionalProperties": false,
+      "description": "How a core run's durable record stands as the run ends, emitted once just before its end.\n\n``reason`` is core's ``EndReason`` when the run recorded a result, ``None`` when it ended\nwithout one (an error, or a stop that left work unsettled). ``resumable`` is whether a\nresume continues it: its record is not terminal. ``rounds_finished`` counts its\nworkstreams (rounds) that reached their end. ``summary`` is core's account of the result.",
+      "properties": {
+        "kind": {
+          "const": "run_ending",
+          "default": "run_ending",
+          "title": "Kind",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EndReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        },
+        "resumable": {
+          "title": "Resumable",
+          "type": "boolean"
+        },
+        "rounds_finished": {
+          "minimum": 0,
+          "title": "Rounds Finished",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "reason",
+        "resumable",
+        "rounds_finished"
+      ],
+      "title": "RunEndingData",
       "type": "object"
     },
     "RunFailedData": {
@@ -3202,6 +3261,7 @@ const runEventSchema: Record<string, unknown> = {
               "rate_limit_update": "#/$defs/RateLimitUpdateData",
               "round_finished": "#/$defs/RoundFinishedData",
               "run_configured": "#/$defs/RunConfiguredData",
+              "run_ending": "#/$defs/RunEndingData",
               "run_failed": "#/$defs/RunFailedData",
               "run_interrupted": "#/$defs/RunInterruptedData",
               "run_started": "#/$defs/RunStartedData",
@@ -3259,6 +3319,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/RunFailedData"
+            },
+            {
+              "$ref": "#/$defs/RunEndingData"
             },
             {
               "$ref": "#/$defs/RunInterruptedData"

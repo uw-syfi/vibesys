@@ -17,7 +17,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from server.events import ChatThreadId, EventData, EventType, RunEvent
 from vibesys.api import CoreEvent, CoreEventType, WireSpan
-from vibesys.events import CoreEventData, EventPayload
+from vibesys.events import CoreEventData, EventPayload, RunFailure, RunFailureKind
 from vs_sim.api.testing import examples
 
 _JSON_SCALARS = st.none() | st.booleans() | st.integers() | st.text(max_size=8)
@@ -35,6 +35,17 @@ _FIELD_VALUES: dict[str, st.SearchStrategy[object]] = {
             '{"id": "flow:#1", "parent": null, "type": "flow", "name": "root",'
             ' "status": "running", "started_at": 0.0}'
         )
+    ),
+    # Hypothesis cannot derive ``RunFailure``: its optional constrained ``adopted_candidate``
+    # trips its length filter on ``None``.
+    "failure": st.builds(
+        RunFailure,
+        kind=st.sampled_from(RunFailureKind),
+        reason=st.text(max_size=8),
+        workstreams_started=st.integers(min_value=0, max_value=9),
+        workstream_budget=st.integers(min_value=0, max_value=9),
+        candidates_kept=st.integers(min_value=0, max_value=9),
+        adopted_candidate=st.none(),
     ),
 }
 _AT = datetime(2026, 1, 1, tzinfo=UTC)

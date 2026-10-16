@@ -22,13 +22,21 @@ from server.events import (
     ConfigurationFailedData,
     EventStatus,
     EventType,
+    QuotaPausedData,
+    RunEndingData,
     RunInterruptedData,
     RunStartupProgressData,
     RunStatusChangedData,
     ServerReadyData,
 )
 from server.execution import ExecutionTracker
-from server.host_api import FailureReason, StartupFact
+from server.host_api import (
+    FailureReason,
+    PauseCause,
+    RunEndingFact,
+    RunEndOutcome,
+    StartupFact,
+)
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
@@ -103,6 +111,16 @@ def _project_scope(project_root: Path) -> str:
     return hashlib.sha256(project_root.expanduser().resolve().as_posix().encode()).hexdigest()
 
 
+def _ending_fact(data: RunEndingData) -> RunEndingFact:
+    """The record's view of a run's ending: core's end reason is one of the record's outcomes."""
+    return RunEndingFact(
+        outcome=None if data.reason is None else RunEndOutcome(data.reason.value),
+        summary=data.summary,
+        resumable=data.resumable,
+        rounds_finished=data.rounds_finished,
+    )
+
+
 class _Once:
     """Run a callback on its first call only; later calls do nothing."""
 
@@ -134,6 +152,18 @@ class ServerLifecycleObserver(Protocol):
         startup: StartupFact | None = None,
     ) -> None:
         """The run's status changed, it failed for ``failure``, or its startup progressed."""
+        ...
+
+    def pausing_for(self, cause: PauseCause) -> None:
+        """The run is pausing, or paused, for ``cause`` rather than an operator's pause."""
+        ...
+
+    def ending(self, fact: RunEndingFact) -> None:
+        """How the run's durable record stood as the run ended."""
+        ...
+
+    def terminated(self) -> None:
+        """The server was terminated (a force stop) before its run reached a safe point."""
         ...
 
 
@@ -535,10 +565,17 @@ class ServerRuntime:
 
 def _report_phase_facts(observer: ServerLifecycleObserver, event: RunEvent) -> None:
     """Tell ``observer`` the lifecycle facts in one journaled event."""
-    if isinstance(event.data, RunStatusChangedData):
-        observer.observe(status=event.data.status)
-    elif isinstance(event.data, RunStartupProgressData):
-        observer.observe(startup=StartupFact(stage=event.data.stage, progress=event.data.progress))
+    data = event.data
+    if isinstance(data, RunStatusChangedData):
+        observer.observe(status=data.status)
+    elif isinstance(data, RunStartupProgressData):
+        observer.observe(startup=StartupFact(stage=data.stage, progress=data.progress))
+    elif isinstance(data, QuotaPausedData):
+        observer.pausing_for(PauseCause.QUOTA)
+    elif isinstance(data, RunEndingData):
+        observer.ending(_ending_fact(data))
+    elif isinstance(data, RunInterruptedData):
+        observer.terminated()
     failure = failure_reason(event)
     if failure is not None:
         observer.observe(failure=failure)
