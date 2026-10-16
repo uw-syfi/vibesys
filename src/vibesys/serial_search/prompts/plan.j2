@@ -10,7 +10,15 @@ tests, or launch benchmarks.
 
 - Round {{ round_number }} of {{ max_rounds }}. Your workspace holds the revision `{{ rev(base_revision) }}`,
   not candidate work: read earlier rounds' files with `git show REVISION:PATH`.
-- Roadmap: `roadmap/index.md` (you may write it).
+{% if roadmap %}
+- Roadmap ({{ roadmap | length }} item(s), in the order first added):
+{% for item in roadmap %}
+  - `{{ item.id }}` {{ item.kind.value }}{% if item.major %} blocking `{{ item.major }}`{% endif %}, {{ item.status.value }}: {{ item.title }}{% if item.note %} ({{ item.note }}){% endif %}
+
+{% endfor %}
+{% else %}
+- Roadmap: empty.
+{% endif %}
 {% if history %}
 - History of the last {{ history | length }} round(s){% if older_rounds %} ({{ older_rounds }} older not shown){% endif %}:
 {% for row in history %}
@@ -64,12 +72,14 @@ direct causal A/B or bounded structural experiment.
 
 ## Strategy and roadmap
 
-Update the roadmap concisely and select one active Major. Statuses: `todo` (not
-started), `in_progress` (active), `done` (proved complete), `parked` (credible
-direction, defective implementation), or `abandoned` (mechanism cannot help
-this workload; a flat metric alone is insufficient). A blocker Minor names its
-Major. Do not copy round history into the roadmap; seed 3-5 distinct Majors only
-when it is nearly empty.
+Update the roadmap concisely and select one active Major. Change it only through
+{{ reply.roadmap }}: each entry creates or replaces the item with its id, so list
+only new or changed items, each in full; the framework keeps the rest. Statuses:
+`todo` (not started), `in_progress` (active), `done` (proved complete), `parked`
+(credible direction, defective implementation), or `abandoned` (mechanism cannot
+help this workload; a flat metric alone is insufficient). A blocker Minor names
+its Major. Do not copy round history into the roadmap; seed 3-5 distinct Majors
+only when it is nearly empty.
 
 Mirror roadmap parking or abandonment in {{ reply.hypothesis_updates }}; structured
 updates are authoritative and apply only to completed hypotheses.

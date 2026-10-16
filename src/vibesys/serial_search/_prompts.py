@@ -23,6 +23,7 @@ from vs_core.api.search import (
 if TYPE_CHECKING:
     from vibesys.hypothesis import HypothesisConfig, PlanningContext, rounds
     from vibesys.profile_focus import FocusView
+    from vs_issue_tracker.api import RoadmapItem
 
 
 class PlanTemplate(StrEnum):
@@ -63,10 +64,15 @@ def plan_prompt(  # noqa: PLR0913  # LW-641208 [PLR0913]; the request is built f
     base: RevisionRef,
     benchmark_enabled: bool,
     last_profile: LastProfile | None,
+    roadmap: tuple[RoadmapItem, ...],
 ) -> PlanPrompt:
-    """The new-hypothesis request: history, the frontier, carried notices and the last profile."""
+    """The new-hypothesis request: history, the frontier, notices, the last profile, the roadmap."""
     evidence = plan_evidence(hypotheses, ledger, planning, focus).model_copy(
-        update={"benchmark_enabled": benchmark_enabled, "last_profile": last_profile}
+        update={
+            "benchmark_enabled": benchmark_enabled,
+            "last_profile": last_profile,
+            "roadmap": roadmap,
+        }
     )
     return PlanPrompt(
         **{name: getattr(evidence, name) for name in PlanEvidence.model_fields},

@@ -4,7 +4,7 @@ The search declares each role once (`orchestration/single/search/_roles`, the de
 with multi in `serial_search`): the template, the reply, the workspace, the time and the
 corrections. A role here is what only the host can add: the system prompt read from a template
 file, the capabilities the provider must have and the tools the agent is given. The designer
-may write the roadmap artifacts of its run-scoped turn; the combined implementer, reviewer and
+reads only (its roadmap changes travel in its reply); the combined implementer, reviewer and
 profiler edits its candidate and carries the bridged evaluation tool. Each role's id comes from
 the search's id scheme, so the roles the search asks and the roles the host declares cannot
 drift apart.
@@ -27,8 +27,8 @@ if TYPE_CHECKING:
 
 _RENDERER = TemplateRenderer(Path(prompts.__file__).parent)
 
-# The designer writes `roadmap/` in the run root and reads everything else.
-DESIGNER_KIND = RoleKind(WorkspaceAccess.LIMITED, frozenset())
+# The designer reads the run root and writes nothing: its roadmap changes travel in its reply.
+DESIGNER_KIND = RoleKind(WorkspaceAccess.READ_ONLY, frozenset())
 
 
 def _role(role: Role, kind: RoleKind) -> AgentRole:

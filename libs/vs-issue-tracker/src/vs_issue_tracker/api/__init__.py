@@ -5,6 +5,11 @@ its JSON-backed implementation. Use ``CreateIssuePolicy`` and its helpers when
 creating issues under an iteration cap; a refusal is a typed ``CreateRejection``
 that callers render. Format helpers produce short and full
 text representations.
+
+``Roadmap`` defines a search's planning items (Majors and the Minors that block them)
+independently of storage; ``DocumentRoadmap`` keeps them as one document in a store the
+application opens, ``FakeRoadmap`` in memory. ``ReadRoadmap`` and ``PutRoadmapItems`` are the
+core operations a strategy reaches it through.
 """
 
 from vs_issue_tracker.core import (
@@ -59,6 +64,32 @@ from vs_issue_tracker.progress import (
     ProgressLog,
     open_progress_log,
 )
+from vs_issue_tracker.roadmap import (
+    NOTE_MAX_LENGTH,
+    ROADMAP_DOCUMENT,
+    ROADMAP_ID_PATTERN,
+    TITLE_MAX_LENGTH,
+    DocumentRoadmap,
+    FakeRoadmap,
+    Roadmap,
+    RoadmapDocuments,
+    RoadmapItem,
+    RoadmapItemKind,
+    RoadmapLoadError,
+    RoadmapRejectedError,
+    RoadmapStatus,
+    merged,
+    roadmap_problem,
+)
+from vs_issue_tracker.roadmap_operations import (
+    ROADMAP_PUT_KIND,
+    ROADMAP_READ_KIND,
+    PutRoadmapItems,
+    ReadRoadmap,
+    RoadmapItemsPut,
+    RoadmapSnapshot,
+    roadmap_operation_registrations,
+)
 from vs_issue_tracker.session import (
     IssueTrackerConfig,
     IssueTrackerSession,
@@ -68,7 +99,13 @@ from vs_issue_tracker.session import (
 __all__ = [
     "APPLY_KIND",
     "LOG_KIND",
+    "NOTE_MAX_LENGTH",
     "READ_KIND",
+    "ROADMAP_DOCUMENT",
+    "ROADMAP_ID_PATTERN",
+    "ROADMAP_PUT_KIND",
+    "ROADMAP_READ_KIND",
+    "TITLE_MAX_LENGTH",
     "AppliedChanges",
     "ApplyIssueChanges",
     "BoardSnapshot",
@@ -77,7 +114,9 @@ __all__ = [
     "CreateIssue",
     "CreateIssuePolicy",
     "CreateRejection",
+    "DocumentRoadmap",
     "FakeIssueTracker",
+    "FakeRoadmap",
     "FaultHook",
     "FaultPhase",
     "FileProgressLog",
@@ -102,8 +141,19 @@ __all__ = [
     "MemoryProgressLog",
     "OutcomeStatus",
     "ProgressLog",
+    "PutRoadmapItems",
     "ReadBoard",
+    "ReadRoadmap",
     "RecordAttempt",
+    "Roadmap",
+    "RoadmapDocuments",
+    "RoadmapItem",
+    "RoadmapItemKind",
+    "RoadmapItemsPut",
+    "RoadmapLoadError",
+    "RoadmapRejectedError",
+    "RoadmapSnapshot",
+    "RoadmapStatus",
     "SetIssueStatus",
     "TemplateBody",
     "TextBody",
@@ -113,8 +163,11 @@ __all__ = [
     "create_issue_under_policy",
     "format_issue_full",
     "format_issue_short",
+    "merged",
     "open_issue_tracker",
     "open_issue_tracker_session",
     "open_progress_log",
     "parse_type",
+    "roadmap_operation_registrations",
+    "roadmap_problem",
 ]

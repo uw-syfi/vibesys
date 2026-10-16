@@ -2,7 +2,7 @@
 
 `SerialHost` plays everything outside the flow that is not an agent: the workspace executor
 (open, settle), the evaluator (measure, read) and the operations (read evidence, capture, validate
-local). A search's own host adds its agents (`answer_agent`). A story answers one wait at a time
+local, and the roadmap, through its production owner over a Fake roadmap). A search's own host adds its agents (`answer_agent`). A story answers one wait at a time
 (`answer`); a generated test chooses which open wait to answer and how (`step`). Nothing here
 has a clock or a thread: `FlowRun` is the whole world.
 """
@@ -16,6 +16,7 @@ from tests.vibesys.vibesys_flows import start_flow
 
 from vibesys.hypothesis import HypothesisState
 from vibesys.metrics import EvidenceReading, MetricRow
+from vibesys.serial_roadmap import RoadmapOwner
 from vs_core.api import (
     ArtifactId,
     ArtifactRef,
@@ -47,6 +48,7 @@ from vs_core.api import (
 )
 from vs_core.api.search import TaskStage, TaskTerms
 from vs_core.testing.builders import initial_state
+from vs_issue_tracker.api import FakeRoadmap, PutRoadmapItems, ReadRoadmap
 
 if TYPE_CHECKING:
     from pydantic import BaseModel
@@ -92,6 +94,7 @@ class World(TypedDict, total=False):
     validation: Validation
     attribution_output: str
     attribution_exit_code: int
+    roadmap: FakeRoadmap
 
 
 @dataclass
@@ -114,6 +117,8 @@ class SerialHost:
     validation: Validation = "passed"
     attribution_output: str = ""
     attribution_exit_code: int = 0
+    roadmap: FakeRoadmap = field(default_factory=FakeRoadmap)
+    """The run's roadmap, which the production owner reads and writes."""
     commits: int = 0
     events: int = 0
     measured: list[str] = field(default_factory=list)
@@ -302,6 +307,8 @@ class SerialHost:
             )
         elif isinstance(typed, ValidateLocalBase):
             outcome = self._validated()
+        elif isinstance(typed, ReadRoadmap | PutRoadmapItems):
+            outcome = RoadmapOwner(self.roadmap).perform(typed)
         else:
             outcome = ParentVerification(status="succeeded", verified=True)
         self.run.finish_operation(asked, outcome)

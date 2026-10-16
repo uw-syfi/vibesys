@@ -174,8 +174,6 @@ def test_design_log_derives_per_round_file_changes(tmp_path: Path) -> None:
     (workspace / "pareto-frontier.md").write_text("# Pareto frontier\n", encoding="utf-8")
     (workspace / "profile").mkdir()
     (workspace / "profile" / "round-0001.md").write_text("framework\n", encoding="utf-8")
-    (workspace / "roadmap").mkdir()
-    (workspace / "roadmap" / "index.md").write_text("framework\n", encoding="utf-8")
     first = _commit_all(workspace, "round 1")
 
     (workspace / "src" / "ffi.rs").unlink()

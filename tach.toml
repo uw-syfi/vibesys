@@ -337,7 +337,7 @@ depends_on = ["vibesys.issue_queue_core", "vibesys.orchestration.issue_queue.lau
 # Pure, deterministic hypothesis policy: never agents/prompts/I/O.
 path = "vibesys.hypothesis"
 layer = "roles_search"
-depends_on = ["vibesys.profile_focus", "vibesys.metrics", "vs_runtime"]
+depends_on = ["vibesys.profile_focus", "vibesys.metrics", "vs_issue_tracker", "vs_runtime"]
 
 [[modules]]
 path = "vibesys.profile_focus"
@@ -1433,7 +1433,7 @@ expose = ["api", "api\\..*"]
 # profile-guided attribution, the designer's view of the search so far and plan acceptance.
 path = "vibesys.serial_search"
 layer = "roles_search"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.hypothesis", "vibesys.inputs", "vibesys.metrics", "vibesys.profile_focus"]
+depends_on = ["vs_core", "vs_issue_tracker", "vibesys.candidates", "vibesys.hypothesis", "vibesys.inputs", "vibesys.metrics", "vibesys.profile_focus"]
 
 [[interfaces]]
 from = ["vibesys.serial_search"]
@@ -1467,6 +1467,17 @@ depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibe
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.core_policy"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+# A serial run's roadmap: the owner of the roadmap operations over the run's `Roadmap`, kept in
+# its portable state through `Project`.
+path = "vibesys.serial_roadmap"
+layer = "loops"
+depends_on = ["vs_core", "vs_issue_tracker", "vs_runtime"]
+
+[[interfaces]]
+from = ["vibesys.serial_roadmap"]
+expose = ["ROADMAP_NAMESPACE", "RoadmapOwner", "roadmap_entries"]
 
 [[modules]]
 # The dynamic search's handoff files: renders each planning call's file and writes it into the
@@ -1568,7 +1579,7 @@ expose = ["single_core_registration"]
 # stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.single_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.single_roles", "vibesys.hypothesis", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.launch", "vibesys.orchestration.single.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts", "vibesys.serial_search"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.serial_roadmap", "vibesys.single_roles", "vibesys.hypothesis", "vibesys.orchestration.single.core_policy", "vibesys.orchestration.single.launch", "vibesys.orchestration.single.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts", "vibesys.serial_search"]
 
 [[interfaces]]
 from = ["vibesys.single_roles"]
@@ -1627,7 +1638,7 @@ expose = ["multi_core_registration"]
 # stores the recipe, builds the operation catalog and reads the run record.
 path = "vibesys.multi_core"
 layer = "loops"
-depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.multi_roles", "vibesys.hypothesis", "vibesys.orchestration.multi.core_policy", "vibesys.orchestration.multi.launch", "vibesys.orchestration.multi.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts", "vibesys.serial_search", "vibesys.orchestration.profilers"]
+depends_on = ["vs_core", "vs_project", "vs_runtime", "vibesys.candidates", "vibesys.core_wiring", "vibesys.serial_roadmap", "vibesys.multi_roles", "vibesys.hypothesis", "vibesys.orchestration.multi.core_policy", "vibesys.orchestration.multi.launch", "vibesys.orchestration.multi.search", "vibesys.plugin_registration", "vibesys.prompts", "vibesys.run.contracts", "vibesys.serial_search", "vibesys.orchestration.profilers"]
 
 [[interfaces]]
 from = ["vibesys.multi_roles"]

@@ -351,8 +351,11 @@ worktree must be clean before VibeSys switches to the saved
 | --- | ---: | --- |
 | `--judge-every N` | `3` | Run an independent judge every Nth round. A candidate explicitly nominated by the implementer and the final round are always reviewed immediately. Canonical accuracy and benchmark commands run only after a judge PASS. The `dynamic` orchestration uses an implementation workstream's global schedule sequence for this cadence: it always reviews a nominated or supported candidate, and reviews another terminal outcome when that sequence is every Nth workstream. Its admission budget is `--max-rounds` times `--max-in-flight`, and a continued hypothesis uses another admission. |
 | `--official-eval-every N` | `3` | Run configured framework-owned accuracy and benchmark gates every N accepted candidate checkpoints. Intermediate checkpoints remain provisional; orchestrator requests and the final round force immediate official evaluation. Retries, continuing hypotheses, and profiler-only rounds do not advance this cadence. Modal gates reuse one healthy deployment for the exact candidate commit, explicitly stop it after the final gate, and rely on zero minimum-warm replicas plus a short finite scaledown window as the crash backstop. Unchanged retries reuse a prior accuracy PASS when only a later gate failed. The `dynamic` orchestration ignores this cadence: its workstreams are parallel branches, so it evaluates every review-passed candidate. |
-| `--memory-layout` | `files` | `files` keeps `roadmap.md` and `progress.md`. `directories` uses `roadmap/index.md` and one `progress/round-NNNN.md` audit file per round; fresh orchestrators receive a bounded recent window and can inspect older files on demand. Existing runs retain their current layout when resumed. |
 | `--constraint TEXT` | none | Add an operator-supplied workload invariant to every agent's objective without changing the input bundle. The framework commits the effective objective under the run's portable `.vibesys/state/` and mounts it read-only in isolated environments, so candidate edits cannot erase it. Repeat for multiple constraints and repeat the same flags when resuming. |
+
+The designer's roadmap (its directions, their blockers and their statuses) is
+kept by VibeSys in the run's state, not in the project: the designer sees it in
+its prompt and changes it through its reply, and a resumed run keeps it.
 
 Designer and judge invocations start with clean model sessions. The implementer
 session is keyed by the designer's stable `hypothesis_id`, so targeted

@@ -1,8 +1,9 @@
 """Public surface of what the serial hypothesis searches (single, multi) share.
 
 The shared designer role and its prompts, the round and run records every serial search keeps,
-the flows both call (attribution capture, asking for a plan, the trusted gates) and the pure
-judgments over a finished round.
+the flows both call (attribution capture, asking for a plan, reading and writing the roadmap,
+the trusted gates) and the pure judgments over a finished round. ``ROADMAP`` is the roadmap's
+operations, which each serial search declares as owned.
 """
 
 from pathlib import Path
@@ -57,6 +58,13 @@ from vibesys.serial_search._prompts import (
     correction_of,
     plan_prompt,
 )
+from vibesys.serial_search._roadmap import (
+    ROADMAP,
+    ROADMAP_TRIES,
+    RoadmapUnavailable,
+    put_roadmap,
+    read_roadmap,
+)
 from vibesys.serial_search._roles import LOST_TURN_BACKOFF, ORCHESTRATOR
 from vibesys.serial_search._run import Closed, RoundDone, RoundStart, SerialRun, round_done
 from vibesys.serial_search._work import Attempting, Room, Turn, work
@@ -70,6 +78,8 @@ __all__ = [
     "OUTPUT_ARGUMENT",
     "PLAN_CORRECTIONS",
     "PROMPTS_DIR",
+    "ROADMAP",
+    "ROADMAP_TRIES",
     "AcceptedPlan",
     "Advise",
     "Attempting",
@@ -90,6 +100,7 @@ __all__ = [
     "PlanEvidence",
     "PlanPrompt",
     "PlanTemplate",
+    "RoadmapUnavailable",
     "Room",
     "RoundDone",
     "RoundRow",
@@ -117,6 +128,8 @@ __all__ = [
     "observe",
     "plan_evidence",
     "plan_prompt",
+    "put_roadmap",
+    "read_roadmap",
     "record_round",
     "revision_of",
     "round_done",

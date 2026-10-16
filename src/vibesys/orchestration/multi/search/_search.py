@@ -13,11 +13,11 @@ from vibesys.orchestration.multi.search._config import MultiConfig
 from vibesys.orchestration.multi.search._operations import OPERATIONS
 from vibesys.orchestration.multi.search._roles import ROLES
 from vibesys.orchestration.multi.search._round import MultiRound, play_round
-from vibesys.serial_search.api import RoundDone, SerialRun
+from vibesys.serial_search.api import ROADMAP, RoundDone, SerialRun
 from vs_core.api.search import Flow, NoWinner, StopRequested, TaskStopped, search
 
 
-@search("multi", config=MultiConfig, operations=OPERATIONS, roles=ROLES)
+@search("multi", config=MultiConfig, operations=OPERATIONS, roles=ROLES, owned=ROADMAP)
 async def multi(ctx: Flow, config: MultiConfig) -> NoWinner | None:
     """Measure the input, play the rounds in order within budget, name the best reviewed candidate."""
     ctx.checkpoint(config)

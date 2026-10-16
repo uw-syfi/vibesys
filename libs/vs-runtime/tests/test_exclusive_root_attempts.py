@@ -64,7 +64,7 @@ if TYPE_CHECKING:
 # (`--depth=nightly`) searches deeper.
 
 _ROOT = WorkspaceMode.EXCLUSIVE_ROOT
-_ARTIFACT_DIR = "roadmap"
+_ARTIFACT_DIR = "profile"
 _PLAN = f"{_ARTIFACT_DIR}/plan.md"
 _NEVER = 10**6
 _WRITES_PER_REQUEST = 9

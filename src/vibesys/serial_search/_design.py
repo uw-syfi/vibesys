@@ -2,9 +2,11 @@
 
 A new hypothesis starts before any candidate does. In the profile-guided preset the configured
 attribution command runs first, in a throwaway workspace holding the revision, and its ranked
-components steer the designer. The designer then writes a plan: the ledger may refuse it, in
-which case it is asked once more with the reason. What a search does between these two (multi
-routes and profiles) is its own.
+components steer the designer. The designer is shown the run's roadmap and answers with a
+plan, which may change roadmap items: the ledger may refuse the plan, or the roadmap the change,
+in which case it is asked once more with the reason. An accepted change is put on the roadmap
+before the hypothesis starts. What a search does between attribution and the plan (multi routes
+and profiles) is its own.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from vibesys.serial_search._attribution import (
 from vibesys.serial_search._ledger import LedgerJson
 from vibesys.serial_search._plans import accept_plan, base_commit, revision_of
 from vibesys.serial_search._prompts import PlanCorrection, PlanPrompt, correction_of, plan_prompt
+from vibesys.serial_search._roadmap import RoadmapUnavailable, put_roadmap, read_roadmap
 from vibesys.serial_search._roles import ORCHESTRATOR
 from vs_core.api.search import (
     CaptureSpec,
@@ -34,6 +37,7 @@ from vs_core.api.search import (
     TurnFinished,
     Value,
 )
+from vs_issue_tracker.api import roadmap_problem
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -43,7 +47,7 @@ if TYPE_CHECKING:
     from vibesys.serial_search._run import RoundStart
 
 PLAN_CORRECTIONS = 1
-"""Times the designer is asked to fix a plan the ledger refused, beyond core's own corrections."""
+"""Times the designer is asked to fix a plan the ledger or the roadmap refused, beyond core's own."""
 
 
 class AcceptedPlan(Value):
@@ -102,7 +106,10 @@ async def ask_plan(
     ledger: rounds.Ledger,
     number: int,
 ) -> AcceptedPlan | NoDesign:
-    """Ask the designer for a plan; when the ledger refuses it, ask again with the reason."""
+    """Ask the designer for a plan; when the ledger or the roadmap refuses it, ask again.
+
+    The roadmap refuses a change that `roadmap_problem` names over the items the prompt showed.
+    """
     asked: PlanPrompt | PlanCorrection = prompt
     problem = "the designer did not answer"
     for _ in range(1 + PLAN_CORRECTIONS):
@@ -110,7 +117,10 @@ async def ask_plan(
             case TurnFinished(reply=OrchestratorPlan() as reply, invocation=turn):
                 accepted = accept_plan(hypotheses, ledger, reply, round_number=number)
                 if isinstance(accepted, OrchestratorPlan):
-                    return AcceptedPlan(plan=accepted)
+                    refused = roadmap_problem(prompt.roadmap, accepted.roadmap)
+                    if refused is None:
+                        return AcceptedPlan(plan=accepted)
+                    accepted = refused
                 problem = accepted
                 asked = correction_of(prompt, turn, problem)
             case Failed() as failed:
@@ -151,6 +161,9 @@ async def design(
             return folded
         ledger = folded.decode(space)
     profile = start.last_profile if advise is None else (await advise(ledger)) or start.last_profile
+    roadmap = await read_roadmap(ctx)
+    if isinstance(roadmap, RoadmapUnavailable):
+        return NoDesign(reason=roadmap.reason)
     prompt = plan_prompt(
         hypotheses,
         ledger,
@@ -159,6 +172,7 @@ async def design(
         base=start.base,
         benchmark_enabled="benchmark" in terms.measured,
         last_profile=profile,
+        roadmap=roadmap,
     )
     asked = await ask_plan(
         ctx.agents.session(ORCHESTRATOR),
@@ -169,6 +183,9 @@ async def design(
     )
     if isinstance(asked, NoDesign):
         return asked
+    unwritten = await put_roadmap(ctx, tuple(asked.plan.roadmap))
+    if unwritten is not None:
+        return NoDesign(reason=unwritten.reason)
     started_ledger, started = rounds.start(
         hypotheses,
         ledger,

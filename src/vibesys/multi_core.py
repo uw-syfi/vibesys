@@ -26,7 +26,6 @@ from vibesys.core_wiring import (
     agent_evaluation_policy,
     domain_prompt_sections,
     evaluation_inputs,
-    operation_catalog,
 )
 from vibesys.hypothesis import HypothesisState
 from vibesys.multi_roles import CORE_ROLES
@@ -45,8 +44,9 @@ from vibesys.plugin_registration import (
     RuntimeRecordProjector,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
+from vibesys.serial_roadmap import roadmap_entries
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
-from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, RevisionRef
+from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, OperationRegistry, RevisionRef
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import (
     CoreOperation,
@@ -56,8 +56,6 @@ from vs_runtime.api import (
     ValidationRecipeArtifact,
 )
 from vs_runtime.api.core import (
-    OperationCatalog,
-    OperationPorts,
     RuntimeRecord,
     operation_roles,
 )
@@ -73,13 +71,18 @@ type MultiRunLaunch = MultiLaunch | ProfileGuidedMultiLaunch
 
 # The label of the snapshot that retains a verified revision.
 RETENTION_LABEL = "verified"
-# The directories the run-scoped turns may write: the designer's roadmap and the profiler's evidence.
-ARTIFACT_DIRECTORIES = ("roadmap", "profile")
+# The directories the run-scoped turns may write: the profiler's evidence. The designer's
+# roadmap is VibeSys-owned run state, reached through the roadmap operations.
+ARTIFACT_DIRECTORIES = ("profile",)
 
 
-def multi_operation_catalog(ports: OperationPorts) -> OperationCatalog:
-    """The operations the multi search requires, each owned by the production owner of its role."""
-    return operation_catalog(OPERATIONS, ports)
+def _registry() -> OperationRegistry:
+    """The codec of every operation a run records: the kit's and the roadmap's."""
+    registry = multi.registry()
+    if registry is None:
+        message = "the multi search registers operations"
+        raise ValueError(message)
+    return registry
 
 
 def multi_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState, HypothesisState]:
@@ -95,7 +98,7 @@ def multi_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState, Hypothe
         plugin_id=plugin_id,
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
-        operations=OPERATIONS.registry(),
+        operations=_registry(),
         published=published,
         project=project,
     )
@@ -210,6 +213,7 @@ def multi_core_policy(launch_type: type[MultiRunLaunch]) -> CorePolicy:
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared"),
         artifact_directories=ARTIFACT_DIRECTORIES,
+        owned_operations=roadmap_entries,
     )
 
 

@@ -13,6 +13,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from vs_issue_tracker.api import RoadmapItem
 from vs_runtime.api import AgentId
 
 HypothesisStrategyDisposition = Literal["parked", "abandoned"]
@@ -153,7 +154,15 @@ class OrchestratorPlan(BaseModel):
         default_factory=list,
         description=(
             "Strategic parked/abandoned updates for previously completed hypotheses. "
-            "These are persisted by the framework; roadmap prose is not authoritative."
+            "These are persisted by the framework; roadmap items do not replace them."
+        ),
+    )
+    roadmap: list[RoadmapItem] = Field(
+        default_factory=list,
+        description=(
+            "Roadmap items to create or replace, each by its id; list only new or changed "
+            "items, each in full. Items are never deleted: mark an ended direction done, "
+            "parked or abandoned."
         ),
     )
     hypothesis: str = Field(

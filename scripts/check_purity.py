@@ -66,7 +66,26 @@ PURE_EXPORTS = {
             "TemplateBody",
             "TextBody",
             "board_operation_registrations",
+            # The roadmap's data contracts: its items, the pure rules every implementation
+            # enforces, and the roadmap operations' request and outcome values. The roadmap
+            # implementations (`DocumentRoadmap`, `FakeRoadmap`) are not.
+            "PutRoadmapItems",
+            "ROADMAP_PUT_KIND",
+            "ROADMAP_READ_KIND",
+            "ReadRoadmap",
+            "RoadmapItem",
+            "RoadmapItemKind",
+            "RoadmapItemsPut",
+            "RoadmapSnapshot",
+            "RoadmapStatus",
+            "merged",
+            "roadmap_operation_registrations",
+            "roadmap_problem",
         }
+    ),
+    "vs_issue_tracker.api.RoadmapItemKind": frozenset({"MAJOR", "MINOR"}),
+    "vs_issue_tracker.api.RoadmapStatus": frozenset(
+        {"ABANDONED", "DONE", "IN_PROGRESS", "PARKED", "TODO"}
     ),
     "vs_issue_tracker.api.IssueStatus": frozenset({"BLOCKED", "CLOSED", "IN_PROGRESS", "OPEN"}),
     "vs_issue_tracker.api.IssueType": frozenset({"BUG", "FEATURE", "PERF"}),

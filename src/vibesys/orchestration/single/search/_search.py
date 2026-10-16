@@ -12,11 +12,11 @@ from vibesys.orchestration.single.search._config import SingleConfig
 from vibesys.orchestration.single.search._operations import OPERATIONS
 from vibesys.orchestration.single.search._roles import ROLES
 from vibesys.orchestration.single.search._round import SingleRound, play_round
-from vibesys.serial_search.api import RoundDone, SerialRun
+from vibesys.serial_search.api import ROADMAP, RoundDone, SerialRun
 from vs_core.api.search import Flow, NoWinner, StopRequested, TaskStopped, search
 
 
-@search("single", config=SingleConfig, operations=OPERATIONS, roles=ROLES)
+@search("single", config=SingleConfig, operations=OPERATIONS, roles=ROLES, owned=ROADMAP)
 async def single(ctx: Flow, config: SingleConfig) -> NoWinner | None:
     """Measure the input, play the rounds in order within budget, name the best candidate."""
     ctx.checkpoint(config)

@@ -3,7 +3,8 @@
 The search itself is `orchestration/single/search`: one flow, its roles and its pure helpers.
 This module does the effects the search cannot: store the evaluation recipe, read the evaluation
 identity, resolve the task's terms from the input bundle and the plan, bind the search's
-operations to the runtime's production owners and read a run's committed record.
+operations to the runtime's production owners (the roadmap's to its owner over run state) and
+read a run's committed record.
 """
 
 from __future__ import annotations
@@ -25,7 +26,6 @@ from vibesys.core_wiring import (
     agent_evaluation_policy,
     domain_prompt_sections,
     evaluation_inputs,
-    operation_catalog,
 )
 from vibesys.hypothesis import HypothesisState
 from vibesys.orchestration.single.core_policy.api import (
@@ -42,14 +42,13 @@ from vibesys.plugin_registration import (
     RuntimeRecordProjector,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
+from vibesys.serial_roadmap import roadmap_entries
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
 from vibesys.single_roles import CORE_ROLES
-from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, RevisionRef
+from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, OperationRegistry, RevisionRef
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import CoreOperation, CorePlan, CorePolicy, OrchestrationPlugin
 from vs_runtime.api.core import (
-    OperationCatalog,
-    OperationPorts,
     RuntimeRecord,
     operation_roles,
 )
@@ -65,13 +64,18 @@ type SingleRunLaunch = SingleLaunch | ProfileGuidedSingleLaunch
 
 # The label of the snapshot that retains a verified revision.
 RETENTION_LABEL = "verified"
-# The directories the designer's run-scoped turn may write.
-ARTIFACT_DIRECTORIES = ("roadmap",)
+# The directories a run-scoped turn may write in the run's workspace: none. The designer's
+# roadmap is VibeSys-owned run state, reached through the roadmap operations.
+ARTIFACT_DIRECTORIES: tuple[str, ...] = ()
 
 
-def single_operation_catalog(ports: OperationPorts) -> OperationCatalog:
-    """The operations the single search requires, each owned by the production owner of its role."""
-    return operation_catalog(OPERATIONS, ports)
+def _registry() -> OperationRegistry:
+    """The codec of every operation a run records: the kit's and the roadmap's."""
+    registry = single.registry()
+    if registry is None:
+        message = "the single search registers operations"
+        raise ValueError(message)
+    return registry
 
 
 def single_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState, HypothesisState]:
@@ -87,7 +91,7 @@ def single_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState, Hypoth
         plugin_id=plugin_id,
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
-        operations=OPERATIONS.registry(),
+        operations=_registry(),
         published=published,
         project=project,
     )
@@ -190,6 +194,7 @@ def single_core_policy(launch_type: type[SingleRunLaunch]) -> CorePolicy:
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(SERIAL_SEARCH_PROMPTS, CORE_PROTOCOL_DIR),
         artifact_directories=ARTIFACT_DIRECTORIES,
+        owned_operations=roadmap_entries,
     )
 
 

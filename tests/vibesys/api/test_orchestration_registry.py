@@ -235,15 +235,16 @@ def test_builtin_plugin_metadata_declares_product_policy() -> None:
         (
             OrchestrationDescriptor(id="single-agent", config_version=1, options=single_options),
             SingleLaunch,
-            ("roadmap",),
+            (),
         ),
         (
             OrchestrationDescriptor(id="multi-agent", config_version=1, options=multi_options),
             MultiLaunch,
-            ("roadmap", "profile"),
+            ("profile",),
         ),
     )
-    # A core strategy declares only the artifact directories its run-scoped turns write, and
+    # A core strategy declares only the artifact directories its run-scoped turns write (the
+    # designer's roadmap is run state behind the roadmap operations, not a directory), and
     # resumes with exact options (no round-budget variant until core can extend limits, #2013).
     for descriptor, launch, paths in cases:
         registration = registry.resolve(descriptor.id)

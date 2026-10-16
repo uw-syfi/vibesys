@@ -31,6 +31,7 @@ from vibesys.serial_search.api import (
     RoundRow,
 )
 from vs_core.api import RevisionId, RevisionRef
+from vs_issue_tracker.api import RoadmapItem, RoadmapItemKind, RoadmapStatus
 from vs_prompts.api import TemplateRenderer
 from vs_sim.api.testing import examples
 
@@ -91,6 +92,26 @@ _PLAN = st.builds(
     ranked_bottlenecks=st.lists(
         st.builds(Bottleneck, component=_TEXT, cost_share_pct=st.floats(0, 100)), max_size=2
     ).map(tuple),
+    roadmap=st.lists(
+        st.builds(
+            RoadmapItem,
+            id=st.sampled_from(("major-1", "major-2")),
+            kind=st.just(RoadmapItemKind.MAJOR),
+            title=_TEXT,
+            status=st.sampled_from(RoadmapStatus),
+            note=st.just("") | _TEXT,
+        )
+        | st.builds(
+            RoadmapItem,
+            id=st.just("minor-1"),
+            kind=st.just(RoadmapItemKind.MINOR),
+            title=_TEXT,
+            status=st.sampled_from(RoadmapStatus),
+            major=st.just("major-1"),
+        ),
+        max_size=3,
+        unique_by=lambda item: item.id,
+    ).map(tuple),
     base_revision=_REVISIONS,
 )
 _ROUND = st.builds(
@@ -135,6 +156,10 @@ def test_the_plan_prompt_renders_for_every_context(context: PlanPrompt) -> None:
     assert f"Round {context.round_number} of {context.max_rounds}" in text
     for row in context.history:
         assert row.hypothesis_id in text
+    for item in context.roadmap:
+        assert f"`{item.id}` {item.kind.value}" in text
+        assert f"{item.status.value}: {item.title}" in text
+    assert ("Roadmap: empty." in text) == (not context.roadmap)
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

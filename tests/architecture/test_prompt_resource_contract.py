@@ -311,6 +311,7 @@ def representative_context() -> dict[str, object]:
         "read_only_paths",
         "recommended_skills",
         "results",
+        "roadmap",
         "sections",
         "seeded_workspace_paths",
         "updated_hypothesis_ids",

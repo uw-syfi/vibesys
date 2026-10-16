@@ -14,6 +14,12 @@ from pydantic import Field
 from vibesys.hypothesis import PlanningContext, RoundRecord, rounds
 from vs_core.api import Value
 
+# lint-waiver: LW-295701 [TC001]; Pydantic resolves this value field annotation at runtime.
+# > Ruff cannot see that `vs_core.api.Value` is the configured runtime-evaluated base, because it
+# > is a re-export. Dropping the future import would force quoting every other annotation here;
+# > a runtime alias only to satisfy the rule would hide why the import is needed.
+from vs_issue_tracker.api import RoadmapItem  # noqa: TC001
+
 if TYPE_CHECKING:
     from vibesys.hypothesis import HypothesisConfig
     from vibesys.profile_focus import FocusView
@@ -99,6 +105,8 @@ class PlanEvidence(Value):
     exhaustion_round: int | None = None
     active_component: str | None = None
     ranked_bottlenecks: tuple[Bottleneck, ...] = ()
+    roadmap: tuple[RoadmapItem, ...] = ()
+    """The run's roadmap items, in the order each was first put."""
 
 
 def _row(record: RoundRecord) -> RoundRow:
@@ -126,8 +134,8 @@ def plan_evidence(
 ) -> PlanEvidence:
     """The evidence for planning ``planning.round_number``: history, frontier, notices, focus.
 
-    ``benchmark_enabled`` and ``last_profile`` are facts of the run and of the strategy's last
-    round, so the strategy sets them on the result.
+    ``benchmark_enabled``, ``last_profile`` and ``roadmap`` are facts of the run, of the
+    strategy's last round and of the roadmap's owner, so the strategy sets them on the result.
     """
     records = ledger.records
     archive = rounds.archive_view(config, ledger)
