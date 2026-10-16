@@ -24,6 +24,8 @@ How to make one kind of change in this repository.
 - [add-bundled-skill](add-bundled-skill/SKILL.md): add or change a bundled
   product skill, its sidecar selection rules, platform references or its
   vendoring update script.
+- [add-example-task](add-example-task/SKILL.md): add or change an example, a
+  task bundle, or an evaluator package and its result protocol.
 - [build-client-feature](build-client-feature/SKILL.md): add or change a
   feature in the TypeScript clients: package placement, machines and folds,
   run-session wiring, cancellation and bounded waits.
