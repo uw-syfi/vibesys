@@ -90,15 +90,21 @@ _FAILURES = st.sampled_from(
 
 @st.composite
 def _snapshots(draw: st.DrawFn) -> RunSnapshot:
-    """A run in progress: workstreams scheduled in order, some running, some finished."""
+    """A run in progress: workstreams scheduled in order, some running, some finished.
+
+    A workstream may name a hypothesis an earlier one already worked on (it goes on under the same
+    planner-chosen ID), so one hypothesis may own several workstreams and rounds.
+    """
     finished: list[FinishedWork] = []
     running: list[Running] = []
-    hypotheses: list[HypothesisRecord] = []
+    hypotheses: dict[str, HypothesisRecord] = {}
     for sequence in range(1, draw(st.integers(0, 5)) + 1):
+        work_id = draw(st.sampled_from((f"w{sequence}", "w1", "w2")))
         plan = WorkPlan(
             kind=WorkKind.IMPLEMENT,
-            work_id=f"w{sequence}",
+            work_id=work_id,
             title=draw(st.sampled_from(("", f"Title {sequence}"))),
+            continue_hypothesis=work_id in hypotheses,
         )
         rounds: tuple[RoundRecord, ...] = ()
         if draw(st.booleans()):
@@ -111,7 +117,7 @@ def _snapshots(draw: st.DrawFn) -> RunSnapshot:
                 rounds = (
                     RoundRecord(
                         sequence=sequence,
-                        attempt=AttemptId(root=f"attempt-{sequence}"),
+                        attempt=AttemptId(root=f"attempt:{work_id}:{sequence}"),
                         review_passed=draw(st.none() | st.booleans()),
                         metrics=tuple(draw(st.lists(_row, max_size=2))),
                         failure=draw(_FAILURES),
@@ -121,17 +127,20 @@ def _snapshots(draw: st.DrawFn) -> RunSnapshot:
                 finished.append(FinishedWork(sequence=sequence, plan=plan, parent=_PARENT))
         else:
             running.append(Running(sequence=sequence, plan=plan))
-        hypotheses.append(
+        prior = hypotheses.get(work_id)
+        hypotheses[work_id] = (
             HypothesisRecord(
-                hypothesis_id=plan.work_id,
+                hypothesis_id=work_id,
                 title=plan.title,
                 hypothesis="claim",
                 first_sequence=sequence,
                 rounds=rounds,
             )
+            if prior is None
+            else prior.model_copy(update={"rounds": (*prior.rounds, *rounds)})
         )
     leading = (
-        draw(st.none() | st.sampled_from([item.hypothesis_id for item in hypotheses]))
+        draw(st.none() | st.sampled_from(sorted(hypotheses)))
         if hypotheses
         else None
     )
@@ -140,7 +149,7 @@ def _snapshots(draw: st.DrawFn) -> RunSnapshot:
     )
     return RunSnapshot(
         baseline=baseline,
-        hypotheses=tuple(hypotheses),
+        hypotheses=tuple(hypotheses.values()),
         finished=tuple(finished),
         running=tuple(running),
         leading=leading,
@@ -200,9 +209,8 @@ def test_every_scheduled_workstream_is_one_node_in_the_order_it_was_scheduled(
         + [(item.sequence, item.plan) for item in snapshot.running],
         key=lambda entry: entry[0],
     )
-    assert [(node.id, node.ordinal) for node in roots] == [
-        (f"workstream:{plan.work_id}", sequence) for sequence, plan in scheduled
-    ]
+    assert [node.ordinal for node in roots] == [sequence for sequence, _ in scheduled]
+    assert len({node.id for node in tree.nodes}) == len(tree.nodes)
     assert all(node.kind is IterationKind.WORKSTREAM for node in roots)
     assert [node.label for node in roots] == [plan.title or plan.work_id for _, plan in scheduled]
 
@@ -232,10 +240,11 @@ def test_a_workstream_status_follows_how_it_ended(snapshot: RunSnapshot) -> None
     tree = project_run_snapshot(snapshot, experiment_revision=1).iterations
     assert isinstance(tree, IterationTree)
     status = {node.id: node.status for node in tree.nodes}
+    workstream = {node.ordinal: node.status for node in _workstreams(tree)}
     rounds = {record.sequence: record for record in _rounds(snapshot)}
 
     for item in snapshot.running:
-        assert status[f"workstream:{item.plan.work_id}"] is IterationStatus.ACTIVE
+        assert workstream[item.sequence] is IterationStatus.ACTIVE
     for item in snapshot.finished:
         record = rounds.get(item.sequence)
         failure = item.failure if record is None else record.failure or item.failure
@@ -249,9 +258,46 @@ def test_a_workstream_status_follows_how_it_ended(snapshot: RunSnapshot) -> None
             expected = IterationStatus.FAILED
         else:
             expected = IterationStatus.COMPLETED
-        assert status[f"workstream:{item.plan.work_id}"] is expected
+        assert workstream[item.sequence] is expected
         if record is not None:
             assert status[record.attempt.root] is expected
+
+
+def test_a_hypothesis_that_goes_on_is_a_second_workstream_beside_its_first() -> None:
+    """Regression: a continued hypothesis made two nodes with one ID, and the run died.
+
+    A live run planned ``design-kernel-path`` as workstream 6 and continued it as workstream 7;
+    projecting the record raised ``nodes[...].id duplicates 'workstream:design-kernel-path'``
+    from inside the commit observer.
+    """
+    hypothesis = "design-kernel-path"
+    first = WorkPlan(kind=WorkKind.IMPLEMENT, work_id=hypothesis, title="Audit the kernel path")
+    again = first.model_copy(update={"title": "CUDA graphs", "continue_hypothesis": True})
+    snapshot = RunSnapshot(
+        baseline=NotConfigured(),
+        hypotheses=(
+            HypothesisRecord(
+                hypothesis_id=hypothesis,
+                title=first.title,
+                hypothesis="claim",
+                first_sequence=6,
+                rounds=(RoundRecord(sequence=6, attempt=AttemptId(root=f"attempt:{hypothesis}:6")),),
+            ),
+        ),
+        finished=(FinishedWork(sequence=6, plan=first, parent=_PARENT),),
+        running=(Running(sequence=7, plan=again),),
+    )
+
+    tree = project_run_snapshot(snapshot, experiment_revision=1).iterations
+
+    assert isinstance(tree, IterationTree)
+    roots = _workstreams(tree)
+    assert [(node.ordinal, node.label, node.status) for node in roots] == [
+        (6, "Audit the kernel path", IterationStatus.COMPLETED),
+        (7, "CUDA graphs", IterationStatus.ACTIVE),
+    ]
+    assert roots[0].id != roots[1].id
+    assert [node.parent_id for node in tree.nodes if node.parent_id is not None] == [roots[0].id]
 
 
 def _single_round_snapshot(failure: Failure) -> RunSnapshot:

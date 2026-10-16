@@ -19,7 +19,7 @@ from vibesys.hypothesis.readmodel import (
     HypothesisView,
     RoundView,
 )
-from vibesys.orchestration.dynamic.search.api import FailureKind
+from vibesys.orchestration.dynamic.search.api import FailureKind, workstream_key
 from vibesys.run.contracts import (
     IterationKind,
     IterationMetric,
@@ -78,7 +78,12 @@ def _baseline_metrics(snapshot: RunSnapshot) -> tuple[MetricRow, ...]:
 
 
 def _workstream_iterations(snapshot: RunSnapshot) -> IterationTree:
-    """Expose workstreams in the order they were scheduled, whatever order they completed in."""
+    """Expose workstreams in the order they were scheduled, whatever order they completed in.
+
+    A node is named by the workstream's key (its schedule position and work ID), never by the
+    work ID alone: a hypothesis that goes on (``continue_hypothesis``) runs as a new workstream
+    under the same planner-chosen ID, and each of those workstreams is its own node.
+    """
     rounds = {record.sequence: record for item in snapshot.hypotheses for record in item.rounds}
     nodes: list[IterationSummary] = []
     for sequence, work_id, title, finished in sorted(
@@ -95,7 +100,7 @@ def _workstream_iterations(snapshot: RunSnapshot) -> IterationTree:
         key=lambda entry: entry[0],
     ):
         record = rounds.get(sequence)
-        root_id = f"workstream:{work_id}"
+        root_id = f"workstream:{workstream_key(sequence, work_id)}"
         status = _workstream_status(finished, record)
         nodes.append(
             IterationSummary(
