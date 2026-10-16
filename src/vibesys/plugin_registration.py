@@ -7,7 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.run.contracts import IterationSupport, PluginProjection, RunStatus, RunView
+from vibesys.run.contracts import (
+    IterationSupport,
+    IterationUnavailable,
+    IterationUnavailableReason,
+    PluginProjection,
+    RunStatus,
+    RunView,
+)
 from vs_core.api import ContractError, OperationRegistration
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import OperationRole, RuntimeRecord
@@ -100,10 +107,27 @@ class RuntimeRecordProjector[S: StrategyState]:
         return self._view(state, run_id=run_id, status=RunStatus.ACTIVE)
 
     def _view(self, record: RuntimeRecord[S], *, run_id: str, status: RunStatus) -> RunView:
-        projection = _require_plugin_projection(
-            self.project(record.envelope.strategy, record.envelope.revision)
+        """The record's view; a projection that fails validation is a view that says so.
+
+        Every reader goes through here: the live commit observer, the iteration and experiment
+        queries, and the run listing. The view is derived from durable state, so a bug in
+        building it must not fail the reader (or a listing of every run). It becomes
+        `IterationUnavailableReason.PROJECTION_INVALID` with no payload, and the commit observer
+        reports it.
+        """
+        try:
+            projection = self.project(record.envelope.strategy, record.envelope.revision)
+        except ValueError:
+            projection = PluginProjection(
+                payload=None,
+                iterations=IterationUnavailable(
+                    reason=IterationUnavailableReason.PROJECTION_INVALID
+                ),
+                experiment_revision=record.envelope.revision,
+            )
+        return _plugin_run_view(
+            self.plugin_id, run_id, status, _require_plugin_projection(projection)
         )
-        return _plugin_run_view(self.plugin_id, run_id, status, projection)
 
 
 @dataclass(frozen=True, slots=True)

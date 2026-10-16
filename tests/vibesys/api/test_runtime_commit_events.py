@@ -25,7 +25,14 @@ from vibesys.events import (
     IterationsChangedData,
     WorkstreamFailureKind,
 )
-from vibesys.run.contracts import RoundFailureSummary, RoundSummary, RunStatus, RunView
+from vibesys.run.contracts import (
+    IterationUnavailable,
+    IterationUnavailableReason,
+    RoundFailureSummary,
+    RoundSummary,
+    RunStatus,
+    RunView,
+)
 from vibesys.run.integration import LocalRunIntegration
 from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api.testing import idle_environment_system
@@ -45,7 +52,7 @@ class _FakeAgentState(BaseModel):
     last_error: RoundFailureSummary | None = None
     repeated_error: bool = False
     unprojectable: bool = False
-    """The state names two iteration nodes alike, so its projection fails validation."""
+    """The policy's projection of this state fails validation."""
 
 
 class _FakeProjector:
@@ -54,14 +61,25 @@ class _FakeProjector:
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         if namespace != "commit-probe" or not isinstance(state, _FakeAgentState):
             return None
+        if state.unprojectable:
+            # As the product projector does when a policy's projection fails validation.
+            return RunView(
+                run_id=run_id,
+                loop="commit-probe",
+                status=RunStatus.ACTIVE,
+                iterations=IterationUnavailable(
+                    reason=IterationUnavailableReason.PROJECTION_INVALID
+                ),
+                experiment_revision=state.revision,
+            )
         return _agent_view(state, run_id=run_id)
 
 
-def _iterations(round_numbers: tuple[int, ...], *, alike: bool = False) -> IterationTree:
+def _iterations(round_numbers: tuple[int, ...]) -> IterationTree:
     return IterationTree.from_nodes(
         tuple(
             IterationSummary(
-                id="round" if alike else f"round:{number}",
+                id=f"round:{number}",
                 kind=IterationKind.ROUND,
                 label=f"Round {number}",
                 ordinal=number,
@@ -78,10 +96,7 @@ def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
         loop="commit-probe",
         status=RunStatus.ACTIVE,
         projection={"rounds": list(state.round_numbers), "active": state.active},
-        iterations=_iterations(
-            (*state.round_numbers, 0, -1) if state.unprojectable else state.round_numbers,
-            alike=state.unprojectable,
-        ),
+        iterations=_iterations(state.round_numbers),
         rounds=tuple(
             RoundSummary(
                 number=number,
@@ -317,14 +332,15 @@ def test_a_commit_of_another_namespace_projects_nothing() -> None:
 
 @given(unprojectable=st.lists(st.booleans(), max_size=10))
 @settings(max_examples=examples(pr=20, nightly=200))
-def test_a_commit_whose_view_cannot_be_built_warns_once_per_stretch_and_never_raises(
+def test_a_commit_whose_view_cannot_be_built_warns_once_and_loses_no_round(
     unprojectable: list[bool],
 ) -> None:
-    """The observer runs after a commit is durable and must not raise (runtime `CommitObserver`).
+    """Each commit adds one round; some commits' views cannot be built.
 
-    Regression: a projection that failed validation escaped the observer and ended a live run.
-    Now each stretch of commits whose view cannot be built warns once, and the commits around it
-    still publish their rounds.
+    Regression: a projection that failed validation escaped the commit observer and ended a
+    live run. Now each stretch of commits whose view cannot be built warns once when it starts,
+    and the first commit after it whose view can be built announces the stretch's rounds, so
+    every round of the last buildable view is announced exactly once, in order.
     """
     integration = LocalRunIntegration(
         clock=ManualClock(),
@@ -346,10 +362,8 @@ def test_a_commit_whose_view_cannot_be_built_warns_once_per_stretch_and_never_ra
             )
         )
 
-    failed: list[bool] = []
     for before, after in itertools.pairwise(states):
         observer.committed(before, after)
-        failed.append(before.unprojectable or after.unprojectable)
 
     warnings = [
         event
@@ -359,7 +373,9 @@ def test_a_commit_whose_view_cannot_be_built_warns_once_per_stretch_and_never_ra
         and event.data.source_label == "projection"
     ]
     stretches = sum(
-        1 for index, now in enumerate(failed) if now and (index == 0 or not failed[index - 1])
+        1
+        for index, now in enumerate(unprojectable)
+        if now and (index == 0 or not unprojectable[index - 1])
     )
     assert len(warnings) == stretches
     announced = [
@@ -367,5 +383,5 @@ def test_a_commit_whose_view_cannot_be_built_warns_once_per_stretch_and_never_ra
         for event in captured
         if event.type is CoreEventType.ROUND_FINISHED
     ]
-    published = [state.revision for state, now in zip(states[1:], failed, strict=True) if not now]
-    assert set(published) <= set(announced)
+    shown = [state for state in states if not state.unprojectable]
+    assert announced == list(shown[-1].round_numbers)

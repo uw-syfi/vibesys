@@ -1276,6 +1276,7 @@ const responsePayloadSchema: Record<string, unknown> = {
       "enum": [
         "external_state_unavailable",
         "policy_not_mapped",
+        "projection_invalid",
         "state_unavailable"
       ],
       "title": "IterationUnavailableReason",

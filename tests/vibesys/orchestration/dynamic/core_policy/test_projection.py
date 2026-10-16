@@ -9,6 +9,7 @@ trusted evaluation measured it.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -42,7 +43,11 @@ from vibesys.plugin_registration import OrchestrationRegistration, project_run
 from vibesys.run.contracts import (
     IterationKind,
     IterationStatus,
+    IterationSummary,
     IterationTree,
+    IterationUnavailable,
+    IterationUnavailableReason,
+    PluginProjection,
     RunStatus,
     RunView,
 )
@@ -513,3 +518,43 @@ def test_a_plugin_registers_the_projector(tmp_path: Path) -> None:
 
     assert agent_projection(view) is not None
     assert [item.number for item in view.rounds] == [1]
+
+
+def test_a_projection_that_fails_validation_is_a_view_that_says_so(tmp_path: Path) -> None:
+    """Readers (the run listing, the iteration and experiment queries, the commit observer) get a
+    valid view naming the failure, never the projection's exception."""
+    project, run_id = _project_with_run(tmp_path)
+    record = _commit(project, run_id, _published(_snapshot()))
+
+    node = IterationSummary(
+        id="same",
+        kind=IterationKind.WORKSTREAM,
+        label="same",
+        ordinal=1,
+        status=IterationStatus.ACTIVE,
+    )
+
+    def invalid(_state: FlowState, _revision: int) -> PluginProjection:
+        return PluginProjection(
+            payload={}, iterations=IterationTree(revision="r", nodes=(node, node))
+        )
+
+    projector = dataclasses.replace(dynamic_projector(), project=invalid)
+
+    stored = projector.view(project, run_id, status=RunStatus.FAILED, loop="dynamic")
+    live = projector.project_committed("dynamic", record, run_id=run_id)
+
+    assert live is not None
+    for view in (stored, live):
+        assert view.projection_failed
+        assert view.iterations == IterationUnavailable(
+            reason=IterationUnavailableReason.PROJECTION_INVALID
+        )
+        assert view.projection is None
+        assert view.experiment_revision == record.envelope.revision
+    assert stored.status is RunStatus.FAILED
+    assert (
+        not dynamic_projector()
+        .project_committed("dynamic", record, run_id=run_id)
+        .projection_failed
+    )

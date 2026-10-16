@@ -804,7 +804,8 @@ export type SchemaVersion1 = 1;
 /**
  * Closed reasons why a policy cannot expose iteration navigation.
  */
-export type IterationUnavailableReason = "external_state_unavailable" | "policy_not_mapped" | "state_unavailable";
+export type IterationUnavailableReason =
+  "external_state_unavailable" | "policy_not_mapped" | "projection_invalid" | "state_unavailable";
 export type IterationsReady = boolean | null;
 export type Round2 = number;
 export type Commit2 = string | null;

@@ -402,6 +402,8 @@ class IterationUnavailableReason(StrEnum):
 
     EXTERNAL_STATE_UNAVAILABLE = "external_state_unavailable"
     POLICY_NOT_MAPPED = "policy_not_mapped"
+    PROJECTION_INVALID = "projection_invalid"
+    """The policy's projection of the committed state failed validation: a product bug."""
     STATE_UNAVAILABLE = "state_unavailable"
 
 
@@ -445,6 +447,14 @@ class RunView(BaseModel):
     )
     rounds: tuple[RoundSummary, ...] = ()
     experiment_revision: int | None = None
+
+    @property
+    def projection_failed(self) -> bool:
+        """Whether the policy's projection of the committed state failed validation."""
+        return (
+            isinstance(self.iterations, IterationUnavailable)
+            and self.iterations.reason is IterationUnavailableReason.PROJECTION_INVALID
+        )
 
 
 __all__ = [
