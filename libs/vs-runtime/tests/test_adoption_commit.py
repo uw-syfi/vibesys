@@ -4,8 +4,9 @@ Adoption makes the root workspace hold the winner. Left uncommitted, that tree m
 project dirty, and the next run refuses to start ("existing project repository must be
 clean"). The adoption therefore commits it on the run's own branch, with a message that
 names the candidate and what it measured, and touches no other branch. The next run is a
-new process, so these tests start it in a copy of the project, as
-``test_git_tracker_next_run`` does.
+new process, so the test starts its tracker afresh over the same repositories, which the
+Fake serves to every process alike. The message itself is a pure function of the request
+and the evidence ledger, tested on its own.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from typing import TYPE_CHECKING, Literal
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-from tests.support.real_git import REAL_GIT, real_git_tracker
 from tests.support.session_world import SettledRunInvocations
 from tests.support.workspace_world import open_workspace_env
 
@@ -30,9 +30,12 @@ from vs_core.api import (
     ObservationStatus,
     RequestId,
     RetainedCandidate,
+    RevisionId,
+    RevisionRef,
     RunId,
     Scope,
     SettlementId,
+    TrustedBaseline,
     VerifyAdoption,
 )
 from vs_evaluation.api import (
@@ -43,12 +46,13 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api import EvidenceKind as StageKind
-from vs_project.api import NullGitTrackerEvents
-from vs_project.api.testing import GitKind
+from vs_project.api import GitTracker, NullGitTrackerEvents
+from vs_project.api.testing import FakeGitRepositories, GitKind
 from vs_runtime.api.core import (
     ReceiptEvidenceLedger,
     ReceiptStore,
     RuntimeWorkspaceRequests,
+    adoption_commit_message,
     commit_of,
 )
 from vs_sim.api.testing import InlineBlockingRunner, SimThreads, examples
@@ -57,7 +61,7 @@ from .test_workspace_requests import (
     _TREE,
     _attempt,
     _common,
-    _ensure_at,
+    _ensure,
     _run,
     _snapshot_of,
     _status,
@@ -65,12 +69,10 @@ from .test_workspace_requests import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
 
-    from vs_core.api import RevisionRef
-    from vs_runtime.api.core import RuntimeWorkspaces
+    from vs_project.api.git_repository import GitRepository
+    from vs_runtime.api.infrastructure import RuntimeWorkspaces
 
 _DIGEST = "a" * 64
 _SCOPE = Scope(owner=RunId(root="run-1"), generation=0)
@@ -89,12 +91,6 @@ _MEASUREMENT = st.tuples(
     st.booleans(),
 )
 """Metrics, the purpose they were measured for, and whether the ledger recorded them."""
-
-
-def _git(root: Path, *args: str) -> str:
-    result = REAL_GIT.run(list(args), cwd=root)
-    assert result.returncode == 0, result.stderr
-    return result.stdout.decode().strip()
 
 
 def _executor(workspaces: RuntimeWorkspaces, store: ReceiptStore) -> RuntimeWorkspaceRequests:
@@ -151,14 +147,16 @@ def _expected_lines(metrics: list[EvidenceMetric]) -> list[str]:
     return [f"{metric.name} = {metric.value:.6g}" for metric in metrics]
 
 
-def _branches(root: Path) -> dict[str, str]:
-    lines = _git(root, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads")
-    return dict(line.split(" ", 1) for line in lines.splitlines())
+def _branches(repository: GitRepository) -> dict[str, str | None]:
+    return {name: repository.resolve_commit(name) for name in repository.branches("")}
 
 
-def _dirty(root: Path) -> list[str]:
-    status = _git(root, "status", "--porcelain", "--untracked-files=all", "--", ".")
-    return [line for line in status.splitlines() if ".vibesys/" not in line]
+def _dirty(repository: GitRepository) -> list[str]:
+    paths = (
+        *repository.uncommitted_paths(()),
+        *repository.unversioned_paths(include_ignored=False),
+    )
+    return sorted(path for path in paths if not path.startswith(".vibesys/"))
 
 
 @settings(
@@ -174,11 +172,18 @@ def test_an_adopted_winner_is_committed_on_the_run_branch_and_the_next_run_start
 ) -> None:
     base = tmp_path_factory.mktemp("adopt")
 
-    async def exercise(workspaces: RuntimeWorkspaces, store: ReceiptStore) -> None:
+    async def exercise(
+        workspaces: RuntimeWorkspaces,
+        store: ReceiptStore,
+        repository: GitRepository,
+        disk: FakeGitRepositories,
+    ) -> None:
         executor = _executor(workspaces, store)
-        root = workspaces.root.path
         attempt = _attempt()
-        path = await _ensure_at(executor, workspaces, attempt, "e")
+        worktrees = set(disk.worktrees(workspaces.root.path))
+        ensured = await _run(executor, _ensure(workspaces, attempt, "e"))
+        assert _status(ensured) is ObservationStatus.SUCCEEDED
+        (path,) = set(disk.worktrees(workspaces.root.path)) - worktrees
         for child in path.iterdir():
             if child.name not in {".git", ".vibesys"}:
                 shutil.rmtree(child) if child.is_dir() else child.unlink()
@@ -195,8 +200,8 @@ def test_an_adopted_winner_is_committed_on_the_run_branch_and_the_next_run_start
             for index, measurement in enumerate(measurements)
         )
         selection = RetainedCandidate(settlement_id=_SETTLEMENT, revision=revision)
-        branch = _git(root, "branch", "--show-current")
-        before = _branches(root)
+        branch = repository.current_branch()
+        before = _branches(repository)
 
         adopt = AdoptRevision(
             request_id=RequestId(root="adopt-1"),
@@ -206,50 +211,98 @@ def test_an_adopted_winner_is_committed_on_the_run_branch_and_the_next_run_start
         )
         assert _status(await _run(executor, adopt)) is ObservationStatus.SUCCEEDED
 
-        assert _visible_files(root) == tree
-        assert _dirty(root) == []
-        after = _branches(root)
+        assert _visible_files(workspaces.root.path) == tree
+        assert _dirty(repository) == []
+        after = _branches(repository)
         assert {name for name in after if after[name] != before.get(name)} <= {branch}
-        message = _git(root, "log", "-1", "--format=%B")
         commit = commit_of(revision)
         assert commit is not None
-        assert message.splitlines()[0] == (
-            f"vibesys: adopt candidate {_SETTLEMENT.root} ({commit[:12]})"
-        )
-        assert f"Revision: {commit}" in message
-        # Every recorded metric is named; a measurement the ledger never recorded is left out.
-        recorded_metrics = [
-            metric for metrics, _purpose, recorded in measurements if recorded for metric in metrics
-        ]
-        measured = [line for line in message.splitlines() if line.startswith("Measured (")]
-        assert len(measured) == len(recorded_metrics)
-        for line, expected in zip(measured, _expected_lines(recorded_metrics), strict=True):
-            assert expected in line
+        message = adoption_commit_message(adopt, commit, ledger)
+        assert repository.recent_subjects(1)[0].subject == message.splitlines()[0]
 
         verify = VerifyAdoption(
             request_id=RequestId(root="verify-1"), scope=_SCOPE, selection=selection
         )
         assert _status(await _run(executor, verify)) is ObservationStatus.SUCCEEDED
         # A repeated adoption (a retry under a new identity) finds nothing to commit.
-        head = _git(root, "rev-parse", "HEAD")
+        head = repository.head()
         again = adopt.model_copy(update={"request_id": RequestId(root="adopt-2")})
         assert _status(await _run(executor, again)) is ObservationStatus.SUCCEEDED
-        assert _git(root, "rev-parse", "HEAD") == head
+        assert repository.head() == head
 
-    with open_workspace_env(base, git=GitKind.REAL) as env:
+    with open_workspace_env(base, git=GitKind.FAKE) as env:
+        disk = env.git_disk
+        assert isinstance(disk, FakeGitRepositories)
+        project = env.project.root
         try:
             asyncio.run(
                 exercise(
                     env.hosts[0],
                     ReceiptStore(env.receipts_namespace(), threads=SimThreads()),
+                    disk.repository(project),
+                    disk,
                 )
             )
         finally:
             for host in reversed(env.hosts):
                 asyncio.run(host.close())
-        project = env.project.root
 
-    following = shutil.copytree(project, base / "next", symlinks=True)
-    tracker = real_git_tracker(following, run_id="next-run", events=NullGitTrackerEvents())
-    tracker.init(existing=False)
-    assert _git(following, "branch", "--show-current") == "vibesys-runs/next-run"
+        # The next run is a new process over the same project.
+        following = disk.repository(project)
+        tracker = GitTracker(
+            project, run_id="next-run", events=NullGitTrackerEvents(), repository=following
+        )
+        tracker.init(existing=False)
+        assert following.current_branch() == "vibesys-runs/next-run"
+
+
+@settings(
+    max_examples=examples(pr=10, nightly=100),
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@given(
+    measurements=st.lists(_MEASUREMENT, max_size=4),
+    commit=st.text(alphabet="0123456789abcdef", min_size=40, max_size=40),
+    kept=st.sampled_from(("candidate", "input")),
+)
+def test_the_adoption_message_names_the_revision_and_every_recorded_metric(
+    tmp_path_factory: pytest.TempPathFactory,
+    measurements: list[_Measurement],
+    commit: str,
+    kept: Literal["candidate", "input"],
+) -> None:
+    with open_workspace_env(tmp_path_factory.mktemp("message")) as env:
+        ledger = ReceiptEvidenceLedger(ReceiptStore(env.receipts_namespace(), threads=SimThreads()))
+        revision = RevisionRef(revision_id=RevisionId(root=commit), digest=f"git-commit:{commit}")
+        evidence = tuple(
+            _measured(ledger, index, revision, measurement)
+            for index, measurement in enumerate(measurements)
+        )
+        selection = (
+            TrustedBaseline(revision=revision)
+            if kept == "input"
+            else RetainedCandidate(settlement_id=_SETTLEMENT, revision=revision)
+        )
+        adopt = AdoptRevision(
+            request_id=RequestId(root="adopt"), scope=_SCOPE, selection=selection, evidence=evidence
+        )
+        lines = adoption_commit_message(adopt, commit, ledger).splitlines()
+        for host in reversed(env.hosts):
+            asyncio.run(host.close())
+
+    assert lines[0] == (
+        f"vibesys: keep the input revision ({commit[:12]})"
+        if kept == "input"
+        else f"vibesys: adopt candidate {_SETTLEMENT.root} ({commit[:12]})"
+    )
+    assert lines[1:3] == ["", f"Revision: {commit}"]
+    # Every recorded metric is named, in order; one the ledger never recorded is left out.
+    recorded = [
+        metric for metrics, _purpose, logged in measurements if logged for metric in metrics
+    ]
+    measured = lines[3:]
+    assert len(measured) == len(recorded)
+    for line, expected in zip(measured, _expected_lines(recorded), strict=True):
+        assert line.startswith("Measured (")
+        assert expected in line
