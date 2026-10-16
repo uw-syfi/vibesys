@@ -13,119 +13,154 @@ from vs_runtime.api.infrastructure import (
     EditorImagePlan,
     RunEnvironmentSpec,
     TaskImageError,
+    TaskImageFacts,
     build_run_environment,
     editor_image_plan,
+    require_built_task_image,
     resolve_run_environment_spec,
     run_environment_record,
+    runs_agent_in_container,
 )
 from vs_sandbox.api import ComputeBackend
 
-_CONTAINER_ENVIRONMENTS = ("docker", "modal", "skypilot", "slurm", "slurm-gpu")
-_IMAGES = st.one_of(st.none(), st.text(min_size=1, max_size=20))
-_DOCKERFILES = st.one_of(st.none(), st.just(Path("/project/.vibesys/tasks/t/Dockerfile")))
-_LAUNCHES: st.SearchStrategy[Literal["fresh", "resume"]] = st.sampled_from(("fresh", "resume"))
+_ENVIRONMENTS = ("docker", "host", "modal", "skypilot", "slurm", "slurm-gpu")
+_CONTAINER_ENVIRONMENTS = tuple(name for name in _ENVIRONMENTS if name != "host")
+_DOCKERFILE = Path("/project/.vibesys/tasks/t/Dockerfile")
+_REFERENCES = st.sampled_from(("vibesys-task-build:o-1", "vibesys-task-build:o-2"))
+_IDS = st.sampled_from(("sha256:" + "a" * 64, "sha256:" + "b" * 64))
+_BASES = st.one_of(st.none(), st.sampled_from(("nvcr.io/nvidia/pytorch:25.04-py3", "python:3")))
+
+
+def _facts(
+    reference: str, base: str | None, recorded: str | None, *, present: bool | None
+) -> TaskImageFacts:
+    return TaskImageFacts(
+        reference=reference,
+        base_image=base,
+        recorded_is_reference=recorded is not None and recorded.startswith("vibesys-task-build:"),
+        recorded_present=present,
+    )
+
+
+def test_only_the_host_environment_runs_its_agent_outside_a_container() -> None:
+    assert {name: runs_agent_in_container(name) for name in _ENVIRONMENTS} == {
+        name: name != "host" for name in _ENVIRONMENTS
+    }
 
 
 @given(
-    environment=st.sampled_from(_CONTAINER_ENVIRONMENTS),
-    dockerfile=_DOCKERFILES,
-    image=_IMAGES,
-    base=_IMAGES,
-    launch=_LAUNCHES,
+    environment=st.sampled_from(_ENVIRONMENTS),
+    image=st.one_of(st.none(), _REFERENCES, _IDS),
+    launch=st.sampled_from(("fresh", "resume")),
 )
-def test_every_container_environment_decides_the_same_way(
-    environment: str,
-    dockerfile: Path | None,
-    image: str | None,
-    base: str | None,
-    launch: Literal["fresh", "resume"],
+def test_without_a_task_dockerfile_the_image_is_used_as_given(
+    environment: str, image: str | None, launch: Literal["fresh", "resume"]
 ) -> None:
-    """Every container environment honors a task Dockerfile identically: none is special."""
-
-    def decide(name: str) -> EditorImagePlan | str:
-        try:
-            return editor_image_plan(
-                name, task_dockerfile=dockerfile, image=image, base_image=base, launch=launch
-            )
-        except TaskImageError as exc:
-            return type(exc).__name__
-
-    assert decide(environment) == decide("docker")
+    plan = editor_image_plan(
+        environment, task_dockerfile=None, image=image, launch=launch, facts=None
+    )
+    assert plan == EditorImagePlan(image=image)
 
 
-@given(
-    environment=st.sampled_from(_CONTAINER_ENVIRONMENTS),
-    dockerfile=_DOCKERFILES,
-    image=_IMAGES,
-    base=_IMAGES,
-    launch=_LAUNCHES,
+_CASES = st.tuples(
+    st.sampled_from(_ENVIRONMENTS),
+    st.one_of(st.none(), _REFERENCES, _IDS),
+    st.sampled_from(("fresh", "resume")),
+    _REFERENCES,
+    _BASES,
+    st.booleans(),
 )
-def test_a_task_dockerfile_is_built_on_the_backend_base_or_refused(
-    environment: str,
-    dockerfile: Path | None,
-    image: str | None,
-    base: str | None,
-    launch: Literal["fresh", "resume"],
+
+
+@given(case=_CASES)
+def test_a_task_dockerfile_is_honored_or_refused_never_dropped(
+    case: tuple[str, str | None, Literal["fresh", "resume"], str, str | None, bool],
 ) -> None:
-    """A declared Dockerfile is never dropped: the plan builds it or the call refuses."""
+    environment, image, launch, reference, base, present = case
+    facts = _facts(reference, base, image if launch == "resume" else None, present=present)
     try:
         plan = editor_image_plan(
-            environment, task_dockerfile=dockerfile, image=image, base_image=base, launch=launch
+            environment, task_dockerfile=_DOCKERFILE, image=image, launch=launch, facts=facts
         )
     except TaskImageError:
-        assert dockerfile is not None
-        # Fresh: an explicit image beside the Dockerfile. Resume: no recorded image.
-        assert (image is not None) if launch == "fresh" else (image is None)
+        refused_because = (
+            environment == "host"
+            or (launch == "fresh" and image is not None)
+            or (
+                launch == "resume"
+                and (image is None or (facts.recorded_is_reference and image != reference))
+            )
+        )
+        assert refused_because
         return
-    if dockerfile is None:
-        assert plan == EditorImagePlan(image=image)
-        assert plan.resolve(None) == image
+    assert environment != "host"
+    assert plan.task_dockerfile == _DOCKERFILE
+    if launch == "fresh":
+        assert plan.image == reference
+        assert plan.build is not None
+        assert plan.build.base_image == base
         return
-    assert plan.task_dockerfile == dockerfile
-    assert plan.base_image == base
+    # A resume always runs the recorded image, and builds only when it is gone.
+    assert plan.image == image
+    assert (plan.build is None) is present
+    if plan.build is not None and not facts.recorded_is_reference:
+        assert plan.build.base_image is None  # built as before BASE_IMAGE
+        assert plan.build.expected_id == image
 
 
-@given(recorded=st.text(min_size=1), built=st.text(min_size=1))
-def test_resume_accepts_only_the_recorded_task_image(recorded: str, built: str) -> None:
-    dockerfile = Path("/task/Dockerfile")
+@given(reference=_REFERENCES, base=_BASES, built=_IDS)
+def test_unchanged_inputs_resume_on_a_new_image_id_when_the_cache_is_gone(
+    reference: str, base: str | None, built: str
+) -> None:
+    """Regression: a pruned build cache gave a new image ID and resume was refused."""
     plan = editor_image_plan(
-        "slurm", task_dockerfile=dockerfile, image=recorded, base_image=None, launch="resume"
+        "slurm",
+        task_dockerfile=_DOCKERFILE,
+        image=reference,
+        launch="resume",
+        facts=_facts(reference, base, reference, present=False),
+    )
+
+    assert plan.build is not None
+    assert plan.notice is not None
+    assert plan.resolve(built) == reference
+
+
+def test_changed_inputs_are_refused_on_resume() -> None:
+    with pytest.raises(TaskImageError, match="inputs changed"):
+        editor_image_plan(
+            "docker",
+            task_dockerfile=_DOCKERFILE,
+            image="vibesys-task-build:o-1",
+            launch="resume",
+            facts=_facts("vibesys-task-build:o-2", None, "vibesys-task-build:o-1", present=True),
+        )
+
+
+@given(recorded=_IDS, built=_IDS)
+def test_a_pre_reference_run_resumes_only_on_its_recorded_id(recorded: str, built: str) -> None:
+    plan = editor_image_plan(
+        "docker",
+        task_dockerfile=_DOCKERFILE,
+        image=recorded,
+        launch="resume",
+        facts=_facts("vibesys-task-build:o-1", "python:3", recorded, present=False),
     )
     if built == recorded:
         assert plan.resolve(built) == recorded
     else:
-        with pytest.raises(TaskImageError, match="changed since the run started"):
+        with pytest.raises(TaskImageError, match="predates input-keyed task images"):
             plan.resolve(built)
-
-
-@given(built=st.text(min_size=1))
-def test_a_fresh_build_is_the_image(built: str) -> None:
-    plan = editor_image_plan(
-        "slurm", task_dockerfile=Path("/t/Dockerfile"), image=None, base_image="b", launch="fresh"
-    )
-    assert plan.resolve(built) == built
-
-
-def test_the_host_environment_refuses_a_task_dockerfile() -> None:
-    with pytest.raises(TaskImageError, match="runs the agent on the host"):
-        editor_image_plan(
-            "host",
-            task_dockerfile=Path("/t/Dockerfile"),
-            image=None,
-            base_image=None,
-            launch="fresh",
-        )
 
 
 def test_deriving_the_host_environment_refuses_a_built_task_image() -> None:
     """Regression: Metal on macOS dropped a task image when it derived ``host``."""
-    dockerfile = Path("/t/Dockerfile")
     spec = RunEnvironmentSpec(
-        name="docker", options={"image": "sha256:" + "a" * 64}, task_dockerfile=dockerfile
+        name="docker", options={"image": "vibesys-task-build:o-1"}, task_dockerfile=_DOCKERFILE
     )
     with pytest.raises(TaskImageError, match="runs the agent on the host"):
         resolve_run_environment_spec(
-            spec, ComputeBackend.METAL, task_dockerfile=dockerfile, platform="darwin", log=print
+            spec, ComputeBackend.METAL, task_dockerfile=_DOCKERFILE, platform="darwin", log=print
         )
 
 
@@ -134,22 +169,33 @@ def test_deriving_the_host_environment_refuses_a_built_task_image() -> None:
     backend=st.sampled_from(tuple(ComputeBackend)),
     platform=st.sampled_from(("linux", "darwin")),
 )
-def test_a_selection_not_built_from_the_task_image_is_refused(
+def test_a_selection_not_built_from_the_task_dockerfile_is_refused(
     environment: str, backend: ComputeBackend, platform: str
 ) -> None:
     """Regression: a run opened with a task Dockerfile but no task image ignored it."""
     spec = RunEnvironmentSpec(name=environment, options={})
     with pytest.raises(TaskImageError, match="without building it"):
         resolve_run_environment_spec(
-            spec, backend, task_dockerfile=Path("/t/Dockerfile"), platform=platform, log=print
+            spec, backend, task_dockerfile=_DOCKERFILE, platform=platform, log=print
         )
+
+
+@pytest.mark.parametrize("environment", _CONTAINER_ENVIRONMENTS)
+@pytest.mark.parametrize("image", [None, "vibesys-task-build:o-1"])
+def test_a_run_opens_only_with_its_task_image_built(environment: str, image: str | None) -> None:
+    options = {} if image is None else {"image": image}
+    spec = RunEnvironmentSpec(name=environment, options=options, task_dockerfile=_DOCKERFILE)
+    if image is None:
+        with pytest.raises(TaskImageError, match="without building it"):
+            require_built_task_image(spec, _DOCKERFILE)
+    else:
+        require_built_task_image(spec, _DOCKERFILE)
+    require_built_task_image(RunEnvironmentSpec(name=environment), None)
 
 
 def test_an_unknown_environment_is_an_error() -> None:
     with pytest.raises(ValueError, match="unknown run environment"):
-        editor_image_plan(
-            "local", task_dockerfile=None, image=None, base_image=None, launch="fresh"
-        )
+        editor_image_plan("local", task_dockerfile=None, image=None, launch="fresh", facts=None)
 
 
 @pytest.mark.parametrize("environment", ["docker", "modal", "slurm"])
@@ -157,7 +203,7 @@ def test_a_container_environment_runs_its_backend_on_the_image_option(
     environment: str, tmp_path: Path
 ) -> None:
     """Regression: the Slurm editor ignored the task image and built from the backend default."""
-    image = "sha256:" + "d" * 64
+    image = "vibesys-task-build:o-1"
     options: dict[str, object] = {"image": image}
     if environment == "slurm":
         config = tmp_path / "slurm.toml"
