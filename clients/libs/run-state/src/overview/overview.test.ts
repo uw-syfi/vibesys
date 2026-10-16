@@ -6,6 +6,7 @@ import {
   type GateReading,
   gateTrajectory,
   overviewFromSnapshot,
+  runningBest,
   workstreamCounts,
 } from './index.js';
 
@@ -83,6 +84,20 @@ function spans(random: Seeded): Span[] {
   return found;
 }
 
+/** The passed gates that beat every passed gate before them, read directly. */
+function improvements(run: readonly Span[], direction: 'max' | 'min'): string[] {
+  let best: number | null = null;
+  const found: string[] = [];
+  for (const gate of gateTrajectory(run)) {
+    if (gate.verdict !== 'passed' || gate.metricValue === null) continue;
+    const value = gate.metricValue;
+    if (best !== null && (direction === 'max' ? value <= best : value >= best)) continue;
+    best = value;
+    found.push(gate.span);
+  }
+  return found;
+}
+
 describe('run overview', () => {
   it('is the last overview a run_started event declared, from the snapshot onward', () => {
     for (let seed = 1; seed <= 100; seed += 1) {
@@ -132,6 +147,22 @@ describe('run overview', () => {
     }
   });
 
+  it('steps the best so far through passed gates only, ending at the best', () => {
+    for (let seed = 1; seed <= 200; seed += 1) {
+      const run = spans(new Seeded(seed));
+      for (const direction of ['max', 'min'] as const) {
+        const steps = runningBest(run, direction);
+        expect(steps.at(-1) ?? null).toEqual(bestVsBaseline(run, direction));
+        expect(steps.map(step => step.span)).toEqual(improvements(run, direction));
+        const values = steps.map(step => step.metricValue as number);
+        const better = (a: number, b: number) => (direction === 'max' ? a > b : a < b);
+        expect(values.every((value, n) => n === 0 || better(value, values[n - 1] as number))).toBe(
+          true,
+        );
+      }
+    }
+  });
+
   it('reads nothing from a run whose search labels no spans', () => {
     const plain: Span = {
       id: 'flow:#1',
@@ -144,5 +175,6 @@ describe('run overview', () => {
     expect(gateTrajectory([plain])).toEqual([]);
     expect(workstreamCounts([plain]).total).toBe(0);
     expect(bestVsBaseline([plain], 'max')).toBeNull();
+    expect(runningBest([plain], 'max')).toEqual([]);
   });
 });
