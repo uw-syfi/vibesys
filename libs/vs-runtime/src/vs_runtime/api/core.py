@@ -10,6 +10,7 @@ from vs_runtime._access_settlement import (
     AccessReceipt,
     AccessSettlement,
     AccessSettlementError,
+    AccessUnrestorableError,
     AccessViolation,
 )
 from vs_runtime._agent_evaluation import (
@@ -264,6 +265,7 @@ __all__ = [
     "AccessReceipt",
     "AccessSettlement",
     "AccessSettlementError",
+    "AccessUnrestorableError",
     "AccessViolation",
     "AdmissionBusyError",
     "AgentEvaluationBridge",

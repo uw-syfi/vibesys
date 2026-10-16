@@ -85,6 +85,7 @@ from vs_runtime._access_settlement import (
     AccessReceipt,
     AccessSettlement,
     AccessSettlementError,
+    AccessUnrestorableError,
     AccessViolation,
     access_unproven,
 )
@@ -352,6 +353,17 @@ def _violated(violation: AccessViolation, resource_id: ResourceId) -> _Facts:
             f"role {violation.role_id} wrote outside its workspace access; "
             f"reverted: {', '.join(violation.paths)}"
         ),
+    )
+
+
+def _unrestorable(error: AccessUnrestorableError, resource_id: ResourceId) -> _Facts:
+    """An ended turn whose writes outside its access could not be undone: it fails for good.
+
+    Retrying the revert would leave the same paths, so the turn is not left unknown
+    until its limit; its output is withheld and the reason is stated.
+    """
+    return _Facts(
+        ObservationStatus.FAILED, accepted=True, resource_id=resource_id, diagnostic=str(error)
     )
 
 
@@ -753,6 +765,10 @@ class RuntimeSessionRequests:
             try:
                 await self._settle_ended_peers(dispatch.workspace.path, access_key)
                 self.settlement.require_clear(dispatch.workspace.path, access_key)
+            except AccessUnrestorableError as error:
+                # An earlier turn's writes cannot be undone: no turn may baseline this
+                # workspace, now or on a retry, so refuse for good and say why.
+                return _rejected(str(error), binding.resource_id)
             except AccessSettlementError as error:
                 return _retryable(str(error), binding.resource_id)
         fence = invocation_fence(bkey, dispatch.invocation)
@@ -935,6 +951,8 @@ class RuntimeSessionRequests:
             return facts
         try:
             violation = await self.settlement.settle(key)
+        except AccessUnrestorableError as error:
+            return _unrestorable(error, binding.resource_id)
         except AccessSettlementError as error:
             raise _RefusalError(_unknown(str(error), binding.resource_id)) from error
         return facts if violation is None else _violated(violation, binding.resource_id)
@@ -1115,6 +1133,9 @@ class RuntimeSessionRequests:
                 violation = await self.settlement.settle(
                     AccessKey(binding=bkey, invocation=invocation.invocation_id.root)
                 )
+            except AccessUnrestorableError as error:
+                violation = None
+                target = _unrestorable(error, binding.resource_id)
             except AccessSettlementError as error:
                 raise _RefusalError(_unknown(str(error), binding.resource_id)) from error
             if violation is not None:

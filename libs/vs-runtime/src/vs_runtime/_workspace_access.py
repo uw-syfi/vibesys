@@ -33,6 +33,7 @@ def unauthorized_paths(
 __all__ = [
     "AccessGrant",
     "AccessGuardedWorkspace",
+    "AccessNotRestoredError",
     "WorkspaceAccessRecovery",
     "WorkspaceAccessResult",
     "WorkspaceAccessTarget",
@@ -51,6 +52,22 @@ class AccessGrant(BaseModel):
     """Exact paths a LIMITED grant allows."""
     directories: tuple[str, ...] = ()
     """The subset of ``paths`` that are directories and so also grant their descendants."""
+
+
+class AccessNotRestoredError(RuntimeContractError):
+    """The revert ran to the end, and writes outside the role's access are still there.
+
+    Conclusive, unlike a revert that could not run: the same revert of the same tree
+    leaves the same paths, so asking again cannot help.
+    """
+
+    def __init__(self, role_id: str, paths: list[str]) -> None:
+        """Name the role and the paths the revert left behind."""
+        self.role_id = role_id
+        self.paths = tuple(paths)
+        super().__init__(
+            f"role {role_id!r} left unauthorized workspace changes: {', '.join(paths)}"
+        )
 
 
 @dataclass(frozen=True)
@@ -153,10 +170,7 @@ class WorkspaceAccessRecovery:
             changes = await workspace.pending_changes()
             remaining = unauthorized_paths(changes, allowed, directories=directories)
             if remaining:
-                message = (
-                    f"role {role_id!r} left unauthorized workspace changes: {', '.join(remaining)}"
-                )
-                raise RuntimeContractError(message)
+                raise AccessNotRestoredError(role_id, remaining)
         self._checkpoint = None
         return WorkspaceAccessResult(unauthorized, changes)
 

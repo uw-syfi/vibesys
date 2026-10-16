@@ -25,7 +25,11 @@ from pydantic import BaseModel, ConfigDict
 
 from vs_core.api import Scope, WorkspaceRef
 from vs_runtime._session_operation import await_session_operation
-from vs_runtime._workspace_access import AccessGrant, enforce_workspace_access
+from vs_runtime._workspace_access import (
+    AccessGrant,
+    AccessNotRestoredError,
+    enforce_workspace_access,
+)
 from vs_runtime.contracts import RuntimeContractError
 
 if TYPE_CHECKING:
@@ -42,6 +46,14 @@ type WorkspaceLookup = Callable[[WorkspaceRef | Scope], Awaitable[AccessGuardedW
 
 class AccessSettlementError(RuntimeContractError):
     """Access cannot be settled or a new baseline cannot be taken yet; retry after it is."""
+
+
+class AccessUnrestorableError(AccessSettlementError):
+    """A turn's writes outside its access survived a complete revert; retrying cannot help.
+
+    The workspace stays fenced, so no later turn can take those writes as its baseline,
+    and every turn that needs the workspace is refused for good, naming the paths.
+    """
 
 
 class AccessViolation(BaseModel):
@@ -70,6 +82,8 @@ class AccessReceipt(BaseModel):
     """Recorded before the revert starts, so a crash during it cannot lose the finding."""
     settled: bool = False
     """True once the workspace provably holds only what the grant allows."""
+    unrestorable: tuple[str, ...] = ()
+    """Paths a complete revert left behind (see ``AccessUnrestorableError``)."""
 
 
 class AccessKey(BaseModel):
@@ -131,6 +145,19 @@ class AccessSettlement:
     def require_clear(self, workspace: Path, key: AccessKey) -> None:
         """Raise unless ``blocking`` is empty: no new baseline may adopt unjudged writes."""
         blocking = self.blocking(workspace, key)
+        stuck = [
+            (other, receipt)
+            for other in blocking
+            if (receipt := self.receipt(other)) is not None and receipt.unrestorable
+        ]
+        if stuck:
+            raise AccessUnrestorableError(
+                "the workspace holds writes outside a turn's access that could not be undone: "
+                + "; ".join(
+                    f"{receipt.grant.role_id} ({other.text}): {', '.join(receipt.unrestorable)}"
+                    for other, receipt in stuck
+                )
+            )
         if blocking:
             message = (
                 "the workspace has invocations whose writes are not judged: "
@@ -235,6 +262,15 @@ class AccessSettlement:
                     )
                 )
             )
+        except AccessNotRestoredError as error:
+            self._store.replace(
+                _ACCESS,
+                "access",
+                key.text,
+                (self.receipt(key) or receipt).model_copy(update={"unrestorable": error.paths}),
+            )
+            message = f"workspace access could not be restored: {error}"
+            raise AccessUnrestorableError(message) from error
         except RuntimeContractError as error:
             message = f"workspace access is not restored: {error}"
             raise AccessSettlementError(message) from error
