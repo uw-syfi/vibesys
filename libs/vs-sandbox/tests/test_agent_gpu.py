@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,6 +19,7 @@ from vs_sandbox.api.slurm import (
     GpuCommand,
     GpuJobRequest,
     choose_partition,
+    parse_partition_limits,
 )
 from vs_sim.api import ProbeResult
 from vs_sim.api.testing import (
@@ -74,6 +76,11 @@ WINDOWS: Mapping[str, object] = {
 }
 
 
+# Recorded `sinfo --noheader --format="%P %l"`: main is the default partition.
+SINFO = "main* 2:00:00\npriority 30:00\n"
+LIMITS = parse_partition_limits(SINFO)
+
+
 def _config(**updates: object) -> AgentGpuConfig:
     values: dict[str, object] = {
         "partitions": ("main", "priority"),
@@ -89,7 +96,9 @@ def _simulated(
 ) -> tuple[AgentGpuLauncher, FakePipedProcessLauncher, ScriptedProbe]:
     """A launcher whose ``srun`` is *process* and whose ``scancel`` and ``squeue`` succeed."""
     processes = FakePipedProcessLauncher(lambda _start: process)
-    probe = ScriptedProbe(lambda _argv: ProbeResult(0, ""))
+    probe = ScriptedProbe(
+        lambda argv: ProbeResult(0, SINFO if argv[-1].startswith("sinfo") else "")
+    )
     launcher = AgentGpuLauncher(
         _config(), ("slurm-shell",), probe=probe, processes=processes, threads=threads
     )
@@ -119,26 +128,110 @@ class TestPartition:
         self, gpus: int, minutes: int, expected: str
     ) -> None:
         request = GpuJobRequest(gpus=gpus, time_minutes=minutes)
-        assert choose_partition(_config(), request, WINDOWS) == expected
+        assert choose_partition(_config(), request, LIMITS, WINDOWS) == expected
 
     def test_uses_priority_for_a_short_job_main_cannot_start(self) -> None:
         config = _config()
         request = GpuJobRequest(gpus=2, time_minutes=20)
         busy = json.loads(json.dumps(WINDOWS))
         busy["partitions"][0]["groups"][0]["options"][0]["start"] = "2026-10-08T23:31"
-        assert choose_partition(config, request, busy) == "priority"
+        assert choose_partition(config, request, LIMITS, busy) == "priority"
 
     def test_never_picks_a_partition_whose_limit_is_too_short(self) -> None:
         config = _config(partitions=("priority", "main"))
         request = GpuJobRequest(gpus=8, time_minutes=60)
-        assert choose_partition(config, request, WINDOWS) == "main"
+        assert choose_partition(config, request, LIMITS, WINDOWS) == "main"
+
+    @pytest.mark.parametrize("minutes", [35, 45])
+    def test_without_a_window_report_skips_a_partition_whose_limit_is_too_short(
+        self, minutes: int
+    ) -> None:
+        # Seen live: priority (30 min) listed first, a 35 and a 45 minute request.
+        config = _config(partitions=("priority", "main"))
+        request = GpuJobRequest(gpus=1, time_minutes=minutes)
+        assert choose_partition(config, request, LIMITS, None) == "main"
 
     @pytest.mark.parametrize("windows", [None, {"partitions": "garbled"}, {}])
-    def test_without_a_usable_report_uses_the_first_partition(
+    def test_a_missing_or_malformed_report_picks_the_first_partition_that_fits(
         self, windows: Mapping[str, object] | None
     ) -> None:
         request = GpuJobRequest(gpus=1, time_minutes=5)
-        assert choose_partition(_config(), request, windows) == "main"
+        assert choose_partition(_config(), request, LIMITS, windows) == "main"
+
+    def test_a_request_no_limit_fits_is_rejected_naming_every_limit(self) -> None:
+        config = _config(partitions=("priority", "main", "ghost"))
+        with pytest.raises(AgentGpuRequestError) as caught:
+            choose_partition(config, GpuJobRequest(gpus=1, time_minutes=121), LIMITS, None)
+        message = str(caught.value)
+        assert "--time 121" in message
+        assert "priority (limit 30 minutes)" in message
+        assert "main (limit 120 minutes)" in message
+        assert "ghost (limit unknown)" in message
+
+    def test_without_any_limits_a_request_is_rejected_not_sent_to_the_first_partition(self) -> None:
+        with pytest.raises(AgentGpuRequestError, match="limit unknown"):
+            choose_partition(_config(), GpuJobRequest(gpus=1, time_minutes=1), {}, None)
+
+    @given(
+        limits=st.lists(st.integers(1, 500) | st.just(math.inf), min_size=1, max_size=5),
+        minutes=st.integers(1, 600),
+        windows=st.sampled_from([None, WINDOWS, {"partitions": "garbled"}]),
+    )
+    def test_chooses_a_fitting_partition_or_rejects(
+        self,
+        limits: list[float],
+        minutes: int,
+        windows: Mapping[str, object] | None,
+    ) -> None:
+        names = tuple(f"p{n}" for n in range(len(limits)))
+        config = _config(partitions=names)
+        request = GpuJobRequest(gpus=1, time_minutes=minutes)
+        by_name = dict(zip(names, limits, strict=True))
+        fitting = [name for name in names if by_name[name] >= minutes]
+        if not fitting:
+            with pytest.raises(AgentGpuRequestError, match=f"--time {minutes} "):
+                choose_partition(config, request, by_name, windows)
+        else:
+            # The window report names main and priority only, so it never prefers p<n>.
+            assert choose_partition(config, request, by_name, windows) == fitting[0]
+
+
+class TestPartitionLimits:
+    @pytest.mark.parametrize(
+        ("text", "minutes"),
+        [
+            ("2:00:00", 120),
+            ("30:00", 30),
+            ("1-00:00:00", 1440),
+            ("2-12:00:00", 3600),
+            ("0:45", 0.75),
+            ("infinite", math.inf),
+            ("UNLIMITED", math.inf),
+        ],
+    )
+    def test_parses_slurm_time_limits(self, text: str, minutes: float) -> None:
+        assert parse_partition_limits(f"main* {text}\n") == {"main": minutes}
+
+    def test_drops_the_default_marker_and_ignores_malformed_lines(self) -> None:
+        text = "main* 2:00:00\nbroken\nodd n/a\nthree 1 2\n\npriority 30:00\n"
+        assert parse_partition_limits(text) == {"main": 120, "priority": 30}
+
+    @given(
+        days=st.integers(0, 30),
+        hours=st.integers(0, 23),
+        minutes=st.integers(0, 59),
+        seconds=st.integers(0, 59),
+    )
+    def test_round_trips_formatted_limits(
+        self, days: int, hours: int, minutes: int, seconds: int
+    ) -> None:
+        text = (
+            f"{days}-{hours:02d}:{minutes:02d}:{seconds:02d}"
+            if days
+            else (f"{hours}:{minutes:02d}:{seconds:02d}")
+        )
+        expected = (days * 24 + hours) * 60 + minutes + seconds / 60
+        assert parse_partition_limits(f"p {text}") == {"p": expected}
 
 
 class TestLauncher:
@@ -166,6 +259,58 @@ class TestLauncher:
         srun_args = start.argv[-1]
         for expected in ("--partition=main", "--gres=gpu:2", "--time=7", "--ntasks=1"):
             assert expected in srun_args
+
+    @pytest.mark.parametrize("minutes", [35, 45])
+    def test_a_request_the_first_partition_cannot_hold_goes_to_one_that_can(
+        self, minutes: int
+    ) -> None:
+        threads = SimThreads()
+        process = ScriptedPipedProcess(threads, merge_stderr=True)
+        process.exit(0)
+        processes = FakePipedProcessLauncher(lambda _start: process)
+        probe = ScriptedProbe(
+            lambda argv: ProbeResult(0, SINFO if argv[-1].startswith("sinfo") else "")
+        )
+        launcher = AgentGpuLauncher(
+            _config(partitions=("priority", "main")),
+            ("slurm-shell",),
+            probe=probe,
+            processes=processes,
+            threads=threads,
+        )
+
+        status = threads.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=minutes),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=bytearray().extend,
+                cancel=threads.event(),
+            )
+        )
+
+        assert status == 0
+        (start,) = processes.started
+        assert "--partition=main" in start.argv[-1]
+
+    def test_a_request_no_partition_holds_never_reaches_srun(self) -> None:
+        threads = SimThreads()
+        process = ScriptedPipedProcess(threads, merge_stderr=True)
+        launcher, processes, _probe = _simulated(threads, process)
+        output = bytearray()
+
+        status = threads.run(
+            lambda: launcher.run(
+                GpuJobRequest(gpus=1, time_minutes=121),
+                GpuCommand(argv=("work",), cwd=Path("workspace"), env={}),
+                write=output.extend,
+                cancel=threads.event(),
+            )
+        )
+
+        assert status == 2
+        assert processes.started == []
+        assert b"rejected before srun" in output
+        assert b"--time 121" in output
 
     def test_cancel_scancels_the_job_by_its_unique_name(self) -> None:
         threads = SimThreads()

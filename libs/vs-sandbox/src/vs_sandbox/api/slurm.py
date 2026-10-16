@@ -16,6 +16,7 @@ from vs_sandbox.agent_gpu import (
     GpuJobRequest,
     GpuLauncher,
     choose_partition,
+    parse_partition_limits,
 )
 from vs_sandbox.agent_gpu_cap import CANCELLED_BEFORE_SUBMISSION, CappedGpuLauncher
 from vs_sandbox.host_command_broker import (
@@ -158,6 +159,7 @@ __all__ = [
     "load_slurm_operator_settings",
     "load_slurm_policy",
     "open_ledger_attachment",
+    "parse_partition_limits",
     "profile_capture_descriptor",
     "queue_status_from_snapshot",
     "read_slurm_capture_plan",
