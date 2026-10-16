@@ -1272,6 +1272,7 @@ def _checkpointed(
         request_id=event.checkpoint_request,
         revision=event.revision,
         retention=record.request.retention,
+        measured_input=record.observation.measured_input,
     )
     updated = attempt.model_copy(
         update={

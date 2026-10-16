@@ -56,6 +56,16 @@ class TurnFailureKind(StrEnum):
     """Core cancelled the turn (stop, interruption or cleanup), so no reply exists."""
 
 
+def unset(value: object) -> bool:
+    """Whether an optional field is unset, so a value's serialized form leaves it out.
+
+    For ``Field(exclude_if=unset)`` on fields that joined after runs had stored digests of
+    plans, requests, observations and evidence: left out when unset, every stored digest,
+    budget key and request id still matches, and a run started earlier resumes.
+    """
+    return value is None
+
+
 class Value(BaseModel):
     """Persistable data, never live interfaces or mutable containers."""
 
@@ -864,6 +874,8 @@ class Observation(Value):
     status: ObservationStatus
     resource_id: ResourceId | None = None
     revision: RevisionRef | None = None
+    measured_input: str | None = Field(default=None, min_length=1, exclude_if=unset)
+    """The digest of what an evaluation reads at ``revision``, when the runtime computed it."""
     accepted: bool = False
     terminal: bool = False
     released: bool = False

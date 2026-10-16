@@ -1840,6 +1840,7 @@ def _record_retention(
         request_id=expected.request_id,
         revision=revision,
         retention=expected.retention,
+        measured_input=observation.measured_input,
     )
     return owner.model_copy(update={"checkpoints": (*owner.checkpoints, checkpoint)})
 
