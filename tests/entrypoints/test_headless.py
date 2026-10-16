@@ -590,6 +590,7 @@ def test_task_dockerfile_builds_once_on_the_backend_base_for_every_container_env
     )
     assert spec.name == environment
     assert spec.options["image"] == reference
+    assert spec.image_id == image_id
     assert spec.task_dockerfile == dockerfile.resolve()
     assert run_environment_record(spec).image == reference
     (build,) = _docker_builds(runner)
@@ -1262,6 +1263,8 @@ def test_resume_with_unchanged_task_inputs_runs_the_recorded_reference(
 
     assert spec.name == environment
     assert run_environment_record(spec).image == reference
+    # The environment runs the image's ID, never the mutable tag.
+    assert spec.image_id == (_OLD_ID if present else _NEW_ID)
     if present:
         assert daemon.builds == []
     else:
@@ -1278,20 +1281,65 @@ def _reference_then_edit(dockerfile: Path) -> str:
 
 
 @pytest.mark.parametrize("environment", ["docker", "slurm"])
-def test_resume_refuses_changed_task_inputs_before_building(
-    environment: Literal["docker", "slurm"], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("recorded_image", ["present", "gone"])
+def test_changed_task_inputs_resume_on_the_local_image_and_are_refused_once_it_is_gone(
+    environment: Literal["docker", "slurm"],
+    recorded_image: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    resume, daemon, _ = _resume_task_image(
+    """Regression: editing a benchmark mid-campaign refused resume though the image was local."""
+    present = recorded_image == "present"
+    resume, daemon, reference = _resume_task_image(
         tmp_path,
         monkeypatch,
         environment=environment,
         recorded=_reference_then_edit,
-        daemon=lambda image: _FakeDockerDaemon({image: _OLD_ID}, next_id=_NEW_ID),
+        daemon=lambda image: _FakeDockerDaemon(
+            {image: _OLD_ID} if present else {}, next_id=_NEW_ID
+        ),
     )
 
-    with pytest.raises(TaskImageError, match="inputs changed"):
-        resume()
+    if present:
+        spec = resume()
+        assert run_environment_record(spec).image == reference
+        assert spec.image_id == _OLD_ID
+        assert "inputs changed" in capsys.readouterr().err
+    else:
+        with pytest.raises(TaskImageError, match="inputs changed"):
+            resume()
     assert daemon.builds == []
+
+
+def test_identical_task_inputs_in_a_copied_project_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: ``--runs-dir`` copies the project, so the task's path differs on resume;
+    identical inputs at another path were refused as changed."""
+
+    def reference_at_another_path(dockerfile: Path) -> str:
+        elsewhere = tmp_path / "original" / "latency"
+        elsewhere.mkdir(parents=True)
+        for path in dockerfile.parent.iterdir():
+            if path.is_file():
+                (elsewhere / path.name).write_bytes(path.read_bytes())
+        return _current_reference(elsewhere / "Dockerfile")
+
+    resume, daemon, recorded = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment="slurm",
+        recorded=reference_at_another_path,
+        daemon=lambda _image: _FakeDockerDaemon({}, next_id=_NEW_ID),
+    )
+
+    spec = resume()
+
+    assert run_environment_record(spec).image == recorded
+    assert spec.image_id == _NEW_ID
+    (build,) = daemon.builds
+    assert recorded not in build  # rebuilt under this location's tag
 
 
 @pytest.mark.parametrize(
@@ -1315,7 +1363,9 @@ def test_a_run_recorded_with_an_image_id_resumes_only_on_that_id(
     )
 
     if resumes:
-        assert run_environment_record(resume()).image == _OLD_ID
+        spec = resume()
+        assert run_environment_record(spec).image == _OLD_ID
+        assert spec.image_id == _OLD_ID
     else:
         with pytest.raises(TaskImageError, match="predates input-keyed task images"):
             resume()

@@ -827,14 +827,16 @@ def test_closing_the_session_removes_every_host_socket(tmp_path: Path, name: str
     assert not any(socket.exists() for socket in sockets)
 
 
-def test_the_slurm_agent_container_is_built_from_the_task_image(tmp_path: Path) -> None:
+def test_the_slurm_agent_container_is_built_from_the_task_image_id(tmp_path: Path) -> None:
     """Regression: the Slurm editor built its agent container on the backend's default image.
 
-    The run selection's ``image`` (the task image, when the task has a
-    Dockerfile) reaches the backend the run opens with, and the agent layer
-    is built ``FROM`` it.
+    The run selection's task image reaches the backend the run opens with, and
+    the agent layer is built ``FROM`` it: from the immutable ID resolved at
+    launch, never the tag, so a later launch of the same task that prunes the
+    tag cannot break this run's next agent container build.
     """
     task_image = "vibesys-task-build:0123456789abcdef-" + "0" * 32
+    image_id = "sha256:" + "d" * 64
     config = tmp_path / "slurm-local.toml"
     config.write_text(_SLURM_LOCAL_CONFIG, encoding="utf-8")
     runner = FakeDockerBuildRunner()
@@ -842,6 +844,7 @@ def test_the_slurm_agent_container_is_built_from_the_task_image(tmp_path: Path) 
         RunEnvironmentSpec(
             name="slurm",
             options={"config_path": str(config), "image": task_image, "build_runner": runner},
+            image_id=image_id,
         )
     )
     # As the run's resources do: the backend opens on the environment's backend image.
@@ -852,4 +855,8 @@ def test_the_slurm_agent_container_is_built_from_the_task_image(tmp_path: Path) 
     session.close()
 
     (agent_build,) = [argv for argv, _, _ in runner.calls if argv[1] == "build"]
-    assert f"BASE_IMAGE={task_image}" in agent_build
+    assert f"BASE_IMAGE=vibesys-base:{image_id.removeprefix('sha256:')}" in agent_build
+    assert ("docker", "tag", image_id, f"vibesys-base:{'d' * 64}") in [
+        argv for argv, _, _ in runner.calls
+    ]
+    assert not any(task_image in " ".join(argv) for argv, _, _ in runner.calls)
