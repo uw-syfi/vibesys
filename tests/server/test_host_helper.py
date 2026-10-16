@@ -101,7 +101,7 @@ from server.host_helper_requests import (
     select_completions,
     split_prefix,
 )
-from server.registry import FakeInstanceStore, LiveRegistry, StopEffects
+from server.registry import FakeInstanceStore, FakeStopIntents, LiveRegistry, StopEffects
 from server.relay import EXIT_STATUS
 from vs_decode.api import Unreadable
 from vs_sim.api.testing import (
@@ -1043,6 +1043,7 @@ def test_a_start_that_finishes_after_its_deadline_is_stopped_before_channel_exit
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,
+            intents=FakeStopIntents(),
         ),
     )
 
@@ -1093,6 +1094,7 @@ def test_an_undeliverable_successful_start_is_stopped_before_channel_exit(
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,
+            intents=FakeStopIntents(),
         ),
     )
 
@@ -1164,6 +1166,7 @@ def test_failed_undeliverable_start_compensation_reports_the_live_instance(
             signaller=signaller,
             clock=threads,
             pause=threads.sleep,
+            intents=FakeStopIntents(),
         ),
     )
 
@@ -1362,6 +1365,7 @@ def test_relay_handoff_waits_for_late_start_compensation(seed: int, tmp_path: Pa
             signaller=FakeProcessSignaller(set()),
             clock=threads,
             pause=threads.sleep,
+            intents=FakeStopIntents(),
         ),
     )
 

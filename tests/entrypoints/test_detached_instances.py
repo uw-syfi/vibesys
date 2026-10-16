@@ -49,6 +49,7 @@ from server.registry import (
     FakeInstanceLogs,
     FakeInstanceMetadataStore,
     FakeInstanceStore,
+    FakeStopIntents,
     FileInstanceLogs,
     FileInstanceMetadataStore,
     FileInstanceStore,
@@ -477,6 +478,7 @@ def _run(
             FakeProcessSignaller(set()),
             clock,
             clock.advance,
+            FakeStopIntents(),
         ),
     )
 

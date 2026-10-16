@@ -6,7 +6,8 @@ through ``vs_sim.api``'s launchers, so this module names no interpreter of its o
 launch runs the command line the ``vibesys`` launcher would. Like the helper, the module
 is light (``tests/architecture/test_light_entrypoints.py``).
 
-Public surface: ``FileProjects``, ``OsDirectories``, ``SubprocessRunLauncher``,
+Public surface: ``FileProjects``, ``ProjectStopIntents``, ``OsDirectories``,
+``SubprocessRunLauncher``,
 ``SubprocessRunPreflight``,
 ``GitCheckoutProbe``, and ``StoreLogReader`` with ``run_streams_directory``.
 """
@@ -144,6 +145,17 @@ class FileProjects:
                 HelperErrorCode.PROJECT_UNINITIALIZED, str(opened.root), message
             )
         return opened
+
+
+class ProjectStopIntents:
+    """Records an operator's stop in the run's project state (``record_stop_request``)."""
+
+    def record(self, record: LiveInstanceRecord) -> None:
+        """Note the stop in ``record``'s project; a project that cannot take it is left as it is."""
+        try:
+            Project.open(record.project_root).state.record_stop_request(record.run_id)
+        except (ProjectError, OSError):
+            return
 
 
 class OsDirectories:

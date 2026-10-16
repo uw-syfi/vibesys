@@ -15,8 +15,10 @@ from vs_core.api import (
     HostId,
     RunEnvelope,
     RunId,
+    RunResultProposal,
     initial_state,
 )
+from vs_core.api import RunStatus as CoreRunStatus
 from vs_core.api.testing import FakeView
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
@@ -374,3 +376,51 @@ def test_a_damaged_store_document_is_a_resume_diagnostic(tmp_path: Path, damage:
     with pytest.raises(CoreResumeError) as failure:
         resolve_core_resume(project, driver(), run_id=run_id)
     assert failure.value.diagnostic.code == "core_resume_invalid"
+
+
+def _commit(project: Project, run_id: str, candidate: RuntimeRecord[FlowState]) -> None:
+    store = project.state_store(run_id)
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    store.commit(
+        None,
+        StoredEnvelope(revision=0, schema_version=1, payload=candidate.model_dump_json().encode()),
+        fence,
+        now=0,
+    )
+
+
+def _ended(candidate: RuntimeRecord[FlowState]) -> RuntimeRecord[FlowState]:
+    """``candidate`` after its run ended: a stop, a deadline or a result made it terminal."""
+    envelope = candidate.envelope
+    core = envelope.core
+    run = core.run.model_copy(
+        update={
+            "status": CoreRunStatus.TERMINAL,
+            "result": RunResultProposal(outcome="cancelled", reason="stopped: by request"),
+        }
+    )
+    ended = envelope.model_copy(update={"core": core.model_copy(update={"run": run})})
+    return RuntimeRecord[FlowState].fresh(ended)
+
+
+def test_resuming_an_ended_run_is_refused_naming_the_run(tmp_path: Path) -> None:
+    """Regression: resuming a stopped run reported it stopped again, with no error."""
+    project, run_id = project_run(tmp_path)
+    _commit(project, run_id, _ended(record(run_id)))
+    before = project.state.portable_run_export(run_id)
+
+    with pytest.raises(CoreResumeError) as failure:
+        resolve_core_resume(project, driver(), run_id=run_id)
+
+    diagnostic = failure.value.diagnostic
+    assert diagnostic.code == "run_ended"
+    assert diagnostic.message == f"cannot resume run {run_id!r}: run ended; start a new run"
+    assert project.state.portable_run_export(run_id) == before
+
+
+def test_an_open_run_still_resumes(tmp_path: Path) -> None:
+    project, run_id = project_run(tmp_path)
+    _commit(project, run_id, record(run_id))
+
+    assert resolve_core_resume(project, driver(), run_id=run_id).run_id == run_id

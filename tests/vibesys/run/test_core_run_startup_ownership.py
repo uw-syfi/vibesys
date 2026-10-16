@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from vibesys.events import CoreEventType, RunEndingData
-from vibesys.run.core_run import drive_core_run
+from vibesys.run.core_run import CoreRunRefusedError, drive_core_run
 from vibesys.run.core_services import ClosableEvaluation, CoreServices
 from vibesys.run.host import CoreHost
 from vs_core.api import initial_state
@@ -123,14 +123,19 @@ def _declared_state() -> CoreState:
 
 
 def _startup_host(
-    tmp_path: Path, bridge: _FailingBridge
+    tmp_path: Path, bridge: _FailingBridge | None, *, stop_requested: bool = False
 ) -> tuple[CoreHost, LocalRunIntegration, VirtualClock]:
     """Build the public product boundary around the configured bridge fault."""
     project = Project.open(tmp_path)
     clock = VirtualClock(at=1.0)
     threads = SimThreads(clock)
     store = FakeStateStore()
-    bindings = CoreRuntimeBindings(transitions=ShellTraceTransitions())
+    # The trace fixture takes no control input; a run that must commit a stop uses core's own.
+    bindings = (
+        CoreRuntimeBindings()
+        if stop_requested
+        else CoreRuntimeBindings(transitions=ShellTraceTransitions())
+    )
     namespace = project.state.state_store_namespace("startup-ownership")
     services = CoreServices(
         run_id="startup-ownership",
@@ -145,7 +150,8 @@ def _startup_host(
         evaluation=cast("ClosableEvaluation", object()),
         artifacts=ArtifactStore(namespace),
         clock=clock,
-        agent_evaluation=cast("AgentEvaluationBridge", bridge),
+        agent_evaluation=None if bridge is None else cast("AgentEvaluationBridge", bridge),
+        stop_requested=stop_requested,
     )
     workspaces = _FollowingWorkspaces()
     host = CoreHost(
@@ -210,3 +216,29 @@ def test_a_bridge_startup_interruption_survives_a_close_failure(
     assert bridge.closed
     assert bridge.shell is not None
     assert not bridge.shell.holds_lease(now_at=clock.now())
+
+
+def test_a_run_force_stopped_before_starts_no_new_work_and_goes_straight_to_its_end(
+    tmp_path: Path,
+) -> None:
+    """A resume of a force-stopped run commits the recorded stop before asking its search.
+
+    Core then ends the run as a stop does, by adopting its last choice: the only request
+    the run makes is that adoption (refused here, where no workspace executor is bound),
+    never an agent turn or an evaluation.
+    """
+    host, integration, clock = _startup_host(tmp_path, None, stop_requested=True)
+
+    async def exercise() -> CoreRunRefusedError:
+        with pytest.raises(CoreRunRefusedError) as refused:
+            await drive_core_run(host, integration)
+        return refused.value
+
+    refusal = run_virtual(clock, exercise()).refusal
+
+    assert refusal.request_id.root.startswith("adopt:")
+    events = cast("_Integration", integration).events
+    assert [event_type for event_type, _data in events.emitted] == [CoreEventType.RUN_ENDING]
+    ((_type, ending),) = events.emitted
+    assert isinstance(ending, RunEndingData)
+    assert ending.rounds_finished == 0

@@ -419,7 +419,7 @@ One closed union, owned by `server.host_api` and folded by the existing pure lif
 | `starting {stage, progress}` | `stage` is `resolving`, `building_image`, or `starting_container`. `progress` is `{done, total \| null, label}` when the stage reports it. | no |
 | `running` | Ready and executing (`RunStatus.RUNNING`; also `pausing`, `paused` as today). | no |
 | `stopping` | A stop was accepted; the run ends at its next boundary. | no |
-| `stopped` | Stopped by request, state persisted, resumable. | yes |
+| `stopped` | Stopped by request; its result and measurements are kept, and it has ended for good: not resumable (Pause is how a run continues later). | yes |
 | `failed {reason}` | `reason` is a `Diagnostic` (code, stage, message, log path). | yes |
 | `finished` | Completed (`RunStatus.COMPLETED`). | yes |
 
@@ -462,8 +462,14 @@ Facts enter once:
   `force_stopped` when the server was terminated, `stopped` for a stop that left work unsettled,
   and `failed` otherwise. `reason` is one line (at most 200 characters): core's account of the
   result, else the failure's message. `resumable` is whether the run's durable core record exists
-  and is not terminal, so a run that recorded a result is not resumable; `resume_from_round` is
-  then its finished rounds plus one. A core run reports these as the `run_ending` event just
+  and is not terminal and no stop ended it: a run that recorded a result is not resumable, and
+  neither is any stopped run (`stopped`, including one whose drain outlived its grace bound, and
+  `force_stopped`), since a stop ends a run for good. `resume_from_round` is then its finished
+  rounds plus one. A force stop records the stop request in the run's state
+  (`ProjectState.record_stop_request`) before the server is signalled, so a resume of a
+  force-stopped run commits that stop first, starts no new work, and only finishes the drain and
+  ends; `vibesys --resume` refuses a run whose record is terminal (`run_ended`, "run ended; start
+  a new run"). A core run reports these as the `run_ending` event just
   before it ends; a run that failed before core started reports none and is not resumable. A
   crashed server's burial records `failed`, resumable, with no round. `end` is absent on a
   tombstone upgraded from version 4 and when a completed run reported no ending, so the UI falls
@@ -491,7 +497,7 @@ Facts enter once:
     server wrote nothing as it died, and the lock carries no time. Its 24 hours run from then.
 
 The UI renders only the phase: Retry appears only on a link failure, never on an ended phase;
-Resume appears only on `stopped`, `failed`, and `finished`.
+Resume appears only on an ended run whose `end` says `resumable` (a failure or a crash), never on a stopped or finished one.
 
 ## Connection manager
 

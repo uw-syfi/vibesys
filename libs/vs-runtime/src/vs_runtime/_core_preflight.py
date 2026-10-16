@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter
 from vs_core.api import (
     ContractError,
     OperationRegistry,
+    RunStatus,
     SearchDriver,
     StrategyState,
     validate_startup,
@@ -32,7 +33,7 @@ class ResumeDiagnostic(BaseModel):
     """Stable transport-neutral preflight failure with source path and schema."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-    code: Literal["dynamic_legacy_resume_unsupported", "core_resume_invalid"]
+    code: Literal["dynamic_legacy_resume_unsupported", "core_resume_invalid", "run_ended"]
     stage: Literal["resume_resolution"] = "resume_resolution"
     path: str
     source_schema: str
@@ -217,4 +218,14 @@ def resolve_core_resume[S: StrategyState](
                 message=f"invalid core resume: {path} (runtime schema {schema}): {error}",
             )
         ) from error
+    if record.envelope.core.run.status == RunStatus.TERMINAL:
+        path = _path(project.state.state_store_namespace(selected.run_id), "store.json")
+        raise CoreResumeError(
+            ResumeDiagnostic(
+                code="run_ended",
+                path=path,
+                source_schema=str(stored.schema_version),
+                message=f"cannot resume run {selected.run_id!r}: run ended; start a new run",
+            )
+        )
     return ResolvedCoreResume(selected.run_id, project.state_store(selected.run_id), record)

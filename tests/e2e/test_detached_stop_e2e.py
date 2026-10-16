@@ -33,6 +33,7 @@ from server.host_api import (
 )
 from server.instances import ControlSocketStopRequester
 from server.registry import (
+    FakeStopIntents,
     FileInstanceStore,
     LiveRegistry,
     StopEffects,
@@ -225,6 +226,7 @@ def test_stop_asks_the_server_which_ends_its_run_and_unregisters(root: Path) -> 
                 _NoSignal(),
                 threads,
                 threads.sleep,
+                FakeStopIntents(),
             ),
         )
 
