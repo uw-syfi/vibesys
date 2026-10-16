@@ -349,7 +349,8 @@ function readingFrom(state: RunPageState, from: number): RunPageStep {
 }
 
 /**
- * An ended run reads its history once into the run fold; a run that is live again (a resume)
+ * An ended run opened with nothing folded reads its history once into the run fold; a run that is
+ * live again (a resume)
  * gets its data from its session, and drops a history read in flight.
  */
 function historyFor(state: RunPageState): RunPageStep {
@@ -363,7 +364,11 @@ function historyFor(state: RunPageState): RunPageStep {
     return {state: {...state, history: {kind: 'idle'}}, requests: []};
   }
   if (state.record.kind === 'ended' && state.history.kind === 'idle') {
-    return readingFrom({...state, run: EMPTY_RUN_FOLD}, 0);
+    // A run watched to its end already holds what its session folded; only one opened ended
+    // (nothing folded yet) reads its recorded history.
+    const folded = state.run.core !== null || state.run.trace !== EMPTY_RUN_FOLD.trace;
+    if (folded) return {state: {...state, history: {kind: 'read'}}, requests: []};
+    return readingFrom(state, 0);
   }
   return {state, requests: []};
 }

@@ -464,6 +464,26 @@ describe('the run page store', () => {
     expect(mismatched.state.views).toEqual({});
   });
 
+  test('a run watched to its end keeps what its session folded and reads no history', () => {
+    const live = fold(initial(), [{type: 'record', record: RECORDS[2] as RunRecord}]);
+    const attach = live.requests.find(request => request.kind === 'attach');
+    if (attach?.kind !== 'attach') throw new Error('no attach asked');
+    const span = {
+      sequence: 3,
+      type: 'span_started',
+      timestamp: '2026-10-15T16:30:51Z',
+      data: {span: {id: 'flow:w1'}},
+    } as unknown as RunEvent;
+    const watched = fold(live.state, [
+      {type: 'attached', token: attach.token, error: null},
+      {type: 'run-data', data: {kind: 'events', events: [span]}},
+    ]).state;
+    const ended = fold(watched, [{type: 'record', record: RECORDS[8] as RunRecord}]);
+    expect(ended.requests.some(request => request.kind === 'read-history')).toBe(false);
+    expect(ended.state.run).toBe(watched.run);
+    expect(ended.state.history).toEqual({kind: 'read'});
+  });
+
   test('an ended run reads its history page by page into the run, and the tabs see its spans', () => {
     const span = (sequence: number, id: string, type: string): RunEvent =>
       ({
