@@ -128,6 +128,38 @@ describe('the ended banner', () => {
     );
   });
 
+  test('names the candidate the search adopted, not the best gate it saw', () => {
+    const adopted = span('op:adopt', 'flow:root#1', {
+      type: 'operation',
+      label: {
+        kind: 'adoption',
+        title: 'adopt',
+        attrs_json: JSON.stringify({candidate: 'abc123', metric_value: 410, vs_baseline: 5.7234}),
+        verdict: 'adopted',
+        links: [],
+      },
+    });
+    const state = ended('adopted', 'adopted: settlement:000002/settle.1', [
+      ROOT,
+      ...round(1, 100, 1.4),
+      ...round(2, 410, 5.7234),
+      ...round(3, 900, 12, 'passed'),
+      adopted,
+    ]);
+    expect(endedView(state)?.reason).toBe(
+      'Kept the candidate from round 2, 5.72× faster than the input.',
+    );
+  });
+
+  test('says the input stood when the search adopted no candidate', () => {
+    const input = span('op:adopt', 'flow:root#1', {
+      type: 'operation',
+      label: {kind: 'adoption', title: 'adopt', attrs_json: '{}', verdict: 'adopted', links: []},
+    });
+    const state = ended('adopted', 'adopted: the input', [ROOT, ...round(1, 100, 1.4), input]);
+    expect(endedView(state)?.reason).toBe('No candidate beat the input, so it was kept as it was.');
+  });
+
   test('reads a lower-is-better objective the same way', () => {
     const state = ended('adopted', 'adopted: s', [ROOT, ...round(1, 25, 0.25)], 'min');
     expect(endedView(state)?.reason).toBe(

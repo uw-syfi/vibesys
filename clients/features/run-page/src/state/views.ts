@@ -426,7 +426,9 @@ export function logsNotice(state: RunPageState): string | null {
 }
 
 /** The candidate the run kept and its objective's direction, as the trace at the end says. */
-function keptAtEnd(state: RunPageState): [KeptCandidate | null, 'max' | 'min' | null | undefined] {
+function keptAtEnd(
+  state: RunPageState,
+): [KeptCandidate | 'input' | null, 'max' | 'min' | null | undefined] {
   const direction = overviewAt(state.run.trace, null)?.objective.direction;
   return [keptCandidate(traceSpans(traceAt(state.run.trace, null)), direction), direction];
 }

@@ -39,6 +39,8 @@ const VERDICTS: Readonly<Record<string, {readonly label: string; readonly tone: 
   passed: {label: 'Passed', tone: 'ok'},
   slower: {label: 'Slower than the input', tone: 'warn'},
   failed_check: {label: 'Failed a check', tone: 'err'},
+  adopted: {label: 'Adopted', tone: 'ok'},
+  not_adopted: {label: 'Not adopted', tone: 'warn'},
 };
 
 /** A word from the wire (`failed_check`) as text (`Failed check`). */
@@ -80,6 +82,7 @@ const KINDS: Readonly<Record<string, string>> = {
   workstream: 'Workstream',
   agent_turn: 'Agent turn',
   gate: 'Gate',
+  adoption: 'Adoption',
 };
 
 /** What kind of step the span is, in words. */
@@ -128,6 +131,10 @@ export function titleOf(span: Span): string {
     }
     case 'gate':
       return `Gate · ${gateTitle(title)}`;
+    case 'adoption': {
+      const candidate = stringAttr(span, 'candidate');
+      return candidate === null ? 'Adopt the input' : `Adopt candidate ${candidate.slice(0, 7)}`;
+    }
     default:
       return title;
   }

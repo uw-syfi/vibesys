@@ -8,10 +8,12 @@
  */
 import type {Span} from '@vibesys/contracts';
 import type {RunEnd} from '@vibesys/hosts';
-import {bestVsBaseline} from '@vibesys/run-state/overview';
+import {adoption, bestVsBaseline, gateTrajectory} from '@vibesys/run-state/overview';
 import {indexSpans, nearest, numberAttr, ratio, stringAttr} from './span-reading.js';
 
 type Outcome = NonNullable<RunEnd>['outcome'];
+
+const KEPT_INPUT = 'No candidate beat the input, so it was kept as it was.';
 
 /** The candidate a run kept, as its trace says: where it came from and how it compares. */
 export interface KeptCandidate {
@@ -23,21 +25,44 @@ export interface KeptCandidate {
   readonly vsBaseline: number | null;
 }
 
-/** The best candidate that passed its gate, with the workstream that made it, or null. */
-export function keptCandidate(
+/** The workstream of the gate span `gate` (or none), as a candidate that compares by `vsBaseline`. */
+function madeBy(
   spans: readonly Span[],
-  direction: 'max' | 'min' | null | undefined,
-): KeptCandidate | null {
-  const best = bestVsBaseline(spans, direction);
-  if (best === null) return null;
+  gate: string | null,
+  vsBaseline: number | null,
+): KeptCandidate {
   const index = indexSpans(spans);
-  const gate = index.byId.get(best.span);
-  const workstream = gate === undefined ? null : nearest(index, gate, 'workstream');
+  const span = gate === null ? undefined : index.byId.get(gate);
+  const workstream = span === undefined ? null : nearest(index, span, 'workstream');
   return {
     round: workstream === null ? null : numberAttr(workstream, 'round'),
     hypothesis: workstream === null ? null : stringAttr(workstream, 'hypothesis_id'),
-    vsBaseline: best.vsBaseline,
+    vsBaseline,
   };
+}
+
+/**
+ * The candidate the run kept, `'input'` when the input stood, or null when the trace does not say.
+ * The search's own account decides (its
+ * `adoption` span: the candidate and how it measured, or the input standing); the workstream that
+ * made it is the one whose passed gate measured that value. A run whose search labels no adoption
+ * is read from its best passed gate.
+ */
+export function keptCandidate(
+  spans: readonly Span[],
+  direction: 'max' | 'min' | null | undefined,
+): KeptCandidate | 'input' | null {
+  const adopted = adoption(spans);
+  if (adopted !== null) {
+    if (adopted.verdict !== 'adopted') return null;
+    if (adopted.candidate === null) return 'input';
+    const gate = gateTrajectory(spans).find(
+      reading => reading.verdict === 'passed' && reading.metricValue === adopted.metricValue,
+    );
+    return madeBy(spans, gate?.span ?? null, adopted.vsBaseline);
+  }
+  const best = bestVsBaseline(spans, direction);
+  return best === null ? null : madeBy(spans, best.span, best.vsBaseline);
 }
 
 /** How much better than the input the candidate is, in words, or null when it is not known or not. */
@@ -52,10 +77,11 @@ function improvement(
 }
 
 function keptWords(
-  kept: KeptCandidate | null,
+  kept: KeptCandidate | 'input' | null,
   direction: 'max' | 'min' | null | undefined,
 ): string {
   if (kept === null) return 'Kept the best candidate.';
+  if (kept === 'input') return KEPT_INPUT;
   const from =
     kept.round !== null
       ? ` from round ${kept.round}`
@@ -73,14 +99,14 @@ function keptWords(
 export function endReason(
   outcome: Outcome,
   reason: string,
-  kept: KeptCandidate | null,
+  kept: KeptCandidate | 'input' | null,
   direction: 'max' | 'min' | null | undefined,
 ): string {
   switch (outcome) {
     case 'adopted':
       return keptWords(kept, direction);
     case 'kept-input':
-      return 'No candidate beat the input, so it was kept as it was.';
+      return KEPT_INPUT;
     case 'no-winner':
       return 'The run ended without a winner.';
     case 'adoption-failed':

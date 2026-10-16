@@ -147,6 +147,37 @@ describe('a step that waits', () => {
   });
 });
 
+describe('an adoption step', () => {
+  const adoption = (attrs: object, verdict: string) =>
+    span('op:adopt', 'flow:root#1', {
+      name: 'adopt',
+      label: {
+        kind: 'adoption',
+        title: 'abc1234def5678',
+        attrs_json: JSON.stringify(attrs),
+        verdict,
+        links: [],
+      },
+    } as Partial<Span>);
+
+  test('reads as adopting the candidate, by a short revision, or the input', () => {
+    const spans = [
+      span('flow:root#1', null, {name: 'multi'}),
+      adoption({candidate: 'abc1234def5678'}, 'adopted'),
+    ];
+    const row = mapRows(trace(spans), ALL)[1];
+    expect(row?.title).toBe('Adopt candidate abc1234');
+    expect(mapDetail(trace(spans), {...ALL, selected: 'op:adopt'})?.state.label).toBe('Adopted');
+    const input = [span('flow:root#1', null, {name: 'multi'}), adoption({}, 'not_adopted')];
+    const other = mapRows(trace(input), ALL)[1];
+    expect(other?.title).toBe('Adopt the input');
+    expect(mapDetail(trace(input), {...ALL, selected: 'op:adopt'})?.state.label).toBe(
+      'Not adopted',
+    );
+    expect(mapDetail(trace(spans), {...ALL, selected: 'op:adopt'})?.kind).toBe('Adoption');
+  });
+});
+
 describe('an evaluator command', () => {
   const overview = (check: readonly string[]) => ({
     objective: {text: 'Go faster.', correctness_check: [...check]},
