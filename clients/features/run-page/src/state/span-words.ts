@@ -1,0 +1,216 @@
+/**
+ * How one span reads on the Map: its kind's name, title, subtitle, state and facts, in words. The
+ * kinds the dynamic search declares (planning call, workstream, agent turn, gate) get their own
+ * words; any other kind, or a span with no label, reads plainly from its name, title, status,
+ * attributes and links. Nothing is guessed from a span's name.
+ */
+import type {Span} from '@vibesys/contracts';
+import type {MapFilter} from './run-page.js';
+import type {Tone} from './views.js';
+
+type Status = Span['status'];
+type Waiting = NonNullable<Span['waiting_on']>[number];
+
+/** A span's attributes as its label carries them: decoded JSON values, or none. */
+export type Attrs = Readonly<Record<string, unknown>>;
+
+/** The label's `attrs_json` as an object; text that is not a JSON object reads as no attributes. */
+export function attrsOf(span: Span): Attrs {
+  const text = span.label?.attrs_json;
+  if (text === null || text === undefined) return {};
+  try {
+    const value: unknown = JSON.parse(text);
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value))
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function text(attrs: Attrs, key: string): string | null {
+  const value = attrs[key];
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function number(attrs: Attrs, key: string): number | null {
+  const value = attrs[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+const STATUS: Readonly<Record<Status, {readonly label: string; readonly tone: Tone}>> = {
+  pending: {label: 'Not started', tone: 'neutral'},
+  running: {label: 'Running', tone: 'live'},
+  waiting: {label: 'Waiting', tone: 'warn'},
+  done: {label: 'Done', tone: 'ok'},
+  failed: {label: 'Failed', tone: 'err'},
+  stopped: {label: 'Stopped', tone: 'neutral'},
+};
+
+export function statusWords(status: Status): {readonly label: string; readonly tone: Tone} {
+  return STATUS[status];
+}
+
+const VERDICTS: Readonly<Record<string, {readonly label: string; readonly tone: Tone}>> = {
+  accepted: {label: 'Accepted', tone: 'ok'},
+  rejected: {label: 'Rejected', tone: 'neutral'},
+  passed: {label: 'Passed', tone: 'ok'},
+  slower: {label: 'Slower than the input', tone: 'warn'},
+  failed_check: {label: 'Failed a check', tone: 'err'},
+};
+
+/** A word from the wire (`failed_check`) as text (`Failed check`). */
+export function plain(word: string): string {
+  const spaced = word.replaceAll('_', ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** The span's verdict in words, or null when it has none. */
+export function verdictWords(span: Span): {readonly label: string; readonly tone: Tone} | null {
+  const verdict = span.label?.verdict;
+  if (verdict === null || verdict === undefined) return null;
+  return VERDICTS[verdict] ?? {label: plain(verdict), tone: 'neutral'};
+}
+
+/** Which filter shows a span: pending counts as waiting, stopped as finished. */
+export function bucket(status: Status): Exclude<MapFilter, 'all'> {
+  switch (status) {
+    case 'running':
+      return 'running';
+    case 'pending':
+    case 'waiting':
+      return 'waiting';
+    case 'failed':
+      return 'failed';
+    case 'done':
+    case 'stopped':
+      return 'finished';
+  }
+}
+
+/** Whether the span has ended (it will not change state again). */
+export function ended(span: Span): boolean {
+  return span.status === 'done' || span.status === 'failed' || span.status === 'stopped';
+}
+
+const KINDS: Readonly<Record<string, string>> = {
+  planning_call: 'Planning call',
+  workstream: 'Workstream',
+  agent_turn: 'Agent turn',
+  gate: 'Gate',
+};
+
+/** What kind of step the span is, in words. */
+export function kindWords(span: Span): string {
+  if (span.parent === null) return 'Run';
+  const kind = span.label?.kind;
+  if (kind === undefined) return span.type === 'operation' ? 'Operation' : 'Step';
+  return KINDS[kind] ?? plain(kind);
+}
+
+/** The span's short name, as a link to it reads: a workstream's hypothesis, else its title. */
+export function shortName(span: Span): string {
+  if (span.label?.kind === 'workstream') {
+    const hypothesis = text(attrsOf(span), 'hypothesis_id');
+    if (hypothesis !== null) return hypothesis;
+  }
+  return span.label?.title ?? span.name;
+}
+
+/** The span's title on its row. */
+export function titleOf(span: Span): string {
+  const label = span.label;
+  const title = label?.title ?? span.name;
+  if (span.parent === null) return `Run · ${title}`;
+  const attrs = attrsOf(span);
+  switch (label?.kind) {
+    case 'planning_call':
+      return plain(title);
+    case 'workstream': {
+      const hypothesis = text(attrs, 'hypothesis_id');
+      return hypothesis === null || hypothesis === title ? title : `${hypothesis} · ${title}`;
+    }
+    case 'agent_turn': {
+      const model = text(attrs, 'model');
+      return model === null ? title : `${title} · ${model}`;
+    }
+    case 'gate':
+      return `Gate · ${title}`;
+    default:
+      return title;
+  }
+}
+
+/** Seconds as a short duration: `12s`, `4m 10s`, `1h 02m`. */
+export function duration(seconds: number): string {
+  const whole = Math.max(0, Math.round(seconds));
+  if (whole < 60) return `${whole}s`;
+  if (whole < 3600) return `${Math.floor(whole / 60)}m ${String(whole % 60).padStart(2, '0')}s`;
+  const minutes = Math.floor(whole / 60);
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, '0')}m`;
+}
+
+/** One source the span waits on, in words; an operation reads as its span's title when known. */
+export function waitingWords(wait: Waiting, spans: ReadonlyMap<string, Span>): string {
+  switch (wait.kind) {
+    case 'operation': {
+      const target = spans.get(wait.ref);
+      return target === undefined ? 'An operation' : titleOf(target);
+    }
+    case 'slot':
+      return 'A free slot';
+    case 'time':
+      return 'A timer';
+    case 'stop':
+      return 'The stop to land';
+  }
+}
+
+/** A try of the span's retry, in words: `#2 of 3 again: build failed`. */
+export function attemptWords(attempt: NonNullable<Span['attempts']>[number]): string {
+  const outcome =
+    attempt.outcome === null || attempt.outcome === undefined
+      ? 'running'
+      : plain(attempt.outcome).toLowerCase();
+  const reason =
+    attempt.reason === null || attempt.reason === undefined ? '' : `: ${attempt.reason}`;
+  return `#${attempt.n} of ${attempt.of} ${outcome}${reason}`;
+}
+
+/** A gate's measurement, in words: `41.2 · 1.18× the input`. */
+function measured(attrs: Attrs): string | null {
+  const value = number(attrs, 'metric_value');
+  if (value === null) return null;
+  const ratio = number(attrs, 'vs_baseline');
+  return ratio === null ? `${value}` : `${value} · ${ratio.toFixed(2)}× the input`;
+}
+
+/** The subtitle a labelled kind gives itself, or null to use the generic one. */
+function kindSubtitle(span: Span, children: number): string | null {
+  const attrs = attrsOf(span);
+  switch (span.label?.kind) {
+    case 'planning_call':
+      return `${children} workstream${children === 1 ? '' : 's'} planned`;
+    case 'gate':
+      return measured(attrs) ?? text(attrs, 'stage');
+    case 'workstream':
+      return span.label?.reason == null ? null : plain(span.label.reason);
+    default:
+      return null;
+  }
+}
+
+/** The span's subtitle: what it waits on, its try, its kind's own words, or its status. */
+export function subtitleOf(span: Span, spans: ReadonlyMap<string, Span>, children: number): string {
+  const waiting = span.waiting_on ?? [];
+  if (waiting.length > 0 && !ended(span)) {
+    return `Waiting on ${waiting.map(wait => waitingWords(wait, spans).toLowerCase()).join(', ')}`;
+  }
+  const own = kindSubtitle(span, children);
+  if (own !== null) return own;
+  const attempt = (span.attempts ?? []).at(-1);
+  if (attempt !== undefined && attempt.of > 1) return `Attempt ${attempt.n} of ${attempt.of}`;
+  if (span.failure !== null && span.failure !== undefined) return span.failure.message;
+  const kind = span.label?.kind;
+  return kind === undefined || kind in KINDS ? statusWords(span.status).label : plain(kind);
+}

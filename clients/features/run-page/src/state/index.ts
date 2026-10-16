@@ -1,7 +1,8 @@
 /**
  * The Run screen's pure state: its store (`runPageStep`, a reducer with request tokens) and the
- * selectors the screen renders: header, stop and ended banners, startup timeline, logs, and the
- * Overview and Work tabs over the folded run at the view (`RunAtView`).
+ * selectors the screen renders: header, stop and ended banners, startup timeline, logs, the
+ * Overview and Work tabs over the folded run at the view (`RunAtView`), and the Map (`mapRows`,
+ * `mapDetail`) and the scrubber (`scrubberView`) over the trace at the view (`traceAt`).
  */
 
 export {
@@ -15,6 +16,17 @@ export {
   traceAt,
   traceStep,
 } from './live.js';
+export {
+  type MapDetail,
+  type MapFact,
+  type MapNode,
+  type MapRow,
+  mapDetail,
+  mapForest,
+  mapRows,
+  selectedSpan,
+  spanLogs,
+} from './map-view.js';
 export {type ObjectiveBlock, objectiveBlocks} from './objective-text.js';
 export {
   type ChartPointView,
@@ -53,6 +65,12 @@ export {
   type StopFlow,
   type Unavailable,
 } from './run-page.js';
+export {
+  type ScrubberView,
+  scrubberView,
+  scrubPositions,
+  viewAtPosition,
+} from './scrub.js';
 export {
   type EndedView,
   endedView,
