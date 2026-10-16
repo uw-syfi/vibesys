@@ -2,7 +2,10 @@ import {describe, expect, test} from 'bun:test';
 import type {HostAction, HostState} from '@vibesys/feature-hosts/state';
 import type {HostKey, HostListing} from '@vibesys/hosts';
 import type {
+  CheckoutInspection,
   ChromeState,
+  MachineEntry,
+  MachineReport,
   PreferencesView,
   WelcomeBridge,
   WelcomeEvent,
@@ -151,6 +154,17 @@ class FakeWelcomeBridge implements WelcomeBridge {
     return this.preferences();
   };
   onPreferences = (_listener: (event: WelcomeEvent<PreferencesView>) => void) => {};
+  // The welcome view lists no machines (the redesigned window's Machines screen does).
+  machines = async (): Promise<WelcomeResult<MachineEntry[]>> => ({ok: true, value: []});
+  machine = async (): Promise<WelcomeResult<MachineReport>> => ({
+    ok: true,
+    value: {kind: 'ready', facts: null},
+  });
+  inspectCheckout = async (): Promise<WelcomeResult<CheckoutInspection>> => ({
+    ok: true,
+    value: {state: 'not_found'},
+  });
+  removeMachine = async (): Promise<WelcomeResult<MachineEntry[]>> => ({ok: true, value: []});
 
   listenerCounts(): number[] {
     return [this.#chrome.length, this.#recent.length, this.#listing.length, this.#showHost.length];
