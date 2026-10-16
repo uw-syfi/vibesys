@@ -13,6 +13,7 @@ runs its own accept loop on a :class:`~vs_sim.concurrency.Threads` worker.
 from __future__ import annotations
 
 import contextlib
+import errno
 import math
 import select
 import socket
@@ -32,6 +33,7 @@ class Connection(Protocol):
                 within ``timeout`` seconds (``None`` waits for ever). Part of it may
                 have been written.
             ConnectionError: the connection broke (reset, aborted, timed out).
+            OSError: this end was closed.
         """
         ...
 
@@ -95,6 +97,17 @@ class DeadlineNetwork(Network, Protocol):
         ...
 
 
+def _poller_for(sock: socket.socket, event: int) -> select.poll:
+    poller = select.poll()
+    try:
+        poller.register(sock, event)
+    except ValueError as error:
+        if sock.fileno() >= 0:
+            raise
+        raise OSError(errno.EBADF, "connection closed") from error
+    return poller
+
+
 class _UnixConnection:
     def __init__(self, sock: socket.socket) -> None:
         self._sock = sock
@@ -106,8 +119,7 @@ class _UnixConnection:
         # As in ``recv``, the socket stays blocking; wait for room instead.
         deadline = time.monotonic() + timeout
         view = memoryview(data)
-        poller = select.poll()
-        poller.register(self._sock, select.POLLOUT)
+        poller = _poller_for(self._sock, select.POLLOUT)
         while view:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not poller.poll(max(math.ceil(remaining * 1000), 0)):
@@ -123,8 +135,7 @@ class _UnixConnection:
         # The socket stays blocking: a socket timeout would also bound a later ``send``
         # from any thread, so a slow reader would fail a write. Wait for readability instead.
         if timeout is not None:
-            poller = select.poll()
-            poller.register(self._sock, select.POLLIN)
+            poller = _poller_for(self._sock, select.POLLIN)
             if not poller.poll(max(math.ceil(timeout * 1000), 0)):
                 message = f"nothing arrived within {timeout} s"
                 raise TimeoutError(message)
