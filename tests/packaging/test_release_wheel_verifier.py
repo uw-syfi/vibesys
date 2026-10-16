@@ -393,16 +393,19 @@ def test_rejects_a_missing_internal_package(release_fixture: tuple[Path, Path]) 
         _verify(source_root, wheel)
 
 
-def test_rejects_an_internal_distribution_dependency(release_fixture: tuple[Path, Path]) -> None:
+@pytest.mark.parametrize("internal_distribution", ["vs-sandbox", "vs-redaction"])
+def test_rejects_an_internal_distribution_dependency(
+    release_fixture: tuple[Path, Path], internal_distribution: str
+) -> None:
     source_root, wheel = release_fixture
     metadata = _wheel_files(source_root)[f"{DIST_INFO}/METADATA"]
     metadata = metadata.replace(
         b"Requires-Dist: example>=1\n",
-        b"Requires-Dist: example>=1\nRequires-Dist: vs-sandbox\n",
+        f"Requires-Dist: example>=1\nRequires-Dist: {internal_distribution}\n".encode(),
     )
     _write_wheel(wheel, source_root, extra={f"{DIST_INFO}/METADATA": metadata})
 
-    with pytest.raises(verifier.ReleaseWheelError, match="vs-sandbox"):
+    with pytest.raises(verifier.ReleaseWheelError, match=internal_distribution):
         _verify(source_root, wheel)
 
 

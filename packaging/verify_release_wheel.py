@@ -64,6 +64,7 @@ _INTERNAL_DISTRIBUTIONS = frozenset(
         "vs-async-ops",
         "vs-evaluator-protocol",
         "vs-decode",
+        "vs-redaction",
         "vs-evaluation",
         "vs-github",
         "vs-issue-tracker",
