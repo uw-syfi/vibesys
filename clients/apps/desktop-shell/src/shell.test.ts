@@ -74,6 +74,12 @@ test('New run opened for a machine starts on it; opened plainly, it keeps its ma
     {mode: 'light', onChange: () => undefined},
     {setAttribute: () => undefined},
     () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
   );
   const select = (screen: Screen): void => stores.sidebar.store.dispatch({type: 'select', screen});
   const machine = () => stores.newRun.getState().context.form.machine;
