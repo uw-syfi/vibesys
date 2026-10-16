@@ -43,7 +43,6 @@ from vibesys.plugin_registration import (
     RuntimeRecordProjector,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vibesys.run.contracts import IterationTree, PluginProjection
 from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, OperationRegistry, RevisionRef
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_runtime.api import (
@@ -64,6 +63,7 @@ from vs_runtime.api.core import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vibesys.run.contracts import PluginProjection
     from vs_core.api import TaskTerms
     from vs_runtime.api import CoreRunContext
 
@@ -87,13 +87,13 @@ def dynamic_operation_catalog(
     return OperationCatalog(_registry(), (*catalog.entries, *handoff))
 
 
-def dynamic_projector() -> RuntimeRecordProjector[FlowState]:
+def dynamic_projector() -> RuntimeRecordProjector[FlowState, RunSnapshot]:
     """Read a dynamic run's published record from its committed runtime record."""
 
-    def project(state: FlowState, revision: int) -> PluginProjection:
-        record = FlowDriver.published(state, RunSnapshot)
-        if record is None:
-            return PluginProjection(payload={}, iterations=IterationTree.from_nodes(()), rounds=())
+    def published(state: FlowState) -> RunSnapshot | None:
+        return FlowDriver.published(state, RunSnapshot)
+
+    def project(record: RunSnapshot, revision: int) -> PluginProjection:
         return project_run_snapshot(record, experiment_revision=revision)
 
     return RuntimeRecordProjector(
@@ -101,6 +101,7 @@ def dynamic_projector() -> RuntimeRecordProjector[FlowState]:
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
         operations=_registry(),
+        published=published,
         project=project,
     )
 

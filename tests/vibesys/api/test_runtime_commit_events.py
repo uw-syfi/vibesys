@@ -330,17 +330,20 @@ def test_a_commit_of_another_namespace_projects_nothing() -> None:
     ]
 
 
-@given(unprojectable=st.lists(st.booleans(), max_size=10))
+@given(unprojectable=st.lists(st.booleans(), max_size=10), held=st.integers(0, 3))
 @settings(max_examples=examples(pr=20, nightly=200))
 def test_a_commit_whose_view_cannot_be_built_warns_once_and_loses_no_round(
-    unprojectable: list[bool],
+    unprojectable: list[bool], held: int
 ) -> None:
     """Each commit adds one round; some commits' views cannot be built.
 
     Regression: a projection that failed validation escaped the commit observer and ended a
     live run. Now each stretch of commits whose view cannot be built warns once when it starts,
     and the first commit after it whose view can be built announces the stretch's rounds, so
-    every round of the last buildable view is announced exactly once, in order.
+    every round of the last buildable view is announced exactly once, in order. The observer
+    starts as a restarted process does: the record it held (``held`` rounds) was announced by the
+    process before it, so none of those rounds is announced again, even when the first commit
+    after the restart cannot be built.
     """
     integration = LocalRunIntegration(
         clock=ManualClock(),
@@ -352,11 +355,11 @@ def test_a_commit_whose_view_cannot_be_built_warns_once_and_loses_no_round(
     observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
     captured: list[CoreEvent] = []
     integration.events.subscribe(captured.append)
-    states = [_FakeAgentState()]
+    states = [_FakeAgentState(round_numbers=tuple(range(1, held + 1)))]
     for revision, broken in enumerate(unprojectable, start=1):
         states.append(
             _FakeAgentState(
-                round_numbers=tuple(range(1, revision + 1)),
+                round_numbers=tuple(range(1, held + revision + 1)),
                 revision=revision,
                 unprojectable=broken,
             )
@@ -384,4 +387,4 @@ def test_a_commit_whose_view_cannot_be_built_warns_once_and_loses_no_round(
         if event.type is CoreEventType.ROUND_FINISHED
     ]
     shown = [state for state in states if not state.unprojectable]
-    assert announced == list(shown[-1].round_numbers)
+    assert announced == [number for number in shown[-1].round_numbers if number > held]

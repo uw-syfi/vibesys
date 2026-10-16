@@ -415,6 +415,8 @@ class IterationUnavailable(BaseModel):
     kind: Literal["unavailable"] = "unavailable"
     schema_version: Literal[1] = 1
     reason: IterationUnavailableReason
+    detail: str | None = None
+    """For an operator, what went wrong (for `PROJECTION_INVALID`, the validation error)."""
 
 
 IterationProjection = Annotated[IterationTree | IterationUnavailable, Field(discriminator="kind")]
@@ -449,12 +451,15 @@ class RunView(BaseModel):
     experiment_revision: int | None = None
 
     @property
-    def projection_failed(self) -> bool:
-        """Whether the policy's projection of the committed state failed validation."""
-        return (
-            isinstance(self.iterations, IterationUnavailable)
-            and self.iterations.reason is IterationUnavailableReason.PROJECTION_INVALID
-        )
+    def projection_failure(self) -> str | None:
+        """Why the policy's projection of the committed state failed validation; None if not."""
+        iterations = self.iterations
+        if (
+            isinstance(iterations, IterationUnavailable)
+            and iterations.reason is IterationUnavailableReason.PROJECTION_INVALID
+        ):
+            return iterations.detail or iterations.reason.value
+        return None
 
 
 __all__ = [

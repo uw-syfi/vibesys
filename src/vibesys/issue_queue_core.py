@@ -58,7 +58,6 @@ from vibesys.plugin_registration import (
     RuntimeRecordProjector,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR
-from vibesys.run.contracts import IterationTree, PluginProjection
 from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, OperationRegistry, RevisionRef
 from vs_core.api import RunFacts as CoreRunFacts
 from vs_prompts.api import TemplateRenderer
@@ -84,6 +83,7 @@ from vs_runtime.api.core import (
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
+    from vibesys.run.contracts import PluginProjection
     from vs_core.api import TaskTerms
     from vs_core.api.search import Role
     from vs_runtime.api import CoreRunContext
@@ -138,13 +138,13 @@ def issue_queue_operation_catalog(
     return OperationCatalog(_registry(), (*catalog.entries, *board))
 
 
-def issue_queue_projector() -> RuntimeRecordProjector[FlowState]:
+def issue_queue_projector() -> RuntimeRecordProjector[FlowState, QueueSnapshot]:
     """Read an issue-queue run's published record from its committed runtime record."""
 
-    def project(state: FlowState, revision: int) -> PluginProjection:
-        record = FlowDriver.published(state, QueueSnapshot)
-        if record is None:
-            return PluginProjection(payload={}, iterations=IterationTree.from_nodes(()), rounds=())
+    def published(state: FlowState) -> QueueSnapshot | None:
+        return FlowDriver.published(state, QueueSnapshot)
+
+    def project(record: QueueSnapshot, revision: int) -> PluginProjection:
         return project_run_snapshot(record, experiment_revision=revision)
 
     return RuntimeRecordProjector(
@@ -152,6 +152,7 @@ def issue_queue_projector() -> RuntimeRecordProjector[FlowState]:
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
         operations=_registry(),
+        published=published,
         project=project,
     )
 

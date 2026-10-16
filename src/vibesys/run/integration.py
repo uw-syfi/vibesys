@@ -197,8 +197,8 @@ class _RunProjection(Protocol):
     def iterations(self) -> object: ...
 
     @property
-    def projection_failed(self) -> bool:
-        """Whether the policy's projection of the committed state failed validation."""
+    def projection_failure(self) -> str | None:
+        """Why the policy's projection of the committed state failed validation; None if not."""
         ...
 
     @property
@@ -209,7 +209,7 @@ class CommittedStateProjector(Protocol):
     """Project just-committed plugin state into product run facts.
 
     A projection is derived from the committed state and never raises for a state it cannot
-    show; it returns a view whose ``projection_failed`` is true instead.
+    show; it returns a view whose ``projection_failure`` says why instead.
     """
 
     def project_committed(
@@ -422,14 +422,16 @@ class _CoreCommitObserver:
         failure first appears; the run goes on.
         """
         self._integration.publish_committed_state(self._namespace, current)
+        if not self._seeded:
+            # The first commit this process sees: what it held before was already announced.
+            before = self._project(previous)
+            if before is not None and before.projection_failure is None:
+                self._shown, self._seeded = before, True
         after = self._project(current)
-        if after is not None and after.projection_failed:
-            self._report_failed_projection(current)
+        if after is not None and after.projection_failure is not None:
+            self._report_failed_projection(current, after.projection_failure)
         elif after is not None:
-            before = self._shown if self._seeded else self._project(previous)
-            if before is not None and before.projection_failed:
-                before = None
-            _emit_core_commit_events(self._integration.events, before, after)
+            _emit_core_commit_events(self._integration.events, self._shown, after)
             self._shown, self._seeded, self._failing = after, True, False
         _emit_winner_selected(
             self._integration.events,
@@ -438,7 +440,7 @@ class _CoreCommitObserver:
         )
         _emit_span_changes(self._integration.events, _run_trace(previous), _run_trace(current))
 
-    def _report_failed_projection(self, current: BaseModel) -> None:
+    def _report_failed_projection(self, current: BaseModel, failure: str) -> None:
         if self._failing:
             return
         self._failing = True
@@ -453,7 +455,7 @@ class _CoreCommitObserver:
                 ),
                 detail=(
                     f"the {self._namespace} projection failed validation at core revision "
-                    f"{revision}; readers see its iterations as unavailable (projection_invalid)"
+                    f"{revision}: {failure}"
                 ),
                 source=FrameworkSource.LOOP,
                 source_label="projection",

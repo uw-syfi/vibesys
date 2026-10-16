@@ -255,8 +255,8 @@ def test_profile_and_merge_workstreams_are_iterations_but_not_rounds() -> None:
     assert projection.rounds == ()
     assert isinstance(projection.iterations, IterationTree)
     assert [(node.kind, node.id) for node in projection.iterations.nodes] == [
-        (IterationKind.WORKSTREAM, "workstream:profile-input"),
-        (IterationKind.WORKSTREAM, "workstream:merge-best"),
+        (IterationKind.WORKSTREAM, "workstream:000001.profile-input"),
+        (IterationKind.WORKSTREAM, "workstream:000002.merge-best"),
     ]
 
 
@@ -571,13 +571,13 @@ def test_a_projection_that_fails_validation_is_a_view_that_says_so(tmp_path: Pat
 
     assert live is not None
     for view in (stored, live):
-        assert view.projection_failed
-        assert view.iterations == IterationUnavailable(
-            reason=IterationUnavailableReason.PROJECTION_INVALID
-        )
+        assert view.projection_failure is not None
+        assert "duplicates 'same'" in view.projection_failure
+        assert isinstance(view.iterations, IterationUnavailable)
+        assert view.iterations.reason is IterationUnavailableReason.PROJECTION_INVALID
         assert view.projection is None
         assert view.experiment_revision == record.envelope.revision
     assert stored.status is RunStatus.FAILED
     sound = dynamic_projector().project_committed("dynamic", record, run_id=run_id)
     assert sound is not None
-    assert not sound.projection_failed
+    assert sound.projection_failure is None

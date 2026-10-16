@@ -34,6 +34,7 @@ from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.api.catalog import BUILT_INS
 from vibesys.plugin_registration import RuntimeRecordProjector
+from vibesys.run.contracts import IterationTree
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -146,8 +147,13 @@ def test_a_search_ends_cleanly_whatever_core_does_to_its_waits_and_however_it_st
     assert isinstance(projector, RuntimeRecordProjector)
 
     def projects() -> None:
-        """What the run published projects to the view the server and the TUI read."""
-        projector.project(host.run.state, len(host.run.decisions)).model_dump_json()
+        """What the run published projects to the view the server and the TUI read, tree too."""
+        published = projector.published(host.run.state)
+        if published is None:
+            return
+        projection = projector.project(published, len(host.run.decisions))
+        projection.model_dump_json()
+        assert isinstance(projection.iterations, IterationTree), host.run.timeline()
 
     try:
         play(host, story, stop, check=projects)

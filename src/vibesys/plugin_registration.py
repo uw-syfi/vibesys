@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from vibesys.run.contracts import (
     IterationSupport,
+    IterationTree,
     IterationUnavailable,
     IterationUnavailableReason,
     PluginProjection,
@@ -73,20 +74,22 @@ def _plugin_run_view(
 
 
 @dataclass(frozen=True, slots=True)
-class RuntimeRecordProjector[S: StrategyState]:
+class RuntimeRecordProjector[S: StrategyState, P: BaseModel]:
     """Project the strategy state of a core-driven run from its committed runtime record.
 
     A run on the core keeps its state in the run's state store as a runtime record
-    whose strategy state is `state_type`, held as `record_type`. `project` is a pure function of that
-    state and the record's revision. `operations` decodes the record, so it must
-    hold the operations the strategy recorded.
+    whose strategy state is `state_type`, held as `record_type`. `operations` decodes the
+    record, so it must hold the operations the strategy recorded. `published` reads the record
+    the strategy published from that state (None before it published one), and `project` is a
+    pure function of that record and the runtime record's revision.
     """
 
     plugin_id: str
     state_type: type[S]
     record_type: type[RuntimeRecord[S]]
     operations: OperationRegistry
-    project: Callable[[S, int], PluginProjection]
+    published: Callable[[S], P | None]
+    project: Callable[[P, int], PluginProjection]
 
     def view(self, project: Project, run_id: str, *, status: RunStatus, loop: str) -> RunView:
         """Project the last committed record, or identity and status when none exists."""
@@ -110,24 +113,33 @@ class RuntimeRecordProjector[S: StrategyState]:
         """The record's view; a projection that fails validation is a view that says so.
 
         Every reader goes through here: the live commit observer, the iteration and experiment
-        queries, and the run listing. The view is derived from durable state, so a bug in
-        building it must not fail the reader (or a listing of every run). It becomes
-        `IterationUnavailableReason.PROJECTION_INVALID` with no payload, and the commit observer
-        reports it.
+        queries, and the run listing. Decoding the published record is reading durable state,
+        so a corrupt or incompatible record fails loudly. Building the view from it is derived
+        work: a bug there must not fail the reader (or a listing of every run), so it becomes
+        `IterationUnavailableReason.PROJECTION_INVALID` with the error as its detail and no
+        payload, and the commit observer reports it.
         """
+        revision = record.envelope.revision
+        published = self.published(record.envelope.strategy)
+        if published is None:
+            return _plugin_run_view(self.plugin_id, run_id, status, _NOTHING_PUBLISHED)
         try:
-            projection = self.project(record.envelope.strategy, record.envelope.revision)
-        except ValueError:
+            projection = self.project(published, revision)
+        except ValueError as error:
             projection = PluginProjection(
                 payload=None,
                 iterations=IterationUnavailable(
-                    reason=IterationUnavailableReason.PROJECTION_INVALID
+                    reason=IterationUnavailableReason.PROJECTION_INVALID, detail=str(error)
                 ),
-                experiment_revision=record.envelope.revision,
+                experiment_revision=revision,
             )
         return _plugin_run_view(
             self.plugin_id, run_id, status, _require_plugin_projection(projection)
         )
+
+
+_NOTHING_PUBLISHED = PluginProjection(payload={}, iterations=IterationTree.from_nodes(()))
+"""The view of a run whose strategy has not published a record yet."""
 
 
 @dataclass(frozen=True, slots=True)

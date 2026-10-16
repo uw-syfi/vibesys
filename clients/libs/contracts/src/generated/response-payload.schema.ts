@@ -1263,6 +1263,18 @@ const responsePayloadSchema: Record<string, unknown> = {
         },
         "reason": {
           "$ref": "#/$defs/IterationUnavailableReason"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
         }
       },
       "required": [

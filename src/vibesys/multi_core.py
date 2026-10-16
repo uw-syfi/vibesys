@@ -45,7 +45,6 @@ from vibesys.plugin_registration import (
     RuntimeRecordProjector,
 )
 from vibesys.prompts import CORE_PROTOCOL_DIR, PROMPTS_DIR
-from vibesys.run.contracts import IterationTree, PluginProjection
 from vibesys.serial_search.api import PROMPTS_DIR as SERIAL_SEARCH_PROMPTS
 from vs_core.api import FlowDriver, FlowState, MeasurementRecipe, RevisionRef
 from vs_core.api import RunFacts as CoreRunFacts
@@ -66,6 +65,7 @@ from vs_runtime.api.core import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from vibesys.run.contracts import PluginProjection
     from vs_core.api import TaskTerms
     from vs_runtime.api import CoreRunContext
 
@@ -82,13 +82,13 @@ def multi_operation_catalog(ports: OperationPorts) -> OperationCatalog:
     return operation_catalog(OPERATIONS, ports)
 
 
-def multi_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState]:
+def multi_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState, HypothesisState]:
     """Read a multi run's published record from its committed runtime record."""
 
-    def project(state: FlowState, revision: int) -> PluginProjection:
-        record = FlowDriver.published(state, HypothesisState)
-        if record is None:
-            return PluginProjection(payload={}, iterations=IterationTree.from_nodes(()), rounds=())
+    def published(state: FlowState) -> HypothesisState | None:
+        return FlowDriver.published(state, HypothesisState)
+
+    def project(record: HypothesisState, revision: int) -> PluginProjection:
         return project_run_snapshot(record, experiment_revision=revision)
 
     return RuntimeRecordProjector(
@@ -96,6 +96,7 @@ def multi_projector(plugin_id: str) -> RuntimeRecordProjector[FlowState]:
         state_type=FlowState,
         record_type=RuntimeRecord[FlowState],
         operations=OPERATIONS.registry(),
+        published=published,
         project=project,
     )
 
