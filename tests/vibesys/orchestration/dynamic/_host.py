@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal, TypedDict, Unpack
 
 from tests.support.dynamic_script import REGISTRY
 from tests.vibesys.orchestration.dynamic._replies import (
+    abandon,
     implement,
     implemented,
     merge,
@@ -179,6 +180,13 @@ class World(TypedDict, total=False):
     """Where each merge the planner asks for starts in the buildable hypotheses, the mergeable
     ones first, taking two in turn: a merge may name one the prompt did not list as mergeable.
     Once these run out, the planner merges the first two mergeable ones."""
+    replans: list[int]
+    """Which hypothesis each implement entry the planner writes names, in order: 0 a fresh ID;
+    any other pick an ID the planner already named (the pick modulo how many), continued when the
+    pick is odd and re-planned as new when it is even. Once these run out, every ID is fresh."""
+    abandons: list[int]
+    """For each plan the planner writes, in order: 0 nothing; any other pick also abandons an ID
+    the planner already named (the pick modulo how many). Once these run out, nothing."""
 
 
 @dataclass
@@ -218,6 +226,10 @@ class Host:
     merger_sessions: dict[str, set[str]] = field(default_factory=dict)
     """The sessions the merger turns ran in, by merge ID."""
     _merges: int = 0
+    replans: list[int] = field(default_factory=list)
+    abandons: list[int] = field(default_factory=list)
+    named: list[str] = field(default_factory=list)
+    """Every hypothesis ID the planner named fresh, in order."""
 
     def __post_init__(self) -> None:
         """Have the handoff owner write each file at once, unless the story answers the writes."""
@@ -346,16 +358,30 @@ class Host:
             case 0 | 1:
                 size = self._portfolio_size() if variant % 5 == 0 else 1
                 entries = self._merge_entries(asked)
-                for _ in range(size - len(entries)):
-                    self._hypotheses += 1
-                    entries.append(implement(f"h{self._hypotheses}"))
-                self.run.reply_raw(asked, plan_reply(*entries))
+                entries.extend(self._implement_entry() for _ in range(size - len(entries)))
+                self.run.reply_raw(asked, plan_reply(*entries, updates=self._abandon()))
             case 2:
                 self.run.reply_raw(asked, "not json")
             case 3:
                 self.run.fail(asked, FailureReason.TIMED_OUT)
             case _:
                 self.run.lose(asked)
+
+    def _implement_entry(self) -> dict[str, object]:
+        """A fresh hypothesis, or one already named, as the next of ``replans`` says."""
+        pick = self.replans.pop(0) if self.replans else 0
+        if pick == 0 or not self.named:
+            self._hypotheses += 1
+            self.named.append(f"h{self._hypotheses}")
+            return implement(self.named[-1])
+        return implement(self.named[pick % len(self.named)], continue_hypothesis=pick % 2 == 1)
+
+    def _abandon(self) -> list[dict[str, object]]:
+        """The hypothesis the next of ``abandons`` retires with this plan, if any."""
+        pick = self.abandons.pop(0) if self.abandons else 0
+        if pick == 0 or not self.named:
+            return []
+        return [abandon(self.named[pick % len(self.named)])]
 
     def _outliner(self, asked: Asked, variant: int) -> None:
         """Outline two steps, the second building on the first; or fail the turn."""

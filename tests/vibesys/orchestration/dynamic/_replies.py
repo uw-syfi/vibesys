@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def plan_reply(
     *entries: dict[str, object],
     reasoning: str = "portfolio",
     handoff: dict[str, object] | None = None,
+    updates: Sequence[dict[str, object]] = (),
 ) -> str:
-    """A planner reply of implement or profile entries, with a handoff note for each entry."""
+    """A planner reply of implement or profile entries, with a handoff note for each entry.
+
+    ``updates`` are the reply's hypothesis updates (`abandon`), left out of the reply when empty.
+    """
     note = (
         handoff
         if handoff is not None
@@ -19,7 +27,20 @@ def plan_reply(
             "doubts": ["doubt"],
         }
     )
-    return json.dumps({"reasoning": reasoning, "workstreams": list(entries), "handoff": note})
+    reply: dict[str, object] = {"reasoning": reasoning, "workstreams": list(entries)}
+    if updates:
+        reply["hypothesis_updates"] = list(updates)
+    return json.dumps({**reply, "handoff": note})
+
+
+def abandon(identifier: str) -> dict[str, object]:
+    """One hypothesis update of a plan that abandons ``identifier``."""
+    return {
+        "hypothesis_id": identifier,
+        "disposition": "abandoned",
+        "reason": f"retire {identifier}",
+        "reason_kind": "falsified",
+    }
 
 
 def _entry_id(entry: dict[str, object]) -> str:
