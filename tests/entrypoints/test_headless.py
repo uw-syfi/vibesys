@@ -7,7 +7,7 @@ import json
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -46,6 +46,7 @@ from vibesys.orchestration.issue_queue import PLUGIN as ISSUE_QUEUE_PLUGIN
 from vibesys.orchestration.issue_queue.launch import IssueQueueLaunch
 from vibesys.orchestration.profilers import ProfilerKind
 from vibesys.run.core_run import RunEnd
+from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_project.api import (
     AgentRoleExecutionRecord,
     OrchestrationDescriptor,
@@ -55,7 +56,6 @@ from vs_project.api import (
     RunExecutionRecord,
 )
 from vs_runtime.api import RunStatus as PluginRunStatus
-from vs_agent.api.testing import FakeDockerBuildRunner
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, run_environment_record
 
 if TYPE_CHECKING:
@@ -1132,10 +1132,10 @@ def test_repository_resume_refuses_a_task_dockerfile_the_record_has_no_image_for
 
 
 @pytest.mark.parametrize("environment", ["docker", "slurm"])
-@pytest.mark.parametrize("reproduced", [True, False])
+@pytest.mark.parametrize("rebuild", ["reproduced", "changed"])
 def test_repository_resume_rebuilds_and_checks_the_recorded_task_image(
-    environment: str,
-    reproduced: bool,  # noqa: FBT001
+    environment: Literal["docker", "slurm"],
+    rebuild: str,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1145,6 +1145,7 @@ def test_repository_resume_rebuilds_and_checks_the_recorded_task_image(
     dockerfile = task / "Dockerfile"
     dockerfile.write_text("FROM python:3.12-bookworm\n")
     recorded_image = f"sha256:{'a' * 64}"
+    reproduced = rebuild == "reproduced"
     rebuilt_image = recorded_image if reproduced else f"sha256:{'b' * 64}"
     slurm_config = (
         str(_write_slurm_operator_config(tmp_path / "operator-slurm.toml"))
