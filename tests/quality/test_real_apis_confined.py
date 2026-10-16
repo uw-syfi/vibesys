@@ -1461,6 +1461,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/entrypoints/web.py": (EdgeKind.STATIC_FILES, "the web client build"),
     "src/entrypoints/web_assets.py": (EdgeKind.STATIC_FILES, "the web client build manifest"),
     "src/server/api/schema.py": (EdgeKind.GENERATOR, "protocol schema files"),
+    "src/entrypoints/protocol_schema.py": (EdgeKind.GENERATOR, "the protocol schema file"),
     "src/server/chat/transcript.py": (EdgeKind.STORE, "chat transcripts"),
     "src/server/event_index.py": (EdgeKind.STORE, "the event index"),
     "src/server/events.py": (EdgeKind.STORE, "the run's wire event log"),
