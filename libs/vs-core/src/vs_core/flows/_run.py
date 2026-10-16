@@ -376,25 +376,9 @@ class _Run:
             )
         work = pending.work
         if isinstance(work, Measure | Withdraw | StartAttempt):
-            issued_as = _label(work)
-            earlier = self._reattached(task.path, issued_as, work)
-            request = work if earlier is None else earlier.request
-            if earlier is not None:
-                pending = Pending(request)
-            self._awaited[pending.decision] = InFlight(
-                path=task.path, label=issued_as, request=request
-            )
-            if earlier is not None:
-                self._pendings[pending.decision] = pending
-                task.started.append(pending)
-                # the restart stopped its span: the resumed flow waits for it again
-                self.trace.operation_started(task.span_id, pending.decision, issued_as)
-                if label is not None:
-                    self.label(operation_span(pending.decision), label.kind, label.fields())
-                if earlier.answer is not None:  # core answered it already: that is the answer
-                    pending.set(earlier.answer)
-                    self.trace.operation_answered(pending.decision, earlier.answer)
-                return pending
+            reattached = self._reattach(task, pending, work, label)
+            if reattached is not None:
+                return reattached
         self._pendings[pending.decision] = pending
         task.started.append(pending)
         self.out.append(decision)
@@ -412,6 +396,37 @@ class _Run:
                 self.trace.operation_started(task.span_id, pending.decision, _label(work))
         if label is not None:
             self.label(operation_span(pending.decision), label.kind, label.fields())
+        return pending
+
+    def _reattach(
+        self,
+        task: _Task,
+        pending: Pending,
+        work: Measure | Withdraw | StartAttempt,
+        label: Label | None,
+    ) -> Pending | None:
+        """The ``Pending`` waiting on the old request ``work`` repeats, or None if it is new.
+
+        The request is registered as awaited either way; only a repeat of one in flight at the
+        restart is not sent again.
+        """
+        issued_as = _label(work)
+        earlier = self._reattached(task.path, issued_as, work)
+        request = work if earlier is None else earlier.request
+        if earlier is not None:
+            pending = Pending(request)
+        self._awaited[pending.decision] = InFlight(path=task.path, label=issued_as, request=request)
+        if earlier is None:
+            return None
+        self._pendings[pending.decision] = pending
+        task.started.append(pending)
+        # the restart stopped its span: the resumed flow waits for it again
+        self.trace.operation_started(task.span_id, pending.decision, issued_as)
+        if label is not None:
+            self.label(operation_span(pending.decision), label.kind, label.fields())
+        if earlier.answer is not None:  # core answered it already: that is the answer
+            pending.set(earlier.answer)
+            self.trace.operation_answered(pending.decision, earlier.answer)
         return pending
 
     def _reattached(
