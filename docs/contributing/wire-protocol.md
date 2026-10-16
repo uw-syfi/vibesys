@@ -83,7 +83,14 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   `failed_check`, `slower`) and `adoption` (verdicts `adopted`, `not_adopted`; attributes
   `candidate`, `metric_value`, `vs_baseline`). The adoption span is the operation that adopts the
   run's winner; a run that has not adopted yet has none, and `candidate` is null when the input
-  itself stands. A gate span covers one measurement; each of its stages (`build`, `accuracy`, `benchmark`) has its own `gate_started`/`gate_finished` events (`GateKind`) and its own log stream, whose `GateStage` owner names the span. The
+  itself stands. Clients read the run's candidates from these spans alone
+  (`@vibesys/run-state/candidates`, folded linearly in events): a `workstream` is one attempt;
+  attempts sharing `hypothesis_id` are one candidate; `idea` is what it tries; `probe` marks one
+  that only looks; an accepted one names the `revision` it kept, which the adoption's
+  `candidate` names; its `builds_on` link names the workstream it built on; and a gate's
+  `failed` names the trusted check that rejected it with its progress (93 of 100 trials). A
+  search that plays one path links each round to the round that kept its base, so its
+  candidates form a chain. Spans carry no agent-spawn relation. A gate span covers one measurement; each of its stages (`build`, `accuracy`, `benchmark`) has its own `gate_started`/`gate_finished` events (`GateKind`) and its own log stream, whose `GateStage` owner names the span. The
   kinds are additive within `PROTOCOL_VERSION` 1: a client that does not know one renders it
   from its name and label.
 - **Ids.** `flow:<path>#<n>` for a flow task, `op:<decision id>` for an operation, both plain

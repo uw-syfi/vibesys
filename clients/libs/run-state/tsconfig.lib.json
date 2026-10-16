@@ -18,7 +18,8 @@
     "src/performance/**",
     "src/transcript/**",
     "src/trace/**",
-    "src/overview/**"
+    "src/overview/**",
+    "src/candidates/**"
   ],
   "references": [
     {

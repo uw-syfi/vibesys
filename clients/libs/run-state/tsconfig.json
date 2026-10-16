@@ -20,6 +20,9 @@
       "path": "./tsconfig.overview.json"
     },
     {
+      "path": "./tsconfig.candidates.json"
+    },
+    {
       "path": "./tsconfig.test.json"
     }
   ]

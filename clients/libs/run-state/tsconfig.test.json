@@ -30,6 +30,9 @@
       "path": "./tsconfig.overview.json"
     },
     {
+      "path": "./tsconfig.candidates.json"
+    },
+    {
       "path": "../contracts/tsconfig.lib.json"
     },
     {
