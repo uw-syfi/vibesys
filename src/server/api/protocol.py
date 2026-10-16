@@ -17,7 +17,7 @@ from server.control_envelope import (
     StopCommand,
 )
 from server.diagnostics import Diagnostic, DiagnosticScope, exception_to_diagnostic
-from server.events import ChatThreadId, RunEvent, WireSpan
+from server.events import ChatThreadId, RunEvent, RunOverview, WireSpan
 from server.execution import ActiveAgentExecution
 from server.host_api import PROTOCOL_VERSION
 from server.run_lifecycle import RunStatus
@@ -344,6 +344,10 @@ class RunSnapshot(ProtocolModel):
     # The run trace: every span of the run as its latest span event left it, each after its
     # parent. Folding the run's span events by span id gives the same list.
     spans: list[WireSpan] = Field(default_factory=list)
+    # The run's objective and what measures it, as its run_started event declared them, with
+    # the unit and direction its measurements add. None before the run started (or for a run
+    # that predates the overview).
+    overview: RunOverview | None = None
 
 
 class ChatResult(ProtocolModel):

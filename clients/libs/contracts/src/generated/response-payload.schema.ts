@@ -144,6 +144,25 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "AttemptOutcome",
       "type": "string"
     },
+    "BenchmarkVersions": {
+      "additionalProperties": false,
+      "description": "What measured the run.\n\n``evaluator`` is the evaluator package when the task pins one; a source-tree evaluator has\nno version, so it is None.",
+      "properties": {
+        "evaluator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvaluatorIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "BenchmarkVersions",
+      "type": "object"
+    },
     "CandidateDisposition": {
       "description": "How a measured candidate should be retained independently of its hypothesis.\n\nHypothesis truth and checkpoint utility are different questions. A causal\nforecast can be disproven while its implementation still establishes a\nuseful throughput/latency tradeoff. These values keep that distinction\nexplicit without promoting provisional evidence to an official result.",
       "enum": [
@@ -468,6 +487,28 @@ const responsePayloadSchema: Record<string, unknown> = {
         "round"
       ],
       "title": "DesignRound",
+      "type": "object"
+    },
+    "EvaluatorIdentity": {
+      "additionalProperties": false,
+      "description": "The evaluator package a run measures with, as the task's manifest pins it.",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "EvaluatorIdentity",
       "type": "object"
     },
     "ExperimentUpdate": {
@@ -1240,6 +1281,69 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "IterationUnavailableReason",
       "type": "string"
     },
+    "ObjectiveOverview": {
+      "additionalProperties": false,
+      "description": "What the run optimizes: the task's objective and the metric it is judged on.\n\n``unit`` and ``direction`` come from the run's own measurements and objectives once it has\nthem; ``correctness_check`` is the argv of the check a candidate must pass (empty when the\ntask gates on none).",
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "max",
+                "min"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direction"
+        },
+        "correctness_check": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Correctness Check",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ObjectiveOverview",
+      "type": "object"
+    },
     "PerfDeltaReason": {
       "description": "Why a headline measurement carries no causal delta.\n\nAlways re-derived from round evidence (``perf_provenance`` and the\nbaseline fields), never stored on the round record, so it cannot drift\nfrom them. Absent entirely for records that predate provenance tracking:\na legacy absolute number keeps reading as a deliberate absolute rather\nthan being relabelled as unresolved.",
       "enum": [
@@ -1391,6 +1495,32 @@ const responsePayloadSchema: Record<string, unknown> = {
       "title": "RepositoryVisibility",
       "type": "string"
     },
+    "RunOverview": {
+      "additionalProperties": false,
+      "description": "The run's objective and what measures it: the Overview's header facts.\n\nOne definition for the core event and the wire: the run's ``run_started`` event carries it,\nand the server's snapshot carries it with the unit and direction its measurements add.",
+      "properties": {
+        "overview_version": {
+          "const": 1,
+          "default": 1,
+          "title": "Overview Version",
+          "type": "integer"
+        },
+        "objective": {
+          "$ref": "#/$defs/ObjectiveOverview"
+        },
+        "benchmarks": {
+          "$ref": "#/$defs/BenchmarkVersions",
+          "default": {
+            "evaluator": null
+          }
+        }
+      },
+      "required": [
+        "objective"
+      ],
+      "title": "RunOverview",
+      "type": "object"
+    },
     "RunSnapshot": {
       "additionalProperties": false,
       "description": "Current server projection of a run's public state.",
@@ -1465,6 +1595,17 @@ const responsePayloadSchema: Record<string, unknown> = {
           },
           "title": "Spans",
           "type": "array"
+        },
+        "overview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunOverview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

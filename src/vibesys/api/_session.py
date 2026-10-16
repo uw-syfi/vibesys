@@ -18,6 +18,7 @@ from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import RunEnd, drive_core_run, ensure_not_legacy_resume
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
+from vibesys.run.overview import overview_of
 from vibesys.run.profilers import (
     ProfilerPreflight,
     validate_attribution_command,
@@ -299,6 +300,7 @@ class _LocalRunSession:
                     input=str(request.input_bundle.root),
                     max_rounds=max_rounds,
                     expected_roles=tuple(role.id for role in plugin.agents),
+                    overview=overview_of(request.input_bundle),
                 ),
             )
             outcome = await run_plugin(

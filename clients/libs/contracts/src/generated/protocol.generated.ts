@@ -269,6 +269,14 @@ export type AttrsJson = string | null;
 export type Verdict = string | null;
 export type Reason1 = string | null;
 export type Spans = Span[];
+export type OverviewVersion = 1;
+export type Text2 = string;
+export type Metric = string | null;
+export type Unit = string | null;
+export type Direction = ("max" | "min") | null;
+export type CorrectnessCheck = string[];
+export type Name1 = string;
+export type Version = string;
 export type ProtocolVersion19 = 1;
 export type Sequence1 = number;
 export type RunId2 = string;
@@ -326,7 +334,7 @@ export type EventType =
   | "span_started"
   | "span_updated"
   | "span_ended";
-export type Text2 = string;
+export type Text3 = string;
 /**
  * Lifecycle and command states reported in events.
  */
@@ -487,9 +495,9 @@ export type SkipReason = string | null;
 export type ImplementerOutcome =
   ("continue" | "supported" | "nominated" | "disproven" | "implementation_failed") | null;
 export type Kind23 = "benchmark_result";
-export type Metric = string;
+export type Metric1 = string;
 export type Value = number;
-export type Unit = string;
+export type Unit1 = string;
 export type Kind24 = "round_finished";
 export type Attempts1 = number;
 export type JudgeVerdict = "pass" | "fail" | "skipped";
@@ -570,9 +578,9 @@ export type SourceLabel = string | null;
 export type Kind37 = "gate_finished";
 export type Recipe1 = string | null;
 export type Reused = boolean;
-export type Metric1 = string | null;
+export type Metric2 = string | null;
 export type Value2 = number | null;
-export type Unit1 = string | null;
+export type Unit2 = string | null;
 export type OutputTail = string | null;
 export type RoundLabel3 = string | null;
 /**
@@ -648,7 +656,7 @@ export type WorkstreamFailureKind =
 export type Role = string | null;
 export type Turns = number | null;
 export type Limit2 = number | null;
-export type Text3 = string;
+export type Text4 = string;
 export type Kind43 = "turn_usage_recorded";
 export type InputTokens2 = number | null;
 export type CacheCreationInputTokens = number | null;
@@ -775,8 +783,8 @@ export type IterationStatus = "pending" | "active" | "completed" | "failed" | "c
 export type ChildCount = number;
 export type Id2 = string;
 export type Value3 = number | null;
-export type Unit2 = string | null;
-export type Direction = ("max" | "min") | null;
+export type Unit3 = string | null;
+export type Direction1 = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
@@ -850,7 +858,7 @@ export type Kind50 = "gate_stage";
 export type ExecutionId2 = string;
 export type Attempt4 = number;
 export type Kind51 = "tool_build";
-export type Name1 = string;
+export type Name2 = string;
 export type Kind52 = "run_narration";
 export type At = string;
 /**
@@ -1236,6 +1244,7 @@ export interface RunSnapshot {
   active_executions?: ActiveExecutions;
   chat_threads?: ChatThreads;
   spans?: Spans;
+  overview?: RunOverview | null;
 }
 /**
  * Authoritative activity checkpoint for one running agent execution.
@@ -1336,6 +1345,47 @@ export interface SpanLink {
   to: SpanId;
 }
 /**
+ * The run's objective and what measures it: the Overview's header facts.
+ *
+ * One definition for the core event and the wire: the run's ``run_started`` event carries it,
+ * and the server's snapshot carries it with the unit and direction its measurements add.
+ */
+export interface RunOverview {
+  overview_version?: OverviewVersion;
+  objective: ObjectiveOverview;
+  benchmarks?: BenchmarkVersions;
+}
+/**
+ * What the run optimizes: the task's objective and the metric it is judged on.
+ *
+ * ``unit`` and ``direction`` come from the run's own measurements and objectives once it has
+ * them; ``correctness_check`` is the argv of the check a candidate must pass (empty when the
+ * task gates on none).
+ */
+export interface ObjectiveOverview {
+  text: Text2;
+  metric?: Metric;
+  unit?: Unit;
+  direction?: Direction;
+  correctness_check?: CorrectnessCheck;
+}
+/**
+ * What measured the run.
+ *
+ * ``evaluator`` is the evaluator package when the task pins one; a source-tree evaluator has
+ * no version, so it is None.
+ */
+export interface BenchmarkVersions {
+  evaluator?: EvaluatorIdentity | null;
+}
+/**
+ * The evaluator package a run measures with, as the task's manifest pins it.
+ */
+export interface EvaluatorIdentity {
+  name: Name1;
+  version: Version;
+}
+/**
  * One reproducible human, control, or invocation event.
  *
  * Frozen: a recorded event is a durable fact. Readers that need a variant
@@ -1348,7 +1398,7 @@ export interface RunEvent {
   run_id?: RunId2;
   timestamp: Timestamp18;
   type: EventType;
-  text?: Text2;
+  text?: Text3;
   diagnostic?: Diagnostic | null;
   status?: EventStatus | null;
   round_label?: RoundLabel2;
@@ -1450,6 +1500,7 @@ export interface RunStartedData {
   input: Input;
   max_rounds?: MaxRounds;
   expected_roles?: ExpectedRoles;
+  overview?: RunOverview | null;
 }
 /**
  * A starting run reached ``stage``, or progressed within it.
@@ -1623,9 +1674,9 @@ export interface JudgeResultData {
  */
 export interface BenchmarkResultData {
   kind: Kind23;
-  metric: Metric;
+  metric: Metric1;
   value: Value;
-  unit: Unit;
+  unit: Unit1;
 }
 /**
  * Summary of attempt, judge, and performance outcomes for a round.
@@ -1800,9 +1851,9 @@ export interface GateFinishedData {
   gate: GateKind;
   recipe?: Recipe1;
   reused?: Reused;
-  metric?: Metric1;
+  metric?: Metric2;
   value?: Value2;
-  unit?: Unit1;
+  unit?: Unit2;
   output_tail?: OutputTail;
   round_label?: RoundLabel3;
   source?: FrameworkSource1;
@@ -1887,7 +1938,7 @@ export interface WorkstreamFailureData {
   role?: Role;
   turns?: Turns;
   limit?: Limit2;
-  text?: Text3;
+  text?: Text4;
 }
 /**
  * Settled token and cost accounting for one finished agent turn.
@@ -2056,8 +2107,8 @@ export interface IterationSummary {
 export interface IterationMetric {
   id: Id2;
   value?: Value3;
-  unit?: Unit2;
-  direction?: Direction;
+  unit?: Unit3;
+  direction?: Direction1;
 }
 /**
  * Typed absence, kept distinct from a supported empty tree.
@@ -2213,7 +2264,7 @@ export interface GateStage {
 export interface ToolBuild {
   span_id?: SpanId | null;
   kind: Kind51;
-  name: Name1;
+  name: Name2;
 }
 /**
  * The run's own narration for humans: what it is doing, warnings, tracebacks.

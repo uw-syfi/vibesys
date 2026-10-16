@@ -201,6 +201,59 @@ class AgentExecutionFinishedData(EventPayload):
     error: str | None = None
 
 
+class EvaluatorIdentity(BaseModel):
+    """The evaluator package a run measures with, as the task's manifest pins it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+
+
+class ObjectiveOverview(BaseModel):
+    """What the run optimizes: the task's objective and the metric it is judged on.
+
+    ``unit`` and ``direction`` come from the run's own measurements and objectives once it has
+    them; ``correctness_check`` is the argv of the check a candidate must pass (empty when the
+    task gates on none).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    text: str
+    """The task's ``OBJECTIVE.md``, as Markdown."""
+    metric: str | None = None
+    unit: str | None = None
+    direction: Literal["max", "min"] | None = None
+    correctness_check: tuple[str, ...] = ()
+
+
+class BenchmarkVersions(BaseModel):
+    """What measured the run.
+
+    ``evaluator`` is the evaluator package when the task pins one; a source-tree evaluator has
+    no version, so it is None.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    evaluator: EvaluatorIdentity | None = None
+
+
+class RunOverview(BaseModel):
+    """The run's objective and what measures it: the Overview's header facts.
+
+    One definition for the core event and the wire: the run's ``run_started`` event carries it,
+    and the server's snapshot carries it with the unit and direction its measurements add.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    overview_version: Literal[1] = 1
+    objective: ObjectiveOverview
+    benchmarks: BenchmarkVersions = BenchmarkVersions()
+
+
 class RunStartedData(EventPayload):
     """Initial input and loop settings for a core run."""
 
@@ -211,6 +264,8 @@ class RunStartedData(EventPayload):
     # Policy-owned role hints let frontends seed per-round placeholders.
     # Empty when the policy does not declare roles.
     expected_roles: tuple[str, ...] = ()
+    overview: RunOverview | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The run's objective and evaluator, as the task's input bundle declares them."""
 
 
 class StartupProgressData(EventPayload):
