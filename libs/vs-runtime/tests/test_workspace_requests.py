@@ -274,7 +274,7 @@ def _env(
             factory = WorkspaceResourceFactory(
                 project,
                 environment,
-                evaluation_plan=TrustedEvaluationPlan(),
+                evaluation_plan=TrustedEvaluationPlan(unread_paths=("NOTES.md",)),
                 memory_paths=(),
                 skill_source_dirs=(),
                 skill_selection=NULL_SKILL_SELECTION,

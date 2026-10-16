@@ -138,8 +138,10 @@ def agent_evaluation_policy(
     """The plan an agent measures with: the run's configured gates, once each.
 
     It is built from the same recipe as the strategy's own trusted measurement plans, so an
-    agent measurement and a trusted one share one identity. A task's build stage, when the
-    recipe has one, comes first: the gates after it load what it built.
+    agent measurement's identity equals the strategy's official one in everything but the
+    purpose (``local-validation``). Core lets an official measurement reuse the scope's one
+    agent run of the same measured input (``vs_core``'s ``_measurement_reuse``). A task's build
+    stage, when the recipe has one, comes first: the gates after it load what it built.
     """
     builds = any(item.stage_id == "build" for item in recipe.stages)
     configured = tuple(

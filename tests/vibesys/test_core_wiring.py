@@ -54,7 +54,7 @@ def _recipe() -> MeasurementRecipe:
 @given(accuracy=st.booleans(), benchmark=st.booleans())
 def test_an_agent_measures_exactly_the_configured_gates(*, accuracy: bool, benchmark: bool) -> None:
     policy = agent_evaluation_policy(_recipe(), accuracy=accuracy, benchmark=benchmark)
-    plan = policy.plan(CANDIDATE, now_at=0.0)
+    plan = policy.plan(CANDIDATE, measured_input="sha256:in", now_at=0.0)
     expected = [n for n, on in (("accuracy", accuracy), ("benchmark", benchmark)) if on]
     assert [stage.stage_id for stage in plan.stages] == expected
     assert plan.accuracy_stage == ("accuracy" if accuracy else None)
@@ -62,7 +62,7 @@ def test_an_agent_measures_exactly_the_configured_gates(*, accuracy: bool, bench
     # The agent's plan is the recipe's plan over those stages: one identity.
     assert plan == _recipe().plan(
         CANDIDATE, purpose="local-validation", now_at=0.0, stages=tuple(expected)
-    )
+    ).model_copy(update={"measured_input": "sha256:in"})
 
 
 @dataclass

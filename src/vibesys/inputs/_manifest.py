@@ -28,6 +28,7 @@ from vs_project.api import Project, RunResourceRequest
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageNotFoundError,
     EvaluatorPackageRequirement,
+    check_unread_paths,
     resolve_evaluator_package,
 )
 
@@ -118,6 +119,14 @@ class WorkspaceInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sources: tuple[WorkspaceSource, ...] = ()
+    unread: tuple[str, ...] = ()
+    """Workspace paths (files or directories) the evaluation never reads, such as agent notes.
+
+    A commit that changes only these is the input an earlier run already measured, so its
+    official measurement reuses that run instead of running again.
+    """
+
+    _check_unread = field_validator("unread")(check_unread_paths)
 
 
 class WorkspaceSource(BaseModel):
@@ -698,6 +707,8 @@ def _append_benchmark(lines: list[str], manifest: InputManifest) -> None:
 
 
 def _append_workspace_sources(lines: list[str], manifest: InputManifest) -> None:
+    if manifest.workspace is not None and manifest.workspace.unread:
+        lines.extend(["", "[workspace]", f"unread = {_toml_array(manifest.workspace.unread)}"])
     if manifest.workspace is not None:
         for source in manifest.workspace.sources:
             lines.extend(

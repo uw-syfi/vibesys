@@ -655,6 +655,7 @@ class FakeWorkspace:
         self._directories: set[str] = set()
         self.restore_calls: list[tuple[str, bool]] = []
         self._snapshot_labels: dict[str, str] = {}
+        self._measured_inputs: dict[str, str] = {}
         self.agent_restore_calls: list[tuple[str, tuple[str, ...]]] = []
 
     @property
@@ -775,6 +776,14 @@ class FakeWorkspace:
     async def find_snapshot(self, label: str) -> str | None:
         """Return the revision the snapshot with this label recorded."""
         return self._snapshot_labels.get(label)
+
+    def script_measured_input(self, revision: str, digest: str) -> None:
+        """Make *revision* read as the measured input *digest*, as an unread-only change does."""
+        self._measured_inputs[revision] = digest
+
+    async def measured_input(self, revision: str) -> str:
+        """The scripted digest of *revision*, else one of its own."""
+        return self._measured_inputs.get(revision, f"input:{revision}")
 
     def knows_revision(self, revision: str) -> bool:
         """Return whether this fake can materialize a revision, retained or dangling."""

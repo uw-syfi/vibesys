@@ -448,6 +448,9 @@ class RuntimeWorkspaceResource:
     def candidate_patch(self, revision: str) -> str:
         return self._project.git.candidate_patch(revision)
 
+    def measured_input(self, revision: str) -> str:
+        return self._project.git.measured_input(revision, self._evaluation_plan.unread_paths)
+
     def is_retained(self, revision: str) -> bool:
         return self._root_project.git.is_retained(revision)
 

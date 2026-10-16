@@ -268,6 +268,13 @@ class Workspace(Protocol):
         """Return the revision a snapshot with this exact label created, if any."""
         ...
 
+    async def measured_input(self, revision: str) -> str:
+        """The digest of what the task's evaluation of *revision* reads.
+
+        Two revisions that differ only in paths the task declares unread share it.
+        """
+        ...
+
     async def pending_changes(self) -> list[str]:
         """List uncommitted workspace-relative paths."""
         ...

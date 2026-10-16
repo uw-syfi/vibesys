@@ -201,6 +201,31 @@ class TrustedBuild(BaseModel):
     outputs: tuple[str, ...] = ()
 
 
+_PATTERN_CHARACTERS = frozenset("*?[]\\:!")
+
+
+def check_unread_paths(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """The paths, each checked to name a workspace file or directory plainly; raises naming one.
+
+    A path is relative, has no empty, ``.`` or ``..`` part, and holds no pattern or pathspec
+    character, so it excludes exactly itself (and, for a directory, what lies below it).
+    """
+    for path in paths:
+        parts = path.removesuffix("/").split("/")
+        if (
+            not path
+            or path.startswith("/")
+            or any(part in {"", ".", ".."} for part in parts)
+            or _PATTERN_CHARACTERS & set(path)
+        ):
+            message = (
+                f"unread path {path!r} must be a plain relative workspace path: no empty, '.'"
+                " or '..' part, and none of * ? [ ] \\ : !"
+            )
+            raise ValueError(message)
+    return paths
+
+
 class TrustedEvaluationPlan(BaseModel):
     """Resolved commands and transport contract for one workspace."""
 
@@ -229,6 +254,16 @@ class TrustedEvaluationPlan(BaseModel):
     _check_startup_causes = field_validator("candidate_startup_causes")(
         check_startup_cause_patterns
     )
+
+    unread_paths: tuple[str, ...] = ()
+    """Workspace paths (files or directories) the task's evaluation never reads.
+
+    Declared by the task, for example an agent's notes. A commit that changes only these is
+    the same measured input (``MeasurementPlan.measured_input``), so its official measurement
+    may reuse an earlier run of that input instead of running again.
+    """
+
+    _check_unread_paths = field_validator("unread_paths")(check_unread_paths)
 
     accuracy_gated: tuple[EvidenceKind, ...] = ()
     """The task's trust rule: kinds of evidence that count only if the accuracy stage passed.

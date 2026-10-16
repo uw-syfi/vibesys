@@ -195,6 +195,10 @@ class Workspace:
         self._refuse_nested()
         return _commit(f"snapshot:{self._edits[-1]}")
 
+    async def measured_input(self, revision: str) -> str:
+        """Each snapshot is its own measured input."""
+        return f"input:{revision}"
+
     async def matches_revision(self, revision: str) -> bool:
         """Whether nothing changed since the snapshot ``revision``."""
         self._refuse_nested()
