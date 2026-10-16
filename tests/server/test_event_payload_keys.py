@@ -29,6 +29,8 @@ _FIELD_VALUES: dict[str, st.SearchStrategy[object]] = {
         lambda value: len(value) <= _THREAD_ID["maxLength"]
     ),
     "value": st.floats(allow_nan=False, allow_infinity=False),
+    # ``model_fields`` drops a field's bound, which ``st.from_type`` would need.
+    "rounds_finished": st.integers(min_value=0, max_value=99),
     # A span's id has a pattern a type alias carries, which ``st.from_type`` cannot see.
     "span": st.just(
         TypeAdapter(WireSpan).validate_json(

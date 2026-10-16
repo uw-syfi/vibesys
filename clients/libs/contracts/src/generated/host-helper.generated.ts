@@ -16,7 +16,8 @@ export type Request =
   | LogsListRequest
   | LogsReadRequest
   | LogsCancelRequest
-  | HarnessesListRequest;
+  | HarnessesListRequest
+  | RunsReadEventsRequest;
 export type RequestId = string;
 export type DeadlineMs = number;
 export type Type = "hello";
@@ -103,6 +104,13 @@ export type ReadId = string;
 export type RequestId15 = string;
 export type DeadlineMs15 = number;
 export type Type15 = "harnesses.list";
+export type RequestId16 = string;
+export type DeadlineMs16 = number;
+export type Type16 = "runs.read_events";
+export type Project3 = string;
+export type RunId1 = string;
+export type FromSequence = number;
+export type Max = number;
 export type Message =
   | HelloReply
   | InstancesListReply
@@ -120,10 +128,11 @@ export type Message =
   | LogsReadReply
   | LogsCancelReply
   | HarnessesListReply
+  | RunsReadEventsReply
   | InstancesChanged
   | HelperError;
-export type RequestId16 = string;
-export type Type16 = "hello";
+export type RequestId17 = string;
+export type Type17 = "hello";
 export type ProtocolVersion = number;
 /**
  * Optional capabilities negotiated by ``hello``; a closed set per protocol version.
@@ -132,16 +141,23 @@ export type ProtocolVersion = number;
  * a strict peer never sees a method it does not know.
  */
 export type HelperFeature =
-  "instances_watch" | "paths_complete" | "instances_inspect" | "logs" | "logs_cancel" | "harnesses" | "logs_by_span";
+  | "instances_watch"
+  | "paths_complete"
+  | "instances_inspect"
+  | "logs"
+  | "logs_cancel"
+  | "harnesses"
+  | "logs_by_span"
+  | "run_history";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
 export type Commit = string | null;
 export type Dirty = boolean | null;
-export type RequestId17 = string;
-export type Type17 = "instances.list";
-export type Version = 4;
-export type Version1 = 4;
+export type RequestId18 = string;
+export type Type18 = "instances.list";
+export type Version = 5;
+export type Version1 = 5;
 export type Id = string;
 /**
  * How far a live server has come; run status itself is on its socket.
@@ -176,10 +192,33 @@ export type Message1 = string;
 export type SocketPath = string;
 export type LogPath = string;
 export type ProjectRoot = string;
-export type RunId1 = string;
+export type RunId2 = string;
 export type Pid = number;
 export type StartedAt = number;
 export type EndedAt = number | null;
+/**
+ * Who paused a paused run.
+ */
+export type PauseCause = "user" | "quota";
+/**
+ * Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.
+ *
+ * The first seven are ``vs_core``'s ``EndReason`` values, copied because this module
+ * may not import the core (``tests/server/test_run_end_record.py`` keeps them equal).
+ */
+export type RunEndOutcome =
+  | "adopted"
+  | "kept-input"
+  | "no-winner"
+  | "adoption-failed"
+  | "stopped"
+  | "deadline"
+  | "finish-refused"
+  | "failed"
+  | "force_stopped";
+export type Reason = string;
+export type Resumable = boolean;
+export type ResumeFromRound = number | null;
 export type Hostname = string;
 export type ProtocolVersion1 = 1;
 export type VibesysVersion1 = string;
@@ -190,8 +229,8 @@ export type Id1 = string;
 export type Version2 = number | null;
 export type Unreadable = UnreadableRecord[];
 export type Unverified = string[];
-export type RequestId18 = string;
-export type Type18 = "instances.inspect";
+export type RequestId19 = string;
+export type Type19 = "instances.inspect";
 export type Version3 = 1;
 export type Id2 = string;
 /**
@@ -201,7 +240,7 @@ export type InspectionState = "live" | "ended" | "unverified";
 export type Version4 = 1;
 export type Id3 = string;
 export type ProjectRoot1 = string;
-export type RunId2 = string;
+export type RunId3 = string;
 export type Task1 = string | null;
 export type Pid1 = number;
 export type StartedAt1 = number;
@@ -218,29 +257,29 @@ export type State = "available";
 export type Text = string;
 export type Truncated = boolean;
 export type State1 = "missing";
-export type RequestId19 = string;
-export type Type19 = "instances.watch";
-export type WatchId1 = string;
 export type RequestId20 = string;
-export type Type20 = "instances.unwatch";
-export type WatchId2 = string;
+export type Type20 = "instances.watch";
+export type WatchId1 = string;
 export type RequestId21 = string;
-export type Type21 = "tasks.list";
+export type Type21 = "instances.unwatch";
+export type WatchId2 = string;
+export type RequestId22 = string;
+export type Type22 = "tasks.list";
 export type Version5 = 1;
 export type ProjectRoot2 = string;
 export type Name = string;
 export type Tasks = TaskSummary[];
-export type RequestId22 = string;
-export type Type22 = "runs.list";
+export type RequestId23 = string;
+export type Type23 = "runs.list";
 export type ProjectRoot3 = string;
-export type RunId3 = string;
+export type RunId4 = string;
 export type Task2 = string | null;
 export type DisplayName = string;
 export type CreatedAt = string;
 export type InstanceId5 = string | null;
 export type Runs = RunSummary[];
-export type RequestId23 = string;
-export type Type23 = "run.start";
+export type RequestId24 = string;
+export type Type24 = "run.start";
 export type Launch = LiveInstanceRecord | DetachedLaunchFailure;
 export type Version6 = 1;
 export type Outcome = "failed";
@@ -249,8 +288,8 @@ export type Stage1 = string;
 export type Message2 = string;
 export type ExitCode = number;
 export type LogPath1 = string | null;
-export type RequestId24 = string;
-export type Type24 = "run.stop";
+export type RequestId25 = string;
+export type Type25 = "run.stop";
 export type Version7 = 1;
 export type Id4 = string;
 /**
@@ -261,14 +300,14 @@ export type StopOutcome = "stopped" | "stopping" | "not_running" | "still_runnin
  * How ``vibesys instances stop`` reached the server.
  */
 export type StopRoute = "control_socket" | "signal";
-export type RequestId25 = string;
-export type Type25 = "run.connect";
-export type RunId4 = string;
-export type ProtocolVersion3 = number;
 export type RequestId26 = string;
-export type Type26 = "ping";
+export type Type26 = "run.connect";
+export type RunId5 = string;
+export type ProtocolVersion3 = number;
 export type RequestId27 = string;
-export type Type27 = "paths.complete";
+export type Type27 = "ping";
+export type RequestId28 = string;
+export type Type28 = "paths.complete";
 export type Directory = string;
 export type Name1 = string;
 export type Path = string;
@@ -277,8 +316,8 @@ export type VibesysProject = boolean;
 export type GitRepository = boolean;
 export type Entries = PathEntry[];
 export type Truncated1 = boolean;
-export type RequestId28 = string;
-export type Type28 = "logs.list";
+export type RequestId29 = string;
+export type Type29 = "logs.list";
 export type Id5 = string;
 export type JsonValue = unknown;
 export type Command = string;
@@ -289,8 +328,8 @@ export type Size = number;
  */
 export type LogStreamOutcome = "ended" | "failed" | "abandoned";
 export type Streams = LogStream[];
-export type RequestId29 = string;
-export type Type29 = "logs.read";
+export type RequestId30 = string;
+export type Type30 = "logs.read";
 export type Offset1 = number;
 export type Data = string;
 export type NextOffset = number;
@@ -304,19 +343,26 @@ export type Length = number;
  */
 export type LogPipe = "stdout" | "stderr";
 export type Pipes = LogPipeSpan[];
-export type RequestId30 = string;
-export type Type30 = "logs.cancel";
-export type ReadId1 = string;
 export type RequestId31 = string;
-export type Type31 = "harnesses.list";
+export type Type31 = "logs.cancel";
+export type ReadId1 = string;
+export type RequestId32 = string;
+export type Type32 = "harnesses.list";
 export type Provider1 = string;
 export type Model1 = string;
 export type Default = boolean;
 export type Harnesses = HarnessOption[];
-export type Type32 = "instances.changed";
+export type RequestId33 = string;
+export type Type33 = "runs.read_events";
+export type Events = {
+  [k: string]: JsonValue;
+}[];
+export type NextSequence = number;
+export type Complete = boolean;
+export type Type34 = "instances.changed";
 export type WatchId3 = string;
-export type Type33 = "error";
-export type RequestId32 = string | null;
+export type Type35 = "error";
+export type RequestId34 = string | null;
 /**
  * Why a request failed; a closed set.
  */
@@ -341,6 +387,7 @@ export type HelperErrorCode =
   | "unknown_instance"
   | "unknown_log_stream"
   | "log_store_corrupt"
+  | "unknown_run"
   | "unvetted_harness"
   | "internal";
 export type Message3 = string;
@@ -376,21 +423,21 @@ export type Detail = string;
  */
 export type RunStartCompensationFailure =
   WorkerStartRefusedCompensationFailure | StopFailedCompensationFailure | StopUnconfirmedCompensationFailure;
-export type Type34 = "run.start_compensation_failed";
+export type Type36 = "run.start_compensation_failed";
 export type ExitStatus1 = 12;
-export type RequestId33 = string;
+export type RequestId35 = string;
 export type Detail1 = string;
 export type Kind = "worker_start_refused";
 export type InstanceId6 = string;
-export type Type35 = "run.start_compensation_failed";
+export type Type37 = "run.start_compensation_failed";
 export type ExitStatus2 = 12;
-export type RequestId34 = string;
+export type RequestId36 = string;
 export type Detail2 = string;
 export type Kind1 = "stop_failed";
 export type InstanceId7 = string;
-export type Type36 = "run.start_compensation_failed";
+export type Type38 = "run.start_compensation_failed";
 export type ExitStatus3 = 12;
-export type RequestId35 = string;
+export type RequestId37 = string;
 export type Detail3 = string;
 export type Kind2 = "stop_unconfirmed";
 export type Version8 = 1;
@@ -613,11 +660,23 @@ export interface HarnessesListRequest {
   type: Type15;
 }
 /**
+ * A page of one run's recorded events, from its journal on disk, live or ended.
+ */
+export interface RunsReadEventsRequest {
+  request_id: RequestId16;
+  deadline_ms: DeadlineMs16;
+  type: Type16;
+  project: Project3;
+  run_id: RunId1;
+  from_sequence: FromSequence;
+  max: Max;
+}
+/**
  * The negotiated version and features, and what will start runs on this host.
  */
 export interface HelloReply {
-  request_id: RequestId16;
-  type: Type16;
+  request_id: RequestId17;
+  type: Type17;
   protocol_version: ProtocolVersion;
   features: Features1;
   vibesys_version: VibesysVersion;
@@ -635,12 +694,12 @@ export interface Checkout {
  * The registry's listing.
  */
 export interface InstancesListReply {
-  request_id: RequestId17;
-  type: Type17;
+  request_id: RequestId18;
+  type: Type18;
   listing: InstanceList;
 }
 /**
- * ``vibesys instances list --json``: the detached servers on this node (version 4).
+ * ``vibesys instances list --json``: the detached servers on this node (version 5).
  */
 export interface InstanceList {
   version?: Version;
@@ -650,13 +709,14 @@ export interface InstanceList {
   unverified?: Unverified;
 }
 /**
- * What a detached server publishes about itself (version 4).
+ * What a detached server publishes about itself (version 5).
  *
  * ``run_id`` is allocated by the launcher before the server starts, so the
  * record names its run from the first time it is published. ``phase`` is the
- * run's lifecycle as the server folds it from its journal. When the server
- * exits it leaves its last record, with an ended phase and ``ended_at``, as a
- * tombstone the registry keeps for a day.
+ * run's lifecycle as the server folds it from its journal, and ``paused`` who
+ * paused it while it is paused. When the server exits it leaves its last
+ * record, with an ended phase, ``ended_at`` and ``end``, as a tombstone the
+ * registry keeps for a day.
  */
 export interface LiveInstanceRecord {
   version?: Version1;
@@ -666,10 +726,12 @@ export interface LiveInstanceRecord {
   socket_path: SocketPath;
   log_path: LogPath;
   project_root: ProjectRoot;
-  run_id: RunId1;
+  run_id: RunId2;
   pid: Pid;
   started_at: StartedAt;
   ended_at?: EndedAt;
+  paused?: PauseCause | null;
+  end?: EndRecord | null;
   hostname: Hostname;
   protocol_version?: ProtocolVersion1;
   vibesys_version: VibesysVersion1;
@@ -708,6 +770,19 @@ export interface FailureReason {
   message: Message1;
 }
 /**
+ * How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.
+ *
+ * ``resumable`` says whether a resume continues the run: its durable record exists and
+ * is not terminal. ``resume_from_round`` is the round that resume starts at, when the
+ * server knew it (a crashed server did not say).
+ */
+export interface EndRecord {
+  outcome: RunEndOutcome;
+  reason: Reason;
+  resumable: Resumable;
+  resume_from_round?: ResumeFromRound;
+}
+/**
  * A registry entry this reader cannot interpret; ``version`` is ``None`` if it has none.
  */
 export interface UnreadableRecord {
@@ -718,8 +793,8 @@ export interface UnreadableRecord {
  * One coherent inspection of a detached server and its retained artifacts.
  */
 export interface InstancesInspectReply {
-  request_id: RequestId18;
-  type: Type18;
+  request_id: RequestId19;
+  type: Type19;
   inspection: InstanceInspection;
 }
 /**
@@ -742,7 +817,7 @@ export interface InstanceInspectionMetadata {
   version?: Version4;
   id: Id3;
   project_root: ProjectRoot1;
-  run_id: RunId2;
+  run_id: RunId3;
   task?: Task1;
   pid: Pid1;
   started_at: StartedAt1;
@@ -771,24 +846,24 @@ export interface MissingLogTail {
  * The watch started; ``instances.changed`` for ``watch_id`` follows at once and on change.
  */
 export interface InstancesWatchReply {
-  request_id: RequestId19;
-  type: Type19;
+  request_id: RequestId20;
+  type: Type20;
   watch_id: WatchId1;
 }
 /**
  * The watch ended; no ``instances.changed`` for ``watch_id`` follows.
  */
 export interface InstancesUnwatchReply {
-  request_id: RequestId20;
-  type: Type20;
+  request_id: RequestId21;
+  type: Type21;
   watch_id: WatchId2;
 }
 /**
  * The project's tasks.
  */
 export interface TasksListReply {
-  request_id: RequestId21;
-  type: Type21;
+  request_id: RequestId22;
+  type: Type22;
   tasks: TaskList;
 }
 /**
@@ -809,8 +884,8 @@ export interface TaskSummary {
  * The project's runs.
  */
 export interface RunsListReply {
-  request_id: RequestId22;
-  type: Type22;
+  request_id: RequestId23;
+  type: Type23;
   runs: RunList;
 }
 /**
@@ -824,7 +899,7 @@ export interface RunList {
  * One run of a project, from its durable manifest and this host's registry.
  */
 export interface RunSummary {
-  run_id: RunId3;
+  run_id: RunId4;
   task: Task2;
   display_name: DisplayName;
   created_at: CreatedAt;
@@ -835,8 +910,8 @@ export interface RunSummary {
  * The started server's record, or why nothing started.
  */
 export interface RunStartReply {
-  request_id: RequestId23;
-  type: Type23;
+  request_id: RequestId24;
+  type: Type24;
   launch: Launch;
 }
 /**
@@ -862,8 +937,8 @@ export interface DetachedLaunchFailure {
  * What the stop observed.
  */
 export interface RunStopReply {
-  request_id: RequestId24;
-  type: Type24;
+  request_id: RequestId25;
+  type: Type25;
   result: InstanceStopResult;
 }
 /**
@@ -879,24 +954,24 @@ export interface InstanceStopResult {
  * The channel is now a byte relay carrying the run protocol to this run.
  */
 export interface RunConnectReply {
-  request_id: RequestId25;
-  type: Type25;
-  run_id: RunId4;
+  request_id: RequestId26;
+  type: Type26;
+  run_id: RunId5;
   protocol_version: ProtocolVersion3;
 }
 /**
  * The channel is alive.
  */
 export interface PingReply {
-  request_id: RequestId26;
-  type: Type26;
+  request_id: RequestId27;
+  type: Type27;
 }
 /**
  * Matching directories of ``directory``, sorted by name, at most ``PATHS_COMPLETE_CAP``.
  */
 export interface PathsCompleteReply {
-  request_id: RequestId27;
-  type: Type27;
+  request_id: RequestId28;
+  type: Type28;
   directory: Directory;
   entries: Entries;
   truncated: Truncated1;
@@ -915,8 +990,8 @@ export interface PathEntry {
  * The instance's streams, oldest first.
  */
 export interface LogsListReply {
-  request_id: RequestId28;
-  type: Type28;
+  request_id: RequestId29;
+  type: Type29;
   streams: Streams;
 }
 /**
@@ -937,8 +1012,8 @@ export interface Owner {
  * One chunk of the stream.
  */
 export interface LogsReadReply {
-  request_id: RequestId29;
-  type: Type29;
+  request_id: RequestId30;
+  type: Type30;
   chunk: LogChunk;
 }
 /**
@@ -970,16 +1045,16 @@ export interface LogPipeSpan {
  * The withdrawal was taken: a read ``read_id`` named that was still waiting stops waiting.
  */
 export interface LogsCancelReply {
-  request_id: RequestId30;
-  type: Type30;
+  request_id: RequestId31;
+  type: Type31;
   read_id: ReadId1;
 }
 /**
  * The vetted pairs, grouped by provider with each provider's default first.
  */
 export interface HarnessesListReply {
-  request_id: RequestId31;
-  type: Type31;
+  request_id: RequestId32;
+  type: Type32;
   harnesses: Harnesses;
 }
 /**
@@ -991,10 +1066,20 @@ export interface HarnessOption {
   default: Default;
 }
 /**
+ * One page of a run's recorded events, oldest first.
+ */
+export interface RunsReadEventsReply {
+  request_id: RequestId33;
+  type: Type33;
+  events: Events;
+  next_sequence: NextSequence;
+  complete: Complete;
+}
+/**
  * A push on a watch: the listing as it is now, sent first and then on each change.
  */
 export interface InstancesChanged {
-  type: Type32;
+  type: Type34;
   watch_id: WatchId3;
   listing: InstanceList;
 }
@@ -1002,8 +1087,8 @@ export interface InstancesChanged {
  * A failed request, or a line that was not one (``request_id`` is ``None`` then).
  */
 export interface HelperError {
-  type: Type33;
-  request_id: RequestId32;
+  type: Type35;
+  request_id: RequestId34;
   code: HelperErrorCode;
   message: Message3;
   path?: Path1;
@@ -1022,9 +1107,9 @@ export interface ChannelEnd {
  * The helper could not start the worker that owns the compensating stop.
  */
 export interface WorkerStartRefusedCompensationFailure {
-  type: Type34;
+  type: Type36;
   exit_status: ExitStatus1;
-  request_id: RequestId33;
+  request_id: RequestId35;
   detail: Detail1;
   kind: Kind;
   instance_id: InstanceId6;
@@ -1033,9 +1118,9 @@ export interface WorkerStartRefusedCompensationFailure {
  * The registry stop raised before returning typed evidence.
  */
 export interface StopFailedCompensationFailure {
-  type: Type35;
+  type: Type37;
   exit_status: ExitStatus2;
-  request_id: RequestId34;
+  request_id: RequestId36;
   detail: Detail2;
   kind: Kind1;
   instance_id: InstanceId7;
@@ -1047,9 +1132,9 @@ export interface StopFailedCompensationFailure {
  * so a serialized report cannot carry two identities that disagree.
  */
 export interface StopUnconfirmedCompensationFailure {
-  type: Type36;
+  type: Type38;
   exit_status: ExitStatus3;
-  request_id: RequestId35;
+  request_id: RequestId37;
   detail: Detail3;
   kind: Kind2;
   stop_result: UnconfirmedInstanceStopResult;

@@ -299,7 +299,7 @@ class RunEndingData(EventPayload):
     reason: EndReason | None
     summary: str = ""
     resumable: bool
-    rounds_finished: int = Field(ge=0)
+    rounds_finished: NonNegativeInt
 
 
 ExperimentsChangeReason = Literal[
