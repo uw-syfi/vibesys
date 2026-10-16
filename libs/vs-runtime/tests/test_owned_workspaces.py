@@ -133,6 +133,9 @@ class _Resource:
             raise ValueError(revision)
         return revision
 
+    def measured_input(self, revision: str) -> str:
+        return f"input:{self.candidate_patch(revision)}"
+
     def is_retained(self, revision: str) -> bool:
         return revision not in self.unavailable_revisions
 
