@@ -1,4 +1,5 @@
 import {
+  Banner,
   Card,
   Chart,
   EmptyState,
@@ -117,6 +118,9 @@ export function OverviewTab(props: {
   const view = overviewView(props.run, props.state);
   return (
     <Stack gap="space-5">
+      {view.progress === null ? null : (
+        <Banner title={view.progress.title} body={view.progress.body} />
+      )}
       <Objective objective={view.objective} />
       <Grid min="tile">
         {view.numbers.map(number => (

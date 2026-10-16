@@ -25,6 +25,7 @@ import {
   logsNotice,
   NOTHING_FOLDED,
   type Offer,
+  progressNote,
   quotaBannerView,
   RUN_TABS,
   type RunAtView,
@@ -342,7 +343,14 @@ function Panel(props: {
     case 'overview':
       return <OverviewTab run={run} state={state} />;
     case 'work':
-      return <WorkTab run={run} work={state.work} dispatch={dispatch} />;
+      return (
+        <WorkTab
+          run={run}
+          work={state.work}
+          progress={progressNote(run, state)}
+          dispatch={dispatch}
+        />
+      );
     case 'map':
       return (
         <MapTab

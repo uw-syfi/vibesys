@@ -12,6 +12,7 @@ import {
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
+  type ProgressNote,
   type RunAtView,
   type RunPageAction,
   type WorkFilter,
@@ -59,16 +60,18 @@ const FLOW_COLUMNS: readonly TableColumn<WorkRow>[] = [
 export function WorkTab(props: {
   readonly run: RunAtView;
   readonly work: WorkFilter;
+  /** What the run is doing before it has any work, shown in place of "No work yet". */
+  readonly progress: ProgressNote | null;
   readonly dispatch: (action: RunPageAction) => void;
 }): JSX.Element {
-  const {run, work, dispatch} = props;
+  const {run, work, progress, dispatch} = props;
   const view = workView(run, work);
   const empty =
     view.total === 0
-      ? {
+      ? (progress ?? {
           title: 'No work yet',
           body: 'Each workstream the run starts appears here, with its outcome.',
-        }
+        })
       : {title: 'No work matches', body: 'Change the search or show all outcomes.'};
   return (
     <Stack gap="space-4">

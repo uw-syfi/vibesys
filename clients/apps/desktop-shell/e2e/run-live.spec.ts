@@ -111,6 +111,25 @@ test('a live run folds its trace and overview into the Overview and Work tabs', 
     await page.screenshot({path: `${shots}/ink-live-work.png`, fullPage: true});
 });
 
+test('a run that has opened no step yet says so on Overview and Work, not "no work yet"', async ({
+  page,
+}) => {
+  await page.addInitScript(installFakeBridge, SEED);
+  await page.addInitScript(installFakeMachines, SEED);
+  await page.addInitScript(installFakeRun, {streams: [], text: {}});
+  await page.addInitScript(installFakeServer, SERVER);
+  await page.goto('./shell.html');
+  await page
+    .getByRole('navigation', {name: 'VibeSys'})
+    .getByRole('button', {name: /^\S+ queue-rs · mpmc/})
+    .click();
+  await expect(page.getByText('Waiting for the first step')).toBeVisible();
+  await expect(page.getByText('before the first plan')).toBeVisible();
+  await page.getByRole('tab', {name: 'Work'}).click();
+  await expect(page.getByText('Waiting for the first step')).toBeVisible();
+  await expect(page.getByText('No work yet')).toHaveCount(0);
+});
+
 test('a live run pauses and resumes from the header over its session, and is let go', async ({
   page,
 }) => {

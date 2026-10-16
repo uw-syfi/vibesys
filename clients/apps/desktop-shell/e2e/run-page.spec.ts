@@ -238,7 +238,7 @@ test('the Overview and Work tabs read the folded run, and the Work filter is kep
 
   // Work: the search and the outcome filter live in the page state, so a tab switch keeps them.
   await page.getByRole('tab', {name: 'Work'}).click();
-  await expect(page.getByText('No work yet')).toBeVisible();
+  await expect(page.getByText('Waiting for the first step')).toBeVisible();
   await page.getByLabel('Search work').fill('ring');
   await page.getByRole('radiogroup', {name: 'Show outcomes'}).getByText('Rejected').click();
   await page.getByRole('tab', {name: 'Overview'}).click();

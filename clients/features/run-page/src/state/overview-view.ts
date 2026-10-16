@@ -78,7 +78,15 @@ export interface CurrentWorkItem {
   readonly state: string;
 }
 
+/** What a run is doing before its first planning call or workstream: a title and one line. */
+export interface ProgressNote {
+  readonly title: string;
+  readonly body: string;
+}
+
 export interface OverviewView {
+  /** Set while the run is starting or measuring, before it has planned or started any work. */
+  readonly progress: ProgressNote | null;
   readonly objective: ObjectiveView | null;
   readonly numbers: readonly KeyNumber[];
   /** Null until a measurement has a value. */
@@ -129,7 +137,7 @@ function bestNumber(run: RunAtView, spans: readonly Span[], ended: boolean): Key
 
 function roundNumber(index: SpanIndex): KeyNumber {
   const calls = index.spans.filter(span => kindOf(span) === 'planning_call');
-  if (calls.length === 0) return {label: 'Round', value: '–', sub: 'no planning call yet'};
+  if (calls.length === 0) return {label: 'Round', value: '–', sub: 'before the first plan'};
   const latest = calls.reduce(
     (best, span) => Math.max(best, numberAttr(span, 'call') ?? 0),
     calls.length,
@@ -152,7 +160,7 @@ function workstreamsNumber(spans: readonly Span[]): KeyNumber {
 function elapsedNumber(spans: readonly Span[], ended: boolean): KeyNumber {
   const start = earliestTime(spans);
   const end = latestTime(spans);
-  if (start === null || end === null) return {label: 'Elapsed', value: '–', sub: 'not started'};
+  if (start === null || end === null) return {label: 'Elapsed', value: '–', sub: 'no steps yet'};
   return {
     label: 'Elapsed',
     value: duration(end - start),
@@ -304,7 +312,49 @@ function currentWork(index: SpanIndex): readonly CurrentWorkItem[] {
       ? CURRENT_KINDS.has(kindOf(span)) && isOpen(span)
       : span.type === 'flow' && span.parent !== null && isOpen(span),
   );
-  return open.map(span => currentItem(index, span, now));
+  // Before the first plan or workstream, the run's own open steps (the input's measurement).
+  const items = open.length === 0 && labelled ? openUnderRoot(index) : open;
+  return items.map(span => currentItem(index, span, now));
+}
+
+function capitalized(text: string): string {
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+}
+
+/** The open spans directly under the run's root, oldest first. */
+function openUnderRoot(index: SpanIndex): Span[] {
+  const root = index.spans.find(span => span.parent === null);
+  return root === undefined ? [] : (index.children.get(root.id) ?? []).filter(isOpen);
+}
+
+/**
+ * What a starting or running run is doing while it has no planning call or workstream yet, from the
+ * record's startup stage and the spans it has open (the input's measurement, with its gate's
+ * state); null once it has planned or started work, or when it is not starting or running.
+ */
+export function progressNote(run: RunAtView, state: RunPageState): ProgressNote | null {
+  const phase = runPhase(state).kind;
+  if (phase !== 'starting' && phase !== 'running') return null;
+  const index = indexSpans(spansAtView(run));
+  if (index.spans.some(span => CURRENT_KINDS.has(kindOf(span)))) return null;
+  const top = openUnderRoot(index)[0];
+  if (top !== undefined) {
+    return {
+      title: capitalized(words(titleOf(top))),
+      body: capitalized(doing(index, top, latestTime(index.spans))),
+    };
+  }
+  if (phase === 'starting') {
+    const status = state.record.kind === 'live' ? state.record.run.status : null;
+    return {
+      title: 'Starting the run',
+      body: status === null ? 'Preparing the run environment.' : capitalized(status),
+    };
+  }
+  return {
+    title: 'Waiting for the first step',
+    body: 'The run has started but has not opened a step yet.',
+  };
 }
 
 export function overviewView(run: RunAtView, state: RunPageState): OverviewView {
@@ -312,6 +362,7 @@ export function overviewView(run: RunAtView, state: RunPageState): OverviewView 
   const index = indexSpans(spans);
   const ended = runPhase(state).kind === 'ended';
   return {
+    progress: progressNote(run, state),
     objective: objectiveView(run),
     numbers: [
       bestNumber(run, spans, ended),

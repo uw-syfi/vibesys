@@ -38,6 +38,8 @@ export {
   type ObjectiveView,
   type OverviewView,
   overviewView,
+  type ProgressNote,
+  progressNote,
 } from './overview-view.js';
 export {runRecord, sameRecord} from './record.js';
 export {NOTHING_FOLDED, type RunAtView} from './run-at-view.js';

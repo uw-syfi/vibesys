@@ -465,6 +465,76 @@ describe('the Overview tab', () => {
   });
 });
 
+describe('a run before its first plan', () => {
+  const span = (id: string, parent: string | null, extra: Partial<Span>): Span =>
+    ({
+      id,
+      parent,
+      type: 'flow',
+      name: id,
+      status: 'running',
+      started_at: 100,
+      ...extra,
+    }) as Span;
+  const started = (spans: readonly Span[]): RunAtView => ({
+    trace: foldTrace(
+      EMPTY_TRACE,
+      spans.map((each, index) => event(index + 1, 'span_started', each)),
+    ),
+    overview: declared('max'),
+  });
+  const starting = (status: string): RunPageState => ({
+    ...page(),
+    record: {kind: 'live', run: {...LIVE_RECORD.run, phase: 'starting', status}} as RunRecord,
+  });
+
+  test('regression: says what the input measurement is doing instead of reading as stuck', () => {
+    const run = started([
+      span('root', null, {name: 'dynamic'}),
+      span('input', 'root', {name: 'measure_the_input'}),
+      span('gate', 'input', {
+        type: 'operation',
+        name: 'evaluation.measure',
+        started_at: 130,
+        label: {kind: 'gate', title: 'correctness + benchmark'},
+      }),
+    ]);
+    const view = overviewView(run, page());
+    expect(view.progress).toEqual({
+      title: 'Measure the input',
+      body: 'Measuring correctness + benchmark, 0s',
+    });
+    expect(view.current.map(item => item.title)).toEqual(['measure_the_input']);
+    expect(view.numbers[1]?.sub).toBe('before the first plan');
+  });
+
+  test('says what the startup stage is, then that no step is open yet', () => {
+    expect(overviewView(NOTHING_RUN, starting('Building image 12/30')).progress).toEqual({
+      title: 'Starting the run',
+      body: 'Building image 12/30',
+    });
+    expect(overviewView(NOTHING_RUN, page()).progress?.title).toBe('Waiting for the first step');
+  });
+
+  test('says nothing once a planning call or workstream exists, or when the run is over', () => {
+    const planned = started([
+      span('root', null, {}),
+      span('plan', 'root', {label: {kind: 'planning_call'}}),
+    ]);
+    expect(overviewView(planned, page()).progress).toBeNull();
+    const ended: RunPageState = {
+      ...page(),
+      record: {
+        kind: 'ended',
+        run: {...LIVE_RECORD.run, phase: 'completed', end: null},
+      } as RunRecord,
+    };
+    expect(overviewView(NOTHING_RUN, ended).progress).toBeNull();
+  });
+});
+
+const NOTHING_RUN: RunAtView = {trace: EMPTY_TRACE, overview: null};
+
 describe('the objective text', () => {
   const WORDS = ['queue', 'lock-free', 'ring', 'throughput', 'MPMC', 'check'] as const;
 
