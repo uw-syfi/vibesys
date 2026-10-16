@@ -31,7 +31,6 @@ from vs_sim.api import (
 from . import connector_protocol
 from .config import (
     PORT_PLACEHOLDER,
-    SERVICE_KILL_REAP_SECONDS,
     SlurmConfig,
     SlurmConfigError,
     SlurmConnectorTransport,
@@ -41,6 +40,7 @@ from .config import (
     shell_join_with_port,
 )
 from .errors import SlurmError, SlurmSubmissionRejectedError, SlurmTransferInterruptedError
+from .job_teardown import start_in_own_session, teardown_shell
 from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
 from .remote_file import SlurmFileSource
 from .remote_operations import (
@@ -163,6 +163,7 @@ class _JobScriptRequest:
     setup_script: str | None
     service: SlurmService | None
     service_stop_grace_seconds: int
+    process_exit_wait_seconds: int
     phase_timing_root: PurePosixPath | None = None
 
 
@@ -550,6 +551,7 @@ class SlurmJobRunner:
                         setup_script=request.setup_script,
                         service=request.service,
                         service_stop_grace_seconds=self._config.service_stop_grace_seconds,
+                        process_exit_wait_seconds=self._config.process_exit_wait_seconds,
                         phase_timing_root=phase_timing_root,
                     )
                 ),
@@ -1761,19 +1763,29 @@ def _job_script(request: _JobScriptRequest) -> str:
         timing_path = workspace / phase_timing_root / "setup-seconds.txt"
         lines.append(f"printf '%s\\n' 0 > {shlex.quote(timing_path.as_posix())}")
     lines.append("set +e")
+    lines.extend(
+        teardown_shell(
+            stop_grace_seconds=request.service_stop_grace_seconds,
+            exit_wait_seconds=request.process_exit_wait_seconds,
+            status_path=status_path,
+        )
+    )
     if service is not None:
         lines.extend(
-            _service_script(
-                service,
-                stop_grace_seconds=request.service_stop_grace_seconds,
-                phase_timing_root=phase_timing_root,
-                workspace=workspace,
-            )
+            _service_script(service, phase_timing_root=phase_timing_root, workspace=workspace)
         )
     elif phase_timing_root is not None:
         timing_path = workspace / phase_timing_root / "service-startup-seconds.txt"
         lines.append(f"printf '%s\\n' 0 > {shlex.quote(timing_path.as_posix())}")
-    lines.extend([shell_join_with_port(command), "job_status=$?"])
+    # The command gets a session of its own too, so a process it leaves behind (a server a
+    # benchmark started and never stopped) is ended with the service, not left to Slurm.
+    lines.extend(
+        [
+            *start_in_own_session(shell_join_with_port(command), pid_variable="command_pid"),
+            'wait "$command_pid"',
+            "job_status=$?",
+        ]
+    )
     if service is not None and phase_timing_root is not None:
         tail_path = workspace / phase_timing_root / _SERVICE_LOG_TAIL
         lines.append(
@@ -1795,7 +1807,6 @@ def _job_script(request: _JobScriptRequest) -> str:
 def _service_script(
     service: SlurmService,
     *,
-    stop_grace_seconds: int,
     phase_timing_root: PurePosixPath | None = None,
     workspace: PurePosixPath | None = None,
 ) -> list[str]:
@@ -1803,26 +1814,11 @@ def _service_script(
     readiness_url = shlex.quote(service.readiness_url)
     lines = [
         "export PORT=$((20000 + SLURM_JOB_ID % 10000))",
-        'service_pid=""',
-        # The service runs in its own session, so its process group is every process it
-        # started (a server's workers too). Teardown signals the whole group and is bounded:
-        # TERM, at most the grace for the group to go, KILL, at most the reap bound, exit.
-        # An unbounded wait here outlives Slurm's KillWait, and Slurm drains the node.
-        "stop_service() {",
-        '  [ -n "$service_pid" ] || return 0',
-        '  kill -TERM -- "-$service_pid" 2>/dev/null',
-        f"  service_deadline=$((SECONDS + {stop_grace_seconds}))",
-        '  while kill -0 -- "-$service_pid" 2>/dev/null && [ "$SECONDS" -lt "$service_deadline" ]; do sleep 0.2; done',
-        '  kill -KILL -- "-$service_pid" 2>/dev/null',
-        f"  service_deadline=$((SECONDS + {SERVICE_KILL_REAP_SECONDS}))",
-        '  while kill -0 -- "-$service_pid" 2>/dev/null && [ "$SECONDS" -lt "$service_deadline" ]; do sleep 0.2; done',
-        "  return 0",
-        "}",
-        "trap stop_service EXIT",
-        # Slurm's SIGTERM at a cancel or time limit runs the teardown above too.
-        "trap 'exit 143' TERM",
-        f"setsid {command} > .vs-slurm-service.log 2>&1 &",
-        "service_pid=$!",
+        # The service's session is every process it started (a server's workers too), and
+        # the teardown in ``job_teardown`` ends all of them before the script exits.
+        *start_in_own_session(
+            command, pid_variable="service_pid", redirect="> .vs-slurm-service.log 2>&1"
+        ),
         "ready=0",
         "service_started=$SECONDS",
         f"for attempt in $(seq 1 {service.startup_timeout_seconds}); do",
