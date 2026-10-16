@@ -753,6 +753,10 @@ class HelperFeature(StrEnum):
     """``logs.list``'s ``span_id``: only the streams whose owner names that run-trace span."""
     RUN_HISTORY = "run_history"
     """``runs.read_events``: a run's recorded events, read from disk in bounded pages."""
+    MACHINE_DESCRIBE = "machine_describe"
+    """``machine.describe``: the host's checkout, hardware, Docker, harness CLIs and run counts."""
+    CHECKOUT_INSPECT = "checkout_inspect"
+    """``checkout.inspect``: whether a path holds a VibeSys checkout this app can use."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -1060,6 +1064,20 @@ class RunsReadEventsRequest(_HelperRequest):
     max: Annotated[int, Field(ge=1, le=RUN_EVENTS_READ_MAX)]
 
 
+class MachineDescribeRequest(_HelperRequest):
+    """What this host offers runs: its checkout, hardware, Docker, harness CLIs and runs."""
+
+    type: Literal["machine.describe"] = "machine.describe"
+
+
+class CheckoutInspectRequest(_HelperRequest):
+    """Whether ``path`` holds a VibeSys checkout, and whether this app can use it."""
+
+    type: Literal["checkout.inspect"] = "checkout.inspect"
+    path: Annotated[str, StringConstraints(min_length=1, max_length=_MAX_PATH_CHARACTERS)]
+    """A path as typed: ``~`` expands on the host, a relative path is under the home directory."""
+
+
 HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     InstancesInspectRequest: HelperFeature.INSTANCES_INSPECT,
     InstancesWatchRequest: HelperFeature.INSTANCES_WATCH,
@@ -1070,6 +1088,8 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
     LogsCancelRequest: HelperFeature.LOGS_CANCEL,
     HarnessesListRequest: HelperFeature.HARNESSES,
     RunsReadEventsRequest: HelperFeature.RUN_HISTORY,
+    MachineDescribeRequest: HelperFeature.MACHINE_DESCRIBE,
+    CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
@@ -1107,7 +1127,9 @@ HelperRequest = Annotated[
     | LogsReadRequest
     | LogsCancelRequest
     | HarnessesListRequest
-    | RunsReadEventsRequest,
+    | RunsReadEventsRequest
+    | MachineDescribeRequest
+    | CheckoutInspectRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1409,6 +1431,154 @@ class HarnessesListReply(_HelperReply):
     harnesses: tuple[HarnessOption, ...]
 
 
+class Accelerator(StrEnum):
+    """How a machine's GPUs run work; a closed set, ``cpu`` when it has none."""
+
+    CPU = "cpu"
+    CUDA = "cuda"
+    ROCM = "rocm"
+    METAL = "metal"
+
+
+class Gpu(BaseModel):
+    """One GPU as its vendor's tool names it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    vendor: str
+    model: str
+
+
+class Hardware(BaseModel):
+    """The machine's processors."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    cpu_cores: PositiveInt
+    gpus: tuple[Gpu, ...]
+    accelerator: Accelerator
+    """How the listed GPUs run work; ``cpu`` exactly when none is listed."""
+
+    @model_validator(mode="after")
+    def _accelerator_matches_gpus(self) -> Hardware:
+        if (self.accelerator is Accelerator.CPU) != (not self.gpus):
+            message = "accelerator is cpu exactly when no GPU is listed"
+            raise ValueError(message)
+        return self
+
+
+class DockerReachable(BaseModel):
+    """Docker's daemon answered, with its server version."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reachable: Literal[True] = True
+    version: str
+
+
+class DockerUnreachable(BaseModel):
+    """Docker could not be reached, and why, in one line."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    reachable: Literal[False] = False
+    reason: str
+
+
+class MachineCheckout(BaseModel):
+    """The VibeSys checkout this helper runs from, which starts runs on this machine."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    root: str
+    version: str
+    commit: str | None
+    """``HEAD``'s commit, or ``None`` when git could not say."""
+    dirty: bool | None
+    """Whether tracked files differ from ``HEAD``; ``None`` when git could not say."""
+
+
+class RunCounts(BaseModel):
+    """Runs on this machine: live now, and ended since the host's local midnight."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    live: NonNegativeInt
+    ended_today: NonNegativeInt
+
+
+class MachineDescription(BaseModel):
+    """What one machine offers runs."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    checkout: MachineCheckout | None
+    """``None`` when the helper runs from an installed distribution."""
+    hardware: Hardware
+    docker: DockerReachable | DockerUnreachable
+    harness_clis: tuple[str, ...]
+    """The vetted harness providers whose CLI is installed on this machine, in offer order."""
+    runs: RunCounts
+
+
+class MachineDescribeReply(_HelperReply):
+    """The machine's description."""
+
+    type: Literal["machine.describe"] = "machine.describe"
+    machine: MachineDescription
+
+
+MIN_CHECKOUT_VERSION: Final = "0.1.1"
+"""The oldest VibeSys version a checkout may have for this app to use it."""
+
+
+class CheckoutFound(BaseModel):
+    """A VibeSys checkout at least ``MIN_CHECKOUT_VERSION``.
+
+    ``compatible`` says whether it ships the host helper this app starts from a checkout.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: Literal["found"] = "found"
+    root: str
+    version: str
+    commit: str | None
+    dirty: bool | None
+    compatible: bool
+
+
+class CheckoutNotFound(BaseModel):
+    """The path holds no VibeSys checkout (or does not exist)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: Literal["not_found"] = "not_found"
+
+
+class CheckoutTooOld(BaseModel):
+    """A VibeSys checkout older than this app supports: ``version`` is below ``min``."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    state: Literal["too_old"] = "too_old"
+    version: str
+    """The version it declares; empty when it declares none."""
+    min: str
+
+
+CheckoutInspection = Annotated[
+    CheckoutFound | CheckoutNotFound | CheckoutTooOld, Field(discriminator="state")
+]
+
+
+class CheckoutInspectReply(_HelperReply):
+    """What the path holds."""
+
+    type: Literal["checkout.inspect"] = "checkout.inspect"
+    inspection: CheckoutInspection
+
+
 class HelperErrorCode(StrEnum):
     """Why a request failed; a closed set."""
 
@@ -1495,6 +1665,8 @@ HelperReply = (
     | LogsCancelReply
     | HarnessesListReply
     | RunsReadEventsReply
+    | MachineDescribeReply
+    | CheckoutInspectReply
 )
 """A request's result; its ``type`` is the request's."""
 

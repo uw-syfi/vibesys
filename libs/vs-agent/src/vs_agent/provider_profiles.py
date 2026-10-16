@@ -32,3 +32,8 @@ def provider_profile(provider: str) -> ProviderProfile:
     import agentshim  # noqa: PLC0415  # lint-waiver: LW-010181 [PLC0415]; Keep agentshim lazy in provider_profile so unused providers and import cycles stay unloaded.
 
     return agentshim.get_provider(provider).profile
+
+
+def provider_binary(provider: str) -> str:
+    """The program name of *provider*'s CLI, as agentshim's profile names it."""
+    return provider_profile(provider).binary

@@ -15,7 +15,9 @@ checkout this module belongs to. Its imports stay within the light allowlist
 from __future__ import annotations
 
 import os
+import shutil
 import sys
+from datetime import UTC, datetime, tzinfo
 from functools import cache
 from typing import TYPE_CHECKING
 
@@ -23,6 +25,7 @@ from entrypoints.launcher import headless_command, source_checkout_root
 from server.host_api import HarnessOption
 from server.host_helper import serve_channel
 from server.host_helper_logs import HelperLogs, run_location
+from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
@@ -83,6 +86,19 @@ def vetted_harnesses() -> tuple[HarnessOption, ...]:
     )
 
 
+@cache
+def harness_binaries() -> tuple[tuple[str, str], ...]:
+    """Each vetted provider, in offer order, with its CLI's program name; loaded on first use."""
+    # lint-waiver: LW-271504 [PLC0415]; the helper answers hello without loading the agent library.
+    # > The same deferral as `vetted_harnesses`: `vs_agent.api` owns the vetted list and the
+    # > provider profiles that name each CLI, and importing it at module level would make every
+    # > channel pay half a second before `hello`; a copied list would be a second source of truth.
+    from vs_agent.api import HARNESSES, provider_binary  # noqa: PLC0415
+
+    providers = dict.fromkeys(harness.provider for harness in HARNESSES)
+    return tuple((provider, provider_binary(provider)) for provider in providers)
+
+
 def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperHost:
     """This host as the helper sees it; ``PermissionError`` when the registry root is unsafe."""
     network = UnixNetwork()
@@ -116,7 +132,21 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
         vibesys_version=host_facts()[1],
         logs=HelperLogs(logs, threads),
         harnesses=vetted_harnesses,
+        machine=HostMachineProbe(
+            SubprocessProbe(),
+            cpu_cores=os.cpu_count,
+            which=shutil.which,
+            harness_binaries=harness_binaries,
+        ),
+        clock=epoch,
+        timezone=local_timezone(epoch.now()),
     )
+
+
+def local_timezone(now: float) -> tzinfo:
+    """This host's local UTC offset at ``now``, which ``machine.describe``'s day follows."""
+    timezone = datetime.fromtimestamp(now, UTC).astimezone().tzinfo
+    return UTC if timezone is None else timezone
 
 
 def main() -> None:

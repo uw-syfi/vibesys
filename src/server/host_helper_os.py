@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -45,6 +44,7 @@ from server.host_helper_logs import (
     UnknownInstanceError,
     UnknownLogStreamError,
 )
+from server.host_helper_machine import git_state, vibesys_version
 from server.host_helper_requests import (
     EventPage,
     PathHints,
@@ -65,7 +65,6 @@ if TYPE_CHECKING:
     from vs_sim.api import CommandProbe, ProcessLauncher
 
 _PYPROJECT_LIMIT_BYTES = 1 << 20
-_GIT_TIMEOUT_SECONDS = 2.0
 _LAUNCH_OUTPUT_TAIL = 2000
 _LAUNCH_RECORD_LIMIT = 1 << 20
 
@@ -197,15 +196,7 @@ def _exists(path: Path) -> bool:
 
 
 def _declares_vibesys(pyproject: Path) -> bool:
-    try:
-        if pyproject.stat().st_size > _PYPROJECT_LIMIT_BYTES:
-            return False
-        with pyproject.open("rb") as handle:
-            document = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
-        return False
-    project = document.get("project")
-    return isinstance(project, dict) and project.get("name") == "vibesys"
+    return vibesys_version(pyproject) is not None
 
 
 class SubprocessRunLauncher:
@@ -274,18 +265,8 @@ class GitCheckoutProbe:
         if self._root is None:
             return None
         root = str(self._root)
-        head = self._probe.run(
-            ("git", "-C", root, "rev-parse", "HEAD"), timeout_seconds=_GIT_TIMEOUT_SECONDS
-        )
-        status = self._probe.run(
-            ("git", "-C", root, "status", "--porcelain", "--untracked-files=no"),
-            timeout_seconds=_GIT_TIMEOUT_SECONDS,
-        )
-        commit = head.stdout.strip() if head is not None and head.returncode == 0 else None
-        dirty = (
-            bool(status.stdout.strip()) if status is not None and status.returncode == 0 else None
-        )
-        return Checkout(root=root, commit=commit or None, dirty=dirty)
+        commit, dirty = git_state(self._probe, root)
+        return Checkout(root=root, commit=commit, dirty=dirty)
 
 
 _OWNER: TypeAdapter[LogOwner] = TypeAdapter(LogOwner)

@@ -92,6 +92,7 @@ from vs_agent.provider_policy import (
     default_model,
     vetted_models,
 )
+from vs_agent.provider_profiles import provider_binary
 from vs_agent.reply_limits import (
     MAX_REPLY_BYTES,
     MAX_WHITESPACE_RUN,
@@ -276,6 +277,7 @@ __all__ = [
     "native_schema",
     "native_schema_problems",
     "parse_typed_response",
+    "provider_binary",
     "reap_orphaned_agents",
     "reply_breach",
     "session_env_allowlist",

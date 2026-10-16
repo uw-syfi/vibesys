@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import posixpath
 from dataclasses import dataclass, field, replace
+from datetime import UTC
 from typing import TYPE_CHECKING
 
 from server.host_api import (
@@ -37,6 +38,7 @@ from server.host_helper_logs import (
     UnknownLogStreamError,
     clip_pipes,
 )
+from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import HelperHost, PathHints, Scan, ScannedEntry
 from server.instances import ControlSocketStopRequester
@@ -49,7 +51,7 @@ from server.registry import (
     StopEffects,
 )
 from vs_decode.api import Unreadable
-from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller
+from vs_sim.api.testing import HANG_GUARD_S, FakeProcessSignaller, ScriptedProbe
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -58,7 +60,7 @@ if TYPE_CHECKING:
 
     from pydantic import JsonValue
 
-    from vs_sim.api import Network, Threads, Worker
+    from vs_sim.api import Network, ProbeResult, Threads, Worker
     from vs_sim.api.testing import SimThreads
 
 HOME = "/home/user"
@@ -332,6 +334,26 @@ def fake_host(
         vibesys_version=VIBESYS_VERSION,
         logs=None,
         harnesses=lambda: HARNESSES,
+        machine=quiet_machine(),
+        clock=threads,
+        timezone=UTC,
+    )
+
+
+def quiet_machine(
+    script: Callable[[tuple[str, ...]], ProbeResult | None] = lambda _argv: None,
+    *,
+    installed: frozenset[str] = frozenset(),
+) -> HostMachineProbe:
+    """The real machine probe over ``script``'s commands: 4 cores, ``installed`` programs on the path.
+
+    The default script answers no command, so the machine has no GPU and no Docker.
+    """
+    return HostMachineProbe(
+        ScriptedProbe(script),
+        cpu_cores=lambda: 4,
+        which=lambda program: f"/usr/bin/{program}" if program in installed else None,
+        harness_binaries=lambda: (("claude", "claude"), ("codex", "codex")),
     )
 
 

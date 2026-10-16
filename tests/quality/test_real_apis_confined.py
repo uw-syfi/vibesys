@@ -1464,6 +1464,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     "src/server/chat/transcript.py": (EdgeKind.STORE, "chat transcripts"),
     "src/server/event_index.py": (EdgeKind.STORE, "the event index"),
     "src/server/events.py": (EdgeKind.STORE, "the run's wire event log"),
+    "src/server/host_helper_machine.py": (
+        EdgeKind.OS_ADAPTER,
+        "checkout pyproject reader for the host helper's machine probe",
+    ),
     "src/server/host_helper_os.py": (
         EdgeKind.OS_ADAPTER,
         "OS adapter and project pyproject loader for the host helper",

@@ -26,6 +26,7 @@ from __future__ import annotations
 import posixpath
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Protocol, assert_never
 
@@ -39,7 +40,13 @@ from server.host_api import (
     PATHS_COMPLETE_CAP,
     UNVETTED_MODEL_FLAG,
     Checkout,
+    CheckoutInspection,
+    CheckoutInspectReply,
+    CheckoutInspectRequest,
     DetachedLaunchFailure,
+    DockerReachable,
+    DockerUnreachable,
+    Hardware,
     HarnessesListReply,
     HarnessesListRequest,
     HarnessOption,
@@ -61,6 +68,10 @@ from server.host_api import (
     LogsCancelRequest,
     LogsListRequest,
     LogsReadRequest,
+    MachineCheckout,
+    MachineDescribeReply,
+    MachineDescribeRequest,
+    MachineDescription,
     PathEntry,
     PathsCompleteReply,
     PathsCompleteRequest,
@@ -70,6 +81,7 @@ from server.host_api import (
     ResumeRun,
     RunConnectReply,
     RunConnectRequest,
+    RunCounts,
     RunEventDocument,
     RunList,
     RunsListReply,
@@ -95,11 +107,11 @@ from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
-    from datetime import datetime
+    from datetime import tzinfo
 
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.relay import Dialer
-    from vs_sim.api import Connection
+    from vs_sim.api import Clock, Connection
 
 SCAN_LIMIT: Final = 10_000
 """The most entries ``paths.complete`` reads from one directory."""
@@ -258,6 +270,30 @@ class RunLauncher(Protocol):
         ...
 
 
+class MachineProbe(Protocol):
+    """Reads what this machine offers runs, and what a path on it holds.
+
+    Contract: no method raises; a fact that cannot be read is reported as absent
+    (no GPU, Docker unreachable with the reason, no CLI, ``not_found``).
+    """
+
+    def hardware(self) -> Hardware:
+        """The machine's CPU cores and GPUs, and how those GPUs run work."""
+        ...
+
+    def docker(self) -> DockerReachable | DockerUnreachable:
+        """Whether Docker's daemon answers, with its version or why not."""
+        ...
+
+    def harness_clis(self) -> tuple[str, ...]:
+        """The vetted harness providers whose CLI is installed, in offer order."""
+        ...
+
+    def inspect_checkout(self, path: Path) -> CheckoutInspection:
+        """Whether ``path`` holds a VibeSys checkout this app can use."""
+        ...
+
+
 class CheckoutProbe(Protocol):
     """Describes the VibeSys checkout this helper runs from."""
 
@@ -284,6 +320,10 @@ class HelperHost:
     lives with the agent library, which the helper does not load to answer ``hello``."""
     logs: HelperLogs | None
     """The run log store; ``None`` on a host that has none, which then does not offer ``logs``."""
+    machine: MachineProbe
+    clock: Clock
+    """Wall-clock epoch seconds, with ``timezone``: when ``machine.describe``'s day began."""
+    timezone: tzinfo
 
     def offered_features(self) -> frozenset[HelperFeature]:
         """The features this host can serve: every one, less ``logs`` without a log store."""
@@ -554,6 +594,8 @@ def _answer(
             reply = _project_reply(request, host)
         case RunsReadEventsRequest():
             reply = _run_events_reply(request, host)
+        case MachineDescribeRequest() | CheckoutInspectRequest():
+            reply = _machine_reply(request, host)
         case RunStartRequest():
             reply = _start(request, host)
         case RunStopRequest(instance_id=instance_id, force=force):
@@ -592,6 +634,53 @@ def _project_reply(
             root, runs = host.projects.runs(project)
             summaries = run_summaries(root, runs, host.registry.list())
             return RunsListReply(request_id=request_id, runs=summaries)
+
+
+def _machine_reply(
+    request: MachineDescribeRequest | CheckoutInspectRequest, host: HelperHost
+) -> MachineDescribeReply | CheckoutInspectReply:
+    """Answer one read of what this machine offers, or of what a path on it holds."""
+    match request:
+        case MachineDescribeRequest(request_id=request_id):
+            return MachineDescribeReply(request_id=request_id, machine=describe_machine(host))
+        case CheckoutInspectRequest(request_id=request_id, path=path):
+            inspection = host.machine.inspect_checkout(Path(_host_path(path, host.directories)))
+            return CheckoutInspectReply(request_id=request_id, inspection=inspection)
+
+
+def describe_machine(host: HelperHost) -> MachineDescription:
+    """What this machine offers runs: its checkout, hardware, Docker, harness CLIs and runs."""
+    checkout = host.checkout.describe()
+    return MachineDescription(
+        checkout=None
+        if checkout is None
+        else MachineCheckout(
+            root=checkout.root,
+            version=host.vibesys_version,
+            commit=checkout.commit,
+            dirty=checkout.dirty,
+        ),
+        hardware=host.machine.hardware(),
+        docker=host.machine.docker(),
+        harness_clis=host.machine.harness_clis(),
+        runs=run_counts(host.registry.read(), host.clock.now(), host.timezone),
+    )
+
+
+def run_counts(listing: InstanceList, now: float, timezone: tzinfo) -> RunCounts:
+    """Live runs, and runs ended since local midnight in ``timezone`` at ``now``.
+
+    A crashed server not yet buried has no end time; it was found dead now, so it counts.
+    """
+    midnight = (
+        datetime.fromtimestamp(now, timezone)
+        .replace(hour=0, minute=0, second=0, microsecond=0)
+        .timestamp()
+    )
+    ended_today = sum(
+        1 for record in listing.ended if record.ended_at is None or record.ended_at >= midnight
+    )
+    return RunCounts(live=len(listing.instances), ended_today=ended_today)
 
 
 def _run_events_reply(request: RunsReadEventsRequest, host: HelperHost) -> RunsReadEventsReply:
