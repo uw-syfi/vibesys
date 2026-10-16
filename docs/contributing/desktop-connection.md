@@ -568,7 +568,26 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 The redesigned window (`VIBESYS_DESKTOP_SHELL=next`, #2827) follows the same rules: the sidebar
 store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived runs, and the
 Settings store (`@vibesys/feature-settings`) saves each change under a token, so a slow save
-cannot undo a newer choice. Both have invariants checked over seeded action sequences. The theme
+cannot undo a newer choice. Both have invariants checked over seeded action sequences.
+
+The Run screen (`@vibesys/feature-run-page`) has one store per shown run, a reducer over the run's
+registry record (from the host's watch, through the sidebar's listings) and its log streams. The
+phase is the record's: the screen never shows a phase the host did not report, except that a Stop
+it sent shows as stopping until the record says so. Stopping, by this window or anyone else, arms a
+two-minute bound (`FORCE_STOP_BOUND_MS`) on the shell's injected clock under a request token;
+"Force stop" is offered only when that token returns while the run is still stopping, so a late
+bound for an earlier stop is dropped. The screen's Stop confirmation states what is lost (a
+stopped run ends for good; Pause is the resumable path), so it sends `stopConfirmed`, which runs
+the same stop flow without the app's native question; the stop flow lets a view force an accepted
+graceful stop. The ended banner reads the end record and offers Resume, naming
+`resume_from_round`, only when it says `resumable`. Logs are grouped by their owner (startup
+steps, gate stages, tool builds, narration) and read over the welcome bridge's `logs`, which the
+main process serves from the host's logs channel until the screen lets it go; the startup
+timeline is built from the startup steps' streams. Pause and Resume of a live run are shown
+disabled with the reason until the shell window has a live run connection, and "Open in new
+window" stays out of the "⋯" menu until the app opens more than one window (#2615). Its invariants (force offered only while stopping and only after its bound,
+no stop flow outliving the live run, commands sent only when offered) are checked over seeded
+action sequences with stale replies. The theme
 is in the first paint: the welcome preload asks the main process synchronously for the stored
 theme and the window controls' inset (`FIRST_PAINT_CHANNEL`, one fact from `window-chrome.ts`) and
 sets them on the root element before the page's scripts run.

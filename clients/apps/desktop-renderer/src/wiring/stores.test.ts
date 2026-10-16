@@ -95,6 +95,7 @@ class FakeWelcomeBridge implements WelcomeBridge {
   showWelcome = () => this.#ask('show-welcome', null);
   retry = () => this.#ask('retry', null);
   stop = () => this.#ask('stop', null);
+  stopConfirmed = () => this.#ask('stop-confirmed', null);
   inspect = () => {
     this.asked.push('inspect');
     const reply = new Deferred<WelcomeResult<WelcomeInspection>>();
