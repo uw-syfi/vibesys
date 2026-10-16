@@ -12,7 +12,6 @@ import tempfile
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -35,6 +34,7 @@ from .config import (
     SlurmConfig,
     SlurmConfigError,
     SlurmConnectorTransport,
+    SlurmJobResources,
     SlurmLocalTransport,
     SlurmService,
     SlurmSshTransport,
@@ -126,20 +126,6 @@ class SlurmTreeArtifact:
 
     remote_path: str
     local_path: Path
-
-
-class SlurmJobResources(StrEnum):
-    """Which resource request a job is submitted with.
-
-    ``CONFIGURED`` uses the operator's ``sbatch_arguments`` as written: the shape an
-    evaluation needs. ``MINIMAL`` keeps their partition, account and other placement
-    options but asks for one CPU, no GPU and a few minutes
-    (:func:`~vs_slurm.config.minimal_job`), so a job that only touches
-    files is not queued behind GPU capacity.
-    """
-
-    CONFIGURED = "configured"
-    MINIMAL = "minimal"
 
 
 @dataclass(frozen=True)
@@ -912,11 +898,7 @@ class SlurmJobRunner:
         pause: Callable[[float], None],
         timeout_seconds: float,
     ) -> SlurmJobWaitResult:
-        """Observe until the job leaves the queue (runs or ends) or *timeout_seconds* pass.
-
-        ``timed_out`` means the job was still queued when last polled. Like
-        :meth:`wait`, the timeout never cancels the job.
-        """
+        """Observe until the job runs or ends; ``timed_out``: still queued. Never cancels."""
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise SlurmError.invalid_wait_timeout()
         return self._observe(handle, timeout_seconds, None, pause, until_started=True)
@@ -937,20 +919,12 @@ class SlurmJobRunner:
             if cancel_event is not None and cancel_event.is_set():
                 raise SlurmError.cancelled(handle.job_id)
             status = self.poll(handle)
-            if status.terminal or (until_started and status != SlurmJobStatus.PENDING):
-                return SlurmJobWaitResult(
-                    handle=handle,
-                    status=status,
-                    timed_out=False,
-                    waited_seconds=self._clock.now() - started,
-                )
+            done = status.terminal or (until_started and status != SlurmJobStatus.PENDING)
             remaining = deadline - self._clock.now()
-            if remaining <= 0:
+            if done or remaining <= 0:
+                waited = self._clock.now() - started
                 return SlurmJobWaitResult(
-                    handle=handle,
-                    status=status,
-                    timed_out=True,
-                    waited_seconds=self._clock.now() - started,
+                    handle=handle, status=status, timed_out=not done, waited_seconds=waited
                 )
             seconds = min(self._config.poll_interval_seconds, remaining)
             # Bounded by *seconds*; the event's setter is the cancel path of the
@@ -1319,14 +1293,10 @@ class SlurmJobRunner:
         output: PurePosixPath,
         resources: SlurmJobResources,
     ) -> str:
-        arguments = (
-            self._config.sbatch_arguments
-            if resources is SlurmJobResources.CONFIGURED
-            else minimal_job(self._config).arguments
-        )
+        minimal = resources is SlurmJobResources.MINIMAL
         argv = (
             *self._config.sbatch_command,
-            *arguments,
+            *(minimal_job(self._config).arguments if minimal else self._config.sbatch_arguments),
             f"--job-name={operation_job_name(self._config, base.name)}",
             f"--output={output.as_posix()}",
             f"--error={output.as_posix()}",

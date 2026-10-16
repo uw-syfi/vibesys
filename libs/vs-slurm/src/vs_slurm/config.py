@@ -7,6 +7,7 @@ import re
 import shlex
 import tomllib
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -376,6 +377,20 @@ _MINIMAL_JOB_CPUS = 1
 _MINIMAL_JOB_MEMORY = "1G"
 # Seconds the minimal job leaves for its own command, besides its teardown waits.
 _MINIMAL_JOB_COMMAND_SECONDS = 60
+
+
+class SlurmJobResources(StrEnum):
+    """Which resource request a job is submitted with.
+
+    ``CONFIGURED`` uses the operator's ``sbatch_arguments`` as written: the shape an
+    evaluation needs. ``MINIMAL`` keeps their partition, account and other placement
+    options but asks for one CPU, no GPU and a few minutes
+    (:func:`minimal_job`), so a job that only touches
+    files is not queued behind GPU capacity.
+    """
+
+    CONFIGURED = "configured"
+    MINIMAL = "minimal"
 
 
 @dataclass(frozen=True)

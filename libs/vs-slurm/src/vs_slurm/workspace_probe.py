@@ -11,7 +11,7 @@ from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_sim.api import ProcessTimeoutError
 
 from .cluster_store import WorkspaceProbeStore
-from .config import SlurmConfig, minimal_job
+from .config import SlurmConfig, SlurmJobResources, minimal_job
 from .errors import (
     SlurmError,
     SlurmSbatchFailedError,
@@ -23,7 +23,6 @@ from .runner import (
     SlurmFileArtifact,
     SlurmJobHandle,
     SlurmJobRequest,
-    SlurmJobResources,
     SlurmJobRunner,
     SlurmJobStatus,
     SlurmJobWaitResult,
