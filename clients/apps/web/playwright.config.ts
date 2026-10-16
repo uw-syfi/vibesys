@@ -1,4 +1,5 @@
 import {defineConfig} from '@playwright/test';
+import {E2E_HOST, runPort} from '../../tools/e2e/free-port.mjs';
 
 /**
  * Browser e2e configuration for the web viewer.
@@ -11,6 +12,7 @@ import {defineConfig} from '@playwright/test';
  * group runs through `repoctl`, which inherits the process environment.
  */
 const inCI = !!process.env['CI'];
+const port = await runPort('VIBESYS_E2E_WEB_PORT');
 
 export default defineConfig({
   testDir: './e2e',
@@ -37,11 +39,10 @@ export default defineConfig({
   // has its own timeout and the suite waits for readiness first.
   timeout: 60_000,
   webServer: {
-    command: 'pnpm dev --host 127.0.0.1',
-    port: 5173,
-    // Reuse the `pnpm dev` a developer already has running. In CI a listener
-    // on 5173 is a stale process, not the build under test.
-    reuseExistingServer: !inCI,
+    command: `pnpm dev --host ${E2E_HOST} --port ${port} --strictPort`,
+    port,
+    // The port is this run's own, so a listener on it is never a server to reuse.
+    reuseExistingServer: false,
   },
-  use: {baseURL: 'http://127.0.0.1:5173'},
+  use: {baseURL: `http://${E2E_HOST}:${port}`},
 });
