@@ -21,8 +21,10 @@ from .runner import (
     SlurmFileArtifact,
     SlurmJobHandle,
     SlurmJobRequest,
+    SlurmJobResources,
     SlurmJobRunner,
     SlurmJobStatus,
+    SlurmJobWaitResult,
 )
 from .staging import tree_content_identity
 
@@ -71,8 +73,12 @@ class _ProbeState(BaseModel):
         "job_failed",
         "node_missing",
         "node_wrong",
+        "unscheduled",
     ] = "pending"
     exit_code: int | None = None
+    # For "unscheduled": how long the job waited in the queue, and the scheduler's reason.
+    waited_seconds: float | None = None
+    pending_reason: str | None = None
 
 
 class _ProbeIntent(BaseModel):
@@ -137,6 +143,9 @@ def _request(
                 collect_on_failure=True,
             ),
         ),
+        # The probe only reads and writes two small files: holding it behind the
+        # evaluation's GPU request would gate startup on GPU queue capacity.
+        resources=SlurmJobResources.MINIMAL,
     )
     return request, tree_content_identity(workspace, excludes=(".git/",)), node_token, returned
 
@@ -300,6 +309,10 @@ def _stored_failure(state: _ProbeState) -> SlurmWorkspaceRootProbeError:
         return SlurmWorkspaceRootProbeError.node_token_wrong(job_id)
     if state.outcome == "infrastructure":
         return SlurmWorkspaceRootProbeError.infrastructure()
+    if state.outcome == "unscheduled" and state.waited_seconds is not None:
+        return SlurmWorkspaceRootProbeError.never_scheduled(
+            job_id, state.waited_seconds, state.pending_reason
+        )
     return SlurmWorkspaceRootProbeError.state_invalid()
 
 
@@ -592,6 +605,8 @@ class _ProbeLifecycle:
             self._abandon(state, handle, error)
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-209102 [BLE001]; a caller cancellation can interrupt a scheduler wait with any BaseException, but the accepted probe still must be settled and cleaned before propagation.
             self._abandon(state, handle, error)
+        if observed.timed_out and observed.status == SlurmJobStatus.PENDING:
+            self._unscheduled(state, handle, observed)
         if observed.timed_out or observed.status not in {
             SlurmJobStatus.COMPLETED,
             SlurmJobStatus.FAILED,
@@ -610,6 +625,28 @@ class _ProbeLifecycle:
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-209107 [BLE001]; verified remote work remains owned until its terminal receipt is durable or the operation is abandoned and cleaned.
             self._abandon(state, handle, error)
         _cleanup(self._runner, verified)
+
+    def _unscheduled(
+        self, state: _ProbeState, handle: SlurmJobHandle, observed: SlurmJobWaitResult
+    ) -> NoReturn:
+        """Cancel a probe the scheduler never started and say how long it waited."""
+        try:
+            reason = self._runner.inspect_job(handle.job_id).reason
+        except _BOUNDARY_FAILURES:
+            reason = None  # the reason only explains the wait; its absence changes nothing
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-209115 [BLE001]; caller cancellation during the queue-reason read must still settle and clean the accepted probe; catching Exception or enumerating cancellation classes would leave it queued on an omitted BaseException path.
+            # > Reading the reason after settlement loses it (a cancelled job has none);
+            # > a finally block cannot tell a cancellation from success without the error.
+            self._abandon(state, handle, error)
+        failed = state.model_copy(
+            update={
+                "outcome": "unscheduled",
+                "exit_code": None,
+                "waited_seconds": observed.waited_seconds,
+                "pending_reason": reason,
+            }
+        )
+        self._abandon(state, handle, _stored_failure(failed), failed=failed)
 
     def _clear_artifact(self, state: _ProbeState, handle: SlurmJobHandle) -> None:
         try:
@@ -658,9 +695,13 @@ class _ProbeLifecycle:
         state: _ProbeState,
         handle: SlurmJobHandle,
         cause: BaseException,
+        *,
+        failed: _ProbeState | None = None,
     ) -> NoReturn:
+        """Settle and clean an accepted probe, recording ``failed`` (default: infrastructure)."""
         _settle(self._runner, handle, pause=self._pause)
-        failed = state.model_copy(update={"outcome": "infrastructure", "exit_code": None})
+        if failed is None:
+            failed = state.model_copy(update={"outcome": "infrastructure", "exit_code": None})
         try:
             _save(self._store, failed)
         except BaseException as record_error:
@@ -671,7 +712,7 @@ class _ProbeLifecycle:
                 raise cause from record_error
             raise SlurmWorkspaceRootProbeError.infrastructure() from cause
         _cleanup(self._runner, failed)
-        if not isinstance(cause, Exception):
+        if not isinstance(cause, Exception) or isinstance(cause, SlurmWorkspaceRootProbeError):
             raise cause
         raise SlurmWorkspaceRootProbeError.infrastructure() from cause
 

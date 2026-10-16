@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import shlex
 import tomllib
@@ -340,6 +341,74 @@ class SlurmConfig(BaseModel):
             message = "remote_workspace_root must be an absolute normalized POSIX path"
             raise ValueError(message)
         return path.as_posix()
+
+
+# ``sbatch`` options that request resources for a job. A job that needs no GPU, one CPU
+# and little memory drops them all, so the operator's evaluation-sized request (GPUs, CPUs,
+# memory, nodes, time) does not hold it in the queue. Options that choose where and as whom
+# the job runs (partition, account, QoS, constraint, reservation) are kept. Short options
+# may carry their value attached (``-c64``); long ones as ``--opt=value`` or ``--opt value``.
+_RESOURCE_SHORT_OPTIONS = frozenset({"-c", "-G", "-n", "-N", "-t"})
+_RESOURCE_LONG_OPTIONS = frozenset(
+    {
+        "--cpus-per-gpu",
+        "--cpus-per-task",
+        "--gpus",
+        "--gpus-per-node",
+        "--gpus-per-socket",
+        "--gpus-per-task",
+        "--gres",
+        "--mem",
+        "--mem-per-cpu",
+        "--mem-per-gpu",
+        "--nodes",
+        "--ntasks",
+        "--ntasks-per-gpu",
+        "--ntasks-per-node",
+        "--time",
+        "--time-min",
+    }
+)
+_RESOURCE_FLAGS = frozenset({"--exclusive"})
+_MINIMAL_JOB_MEMORY = "1G"
+# Seconds the minimal job leaves for its own command, besides its teardown waits.
+_MINIMAL_JOB_COMMAND_SECONDS = 60
+
+
+def minimal_sbatch_arguments(config: SlurmConfig) -> tuple[str, ...]:
+    """``config``'s ``sbatch_arguments`` reshaped for a tiny job: 1 CPU, no GPU, minutes.
+
+    Every resource request is replaced by one node, one task, one CPU, 1 GiB and the
+    shortest whole-minute time limit that still fits the job script's teardown
+    (``service_stop_grace_seconds + process_exit_wait_seconds``) plus a minute for the
+    command. Partition, account, QoS and every other non-resource option stay, so the
+    job is submitted where and as whom the operator chose.
+    """
+    kept: list[str] = []
+    arguments = config.sbatch_arguments
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        index += 1
+        name = argument.split("=", 1)[0]
+        if name in _RESOURCE_LONG_OPTIONS:
+            index += int("=" not in argument)
+        elif argument in _RESOURCE_FLAGS or name in _RESOURCE_FLAGS:
+            pass
+        elif argument[:2] in _RESOURCE_SHORT_OPTIONS and not argument.startswith("--"):
+            index += int(len(argument) == len("-c"))
+        else:
+            kept.append(argument)
+    teardown = config.service_stop_grace_seconds + config.process_exit_wait_seconds
+    minutes = math.ceil((teardown + _MINIMAL_JOB_COMMAND_SECONDS) / 60)
+    return (
+        *kept,
+        "--nodes=1",
+        "--ntasks=1",
+        "--cpus-per-task=1",
+        f"--mem={_MINIMAL_JOB_MEMORY}",
+        f"--time={minutes}",
+    )
 
 
 def _sbatch_time_limit_seconds(arguments: Sequence[str]) -> int | None:

@@ -213,6 +213,20 @@ class SlurmWorkspaceRootProbeError(SlurmError):
         return cls("Slurm `remote_workspace_root` startup probe failed: infrastructure error")
 
     @classmethod
+    def never_scheduled(
+        cls, job_id: str, waited_seconds: float, reason: str | None
+    ) -> SlurmWorkspaceRootProbeError:
+        """Describe a probe job still queued at its deadline, and what the operator can do."""
+        why = f" (scheduler reason: {reason})" if reason else ""
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: "
+            f"probe job {job_id} was never scheduled. It waited {waited_seconds:.0f} s in the "
+            f"queue{why} for 1 CPU, 1 GiB and a few minutes without GPUs, in the partition "
+            "`sbatch_arguments` names, and VibeSys cancelled it. Relaunch when that partition "
+            "has a free CPU, or raise `job_timeout_seconds`, which bounds this wait"
+        )
+
+    @classmethod
     def submission_unresolved(cls) -> SlurmWorkspaceRootProbeError:
         """Describe scheduler acceptance that could not be reconciled yet."""
         return cls(

@@ -12,6 +12,7 @@ import tempfile
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -37,6 +38,7 @@ from .config import (
     SlurmLocalTransport,
     SlurmService,
     SlurmSshTransport,
+    minimal_sbatch_arguments,
     shell_join_with_port,
 )
 from .errors import (
@@ -124,6 +126,20 @@ class SlurmTreeArtifact:
     local_path: Path
 
 
+class SlurmJobResources(StrEnum):
+    """Which resource request a job is submitted with.
+
+    ``CONFIGURED`` uses the operator's ``sbatch_arguments`` as written: the shape an
+    evaluation needs. ``MINIMAL`` keeps their partition, account and other placement
+    options but asks for one CPU, no GPU and a few minutes
+    (:func:`~vs_slurm.config.minimal_sbatch_arguments`), so a job that only touches
+    files is not queued behind GPU capacity.
+    """
+
+    CONFIGURED = "configured"
+    MINIMAL = "minimal"
+
+
 @dataclass(frozen=True)
 class SlurmJobRequest:
     """One command, its staged inputs, and requested output artifacts."""
@@ -136,6 +152,7 @@ class SlurmJobRequest:
     file_artifacts: tuple[SlurmFileArtifact, ...] = ()
     tree_artifacts: tuple[SlurmTreeArtifact, ...] = ()
     cancel_event: Event | None = None
+    resources: SlurmJobResources = SlurmJobResources.CONFIGURED
 
 
 @dataclass(frozen=True)
@@ -385,6 +402,8 @@ class SlurmJobWaitResult(BaseModel):
     handle: SlurmJobHandle
     status: SlurmJobStatus
     timed_out: bool
+    waited_seconds: float
+    """How long this observation lasted, on the runner's clock."""
 
     @property
     def terminal(self) -> bool:
@@ -563,7 +582,7 @@ class SlurmJobRunner:
             )
             self._transport.put(local_script, remote_script)
             boundary.started = True
-            job_id = self._submit(base, remote_script, remote_log)
+            job_id = self._submit(base, remote_script, remote_log, request.resources)
         artifacts = (
             *(
                 SlurmArtifactTarget(
@@ -887,16 +906,27 @@ class SlurmJobRunner:
         pause: Callable[[float], None],
     ) -> SlurmJobWaitResult:
         """Poll until terminal or *timeout*; a set *cancel_event* raises, uncancelled."""
-        deadline = self._clock.now() + timeout
+        started = self._clock.now()
+        deadline = started + timeout
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 raise SlurmError.cancelled(handle.job_id)
             status = self.poll(handle)
             if status.terminal:
-                return SlurmJobWaitResult(handle=handle, status=status, timed_out=False)
+                return SlurmJobWaitResult(
+                    handle=handle,
+                    status=status,
+                    timed_out=False,
+                    waited_seconds=self._clock.now() - started,
+                )
             remaining = deadline - self._clock.now()
             if remaining <= 0:
-                return SlurmJobWaitResult(handle=handle, status=status, timed_out=True)
+                return SlurmJobWaitResult(
+                    handle=handle,
+                    status=status,
+                    timed_out=True,
+                    waited_seconds=self._clock.now() - started,
+                )
             seconds = min(self._config.poll_interval_seconds, remaining)
             # Bounded by *seconds*; the event's setter is the cancel path of the
             # caller that owns the wait, so no pause here is unbounded.
@@ -1257,10 +1287,21 @@ class SlurmJobRunner:
         encoded = json.dumps(identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 
-    def _submit(self, base: PurePosixPath, script: PurePosixPath, output: PurePosixPath) -> str:
+    def _submit(
+        self,
+        base: PurePosixPath,
+        script: PurePosixPath,
+        output: PurePosixPath,
+        resources: SlurmJobResources,
+    ) -> str:
+        arguments = (
+            self._config.sbatch_arguments
+            if resources is SlurmJobResources.CONFIGURED
+            else minimal_sbatch_arguments(self._config)
+        )
         argv = (
             *self._config.sbatch_command,
-            *self._config.sbatch_arguments,
+            *arguments,
             f"--job-name={operation_job_name(self._config, base.name)}",
             f"--output={output.as_posix()}",
             f"--error={output.as_posix()}",

@@ -39,6 +39,7 @@ from .config import (
     SlurmSshTransport,
     SlurmTransport,
     load_slurm_config,
+    minimal_sbatch_arguments,
     shell_join_with_port,
 )
 from .connector_protocol import (
@@ -154,6 +155,7 @@ from .runner import (
     SlurmFileArtifact,
     SlurmJobHandle,
     SlurmJobRequest,
+    SlurmJobResources,
     SlurmJobResult,
     SlurmJobRunner,
     SlurmJobWaitResult,
@@ -314,6 +316,7 @@ __all__ = [
     "SlurmFileSource",
     "SlurmJobHandle",
     "SlurmJobRequest",
+    "SlurmJobResources",
     "SlurmJobResult",
     "SlurmJobRunner",
     "SlurmJobStatus",
@@ -361,6 +364,7 @@ __all__ = [
     "life_for_status",
     "list_entries",
     "load_slurm_config",
+    "minimal_sbatch_arguments",
     "needs_accounting",
     "observe",
     "observe_with_notice",
