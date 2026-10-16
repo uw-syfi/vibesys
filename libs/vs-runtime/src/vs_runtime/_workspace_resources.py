@@ -230,7 +230,7 @@ class WorkspaceResourceFactory:
             threads=self._threads,
             blocking=self._blocking,
         )
-        host_resources = self._host_resources
+        host_resources = (*self._host_resources, *environment.view.agent_host_resources)
         if environment.request.objective is not None:
             objective_path = (
                 environment.request.objective_document

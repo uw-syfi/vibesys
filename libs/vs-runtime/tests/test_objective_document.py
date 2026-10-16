@@ -121,7 +121,9 @@ def test_candidate_objective_verification_uses_run_root_and_requires_exact_text(
         )
         presentation = RunEnvironmentPresentation(prompt_notes="")
         with unconfined_host_environment().prepare(request).open(presentation) as session:
-            assert session.view.paths.objective == str(document)
+            # A host agent reads a copy outside the project, not the committed document.
+            assert session.view.paths.objective == str(root / "effective-objective.md")
+            assert Path(session.view.paths.objective).read_text() == objective
 
         document.write_text(objective + "modified")
         with pytest.raises(ValueError, match="does not match its committed document"):

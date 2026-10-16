@@ -9,7 +9,7 @@ said, a reopened project still holds it, and `observe` says the write landed onl
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from hypothesis import given, settings
@@ -31,8 +31,6 @@ from vs_runtime.api.core import Applied, NotApplied
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     import pytest
 
 RUN = "run-1"
@@ -62,7 +60,10 @@ def _project(root: Path) -> Project:
 
 
 def _owner(project: Project) -> HandoffOwner:
-    return HandoffOwner(project.state.portable_namespace(RUN, HANDOFF_NAMESPACE))
+    return HandoffOwner(
+        project.state.agent_visible_namespace(RUN, HANDOFF_NAMESPACE),
+        earlier=project.state.portable_namespace(RUN, HANDOFF_NAMESPACE),
+    )
 
 
 @st.composite
@@ -133,7 +134,7 @@ def test_the_file_carries_the_reply_at_the_named_path_and_survives_reopening(
 
     assert isinstance(written, HandoffWritten)
     assert written.path == (
-        f".vibesys/state/runs/{RUN}/{HANDOFF_NAMESPACE}/calls/call-{request.call:04d}.md"
+        f".vibesys/state/agent-visible/{RUN}/{HANDOFF_NAMESPACE}/calls/call-{request.call:04d}.md"
     )
     text = (root / written.path).read_text(encoding="utf-8")
     assert text == render_handoff(request)
@@ -158,7 +159,7 @@ def test_every_write_lists_every_file_the_run_holds_oldest_call_first(
         written = owner.perform(base.model_copy(update={"call": call}))
         assert written.listed[-1] == written.path or written.path in written.listed
     paths = [
-        f".vibesys/state/runs/{RUN}/{HANDOFF_NAMESPACE}/calls/call-{call:04d}.md"
+        f".vibesys/state/agent-visible/{RUN}/{HANDOFF_NAMESPACE}/calls/call-{call:04d}.md"
         for call in sorted(calls)
     ]
     assert list(written.listed) == paths
@@ -170,14 +171,16 @@ def test_the_planner_sees_the_file_through_its_confinement_and_cannot_change_it(
 ) -> None:
     """The project's path policy for agents leaves the handoff files readable and read-only.
 
-    The planner works in the run's project checkout; its confinement hides the run's local
-    state and makes the framework state read-only. The file must be in neither hidden part.
+    The planner works in the run's project checkout; its confinement hides the run's record and
+    local state and makes the framework state read-only. The file must be in neither hidden part.
     """
     root = tmp_path / "project"
     project = _project(root)
     request = WriteHandoff(call=1, reasoning="why", scheduled=(), handoff=HandoffNote())
     written = _owner(project).perform(request)
+    (root / ".vibesys/state/local").mkdir()
     policy = build_project_path_policy(root, evaluator_source=None)
+    assert {Path(".vibesys/state/runs"), Path(".vibesys/state/local")} <= set(policy.hidden_paths)
     path = PurePosixPath(written.path)
     assert not any(path.is_relative_to(hidden.as_posix()) for hidden in policy.hidden_paths)
     assert any(path.is_relative_to(guarded.as_posix()) for guarded in policy.read_only_paths)
@@ -192,3 +195,30 @@ def test_a_file_that_differs_from_the_request_is_not_applied(
     owner = _owner(project)
     owner.perform(request.model_copy(update={"reasoning": f"{request.reasoning} {other}"}))
     assert isinstance(owner.observe(request), NotApplied)
+
+
+def test_files_an_earlier_run_kept_in_its_record_are_listed_where_the_planner_reads(
+    tmp_path: Path,
+) -> None:
+    """A resumed run's handoff files move out of the hidden record without losing any."""
+    root = tmp_path / "project"
+    project = _project(root)
+    earlier = project.state.portable_namespace(RUN, HANDOFF_NAMESPACE)
+    old = WriteHandoff(
+        call=1, reasoning="written before the move", scheduled=(), handoff=HandoffNote()
+    )
+    earlier.write_bytes("calls/call-0001.md", render_handoff(old).encode("utf-8"))
+
+    owner = _owner(project)
+    assert owner.observe(old) == Applied(
+        HandoffWritten(path=_path(1), listed=(_path(1),)),
+    )
+    written = owner.perform(old.model_copy(update={"call": 2}))
+
+    assert written.listed == (_path(1), _path(2))
+    assert (root / _path(1)).read_text(encoding="utf-8") == render_handoff(old)
+    assert earlier.read_bytes("calls/call-0001.md") is not None
+
+
+def _path(call: int) -> str:
+    return f".vibesys/state/agent-visible/{RUN}/{HANDOFF_NAMESPACE}/calls/call-{call:04d}.md"

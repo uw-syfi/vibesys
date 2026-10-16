@@ -108,6 +108,24 @@ def is_project_state_path(relative_path: Path | str) -> bool:
     )
 
 
+_AGENT_VISIBLE_DIRECTORY = "agent-visible"
+"""The state directory of documents the framework writes for agents to read.
+
+It sits beside ``runs`` and ``local`` but is not hidden: the configuration directory
+that holds it is read-only to agents, so they read these documents and cannot change them.
+"""
+
+_AGENT_HIDDEN_STATE_DIRECTORIES = ("local", "runs")
+"""The state directories agent confinement hides, each for a reason.
+
+``local`` holds machine-local state: credentials, caches and the candidate worktrees.
+``runs`` holds the run's own record: every role's turns, the judge's reviews, the
+trusted measurements and the checkpoints a resume loads, so reading it breaks the
+barriers between roles and writing it could poison a resume. ``project.json`` and
+``.gitignore`` beside them stay visible: the manifest names the project, not a run,
+and the ignore file is a fixed two-line contract.
+"""
+
 _CONTROL_NAMESPACE = "control"
 """Run state the operator writes from outside the run's server, such as a force stop."""
 _STOP_REQUEST_FILE = "stop-request"
@@ -117,12 +135,20 @@ _STOP_REQUEST_FILE = "stop-request"
 class ProjectSandboxPaths:
     """Project-relative framework paths for a sandbox policy.
 
-    A missing path is represented by ``None`` so callers can combine this
-    capability with their own policy without interpreting the state layout.
+    A missing read-only path is ``None`` and missing hidden paths are left out, so
+    callers can combine this capability with their own policy without interpreting
+    the state layout.
+
+    ``hidden_paths`` is every part of the framework state an agent must not see:
+    the machine-local state (credentials and caches) and the run state (the core
+    record of every role's turns, the judge's reviews and the trusted
+    measurements, which a resume loads). What agents may read lives in the
+    agent-visible state (``ProjectState.agent_visible_namespace``), below the
+    read-only configuration directory.
     """
 
     read_only_path: Path | None
-    hidden_path: Path | None
+    hidden_paths: tuple[Path, ...]
 
 
 @dataclass(frozen=True, init=False)
@@ -926,10 +952,27 @@ class ProjectState:
         self._validate_storage_roots()
         return ProjectSandboxPaths(
             read_only_path=(Path(_CONFIG_DIRECTORY_NAME) if self._config_dir.exists() else None),
-            hidden_path=(
-                _STATE_DIRECTORY_PATH / "local" if self._workspace_local_dir.exists() else None
+            hidden_paths=tuple(
+                _STATE_DIRECTORY_PATH / name
+                for name in _AGENT_HIDDEN_STATE_DIRECTORIES
+                if (self._metadata_dir / name).exists()
             ),
         )
+
+    def prepare_hidden_directories(self, run_id: str) -> None:
+        """Create the state directories agent confinement hides, where they are missing.
+
+        A linked candidate worktree omits the ignored local state and any run record its
+        revision predates, yet shares the run's confinement policy, which names those
+        directories (``sandbox_paths``). Call this before opening a confinement over such
+        a workspace so every hidden path exists to be hidden.
+        """
+        self._validate_storage_roots()
+        self._worktrees_dir(run_id).mkdir(parents=True, exist_ok=True)
+        for name in _AGENT_HIDDEN_STATE_DIRECTORIES:
+            _contained_without_symlinks(
+                self._metadata_dir, self._metadata_dir / name, kind="hidden state"
+            ).mkdir(parents=True, exist_ok=True)
 
     def log_directory(self, run_id: str) -> Path:
         """Return the machine-local log directory for one run."""
@@ -1330,6 +1373,26 @@ class ProjectState:
             portable=True,
         )
 
+    def agent_visible_namespace(self, run_id: str, namespace: str) -> StateNamespace:
+        """Return the typed boundary for committed documents agents read by path.
+
+        The framework writes the documents; agent confinement leaves this directory
+        readable and read-only. Nothing else about the run is visible to an agent, so
+        put a document here only when a role's prompt names its path.
+        """
+        self.load_run(run_id)
+        self._validate_storage_roots()
+        root = _contained_without_symlinks(
+            self._metadata_dir,
+            self._metadata_dir / _AGENT_VISIBLE_DIRECTORY / validate_run_id(run_id),
+            kind="agent-visible run",
+        )
+        return StateNamespace(
+            project_root=self.project_root,
+            root=_contained_state_dir(root, namespace, kind="agent-visible"),
+            portable=True,
+        )
+
     def record_stop_request(self, run_id: str) -> None:
         """Durably note that the operator stopped ``run_id``, before its server is killed.
 
@@ -1617,12 +1680,21 @@ def _validate_snapshot_root(path: PurePosixPath) -> None:
     if parts[:3] == (*_STATE_DIRECTORY_PARTS, "local"):
         message = "portable state snapshot root must not be below .vibesys/state/local"
         raise ValueError(message)
-    if parts[:3] != (*_STATE_DIRECTORY_PARTS, "runs") or len(parts) not in {4, 5}:
+    if parts[:2] != _STATE_DIRECTORY_PARTS or parts[2:3] not in (
+        ("runs",),
+        (_AGENT_VISIBLE_DIRECTORY,),
+    ):
         message = (
             "portable state snapshot root must be .vibesys/state, "
-            ".vibesys/state/runs/<run-id>, or "
-            ".vibesys/state/runs/<run-id>/<namespace>"
+            ".vibesys/state/runs/<run-id>, .vibesys/state/runs/<run-id>/<namespace>, or "
+            ".vibesys/state/agent-visible/<run-id>/<namespace>"
         )
+        raise ValueError(message)
+    run_part_count = _RUN_NAMESPACE_PART_COUNT - 1
+    if len(parts) not in {run_part_count, _RUN_NAMESPACE_PART_COUNT} or (
+        parts[2] == _AGENT_VISIBLE_DIRECTORY and len(parts) != _RUN_NAMESPACE_PART_COUNT
+    ):
+        message = f"portable state snapshot root has the wrong depth: {path}"
         raise ValueError(message)
     if re.fullmatch(_IDENTIFIER_PATTERN, parts[3]) is None:
         message = f"portable state snapshot root contains an invalid run ID: {path}"

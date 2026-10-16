@@ -592,7 +592,9 @@ def core_policy_context() -> dict[str, object]:
         # The outline turn of a plan-mode run cites the plan's documents (a staged input here).
         "documents": ("reference/reference.py",),
         # The handoff file of one planning call (`WriteHandoff`'s fields).
-        "handoff_paths": (".vibesys/state/runs/run-1/orchestrator-handoff/calls/call-0001.md",),
+        "handoff_paths": (
+            ".vibesys/state/agent-visible/run-1/orchestrator-handoff/calls/call-0001.md",
+        ),
         "call": 1,
         "reasoning": "Batch the decode loop first.",
         "scheduled": (),

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
@@ -14,9 +14,6 @@ from vs_runtime.api.testing import idle_environment_system, unconfined_host_envi
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api.testing import ManualClock, SimThreads
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 
 @pytest.mark.parametrize("candidate", [False, True])
 def test_run_environment_prepares_hidden_state_before_opening(
@@ -26,7 +23,9 @@ def test_run_environment_prepares_hidden_state_before_opening(
     canonical.mkdir()
     project = Project.open(canonical)
     project.state.candidate_worktrees_directory("run").mkdir(parents=True)
+    (canonical / ".vibesys/state/runs").mkdir(parents=True)
     policy = build_project_path_policy(canonical, evaluator_source=None)
+    assert {Path(".vibesys/state/local"), Path(".vibesys/state/runs")} <= set(policy.hidden_paths)
     workspace = tmp_path / "candidate" if candidate else canonical
     workspace.mkdir(exist_ok=True)
     if candidate:

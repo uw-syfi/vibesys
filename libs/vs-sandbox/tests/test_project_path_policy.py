@@ -28,6 +28,8 @@ def _workspace(tmp_path: Path) -> Path:
     workspace = tmp_path / "workspace"
     (workspace / ".state" / "local").mkdir(parents=True)
     (workspace / ".state" / "run.json").write_text("{}\n")
+    (workspace / ".state" / "runs" / "run-1" / "core-store").mkdir(parents=True)
+    (workspace / ".state" / "runs" / "run-1" / "core-store" / "store.json").write_text("{}\n")
     (workspace / ".env").write_text("TOKEN=secret\n")
     (workspace / "Cargo.toml").write_text("[package]\n")
     return workspace
@@ -36,7 +38,7 @@ def _workspace(tmp_path: Path) -> Path:
 def _policy() -> ProjectPathPolicy:
     return ProjectPathPolicy(
         read_only_paths=(".state", "Cargo.toml"),
-        hidden_paths=(".state/local", ".env"),
+        hidden_paths=(".state/local", ".state/runs", ".env"),
     )
 
 
@@ -120,7 +122,7 @@ class TestProjectPathPolicy:
         policy.validate(workspace)
 
         assert policy.read_only_paths == (Path(".state"), Path("Cargo.toml"))
-        assert policy.hidden_paths == (Path(".state/local"), Path(".env"))
+        assert policy.hidden_paths == (Path(".state/local"), Path(".state/runs"), Path(".env"))
 
     def test_rejects_missing_path(self, tmp_path: Path) -> None:
         workspace = _workspace(tmp_path)
@@ -202,12 +204,14 @@ class TestBubblewrapProjectPaths:
             str(workspace / "Cargo.toml"),
         )
         hidden_dir = _sequence_index(argv, "--tmpfs", str(workspace / ".state" / "local"))
+        hidden_runs = _sequence_index(argv, "--tmpfs", str(workspace / ".state" / "runs"))
         hidden_file = _sequence_index(argv, "--ro-bind", "/dev/null", str(workspace / ".env"))
         chdir = _sequence_index(argv, "--chdir", str(workspace))
 
         assert workspace_bind < readonly_dir < hidden_dir < chdir
+        assert readonly_dir < hidden_runs < chdir
         assert workspace_bind < readonly_file < hidden_file < chdir
-        assert max(readonly_dir, readonly_file) < min(hidden_dir, hidden_file)
+        assert max(readonly_dir, readonly_file) < min(hidden_dir, hidden_runs, hidden_file)
 
     @pytest.mark.skipif(_working_bwrap() is None, reason="requires working bubblewrap")
     def test_enforces_file_and_directory_policy(self, tmp_path: Path) -> None:
@@ -221,6 +225,9 @@ class TestBubblewrapProjectPaths:
         )
         script = (
             "test ! -e .state/local/host-secret"
+            " && test ! -e .state/runs/run-1/core-store/store.json"
+            " && ! cat .state/runs/run-1/core-store/store.json"
+            " && ! printf poisoned > .state/runs/run-1/core-store/store.json"
             " && test ! -s .env"
             " && ! printf changed > .env"
             " && ! printf changed > Cargo.toml"
@@ -241,6 +248,8 @@ class TestBubblewrapProjectPaths:
         assert (workspace / ".env").read_text() == "TOKEN=secret\n"
         assert (workspace / "Cargo.toml").read_text() == "[package]\n"
         assert (workspace / ".state" / "run.json").read_text() == "{}\n"
+        store = workspace / ".state" / "runs" / "run-1" / "core-store" / "store.json"
+        assert store.read_text() == "{}\n"
         assert not (workspace / ".state" / "local" / "agent-file").exists()
         assert (workspace / "source.txt").read_text() == "editable"
 
@@ -417,11 +426,16 @@ class TestSeatbeltProjectPaths:
         readonly_dir = f'(deny file-write* (subpath "{workspace / ".state"}"))'
         readonly_file = f'(deny file-write* (literal "{workspace / "Cargo.toml"}"))'
         hidden_dir = f'(deny file-read* file-write* (subpath "{workspace / ".state" / "local"}"))'
+        hidden_runs = f'(deny file-read* file-write* (subpath "{workspace / ".state" / "runs"}"))'
         hidden_file = f'(deny file-read* file-write* (literal "{workspace / ".env"}"))'
 
         allow_index = profile.index(workspace_allow)
         readonly_indexes = (profile.index(readonly_dir), profile.index(readonly_file))
-        hidden_indexes = (profile.index(hidden_dir), profile.index(hidden_file))
+        hidden_indexes = (
+            profile.index(hidden_dir),
+            profile.index(hidden_runs),
+            profile.index(hidden_file),
+        )
         assert allow_index < min(readonly_indexes)
         assert max(readonly_indexes) < min(hidden_indexes)
 
