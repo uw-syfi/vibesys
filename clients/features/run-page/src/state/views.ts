@@ -5,7 +5,7 @@
  */
 import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
-import type {RunEnd} from '@vibesys/hosts';
+import {endedLook, type HostRun, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
@@ -42,24 +42,10 @@ function projectName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path;
 }
 
-const ENDED: Readonly<Record<NonNullable<RunEnd>['outcome'], {label: string; tone: Tone}>> = {
-  adopted: {label: 'Finished', tone: 'ok'},
-  'kept-input': {label: 'Finished · kept the input', tone: 'ok'},
-  'no-winner': {label: 'Finished · no winner', tone: 'ok'},
-  deadline: {label: 'Finished · time limit', tone: 'ok'},
-  'finish-refused': {label: 'Finished · not adopted', tone: 'warn'},
-  'adoption-failed': {label: 'Failed to adopt', tone: 'err'},
-  failed: {label: 'Failed', tone: 'err'},
-  stopped: {label: 'Stopped', tone: 'neutral'},
-  force_stopped: {label: 'Force stopped', tone: 'neutral'},
-};
-
 /** An ended run's words, from its end record or, on an older tombstone, its last phase. */
-function endedStatus(phase: string, end: RunEnd): {label: string; tone: Tone} {
-  if (end !== null) return ENDED[end.outcome];
-  if (phase === 'failed') return {label: 'Failed', tone: 'err'};
-  if (phase === 'stopped') return {label: 'Stopped', tone: 'neutral'};
-  return {label: 'Finished', tone: 'ok'};
+function endedStatus(phase: HostRun['phase'], end: RunEnd): {label: string; tone: Tone} {
+  const look = endedLook({phase, end});
+  return look === null ? {label: 'Finished', tone: 'ok'} : {label: look.label, tone: look.tone};
 }
 
 function status(state: RunPageState): {label: string; tone: Tone} {

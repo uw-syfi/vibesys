@@ -3,24 +3,10 @@
  * (`paused` names who paused it); an ended one finished, failed or stopped, from its end record's
  * outcome, or from its last phase on a tombstone that records no end.
  */
-import type {HostRun} from '@vibesys/hosts';
+import {type EndTone, endedLook, type HostRun} from '@vibesys/hosts';
 
 /** What a sidebar row says about its run; never shown by color alone. */
 export type RunRowStatus = 'live' | 'paused' | 'finished' | 'failed' | 'stopped' | 'unknown';
-
-type Outcome = NonNullable<HostRun['end']>['outcome'];
-
-const OUTCOMES: Readonly<Record<Outcome, RunRowStatus>> = {
-  adopted: 'finished',
-  'kept-input': 'finished',
-  'no-winner': 'finished',
-  deadline: 'finished',
-  'finish-refused': 'finished',
-  'adoption-failed': 'failed',
-  failed: 'failed',
-  stopped: 'stopped',
-  force_stopped: 'stopped',
-};
 
 /** The status of a live server's run. */
 export function liveStatus(server: HostRun): RunRowStatus {
@@ -29,18 +15,28 @@ export function liveStatus(server: HostRun): RunRowStatus {
 
 /** The status of an ended server's run, or `unknown` when there is no record of it. */
 export function endedStatus(server: HostRun | undefined): RunRowStatus {
-  if (server === undefined) return 'unknown';
-  if (server.end !== null) return OUTCOMES[server.end.outcome];
-  switch (server.phase) {
-    case 'completed':
-      return 'finished';
-    case 'failed':
-      return 'failed';
-    case 'stopped':
-      return 'stopped';
-    default:
-      return 'unknown';
-  }
+  return (server === undefined ? null : endedLook(server))?.kind ?? 'unknown';
+}
+
+/** What a row's dot and detail say: the tone and the words, never by color alone. */
+export interface RowLook {
+  readonly tone: EndTone | 'live';
+  readonly word: string;
+}
+
+/** The look of a live server's run. */
+export function liveLook(server: HostRun): RowLook {
+  return server.paused === null
+    ? {tone: 'live', word: statusWord('live')}
+    : {tone: 'warn', word: statusWord('paused')};
+}
+
+/** The look of an ended server's run: its outcome in words, in the tone the shared table gives. */
+export function endedRowLook(server: HostRun | undefined): RowLook {
+  const look = server === undefined ? null : endedLook(server);
+  return look === null
+    ? {tone: 'neutral', word: statusWord('unknown')}
+    : {tone: look.tone, word: look.label.toLowerCase()};
 }
 
 const WORDS: Readonly<Record<RunRowStatus, string>> = {

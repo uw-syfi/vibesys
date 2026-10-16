@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import type {HostKey, HostListing, HostRun} from '@vibesys/hosts';
+import type {EndTone, HostKey, HostListing, HostRun} from '@vibesys/hosts';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
@@ -278,6 +278,55 @@ describe('row statuses', () => {
         },
       ).state;
       expect(recentRows(state).rows[0]?.status, `${outcome} ${phase}`).toBe(status);
+    }
+  });
+
+  test('regression: only a run that adopted or kept a result gets the green dot', () => {
+    const tones: readonly [string, EndTone, string][] = [
+      ['adopted', 'ok', 'finished'],
+      ['kept-input', 'ok', 'finished · kept the input'],
+      ['no-winner', 'neutral', 'no winner'],
+      ['deadline', 'warn', 'time limit reached'],
+      ['finish-refused', 'warn', 'not adopted'],
+      ['failed', 'err', 'failed'],
+      ['stopped', 'neutral', 'stopped'],
+    ];
+    for (const [outcome, tone, word] of tones) {
+      const state = sidebarStep(
+        sidebarStep(SIDEBAR_EMPTY, {
+          type: 'recent',
+          recent: [
+            {
+              host: 'local',
+              hostLabel: '',
+              project: '/p',
+              task: null,
+              runId: 'r',
+              instanceId: null,
+              attachedAt: 1,
+            },
+          ],
+        }).state,
+        {
+          type: 'listing',
+          listing: {
+            kind: 'listed',
+            host: 'local',
+            live: [],
+            ended: [
+              {
+                ...server(1, 'r', 'completed'),
+                end: {outcome, reason: 'why', resumable: false} as NonNullable<HostRun['end']>,
+              },
+            ],
+            unreadable: [],
+            unverified: [],
+          },
+        },
+      ).state;
+      const row = recentRows(state).rows[0];
+      expect(row?.look, outcome).toEqual({tone, word});
+      expect(row?.detail, outcome).toBe(`This Mac · ${word}`);
     }
   });
 

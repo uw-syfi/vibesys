@@ -549,6 +549,18 @@ describe('the run page store', () => {
     ]);
   });
 
+  test('regression: a run that ended with no winner is not shown as a success', () => {
+    const record: RunRecord = {
+      kind: 'ended',
+      run: server('completed', {
+        end: {outcome: 'no-winner', reason: 'No candidate beat the input.', resumable: false},
+      }),
+    };
+    const state = fold(initial(), [{type: 'record', record}]).state;
+    expect(headerView(state).status).toEqual({label: 'No winner', tone: 'neutral'});
+    expect(endedView(state)).toMatchObject({title: 'No winner', tone: 'neutral'});
+  });
+
   test('groups streams by owner and builds the startup timeline from them', () => {
     const listed = fold(initial(), [{type: 'record', record: RECORDS[1] as RunRecord}]);
     const list = listed.requests.find(request => request.kind === 'list-logs');

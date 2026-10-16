@@ -1,34 +1,15 @@
-import {
-  AppFrame,
-  Button,
-  Row,
-  SidebarItem,
-  SidebarSection,
-  type StatusTone,
-  Text,
-} from '@vibesys/ui';
+import {AppFrame, Button, Row, SidebarItem, SidebarSection, Text} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
   liveRows,
   machineCounts,
   type RunRow,
-  type RunRowStatus,
   recentRows,
   type Screen,
   type ShellActions,
   type SidebarAction,
   type SidebarState,
-  statusWord,
 } from '../../state/index.js';
-
-const TONES: Readonly<Record<RunRowStatus, StatusTone>> = {
-  live: 'live',
-  paused: 'warn',
-  finished: 'ok',
-  failed: 'err',
-  stopped: 'neutral',
-  unknown: 'neutral',
-};
 
 function sameScreen(left: Screen, right: Screen): boolean {
   if (left.kind !== 'run' || right.kind !== 'run') return left.kind === right.kind;
@@ -47,7 +28,7 @@ function RunItem(props: {
     <SidebarItem
       label={row.title}
       detail={row.detail}
-      status={{tone: TONES[row.status], label: statusWord(row.status)}}
+      status={{tone: row.look.tone, label: row.look.word}}
       active={sameScreen(state.selection, screen)}
       press={() => dispatch({type: 'select', screen})}
       menu={[

@@ -9,7 +9,15 @@
 import {type HostKey, type HostListing, type HostRun, hostFromKey, hostLabel} from '@vibesys/hosts';
 import {type RecentRun, type RunRef, sameRun} from '@vibesys/runs';
 import type {Step} from '@vibesys/store';
-import {endedStatus, liveDetail, liveStatus, type RunRowStatus, statusWord} from './run-status.js';
+import {
+  endedRowLook,
+  endedStatus,
+  liveDetail,
+  liveLook,
+  liveStatus,
+  type RowLook,
+  type RunRowStatus,
+} from './run-status.js';
 
 /** The screen the main area shows. */
 export type Screen =
@@ -25,6 +33,8 @@ export interface RunRow {
   readonly title: string;
   readonly detail: string;
   readonly status: RunRowStatus;
+  /** The dot's tone and the row's status word. */
+  readonly look: RowLook;
 }
 
 /** What the sidebar's row menus ask of the app. */
@@ -222,6 +232,7 @@ export function liveRows(state: SidebarState): RunRow[] {
         title: titleOf(state, run, server.projectRoot),
         detail: `${label(listing.host)} · ${liveDetail(server)}`,
         status: liveStatus(server),
+        look: liveLook(server),
       };
     });
   });
@@ -242,12 +253,14 @@ export function recentRows(state: SidebarState): {readonly rows: RunRow[]; reado
       const ended =
         listing?.kind === 'listed' ? newestByRun(listing.ended).get(recent.runId) : undefined;
       const status = endedStatus(ended);
+      const look = endedRowLook(ended);
       const run: RunRef = {host: recent.host, runId: recent.runId};
       return {
         run,
         title: titleOf(state, run, recent.project),
-        detail: `${label(recent.host)} · ${statusWord(status)}`,
+        detail: `${label(recent.host)} · ${look.word}`,
         status,
+        look,
       };
     });
   return {rows: rows.slice(0, RECENT_ROWS), more: Math.max(0, rows.length - RECENT_ROWS)};

@@ -46,3 +46,4 @@ export {
   type RunEnd,
   type RunPause,
 } from './listing.js';
+export {type EndKind, type EndLook, type EndTone, endedLook} from './run-look.js';
