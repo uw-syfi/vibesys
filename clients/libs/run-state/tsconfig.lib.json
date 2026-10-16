@@ -17,7 +17,8 @@
     "src/rounds/**",
     "src/performance/**",
     "src/transcript/**",
-    "src/trace/**"
+    "src/trace/**",
+    "src/overview/**"
   ],
   "references": [
     {
