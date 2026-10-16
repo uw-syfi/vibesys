@@ -429,7 +429,7 @@ stop) are the same decisions with `multi` roles. The differences:
 | Legacy step (`multi/orchestration.py`, `turns.py`) | Core decision or request | Answered by |
 |---|---|---|
 | pre-round turn (`PreRoundDecision`) | `RequestTurn(free, run scope)` by `multi-orchestrator` | `TurnResult` |
-| profiler turn (`ProfilerSummary`), failure is advisory | `RequestTurn(free, run scope, WRITE_ARTIFACTS profile dir)` by `multi-profiler`; a failed turn becomes a note and the plan proceeds | `TurnResult` |
+| profiler turn (`ProfilerSummary`), failure is advisory | `RequestTurn(free, run scope, READ_ONLY)` by `multi-profiler`; a failed turn becomes a note and the plan proceeds | `TurnResult` |
 | plan turn and correction | as `single` | `TurnResult` |
 | implementer turn, continuation prompt when `next_step` | paid `RequestTurn(WRITE_CANDIDATE)`; the strategy picks the template (first or continuation) from `HypothesisRecord.next_step` | `TurnResult` |
 | `_review`: `review_due`, judge turn | free `RequestTurn(READ_ONLY)` on `turn_candidate`, only when `review_due` | `TurnResult` |
@@ -460,7 +460,7 @@ requires the configured gates. A round that skipped review (sparse policy) is no
 | Role id | Access | Required capabilities | Tools |
 |---|---|---|---|
 | `multi-orchestrator` | `LIMITED` (`roadmap/`) | none | none |
-| `multi-profiler` | `LIMITED` (profile directory) | none | `profiler` (stateless, B15) |
+| `multi-profiler` | `READ_ONLY` | none | `profiler` (stateless, B15) |
 | `multi-implementer` | `READ_WRITE` | `CONTINUATION` plus `MCP_SERVERS` | `evaluation` |
 | `multi-judge` | `READ_ONLY` | `CONTINUATION` plus `MCP_SERVERS` | `evaluation` |
 
@@ -1002,8 +1002,8 @@ mapping above, each deliberate:
 - Prompts are domain-agnostic as `single`'s are: the evidence the loop kept in progress files (history,
   frontier, notices, the implementer's claims for the judge, the profile) is rendered from typed
   rows, the validation recipe contract is rendered from its schema, and the profiler prompt is the
-  per-kind shared template, and the profiler writes nothing in the project (its reply is the evidence). The
-  run's domain pack is rendered once by the plan (`domain_sections`) into one slot of each role's
+  per-kind shared template (the profiler writes nothing in the project: its reply is the
+  evidence). The run's domain pack is rendered once by the plan (`domain_sections`) into one slot of each role's
   prompt, and skill-recommendation resolution is not rendered; the modality and interface texts
   are.
 - Properties M1 to M4 are tests of the strategy on the production shell (the roles asked per round
