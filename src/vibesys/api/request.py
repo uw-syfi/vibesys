@@ -34,13 +34,21 @@ from vibesys.run.core_run import ensure_not_legacy_resume
 from vibesys.run.experiment_repo import origin_matches
 from vibesys.run.profilers import validate_run_request as validate_execution_request
 from vibesys.run.skill_sources import resolve_skill_source_dirs
-from vs_agent.api.images import DockerBuildRunner, build_task_image
+from vs_agent.api.images import (
+    DockerBuildRunner,
+    build_task_image,
+    is_task_image_reference,
+    local_image_exists,
+    task_image_reference,
+)
 from vs_project.api import GitRemoteRepository
 from vs_runtime.api.infrastructure import (
     EditorImagePlan,
     RunEnvironmentSpec,
     TaskImageError,
+    TaskImageFacts,
     build_run_environment,
+    derived_environment_name,
     editor_image_plan,
     make_run_environment_spec,
     migrate_recorded_run_environment,
@@ -77,16 +85,20 @@ __all__ = [
     "RunEnvironmentSpec",
     "SynthesizedInputSpec",
     "TaskImageError",
+    "TaskImageFacts",
     "backend_default_image",
     "build_task_image",
     "default_skill_roots",
+    "derived_environment_name",
     "editor_image_plan",
     "experiment_origin_matches",
     "generate_experiment_name",
+    "is_task_image_reference",
     "load_objective",
     "load_objectives",
     "load_project_task",
     "load_task",
+    "local_image_exists",
     "make_run_environment_spec",
     "migrate_recorded_run_environment",
     "repository_name_from_experiment",
@@ -97,6 +109,7 @@ __all__ = [
     "run_environment_uses_docker",
     "supported_profilers",
     "synthesize_input_bundle",
+    "task_image_reference",
     "validate_descriptor",
     "validate_experiment_name",
     "validate_run_request",

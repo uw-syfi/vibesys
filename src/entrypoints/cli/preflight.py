@@ -25,7 +25,11 @@ from server.host_preflight import (
     one_line,
 )
 from vibesys.api import ConfigurationError
-from vibesys.api.request import run_accelerator_unavailable, run_environment_uses_docker
+from vibesys.api.request import (
+    TaskImageError,
+    run_accelerator_unavailable,
+    run_environment_uses_docker,
+)
 from vs_agent.api.images import AGENT_IMAGE_REPOSITORY
 from vs_sim.api import SubprocessProbe
 
@@ -41,6 +45,8 @@ AGENT_IMAGES_COMMAND = ("docker", "image", "ls", "--quiet", AGENT_IMAGE_REPOSITO
 """Lists the agent images built on this machine; Docker reuses their layers in a new build."""
 ACCELERATOR_UNAVAILABLE = "accelerator_unavailable"
 """The settings code when this host cannot give the run its compute backend's accelerator."""
+TASK_IMAGE_UNSUPPORTED = "task_image_unsupported"
+"""The settings code when the run cannot honor the task's Dockerfile as asked."""
 
 
 def run_preflight(argv: list[str], parse: Callable[[list[str]], Namespace]) -> None:
@@ -56,17 +62,21 @@ def preflight_report(
     try:
         args = parse(argv)
         request, _config = validated_run_request(args)
+        accelerator = run_accelerator_unavailable(request, probe)
     except ConfigurationError as error:
         diagnostic = error.diagnostic
-        return PreflightReport(
-            settings=SettingsInvalid(
+        return _invalid_settings(
+            SettingsInvalid(
                 code=diagnostic.code, stage=diagnostic.stage, message=diagnostic.message
-            ),
-            uses_docker=None,
-            agent_image=_not_checked(CheckId.AGENT_IMAGE),
-            evaluator=_not_checked(CheckId.EVALUATOR_AVAILABLE),
+            )
         )
-    accelerator = run_accelerator_unavailable(request, probe)
+    except TaskImageError as error:
+        # The run refuses this before it builds anything; report it as settings.
+        return _invalid_settings(
+            SettingsInvalid(
+                code=TASK_IMAGE_UNSUPPORTED, stage="run_environment", message=str(error)
+            )
+        )
     if accelerator is not None:
         # The run stops on this before its image build, seconds after it starts.
         return PreflightReport(
@@ -81,6 +91,15 @@ def preflight_report(
         uses_docker=run_environment_uses_docker(request.run_environment),
         bundle=args.input_bundle,
         probe=probe,
+    )
+
+
+def _invalid_settings(settings: SettingsInvalid) -> PreflightReport:
+    return PreflightReport(
+        settings=settings,
+        uses_docker=None,
+        agent_image=_not_checked(CheckId.AGENT_IMAGE),
+        evaluator=_not_checked(CheckId.EVALUATOR_AVAILABLE),
     )
 
 

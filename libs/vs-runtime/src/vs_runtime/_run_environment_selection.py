@@ -64,17 +64,33 @@ def resolve_run_environment_spec(
     """
     if task_dockerfile is not None and spec.task_dockerfile != task_dockerfile:
         raise TaskImageError.not_built(spec.name, task_dockerfile)
-    if spec.name != "docker" or platform != "darwin" or not backend_is_host_only(backend):
+    if derived_environment_name(spec.name, backend, platform=platform) != "host":
         return spec
     # The same decision every environment makes refuses the task image here.
     editor_image_plan(
-        "host", task_dockerfile=task_dockerfile, image=None, base_image=None, launch="fresh"
+        "host",
+        task_dockerfile=task_dockerfile,
+        image=None,
+        launch="fresh",
+        facts=None,
     )
     log(
         f"[environment] the {backend.value} backend cannot be reached from Docker; "
         "running the agent on the host under Seatbelt"
     )
     return replace(spec, name="host", options={})
+
+
+def derived_environment_name(name: str, backend: ComputeBackend, *, platform: str) -> str:
+    """Return the environment a *name* selection runs in on *platform* with *backend*.
+
+    ``docker`` becomes ``host`` for a host-only backend on macOS; every other
+    selection is itself. :func:`resolve_run_environment_spec` applies it; an
+    entry point asks it before building a task image the host would refuse.
+    """
+    if name == "docker" and platform == "darwin" and backend_is_host_only(backend):
+        return "host"
+    return name
 
 
 def run_environment_deprecation(environment: RunEnvironment) -> str | None:

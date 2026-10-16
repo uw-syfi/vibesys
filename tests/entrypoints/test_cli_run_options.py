@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -13,6 +14,7 @@ from entrypoints.cli.config import load_config_and_skills
 from entrypoints.cli.preflight import (
     ACCELERATOR_UNAVAILABLE,
     AGENT_IMAGES_COMMAND,
+    TASK_IMAGE_UNSUPPORTED,
     agent_image_check,
     preflight_report,
     valid_report,
@@ -20,7 +22,7 @@ from entrypoints.cli.preflight import (
 from server.host_api import MAX_RUN_SECONDS_FLAG, ROLE_MODEL_FLAG, ROLE_REASONING_EFFORT_FLAG
 from server.host_preflight import CheckId, CheckState, SettingsInvalid
 from vibesys.api import DomainName
-from vibesys.api.request import run_environment_uses_docker
+from vibesys.api.request import TaskImageError, run_environment_uses_docker
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vs_runtime.api.infrastructure import RunEnvironmentSpec
 from vs_sim.api import ProbeResult
@@ -28,7 +30,6 @@ from vs_sim.api.testing import ScriptedProbe
 
 if TYPE_CHECKING:
     from argparse import Namespace
-    from pathlib import Path
 
 
 def _argv(tmp_path: Path, *extra: str) -> list[str]:
@@ -232,3 +233,19 @@ def test_a_pinned_cuda_device_is_trusted_as_the_run_trusts_it(
     report = preflight_report(_argv(tmp_path, "--backend", "cuda"), _parse, _nvidia_smi(None))
 
     assert report.settings.valid is True
+
+
+def test_a_task_image_the_run_refuses_is_reported_as_invalid_settings() -> None:
+    """Regression: a refused task Dockerfile (a ValueError) crashed ``vibesys preflight``."""
+    refusal = TaskImageError.operator_image(Path("/task/Dockerfile"), "custom:1")
+
+    def parse(_argv: list[str]) -> Namespace:
+        raise refusal
+
+    probe = ScriptedProbe(lambda _argv: None)
+    report = preflight_report(["--docker-image", "custom:1"], parse, probe)
+
+    assert report.settings == SettingsInvalid(
+        code=TASK_IMAGE_UNSUPPORTED, stage="run_environment", message=str(refusal)
+    )
+    assert probe.calls == []

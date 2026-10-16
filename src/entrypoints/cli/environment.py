@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from entrypoints.cli.errors import _configuration_error
 from vibesys.api.request import (
     RunEnvironmentSpec,
+    TaskImageFacts,
     backend_default_image,
     build_task_image,
+    derived_environment_name,
     editor_image_plan,
+    is_task_image_reference,
+    local_image_exists,
     make_run_environment_spec,
     supported_profilers,
+    task_image_reference,
 )
 from vs_sim.api import DISCARD, MonotonicClock
 
@@ -78,18 +84,64 @@ class TaskImageBuild:
     runner: DockerBuildRunner | None = None
 
 
-def _editor_image(plan: EditorImagePlan, build: TaskImageBuild | None) -> str | None:
-    """Run the build *plan* asks for, if this call builds, and return the editor image."""
-    if plan.task_dockerfile is None or build is None:
-        return plan.resolve(None)
+def _task_image_facts(
+    dockerfile: Path,
+    recorded: str | None,
+    launch: Literal["fresh", "resume"],
+    build: TaskImageBuild,
+) -> TaskImageFacts:
+    """Read what the plan needs: the inputs' reference and whether the recorded image is local."""
+    base_image = backend_default_image(build.backend)
+    present = None
+    if launch == "resume" and recorded is not None:
+        present = local_image_exists(
+            recorded, command_runner=build.runner, output=DISCARD, clock=MonotonicClock()
+        )
+    return TaskImageFacts(
+        reference=task_image_reference(dockerfile, base_image=base_image),
+        base_image=base_image,
+        recorded_is_reference=recorded is not None and is_task_image_reference(recorded),
+        recorded_present=present,
+    )
+
+
+def _editor_image(
+    environment: str,
+    *,
+    dockerfile: Path | None,
+    image: str | None,
+    launch: Literal["fresh", "resume"],
+    build: TaskImageBuild | None,
+) -> EditorImagePlan:
+    """Decide the editor image and perform the build the decision asks for.
+
+    The refusals run first, without reading or building anything, so an
+    environment that cannot honor the task image fails before a build.
+    """
+    plan = editor_image_plan(
+        environment, task_dockerfile=dockerfile, image=image, launch=launch, facts=None
+    )
+    if dockerfile is None or build is None:
+        return plan
+    plan = editor_image_plan(
+        environment,
+        task_dockerfile=dockerfile,
+        image=image,
+        launch=launch,
+        facts=_task_image_facts(dockerfile, image, launch, build),
+    )
+    if plan.build is None:
+        return plan
+    if plan.notice is not None:
+        sys.stderr.write(f"{plan.notice}\n")
     built = build_task_image(
-        plan.task_dockerfile,
-        base_image=plan.base_image,
+        plan.build.dockerfile,
+        base_image=plan.build.base_image,
         command_runner=build.runner,
         clock=MonotonicClock(),
         output=DISCARD,
     )
-    return plan.resolve(built)
+    return replace(plan, image=plan.resolve(built))
 
 
 def _image_option(image: str | None) -> dict[str, object]:
@@ -140,14 +192,22 @@ def run_environment_spec_from_args(
             )
             raise ValueError(_exception_message_2)
 
-    plan = editor_image_plan(
-        requested_environment,
-        task_dockerfile=dockerfile_path,
+    # The environment the run will open: Metal on macOS derives the host one,
+    # which refuses a task image, so ask before building it.
+    plan = _editor_image(
+        (
+            derived_environment_name(
+                requested_environment, task_image.backend, platform=sys.platform
+            )
+            if task_image is not None
+            else requested_environment
+        ),
+        dockerfile=dockerfile_path,
         image=args.docker_image,
-        base_image=(backend_default_image(task_image.backend) if task_image is not None else None),
         launch="resume" if resuming else "fresh",
+        build=task_image,
     )
-    image = _editor_image(plan, task_image)
+    image = plan.image
 
     if requested_environment == "slurm-gpu":
         return RunEnvironmentSpec(
