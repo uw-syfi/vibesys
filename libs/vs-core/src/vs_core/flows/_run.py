@@ -39,7 +39,7 @@ from vs_core.types.strategy import (
     Withdraw,
     Work,
 )
-from vs_core.types.until import Within
+from vs_core.types.until import Failed, Within
 
 from ._defs import FlowDef, _adapter, _Task, definition_of, snapshot_adapter
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
@@ -390,9 +390,9 @@ class _Run:
                 self.trace.operation_started(task.span_id, pending.decision, issued_as)
                 if label is not None:
                     self.label(operation_span(pending.decision), label.kind, label.fields())
-                if earlier.closed is not None:  # core settled it already: that is the answer
-                    pending.set(earlier.closed)
-                    self.trace.operation_answered(pending.decision, earlier.closed)
+                if earlier.answer is not None:  # core answered it already: that is the answer
+                    pending.set(earlier.answer)
+                    self.trace.operation_answered(pending.decision, earlier.answer)
                 return pending
         self._pendings[pending.decision] = pending
         task.started.append(pending)
@@ -599,9 +599,12 @@ class _Run:
             else:
                 self._settle_held(task.path, held, RestartSettleReason.NOT_REOPENED)
         task.carried = []
-        self._in_flight = [
-            i for i in self._in_flight if i.path != task.path or i.closed is None
-        ]  # a settlement kept for the flow that no flow takes now
+        for entry in [i for i in self._in_flight if i.path == task.path and i.answer is not None]:
+            # an answer kept for the flow that it no longer takes: a workspace it opens is settled
+            self._in_flight.remove(entry)
+            if isinstance(entry.answer, WorkspaceOpened):
+                held = Held(attempt=entry.answer.attempt)
+                self._settle_held(task.path, held, RestartSettleReason.UNCLAIMED)
         self._tasks.remove(task)
         for pending in task.started:
             if pending.alive():
@@ -644,7 +647,7 @@ class _Run:
             return  # an event that answers nothing of ours (an agent's own measurement)
         pending = self._pendings.pop(decision, None)
         self._awaited.pop(decision, None)
-        if self._closed_early(item, pending):
+        if self._answered_early(item, decision, pending):
             return
         self._in_flight = [i for i in self._in_flight if not _answers(item, decision, i.request)]
         if pending is None:
@@ -659,25 +662,39 @@ class _Run:
         if not isinstance(pending.work, Finish):
             self.trace.operation_answered(decision, event)
 
-    def _closed_early(self, item: Event | Recorded, pending: Pending | None) -> bool:
-        """Keep a settlement that came while the resumed flow that holds its workspace works on.
+    def _answered_early(
+        self, item: Event | Recorded, decision: DecisionId, pending: Pending | None
+    ) -> bool:
+        """Keep an opening or a settlement that came before the resumed flow asked for it again.
 
-        The flow reopened the workspace after a restart and will close it: its close then
-        takes this settlement (``issue``) rather than asking core for another.
+        A flow resumed after a restart asks again for what it waited for (``issue``); core may
+        answer the old request first. An opened workspace is kept for the flow at that path,
+        which takes it when it asks, so the workspace opens once; if the flow ends without
+        asking, the workspace is settled (``_ended``). A settlement is kept only while a flow
+        there holds its workspace: it reopened it and will close it.
         """
-        if pending is not None or not isinstance(item, WorkspaceClosed):
+        if pending is not None or not isinstance(item, WorkspaceOpened | WorkspaceClosed | Failed):
             return False
-        attempt = item.settlement.attempt.attempt_id
         for index, entry in enumerate(self._in_flight):
             request = entry.request
-            held = any(
-                h.attempt.attempt_id == attempt
-                for task in self._tasks
-                if task.path == entry.path
-                for h in (*task.holds, *task.carried)
-            )
-            if isinstance(request, Withdraw) and _answers(item, item.decision, request) and held:
-                self._in_flight[index] = entry.model_copy(update={"closed": item})
+            if entry.answer is not None or not _answers(item, decision, request):
+                continue
+            if isinstance(request, Measure) or (
+                isinstance(item, WorkspaceClosed) != isinstance(request, Withdraw)
+            ):
+                # a measurement asked again later is measured again (the flow may ask another);
+                # a close answers only a settlement, reported under the opening decision
+                continue
+            here = [task for task in self._tasks if task.path == entry.path]
+            if isinstance(item, WorkspaceClosed):
+                attempt = item.settlement.attempt.attempt_id
+                here = [
+                    task
+                    for task in here
+                    if any(h.attempt.attempt_id == attempt for h in (*task.holds, *task.carried))
+                ]
+            if here:
+                self._in_flight[index] = entry.model_copy(update={"answer": item})
                 return True
         return False
 

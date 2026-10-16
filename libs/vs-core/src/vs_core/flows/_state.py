@@ -179,8 +179,11 @@ class InFlight(Value):
     path: str
     label: str
     request: Measure | Withdraw | StartAttempt
-    closed: WorkspaceClosed | None = None
-    """For a settlement: core's answer, when it came before the resumed flow asked again."""
+    answer: (
+        Annotated[WorkspaceOpened | WorkspaceClosed | Failed, Field(discriminator="kind")] | None
+    ) = None
+    """Core's answer to an opening or a settlement, when it came before the resumed flow asked
+    again: the flow takes it then."""
 
 
 class LiveFlow(Value):

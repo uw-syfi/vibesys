@@ -202,6 +202,65 @@ def test_a_workspace_opening_at_the_change_opens_for_the_resumed_flow() -> None:
     assert run.state.restart_settled == ()
 
 
+def verifier(label: str, *, opens: bool = True) -> Worker:
+    """A flow that asks ``verify`` before it opens a workspace, so it is redone from its start.
+
+    Without ``opens`` it ends after ``verify`` and never asks for the workspace.
+    """
+
+    @core.flow(snapshot=Job, name="holder")
+    async def run(ctx: core.Flow, job: Job) -> int:
+        ctx.checkpoint(job)
+        await ask(ctx, "verify")
+        if not opens:
+            return 0
+        async with open_workspace(ctx, "ws") as ws:
+            assert not isinstance(ws, core.NotOpened)
+            await ask(ctx, label)
+            ctx.workspaces.keep(ws, REVISION, KEPT)
+        return 1
+
+    return run
+
+
+@pytest.mark.parametrize("opens", [True, False], ids=["asks-again", "never-asks"])
+def test_a_workspace_that_opens_before_the_resumed_flow_asks_again_waits_for_it(
+    *, opens: bool
+) -> None:
+    """Core may open the workspace before the resumed flow, redone from its start, asks again.
+
+    The opening is kept for the flow: it takes the workspace when it asks, so the workspace
+    opens once; a flow that ends without asking has it settled, never leaked.
+    """
+    run = FlowRun.start(parent(verifier("v1")), Config())
+    run.reply(run.expect_turn("verify"), Plan(n=1))
+    start = run.expect(core.StartAttempt)
+    run.swap(code_changed(parent(verifier("v2", opens=opens))))
+    run.advance_to(1.0)  # the first event the new code sees: the flows restart
+    verify = run.expect_turn("verify")
+    opened = run.open_workspace(start)  # answered before the resumed flow asks again
+
+    assert not _settles(run, "restart-settle")
+    run.reply(verify, Plan(n=1))
+    assert len([d for d in run.decisions if _starts(d)]) == 1  # never opened twice
+    if not opens:
+        (settle,) = _settles(run, "restart-settle")
+        assert settle.request.target == opened  # ty: ignore[unresolved-attribute]
+        assert [item.reason for item in run.state.restart_settled] == [
+            core.RestartSettleReason.UNCLAIMED
+        ]
+        run.close_workspace(settle)
+        assert run.state.live.in_flight == ()
+        return
+    run.reply(run.expect_turn("v2"), Plan(n=1))
+    settle = run.expect(core.Withdraw, label="settle")
+    assert settle.request.target == opened  # ty: ignore[unresolved-attribute]
+    run.close_workspace(settle)
+    assert run.driver.published(run.state, Gave) == Gave(result=1)
+    assert run.state.restart_settled == ()
+    assert run.state.live.in_flight == ()
+
+
 def test_a_workspace_that_opens_for_no_flow_is_settled_not_leaked() -> None:
     run = FlowRun.start(parent(holder("v1")), Config())
     start = run.expect(core.StartAttempt)

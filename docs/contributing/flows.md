@@ -409,8 +409,11 @@ revision, assessment)`, which names how the workspace settles if the restart can
 Requests in flight at the change are not asked twice. A resumed flow that asks again for a
 measurement of the same plan, a settlement of the same workspace, or the opening of the same
 workspace is attached to the request already in flight (`LiveFlows.in_flight`) and gets its
-answer. A workspace whose settlement was in flight is left to it (`ws.settling` on reopen, reason
-`settling`); a workspace that opens with no flow left to claim it is settled as `unclaimed`.
+answer. An opening or a settlement core answers before the resumed flow asks again is kept for
+the flow at that path (`InFlight.answer`), so the workspace still opens once; a measurement
+answered first is dropped, and measured again if asked. A workspace whose settlement was in flight
+is left to it (`ws.settling` on reopen, reason `settling`); a workspace that opens with no flow
+left to claim it, or whose kept opening its flow ends without taking, is settled as `unclaimed`.
 
 ## The winner
 
