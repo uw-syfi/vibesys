@@ -2097,7 +2097,7 @@
     },
     "GateFinishedData": {
       "additionalProperties": false,
-      "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries the trailing command\noutput on failure. ``round_label`` groups the per-recipe local-validation\ngates of one attempt back together, so a client folds them into a\npass-fraction itself rather than the backend aggregating one.",
+      "description": "Outcome of one framework gate; envelope status carries pass or fail.\n\n``metric``/``value``/``unit`` are set only on a passing benchmark gate.\n``unit`` keeps the historical fallback of the metric name when the\ncontract declares no unit. ``output_tail`` carries bounded, credential-redacted\ntrailing command output on failure. ``round_label`` groups the per-recipe local-validation\ngates of one attempt back together, so a client folds them into a\npass-fraction itself rather than the backend aggregating one.",
       "properties": {
         "kind": {
           "const": "gate_finished",

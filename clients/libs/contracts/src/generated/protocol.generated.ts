@@ -1790,8 +1790,8 @@ export interface GateStartedData {
  *
  * ``metric``/``value``/``unit`` are set only on a passing benchmark gate.
  * ``unit`` keeps the historical fallback of the metric name when the
- * contract declares no unit. ``output_tail`` carries the trailing command
- * output on failure. ``round_label`` groups the per-recipe local-validation
+ * contract declares no unit. ``output_tail`` carries bounded, credential-redacted
+ * trailing command output on failure. ``round_label`` groups the per-recipe local-validation
  * gates of one attempt back together, so a client folds them into a
  * pass-fraction itself rather than the backend aggregating one.
  */

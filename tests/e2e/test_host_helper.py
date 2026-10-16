@@ -56,7 +56,9 @@ _SCENARIOS = tuple(
 # adds 1.
 # server.host_helper_logs (the logs handlers: chunk cuts and the long poll) adds 1; the
 # vs_logs reader itself loads on the first logs request, never for hello (asserted below).
-_MODULE_CEILING = 336
+# vs_redaction and its api add 2 light, standard-library-only modules so every host diagnostic
+# boundary uses the same credential matcher instead of retaining a second implementation.
+_MODULE_CEILING = 338
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
