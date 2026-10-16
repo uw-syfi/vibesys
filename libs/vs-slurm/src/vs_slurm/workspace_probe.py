@@ -5,14 +5,16 @@ from __future__ import annotations
 import hashlib
 from typing import TYPE_CHECKING, Literal, NoReturn
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_sim.api import ProcessTimeoutError
 
 from .cluster_store import WorkspaceProbeStore
+from .config import SlurmConfig, minimal_job
 from .errors import (
     SlurmError,
+    SlurmSbatchFailedError,
     SlurmSubmissionRejectedError,
     SlurmWorkspaceRootProbeError,
 )
@@ -38,6 +40,12 @@ _RECORD = "workspace-root-probe"
 _SUBMIT_MARKER_FILE = ".vibesys-submit-token"
 _NODE_MARKER_FILE = ".vibesys-node-token"
 _MAX_STATE_BYTES = 64 * 1024
+# The record version written before retry generations; still read.
+_LEGACY_RECORD_VERSION = 2
+# How long the probe waits in the queue when ``queue_timeout_seconds`` is unset.
+_DEFAULT_QUEUE_TIMEOUT_SECONDS = 1800
+# Once started, the probe gets its time limit plus this long to be seen ending.
+_RUN_MARGIN_SECONDS = 120
 _BOUNDARY_FAILURES = (
     OSError,
     SlurmError,
@@ -53,7 +61,11 @@ class _ProbeState(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    version: Literal[2] = 2
+    # Version 3 added ``generation`` and the "unscheduled" outcome; version 2 is read.
+    version: Literal[2, 3] = 3
+    # Which attempt of this run's probe the record is about. A resume after a probe
+    # the scheduler never started retries under the next generation's operation id.
+    generation: int = Field(default=0, ge=0)
     operation_id: str
     workspace_identity: str
     claim_identity: str
@@ -76,9 +88,23 @@ class _ProbeState(BaseModel):
         "unscheduled",
     ] = "pending"
     exit_code: int | None = None
-    # For "unscheduled": how long the job waited in the queue, and the scheduler's reason.
+    # Present exactly for "unscheduled": how long the job waited in the queue, and the
+    # scheduler's pending reason ("" when it gave none).
     waited_seconds: float | None = None
     pending_reason: str | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> _ProbeState:
+        unscheduled = self.outcome == "unscheduled"
+        if unscheduled != (self.waited_seconds is not None) or unscheduled != (
+            self.pending_reason is not None
+        ):
+            message = "waited_seconds and pending_reason are set exactly when unscheduled"
+            raise ValueError(message)
+        if self.version == _LEGACY_RECORD_VERSION and (self.generation or unscheduled):
+            message = "a version 2 record has no generation and no unscheduled outcome"
+            raise ValueError(message)
+        return self
 
 
 class _ProbeIntent(BaseModel):
@@ -98,8 +124,10 @@ class _ProbeAcceptance(_ProbeIntent):
     job_id: str
 
 
-def _operation_id(run_id: str) -> str:
-    return "workspace-root-probe-" + hashlib.sha256(run_id.encode()).hexdigest()[:32]
+def _operation_id(run_id: str, generation: int) -> str:
+    """The run's probe operation id; generation 0 keeps the version 2 derivation."""
+    key = run_id if generation == 0 else f"{run_id}\0retry-{generation}"
+    return "workspace-root-probe-" + hashlib.sha256(key.encode()).hexdigest()[:32]
 
 
 def _token(kind: str, operation_id: str) -> str:
@@ -150,12 +178,8 @@ def _request(
     return request, tree_content_identity(workspace, excludes=(".git/",)), node_token, returned
 
 
-def _load(
-    store: WorkspaceProbeStore,
-    operation_id: str,
-    identity: str,
-    claim_identity: str,
-) -> _ProbeState | None:
+def _read(store: WorkspaceProbeStore) -> _ProbeState | None:
+    """The stored record, upgraded to the current version; identity unchecked."""
     raw = store.read(_RECORD)
     if raw is None:
         return None
@@ -168,13 +192,7 @@ def _load(
     )
     if isinstance(state, Unreadable):
         raise SlurmWorkspaceRootProbeError.state_invalid()
-    if (
-        state.operation_id != operation_id
-        or state.workspace_identity != identity
-        or state.claim_identity != claim_identity
-    ):
-        raise SlurmWorkspaceRootProbeError.state_invalid()
-    return state
+    return state.model_copy(update={"version": 3})
 
 
 def _save(store: WorkspaceProbeStore, state: _ProbeState) -> None:
@@ -299,7 +317,7 @@ def _settle(
             raise SlurmWorkspaceRootProbeError.settlement_unconfirmed() from error
 
 
-def _stored_failure(state: _ProbeState) -> SlurmWorkspaceRootProbeError:
+def _stored_failure(state: _ProbeState, config: SlurmConfig) -> SlurmWorkspaceRootProbeError:
     job_id = state.handle.job_id if state.handle is not None else "unknown"
     if state.outcome == "job_failed":
         return SlurmWorkspaceRootProbeError.job_failed(job_id, state.exit_code)
@@ -311,7 +329,11 @@ def _stored_failure(state: _ProbeState) -> SlurmWorkspaceRootProbeError:
         return SlurmWorkspaceRootProbeError.infrastructure()
     if state.outcome == "unscheduled" and state.waited_seconds is not None:
         return SlurmWorkspaceRootProbeError.never_scheduled(
-            job_id, state.waited_seconds, state.pending_reason
+            job_id,
+            waited_seconds=state.waited_seconds,
+            reason=state.pending_reason,
+            request=minimal_job(config).description,
+            queue_timeout_seconds=config.queue_timeout_seconds,
         )
     return SlurmWorkspaceRootProbeError.state_invalid()
 
@@ -329,7 +351,9 @@ def _record_failure(
 
 
 def _raise_unresolved(cause: BaseException | None = None) -> NoReturn:
-    error = SlurmWorkspaceRootProbeError.submission_unresolved()
+    # sbatch's own diagnostic is safe to show and usually says why (bad partition, QoS).
+    detail = str(cause) if isinstance(cause, SlurmSbatchFailedError) else None
+    error = SlurmWorkspaceRootProbeError.submission_unresolved(detail)
     if cause is None:
         raise error
     raise error from cause
@@ -346,10 +370,12 @@ class _ProbeLifecycle:
         pause: Callable[[float], None],
     ) -> None:
         self._runner = runner
-        self._operation_id = _operation_id(run_id)
+        self._run_id = run_id
+        self._state_root = state_root
         self._store = WorkspaceProbeStore(state_root)
-        self._claim_identity = _claim_identity(state_root, self._operation_id)
         self._pause = pause
+        self._operation_id = _operation_id(run_id, 0)
+        self._claim_identity = ""
 
     def run(self) -> None:
         """Serialize this run's preparation and retain its terminal receipt."""
@@ -357,13 +383,26 @@ class _ProbeLifecycle:
             self._run_locked()
 
     def _run_locked(self) -> None:
+        stored = _read(self._store)
+        generation = 0 if stored is None else stored.generation
+        if stored is not None and stored.outcome == "unscheduled":
+            # The scheduler never started that attempt and it was settled and cleaned
+            # when recorded; confirm the cleanup, then retry under a fresh operation
+            # id so the old claim is never reused.
+            _cleanup(self._runner, stored)
+            generation += 1
+            stored = None
+        self._operation_id = _operation_id(self._run_id, generation)
+        self._claim_identity = _claim_identity(self._state_root, self._operation_id)
         request, identity, node_token, _returned = _request(self._store, self._operation_id)
-        state = _load(
-            self._store,
-            self._operation_id,
-            identity,
-            self._claim_identity,
-        ) or _ProbeState(
+        if stored is not None and (
+            stored.operation_id != self._operation_id
+            or stored.workspace_identity != identity
+            or stored.claim_identity != self._claim_identity
+        ):
+            raise SlurmWorkspaceRootProbeError.state_invalid()
+        state = stored or _ProbeState(
+            generation=generation,
             operation_id=self._operation_id,
             workspace_identity=identity,
             claim_identity=self._claim_identity,
@@ -377,7 +416,7 @@ class _ProbeLifecycle:
     def _finish_stored(self, state: _ProbeState) -> None:
         _cleanup(self._runner, state)
         if state.outcome != "verified":
-            raise _stored_failure(state)
+            raise _stored_failure(state, self._runner.config)
 
     def _handle(
         self, request: SlurmJobRequest, state: _ProbeState
@@ -563,7 +602,7 @@ class _ProbeLifecycle:
         """Consume durable pre-acceptance rejection and leave a safe retry point."""
         retryable = self._save_phase(state, "prepared")
         _cleanup(self._runner, retryable)
-        failure = SlurmWorkspaceRootProbeError.infrastructure()
+        failure = SlurmWorkspaceRootProbeError.rejected(None if cause is None else str(cause))
         if cause is None:
             raise failure
         raise failure from cause
@@ -599,14 +638,12 @@ class _ProbeLifecycle:
         handle: SlurmJobHandle,
         node_token: str,
     ) -> None:
-        try:
-            observed = self._runner.wait(handle, pause=self._pause)
-        except _BOUNDARY_FAILURES as error:
-            self._abandon(state, handle, error)
-        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-209102 [BLE001]; a caller cancellation can interrupt a scheduler wait with any BaseException, but the accepted probe still must be settled and cleaned before propagation.
-            self._abandon(state, handle, error)
+        config = self._runner.config
+        queue_seconds = config.queue_timeout_seconds or _DEFAULT_QUEUE_TIMEOUT_SECONDS
+        observed = self._wait(state, handle, queue_seconds=queue_seconds)
         if observed.timed_out and observed.status == SlurmJobStatus.PENDING:
-            self._unscheduled(state, handle, observed)
+            self._unless_started(state, handle, observed)
+            observed = self._wait(state, handle, queue_seconds=None)
         if observed.timed_out or observed.status not in {
             SlurmJobStatus.COMPLETED,
             SlurmJobStatus.FAILED,
@@ -626,27 +663,53 @@ class _ProbeLifecycle:
             self._abandon(state, handle, error)
         _cleanup(self._runner, verified)
 
-    def _unscheduled(
-        self, state: _ProbeState, handle: SlurmJobHandle, observed: SlurmJobWaitResult
-    ) -> NoReturn:
-        """Cancel a probe the scheduler never started and say how long it waited."""
+    def _wait(
+        self, state: _ProbeState, handle: SlurmJobHandle, *, queue_seconds: float | None
+    ) -> SlurmJobWaitResult:
+        """Wait out the queue (when ``queue_seconds`` is given), then the short run.
+
+        A result still ``PENDING`` and ``timed_out`` means the queue bound passed.
+        """
+        job = minimal_job(self._runner.config)
+        run_limit = job.time_limit_seconds or self._runner.config.job_timeout_seconds
         try:
-            reason = self._runner.inspect_job(handle.job_id).reason
+            if queue_seconds is not None:
+                queued = self._runner.wait_until_started(
+                    handle, pause=self._pause, timeout_seconds=queue_seconds
+                )
+                if queued.timed_out:
+                    return queued
+            return self._runner.wait(
+                handle, pause=self._pause, timeout_seconds=run_limit + _RUN_MARGIN_SECONDS
+            )
+        except _BOUNDARY_FAILURES as error:
+            self._abandon(state, handle, error)
+        except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-209102 [BLE001]; a caller cancellation can interrupt a scheduler wait with any BaseException, but the accepted probe still must be settled and cleaned before propagation.
+            self._abandon(state, handle, error)
+
+    def _unless_started(
+        self, state: _ProbeState, handle: SlurmJobHandle, queued: SlurmJobWaitResult
+    ) -> None:
+        """Return if the job started after the last poll; else cancel it as never scheduled."""
+        try:
+            reading = self._runner.inspect_job(handle.job_id)
         except _BOUNDARY_FAILURES:
-            reason = None  # the reason only explains the wait; its absence changes nothing
+            reading = None  # the last poll's PENDING stands; only the reason is lost
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-209115 [BLE001]; caller cancellation during the queue-reason read must still settle and clean the accepted probe; catching Exception or enumerating cancellation classes would leave it queued on an omitted BaseException path.
             # > Reading the reason after settlement loses it (a cancelled job has none);
             # > a finally block cannot tell a cancellation from success without the error.
             self._abandon(state, handle, error)
+        if reading is not None and reading.status != SlurmJobStatus.PENDING:
+            return
         failed = state.model_copy(
             update={
                 "outcome": "unscheduled",
                 "exit_code": None,
-                "waited_seconds": observed.waited_seconds,
-                "pending_reason": reason,
+                "waited_seconds": queued.waited_seconds,
+                "pending_reason": (reading.reason if reading is not None else None) or "",
             }
         )
-        self._abandon(state, handle, _stored_failure(failed), failed=failed)
+        self._abandon(state, handle, _stored_failure(failed, self._runner.config), failed=failed)
 
     def _clear_artifact(self, state: _ProbeState, handle: SlurmJobHandle) -> None:
         try:
@@ -685,7 +748,7 @@ class _ProbeLifecycle:
         except BaseException as error:  # noqa: BLE001  # lint-waiver: LW-209114 [BLE001]; a local receipt failure must not strand the already terminal scheduler operation, even under caller cancellation.
             self._abandon(state, handle, error)
         _cleanup(self._runner, failed)
-        error = _stored_failure(failed)
+        error = _stored_failure(failed, self._runner.config)
         if cause is None:
             raise error
         raise error from cause

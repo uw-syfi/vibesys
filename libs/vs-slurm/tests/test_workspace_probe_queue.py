@@ -8,11 +8,12 @@ reported as an opaque "infrastructure error".
 from __future__ import annotations
 
 import hashlib
+import json
 import shlex
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vs_sim.api.testing import ManualClock, examples
@@ -23,7 +24,7 @@ from vs_slurm.api import (
     SlurmJobStatus,
     SlurmLocalTransport,
     SlurmWorkspaceRootProbeError,
-    minimal_sbatch_arguments,
+    minimal_job,
     probe_workspace_root,
 )
 
@@ -31,6 +32,7 @@ from vs_slurm.api import (
 from vs_slurm.fake_connector import recorded_commands
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
     from random import Random
 
@@ -47,10 +49,14 @@ _EVALUATION_ARGUMENTS = (
     "00:30:00",
 )
 _RUN_ID = "run-on-a-busy-cluster"
+# test-isolation: the first attempt's scheduler identity, which the Fake scripts by operation id.
 _OPERATION_ID = "workspace-root-probe-" + hashlib.sha256(_RUN_ID.encode()).hexdigest()[:32]
+_FIRST_JOB_ID = "5000"  # the Fake's first scheduler identity
+_DEFAULT_QUEUE_SECONDS = 1800
 
-# Resource requests in every spelling sbatch reads: (tokens, option name).
-_RESOURCE_SPELLINGS = st.sampled_from(
+# Options a minimal job drops, in every spelling sbatch reads, with any value they take:
+# resource requests, start delays, node lists, and abbreviations sbatch would expand.
+_DROPPED_SPELLINGS = st.sampled_from(
     [
         ("--gres=gpu:4",),
         ("--gres", "gpu:8"),
@@ -59,10 +65,16 @@ _RESOURCE_SPELLINGS = st.sampled_from(
         ("-G4",),
         ("--gpus-per-node=8",),
         ("--gpus-per-task", "1"),
+        ("--tres-per-task=gres/gpu:1",),
         ("-c", "64"),
         ("-c64",),
         ("--cpus-per-task=32",),
         ("--cpus-per-gpu=16",),
+        ("--mincpus", "8"),
+        ("-B", "2:4:1"),
+        ("--sockets-per-node=2",),
+        ("--cores-per-socket", "4"),
+        ("--threads-per-core=1",),
         ("--mem=900G",),
         ("--mem", "200G"),
         ("--mem-per-cpu=8G",),
@@ -80,51 +92,61 @@ _RESOURCE_SPELLINGS = st.sampled_from(
         ("--time-min=10",),
         ("--exclusive",),
         ("--exclusive=user",),
+        ("--hold",),
+        ("-H",),
+        ("--dependency=afterok:7",),
+        ("-d", "afterany:8"),
+        ("--begin=now+1hour",),
+        ("-b", "16:00"),
+        ("--array=0-3",),
+        ("--signal", "B:USR1@60"),
+        ("-w", "node1"),
+        ("--nodelist=node[1-2]",),
+        ("--part=main",),
+        ("--acc", "lab"),
     ]
 )
-# Placement and identity options the operator chose; the probe keeps every one.
+# Placement and identity options the operator chose; a minimal job keeps every one.
 _PLACEMENT_SPELLINGS = st.sampled_from(
     [
         ("-p", "priority"),
+        ("-ppriority",),
         ("--partition=main",),
+        ("--partition", "main"),
         ("-A", "lab"),
+        ("-Alab",),
         ("--account=lab",),
         ("-q", "normal"),
         ("--qos=high",),
         ("-C", "b200"),
+        ("--constraint", "b200&ib"),
         ("--reservation=campaign",),
+        ("-M", "west"),
+        ("--clusters=west",),
+        ("-x", "node3"),
+        ("--exclude", "node[4-5]"),
+        ("--wckey=glm",),
+        ("--comment", "vibesys probe"),
     ]
 )
-_RESOURCE_NAMES = (
-    "--gres",
-    "--gpus",
-    "--cpus",
-    "--mem",
-    "--nodes",
-    "--ntasks",
-    "--time",
-    "--exclusive",
-)
+_MINIMAL_REQUEST = ("--nodes=1", "--ntasks=1", "--cpus-per-task=1", "--mem=1G")
 
 
-def _config(
-    remote: Path,
-    arguments: tuple[str, ...] = _EVALUATION_ARGUMENTS,
-    *,
-    job_timeout_seconds: int = 2100,
-    poll_interval_seconds: float = 10.0,
-) -> SlurmConfig:
-    return SlurmConfig(
-        name="busy",
-        remote_workspace_root=str(remote),
-        transport=SlurmLocalTransport(
-            kind="local",
-            shell_command=("fake-connector", "shell"),
-            rsync_command=("fake-connector", "rsync"),
-        ),
-        sbatch_arguments=arguments,
-        job_timeout_seconds=job_timeout_seconds,
-        poll_interval_seconds=poll_interval_seconds,
+def _config(remote: Path, **settings: object) -> SlurmConfig:
+    return SlurmConfig.model_validate(
+        {
+            "name": "busy",
+            "remote_workspace_root": str(remote),
+            "transport": SlurmLocalTransport(
+                kind="local",
+                shell_command=("fake-connector", "shell"),
+                rsync_command=("fake-connector", "rsync"),
+            ),
+            "sbatch_arguments": _EVALUATION_ARGUMENTS,
+            "job_timeout_seconds": 2100,
+            "poll_interval_seconds": 10.0,
+            **settings,
+        }
     )
 
 
@@ -153,6 +175,11 @@ def _setup(root: Path) -> tuple[Path, FakeConnector]:
     return remote, FakeConnector(root / "cluster")
 
 
+def _assert_cleaned(remote: Path) -> None:
+    cluster = remote / "busy"
+    assert not [path for path in cluster.iterdir() if path.name != ".vibesys-content-cache"]
+
+
 def test_probe_asks_for_one_cpu_and_no_gpu_in_the_configured_partition(tmp_path: Path) -> None:
     remote, connector = _setup(tmp_path)
 
@@ -161,82 +188,173 @@ def test_probe_asks_for_one_cpu_and_no_gpu_in_the_configured_partition(tmp_path:
     (submitted,) = _submissions(connector)
     assert submitted[:2] == ["-p", "priority"]
     assert not any("gpu" in arg or "900G" in arg or arg == "64" for arg in submitted)
-    assert {"--nodes=1", "--ntasks=1", "--cpus-per-task=1", "--mem=1G"} <= set(submitted)
+    assert set(_MINIMAL_REQUEST) <= set(submitted)
+
+
+def test_probe_sbatch_arguments_replace_the_derived_request(tmp_path: Path) -> None:
+    remote, connector = _setup(tmp_path)
+    override = ("-p", "gpu-only", "--gres=gpu:1", "--time=10")
+
+    _probe(_config(remote, probe_sbatch_arguments=override), connector, tmp_path)
+
+    (submitted,) = _submissions(connector)
+    assert tuple(submitted[: len(override)]) == override
+    assert not set(_MINIMAL_REQUEST) & set(submitted)
 
 
 @given(
-    resources=st.lists(_RESOURCE_SPELLINGS, max_size=6),
+    dropped=st.lists(_DROPPED_SPELLINGS, max_size=6),
     placement=st.lists(_PLACEMENT_SPELLINGS, max_size=4),
     order=st.randoms(use_true_random=False),
     grace=st.integers(min_value=1, max_value=20),
     exit_wait=st.integers(min_value=1, max_value=1800),
 )
 @settings(max_examples=examples(pr=50, nightly=500), deadline=None)
-def test_minimal_arguments_drop_every_resource_request_and_keep_placement(
-    resources: list[tuple[str, ...]],
+def test_a_minimal_job_keeps_exactly_the_placement_options(
+    dropped: list[tuple[str, ...]],
     placement: list[tuple[str, ...]],
     order: Random,
     grace: int,
     exit_wait: int,
 ) -> None:
-    groups = [*resources, *placement]
+    groups = [*dropped, *placement]
     order.shuffle(groups)
-    arguments = tuple(token for group in groups for token in group)
     config = SlurmConfig(
         name="any",
         remote_workspace_root="/scratch",
         transport=SlurmLocalTransport(kind="local"),
-        sbatch_arguments=arguments,
+        sbatch_arguments=tuple(token for group in groups for token in group),
         service_stop_grace_seconds=grace,
         process_exit_wait_seconds=exit_wait,
     )
 
-    minimal = minimal_sbatch_arguments(config)
+    job = minimal_job(config)
 
-    kept, added = minimal[:-5], minimal[-5:]
-    placed = tuple(token for group in groups if group in placement for token in group)
-    assert kept == placed
-    assert not any(token.startswith(_RESOURCE_NAMES) for token in kept)
-    assert added[:4] == ("--nodes=1", "--ntasks=1", "--cpus-per-task=1", "--mem=1G")
+    kept, added = job.arguments[:-5], job.arguments[-5:]
+    assert kept == tuple(token for group in groups if group in placement for token in group)
+    assert added[:4] == _MINIMAL_REQUEST
     # The minimal job is itself a valid configuration: its time limit leaves the job
     # script's teardown room, plus a minute for the command.
-    reshaped = config.model_copy(update={"sbatch_arguments": minimal})
-    SlurmConfig.model_validate(reshaped.model_dump(), strict=False)
-    minutes = int(added[4].removeprefix("--time="))
-    assert (minutes - 1) * 60 < grace + exit_wait + 60 <= minutes * 60
+    SlurmConfig.model_validate(
+        {**config.model_dump(), "sbatch_arguments": job.arguments}, strict=False
+    )
+    assert job.time_limit_seconds is not None
+    assert job.time_limit_seconds - 60 < grace + exit_wait + 60 <= job.time_limit_seconds
+    assert f"{job.time_limit_seconds // 60} min" in job.description
 
 
 @given(
-    timeout=st.integers(min_value=1, max_value=1800),
+    queue_timeout=st.none() | st.integers(min_value=1, max_value=1800),
     poll=st.sampled_from([60.0, 300.0]),
-    reason=st.sampled_from(["Priority", "Resources", "QOSMaxJobsPerUserLimit"]),
+    reason=st.sampled_from(["Priority", "Resources", "QOSMaxJobsPerUserLimit", ""]),
 )
-@settings(
-    max_examples=examples(pr=5, nightly=50),
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
-def test_a_probe_still_queued_at_its_deadline_says_it_was_never_scheduled(
-    tmp_path_factory: pytest.TempPathFactory, timeout: int, poll: float, reason: str
+@settings(max_examples=examples(pr=5, nightly=50), deadline=None)
+def test_a_probe_still_queued_at_its_deadline_says_so_and_a_resume_retries_it(
+    tmp_path_factory: pytest.TempPathFactory,
+    queue_timeout: int | None,
+    poll: float,
+    reason: str,
 ) -> None:
     root = tmp_path_factory.mktemp("queued")
     remote, connector = _setup(root)
     connector.script(_OPERATION_ID, states=(SlurmJobStatus.PENDING,), pending_reason=reason)
-    config = _config(remote, job_timeout_seconds=timeout, poll_interval_seconds=poll)
-    job_id = "5000"  # the Fake's first scheduler identity
-
-    expected = (
-        rf"probe job {job_id} was never scheduled\. It waited {timeout} s in the queue "
-        rf"\(scheduler reason: {reason}\).*Relaunch when that partition has a free CPU, "
-        r"or raise `job_timeout_seconds`"
+    config = _config(remote, queue_timeout_seconds=queue_timeout, poll_interval_seconds=poll)
+    waited = queue_timeout or _DEFAULT_QUEUE_SECONDS
+    why = rf" \(scheduler reason: {reason}\)" if reason else ""
+    setting = (
+        rf"`queue_timeout_seconds` \(now {queue_timeout} s\)"
+        if queue_timeout is not None
+        else r"`queue_timeout_seconds` \(unset"
     )
-    with pytest.raises(SlurmWorkspaceRootProbeError, match=expected):
-        _probe(config, connector, root)
-    assert f"scancel {job_id}" in recorded_commands(connector.state)
-    cluster = remote / "busy"
-    assert not [path for path in cluster.iterdir() if path.name != ".vibesys-content-cache"]
 
-    # A restart of the same run reports the same recorded outcome without resubmitting.
-    with pytest.raises(SlurmWorkspaceRootProbeError, match=expected):
+    with pytest.raises(
+        SlurmWorkspaceRootProbeError,
+        match=(
+            rf"probe job {_FIRST_JOB_ID} was never scheduled\. It waited {waited} s in the "
+            rf"queue{why} for 1 CPU, 1G of memory and 4 min without GPUs, in the partition "
+            rf"`sbatch_arguments` names.*a resumed run retries the probe.*raise {setting}"
+        ),
+    ):
         _probe(config, connector, root)
+    assert f"scancel {_FIRST_JOB_ID}" in recorded_commands(connector.state)
+    _assert_cleaned(remote)
+
+    # Resuming the run retries the probe under a new scheduler identity, which starts.
+    _probe(config, connector, root)
+
+    names = [
+        next(arg for arg in submitted if arg.startswith("--job-name="))
+        for submitted in _submissions(connector)
+    ]
+    assert len(names) == len(set(names)) == 2
+    _assert_cleaned(remote)
+
+
+def test_a_probe_that_starts_after_its_last_queued_poll_is_not_cancelled(
+    tmp_path: Path,
+) -> None:
+    remote, connector = _setup(tmp_path)
+    queue_seconds, poll = 60, 10.0
+    polls_in_queue_window = int(queue_seconds / poll) + 1
+    connector.script(
+        _OPERATION_ID,
+        states=(
+            *(SlurmJobStatus.PENDING,) * polls_in_queue_window,
+            SlurmJobStatus.RUNNING,
+            SlurmJobStatus.COMPLETED,
+        ),
+    )
+
+    _probe(
+        _config(remote, queue_timeout_seconds=queue_seconds, poll_interval_seconds=poll),
+        connector,
+        tmp_path,
+    )
+
+    assert f"scancel {_FIRST_JOB_ID}" not in recorded_commands(connector.state)
+    assert len(_submissions(connector)) == 1
+
+
+def _refuse_sbatch(
+    request: dict[str, object], answer: Callable[[dict[str, object]], dict[str, object]]
+) -> dict[str, object]:
+    if " sbatch " in f" {request.get('command', '')} ":
+        return {
+            "version": 1,
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "sbatch: error: invalid partition specified: nope\n",
+        }
+    return answer(request)
+
+
+def test_an_sbatch_refusal_is_reported_in_sbatchs_own_words(tmp_path: Path) -> None:
+    remote, connector = _setup(tmp_path)
+    connector.intercept(_refuse_sbatch)
+
+    with pytest.raises(
+        SlurmWorkspaceRootProbeError,
+        match=r"sbatch exited with code 1: sbatch: error: invalid partition specified: nope",
+    ):
+        _probe(_config(remote), connector, tmp_path)
+
+
+def test_a_record_written_by_the_previous_release_is_still_read(tmp_path: Path) -> None:
+    remote, connector = _setup(tmp_path)
+    config = _config(remote)
+    _probe(config, connector, tmp_path)
+    # test-isolation: the durable record format is a contract with the previous release,
+    # which wrote version 2 without the retry generation or the queue-wait fields.
+    record = tmp_path / "probe-state" / "records" / "workspace-root-probe.json"
+    current = json.loads(record.read_text(encoding="utf-8"))
+    assert current["version"] == 3
+    legacy = {
+        key: value
+        for key, value in current.items()
+        if key not in {"generation", "waited_seconds", "pending_reason"}
+    }
+    record.write_text(json.dumps({**legacy, "version": 2}), encoding="utf-8")
+
+    _probe(config, connector, tmp_path)
+
     assert len(_submissions(connector)) == 1

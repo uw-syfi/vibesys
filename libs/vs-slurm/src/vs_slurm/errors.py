@@ -87,9 +87,13 @@ class SlurmError(RuntimeError):
         return cls(f"Slurm transport timed out during {operation}")
 
     @classmethod
-    def transport_failed(cls, operation: str, returncode: int) -> SlurmError:
+    def transport_failed(cls, operation: str, returncode: int, stderr: str = "") -> SlurmError:
         """Describe an unsuccessful transport operation without exposing output."""
-        return cls(f"Slurm transport {operation} failed with exit code {returncode}")
+        return SlurmTransportFailedError(
+            f"Slurm transport {operation} failed with exit code {returncode}",
+            returncode=returncode,
+            stderr=stderr,
+        )
 
     @classmethod
     def invalid_connector_response(cls, operation: str) -> SlurmError:
@@ -172,6 +176,40 @@ class SlurmTransferInterruptedError(SlurmError):
         return cls(f"download of {remote} did not complete: {cause}")
 
 
+class SlurmTransportFailedError(SlurmError):
+    """A transport command ran and exited nonzero.
+
+    ``stderr`` is kept off the message, which never exposes command output; a caller
+    whose program's diagnostics are safe to show (``sbatch``) reads it.
+    """
+
+    def __init__(self, message: str, *, returncode: int, stderr: str) -> None:
+        """Keep the exit code and standard error beside the output-free message."""
+        super().__init__(message)
+        self.returncode = returncode
+        self.stderr = stderr
+
+
+# The longest part of sbatch's own diagnostics an error message carries.
+_SBATCH_DIAGNOSTIC_MAX_CHARS = 500
+_SBATCH_DIAGNOSTIC_LINES = 3
+
+
+class SlurmSbatchFailedError(SlurmError):
+    """``sbatch`` exited nonzero; the message carries the end of its own diagnostics.
+
+    Acceptance is still unknown: an ``sbatch`` whose reply timed out may have
+    submitted the job, so callers reconcile by name as for any other failure.
+    """
+
+    @classmethod
+    def from_transport(cls, error: SlurmTransportFailedError) -> SlurmSbatchFailedError:
+        """Describe a failed ``sbatch`` by its exit code and last diagnostic lines."""
+        lines = [line.strip() for line in error.stderr.splitlines() if line.strip()]
+        detail = " ".join(lines[-_SBATCH_DIAGNOSTIC_LINES:])[:_SBATCH_DIAGNOSTIC_MAX_CHARS]
+        return cls(f"sbatch exited with code {error.returncode}: {detail or 'no diagnostics'}")
+
+
 class SlurmSubmissionRejectedError(SlurmError):
     """Submission failed before the scheduler submission call was invoked.
 
@@ -213,25 +251,47 @@ class SlurmWorkspaceRootProbeError(SlurmError):
         return cls("Slurm `remote_workspace_root` startup probe failed: infrastructure error")
 
     @classmethod
-    def never_scheduled(
-        cls, job_id: str, waited_seconds: float, reason: str | None
+    def never_scheduled(  # LW-209116; each argument is one fact the operator needs to act on.
+        # > A record type would duplicate the probe's durable state for one message;
+        # > passing the state couples the error to the probe's private model.
+        cls,
+        job_id: str,
+        *,
+        waited_seconds: float,
+        reason: str | None,
+        request: str,
+        queue_timeout_seconds: int | None,
     ) -> SlurmWorkspaceRootProbeError:
         """Describe a probe job still queued at its deadline, and what the operator can do."""
         why = f" (scheduler reason: {reason})" if reason else ""
+        setting = (
+            f"`queue_timeout_seconds` (now {queue_timeout_seconds} s)"
+            if queue_timeout_seconds is not None
+            else "`queue_timeout_seconds` (unset, so the probe waits its default)"
+        )
         return cls(
             "Slurm `remote_workspace_root` startup probe failed: "
             f"probe job {job_id} was never scheduled. It waited {waited_seconds:.0f} s in the "
-            f"queue{why} for 1 CPU, 1 GiB and a few minutes without GPUs, in the partition "
-            "`sbatch_arguments` names, and VibeSys cancelled it. Relaunch when that partition "
-            "has a free CPU, or raise `job_timeout_seconds`, which bounds this wait"
+            f"queue{why} for {request}, and VibeSys cancelled it. Start the run again when "
+            f"the cluster has room for that request (a resumed run retries the probe), or "
+            f"raise {setting} to let it wait longer"
         )
 
     @classmethod
-    def submission_unresolved(cls) -> SlurmWorkspaceRootProbeError:
+    def rejected(cls, detail: str | None) -> SlurmWorkspaceRootProbeError:
+        """Describe a probe the cluster refused before ``sbatch`` accepted it."""
+        return cls(
+            "Slurm `remote_workspace_root` startup probe failed: the probe submission was "
+            f"rejected: {detail or 'the diagnostic was not kept across the restart'}"
+        )
+
+    @classmethod
+    def submission_unresolved(cls, detail: str | None = None) -> SlurmWorkspaceRootProbeError:
         """Describe scheduler acceptance that could not be reconciled yet."""
+        suffix = f": {detail}" if detail else ""
         return cls(
             "Slurm `remote_workspace_root` startup probe failed: "
-            "probe submission could not be reconciled"
+            f"probe submission could not be reconciled{suffix}"
         )
 
     @classmethod

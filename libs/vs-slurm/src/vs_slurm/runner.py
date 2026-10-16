@@ -38,13 +38,15 @@ from .config import (
     SlurmLocalTransport,
     SlurmService,
     SlurmSshTransport,
-    minimal_sbatch_arguments,
+    minimal_job,
     shell_join_with_port,
 )
 from .errors import (
     SlurmError,
+    SlurmSbatchFailedError,
     SlurmSubmissionRejectedError,
     SlurmTransferInterruptedError,
+    SlurmTransportFailedError,
 )
 from .job_teardown import start_in_own_session, teardown_shell
 from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
@@ -132,7 +134,7 @@ class SlurmJobResources(StrEnum):
     ``CONFIGURED`` uses the operator's ``sbatch_arguments`` as written: the shape an
     evaluation needs. ``MINIMAL`` keeps their partition, account and other placement
     options but asks for one CPU, no GPU and a few minutes
-    (:func:`~vs_slurm.config.minimal_sbatch_arguments`), so a job that only touches
+    (:func:`~vs_slurm.config.minimal_job`), so a job that only touches
     files is not queued behind GPU capacity.
     """
 
@@ -454,6 +456,11 @@ class SlurmJobRunner:
         self._operations = RemoteOperations(self._transport, config, scratch_root)
         self._clock = clock
         self._invocation_id = invocation_id
+
+    @property
+    def config(self) -> SlurmConfig:
+        """The cluster settings this runner submits with."""
+        return self._config
 
     def run(self, request: SlurmJobRequest, *, pause: Callable[[float], None]) -> SlurmJobResult:
         """Stage, submit, wait, and collect as a blocking compatibility API.
@@ -898,21 +905,39 @@ class SlurmJobRunner:
             self._cancel_abandoned(handle, failure)
             raise
 
+    def wait_until_started(
+        self,
+        handle: SlurmJobHandle,
+        *,
+        pause: Callable[[float], None],
+        timeout_seconds: float,
+    ) -> SlurmJobWaitResult:
+        """Observe until the job leaves the queue (runs or ends) or *timeout_seconds* pass.
+
+        ``timed_out`` means the job was still queued when last polled. Like
+        :meth:`wait`, the timeout never cancels the job.
+        """
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+            raise SlurmError.invalid_wait_timeout()
+        return self._observe(handle, timeout_seconds, None, pause, until_started=True)
+
     def _observe(
         self,
         handle: SlurmJobHandle,
         timeout: float,
         cancel_event: Event | None,
         pause: Callable[[float], None],
+        *,
+        until_started: bool = False,
     ) -> SlurmJobWaitResult:
-        """Poll until terminal or *timeout*; a set *cancel_event* raises, uncancelled."""
+        """Poll until terminal (or started) or *timeout*; a set *cancel_event* raises, uncancelled."""
         started = self._clock.now()
         deadline = started + timeout
         while True:
             if cancel_event is not None and cancel_event.is_set():
                 raise SlurmError.cancelled(handle.job_id)
             status = self.poll(handle)
-            if status.terminal:
+            if status.terminal or (until_started and status != SlurmJobStatus.PENDING):
                 return SlurmJobWaitResult(
                     handle=handle,
                     status=status,
@@ -1297,7 +1322,7 @@ class SlurmJobRunner:
         arguments = (
             self._config.sbatch_arguments
             if resources is SlurmJobResources.CONFIGURED
-            else minimal_sbatch_arguments(self._config)
+            else minimal_job(self._config).arguments
         )
         argv = (
             *self._config.sbatch_command,
@@ -1310,7 +1335,12 @@ class SlurmJobRunner:
             "--no-requeue",
             script.as_posix(),
         )
-        result = self._transport.exec(f"cd {shlex.quote(base.as_posix())} && {shlex.join(argv)}")
+        try:
+            result = self._transport.exec(
+                f"cd {shlex.quote(base.as_posix())} && {shlex.join(argv)}"
+            )
+        except SlurmTransportFailedError as error:
+            raise SlurmSbatchFailedError.from_transport(error) from error
         match = _JOB_ID.search(result.stdout)
         if match is None:
             raise SlurmError.missing_job_id()
@@ -1362,8 +1392,10 @@ class _ProcessTransport:
         match run:
             case ProcessOutcome(returncode=0, stdout=stdout, stderr=stderr):
                 return _TransportResponse(stdout=stdout.decode(), stderr=stderr.decode())
-            case ProcessOutcome(returncode=returncode):
-                raise SlurmError.transport_failed(operation, returncode)
+            case ProcessOutcome(returncode=returncode, stderr=stderr):
+                raise SlurmError.transport_failed(
+                    operation, returncode, stderr.decode(errors="replace")
+                )
             case ProcessTimedOut():
                 raise SlurmError.transport_timed_out(operation)
             case ProcessGroupUnreaped(detail=detail):
@@ -1585,7 +1617,7 @@ class _ConnectorTransport(_ProcessTransport):
         if isinstance(response, Unreadable):
             raise SlurmError.invalid_connector_response(operation)
         if response.returncode != 0:
-            raise SlurmError.transport_failed(operation, response.returncode)
+            raise SlurmError.transport_failed(operation, response.returncode, response.stderr)
         return _TransportResponse(stdout=response.stdout, stderr=response.stderr)
 
 
