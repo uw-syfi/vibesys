@@ -74,6 +74,9 @@ def _check_turns_and_gates(host: Host) -> None:
         assert gate.type is SpanType.OPERATION
         assert _attrs(gate)["stage"]
         assert gate.label is not None
+        if gate.label.verdict == "slower":
+            ratio = _attrs(gate)["vs_baseline"]
+            assert ratio is None or float(str(ratio)) < 1, f"{gate.id} is slower at {ratio}"
         if gate.label.verdict in {"passed", "slower"}:
             assert _attrs(gate)["metric_value"] is not None, f"{gate.id} measured nothing"
             if measured:
@@ -96,7 +99,7 @@ def _check(host: Host) -> None:
     story=steps(),
     stop=stops(),
     width=st.tuples(st.integers(1, 3), st.integers(1, 3)),
-    measured=st.sampled_from(["measured", "failed-workload", "no-evidence"]),
+    world=st.tuples(st.sampled_from(["measured", "failed-workload", "no-evidence"]), st.booleans()),
 )
 def test_the_dynamic_search_labels_its_spans_whatever_core_answers(
     *,
@@ -104,14 +107,17 @@ def test_the_dynamic_search_labels_its_spans_whatever_core_answers(
     story: list[Step],
     stop: Stop | None,
     width: tuple[int, int],
-    measured: Literal["measured", "failed-workload", "no-evidence"],
+    world: tuple[Literal["measured", "failed-workload", "no-evidence"], bool],
 ) -> None:
+    measured, slow = world
     rounds, in_flight = width
     host = begin(
         config(max_rounds=rounds, max_in_flight=in_flight),
         restarting=restarting,
         input_first=False,
         baseline=measured,
+        # every candidate slower than the input (50), so gates reach "slower" too
+        throughputs={f"c{n}": 10.0 for n in range(1, 40)} if slow else {},
     )
     try:
         play(host, story, stop, check=lambda: _check(host))
