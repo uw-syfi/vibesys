@@ -18,15 +18,8 @@ import {
   WAKE_CHANNEL,
   type WelcomeEvent,
 } from '@vibesys/ipc';
-import {
-  BaseWindow,
-  dialog,
-  ipcMain,
-  type MessagePortMain,
-  nativeTheme,
-  type WebContentsView,
-} from 'electron';
-import {APP_ENTRY_URL, WELCOME_URL} from './app-assets.js';
+import {BaseWindow, dialog, ipcMain, type MessagePortMain, type WebContentsView} from 'electron';
+import {APP_ENTRY_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
 import {type PendingRunPort, RunIpcRegistry} from './run-ipc.js';
 import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
@@ -76,6 +69,8 @@ function runIpcRegistry(log: (message: string) => void): RunIpcRegistry {
 
 export interface AppWindowDeps {
   readonly log: (message: string) => void;
+  /** The page the trusted surface loads: the welcome view or the app shell (`surfaceUrl`). */
+  readonly surfaceUrl: string;
   /** The run page opened one connection, for the run bound to it (`openRunPage`'s `runId`). */
   readonly connect: (port: RelayPort, runId: string) => void;
   /** The run page asked about its run's logs (`openRunPage`'s `runId`). */
@@ -267,7 +262,7 @@ export class AppWindow {
       }
     });
     this.#layout();
-    observeWelcomePage(view.webContents, WELCOME_URL, lost);
+    observeWelcomePage(view.webContents, this.#deps.surfaceUrl, lost);
   }
 
   #retireWelcomePage(view: WebContentsView): void {
@@ -293,8 +288,6 @@ export class AppWindow {
     if (this.#window.isDestroyed()) return;
     const {width, height} = this.#window.getContentBounds();
     const full = {x: 0, y: 0, width, height};
-    // The run page follows one dark theme; the welcome view follows the system's.
-    nativeTheme.themeSource = this.#mode === 'run' ? 'dark' : 'system';
     const run = this.#runPages.current;
     if (run !== null) {
       run.setBounds(full);

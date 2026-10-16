@@ -63,7 +63,8 @@
  *
  * - `strict-no-stylesheets`: a strict package exports no stylesheet and holds no style file.
  * - `strict-imports`: a strict package imports UI only from `@vibesys/ui`'s `.` and `./tokens`,
- *   workspace code only from `STRICT_WORKSPACE_IMPORTS`, and third-party code only from
+ *   workspace code only from `STRICT_WORKSPACE_IMPORTS` and other strict packages (a strict app
+ *   composes strict features' screens), and third-party code only from
  *   `STRICT_THIRD_PARTY`.
  * - `strict-lint-coverage`: the `includes` of `biome.json`'s strict override (the one loading the
  *   strict Grit rules) are exactly the strict packages' sources, so a strict package cannot escape
@@ -991,7 +992,7 @@ export function strictOverrideIncludes(directories) {
 function strictErrors(root, workspacePackage, byName) {
   return [
     ...stylesheetErrors(root, workspacePackage),
-    ...strictManifestErrors(workspacePackage),
+    ...strictManifestErrors(workspacePackage, byName),
     ...strictImportErrors(root, workspacePackage, byName),
   ];
 }
@@ -1023,10 +1024,17 @@ function stylesheetErrors(root, {name, directory, manifest}) {
   return errors;
 }
 
-function strictManifestErrors({name, directory, manifest}) {
+/** Whether `name` is a workspace package marked strict: one strict package may compose another. */
+function isStrictPackage(name, byName) {
+  return byName.get(name)?.manifest.vibesys?.design === 'strict';
+}
+
+function strictManifestErrors({name, directory, manifest}, byName) {
   const errors = [];
   for (const dependency of Object.keys(manifest.dependencies ?? {})) {
-    const message = strictDependencyMessage(dependency);
+    const message = isStrictPackage(dependency, byName)
+      ? undefined
+      : strictDependencyMessage(dependency);
     if (message === undefined) continue;
     errors.push(
       violation(
@@ -1070,6 +1078,7 @@ function strictSpecifierMessage({name, manifest}, specifier, byName) {
   if (!specifier.startsWith(SCOPE)) return strictThirdPartyMessage(specifier);
   const target = splitSpecifier(specifier);
   if (target.name === name || !byName.has(target.name)) return undefined;
+  if (isStrictPackage(target.name, byName)) return undefined;
   if (!Object.hasOwn(STRICT_WORKSPACE_IMPORTS, target.name)) {
     return `imports ${specifier}, which a strict package may not use (S6); ${STRICT_FIX}`;
   }

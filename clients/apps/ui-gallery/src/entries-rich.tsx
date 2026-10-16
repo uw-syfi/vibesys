@@ -327,7 +327,7 @@ export const RICH_ENTRIES = {
       <AppFrame
         label="Sections"
         nav={
-          <SidebarSection title="Navigate">
+          <SidebarSection title="Pages">
             <SidebarItem label="First" icon="plus" href="#first" active />
             <SidebarItem label="Second" icon="folder" href="#second" />
           </SidebarSection>

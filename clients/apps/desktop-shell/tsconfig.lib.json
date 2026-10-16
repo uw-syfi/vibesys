@@ -1,0 +1,49 @@
+{
+  "extends": "../../tools/tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "noEmit": true,
+    "tsBuildInfoFile": ".tsbuild/lib.tsbuildinfo"
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
+  ],
+  "references": [
+    {
+      "path": "../../features/app-shell/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/app-shell/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/settings/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/settings/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../libs/ipc/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/store/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/ui/tsconfig.lib.json"
+    }
+  ]
+}

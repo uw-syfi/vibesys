@@ -45,6 +45,12 @@
     },
     {
       "path": "../../libs/transport/tsconfig.lib.json"
+    },
+    {
+      "path": "../../features/app-shell/tsconfig.main.json"
+    },
+    {
+      "path": "../../features/settings/tsconfig.main.json"
     }
   ]
 }

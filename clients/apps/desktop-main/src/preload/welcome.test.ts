@@ -72,6 +72,11 @@ function cases(random: Seeded): Case[] {
   const force = random.pick([true, false]);
   const harness = random.pick([null, {provider: 'claude', model: 'claude-a'}]);
   const directory = path.endsWith('/') ? path : `${path}/`;
+  const appearance = {
+    mode: random.pick(['system', 'light', 'dark'] as const),
+    light: random.pick(['paper', 'mist', 'sand'] as const),
+    dark: random.pick(['ink', 'midnight', 'terminal'] as const),
+  };
   return [
     [bridge => bridge.overview(), {kind: 'overview'}],
     [bridge => bridge.hosts(), {kind: 'hosts'}],
@@ -109,6 +114,13 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.showWelcome(), {kind: 'show-welcome'}],
     [bridge => bridge.retry(), {kind: 'retry'}],
     [bridge => bridge.stop(key, instance, force), {kind: 'stop', host, instance, force}],
+    [bridge => bridge.preferences(), {kind: 'preferences'}],
+    [bridge => bridge.setAppearance(appearance), {kind: 'set-appearance', appearance}],
+    [bridge => bridge.setNotifications(force), {kind: 'set-notifications', enabled: force}],
+    [
+      bridge => bridge.archive({host: key, runId: name}, force),
+      {kind: 'archive', run: {host: key, runId: name}, archived: force},
+    ],
   ];
 }
 
@@ -132,6 +144,7 @@ describe('the welcome contract', () => {
     bridge.onRecent(event => heard.push([WELCOME_EVENTS.recent, event]));
     bridge.onShowHost(event => heard.push([WELCOME_EVENTS.showHost, event]));
     bridge.onListing(event => heard.push([WELCOME_EVENTS.listing, event]));
+    bridge.onPreferences(event => heard.push([WELCOME_EVENTS.preferences, event]));
     expect([...main.subscribed.keys()].sort()).toEqual(Object.values(WELCOME_EVENTS).sort());
     for (const [index, channel] of Object.values(WELCOME_EVENTS).entries()) {
       main.subscribed.get(channel)?.({sequence: index, value: channel});

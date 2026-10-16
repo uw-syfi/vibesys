@@ -562,6 +562,13 @@ Every screen (welcome, host panel, start-run sheet, run strip) has one store:
 - **Data from watches.** Host panels and Recent statuses fold `instances.watch` pushes; there is no
   manual refresh path to forget.
 
+The redesigned window (`VIBESYS_DESKTOP_SHELL=next`, #2827) follows the same rules: the sidebar
+store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived runs, and the
+Settings store (`@vibesys/feature-settings`) saves each change under a token, so a slow save
+cannot undo a newer choice. Both have invariants checked over seeded action sequences. The theme
+is in the first paint: the welcome preload asks the main process synchronously for the stored
+theme (`THEME_SYNC_CHANNEL`) and sets it on the root element before the page's scripts run.
+
 ## Multiple run windows
 
 Each `AppWindow` holds one `#run` view and binds to at most one run at a time (`openRunPage`

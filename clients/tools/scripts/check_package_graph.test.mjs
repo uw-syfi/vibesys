@@ -822,6 +822,26 @@ test('a strict app imports the generated stylesheets of @vibesys/ui', async t =>
   assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
 });
 
+test('a strict app composes strict features, and still not an old feature', async t => {
+  const workspace = validWorkspace();
+  const app = workspace['web-app'];
+  app.manifest.vibesys.design = 'strict';
+  app.manifest.dependencies = {'@vibesys/feature-screen': 'workspace:*'};
+  app.files['tsconfig.lib.json'].references = [
+    {path: '../../features/screen/tsconfig.renderer.json'},
+  ];
+  app.files['src/index.ts'] =
+    "import {r} from '@vibesys/feature-screen/renderer';\nexport const a = r;\n";
+  workspace[BIOME_INCLUDES] = strictOverrideIncludes(['apps/web-app', 'features/screen']);
+  assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
+
+  app.manifest.dependencies['@vibesys/feature-stop-run'] = 'workspace:*';
+  app.files['src/index.ts'] += "import '@vibesys/feature-stop-run/renderer';\n";
+  const errors = strictRules(packageGraphErrors(await materialize(t, workspace)));
+  assert.ok(errors.some(error => error.includes('dependencies["@vibesys/feature-stop-run"]')));
+  assert.ok(errors.some(error => error.includes('imports @vibesys/feature-stop-run/renderer')));
+});
+
 const COVERAGE_CASES = {
   'a package missing from the includes': {
     mutate: workspace => {

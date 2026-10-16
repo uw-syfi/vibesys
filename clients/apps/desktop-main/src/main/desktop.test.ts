@@ -1,6 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {WELCOME_CHANNELS, type WelcomeEvent, type WelcomeResult} from '@vibesys/ipc';
-import type {RecentFile} from '@vibesys/settings';
+import {DEFAULT_PREFERENCES, type RecentFile} from '@vibesys/settings';
+import {WELCOME_URL} from './app-assets.js';
 import {Desktop, type DesktopDeps} from './desktop.js';
 import {WelcomeFeed} from './welcome-feed.js';
 import type {WelcomeDocument, WelcomeInvokeEvent, WelcomeIpc} from './welcome-ipc.js';
@@ -176,6 +177,14 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
     hosts,
     runs,
     settings,
+    preferences: {
+      answer: async () => ({
+        appearance: DEFAULT_PREFERENCES.appearance,
+        notifications: DEFAULT_PREFERENCES.notifications,
+        archived: [],
+      }),
+    },
+    surfaceUrl: WELCOME_URL,
     welcomeIpc: ipc,
     log: message => logs.push(message),
   });

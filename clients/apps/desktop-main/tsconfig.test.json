@@ -46,6 +46,12 @@
     },
     {
       "path": "../../features/start-run/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/app-shell/tsconfig.main.json"
+    },
+    {
+      "path": "../../features/settings/tsconfig.main.json"
     }
   ]
 }

@@ -6,6 +6,7 @@
 
 import type {Hosts} from '@vibesys/feature-hosts/main';
 import type {RunControl} from '@vibesys/feature-run-control/main';
+import type {PreferencesMain} from '@vibesys/feature-settings/main';
 import {shellWords} from '@vibesys/feature-start-run/state';
 import {type HostKey, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
 import {
@@ -16,7 +17,6 @@ import {
 } from '@vibesys/ipc';
 import type {RecentRun} from '@vibesys/runs';
 import type {RecentFile, SettingsStore} from '@vibesys/settings';
-import {WELCOME_URL} from './app-assets.js';
 import type {LaunchPlan} from './launch-args.js';
 import type {WelcomeFeed} from './welcome-feed.js';
 import {bindWelcomeIpc, type WelcomeIpc} from './welcome-ipc.js';
@@ -59,6 +59,9 @@ export interface DesktopDeps {
     | 'stops'
   >;
   readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recent'>;
+  readonly preferences: Pick<PreferencesMain, 'answer'>;
+  /** The page the window's trusted surface loads, the only one admitted to its requests. */
+  readonly surfaceUrl: string;
   readonly welcomeIpc: WelcomeIpc;
   readonly log: (message: string) => void;
 }
@@ -91,7 +94,7 @@ export class Desktop {
     bindWelcomeIpc(
       deps.welcomeIpc,
       deps.window.welcome,
-      WELCOME_URL,
+      deps.surfaceUrl,
       (request, rendererGeneration) => this.#answer(request, rendererGeneration),
       rendererGeneration => {
         // Renderer-owned writes and starts lose authority in the navigation turn itself. A late
@@ -267,6 +270,11 @@ export class Desktop {
       case 'retry':
         runs.retry();
         return null;
+      case 'preferences':
+      case 'set-appearance':
+      case 'set-notifications':
+      case 'archive':
+        return this.#deps.preferences.answer(request);
     }
   }
 }

@@ -1,6 +1,14 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
-import {APP_ENTRY_URL, assetPath, isAppPage, isSameAppPage} from './app-assets.js';
+import {
+  APP_ENTRY_URL,
+  assetPath,
+  isAppPage,
+  isSameAppPage,
+  SHELL_URL,
+  surfaceUrl,
+  WELCOME_URL,
+} from './app-assets.js';
 
 const ROOT = '/opt/vibesys/ui';
 
@@ -99,5 +107,16 @@ describe('isSameAppPage', () => {
     expect(isSameAppPage('https://vibesys/desktop.html', 'https://vibesys/desktop.html')).toBe(
       false,
     );
+  });
+});
+
+describe('surfaceUrl', () => {
+  test('shows the app shell only for next, the welcome view when unset, and refuses the rest', () => {
+    expect(surfaceUrl(undefined)).toBe(WELCOME_URL);
+    expect(surfaceUrl('')).toBe(WELCOME_URL);
+    expect(surfaceUrl('next')).toBe(SHELL_URL);
+    for (const value of ['Next', 'old', '1']) {
+      expect(() => surfaceUrl(value)).toThrow('VIBESYS_DESKTOP_SHELL');
+    }
   });
 });

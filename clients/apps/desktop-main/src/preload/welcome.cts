@@ -112,9 +112,6 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
 // remains in this file. Bun tests have no Electron renderer process and exercise the factory above.
 if (process.type === 'renderer') {
   const electron: typeof import('electron') = require('electron');
-  // The page's first paint is in the persisted theme: ask for it before any of its scripts run.
-  const theme: unknown = electron.ipcRenderer.sendSync(THEME_SYNC_CHANNEL);
-  if (typeof theme === 'string') document.documentElement.setAttribute('data-theme', theme);
   electron.contextBridge.exposeInMainWorld(
     'vibesysWelcome',
     createWelcomePreload({
@@ -124,6 +121,25 @@ if (process.type === 'renderer') {
         electron.ipcRenderer.on(channel, (_event, value) => listener(value)),
     }),
   );
+  paintInStoredTheme(electron.ipcRenderer.sendSync(THEME_SYNC_CHANNEL));
+}
+
+/**
+ * Set `theme` on the root element as the parser inserts it, before the first paint. A preload runs
+ * before the document has a root element, so this waits for it with a mutation observer, whose
+ * callback runs before the page renders.
+ */
+function paintInStoredTheme(theme: unknown): void {
+  if (typeof theme !== 'string') return;
+  const apply = (): boolean => {
+    document.documentElement?.setAttribute('data-theme', theme);
+    return document.documentElement !== null;
+  };
+  if (apply()) return;
+  const observer = new MutationObserver(() => {
+    if (apply()) observer.disconnect();
+  });
+  observer.observe(document, {childList: true});
 }
 
 export = createWelcomePreload;

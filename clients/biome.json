@@ -67,6 +67,8 @@
       "includes": [
         "apps/ui-gallery/src/**/*.ts",
         "apps/ui-gallery/src/**/*.tsx",
+        "apps/desktop-shell/src/**/*.ts",
+        "apps/desktop-shell/src/**/*.tsx",
         "features/app-shell/src/**/*.ts",
         "features/app-shell/src/**/*.tsx",
         "features/settings/src/**/*.ts",

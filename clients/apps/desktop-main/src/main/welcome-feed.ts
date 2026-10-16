@@ -3,7 +3,7 @@
  * needed for an authoritative bootstrap snapshot are retained beside that sequence.
  */
 import type {HostKey, HostListing} from '@vibesys/hosts';
-import type {ChromeState, WelcomeEvent, WelcomeOverview} from '@vibesys/ipc';
+import type {ChromeState, PreferencesView, WelcomeEvent, WelcomeOverview} from '@vibesys/ipc';
 import type {RecentRun} from '@vibesys/runs';
 
 export interface WelcomeSnapshotValues {
@@ -26,6 +26,10 @@ export class WelcomeFeed {
 
   recent(value: readonly RecentRun[]): WelcomeEvent<readonly RecentRun[]> {
     this.#recent = value;
+    return this.#next(value);
+  }
+
+  preferences(value: PreferencesView): WelcomeEvent<PreferencesView> {
     return this.#next(value);
   }
 

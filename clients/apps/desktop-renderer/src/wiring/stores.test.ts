@@ -3,6 +3,7 @@ import type {HostAction, HostState} from '@vibesys/feature-hosts/state';
 import type {HostKey, HostListing} from '@vibesys/hosts';
 import type {
   ChromeState,
+  PreferencesView,
   WelcomeBridge,
   WelcomeEvent,
   WelcomeInspection,
@@ -118,6 +119,37 @@ class FakeWelcomeBridge implements WelcomeBridge {
   onListing = (listener: (event: WelcomeEvent<HostListing>) => void) => {
     this.#listing.push(listener);
   };
+  // The welcome view makes no preference requests; the app shell does (`@vibesys/feature-settings`).
+  #preferences: PreferencesView = {
+    appearance: {mode: 'system', light: 'paper', dark: 'ink'},
+    notifications: {enabled: true},
+    archived: [],
+  };
+  preferences = async (): Promise<WelcomeResult<PreferencesView>> => ({
+    ok: true,
+    value: this.#preferences,
+  });
+  setAppearance = async (
+    appearance: PreferencesView['appearance'],
+  ): Promise<WelcomeResult<PreferencesView>> => {
+    this.#preferences = {...this.#preferences, appearance};
+    return this.preferences();
+  };
+  setNotifications = async (enabled: boolean): Promise<WelcomeResult<PreferencesView>> => {
+    this.#preferences = {...this.#preferences, notifications: {enabled}};
+    return this.preferences();
+  };
+  archive = async (
+    run: PreferencesView['archived'][number],
+    archived: boolean,
+  ): Promise<WelcomeResult<PreferencesView>> => {
+    const others = this.#preferences.archived.filter(
+      each => each.host !== run.host || each.runId !== run.runId,
+    );
+    this.#preferences = {...this.#preferences, archived: archived ? [...others, run] : others};
+    return this.preferences();
+  };
+  onPreferences = (_listener: (event: WelcomeEvent<PreferencesView>) => void) => {};
 
   listenerCounts(): number[] {
     return [this.#chrome.length, this.#recent.length, this.#listing.length, this.#showHost.length];

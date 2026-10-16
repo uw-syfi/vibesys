@@ -16,6 +16,19 @@ const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
 export const APP_ENTRY_URL = `${APP_ORIGIN}/desktop.html`;
 /** The stable welcome surface that may invoke welcome IPC. */
 export const WELCOME_URL = `${APP_ORIGIN}/welcome.html`;
+/** The redesigned app shell, shown in the welcome surface's place under `VIBESYS_DESKTOP_SHELL=next`. */
+export const SHELL_URL = `${APP_ORIGIN}/shell.html`;
+
+/**
+ * The page the window's trusted surface loads: the app shell when `VIBESYS_DESKTOP_SHELL` is `next`,
+ * the welcome view when it is unset. Any other value is refused, naming the variable, so a typo
+ * never silently shows the old view.
+ */
+export function surfaceUrl(shell: string | undefined): string {
+  if (shell === undefined || shell === '') return WELCOME_URL;
+  if (shell === 'next') return SHELL_URL;
+  throw new Error(`VIBESYS_DESKTOP_SHELL must be "next" or unset, not ${JSON.stringify(shell)}`);
+}
 
 /**
  * Same-origin scripts, styles, and images only; no connections of any kind. React's inline style
