@@ -618,6 +618,8 @@ class HelperFeature(StrEnum):
     """``logs.cancel``: withdraw a waiting ``logs.read`` so its worker returns at once."""
     HARNESSES = "harnesses"
     """``harnesses.list`` and ``run.start``'s ``harness``: start a run on a vetted provider and model."""
+    LOGS_BY_SPAN = "logs_by_span"
+    """``logs.list``'s ``span_id``: only the streams whose owner names that run-trace span."""
 
 
 CLI_PROVIDER_FLAG: Final = "--cli-provider"
@@ -865,6 +867,8 @@ class LogsListRequest(_HelperRequest):
 
     type: Literal["logs.list"] = "logs.list"
     instance_id: InstanceId
+    span_id: Annotated[str, StringConstraints(pattern=r"^(flow|op):\S*$")] | None = None
+    """Only the streams whose owner names this run-trace span (feature ``logs_by_span``)."""
 
 
 class LogsReadRequest(_HelperRequest):
@@ -909,6 +913,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[_HelperRequest], HelperFeature]] = {
 
 HELPER_FIELD_FEATURES: Final[Mapping[type[_HelperRequest], Mapping[str, HelperFeature]]] = {
     RunStartRequest: {"harness": HelperFeature.HARNESSES},
+    LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
 }
 """The feature each gated optional field needs when it is set (not ``None``), exported too."""
 

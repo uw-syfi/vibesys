@@ -549,7 +549,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "instances_inspect",
         "logs",
         "logs_cancel",
-        "harnesses"
+        "harnesses",
+        "logs_by_span"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -1557,6 +1558,19 @@ const hostHelperSchema: Record<string, unknown> = {
           "pattern": "^[0-9a-f]{12}$",
           "title": "Instance Id",
           "type": "string"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "pattern": "^(flow|op):\\S*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Span Id"
         }
       },
       "required": [
@@ -2970,6 +2984,9 @@ const hostHelperSchema: Record<string, unknown> = {
   "x-vibesys-feature-by-field": {
     "run.start": {
       "harness": "harnesses"
+    },
+    "logs.list": {
+      "span_id": "logs_by_span"
     }
   }
 };

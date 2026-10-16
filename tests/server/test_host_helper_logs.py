@@ -262,6 +262,24 @@ def test_list_names_each_stream_with_its_size_and_state() -> None:
     ]
 
 
+@settings(max_examples=examples(pr=6, nightly=50), deadline=None)
+@given(owners=st.lists(st.sampled_from([None, "flow:w0/#1", "op:w0/worker.1"]), max_size=4))
+def test_list_by_span_keeps_exactly_the_streams_whose_owner_names_it(
+    owners: list[str | None],
+) -> None:
+    store = _store()
+    for number, span_id in enumerate(owners):
+        named = {} if span_id is None else {"span_id": span_id}
+        store.open(_INSTANCE, f"{900000 + number}", {"kind": "run_narration", **named}, "vibesys")
+    request = LogsListRequest(
+        request_id="l", deadline_ms=1, instance_id=_INSTANCE, span_id="flow:w0/#1"
+    )
+    reply = list_logs(request, _logs(store))
+    assert isinstance(reply, LogsListReply)
+    named = [f"{900000 + n}" for n, span_id in enumerate(owners) if span_id == "flow:w0/#1"]
+    assert [s.id for s in reply.streams if s.id != _STREAM] == named
+
+
 # ----- the long poll, through the channel -----
 
 

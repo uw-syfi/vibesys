@@ -240,6 +240,8 @@ def list_logs(request: LogsListRequest, logs: HelperLogs) -> LogsListReply | Hel
         return _unknown_instance(request.request_id, request.instance_id)
     except LogStoreCorruptError as error:
         return _corrupt(request.request_id, error)
+    if request.span_id is not None:
+        streams = tuple(s for s in streams if s.owner.get("span_id") == request.span_id)
     return LogsListReply(request_id=request.request_id, streams=streams)
 
 

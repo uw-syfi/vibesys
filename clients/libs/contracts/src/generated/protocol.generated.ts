@@ -2161,6 +2161,7 @@ export interface ProtocolErrorMessage {
  * A step of opening the run's environment, such as building its image.
  */
 export interface StartupStep {
+  span_id?: SpanId | null;
   kind: Kind48;
   stage: EnvironmentStartupStage;
 }
@@ -2168,6 +2169,7 @@ export interface StartupStep {
  * One attempt of one gate of a candidate's evaluation.
  */
 export interface GateStage {
+  span_id?: SpanId | null;
   kind: Kind49;
   execution_id: ExecutionId2;
   gate: GateKind;
@@ -2177,6 +2179,7 @@ export interface GateStage {
  * Building or pulling a tool the run needs, such as a profiler.
  */
 export interface ToolBuild {
+  span_id?: SpanId | null;
   kind: Kind50;
   name: Name1;
 }
@@ -2184,6 +2187,7 @@ export interface ToolBuild {
  * The run's own narration for humans: what it is doing, warnings, tracebacks.
  */
 export interface RunNarration {
+  span_id?: SpanId | null;
   kind: Kind51;
 }
 /**

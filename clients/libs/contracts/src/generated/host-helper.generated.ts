@@ -85,6 +85,7 @@ export type RequestId12 = string;
 export type DeadlineMs12 = number;
 export type Type12 = "logs.list";
 export type InstanceId3 = string;
+export type SpanId = string | null;
 export type RequestId13 = string;
 export type DeadlineMs13 = number;
 export type Type13 = "logs.read";
@@ -131,7 +132,7 @@ export type ProtocolVersion = number;
  * a strict peer never sees a method it does not know.
  */
 export type HelperFeature =
-  "instances_watch" | "paths_complete" | "instances_inspect" | "logs" | "logs_cancel" | "harnesses";
+  "instances_watch" | "paths_complete" | "instances_inspect" | "logs" | "logs_cancel" | "harnesses" | "logs_by_span";
 export type Features1 = HelperFeature[];
 export type VibesysVersion = string;
 export type Root = string;
@@ -559,6 +560,7 @@ export interface LogsListRequest {
   deadline_ms: DeadlineMs12;
   type: Type12;
   instance_id: InstanceId3;
+  span_id?: SpanId;
 }
 /**
  * One bounded chunk of a stream; at the end of an open stream, wait up to ``wait_ms`` for more.
