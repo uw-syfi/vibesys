@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from argparse import Namespace
     from collections.abc import Callable
 
-    from vibesys.api import InputBundle
+    from vibesys.api.request import InputBundle
     from vs_sim.api import CommandProbe
 
 DOCKER_TIMEOUT_SECONDS = 5.0

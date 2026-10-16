@@ -20,7 +20,8 @@
     "host-paths": [
       "helper-project-missing",
       "helper-paths-missing",
-      "helper-machine"
+      "helper-machine",
+      "helper-preflight-project-missing"
     ],
     "logs": [
       "helper-logs-list",

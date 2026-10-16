@@ -14,6 +14,7 @@
  */
 import {
   type ChannelEndOutcome,
+  type Check,
   type CheckoutInspectReply,
   type HarnessOption,
   type HelperFeature,
@@ -110,7 +111,19 @@ export interface FakeHost {
   machine: MachineDescription;
   /** What `checkout.inspect` answers per path; any other path holds no checkout. */
   readonly checkouts: Map<string, CheckoutInspectReply['inspection']>;
+  /** What `run.preflight` answers for a known project; replace it to fail a check. */
+  preflight: Check[];
 }
+
+/** The checks a new `FakeHelper` answers: every one passes. */
+const PASSING_CHECKS: readonly Check[] = [
+  {id: 'checkout_found', state: 'ok', detail: 'VibeSys 0.1.1 at /src/vibesys'},
+  {id: 'project_own_repository', state: 'ok', detail: 'the project is its own Git repository'},
+  {id: 'settings_valid', state: 'ok', detail: "the run's configuration is valid"},
+  {id: 'docker_reachable', state: 'ok', detail: 'Docker 27.3.1'},
+  {id: 'agent_image', state: 'ok', detail: 'an agent image is cached here'},
+  {id: 'evaluator_available', state: 'ok', detail: 'benchmark command'},
+];
 
 /** The machine a new `FakeHelper` describes: a CPU-only host with Docker and one harness CLI. */
 const FAKE_MACHINE: MachineDescription = {
@@ -186,6 +199,7 @@ export class FakeHelper {
     harnesses: [...FAKE_HARNESSES],
     machine: FAKE_MACHINE,
     checkouts: new Map(),
+    preflight: [...PASSING_CHECKS],
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
@@ -222,6 +236,8 @@ export class FakeHelper {
     'run_history',
     'machine_describe',
     'checkout_inspect',
+    'preflight',
+    'run_options',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -530,6 +546,9 @@ class HelperSession {
       case 'machine.describe':
         this.#send({type: 'machine.describe', request_id: id, machine: this.#helper.host.machine});
         return;
+      case 'run.preflight':
+        this.#preflight(request);
+        return;
       case 'checkout.inspect':
         this.#send({
           type: 'checkout.inspect',
@@ -712,6 +731,15 @@ class HelperSession {
       }
     }
     this.#project(request);
+  }
+
+  #preflight(request: Extract<HelperRequest, {type: 'run.preflight'}>): void {
+    const id = request.request_id;
+    if (!this.#helper.host.projects.has(request.project)) {
+      this.#send({...this.#error(id, 'project_missing', 'no such project'), path: request.project});
+      return;
+    }
+    this.#send({type: 'run.preflight', request_id: id, checks: [...this.#helper.host.preflight]});
   }
 
   /** The fake host records no runs, so every run of a known project is unknown. */

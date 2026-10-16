@@ -22,6 +22,7 @@ import {type Schema, type SchemaWalk, validateSchema} from './schema-walker.js';
 export type {
   ChannelEnd,
   ChannelEndOutcome,
+  Check,
   Checkout,
   CheckoutInspectReply,
   DetachedLaunchFailure,
