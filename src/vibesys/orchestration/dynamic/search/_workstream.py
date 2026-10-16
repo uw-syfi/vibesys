@@ -24,6 +24,12 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     failure_of,
 )
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
+from vibesys.orchestration.dynamic.search._spans import (
+    WORKSTREAM,
+    label_outcome,
+    workstream_attrs,
+    workstream_title,
+)
 from vibesys.orchestration.dynamic.search._values import Failure, FailureKind
 from vibesys.orchestration.dynamic.search._work import do_work
 from vs_core.api.search import (
@@ -34,6 +40,7 @@ from vs_core.api.search import (
     NotReopened,
     ParentVerification,
     RevisionRef,
+    Settle,
     Stopped,
     Workspace,
     flow,
@@ -47,6 +54,7 @@ async def workstream(ctx: Flow, given: WorkstreamStart | WorkstreamResume) -> Wo
     if isinstance(given, WorkstreamResume):
         return await resumed(ctx, given)
     w = given
+    ctx.label(WORKSTREAM, title=workstream_title(w), attrs=workstream_attrs(w))
     work = Work()
     try:
         unverified = await verify_parent(ctx, w)
@@ -101,7 +109,8 @@ async def close_with(
         closing = await do_work(ctx, w, ws, work, at)
     if closing.scored(w.plan):
         await the_input(ctx, w, work)  # a candidate is scored against it
-    keep(ctx, w, ws, closing, work.baseline)
+    settled = keep(ctx, w, ws, closing, work.baseline)
+    label_outcome(ctx, w, closing, settled, work)
     mark(ctx, w, work, ResumeStage.SETTLING, result=closing.result, closing=closing)
     return closing
 
@@ -131,7 +140,7 @@ async def verify_parent(ctx: Flow, w: WorkstreamStart) -> Unverified | None:
 
 def keep(
     ctx: Flow, w: WorkstreamStart, ws: Workspace, closing: Closing, baseline: Baseline | None
-) -> None:
+) -> Settle:
     """Assert what the workstream established for the workspace to settle with.
 
     If core will not take that assertion, the workspace settles as a plain failure instead.
@@ -144,3 +153,4 @@ def keep(
         retention=proposed.retention,
     )
     ctx.workspaces.keep(ws, closing.candidate, kept)
+    return proposed

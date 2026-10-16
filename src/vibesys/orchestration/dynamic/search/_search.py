@@ -57,6 +57,7 @@ from vibesys.orchestration.dynamic.search._run_state import (
     RunRecord,
     Scheduled,
 )
+from vibesys.orchestration.dynamic.search._spans import SPANS, BuildsOn
 from vibesys.orchestration.dynamic.search._workstream import workstream
 from vs_core.api.search import Flow, Group, NoWinner, StopRequested, TaskStopped, search
 
@@ -68,6 +69,7 @@ from vs_core.api.search import Flow, Group, NoWinner, StopRequested, TaskStopped
     roles=ROLES,
     snapshot=DynamicResume,
     owned=(HANDOFF,),
+    spans=SPANS,
 )
 async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner | None:
     """Measure the input while planning, run workstreams in the free slots, name the best."""
@@ -81,6 +83,7 @@ async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner |
     workstreams: Group[WorkstreamDone] = ctx.group()
     planning: Group[PlanOutcome] = ctx.group(limit=1)
     measuring: Group[Baseline] = ctx.group(limit=1)
+    built = BuildsOn()
     async with workstreams, planning, measuring:
         resume(ctx, run, workstreams, measuring)
         while not run.over(
@@ -89,7 +92,7 @@ async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner |
             stopping=ctx.stop_requested,
         ):
             for start in run.ready_to_start(run.free_agents()):
-                workstreams.start(start.key, workstream, start)
+                built.started(ctx, start, workstreams.start(start.key, workstream, start))
             for key, verdict in run.verdicts(stopping=ctx.stop_requested):
                 ctx.latch(VERDICTS.of(key)).set(verdict)
             # an input with nothing to measure has its result in at once: read it before planning

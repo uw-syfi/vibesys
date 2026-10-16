@@ -21,6 +21,7 @@ from vibesys.orchestration.dynamic.search._outcomes import (
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
+from vibesys.orchestration.dynamic.search._spans import turn_label
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
@@ -136,7 +137,7 @@ async def implementer_turn(
     not landed); the prompt says it is pending, or why it failed.
     """
     prompt = implement_prompt(w, blockers, baseline=baseline)
-    match await implementer.turn(prompt):
+    match await implementer.turn(prompt, label=turn_label(implementer)):
         case TurnFinished(reply=ImplementerResult() as reply, checkpoint=checkpoint):
             return _candidate_of(w, work, reply, checkpoint)
         case Failed(reason=FailureReason.TIMED_OUT | FailureReason.TURN_FAILED) as failed:
@@ -227,7 +228,7 @@ async def review(  # noqa: PLR0913  # LW-220432 [PLR0913]; each argument is a di
     prompt = review_prompt(
         w.plan, revision, result.candidate.summary, review_evaluations(refs, readings)
     )
-    match await judge.turn(prompt, revision=revision):
+    match await judge.turn(prompt, revision=revision, label=turn_label(judge)):
         case TurnFinished(reply=ReviewResult() as reply, invocation=invocation):
             graded = result.model_copy(
                 update={"verdict": Verdict(passed=reply.passed, invocation=invocation)}

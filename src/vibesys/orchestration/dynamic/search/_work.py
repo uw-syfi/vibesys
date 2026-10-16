@@ -24,6 +24,7 @@ from vibesys.orchestration.dynamic.search._outcomes import (
 )
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, MERGER, PROFILER
+from vibesys.orchestration.dynamic.search._spans import turn_label
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Failure,
@@ -92,7 +93,8 @@ async def profile(
     """
     if at is None or at.at(*_IMPLEMENTING):
         profiler = ctx.agents.session(PROFILER, workspace=ws, revision=w.parent)
-        if isinstance(failed := await profiler.turn(profile_prompt(w.plan, w.parent)), Failed):
+        asked = profile_prompt(w.plan, w.parent)
+        if isinstance(failed := await profiler.turn(asked, label=turn_label(profiler)), Failed):
             raise ended_by(failed, AgentName.PROFILER, plan=w.plan)
         mark(ctx, w, work, ResumeStage.READY)
     return Closing(evidence=await measured(ctx, w, ws, work, w.parent, at, None))
@@ -110,7 +112,8 @@ async def merge(
     """
     if at is None or at.at(*_IMPLEMENTING):
         merger = ctx.agents.session(MERGER, workspace=ws, revision=w.parent)
-        match await merger.turn(merge_prompt(w.plan, w.parent, w.merge)):
+        asked = merge_prompt(w.plan, w.parent, w.merge)
+        match await merger.turn(asked, label=turn_label(merger)):
             case TurnFinished(reply=MergeResult() as reply, checkpoint=checkpoint):
                 report = _merged(w, reply, checkpoint)
             case Failed() as failed:

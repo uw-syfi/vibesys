@@ -22,7 +22,7 @@ from vibesys.candidates.api import (
 )
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active
-from vibesys.metrics import AcceptedReading, reading_of
+from vibesys.metrics import AcceptedReading, MetricRow, reading_of
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._parents import ParentSnapshot
 from vibesys.orchestration.dynamic.search._values import (
@@ -55,6 +55,7 @@ from vs_core.api.search import (
     RevisionRef,
     Settle,
     Settlement,
+    SpanId,
     TaskTerms,
     Value,
     WaitRefusal,
@@ -258,6 +259,8 @@ class Work:
     """Whether its wait for the input has passed the run's limit (`_measure.while_input_pending`)."""
     merged: MergeReport | None = None
     """The merger's commit, once it made one, so a failed measurement still settles with it."""
+    gate: tuple[SpanId, str] | None = None
+    """The span of the trusted measurement once it was issued, and the stages it measures."""
 
     def ended(self, ended: "WorkEndedError") -> Closing:
         """The closing of work that did not finish: what it carried, with the failure."""
@@ -399,20 +402,33 @@ def assertion(
     if closing.scored(w.plan) and baseline is None:
         message = "a candidate is scored only once the input's measurement is known"
         raise ValueError(message)
-    space = space_of(terms)
-    benchmark = reading_of(closing.readings, EvidenceKind.BENCHMARK)
-    seen = baseline.reading if isinstance(baseline, Measured) else None
-    beats = improves_on(
-        measurement(None if benchmark is None else benchmark.headline()),
-        measurement(seen.metrics[0] if seen is not None and seen.metrics else None),
-        space=space,
-        when_input_unmeasured=True,
-    )
     return settle_for(
         closing,
         gates=gates_of(terms),
-        beats_input=beats,
+        beats_input=beats_input(closing, terms, baseline),
         unsettled=UNSETTLED,
+    )
+
+
+def headline(closing: Closing) -> MetricRow | None:
+    """The candidate's headline benchmark value, when it was measured."""
+    benchmark = reading_of(closing.readings, EvidenceKind.BENCHMARK)
+    return None if benchmark is None else benchmark.headline()
+
+
+def input_headline(baseline: Baseline | None) -> MetricRow | None:
+    """The input's headline value, when it was measured."""
+    seen = baseline.reading if isinstance(baseline, Measured) else None
+    return seen.metrics[0] if seen is not None and seen.metrics else None
+
+
+def beats_input(closing: Closing, terms: TaskTerms, baseline: Baseline | None) -> bool:
+    """Whether the candidate's headline improves on the input's (an unmeasured input is beaten)."""
+    return improves_on(
+        measurement(headline(closing)),
+        measurement(input_headline(baseline)),
+        space=space_of(terms),
+        when_input_unmeasured=True,
     )
 
 

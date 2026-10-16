@@ -25,6 +25,7 @@ from vibesys.orchestration.dynamic.search._reports import (
     InputOverdue,
     Released,
 )
+from vibesys.orchestration.dynamic.search._spans import GATE, GateAttrs
 from vibesys.orchestration.dynamic.search._values import (
     DropReason,
     Failure,
@@ -200,6 +201,11 @@ async def measurement_of(
         raise WorkEndedError(stopped) from None
     plan = recipe.plan(revision, purpose=purpose, now_at=ctx.clock.now(), stages=names)
     found = await ctx.evaluation.measure(plan, workspace=ws, within=recipe.budget(names))
+    gate = ctx.operation_span
+    if gate is not None:
+        stage = ",".join(names)
+        work.gate = (gate, stage)
+        ctx.label(GATE, span=gate, title=" + ".join(names), attrs=GateAttrs(stage=stage))
     ctx.channel(REPORTS).send(Released(key=w.key))
     if isinstance(found, Failed):
         ctx.channel(REPORTS).send(Released(key=w.key))

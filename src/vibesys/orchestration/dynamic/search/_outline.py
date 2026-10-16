@@ -11,6 +11,7 @@ from vibesys.orchestration.dynamic.models import PlanOutline
 from vibesys.orchestration.dynamic.search._prompts import OutlinePrompt
 from vibesys.orchestration.dynamic.search._roles import OUTLINER
 from vibesys.orchestration.dynamic.search._run_state import NoPlan, Outlined, RunRecord
+from vibesys.orchestration.dynamic.search._spans import turn_label
 from vibesys.orchestration.dynamic.search._values import PlanProblem, ProblemKind, Step
 from vs_core.api.search import Failed, FailureReason, Flow, TurnFinished
 
@@ -22,7 +23,8 @@ async def outline(ctx: Flow, run: RunRecord) -> Outlined | NoPlan:
         message = "only a run that follows a plan outlines one"
         raise ValueError(message)
     outliner = ctx.agents.session(OUTLINER)
-    match await outliner.turn(OutlinePrompt(documents=plan.documents)):
+    prompt = OutlinePrompt(documents=plan.documents)
+    match await outliner.turn(prompt, label=turn_label(outliner)):
         case TurnFinished(reply=PlanOutline() as given):
             steps = tuple(Step.model_validate(item.model_dump()) for item in given.steps)
             return Outlined(steps=steps)

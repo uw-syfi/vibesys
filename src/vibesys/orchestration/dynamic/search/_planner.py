@@ -27,6 +27,11 @@ from vibesys.orchestration.dynamic.search._run_state import (
     RunRecord,
     Scheduled,
 )
+from vibesys.orchestration.dynamic.search._spans import (
+    PLANNING_CALL,
+    PlanningAttrs,
+    turn_label,
+)
 from vibesys.orchestration.dynamic.search._values import (
     MergeRecord,
     PlanProblem,
@@ -94,6 +99,9 @@ async def plan(ctx: Flow, run: RunRecord) -> PlanOutcome:
     A planning call is not restartable from a snapshot: after a code change the root plans again.
     A run that follows a plan declaring no steps asks for its outline first (`outline`).
     """
+    ctx.label(
+        PLANNING_CALL, title=f"planning call {run.calls}", attrs=PlanningAttrs(call=run.calls)
+    )
     if run.needs_outline:
         return await outline(ctx, run)
     planner = ctx.agents.session(PLANNER)
@@ -162,7 +170,8 @@ async def ask_planner(
     """
     asked_of = lost[-1].turn if lost else call.again
     asked = run.world(now)
-    event = await planner.turn(asked.prompt(call.problem, again=asked_of))
+    prompt = asked.prompt(call.problem, again=asked_of)
+    event = await planner.turn(prompt, label=turn_label(planner))
     world = run.world()  # the run as it is when the reply arrives
     match event:
         case TurnFinished(reply=PortfolioPlan() as given, invocation=turn):
