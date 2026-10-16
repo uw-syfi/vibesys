@@ -1,8 +1,8 @@
 # Corpus file formats
 
-Three file kinds live in this corpus: event fixtures under `events/`, connection scenarios under
-`scenarios/`, and runner inventories under `runners/`. All are plain JSON so any language can read
-them. The corpus gate
+Four file kinds live in this corpus: event fixtures under `events/`, frontend disposition tables
+under `rendering-dispositions/`, connection scenarios under `scenarios/`, and runner inventories
+under `runners/`. All are plain JSON so any language can read them. The corpus gate
 (`clients/tools/scripts/check_conformance_corpus.mjs`) validates every file against the rules below with no
 external schema library, so the rules are intentionally simple and structural. Deep payload
 validation happens when the runners fold a fixture through `run-state` (888b) or replay a scenario
@@ -36,8 +36,32 @@ Rules the gate enforces:
 Fixtures are minimal but valid: fields a kind does not need are omitted and take their schema
 default. A fixture may carry the fields its kind semantically uses (for example `execution_id` on an
 `agent_execution_started`), which makes it more useful to the fold runner, but the gate only requires
-a structurally valid envelope. There is one fixture per kind; richer per-kind fixtures and the
-rendering-disposition tables are #834, not here.
+a structurally valid envelope. There is one fixture per kind; richer per-kind fixtures remain
+separate from the rendering decisions below.
+
+## Frontend dispositions: `rendering-dispositions/<frontend>.json`
+
+The TUI and Web each check in one table. `events`, `queries`, `responses`, and `campaign` are exhaustive over
+the generated protocol schema's `EventType` enum, `query.*` request-discriminator mappings, and
+`Response` property names. `campaign` is empty until campaign contracts exist, then covers every
+`Campaign*` definition and campaign-prefixed top-level schema section. Entries use the section's key
+(`kind` for events and queries, `field` for responses, and `dto` for campaign contracts) and occur
+exactly once. Unknown and duplicate values fail the gate.
+
+An event is `rendered` with a non-empty `surface`, `deferred` with a positive `issue` and non-empty
+`reason`, or `not_applicable` with a reason when another semantic contract deliberately supersedes
+the raw event. A query is `used` with a `consumer`, `deferred`, or `not_applicable` with a reason. A
+response and campaign contract may use any of those dispositions plus `rendered`. Unknown fields
+and statuses are rejected, so a typo cannot satisfy coverage accidentally.
+
+`extensions` records generated contracts planned outside the current schema. Today it contains
+one `campaign-projection` deferral to #1761 and `campaign` is empty. Once the generated schema
+contains a `Campaign*` definition or a campaign-prefixed top-level section, the extension set becomes
+empty and those generated names must each have a disposition in `campaign`.
+
+Deferred issue references are verified as open when a table is authored or reviewed. CI validates
+the recorded positive issue number but deliberately performs no network calls, keeping the gate
+deterministic and available offline.
 
 ## Scenarios: `scenarios/<id>.json`
 

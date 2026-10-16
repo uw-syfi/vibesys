@@ -7,6 +7,7 @@
 // event envelope (its fields and which are required) is read from the generated schema, the single
 // source protocol codegen owns (see #850). Host helper scenarios (`"protocol": "host-helper"`) are
 // checked against the generated helper schema instead, and every helper request must be sent by one.
+// TUI and Web dispositions are exhaustive over the generated event, query, and response sets.
 // See tests/conformance/README.md and FORMAT.md.
 
 import {readdir, readFile} from 'node:fs/promises';
@@ -20,12 +21,23 @@ const HELPER_ROLES = new Set(['control', 'run', 'logs']);
 const HELPER_TRANSPORTS = new Set(['stdio']);
 const CONTRACT_RELATIVE = 'docs/contributing/wire-protocol.md';
 const CORPUS_RELATIVE = 'tests/conformance';
+const DISPOSITIONS_RELATIVE = 'rendering-dispositions';
 const RUNNERS_RELATIVE = 'runners';
+const FRONTENDS = ['tui', 'web'];
+const CAMPAIGN_EXTENSION = 'campaign-projection';
 
 const STEP_DIRECTIONS = new Set(['c2s', 's2c']);
 const SCENARIO_ROLES = new Set(['control', 'subscribe', 'chat']);
 const KNOWN_TRANSPORTS = new Set(['unix', 'websocket']);
 const RUNNER_FIELDS = new Set(['id', 'description', 'groups']);
+const DISPOSITION_TABLE_FIELDS = new Set([
+  'frontend',
+  'events',
+  'queries',
+  'responses',
+  'campaign',
+  'extensions',
+]);
 const SETUP_CAPABILITY = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 // A control-path reply is a `Response`, which has no `type` discriminant, so scenarios name it with
 // this pseudo-type. Every other frame type is derived from the schema. The name is not defined
@@ -46,6 +58,28 @@ function typeConsts(schema) {
 /** The `EventType` enum: the authoritative event-kind set the corpus must cover one-for-one. */
 function eventKinds(schema) {
   return new Set(schema.$defs?.EventType?.enum ?? []);
+}
+
+/** Every query tag, derived from the generated request union rather than client call sites. */
+function queryKinds(schema) {
+  return new Set(
+    Object.keys(schema.properties?.request?.discriminator?.mapping ?? {}).filter(kind =>
+      kind.startsWith('query.'),
+    ),
+  );
+}
+
+/** Every response field, including envelope metadata, from the generated Response model. */
+function responseFields(schema) {
+  return new Set(Object.keys(schema.$defs?.Response?.properties ?? {}));
+}
+
+/** Every generated campaign DTO/section; empty until the backend contract in #1761 lands. */
+function campaignContracts(schema) {
+  return new Set([
+    ...Object.keys(schema.$defs ?? {}).filter(name => name.startsWith('Campaign')),
+    ...Object.keys(schema.properties ?? {}).filter(name => name.startsWith('campaign')),
+  ]);
 }
 
 /** The `RunEvent` envelope: which top-level fields an event fixture may carry. */
@@ -132,6 +166,168 @@ function checkEventCoverage(files, kinds) {
   const present = new Set(files.filter(file => !file.parseError).map(file => file.stem));
   for (const kind of [...kinds].sort()) {
     if (!present.has(kind)) errors.push(`events/: EventType "${kind}" has no fixture`);
+  }
+  return errors;
+}
+
+function objectErrors(value, label) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? []
+    : [`${label}: must be an object`];
+}
+
+function unknownFieldErrors(value, allowed, label) {
+  return Object.keys(value).flatMap(field =>
+    allowed.has(field) ? [] : [`${label}: unknown field "${field}"`],
+  );
+}
+
+function namedDispositionErrors(entry, where, key, detail, description) {
+  const errors = unknownFieldErrors(entry, new Set([key, 'disposition', detail]), where);
+  if (typeof entry[detail] !== 'string' || entry[detail].trim() === '') {
+    errors.push(`${where}: ${description} needs a non-empty "${detail}"`);
+  }
+  return errors;
+}
+
+function deferredDispositionErrors(entry, where, key) {
+  const errors = unknownFieldErrors(entry, new Set([key, 'disposition', 'issue', 'reason']), where);
+  if (!Number.isInteger(entry.issue) || entry.issue <= 0) {
+    errors.push(`${where}: deferred disposition needs a positive integer "issue"`);
+  }
+  if (typeof entry.reason !== 'string' || entry.reason.trim() === '') {
+    errors.push(`${where}: deferred disposition needs a non-empty "reason"`);
+  }
+  return errors;
+}
+
+function dispositionShapeErrors(entry, where, spec) {
+  if (!spec.statuses.has(entry.disposition)) {
+    return [
+      `${where}: "disposition" must be one of ${[...spec.statuses].join(', ')}`,
+      ...unknownFieldErrors(entry, new Set([spec.key, 'disposition']), where),
+    ];
+  }
+  if (entry.disposition === 'rendered') {
+    return namedDispositionErrors(entry, where, spec.key, 'surface', 'rendered disposition');
+  }
+  if (entry.disposition === 'used') {
+    return namedDispositionErrors(entry, where, spec.key, 'consumer', 'used disposition');
+  }
+  if (entry.disposition === 'deferred') {
+    return deferredDispositionErrors(entry, where, spec.key);
+  }
+  return namedDispositionErrors(entry, where, spec.key, 'reason', 'not_applicable disposition');
+}
+
+function checkDispositionEntry(entry, index, label, spec, seen) {
+  const where = `${label} ${spec.field} entry ${index}`;
+  const shapeErrors = objectErrors(entry, where);
+  if (shapeErrors.length > 0) return shapeErrors;
+  const errors = [];
+  const value = entry[spec.key];
+  if (typeof value !== 'string' || value.length === 0) {
+    errors.push(`${where}: "${spec.key}" must be a non-empty string`);
+  } else {
+    if (!spec.values.has(value)) {
+      errors.push(`${where}: ${spec.key} "${value}" is not in the generated ${spec.label}`);
+    }
+    if (seen.has(value)) errors.push(`${where}: ${spec.key} "${value}" is listed more than once`);
+    seen.add(value);
+  }
+  errors.push(...dispositionShapeErrors(entry, where, spec));
+  return errors;
+}
+
+function checkDispositionSection(data, label, spec) {
+  const entries = data?.[spec.field];
+  if (!Array.isArray(entries)) return [`${label}: "${spec.field}" must be an array`];
+  const errors = [];
+  const seen = new Set();
+  for (const [index, entry] of entries.entries()) {
+    errors.push(...checkDispositionEntry(entry, index, label, spec, seen));
+  }
+  for (const value of [...spec.values].sort()) {
+    if (!seen.has(value)) {
+      errors.push(`${label}: generated ${spec.label} "${value}" has no disposition`);
+    }
+  }
+  return errors;
+}
+
+function dispositionSpecs(schema) {
+  const campaign = campaignContracts(schema);
+  return [
+    {
+      field: 'events',
+      key: 'kind',
+      label: 'EventType',
+      values: eventKinds(schema),
+      statuses: new Set(['rendered', 'deferred', 'not_applicable']),
+    },
+    {
+      field: 'queries',
+      key: 'kind',
+      label: 'query',
+      values: queryKinds(schema),
+      statuses: new Set(['used', 'deferred', 'not_applicable']),
+    },
+    {
+      field: 'responses',
+      key: 'field',
+      label: 'Response field',
+      values: responseFields(schema),
+      statuses: new Set(['rendered', 'used', 'deferred', 'not_applicable']),
+    },
+    {
+      field: 'campaign',
+      key: 'dto',
+      label: 'campaign DTO',
+      values: campaign,
+      statuses: new Set(['rendered', 'used', 'deferred', 'not_applicable']),
+    },
+    {
+      field: 'extensions',
+      key: 'contract',
+      label: 'planned extension',
+      values: campaign.size === 0 ? new Set([CAMPAIGN_EXTENSION]) : new Set(),
+      statuses: new Set(['deferred']),
+    },
+  ];
+}
+
+function checkDispositionTable(file, frontend, schema) {
+  const label = `${DISPOSITIONS_RELATIVE}/${file.name}`;
+  if (file.parseError) return [`${label}: invalid JSON: ${file.parseError}`];
+  const errors = objectErrors(file.data, label);
+  if (errors.length > 0) return errors;
+  errors.push(...unknownFieldErrors(file.data, DISPOSITION_TABLE_FIELDS, label));
+  if (file.stem !== frontend || file.data.frontend !== frontend) {
+    errors.push(`${label}: "frontend" must equal the filename stem "${frontend}"`);
+  }
+  for (const spec of dispositionSpecs(schema)) {
+    errors.push(...checkDispositionSection(file.data, label, spec));
+  }
+  return errors;
+}
+
+async function checkRenderingDispositions(corpus, schema) {
+  const directory = await readJsonDir(join(corpus, DISPOSITIONS_RELATIVE));
+  if (directory.error) return [directory.error];
+  const errors = [];
+  const files = new Map(directory.files.map(file => [file.stem, file]));
+  for (const frontend of FRONTENDS) {
+    const file = files.get(frontend);
+    if (file === undefined) {
+      errors.push(`${DISPOSITIONS_RELATIVE}/: frontend "${frontend}" has no disposition table`);
+    } else {
+      errors.push(...checkDispositionTable(file, frontend, schema));
+    }
+  }
+  for (const frontend of [...files.keys()].sort()) {
+    if (!FRONTENDS.includes(frontend)) {
+      errors.push(`${DISPOSITIONS_RELATIVE}/: unknown frontend table "${frontend}"`);
+    }
   }
   return errors;
 }
@@ -441,6 +637,7 @@ export async function corpusErrors(root) {
   }
 
   const corpus = join(root, CORPUS_RELATIVE);
+  errors.push(...(await checkRenderingDispositions(corpus, schema)));
   const events = await readJsonDir(join(corpus, 'events'));
   if (events.error) errors.push(events.error);
   for (const fixture of events.files) {
