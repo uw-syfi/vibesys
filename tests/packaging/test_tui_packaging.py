@@ -50,6 +50,7 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/features/conversation/package.json",
         "clients/features/gateway-connect/package.json",
         "clients/features/hosts/package.json",
+        "clients/features/machines/package.json",
         "clients/features/recent-runs/package.json",
         "clients/features/replay/package.json",
         "clients/features/run-control/package.json",
