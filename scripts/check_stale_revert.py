@@ -151,6 +151,7 @@ def _edits(root: Path, base: str, head: str, changed: list[str]) -> dict[str, _E
     diff = _git(root, "diff", "-U0", "--no-renames", "--diff-filter=M", base, head, "--", *changed)
     deleted: dict[str, set[int]] = {}
     added: dict[str, list[str]] = {}
+    gitlinks: set[str] = set()
     path = ""
     for line in diff.splitlines():
         if line.startswith("--- a/"):
@@ -160,13 +161,18 @@ def _edits(root: Path, base: str, head: str, changed: list[str]) -> dict[str, _E
         elif match := _HUNK.match(line):
             start, count = int(match.group(1)), int(match.group(2) or 1)
             deleted[path].update(range(start, start + count))
+        elif line.startswith("-Subproject commit "):
+            gitlinks.add(path)
         elif line.startswith("+") and not line.startswith("+++ "):
             added[path].append(line[1:])
+    # A submodule pin is a commit id, not lines: it has nothing to blame, and CI's checkout
+    # holds no submodule objects to blame it with.
     return {
         path: _Edit(
             frozenset(deleted[path]), frozenset(x.strip() for x in added[path]), len(added[path])
         )
         for path in deleted
+        if path not in gitlinks
     }
 
 

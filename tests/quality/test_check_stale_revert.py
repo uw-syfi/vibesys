@@ -301,3 +301,24 @@ def test_a_change_to_an_append_only_file_is_flagged_unless_it_only_appends(
         found = rewritten_append_only(root, "main")
 
     assert found == (["golden.txt"] if marked and edit != "append" else [])
+
+
+def test_bumping_a_submodule_pin_is_not_a_line_edit() -> None:
+    """A gitlink holds a commit id, not lines, and its commit is absent from the checkout.
+
+    CI's checkout has no submodule objects, so blaming the changed pin failed the whole
+    check (#2987 bumped seven example submodules).
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        _repository(root)
+        _commit(root, {"README.md": "base\n"}, "base")
+        for index, pin in enumerate(("1" * 40, "2" * 40)):
+            _git(root, "update-index", "--add", "--cacheinfo", f"160000,{pin},examples/sub")
+            _git(root, "commit", "-q", "-m", f"main: pin {index}{_TRAILER}")
+        _git(root, "branch", "change")
+        _git(root, "checkout", "-q", "change")
+        _git(root, "update-index", "--cacheinfo", f"160000,{'3' * 40},examples/sub")
+        _git(root, "commit", "-q", "-m", f"change: bump the pin{_TRAILER}")
+
+        assert stale_files(root, "main") == []
