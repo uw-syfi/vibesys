@@ -216,6 +216,36 @@ test('the Map shows the run as a tree, opens a step’s own logs, and replays it
   await shot(page, 'ink-map-ended');
 });
 
+test('a step picked far down the tree keeps its details and turns in view', async ({page}) => {
+  await page.setViewportSize({width: 1280, height: 520});
+  await openMap(page);
+  const tree = page.getByRole('tree', {name: 'Run steps'});
+  const row = (name: string | RegExp) => tree.getByRole('treeitem', {name});
+  await row(/4 finished workstreams/).click();
+  await row(/W5 · Combine W1 ring/).click();
+  const details = page.getByRole('region', {name: 'Workstream'});
+  const turns = page.getByRole('region', {name: 'Turn by turn'});
+  await expect(turns.getByText('1 agent turn')).toBeVisible();
+
+  // The tree is taller than the window; scrolled to its last row, the page has left the top of it.
+  const last = tree.getByRole('treeitem').last();
+  await last.scrollIntoViewIfNeeded();
+  const scrolled = await tree.evaluate(element => {
+    for (let at = element.parentElement; at !== null; at = at.parentElement) {
+      if (at.scrollHeight > at.clientHeight && getComputedStyle(at).overflowY !== 'visible') {
+        return at.scrollTop;
+      }
+    }
+    return document.scrollingElement?.scrollTop ?? 0;
+  });
+  expect(scrolled).toBeGreaterThan(0);
+  await expect(last).toBeInViewport();
+
+  // The details stay beside it, and the turns with them.
+  await expect(details).toBeInViewport();
+  await expect(turns).toBeInViewport();
+});
+
 test('the Map shows the turns under a step, turn by turn, and none for a step without any', async ({
   page,
 }) => {

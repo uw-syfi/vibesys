@@ -43,6 +43,8 @@ export interface RunPagePorts {
   /** Resume an ended run that its end record says can resume. */
   resumeEnded(fromRound: number | null): void;
   openWindow(): void;
+  /** This window's clock, in epoch milliseconds. */
+  now(): number;
   archive(): void;
   runAgain(): void;
   /** The run's log streams, when the app can read them (`unavailable.logs` says when not). */
@@ -97,6 +99,45 @@ class Followers {
   }
 }
 
+/** How often the clock ticks while a tab shows ages: a second, the finest the screen writes. */
+const TICK_MS = 1000;
+
+/**
+ * Ticks this window's clock into the store while the screen shows the ages of a live run's open
+ * steps (the Overview and Work tabs at the live end of an attached run), and not otherwise: a
+ * tick re-renders the screen, so it runs only where time passing is on screen.
+ */
+class Ticker {
+  #cancel: (() => void) | null = null;
+
+  constructor(
+    private readonly schedule: ScheduleTimeout,
+    private readonly now: () => number,
+    private readonly dispatch: Dispatch,
+  ) {}
+
+  reconcile(state: RunPageState): void {
+    const wanted =
+      state.link.kind === 'attached' &&
+      state.view.at === 'live' &&
+      (state.tab === 'overview' || state.tab === 'work');
+    if (wanted && this.#cancel === null) this.#arm();
+    if (!wanted) this.stop();
+  }
+
+  stop(): void {
+    this.#cancel?.();
+    this.#cancel = null;
+  }
+
+  #arm(): void {
+    this.#cancel = this.schedule(() => {
+      this.#cancel = null;
+      this.dispatch({type: 'tick', wallMs: this.now()});
+    }, TICK_MS);
+  }
+}
+
 /** Read one history page; a read that throws settles as a failed page. */
 function readHistory(
   ports: RunPagePorts,
@@ -108,6 +149,21 @@ function readHistory(
   void ports
     .readHistory(request.from, request.max)
     .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
+}
+
+/** List the run's log streams; a listing that throws settles as a transport failure. */
+function listLogs(
+  ports: RunPagePorts,
+  request: Extract<RunPageRequest, {readonly kind: 'list-logs'}>,
+  dispatch: Dispatch,
+): void {
+  const settle = (outcome: LogListOutcome): void =>
+    dispatch({type: 'streams', token: request.token, outcome});
+  void ports.logs
+    ?.list(request.instanceId)
+    .then(settle, (error: unknown) =>
+      settle({ok: false, failure: {code: 'transport', message: String(error)}}),
+    );
 }
 
 function performCommand(ports: RunPagePorts, request: RunPageRequest): void {
@@ -137,7 +193,11 @@ export function createRunPageStore(
   const cancels = new Set<() => void>();
   let disposed = false;
   // Reports reach the store only while it lives; `store` is assigned before any can arrive.
-  const sessions = new SessionHolder(ports.openSession, action => store.dispatch(action));
+  const sessions = new SessionHolder(
+    ports.openSession,
+    action => store.dispatch(action),
+    ports.now,
+  );
   const live =
     (dispatch: Dispatch): Dispatch =>
     action => {
@@ -161,16 +221,9 @@ export function createRunPageStore(
         cancels.add(cancel);
         return;
       }
-      case 'list-logs': {
-        const settle = (outcome: LogListOutcome): void =>
-          dispatch({type: 'streams', token: request.token, outcome});
-        void ports.logs
-          ?.list(request.instanceId)
-          .then(settle, (error: unknown) =>
-            settle({ok: false, failure: {code: 'transport', message: String(error)}}),
-          );
+      case 'list-logs':
+        listLogs(ports, request, dispatch);
         return;
-      }
       case 'attach':
         void ports.attach(request.instance).then(
           error => dispatch({type: 'attached', token: request.token, error}),
@@ -202,12 +255,14 @@ export function createRunPageStore(
     runPageInitial(seed),
     perform,
   );
+  const ticker = new Ticker(schedule, ports.now, live(store.dispatch));
   const followers =
     ports.logs === null ? null : new Followers(ports.logs, schedule, live(store.dispatch));
   const unsubscribe = store.subscribe(() => {
     const state = store.getState();
     followers?.reconcile(state);
     sessions.reconcile(state);
+    ticker.reconcile(state);
   });
   return {
     ...store,
@@ -216,6 +271,7 @@ export function createRunPageStore(
       unsubscribe();
       followers?.stop();
       sessions.close();
+      ticker.stop();
       if (store.getState().link.kind !== 'none') ports.release();
       for (const cancel of cancels) cancel();
       cancels.clear();

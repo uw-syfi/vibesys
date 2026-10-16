@@ -1,11 +1,20 @@
 import {expect, test} from 'bun:test';
-import type {RunEvent} from '@vibesys/contracts';
+import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import type {LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
 import {initialCoreState, reduceEvent} from '@vibesys/run-state';
 import type {AbortSignalLike} from '@vibesys/transport';
-import {headerView, quotaBannerView, stopBannerView} from '../../state/index.js';
+import {
+  headerView,
+  overviewView,
+  quotaBannerView,
+  runNow,
+  stopBannerView,
+  viewedRun,
+  WORK_FILTER_ALL,
+  workView,
+} from '../../state/index.js';
 import type {LiveSession, SessionObserver} from '../index.js';
 import {createRunPageStore, type RunPagePorts} from '../index.js';
 
@@ -53,6 +62,8 @@ class FakeApp {
   readonly asked: string[] = [];
   observer: SessionObserver | null = null;
   refuse: string | null = null;
+  /** This window's clock, which the test advances by hand. */
+  wallMs = 0;
 
   session(): LiveSession {
     return {
@@ -93,6 +104,7 @@ function fakePorts(stops: boolean[], app = new FakeApp()): RunPagePorts {
     readHistory: () => Promise.resolve({kind: 'unsupported'}),
     resumeEnded: ignore,
     openWindow: ignore,
+    now: () => app.wallMs,
     archive: ignore,
     runAgain: ignore,
     logs: null,
@@ -266,6 +278,96 @@ test('a session that reports while it opens is opened once', async () => {
   expect(app.asked.filter(asked => asked === 'open')).toHaveLength(1);
   expect(store.getState().session).toEqual(LIVE_VIEW);
   store.dispose();
+});
+
+/** A running multi-agent run: its root, a round (workstream) and the orchestrator's turn under it. */
+function snapshotWith(openSince: number): RunSnapshot {
+  const base = {
+    status: 'running' as const,
+    waiting_on: [],
+    attempts: [],
+    ended_at: null,
+    failure: null,
+    stop: null,
+  };
+  return {
+    run_id: '20261015-163047',
+    sequence: 3,
+    status: 'running',
+    spans: [
+      {...base, id: 'flow:#1', parent: null, type: 'flow', name: 'multi', started_at: 0},
+      {
+        ...base,
+        id: 'flow:round#1',
+        parent: 'flow:#1',
+        type: 'flow',
+        name: 'play_round',
+        started_at: openSince,
+        label: {kind: 'workstream', title: 'round 1', attrs_json: '{"round":1}', links: []},
+      },
+      {
+        ...base,
+        id: 'op:round/orchestrator.1',
+        parent: 'flow:round#1',
+        type: 'operation',
+        name: 'agent.turn',
+        started_at: openSince,
+        label: {
+          kind: 'agent_turn',
+          title: 'orchestrator',
+          attrs_json: '{"role":"orchestrator"}',
+          links: [],
+        },
+      },
+    ],
+  } as RunSnapshot;
+}
+
+function liveStore(app: FakeApp, clock: FakeClock) {
+  const store = createRunPageStore(SEED, fakePorts([], app), clock.schedule);
+  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+  return store;
+}
+
+test('an open step keeps aging while the run says nothing, on the window clock', async () => {
+  const app = new FakeApp();
+  const clock = new FakeClock();
+  const store = liveStore(app, clock);
+  await Promise.resolve();
+  app.wallMs = 1_000_000;
+  app.observer?.session(LIVE_VIEW);
+  app.observer?.data({kind: 'snapshot', snapshot: snapshotWith(10)});
+  const doing = (): string | undefined =>
+    overviewView(viewedRun(store.getState()), store.getState()).current[0]?.doing;
+  expect(doing()).toBe('Orchestrator turn, 0s');
+  // Ten minutes pass with no event from the run.
+  app.wallMs += 10 * 60_000;
+  clock.advance(1000);
+  expect(doing()).toBe('Orchestrator turn, 10m');
+  const row = workView(viewedRun(store.getState()), WORK_FILTER_ALL, runNow(store.getState()))
+    .rows[0];
+  expect(row?.took).toBe('10m');
+  store.dispose();
+});
+
+test('time is carried only while an attached run is at its live end on a tab that shows ages', async () => {
+  const app = new FakeApp();
+  const clock = new FakeClock();
+  const store = liveStore(app, clock);
+  await Promise.resolve();
+  app.observer?.session(LIVE_VIEW);
+  app.observer?.data({kind: 'snapshot', snapshot: snapshotWith(10)});
+  expect(clock.pending).toBe(1);
+  store.dispatch({type: 'tab', tab: 'map'});
+  expect(clock.pending).toBe(0);
+  store.dispatch({type: 'tab', tab: 'work'});
+  expect(clock.pending).toBe(1);
+  store.dispatch({type: 'view', view: {at: 3}});
+  expect(clock.pending).toBe(0);
+  expect(runNow(store.getState())).toBeNull();
+  store.dispatch({type: 'view', view: {at: 'live'}});
+  store.dispose();
+  expect(clock.pending).toBe(0);
 });
 
 test('a session that reports after its run ended reaches nothing', async () => {

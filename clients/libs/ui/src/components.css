@@ -144,6 +144,13 @@ body > div:first-child {
   flex-direction: column;
   gap: var(--space-4);
 }
+/* A sticky aside stays in view beside a long main column, and scrolls within itself when taller. */
+.vs-split[data-sticky-aside] > .vs-split-aside {
+  position: sticky;
+  top: var(--space-4);
+  max-height: calc(100dvh - 2 * var(--space-4));
+  overflow-y: auto;
+}
 
 .vs-grid {
   display: grid;

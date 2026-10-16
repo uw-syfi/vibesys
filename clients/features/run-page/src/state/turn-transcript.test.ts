@@ -98,6 +98,7 @@ function page(transcript: readonly RunEvent[], selected: string | null): RunPage
   state = {...state, link: {kind: 'attached', instance: 'a1b2c3d4e5f6'}};
   state = runPageStep(state, {
     type: 'run-data',
+    wallMs: 0,
     data: {kind: 'events', events: SPANS.map((each, index) => started(index + 1, each))},
   }).state;
   for (const action of actions) state = runPageStep(state, action).state;
@@ -164,6 +165,7 @@ describe('the turns under the selected Map step', () => {
     state = page([call(10, 'op:1', 'c1', 'make')], 'op:1');
     state = runPageStep(state, {
       type: 'run-data',
+      wallMs: 0,
       data: {
         kind: 'events',
         events: ended

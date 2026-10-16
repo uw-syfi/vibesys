@@ -12,19 +12,20 @@
 import type {Span} from '@vibesys/contracts';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import type {MapFilter, MapState, RunPageState} from './run-page.js';
-import {attrsOf, duration} from './span-reading.js';
+import {attrsOf, duration, formatValue, ratio, upperFirst} from './span-reading.js';
 import {
   attemptWords,
   bucket,
   ended,
   kindWords,
+  openWaits,
   plain,
   shortName,
   statusWords,
   subtitleOf,
   titleOf,
   verdictWords,
-  waitingWords,
+  waitPhrase,
 } from './span-words.js';
 import {type LogStreamItem, logGroups, type Tone} from './views.js';
 
@@ -223,10 +224,10 @@ function stateFacts(span: Span, trace: RunTrace, start: number): MapFact[] {
       value: reason == null ? verdict.label : `${verdict.label} · ${plain(reason)}`,
     });
   }
-  const waiting = ended(span) ? [] : (span.waiting_on ?? []);
+  const waiting = openWaits(span);
   if (waiting.length > 0) {
     const words = waiting.map(
-      wait => `${waitingWords(wait, trace.spans)}, since ${at(wait.since, start)}`,
+      wait => `${upperFirst(waitPhrase(wait, trace.spans))}, since ${at(wait.since, start)}`,
     );
     facts.push({key: 'Waiting on', value: words.join('; ')});
   }
@@ -243,14 +244,18 @@ function stateFacts(span: Span, trace: RunTrace, start: number): MapFact[] {
   return facts;
 }
 
+/** A label attribute as the screen writes it: a ratio to the baseline, a number, else as is. */
+function attrValue(key: string, value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return key === 'vs_baseline' ? ratio(value) : formatValue(value);
+  }
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
 function attrFacts(span: Span): MapFact[] {
   return Object.entries(attrsOf(span))
     .filter(([, value]) => value !== null && value !== undefined)
-    .map(([key, value]) => ({
-      key: plain(key),
-      value: typeof value === 'string' ? value : JSON.stringify(value),
-      mono: true,
-    }));
+    .map(([key, value]) => ({key: plain(key), value: attrValue(key, value), mono: true}));
 }
 
 /** Facts with distinct keys: an attribute named like a fact above it keeps its own row. */

@@ -6,7 +6,15 @@
  */
 import type {Span} from '@vibesys/contracts';
 import type {MapFilter} from './run-page.js';
-import {duration, numberAttr, ratio, stringAttr, words} from './span-reading.js';
+import {
+  duration,
+  formatValue,
+  numberAttr,
+  ratio,
+  stepName,
+  stringAttr,
+  words,
+} from './span-reading.js';
 import type {Tone} from './views.js';
 
 type Status = Span['status'];
@@ -88,7 +96,7 @@ export function shortName(span: Span): string {
     const hypothesis = stringAttr(span, 'hypothesis_id');
     if (hypothesis !== null) return hypothesis;
   }
-  return span.label?.title ?? span.name;
+  return span.label?.title ?? stepName(span.name) ?? span.name;
 }
 
 /** How a gate's stages read in its title: a task's build stage is the candidate build. */
@@ -105,7 +113,7 @@ function gateTitle(title: string): string {
 /** The span's title on its row. */
 export function titleOf(span: Span): string {
   const label = span.label;
-  const title = label?.title ?? span.name;
+  const title = label?.title ?? stepName(span.name) ?? span.name;
   if (span.parent === null) return `Run · ${title}`;
   switch (label?.kind) {
     case 'planning_call':
@@ -125,19 +133,34 @@ export function titleOf(span: Span): string {
   }
 }
 
-/** One source the span waits on, in words; an operation reads as its span's title when known. */
-export function waitingWords(wait: Waiting, spans: ReadonlyMap<string, Span>): string {
+/**
+ * What the span waits on that is worth saying. Every live flow also awaits the operator's stop, so
+ * the run records a `stop` wait on each from the start; it is something the flow waits on only
+ * once a stop was requested.
+ */
+export function openWaits(span: Span): readonly Waiting[] {
+  if (ended(span)) return [];
+  const requested = span.stop !== null && span.stop !== undefined;
+  return (span.waiting_on ?? []).filter(wait => wait.kind !== 'stop' || requested);
+}
+
+/**
+ * One source the span waits on, as a phrase to follow "waiting on": an operation or a step reads as
+ * its title when it is in the trace. A `slot` is a result another flow fills: a task's (the span
+ * `ref` names), all of a group's tasks (`group`), or a signal.
+ */
+export function waitPhrase(wait: Waiting, spans: ReadonlyMap<string, Span>): string {
+  const target = spans.get(wait.ref);
   switch (wait.kind) {
-    case 'operation': {
-      const target = spans.get(wait.ref);
-      return target === undefined ? 'An operation' : titleOf(target);
-    }
+    case 'operation':
+      return target === undefined ? 'an operation' : titleOf(target);
     case 'slot':
-      return 'A free slot';
+      if (wait.ref === 'group') return 'its steps to finish';
+      return target === undefined ? 'another step’s signal' : `${titleOf(target)} to finish`;
     case 'time':
-      return 'A timer';
+      return 'a timer';
     case 'stop':
-      return 'The stop to land';
+      return 'the stop to land';
   }
 }
 
@@ -157,7 +180,7 @@ function measured(span: Span): string | null {
   const value = numberAttr(span, 'metric_value');
   if (value === null) return null;
   const vs = numberAttr(span, 'vs_baseline');
-  return vs === null ? `${value}` : `${value} · ${ratio(vs)} the input`;
+  return vs === null ? formatValue(value) : `${formatValue(value)} · ${ratio(vs)} the input`;
 }
 
 /** The subtitle a labelled kind gives itself, or null to use the generic one. */
@@ -200,9 +223,9 @@ export function subtitleOf(
   children: number,
   start: number,
 ): string {
-  const waiting = span.waiting_on ?? [];
-  if (waiting.length > 0 && !ended(span)) {
-    return `Waiting on ${waiting.map(wait => waitingWords(wait, spans).toLowerCase()).join(', ')}`;
+  const waiting = openWaits(span);
+  if (waiting.length > 0) {
+    return `Waiting on ${waiting.map(wait => waitPhrase(wait, spans)).join(', ')}`;
   }
   const own = span.parent === null ? workstreams(spans) : kindSubtitle(span, children);
   if (own !== null) return own;

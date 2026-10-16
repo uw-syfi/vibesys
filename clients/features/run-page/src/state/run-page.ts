@@ -31,6 +31,7 @@ import {
 import type {RunRef} from '@vibesys/runs';
 import {
   EMPTY_RUN_FOLD,
+  heardAfter,
   type RunData,
   type RunFold,
   type RunLink,
@@ -163,6 +164,8 @@ export interface RunPageState {
   readonly session: SessionView | null;
   /** The run fold and trace so far. */
   readonly run: RunFold;
+  /** This window's clock (epoch ms) at its latest tick; null before the first one. */
+  readonly clockMs: number | null;
   /** The sequence the tabs show: the live end, or a past one the scrubber chose. */
   readonly view: RunView;
   /** Why the last command the run refused failed, until the next one. */
@@ -206,7 +209,10 @@ export type RunPageAction =
   | {readonly type: 'attached'; readonly token: number; readonly error: string | null}
   | {readonly type: 'session'; readonly session: SessionView | null}
   | {readonly type: 'run-core'; readonly core: CoreState}
-  | {readonly type: 'run-data'; readonly data: RunData}
+  /** The run's spans changed: `data` arrived at `wallMs` on this window's clock. */
+  | {readonly type: 'run-data'; readonly data: RunData; readonly wallMs: number}
+  /** This window's clock, ticked while the screen shows time passing on a live run. */
+  | {readonly type: 'tick'; readonly wallMs: number}
   | {readonly type: 'command-refused'; readonly message: string}
   /** The run refused a Resume when capacity returns (an older server rejects `when`). */
   | {readonly type: 'wait-refused'; readonly message: string}
@@ -260,6 +266,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     link: {kind: 'none'},
     session: null,
     run: EMPTY_RUN_FOLD,
+    clockMs: null,
     view: {at: 'live'},
     notice: null,
     map: {filter: 'all', open: new Set(), selected: null},
@@ -288,6 +295,17 @@ function recordPhase(record: RunRecord): RunPhase {
     default:
       return {kind: 'running', pausing: false};
   }
+}
+
+/**
+ * The run clock's time now: the time of the run's latest span change, carried forward by this
+ * window's clock since the window heard it. Null at a past view or without a live attachment,
+ * where the latest time the spans carry is the run's time (`latestTime`).
+ */
+export function runNow(state: RunPageState): number | null {
+  const {heard} = state.run;
+  if (heard === null || state.view.at !== 'live' || state.link.kind !== 'attached') return null;
+  return heard.run + Math.max(0, (state.clockMs ?? heard.wallMs) - heard.wallMs) / 1000;
 }
 
 /** The run's phase as the screen shows it. */
@@ -423,6 +441,7 @@ function withHistory(state: RunPageState, token: number, reply: HistoryReply): R
     reply.events.length === 0
       ? state.run
       : {
+          ...state.run,
           core: reduceEventBatch(state.run.core ?? initialCoreState(), reply.events),
           trace: traceStep(state.run.trace, {kind: 'events', events: reply.events}),
         };
@@ -690,10 +709,19 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
     case 'run-data':
       return {
         state: attached
-          ? {...state, run: {...state.run, trace: traceStep(state.run.trace, action.data)}}
+          ? {
+              ...state,
+              run: {
+                ...state.run,
+                trace: traceStep(state.run.trace, action.data),
+                heard: heardAfter(state.run.heard, action.data, action.wallMs),
+              },
+            }
           : state,
         requests: [],
       };
+    case 'tick':
+      return {state: {...state, clockMs: action.wallMs}, requests: []};
     case 'command-refused':
       return {state: {...state, notice: action.message}, requests: []};
     case 'wait-refused':

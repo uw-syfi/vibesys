@@ -42,6 +42,8 @@ export class SessionHolder {
   constructor(
     private readonly openSession: OpenSession,
     private readonly dispatch: (action: RunPageAction) => void,
+    /** This window's clock (epoch ms), which stamps when the run's data arrived. */
+    private readonly now: () => number,
   ) {}
 
   reconcile(state: RunPageState): void {
@@ -72,7 +74,7 @@ export class SessionHolder {
     const opened = this.openSession({
       session: view => report({type: 'session', session: view}),
       core: core => report({type: 'run-core', core}),
-      data: data => report({type: 'run-data', data}),
+      data: data => report({type: 'run-data', data, wallMs: this.now()}),
     });
     session = opened;
     // Closed while it was opening (a report moved the link on): close what just opened.

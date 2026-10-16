@@ -15,11 +15,12 @@ import {
   workstreamCounts,
 } from '@vibesys/run-state/overview';
 import {type ObjectiveBlock, objectiveBlocks} from './objective-text.js';
-import {type RunAtView, spansAtView} from './run-at-view.js';
+import {clockNow, type RunAtView, spansAtView} from './run-at-view.js';
 import {type RunPageState, runPhase} from './run-page.js';
 import {
   duration,
   earliestTime,
+  formatValue,
   indexSpans,
   isOpen,
   kindOf,
@@ -30,8 +31,10 @@ import {
   type SpanIndex,
   stringAttr,
   titleOf,
+  upperFirst,
   words,
 } from './span-reading.js';
+import {openWaits, waitPhrase} from './span-words.js';
 import type {Tone} from './views.js';
 
 export interface ObjectiveView {
@@ -95,6 +98,24 @@ export interface OverviewView {
   readonly current: readonly CurrentWorkItem[];
 }
 
+/**
+ * What an evaluator command's placeholders stand for when it runs, in words: the run substitutes
+ * them per candidate (`${PROJECT_ROOT}` is the candidate's own checkout), so the command a person
+ * reads says what they stand for instead of showing the unexpanded variable.
+ */
+const COMMAND_PLACEHOLDERS: readonly (readonly [string, string])[] = [
+  ['${PROJECT_ROOT}', '<the candidate’s project>'],
+  ['${PYTHON}', 'python'],
+];
+
+/** A command's argument vector as one line, its placeholders written as what they stand for. */
+export function commandLine(argv: readonly string[]): string {
+  return COMMAND_PLACEHOLDERS.reduce(
+    (line, [token, words]) => line.replaceAll(token, words),
+    argv.join(' '),
+  );
+}
+
 function objectiveView(run: RunAtView): ObjectiveView | null {
   const overview = run.overview;
   if (overview === null) return null;
@@ -115,7 +136,7 @@ function objectiveView(run: RunAtView): ObjectiveView | null {
   return {
     blocks: objectiveBlocks(objective.text),
     metric: objective.metric ? metricParts.join(' · ') : null,
-    check: check.length === 0 ? null : check.join(' '),
+    check: check.length === 0 ? null : commandLine(check),
     evaluator: evaluator === null ? null : `${evaluator.name} ${evaluator.version}`,
   };
 }
@@ -203,13 +224,6 @@ function elapsedNumber(spans: readonly Span[], ended: boolean): KeyNumber {
   };
 }
 
-/** A metric value with at most three significant decimals, grouped. */
-export function formatValue(value: number): string {
-  const abs = Math.abs(value);
-  const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : abs >= 1 ? 2 : 3;
-  return value.toLocaleString('en-US', {maximumFractionDigits: digits});
-}
-
 /** A value on an axis, compact (`24M`, `1.5k`, `0.002`) so a long number never crowds the gutter. */
 function formatAxisValue(value: number): string {
   return value.toLocaleString('en-US', {
@@ -287,17 +301,12 @@ function chartView(run: RunAtView, index: SpanIndex): ChartView | null {
 /** What the deepest open span under `span` says it is doing. */
 function doing(index: SpanIndex, span: Span, now: number | null): string {
   const open = deepestOpen(index, span) ?? span;
-  const since = open.waiting_on?.[0]?.since ?? open.started_at;
+  const wait = openWaits(open)[0];
+  const since = wait?.since ?? open.started_at;
   const age = now === null ? '' : `, ${duration(now - since)}`;
-  const wait = open.waiting_on?.[0];
   if (open.status === 'waiting' && wait !== undefined) {
-    const what: Record<string, string> = {
-      slot: 'Waiting for a free slot',
-      time: 'Waiting for its time',
-      stop: 'Stopping',
-      operation: 'Waiting on an operation',
-    };
-    return `${what[wait.kind] ?? `Waiting on ${words(wait.kind)}`}${age}`;
+    const what = wait.kind === 'stop' ? 'Stopping' : `Waiting on ${waitPhrase(wait, index.byId)}`;
+    return `${what}${age}`;
   }
   if (open.status === 'pending') return 'Not started';
   switch (kindOf(open)) {
@@ -339,8 +348,7 @@ const CURRENT_KINDS: ReadonlySet<string | null> = new Set(['planning_call', 'wor
  * The open planning calls and workstreams; a run whose search labels no span shows its open flows
  * below the root instead.
  */
-function currentWork(index: SpanIndex): readonly CurrentWorkItem[] {
-  const now = latestTime(index.spans);
+function currentWork(index: SpanIndex, now: number | null): readonly CurrentWorkItem[] {
   const labelled = index.spans.some(span => kindOf(span) !== null);
   const open = index.spans.filter(span =>
     labelled
@@ -350,10 +358,6 @@ function currentWork(index: SpanIndex): readonly CurrentWorkItem[] {
   // Before the first plan or workstream, the run's own open steps (the input's measurement).
   const items = open.length === 0 && labelled ? openUnderRoot(index) : open;
   return items.map(span => currentItem(index, span, now));
-}
-
-function capitalized(text: string): string {
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
 /** The open spans directly under the run's root, oldest first. */
@@ -375,15 +379,15 @@ export function progressNote(run: RunAtView, state: RunPageState): ProgressNote 
   const top = openUnderRoot(index)[0];
   if (top !== undefined) {
     return {
-      title: capitalized(words(titleOf(top))),
-      body: capitalized(doing(index, top, latestTime(index.spans))),
+      title: upperFirst(words(titleOf(top))),
+      body: upperFirst(doing(index, top, clockNow(state, index.spans))),
     };
   }
   if (phase === 'starting') {
     const status = state.record.kind === 'live' ? state.record.run.status : null;
     return {
       title: 'Starting the run',
-      body: status === null ? 'Preparing the run environment.' : capitalized(status),
+      body: status === null ? 'Preparing the run environment.' : upperFirst(status),
     };
   }
   return {
@@ -406,6 +410,6 @@ export function overviewView(run: RunAtView, state: RunPageState): OverviewView 
       elapsedNumber(spans, ended),
     ],
     chart: chartView(run, index),
-    current: currentWork(index),
+    current: currentWork(index, clockNow(state, spans)),
   };
 }

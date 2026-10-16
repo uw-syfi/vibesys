@@ -66,18 +66,25 @@ export function Row(props: FlexProps): JSX.Element {
 /**
  * A main column and an aside beside it; the aside moves under the main column when narrow.
  * `asideFirst` puts the aside before the main column, in reading order and on screen (a list
- * beside the detail of its selected row); when narrow it then sits above it.
+ * beside the detail of its selected row); when narrow it then sits above it. `stickyAside` keeps
+ * the aside in view while a long main column scrolls past (the detail of a row picked far down a
+ * list); an aside taller than the window scrolls within itself.
  */
 export function Split(props: {
   readonly main: ReactNode;
   readonly aside: ReactNode;
   readonly gap?: SpaceToken;
   readonly asideFirst?: boolean;
+  readonly stickyAside?: boolean;
 }): JSX.Element {
   const main = <div className="vs-split-main">{props.main}</div>;
   const aside = <div className="vs-split-aside">{props.aside}</div>;
   return (
-    <div className="vs-split" style={gapStyle(props.gap ?? 'space-5')}>
+    <div
+      className="vs-split"
+      {...(props.stickyAside === true ? {'data-sticky-aside': ''} : {})}
+      style={gapStyle(props.gap ?? 'space-5')}
+    >
       {props.asideFirst === true ? aside : main}
       {props.asideFirst === true ? main : aside}
     </div>

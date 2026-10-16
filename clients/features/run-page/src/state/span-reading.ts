@@ -31,10 +31,48 @@ export function kindOf(span: Span): string | null {
   return span.label?.kind ?? null;
 }
 
-/** What a span is called: its label's title, else its registered name. */
+/**
+ * What the run's own steps are called, by the registered name of the operation or flow that
+ * records them. A search labels the steps it cares about (its workstreams, turns and gates); the
+ * rest are the plumbing around them, named by a closed registry (an operation's kind, a flow's
+ * name) and worded here, never in the backend. A strategy's operations are
+ * `<strategy>.<operation>`, so a name not listed whole is looked up by its operation
+ * (`multi.render_role_artifacts` reads as `render_role_artifacts`).
+ */
+const STEP_NAMES: Readonly<Record<string, string>> = {
+  render_role_artifacts: 'Writing the agent’s instructions',
+  interpret_evidence: 'Reading the measurement',
+  capture_command: 'Profiling',
+  validate_local: 'Validating the candidate',
+  verify_parent_revision: 'Checking the starting revision',
+  export_patch: 'Exporting the candidate’s changes',
+  write_handoff: 'Writing the hand-off notes',
+  'roadmap.read': 'Reading the roadmap',
+  'roadmap.put_items': 'Updating the roadmap',
+  'issue_board.read': 'Reading the issue board',
+  'issue_board.apply_changes': 'Updating the issue board',
+  'issue_board.log_progress': 'Logging progress',
+  'agent.turn': 'Agent turn',
+  play_round: 'Play round',
+  'measure-input': 'Measuring the input',
+};
+
+/** The words for a step's registered name, or null when the registry does not list it. */
+export function stepName(name: string): string | null {
+  const whole = STEP_NAMES[name];
+  if (whole !== undefined) return whole;
+  return name.includes('.') ? (STEP_NAMES[name.slice(name.indexOf('.') + 1)] ?? null) : null;
+}
+
+/**
+ * What a span is called: its label's title, else its registered name in words (a name the
+ * registry does not list reads as it is).
+ */
 export function titleOf(span: Span): string {
   const title = span.label?.title;
-  return title === undefined || title === null || title === '' ? span.name : title;
+  return title === undefined || title === null || title === ''
+    ? (stepName(span.name) ?? span.name)
+    : title;
 }
 
 /** The label's attributes as a record; empty when it has none or they do not parse to one. */
@@ -134,9 +172,21 @@ export function duration(seconds: number): string {
   return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
+/** A metric value as the screen writes it everywhere: grouped, with at most three significant decimals. */
+export function formatValue(value: number): string {
+  const abs = Math.abs(value);
+  const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : abs >= 1 ? 2 : 3;
+  return value.toLocaleString('en-US', {maximumFractionDigits: digits});
+}
+
 /** A ratio to the baseline as the screen writes it: `1.42×`. */
 export function ratio(value: number): string {
   return `${value.toFixed(2)}×`;
+}
+
+/** `text` with its first letter capitalized. */
+export function upperFirst(text: string): string {
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
 /** Snake-case words as the screen writes them: `failed_check` reads `failed check`. */

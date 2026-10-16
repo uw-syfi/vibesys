@@ -45,6 +45,7 @@ if (bridge === undefined) {
     schedule,
     {
       messages: window,
+      now: () => Date.now(),
       session: run => shellSessionOptions(run, {document, window, navigator}),
     },
   );

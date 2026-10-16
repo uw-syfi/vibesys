@@ -9,7 +9,14 @@
 import type {RunEvent, RunOverview, RunSnapshot} from '@vibesys/contracts';
 import type {CoreState} from '@vibesys/run-state';
 import {foldOverview, overviewFromSnapshot} from '@vibesys/run-state/overview';
-import {EMPTY_TRACE, foldTrace, type RunTrace, traceFromSnapshot} from '@vibesys/run-state/trace';
+import {
+  EMPTY_TRACE,
+  foldTrace,
+  type RunTrace,
+  traceFromSnapshot,
+  traceSpans,
+} from '@vibesys/run-state/trace';
+import {latestTime} from './span-reading.js';
 
 /** The window's hold on the live run: none, being attached under a token, attached, or refused. */
 export type RunLink =
@@ -110,13 +117,43 @@ export function overviewAt(log: TraceLog, at: number | null): RunOverview | null
   return foldOverview(log.baseOverview, eventsAt(log, at));
 }
 
+/**
+ * Where the run clock stood when this window last heard the run's spans change, and the window's
+ * clock then (epoch ms). The run's own clock is read only from its spans, which change when a step
+ * does, so a step that runs for minutes shows no time passing; this lets the page carry the run
+ * clock forward on its own clock. Both are this window's: a remote host's clock never enters.
+ */
+export interface Heard {
+  readonly run: number;
+  readonly wallMs: number;
+}
+
 /** The run fold and trace a live or recorded run has produced so far. */
 export interface RunFold {
   readonly core: CoreState | null;
   readonly trace: TraceLog;
+  /** The run clock when the live run's spans last changed here; null before they did. */
+  readonly heard: Heard | null;
 }
 
-export const EMPTY_RUN_FOLD: RunFold = {core: null, trace: EMPTY_TRACE_LOG};
+export const EMPTY_RUN_FOLD: RunFold = {core: null, trace: EMPTY_TRACE_LOG, heard: null};
+
+/** The latest run-clock time the spans carry that `data` brings, or null when it brings none. */
+function timeOf(data: RunData): number | null {
+  const spans =
+    data.kind === 'snapshot'
+      ? (data.snapshot.spans ?? [])
+      : traceSpans(foldTrace(EMPTY_TRACE, data.events));
+  return latestTime(spans);
+}
+
+/** What the window heard after `data` arrived at `wallMs`: the run clock moves only forward. */
+export function heardAfter(heard: Heard | null, data: RunData, wallMs: number): Heard | null {
+  if (data.kind === 'rebootstrap' && data.base === 'reset') return null;
+  const run = timeOf(data);
+  if (run === null || (heard !== null && run <= heard.run)) return heard;
+  return {run, wallMs};
+}
 
 /** What must hold of the trace slice: its events are span events, in increasing sequence. */
 export function traceProblems(log: TraceLog): string[] {

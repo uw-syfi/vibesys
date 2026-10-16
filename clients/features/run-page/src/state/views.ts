@@ -9,6 +9,7 @@ import {endedLook, type HostRun, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
 import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
+import {endReason, type KeptCandidate, keptCandidate} from './end-words.js';
 import {overviewAt, traceAt} from './live.js';
 import {
   commandable,
@@ -366,10 +367,18 @@ export function logGroups(state: RunPageState): readonly LogGroup[] {
   }).filter(group => group.streams.length > 0);
 }
 
-/** The stream the Logs tab shows: the selected one while it is listed, else the first. */
+/**
+ * The stream the Logs tab shows: the selected one while it is listed. Otherwise, once the run has
+ * started, its latest narration (what the run says about itself), not the first image build of the
+ * startup steps, which the startup timeline already shows; while it starts, or with no narration,
+ * the first stream.
+ */
 export function shownStream(state: RunPageState): string | null {
-  const ids = logGroups(state).flatMap(group => group.streams.map(stream => stream.id));
+  const groups = logGroups(state);
+  const ids = groups.flatMap(group => group.streams.map(stream => stream.id));
   if (state.selected !== null && ids.includes(state.selected)) return state.selected;
+  const narration = groups.find(group => group.name === 'Run narration')?.streams.at(-1);
+  if (narration !== undefined && runPhase(state).kind !== 'starting') return narration.id;
   return ids[0] ?? null;
 }
 
@@ -416,6 +425,12 @@ export function logsNotice(state: RunPageState): string | null {
   }
 }
 
+/** The candidate the run kept and its objective's direction, as the trace at the end says. */
+function keptAtEnd(state: RunPageState): [KeptCandidate | null, 'max' | 'min' | null | undefined] {
+  const direction = overviewAt(state.run.trace, null)?.objective.direction;
+  return [keptCandidate(traceSpans(traceAt(state.run.trace, null)), direction), direction];
+}
+
 export interface EndedView {
   readonly title: string;
   readonly tone: 'neutral' | 'ok' | 'warn' | 'err';
@@ -430,7 +445,10 @@ export function endedView(state: RunPageState): EndedView | null {
   if (phase.kind !== 'ended') return null;
   const {label, tone} = endedStatus(phase.run.phase, phase.end);
   const end = phase.end;
-  const reason = end?.reason ?? phase.run.reason ?? 'The run’s record does not say why it ended.';
+  const reason =
+    end === null
+      ? (phase.run.reason ?? 'The run’s record does not say why it ended.')
+      : endReason(end.outcome, end.reason, ...keptAtEnd(state));
   const round = end?.resume_from_round ?? null;
   const resume =
     end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;

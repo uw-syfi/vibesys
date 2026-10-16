@@ -214,9 +214,14 @@ export function MapTab(props: {
             <MapTree rows={rows} selected={detail.id} actions={actions} />
           </Card>
         }
-        aside={<Detail detail={detail} logs={props.logsOf(detail.id)} actions={actions} />}
+        aside={
+          <>
+            <Detail detail={detail} logs={props.logsOf(detail.id)} actions={actions} />
+            <Turns stepId={detail.id} transcript={props.transcript} />
+          </>
+        }
+        stickyAside
       />
-      <Turns stepId={detail.id} transcript={props.transcript} />
     </Stack>
   );
 }

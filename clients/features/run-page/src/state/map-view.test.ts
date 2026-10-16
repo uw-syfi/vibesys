@@ -608,7 +608,7 @@ describe('a dynamic run on the Map', () => {
     expect(gate?.kind).toBe('Gate');
     expect(gate?.facts).toContainEqual({
       key: 'Waiting on',
-      value: 'A free slot, since 1m into the run',
+      value: 'Its steps to finish, since 1m into the run',
     });
     expect(gate?.facts).toContainEqual({key: 'Metric value', value: '41.2', mono: true});
     const odd = mapDetail(live, {...all, selected: 'op:odd'});

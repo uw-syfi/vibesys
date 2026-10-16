@@ -19,6 +19,7 @@ import {
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
+  clockNow,
   endedView,
   headerView,
   logGroups,
@@ -35,6 +36,7 @@ import {
   runPhase,
   shownStream,
   spanLogs,
+  spansAtView,
   stopBannerView,
   streamLines,
   timelineView,
@@ -349,6 +351,7 @@ function Panel(props: {
           run={run}
           work={state.work}
           progress={progressNote(run, state)}
+          now={clockNow(state, spansAtView(run))}
           dispatch={dispatch}
         />
       );

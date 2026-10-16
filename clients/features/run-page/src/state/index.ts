@@ -33,7 +33,7 @@ export {
   type ChartPointView,
   type ChartView,
   type CurrentWorkItem,
-  formatValue,
+  commandLine,
   type KeyNumber,
   type ObjectiveView,
   type OverviewView,
@@ -42,7 +42,7 @@ export {
   progressNote,
 } from './overview-view.js';
 export {runRecord, sameRecord} from './record.js';
-export {NOTHING_FOLDED, type RunAtView} from './run-at-view.js';
+export {clockNow, NOTHING_FOLDED, type RunAtView, spansAtView} from './run-at-view.js';
 export {
   commandable,
   FIRST_HISTORY_SEQUENCE,
@@ -67,6 +67,7 @@ export {
   type RunRecord,
   type RunTab,
   type RunView,
+  runNow,
   runPageInitial,
   runPageInvariants,
   runPageStep,
@@ -81,6 +82,7 @@ export {
   scrubPositions,
   viewAtPosition,
 } from './scrub.js';
+export {formatValue} from './span-reading.js';
 export {
   type TurnRow,
   type TurnTranscript,

@@ -51,6 +51,7 @@ test('the page follows the stored theme for the system mode, and each change of 
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
+      now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
       },
@@ -76,6 +77,7 @@ test('New run opened for a machine starts on it; opened plainly, it keeps its ma
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
+      now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
       },
@@ -100,6 +102,7 @@ test('regression: Run again opens New run with the options the run was started w
     () => () => undefined,
     {
       messages: {addEventListener: ignore, removeEventListener: ignore},
+      now: () => 0,
       session: () => {
         throw new Error('this test opens no run');
       },

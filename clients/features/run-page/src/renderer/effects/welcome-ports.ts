@@ -42,6 +42,8 @@ export type RunPageBridge = Pick<
 /** The page the session runs in: where the preload's ports arrive, and the app's session wiring. */
 export interface RunPagePage {
   readonly messages: PortMessages;
+  /** The window's clock, in epoch milliseconds. */
+  now(): number;
   /** The session's transport and lifecycle over the run's bridge (the app builds transports). */
   session(bridge: DesktopBridge): Omit<WebSessionOptions, 'onTracePublication'>;
 }
@@ -184,6 +186,7 @@ export function welcomeRunPorts(
     resumeEnded: () =>
       void settled(bridge.resume(host, target.project, exactResumeRunId(target.run.runId))),
     openWindow: () => navigation.openWindow(),
+    now: () => page.now(),
     archive: () => void settled(bridge.archive(target.run, true)),
     runAgain: () => navigation.runAgain(),
     logs: {

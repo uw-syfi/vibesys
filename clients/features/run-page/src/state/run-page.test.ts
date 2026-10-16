@@ -210,6 +210,7 @@ function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
       if (random.bool()) {
         return {
           type: 'run-data',
+          wallMs: 0,
           data: {
             kind: 'rebootstrap',
             base: random.pick(['preserve', 'reset'] as const),
@@ -219,6 +220,7 @@ function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
       }
       return {
         type: 'run-data',
+        wallMs: 0,
         data: {
           kind: 'events',
           events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
@@ -418,10 +420,11 @@ describe('the run page store', () => {
 
   test('same-store rebootstrap keeps the snapshot base and replaces the replay suffix', () => {
     const state = fold(attached(), [
-      {type: 'run-data', data: {kind: 'snapshot', snapshot: snapshot(40, ['base'])}},
-      {type: 'run-data', data: {kind: 'events', events: [spanEvent(41, 'old-tail')]}},
+      {type: 'run-data', wallMs: 0, data: {kind: 'snapshot', snapshot: snapshot(40, ['base'])}},
+      {type: 'run-data', wallMs: 0, data: {kind: 'events', events: [spanEvent(41, 'old-tail')]}},
       {
         type: 'run-data',
+        wallMs: 0,
         data: {
           kind: 'rebootstrap',
           base: 'preserve',
@@ -442,7 +445,7 @@ describe('the run page store', () => {
     ];
     const state = fold(
       attached(),
-      publications.map(data => ({type: 'run-data', data})),
+      publications.map(data => ({type: 'run-data', wallMs: 0, data})),
     ).state;
 
     expect(viewedRun(state).spans.map(span => span.id)).toEqual(['historical-base', 'live-tail']);
@@ -452,10 +455,11 @@ describe('the run page store', () => {
 
   test('a proven replacement store resets both the trace base and replay suffix', () => {
     const state = fold(attached(), [
-      {type: 'run-data', data: {kind: 'snapshot', snapshot: snapshot(40, ['old-base'])}},
-      {type: 'run-data', data: {kind: 'events', events: [spanEvent(41, 'old-tail')]}},
+      {type: 'run-data', wallMs: 0, data: {kind: 'snapshot', snapshot: snapshot(40, ['old-base'])}},
+      {type: 'run-data', wallMs: 0, data: {kind: 'events', events: [spanEvent(41, 'old-tail')]}},
       {
         type: 'run-data',
+        wallMs: 0,
         data: {
           kind: 'rebootstrap',
           base: 'reset',
@@ -476,15 +480,16 @@ describe('the run page store', () => {
       events: [spanEvent(2, 'identity-unknown')],
     };
     const reset = fold(attached(), [
-      {type: 'run-data', data: {kind: 'snapshot', snapshot: snapshot(40, ['old-base'])}},
-      {type: 'run-data', data: {kind: 'events', events: [spanEvent(41, 'old-tail')]}},
-      {type: 'run-data', data: publication},
+      {type: 'run-data', wallMs: 0, data: {kind: 'snapshot', snapshot: snapshot(40, ['old-base'])}},
+      {type: 'run-data', wallMs: 0, data: {kind: 'events', events: [spanEvent(41, 'old-tail')]}},
+      {type: 'run-data', wallMs: 0, data: publication},
     ]).state;
     expect(viewedRun(reset).spans.map(span => span.id)).toEqual(['identity-unknown']);
 
     const restored = fold(reset, [
       {
         type: 'run-data',
+        wallMs: 0,
         data: {kind: 'snapshot', snapshot: snapshot(2, ['old-base', 'identity-unknown'])},
       },
     ]).state;
@@ -716,7 +721,7 @@ describe('the run page store', () => {
     } as unknown as RunEvent;
     const watched = fold(live.state, [
       {type: 'attached', token: attach.token, error: null},
-      {type: 'run-data', data: {kind: 'events', events: [span]}},
+      {type: 'run-data', wallMs: 0, data: {kind: 'events', events: [span]}},
     ]).state;
     const ended = fold(watched, [{type: 'record', record: RECORDS[8] as RunRecord}]);
     expect(ended.requests.some(request => request.kind === 'read-history')).toBe(false);

@@ -16,6 +16,7 @@ import {
   numberAttr,
   ratio,
   type SpanIndex,
+  stepName,
   stringAttr,
   titleOf,
   words,
@@ -68,7 +69,7 @@ function rowOutcome(span: Span): RowOutcome {
 }
 
 function hypothesisId(span: Span): string {
-  return stringAttr(span, 'hypothesis_id') ?? span.name;
+  return stringAttr(span, 'hypothesis_id') ?? stepName(span.name) ?? span.name;
 }
 
 function buildsOn(index: SpanIndex, span: Span): string {
@@ -135,14 +136,15 @@ export function rowMatches(row: WorkRow, filter: WorkFilter): boolean {
   return [row.id, row.hypothesis, row.buildsOn].some(text => text.toLowerCase().includes(query));
 }
 
-export function workView(run: RunAtView, filter: WorkFilter): WorkView {
+export function workView(run: RunAtView, filter: WorkFilter, now?: number | null): WorkView {
   const spans = spansAtView(run);
   const index = indexSpans(spans);
-  const now = latestTime(spans);
+
   const labelled = spans.some(span => kindOf(span) !== null);
   const listed = spans.filter(span =>
     labelled ? kindOf(span) === 'workstream' : span.type === 'flow' && span.parent !== null,
   );
-  const rows = listed.map(span => row(index, span, now));
+  const clock = now ?? latestTime(spans);
+  const rows = listed.map(span => row(index, span, clock));
   return {labelled, rows: rows.filter(item => rowMatches(item, filter)), total: rows.length};
 }

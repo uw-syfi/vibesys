@@ -62,10 +62,12 @@ export function WorkTab(props: {
   readonly work: WorkFilter;
   /** What the run is doing before it has any work, shown in place of "No work yet". */
   readonly progress: ProgressNote | null;
+  /** The run clock's time now, for the ages of open work. */
+  readonly now: number | null;
   readonly dispatch: (action: RunPageAction) => void;
 }): JSX.Element {
-  const {run, work, progress, dispatch} = props;
-  const view = workView(run, work);
+  const {run, work, progress, now, dispatch} = props;
+  const view = workView(run, work, now);
   const empty =
     view.total === 0
       ? (progress ?? {
