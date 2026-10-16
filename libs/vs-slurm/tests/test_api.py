@@ -958,8 +958,8 @@ def test_teardown_bounds_every_read_that_can_block_on_another_process(
     ]
     assert len(readers) == 2, readers
     assert all(re.search(r"\btimeout -s KILL \d+ (grep|ps) ", line) for line in readers), readers
-    scan = script[script.index("vs_scan() {") : script.index("vs_signal() {")]
-    check = script[script.index("vs_check() {") : script.index("vs_scan() {")]
+    scan = script[script.index("vs_scan_once() {") : script.index("vs_scan() {")]
+    check = script[script.index("vs_check() {") : script.index("vs_scan_once() {")]
     # A read cut short (124, or 137 when timeout kills itself too) leaves the process
     # unknown, and an unknown process keeps the scan reporting the job as not yet gone.
     assert '124 | 137) vs_unknown="$vs_unknown $1" ;;' in check
