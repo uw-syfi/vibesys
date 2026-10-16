@@ -15,6 +15,8 @@ from tests.vibesys.orchestration.evolve._host import Host, begin, config
 from tests.vibesys.search_faults import Step, Stop, play, steps, stops
 from tests.vibesys.vibesys_flows import across_restarts
 
+from vibesys.orchestration.evolve.core_policy.api import project_snapshot
+from vibesys.run.contracts import IterationTree
 from vs_core.api import Finish
 from vs_sim.api.testing import examples
 
@@ -33,6 +35,9 @@ def _check_always(host: Host) -> None:
         assert record.population.generation <= rules.max_generations, (
             f"too many generations: {where}"
         )
+        # Every published record projects to a sound iteration tree: the run projects each one.
+        tree = project_snapshot(record, experiment_revision=0).iterations
+        assert isinstance(tree, IterationTree), f"unprojectable record: {where}"
 
 
 def _check_at_the_end(host: Host) -> None:

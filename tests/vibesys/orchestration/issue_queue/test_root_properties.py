@@ -16,6 +16,8 @@ from tests.vibesys.orchestration.issue_queue._replies import evaluated, judged
 from tests.vibesys.search_faults import Step, Stop, play, steps, stops
 from tests.vibesys.vibesys_flows import across_restarts
 
+from vibesys.orchestration.issue_queue.core_policy.api import project_run_snapshot
+from vibesys.run.contracts import IterationTree
 from vs_core.api import StartAttempt, StopMode, Wait
 from vs_sim.api.testing import examples
 
@@ -42,6 +44,11 @@ def _check_always(host: Host) -> None:
         assert issue.attempts <= rules.max_attempts_per_issue, f"too many attempts: {where}"
     titles = host.titles()
     assert len(titles) == len(set(titles)), f"an issue was filed twice: {where}"
+    # Every published record projects to a sound iteration tree: the run projects each one.
+    record = host.record
+    if record is not None:
+        tree = project_run_snapshot(record, experiment_revision=0).iterations
+        assert isinstance(tree, IterationTree), f"unprojectable record: {where}"
 
 
 @MODES
