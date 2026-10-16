@@ -112,13 +112,15 @@ function openWebSession(
   session.store.subscribe(() => observer.core(session.store.getState()));
   void session.start();
   return {
-    command: async kind => {
-      const outcome = await session.command({
-        type: kind === 'pause' ? 'command.pause' : 'command.resume',
-      });
+    command: async command => {
+      const outcome = await session.command(
+        command.kind === 'pause'
+          ? {type: 'command.pause'}
+          : {type: 'command.resume', when: command.when},
+      );
       return outcome.kind === 'acknowledged'
         ? null
-        : (outcome.message ?? `the run refused ${kind}`);
+        : (outcome.message ?? `the run refused ${command.kind}`);
     },
     close: () => void session.close(),
   };

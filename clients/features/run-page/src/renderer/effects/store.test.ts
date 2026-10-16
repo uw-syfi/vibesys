@@ -1,9 +1,11 @@
 import {expect, test} from 'bun:test';
+import type {RunEvent} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import type {LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
+import {initialCoreState, reduceEvent} from '@vibesys/run-state';
 import type {AbortSignalLike} from '@vibesys/transport';
-import {headerView, stopBannerView} from '../../state/index.js';
+import {headerView, quotaBannerView, stopBannerView} from '../../state/index.js';
 import type {LiveSession, SessionObserver} from '../index.js';
 import {createRunPageStore, type RunPagePorts} from '../index.js';
 
@@ -54,8 +56,13 @@ class FakeApp {
 
   session(): LiveSession {
     return {
-      command: kind => {
-        this.asked.push(kind);
+      command: command => {
+        // Resume now reads as `resume`; a Resume when capacity returns names its `when`.
+        this.asked.push(
+          command.kind === 'resume' && command.when !== 'now'
+            ? `resume:${command.when}`
+            : command.kind,
+        );
         return Promise.resolve(this.refuse);
       },
       close: () => {
@@ -203,6 +210,38 @@ test('a live run is attached, its session opened, and Pause and Resume go throug
     record: {kind: 'ended', run: {...running(), phase: 'completed'}},
   });
   expect(app.asked.slice(4)).toEqual(['close', 'release']);
+  store.dispose();
+});
+
+test('a server that refuses to wait for quota no longer offers the wait for that run', async () => {
+  const app = new FakeApp();
+  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+  const paused: HostRun = {...running(), status: 'paused', phase: 'paused', paused: 'quota'};
+  store.dispatch({type: 'record', record: {kind: 'live', run: paused}});
+  await Promise.resolve();
+  app.observer?.session(LIVE_VIEW);
+  const event = {
+    sequence: 1,
+    type: 'quota_paused',
+    data: {kind: 'quota_paused', provider: 'claude', condition: 'quota_exhausted', detail: 'limit'},
+  } as unknown as RunEvent;
+  app.observer?.core(reduceEvent(initialCoreState(), event));
+  expect(quotaBannerView(store.getState(), String)?.wait.shown).toBe(true);
+  // An older server rejects the `when` field.
+  app.refuse = "unknown field 'when'";
+  store.dispatch({type: 'wait-for-quota'});
+  await settled();
+  expect(app.asked.slice(2)).toEqual(['resume:capacity_returns']);
+  expect(quotaBannerView(store.getState(), String)?.wait.shown).toBe(false);
+  expect(store.getState().notice).toBe("The run cannot wait for its quota: unknown field 'when'");
+  store.dispatch({type: 'wait-for-quota'});
+  await settled();
+  expect(app.asked.slice(2)).toEqual(['resume:capacity_returns']);
+  // Resume now still goes to the run.
+  app.refuse = null;
+  store.dispatch({type: 'resume'});
+  await settled();
+  expect(app.asked.slice(2)).toEqual(['resume:capacity_returns', 'resume']);
   store.dispose();
 });
 

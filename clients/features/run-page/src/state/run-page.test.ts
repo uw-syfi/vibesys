@@ -3,6 +3,7 @@ import type {RunEvent} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, foldChunk} from '@vibesys/logs';
+import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state';
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
   endedView,
@@ -12,6 +13,7 @@ import {
   headerView,
   logGroups,
   MAP_FILTERS,
+  quotaBannerView,
   RUN_TABS,
   type RunPageAction,
   type RunPageRequest,
@@ -112,6 +114,9 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'stop-failed'},
   {type: 'pause'},
   {type: 'resume'},
+  {type: 'wait-for-quota'},
+  {type: 'stop-waiting'},
+  {type: 'wait-refused', message: "unknown field 'when'"},
   {type: 'resume-ended'},
   {type: 'open-window'},
   {type: 'archive'},
@@ -133,9 +138,33 @@ function runEvent(random: Seeded, sequence: number): RunEvent {
   } as unknown as RunEvent;
 }
 
+function quotaEvent(sequence: number, data: Record<string, unknown>): RunEvent {
+  return {sequence, type: data['kind'], data} as unknown as RunEvent;
+}
+
+const PAUSED = {
+  kind: 'quota_paused',
+  provider: 'claude',
+  condition: 'quota_exhausted',
+  detail: 'Claude usage limit reached',
+  resets_at: 1_760_580_000,
+};
+
+/** The run fold after quota events: none, a pause, a pause with a wait, or a wait cancelled. */
+function quotaCore(stage: number): CoreState {
+  const events = [
+    quotaEvent(1, PAUSED),
+    quotaEvent(2, {kind: 'quota_waiting', provider: 'claude', resumes_at: 1_760_580_120}),
+    quotaEvent(3, {kind: 'quota_wait_cancelled', provider: 'claude', reason: 'paused'}),
+  ].slice(0, stage);
+  return events.reduce(reduceEvent, initialCoreState());
+}
+
 /** What the attached run's session might report, current or late. */
 function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
   switch (random.int(5)) {
+    case 4:
+      return {type: 'run-core', core: quotaCore(random.int(4))};
     case 0:
       return {
         type: 'attached',
@@ -240,16 +269,29 @@ function reply(action: RunPageAction) {
   return null;
 }
 
+/** Why a Pause or Resume was not on offer in `before` (header or quota banner), or null. */
+function commandNotOffered(
+  before: RunPageState,
+  request: Extract<RunPageRequest, {kind: 'pause' | 'resume'}>,
+): string | null {
+  const header = headerView(before);
+  const banner = quotaBannerView(before, String);
+  const offers =
+    request.kind === 'pause'
+      ? [header.pause, banner?.stopWaiting]
+      : request.when === 'now'
+        ? [header.resume, banner?.resumeNow]
+        : [banner?.wait];
+  const offered = offers.some(each => each?.shown === true && each.disabledReason === null);
+  return offered ? null : `${request.kind} was sent while not offered`;
+}
+
 /** Why `request` was not on offer in `before`, or null when it was. */
 function notOffered(before: RunPageState, request: RunPageRequest): string | null {
-  const header = headerView(before);
   switch (request.kind) {
     case 'pause':
-      return header.pause.shown && header.pause.disabledReason === null
-        ? null
-        : 'pause was sent while not offered';
     case 'resume':
-      return header.resume.shown ? null : 'resume was sent while not offered';
+      return commandNotOffered(before, request);
     case 'stop': {
       const banner = stopBannerView(before);
       const offered = !request.force || (banner.kind === 'stopping' && banner.forceOffered);
@@ -293,6 +335,50 @@ describe('the run page store', () => {
         also: offeredOnly,
       });
     }
+  });
+
+  test('a quota pause offers Resume now and the wait, and the wait offers Stop waiting', () => {
+    const at = (seconds: number) => `t${seconds}`;
+    const attached = fold(initial(), [
+      {type: 'record', record: {kind: 'live', run: server('paused', {paused: 'quota'})}},
+    ]);
+    const token = attached.requests.find(request => request.kind === 'attach');
+    const ready = fold(attached.state, [
+      {type: 'attached', token: token?.kind === 'attach' ? token.token : 0, error: null},
+      {type: 'session', session: {hasSnapshot: true, streaming: true, controls: true, error: null}},
+      {type: 'run-core', core: quotaCore(1)},
+    ]).state;
+    expect(headerView(ready).resume.shown).toBe(false);
+    expect(quotaBannerView(ready, at)).toMatchObject({
+      title: 'Paused: Claude hit its usage limit',
+      body: 'Claude usage limit reached. Claude expects capacity back at t1760580000.',
+      wait: {shown: true},
+      stopWaiting: {shown: false},
+    });
+    expect(fold(ready, [{type: 'wait-for-quota'}]).requests).toEqual([
+      {kind: 'resume', when: 'capacity_returns'},
+    ]);
+    expect(fold(ready, [{type: 'resume'}]).requests).toEqual([{kind: 'resume', when: 'now'}]);
+    // Stop waiting is not on offer before the run waits.
+    expect(fold(ready, [{type: 'stop-waiting'}]).requests).toEqual([]);
+
+    const waiting = fold(ready, [{type: 'run-core', core: quotaCore(2)}]).state;
+    expect(quotaBannerView(waiting, at)).toMatchObject({
+      title: "Waiting for Claude's quota",
+      body: 'The run resumes by itself at about t1760580120.',
+      wait: {shown: false},
+      stopWaiting: {shown: true},
+    });
+    expect(fold(waiting, [{type: 'stop-waiting'}]).requests).toEqual([{kind: 'pause'}]);
+    expect(fold(waiting, [{type: 'wait-for-quota'}]).requests).toEqual([]);
+
+    const cancelled = fold(waiting, [{type: 'run-core', core: quotaCore(3)}]).state;
+    expect(quotaBannerView(cancelled, at)?.wait.shown).toBe(true);
+    // A run paused by its user shows no quota banner.
+    const byUser = fold(cancelled, [
+      {type: 'record', record: {kind: 'live', run: server('paused')}},
+    ]).state;
+    expect(quotaBannerView(byUser, at)).toBeNull();
   });
 
   test('offers force stop only after the bound elapses while stopping', () => {

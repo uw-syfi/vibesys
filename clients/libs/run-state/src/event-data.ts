@@ -129,9 +129,8 @@ const EVENT_DATA_HANDLERS = {
   quota_paused: runEventData(applyQuotaData),
   quota_resumed: runEventData(applyQuotaData),
   quota_abandoned: runEventData(applyQuotaData),
-  // The quota banner (a later client change) folds the operator's wait for capacity.
-  quota_waiting: ignoredEventData,
-  quota_wait_cancelled: ignoredEventData,
+  quota_waiting: runEventData(applyQuotaData),
+  quota_wait_cancelled: runEventData(applyQuotaData),
   provider_switched: runEventData(applyQuotaData),
   gate_started: ignoredEventData,
   gate_finished: runEventData(applyBenchmarkData),
@@ -277,8 +276,22 @@ function quotaFromEvent(quota: QuotaState, event: RunEvent, sequence: number): Q
             data.fallback_provider == null
               ? null
               : {provider: data.fallback_provider, model: data.fallback_model ?? null},
+          waiting: null,
         },
       };
+    case 'quota_waiting':
+      // A wait belongs to the pause it waits out; one with no pause folded has nothing to show.
+      return quota.pause === null
+        ? quota
+        : {
+            ...quota,
+            sequence,
+            pause: {...quota.pause, waiting: {resumesAt: data.resumes_at ?? null}},
+          };
+    case 'quota_wait_cancelled':
+      return quota.pause === null
+        ? quota
+        : {...quota, sequence, pause: {...quota.pause, waiting: null}};
     case 'quota_resumed':
     case 'quota_abandoned':
       return {...quota, sequence, pause: null};

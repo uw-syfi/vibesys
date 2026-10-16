@@ -4,7 +4,9 @@ The host helper's ``run.preflight`` runs this with exactly the arguments ``run.s
 would launch with, in the project, under the same interpreter, and reads the one
 ``PreflightReport`` line it prints. The configuration check is the run's own
 (``validated_run_request``), so a run whose configuration passes here does not fail
-its configuration validation at launch.
+its configuration validation at launch. Nor on its compute backend's accelerator: when
+the run's environment would hand the agent an accelerator this host cannot provide, the
+settings fail with the reason the run itself would stop on.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from server.host_preflight import (
     one_line,
 )
 from vibesys.api import ConfigurationError
-from vibesys.api.request import run_environment_uses_docker
+from vibesys.api.request import run_accelerator_unavailable, run_environment_uses_docker
 from vs_agent.api.images import AGENT_IMAGE_REPOSITORY
 from vs_sim.api import SubprocessProbe
 
@@ -37,6 +39,8 @@ if TYPE_CHECKING:
 DOCKER_TIMEOUT_SECONDS = 5.0
 AGENT_IMAGES_COMMAND = ("docker", "image", "ls", "--quiet", AGENT_IMAGE_REPOSITORY)
 """Lists the agent images built on this machine; Docker reuses their layers in a new build."""
+ACCELERATOR_UNAVAILABLE = "accelerator_unavailable"
+"""The settings code when this host cannot give the run its compute backend's accelerator."""
 
 
 def run_preflight(argv: list[str], parse: Callable[[list[str]], Namespace]) -> None:
@@ -59,6 +63,17 @@ def preflight_report(
                 code=diagnostic.code, stage=diagnostic.stage, message=diagnostic.message
             ),
             uses_docker=None,
+            agent_image=_not_checked(CheckId.AGENT_IMAGE),
+            evaluator=_not_checked(CheckId.EVALUATOR_AVAILABLE),
+        )
+    accelerator = run_accelerator_unavailable(request, probe)
+    if accelerator is not None:
+        # The run stops on this before its image build, seconds after it starts.
+        return PreflightReport(
+            settings=SettingsInvalid(
+                code=ACCELERATOR_UNAVAILABLE, stage="compute_backend", message=accelerator
+            ),
+            uses_docker=run_environment_uses_docker(request.run_environment),
             agent_image=_not_checked(CheckId.AGENT_IMAGE),
             evaluator=_not_checked(CheckId.EVALUATOR_AVAILABLE),
         )

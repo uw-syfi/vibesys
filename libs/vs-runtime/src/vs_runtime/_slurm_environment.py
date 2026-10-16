@@ -320,6 +320,11 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
     uses_docker = True
     backend_image: str | None = None
 
+    def attaches_backend_accelerator(self, *, docker_in_docker: bool) -> bool:
+        """The local editor holds no accelerator; the cluster does the GPU work."""
+        del docker_in_docker
+        return False
+
     def __init__(
         self,
         settings: SlurmOperatorSettings,

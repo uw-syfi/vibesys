@@ -187,8 +187,10 @@ export function createRunPageStore(
         return;
       case 'pause':
       case 'resume':
-        void sessions.command(request.kind).then(refused => {
-          if (refused !== null) dispatch({type: 'command-refused', message: refused});
+        void sessions.command(request).then(refused => {
+          if (refused === null) return;
+          const waited = request.kind === 'resume' && request.when === 'capacity_returns';
+          dispatch({type: waited ? 'wait-refused' : 'command-refused', message: refused});
         });
         return;
       default:

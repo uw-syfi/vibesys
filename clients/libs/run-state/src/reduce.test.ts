@@ -2972,9 +2972,39 @@ describe('quota state', () => {
         resumesAt: 105,
         policy: 'wait',
         fallback: {provider: 'codex', model: 'gpt-5.4'},
+        waiting: null,
       },
       lastSwitch: null,
     });
+  });
+
+  it("folds the operator's wait for capacity into the pause it waits out, until cancelled", () => {
+    const waiting = (sequence: number, resumesAt: number | null): RunEvent =>
+      fixtureEvent(sequence, 'quota_waiting', {
+        data: {
+          kind: 'quota_waiting',
+          provider: 'claude',
+          ...(resumesAt === null ? {} : {resumes_at: resumesAt}),
+        },
+      });
+    const cancelled = (sequence: number): RunEvent =>
+      fixtureEvent(sequence, 'quota_wait_cancelled', {
+        data: {kind: 'quota_wait_cancelled', provider: 'claude', reason: 'paused'},
+      });
+    // With no pause folded, a wait has nothing to attach to.
+    expect(reduceEvent(initialCoreState(), waiting(1, 160)).quota.pause).toBeNull();
+    let state = reduceEvent(initialCoreState(), pausedEvent(1));
+    state = reduceEvent(state, waiting(2, 160));
+    expect(state.quota.pause?.waiting).toEqual({resumesAt: 160});
+    // A later request replaces the earlier one; no reset time leaves the time unknown.
+    state = reduceEvent(state, waiting(3, null));
+    expect(state.quota.pause?.waiting).toEqual({resumesAt: null});
+    state = reduceEvent(state, cancelled(4));
+    expect(state.quota.pause?.waiting).toBeNull();
+    expect(state.quota.pause?.provider).toBe('claude');
+    // A new pause starts with no wait.
+    state = reduceEvent(reduceEvent(state, waiting(5, 170)), pausedEvent(6));
+    expect(state.quota.pause?.waiting).toBeNull();
   });
 
   it('settles on resumed and abandoned, each at its own sequence, without inventing a switch', () => {
