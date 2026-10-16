@@ -6860,21 +6860,45 @@
     },
     "WorkstreamAttrs": {
       "additionalProperties": false,
-      "description": "A workstream: the hypothesis it works on and the revision it builds on.",
+      "description": "A workstream: the hypothesis it works on, the revision it builds on, and its round.\n\n``round`` is the round that runs it, for a search that plays rounds (the serial searches);\nNone for one that plans calls instead. A round labels its workstream as it begins, before\nit has chosen its hypothesis: until then ``hypothesis_id`` and ``parent_revision`` are None.",
       "properties": {
         "hypothesis_id": {
-          "title": "Hypothesis Id",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hypothesis Id"
         },
         "parent_revision": {
-          "title": "Parent Revision",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Revision"
+        },
+        "round": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Round"
         }
       },
-      "required": [
-        "hypothesis_id",
-        "parent_revision"
-      ],
       "title": "WorkstreamAttrs",
       "type": "object"
     },

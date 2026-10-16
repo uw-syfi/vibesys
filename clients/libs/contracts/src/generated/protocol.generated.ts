@@ -888,8 +888,9 @@ export type Stage3 = string;
 export type MetricValue = number | null;
 export type VsBaseline = number | null;
 export type Call = number;
-export type HypothesisId1 = string;
-export type ParentRevision = string;
+export type HypothesisId1 = string | null;
+export type ParentRevision = string | null;
+export type Round3 = number | null;
 
 export interface ProtocolDocument {
   request: Request;
@@ -2363,9 +2364,14 @@ export interface PlanningAttrs {
   call: Call;
 }
 /**
- * A workstream: the hypothesis it works on and the revision it builds on.
+ * A workstream: the hypothesis it works on, the revision it builds on, and its round.
+ *
+ * ``round`` is the round that runs it, for a search that plays rounds (the serial searches);
+ * None for one that plans calls instead. A round labels its workstream as it begins, before
+ * it has chosen its hypothesis: until then ``hypothesis_id`` and ``parent_revision`` are None.
  */
 export interface WorkstreamAttrs {
-  hypothesis_id: HypothesisId1;
-  parent_revision: ParentRevision;
+  hypothesis_id?: HypothesisId1;
+  parent_revision?: ParentRevision;
+  round?: Round3;
 }
