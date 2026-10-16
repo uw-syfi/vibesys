@@ -163,7 +163,7 @@ depends_on = ["server.events"]
 
 [[modules]]
 path = "server.journal"
-depends_on = ["server.host_api", "server.events", "server.diagnostics", "vs_sim.api"]
+depends_on = ["server.host_api", "server.events", "server.diagnostics", "server.trace", "vs_sim.api"]
 
 [[modules]]
 path = "server.read_model"
