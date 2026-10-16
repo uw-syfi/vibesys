@@ -25,21 +25,23 @@ from vs_runtime._host_command_bridge import (
 )
 from vs_runtime._job_tools import TOOLKIT_BIN_PATTERNS, find_job_tool, off_path_tools
 from vs_runtime._run_environment import (
-    AgentGpuFacts,
-    ClusterEvaluationFacts,
     DockerEnvironment,
     DockerEnvironmentConfig,
     RunEnvironmentPresentation,
     RunEnvironmentRequest,
     RunEnvironmentSession,
     RunEnvironmentView,
-    SlurmEnvironmentFacts,
     _command_argv,
     _make_host_sandbox,
     _NoopWorkspaceRecovery,
     _prepare_evaluation_plan,
     _PreparedRunEnvironment,
     _starting_container,
+)
+from vs_runtime._run_environment_facts import (
+    AgentGpuFacts,
+    ClusterEvaluationFacts,
+    SlurmEnvironmentFacts,
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
 from vs_runtime._trusted_evaluation_preparation import (

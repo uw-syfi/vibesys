@@ -171,12 +171,8 @@ from vs_runtime._run_control import (
 )
 from vs_runtime._run_environment import (
     AgentPaths,
-    ClusterEvaluationFacts,
     DockerEnvironment,
     DockerEnvironmentConfig,
-    DockerEnvironmentFacts,
-    HostEnvironmentFacts,
-    ModalEnvironmentFacts,
     ParallelCandidateObstacle,
     RunEnvironment,
     RunEnvironmentPresentation,
@@ -186,10 +182,16 @@ from vs_runtime._run_environment import (
     RunEnvironmentSpec,
     RunEnvironmentView,
     SkyPilotEnvironment,
-    SkyPilotEnvironmentFacts,
-    SlurmEnvironmentFacts,
     open_run_environment_resources,
     open_workspace_environment_resources,
+)
+from vs_runtime._run_environment_facts import (
+    ClusterEvaluationFacts,
+    DockerEnvironmentFacts,
+    HostEnvironmentFacts,
+    ModalEnvironmentFacts,
+    SkyPilotEnvironmentFacts,
+    SlurmEnvironmentFacts,
 )
 from vs_runtime._run_environment_selection import (
     HostEnvironment,
