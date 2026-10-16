@@ -20,6 +20,7 @@ from entrypoints.main_thread_interrupt import MainThreadInterrupt
 from entrypoints.production import production_runs, production_web_discovery
 from entrypoints.web_assets import WebAssetBundle
 from server.host_api import (
+    RUN_EVENTS_FILE,
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
     FailureReason,
@@ -204,7 +205,7 @@ def _read_only_log_from_argv(argv: list[str]) -> Path | None:
     if value is None:
         return None
     path = Path(value).expanduser().resolve()
-    return path.parent if path.name == "run-events.jsonl" else path
+    return path.parent if path.name == RUN_EVENTS_FILE else path
 
 
 def _headless_argv(argv: list[str]) -> list[str]:

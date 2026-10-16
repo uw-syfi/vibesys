@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter
 
 from server.host_api import (
+    RUN_EVENTS_FILE,
     Checkout,
     DetachedLaunchErrorCode,
     DetachedLaunchFailure,
@@ -105,6 +106,14 @@ class FileProjects:
     def require_initialized(self, project: Path) -> Path:
         """The project's root, once it is known to define tasks."""
         return self._initialized(project).root
+
+    def run_journal(self, project: Path, run_id: str) -> Path:
+        """Where run ``run_id`` journals its events, once the project is known to have the run."""
+        root, runs = self.runs(project)
+        if all(run.run_id != run_id for run in runs):
+            message = f"{root} has no run {run_id!r}"
+            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
+        return Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
 
     def _open(self, project: Path) -> Project:
         try:
