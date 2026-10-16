@@ -10,6 +10,11 @@ function server(phase: HostRun['phase']): HostRun {
     runId: '20261015-163047',
     status: phase,
     phase,
+    paused: phase === 'paused' ? 'user' : null,
+    end:
+      phase === 'completed'
+        ? {outcome: 'adopted', reason: 'kept the best', resumable: false}
+        : null,
     startedAt: 1,
     reason: null,
   };

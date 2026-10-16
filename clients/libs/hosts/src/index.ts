@@ -26,4 +26,6 @@ export {
   type InstanceObservation,
   instanceObservation,
   instancePhaseText,
+  type RunEnd,
+  type RunPause,
 } from './listing.js';

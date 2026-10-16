@@ -9,7 +9,20 @@ interface FakeHostWindow extends Window {
 const PROJECT = '/home/me/projects/queue-rs';
 
 function server(id: string, runId: string, phase: string): Record<string, unknown> {
-  return {id, projectRoot: PROJECT, runId, status: phase, phase, startedAt: 1, reason: null};
+  const end =
+    phase === 'completed' ? {outcome: 'adopted', reason: 'kept the best', resumable: false} : null;
+  const paused = phase === 'paused' ? 'user' : null;
+  return {
+    id,
+    projectRoot: PROJECT,
+    runId,
+    status: phase,
+    phase,
+    paused,
+    end,
+    startedAt: 1,
+    reason: null,
+  };
 }
 
 function listed(live: unknown[], ended: unknown[]): Record<string, unknown> {

@@ -3,12 +3,12 @@
  * host's listing calls for.
  */
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';
+export {type RunRowStatus, statusWord} from './run-status.js';
 export {
   liveRows,
   machineCounts,
   RECENT_ROWS,
   type RunRow,
-  type RunRowStatus,
   recentRows,
   type Screen,
   type ShellActions,
@@ -17,5 +17,4 @@ export {
   type SidebarState,
   sidebarInvariants,
   sidebarStep,
-  statusWord,
 } from './sidebar.js';

@@ -5,6 +5,7 @@
  */
 import {type HostListing, type HostRun, hostFromKey, hostLabel} from '@vibesys/hosts';
 import type {RunRef} from '@vibesys/runs';
+import {endedStatus, endReason} from './run-status.js';
 
 export type NoticeKind = 'finished' | 'failed' | 'paused';
 
@@ -23,7 +24,8 @@ const TITLES: Readonly<Record<NoticeKind, string>> = {
 
 function notice(kind: NoticeKind, listing: HostListing, server: HostRun): RunNotice {
   const project = server.projectRoot.split('/').filter(Boolean).at(-1) ?? server.projectRoot;
-  const reason = kind === 'failed' && server.reason !== null ? `: ${server.reason}` : '';
+  const why = endReason(server);
+  const reason = kind === 'failed' && why !== null ? `: ${why}` : '';
   return {
     kind,
     run: {host: listing.host, runId: server.runId},
@@ -33,9 +35,8 @@ function notice(kind: NoticeKind, listing: HostListing, server: HostRun): RunNot
 }
 
 function endedKind(server: HostRun): NoticeKind | null {
-  if (server.phase === 'completed') return 'finished';
-  if (server.phase === 'failed') return 'failed';
-  return null;
+  const status = endedStatus(server);
+  return status === 'finished' || status === 'failed' ? status : null;
 }
 
 /** The notices `after` calls for, given the host's listing `before` it (none for a first one). */
@@ -51,7 +52,7 @@ export function runNotices(before: HostListing | undefined, after: HostListing):
   });
   const paused = after.live.flatMap(server => {
     const previous = wasLive.get(server.id);
-    return server.phase === 'paused' && previous !== undefined && previous.phase !== 'paused'
+    return server.paused !== null && previous !== undefined && previous.paused === null
       ? [notice('paused', after, server)]
       : [];
   });

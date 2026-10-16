@@ -540,6 +540,8 @@ function listing(runId: string): HostListing {
         runId,
         status: 'running',
         phase: 'running',
+        paused: null,
+        end: null,
         startedAt: 1,
         reason: null,
       },

@@ -5,6 +5,7 @@
  */
 import {type HostKey, type HostListing, type HostRun, hostFromKey, hostLabel} from '@vibesys/hosts';
 import {type RecentRun, type RunRef, sameRun} from '@vibesys/runs';
+import {endedStatus, liveDetail, liveStatus, type RunRowStatus, statusWord} from './run-status.js';
 
 /** The screen the main area shows. */
 export type Screen =
@@ -14,8 +15,7 @@ export type Screen =
   | {readonly kind: 'all-runs'}
   | {readonly kind: 'run'; readonly run: RunRef};
 
-/** What a sidebar row says about its run; never shown by color alone. */
-export type RunRowStatus = 'live' | 'paused' | 'finished' | 'failed' | 'stopped' | 'unknown';
+export type {RunRowStatus};
 
 export interface RunRow {
   readonly run: RunRef;
@@ -100,33 +100,6 @@ function newestByRun(runs: readonly HostRun[]): Map<string, HostRun> {
   return newest;
 }
 
-function endedStatus(run: HostRun | undefined): RunRowStatus {
-  switch (run?.phase) {
-    case 'completed':
-      return 'finished';
-    case 'failed':
-      return 'failed';
-    case 'stopped':
-      return 'stopped';
-    default:
-      return 'unknown';
-  }
-}
-
-const STATUS_WORDS: Readonly<Record<RunRowStatus, string>> = {
-  live: 'running',
-  paused: 'paused',
-  finished: 'finished',
-  failed: 'failed',
-  stopped: 'stopped',
-  unknown: 'status unknown',
-};
-
-/** The word for a row's status. */
-export function statusWord(status: RunRowStatus): string {
-  return STATUS_WORDS[status];
-}
-
 function titleOf(state: SidebarState, run: RunRef, project: string): string {
   const task = state.recent.find(recent => sameRun(recent, run))?.task ?? null;
   const name = projectName(project);
@@ -139,12 +112,11 @@ export function liveRows(state: SidebarState): RunRow[] {
     if (listing.kind !== 'listed') return [];
     return [...newestByRun(listing.live).values()].map(server => {
       const run: RunRef = {host: listing.host, runId: server.runId};
-      const status: RunRowStatus = server.phase === 'paused' ? 'paused' : 'live';
       return {
         run,
         title: titleOf(state, run, server.projectRoot),
-        detail: `${label(listing.host)} · ${server.status}`,
-        status,
+        detail: `${label(listing.host)} · ${liveDetail(server)}`,
+        status: liveStatus(server),
       };
     });
   });

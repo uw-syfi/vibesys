@@ -122,6 +122,8 @@ describe('instanceObservation', () => {
     runId: `run-${id}`,
     status: 'running',
     phase: 'running',
+    paused: null,
+    end: null,
     startedAt: 1,
     reason: null,
   });

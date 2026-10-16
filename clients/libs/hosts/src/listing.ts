@@ -12,6 +12,11 @@ import type {
 import type {ConnectionStatus} from './connection-status.js';
 import type {HostKey} from './host.js';
 
+/** Who paused a paused run: the user, or a usage limit. */
+export type RunPause = NonNullable<LiveInstanceRecord['paused']> | null;
+/** A tombstone's end record: the outcome, a one-line reason, and whether it can resume. */
+export type RunEnd = NonNullable<LiveInstanceRecord['end']> | null;
+
 /** One run a host's registry lists: a live server, or an ended one kept as a tombstone. */
 export interface HostRun {
   /** The registry id of the server. */
@@ -22,6 +27,10 @@ export interface HostRun {
   readonly status: string;
   /** The run's phase as the registry records it. */
   readonly phase: RunStatus;
+  /** Who paused it, exactly while its phase is `paused`. */
+  readonly paused: RunPause;
+  /** How it ended, on a tombstone that records it; null while live, or on an older tombstone. */
+  readonly end: RunEnd;
   readonly startedAt: number;
   /** Why the run failed, when it did. */
   readonly reason: string | null;
@@ -87,6 +96,8 @@ function hostRun(record: LiveInstanceRecord): HostRun {
     runId: record.run_id,
     status: instancePhaseText(phase),
     phase: phase.status,
+    paused: record.paused ?? null,
+    end: record.end ?? null,
     startedAt: record.started_at,
     reason: phase.reason == null ? null : phase.reason.message,
   };

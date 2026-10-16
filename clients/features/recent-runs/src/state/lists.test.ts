@@ -25,6 +25,8 @@ function listing(host: string, live: string[], ended: string[]): HostListing {
     runId,
     status: 'running',
     phase: 'running' as const,
+    paused: null,
+    end: null,
     startedAt: 1,
     reason: null,
   });

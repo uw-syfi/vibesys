@@ -21,6 +21,8 @@ function server(id: number, startedAt: number, status: string, runId = 'run-1'):
     runId,
     status,
     phase: 'running',
+    paused: null,
+    end: null,
     startedAt,
     reason: null,
   };

@@ -4,6 +4,7 @@ import type {RecentRun, RunRef} from '@vibesys/runs';
 import {
   liveRows,
   RECENT_ROWS,
+  type RunRowStatus,
   recentRows,
   runNotices,
   SIDEBAR_EMPTY,
@@ -40,8 +41,19 @@ function server(id: number, runId: string, phase: HostRun['phase'], startedAt = 
     runId,
     status: phase,
     phase,
+    paused: phase === 'paused' ? 'quota' : null,
+    // A failed run records its end; the others are older tombstones that fall back to the phase.
+    end:
+      phase === 'failed'
+        ? {
+            outcome: 'failed',
+            reason: 'the benchmark crashed',
+            resumable: true,
+            resume_from_round: 2,
+          }
+        : null,
     startedAt,
-    reason: phase === 'failed' ? 'the benchmark crashed' : null,
+    reason: null,
   };
 }
 
@@ -142,6 +154,76 @@ describe('sidebarStep', () => {
     expect(liveRows(state).map(row => [row.run.runId, row.status])).toEqual([
       [RUN_IDS[28] as string, 'paused'],
     ]);
+  });
+});
+
+describe('row statuses', () => {
+  test('read the end record when there is one, and the phase when there is not', () => {
+    const ended = (outcome: string | null, phase: HostRun['phase']): HostRun => ({
+      ...server(1, 'r', phase),
+      end:
+        outcome === null
+          ? null
+          : ({outcome, reason: 'why', resumable: false} as NonNullable<HostRun['end']>),
+    });
+    const cases: readonly [string | null, HostRun['phase'], RunRowStatus][] = [
+      ['adopted', 'completed', 'finished'],
+      ['no-winner', 'completed', 'finished'],
+      ['deadline', 'stopped', 'finished'],
+      ['adoption-failed', 'failed', 'failed'],
+      ['force_stopped', 'stopped', 'stopped'],
+      [null, 'completed', 'finished'],
+      [null, 'failed', 'failed'],
+      [null, 'stopped', 'stopped'],
+    ];
+    for (const [outcome, phase, status] of cases) {
+      const state = sidebarStep(
+        sidebarStep(SIDEBAR_EMPTY, {
+          type: 'recent',
+          recent: [
+            {
+              host: 'local',
+              hostLabel: '',
+              project: '/p',
+              task: null,
+              runId: 'r',
+              instanceId: null,
+              attachedAt: 1,
+            },
+          ],
+        }),
+        {
+          type: 'listing',
+          listing: {
+            kind: 'listed',
+            host: 'local',
+            live: [],
+            ended: [ended(outcome, phase)],
+            unreadable: [],
+            unverified: [],
+          },
+        },
+      );
+      expect(recentRows(state).rows[0]?.status, `${outcome} ${phase}`).toBe(status);
+    }
+  });
+
+  test('a paused run says who paused it', () => {
+    const state = sidebarStep(SIDEBAR_EMPTY, {
+      type: 'listing',
+      listing: {
+        kind: 'listed',
+        host: 'local',
+        live: [server(1, 'r', 'paused')],
+        ended: [],
+        unreadable: [],
+        unverified: [],
+      },
+    });
+    expect(liveRows(state)[0]).toMatchObject({
+      status: 'paused',
+      detail: 'This Mac · paused: usage limit',
+    });
   });
 });
 
