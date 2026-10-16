@@ -187,7 +187,7 @@ export function createRunPageStore(
         return;
       case 'pause':
       case 'resume':
-        void sessions.command(request.kind).then(refused => {
+        void sessions.command(request).then(refused => {
           if (refused !== null) dispatch({type: 'command-refused', message: refused});
         });
         return;

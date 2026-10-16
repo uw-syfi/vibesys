@@ -12,13 +12,21 @@
  * A live run is attached under a token (`link`); once attached, the shell runs the run's session
  * (`@vibesys/run-session`) and reports what it says (`session`) and what it folded (`run`). Pause
  * and Resume are protocol commands, so they are offered only while the session can deliver one.
+ * A run paused by a usage limit also offers to wait: Resume with `when: capacity_returns`, which the
+ * run acknowledges with `quota_waiting` (folded into the pause by `@vibesys/run-state`), and "Stop
+ * waiting" (Pause) once it waits.
  */
 
 import type {RunEvent} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
-import {type CoreState, initialCoreState, reduceEventBatch} from '@vibesys/run-state';
+import {
+  type CoreState,
+  initialCoreState,
+  type QuotaPause,
+  reduceEventBatch,
+} from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
 import {
   EMPTY_RUN_FOLD,
@@ -30,6 +38,9 @@ import {
   traceStep,
 } from './live.js';
 import {WORK_FILTER_ALL, type WorkFilter, type WorkOutcome} from './work-filter.js';
+
+/** When a Resume takes effect: now, or once the provider's capacity returns. */
+export type ResumeWhen = 'now' | 'capacity_returns';
 
 /** How long a Stop may take before "Force stop" is offered. */
 export const FORCE_STOP_BOUND_MS = 2 * 60 * 1000;
@@ -178,6 +189,10 @@ export type RunPageAction =
   | {readonly type: 'log-view'; readonly streamId: string; readonly view: LogView}
   | {readonly type: 'pause'}
   | {readonly type: 'resume'}
+  /** Resume the quota-paused run when capacity returns. */
+  | {readonly type: 'wait-for-quota'}
+  /** End that wait: the run stays paused. */
+  | {readonly type: 'stop-waiting'}
   | {readonly type: 'resume-ended'}
   | {readonly type: 'open-window'}
   | {readonly type: 'archive'}
@@ -195,7 +210,7 @@ export type RunPageRequest =
   | {readonly kind: 'arm-bound'; readonly token: number; readonly ms: number}
   | {readonly kind: 'list-logs'; readonly token: number; readonly instanceId: string}
   | {readonly kind: 'pause'}
-  | {readonly kind: 'resume'}
+  | {readonly kind: 'resume'; readonly when: ResumeWhen}
   | {readonly kind: 'resume-ended'; readonly fromRound: number | null}
   | {readonly kind: 'open-window'}
   | {readonly kind: 'archive'}
@@ -521,9 +536,22 @@ export function commandable(state: RunPageState): boolean {
   return state.link.kind === 'attached' && state.session?.controls === true;
 }
 
+/** The usage-limit stop the run is paused on, while it is paused by quota; null otherwise. */
+export function quotaPause(state: RunPageState): QuotaPause | null {
+  const phase = runPhase(state);
+  if (phase.kind !== 'paused' || phase.by !== 'quota') return null;
+  return state.run.core?.quota.pause ?? null;
+}
+
+/** Whether the run waits for its quota now (it acknowledged a Resume when capacity returns). */
+export function waitingForQuota(state: RunPageState): boolean {
+  return quotaPause(state)?.waiting != null;
+}
+
 /** A command the screen offers, sent only when the current state offers it. */
 function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
   const phase = runPhase(state);
+  const byQuota = phase.kind === 'paused' && phase.by === 'quota';
   const offered = (when: boolean, request: RunPageRequest): RunPageStep => ({
     state,
     requests: when ? [request] : [],
@@ -536,7 +564,15 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
     case 'resume':
       return offered(commandable(state) && phase.kind === 'paused', {
         kind: 'resume',
+        when: 'now',
       });
+    case 'wait-for-quota':
+      return offered(commandable(state) && byQuota && !waitingForQuota(state), {
+        kind: 'resume',
+        when: 'capacity_returns',
+      });
+    case 'stop-waiting':
+      return offered(commandable(state) && waitingForQuota(state), {kind: 'pause'});
     case 'resume-ended': {
       const end = phase.kind === 'ended' ? phase.end : null;
       return offered(end?.resumable === true, {

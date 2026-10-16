@@ -54,8 +54,13 @@ class FakeApp {
 
   session(): LiveSession {
     return {
-      command: kind => {
-        this.asked.push(kind);
+      command: command => {
+        // Resume now reads as `resume`; a Resume when capacity returns names its `when`.
+        this.asked.push(
+          command.kind === 'resume' && command.when !== 'now'
+            ? `resume:${command.when}`
+            : command.kind,
+        );
         return Promise.resolve(this.refuse);
       },
       close: () => {
