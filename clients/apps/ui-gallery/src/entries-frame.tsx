@@ -1,0 +1,374 @@
+import {
+  Breadcrumb,
+  Button,
+  Card,
+  DotLegend,
+  Gantt,
+  type GanttRow,
+  type Guide,
+  LogPane,
+  Meter,
+  NewBelow,
+  Pane,
+  Panes,
+  PickList,
+  PickRow,
+  Row,
+  Screen,
+  Stack,
+  Text,
+} from '@vibesys/ui';
+import {type JSX, useState} from 'react';
+import type {ComponentName, GalleryEntry} from './gallery-entry.js';
+
+const noop = (): void => undefined;
+
+interface Candidate {
+  readonly id: string;
+  readonly guides: readonly Guide[];
+  readonly idea: string;
+  readonly share: number;
+  readonly figure: string;
+  readonly state: 'kept' | 'rejected' | 'running';
+}
+
+const CANDIDATES: readonly Candidate[] = [
+  {id: 'input', guides: [], idea: 'your project', share: 0.17, figure: '1.00×', state: 'kept'},
+  {
+    id: 'ring-v1',
+    guides: ['elbow'],
+    idea: 'sequence ring',
+    share: 0.7,
+    figure: '4.09×',
+    state: 'kept',
+  },
+  {
+    id: 'padding',
+    guides: ['blank', 'tee'],
+    idea: 'pad counters',
+    share: 1,
+    figure: '5.72×',
+    state: 'kept',
+  },
+  {
+    id: 'batching',
+    guides: ['blank', 'elbow'],
+    idea: 'batch dequeue',
+    share: 0.6,
+    figure: '3.82×',
+    state: 'rejected',
+  },
+  {id: 'backoff', guides: [], idea: 'spin backoff', share: 0, figure: '1m 05s', state: 'running'},
+];
+
+const STATE_DOT = {
+  kept: {tone: 'ok', label: 'kept'},
+  rejected: {tone: 'err', label: 'rejected · slower than parent'},
+  running: {tone: 'live', label: 'running'},
+} as const;
+
+function CandidateList(props: {
+  readonly selected: string | undefined;
+  readonly pick: (id: string) => void;
+}): JSX.Element {
+  const [pointed, setPointed] = useState<string | null>(null);
+  return (
+    <PickList
+      label="Candidates"
+      header={{
+        start: 'candidate · built on · idea',
+        end: [{label: 'vs best', bar: true}, {label: 'vs input'}],
+      }}
+      {...(props.selected === undefined ? {} : {selected: props.selected})}
+    >
+      {CANDIDATES.map(candidate => (
+        <PickRow
+          key={candidate.id}
+          id={candidate.id}
+          guides={candidate.guides}
+          title={candidate.id}
+          mono
+          summary={candidate.idea}
+          state={STATE_DOT[candidate.state]}
+          {...(candidate.id === 'padding' ? {badges: [{label: 'best', tone: 'ok' as const}]} : {})}
+          {...(candidate.id === 'batching'
+            ? {badges: [{label: '×3', tone: 'neutral' as const}]}
+            : {})}
+          {...(candidate.state === 'running'
+            ? {}
+            : {
+                bar: {
+                  value: candidate.share,
+                  tone: 'ok' as const,
+                  label: `${candidate.share * 100}% of the best`,
+                },
+              })}
+          figure={candidate.figure}
+          figureTone={
+            candidate.state === 'rejected' ? 'err' : candidate.state === 'running' ? 'muted' : 'ok'
+          }
+          path={pointed === 'batching' && ['input', 'ring-v1', 'batching'].includes(candidate.id)}
+          hover={on => setPointed(on ? candidate.id : null)}
+          fresh={candidate.state === 'running'}
+          select={() => props.pick(candidate.id)}
+        />
+      ))}
+    </PickList>
+  );
+}
+
+function PickListDemo(): JSX.Element {
+  const [selected, setSelected] = useState<string | undefined>('ring-v1');
+  return (
+    <Card>
+      <CandidateList selected={selected} pick={setSelected} />
+    </Card>
+  );
+}
+
+const ROWS: readonly GanttRow[] = [
+  {
+    id: 'input',
+    label: 'input',
+    start: 0,
+    end: 1,
+    outcome: 'muted',
+    press: noop,
+    figure: '1.00×',
+    segments: [
+      {id: 'gate', start: 0, end: 1, kind: 'gate', label: 'gate · 2.33M ops/s · 41s', press: noop},
+    ],
+  },
+  {
+    id: 'ring-v1',
+    label: 'ring-v1',
+    guides: ['elbow'],
+    start: 1,
+    end: 7,
+    outcome: 'ok',
+    press: noop,
+    figure: '4.09×',
+    selected: true,
+    segments: [
+      {
+        id: 'plan',
+        start: 1,
+        end: 2,
+        kind: 'judge',
+        label: 'judge · picked the idea · 1m',
+        press: noop,
+      },
+      {
+        id: 'impl',
+        start: 2,
+        end: 5,
+        kind: 'agent',
+        label: 'implementer · wrote the ring · 3m',
+        press: noop,
+      },
+      {id: 'gate', start: 5, end: 7, kind: 'gate', label: 'gate · 9.53M ops/s · 2m', press: noop},
+    ],
+  },
+  {
+    id: 'batching',
+    label: 'batching',
+    guides: ['blank', 'elbow'],
+    start: 7,
+    end: 11,
+    outcome: 'err',
+    press: noop,
+    figure: '3.82×',
+    segments: [
+      {
+        id: 'impl',
+        start: 7,
+        end: 9,
+        kind: 'agent',
+        label: 'implementer · batched dequeues · 2m',
+        press: noop,
+      },
+      {
+        id: 'gate',
+        start: 9,
+        end: 11,
+        kind: 'gate',
+        label: 'gate · slower than parent · 2m',
+        press: noop,
+      },
+    ],
+  },
+  {
+    id: 'backoff',
+    label: 'backoff',
+    start: 8,
+    end: 14,
+    outcome: 'live',
+    press: noop,
+    fresh: true,
+    segments: [
+      {
+        id: 'impl',
+        start: 8,
+        end: 14,
+        kind: 'agent',
+        label: 'implementer · editing · 6m',
+        press: noop,
+      },
+    ],
+  },
+];
+
+const TICKS = [0, 5, 10].map(at => ({at, label: `${at}m`}));
+
+function GanttDemo(): JSX.Element {
+  return (
+    <Stack>
+      <Card>
+        <Gantt
+          label="Candidates over time"
+          nameLabel="candidate · built on"
+          figureLabel="vs input"
+          from={0}
+          to={14}
+          playhead={14}
+          ticks={TICKS}
+          rows={ROWS}
+        />
+      </Card>
+      <Card>
+        <Gantt
+          label="ring-v1 steps over time"
+          strip
+          from={1}
+          to={7}
+          rows={ROWS.slice(1, 2).map(row => ({...row, selected: false}))}
+        />
+      </Card>
+    </Stack>
+  );
+}
+
+function ScreenDemo(): JSX.Element {
+  const [selected, setSelected] = useState<string | undefined>('padding');
+  return (
+    <Screen
+      density="compact"
+      header={
+        <Row justify="between" align="center">
+          <Text as="h3" variant="heading">
+            queue-rs · mpmc
+          </Text>
+          <Button size="sm" variant="secondary" text="Pause" press={noop} />
+        </Row>
+      }
+    >
+      <Breadcrumb
+        label="Zoom"
+        items={[
+          {id: 'run', label: 'run', press: noop},
+          {id: 'candidate', label: 'padding'},
+        ]}
+      />
+      <Panes>
+        <Pane
+          kicker="candidates · idea + code"
+          title="5"
+          width="list"
+          meta={
+            <DotLegend
+              items={[
+                {tone: 'ok', label: '3 kept'},
+                {tone: 'err', label: '1 rejected'},
+                {tone: 'live', label: '1 running'},
+              ]}
+            />
+          }
+        >
+          <CandidateList selected={selected} pick={setSelected} />
+        </Pane>
+        <Pane
+          kicker="candidate"
+          title="Pad the head and tail counters"
+          width="fill"
+          enterKey="padding"
+        >
+          <LogPane
+            size="fill"
+            label="Gate log"
+            lines={[
+              {text: '$ cargo test --locked'},
+              {text: 'test result: ok. 18 passed; 0 failed'},
+              {text: 'warning: cpu frequency scaling is enabled', stream: 'err'},
+            ]}
+          />
+        </Pane>
+      </Panes>
+    </Screen>
+  );
+}
+
+/** The frame: a screen that never scrolls as a whole, its panes and lists, and a time axis. */
+export const FRAME_ENTRIES = {
+  Screen: {render: () => <ScreenDemo />},
+  Breadcrumb: {
+    render: () => (
+      <Breadcrumb
+        label="Zoom"
+        items={[
+          {id: 'run', label: 'run', press: noop},
+          {id: 'candidate', label: 'padding', press: noop},
+          {id: 'step', label: 'implementer', press: noop},
+          {id: 'item', label: 'cargo test --locked'},
+        ]}
+      />
+    ),
+  },
+  Panes: {
+    render: () => (
+      <Text tone="muted">
+        The row of panes in the Screen above: a list pane beside the pane its selection opened.
+      </Text>
+    ),
+  },
+  Pane: {
+    render: () => (
+      <Text tone="muted">
+        The panes of the Screen above: a kicker, a title and facts on one line, a body that scrolls
+        by itself, and a slide-in with a flash on the header when a selection opens it.
+      </Text>
+    ),
+  },
+  PickList: {render: () => <PickListDemo />},
+  PickRow: {
+    render: () => (
+      <Text tone="muted">
+        Rows of the PickList above: one line with lineage guides, a state dot that names its state
+        under the pointer and the focus, badges, a share bar and a figure; the path to the root lit
+        while a row is pointed at; one row selected, one fresh.
+      </Text>
+    ),
+  },
+  Meter: {
+    render: () => (
+      <Stack>
+        <Meter label="Accent, 30% of the best" value={0.3} />
+        <Meter label="Ok, 70% of the best" value={0.7} tone="ok" />
+        <Meter label="Muted, all of it" value={1} tone="muted" />
+      </Stack>
+    ),
+  },
+  NewBelow: {render: () => <NewBelow text="3 new" press={noop} />},
+  Gantt: {render: () => <GanttDemo />},
+  DotLegend: {
+    render: () => (
+      <DotLegend
+        items={[
+          {tone: 'ok', label: '2 kept'},
+          {tone: 'err', label: '2 rejected'},
+          {tone: 'live', label: '2 running'},
+          {tone: 'neutral', label: '1 stopped'},
+        ]}
+      />
+    ),
+  },
+} satisfies Partial<Record<ComponentName, GalleryEntry>>;

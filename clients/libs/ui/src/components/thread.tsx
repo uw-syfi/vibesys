@@ -1,6 +1,5 @@
 import {type JSX, type UIEvent, useRef, useState} from 'react';
 import {SIZE} from '../tokens/index.js';
-import {Button} from './button.js';
 import {
   Message,
   type MessageTone,
@@ -8,6 +7,7 @@ import {
   ToolCall,
   type ToolState,
 } from './message.js';
+import {NewBelow} from './new-below.js';
 import {Text} from './text.js';
 
 /** One entry of a thread: a heading that starts a section, a message, or a tool call. */
@@ -129,13 +129,14 @@ function Row(props: {
  * Only the rows near the visible part are drawn, between spacers as tall as the rest, so a
  * thread of any length costs a screenful of rows. A row's height is taken to be an estimate
  * until it has been drawn, then the height it was measured at. While scrolled to the end it follows
- * the newest item as items arrive and grow; scrolling up stops following and offers "Jump to
- * latest". Give it a `key` that changes with its content's identity, so a new thread starts at
+ * the newest item as items arrive and grow; scrolling up stops following and shows a "New below"
+ * pill that jumps to the end. `size` `fill` takes the height of its container. Give it a `key` that changes with its content's identity, so a new thread starts at
  * its end with every block as it starts.
  */
 export function Thread(props: {
   readonly label: string;
   readonly items: readonly ThreadItem[];
+  readonly size?: 'default' | 'fill';
 }): JSX.Element {
   const {items} = props;
   const following = useRef(true);
@@ -186,7 +187,7 @@ export function Thread(props: {
   };
 
   return (
-    <div className="vs-thread">
+    <div className="vs-thread" data-size={props.size ?? 'default'}>
       <ul
         ref={follow}
         className="vs-thread-pane"
@@ -218,13 +219,7 @@ export function Thread(props: {
       </ul>
       {behind ? (
         <span className="vs-thread-jump">
-          <Button
-            size="sm"
-            variant="primary"
-            icon="chevron-down"
-            text="Jump to latest"
-            press={jump}
-          />
+          <NewBelow text="New below" press={jump} />
         </span>
       ) : null}
     </div>

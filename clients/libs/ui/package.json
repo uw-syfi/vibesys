@@ -49,6 +49,7 @@
     "src/tokens.css",
     "src/fonts.css",
     "src/components.css",
+    "src/frame.css",
     "src/fonts"
   ],
   "scripts": {

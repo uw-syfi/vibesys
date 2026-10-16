@@ -197,7 +197,7 @@ test('a log pane follows the tail until scrolled up, then offers to jump to it',
   await pane.evaluate(element => {
     element.scrollTop = 0;
   });
-  const jump = page.getByRole('button', {name: 'Jump to latest'});
+  const jump = page.getByRole('button', {name: 'New below'});
   await expect(jump).toBeVisible();
   await jump.click();
   await expect(jump).toHaveCount(0);
@@ -213,14 +213,14 @@ test('a thread follows its tail until scrolled up, and opens a block from the ke
   await pane.evaluate(element => {
     element.scrollTop = 0;
   });
-  await expect(page.getByRole('button', {name: 'Jump to latest'})).toBeVisible();
+  await expect(page.getByRole('button', {name: 'New below'})).toBeVisible();
   const reasoning = pane.getByRole('button', {name: /Reasoning/});
   await reasoning.focus();
   await expect(reasoning).toHaveAttribute('aria-expanded', 'false');
   await page.keyboard.press('Enter');
   await expect(reasoning).toHaveAttribute('aria-expanded', 'true');
   await expect(pane.getByText('Padding costs memory but removes the false sharing.')).toBeVisible();
-  await page.getByRole('button', {name: 'Jump to latest'}).click();
+  await page.getByRole('button', {name: 'New below'}).click();
   await expect(pane.getByText('The batch handoff is slower under contention')).toBeVisible();
 });
 

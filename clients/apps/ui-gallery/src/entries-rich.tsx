@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Chart,
+  type ChartPoint,
   type CheckItem,
   CheckList,
   Dialog,
@@ -324,6 +325,34 @@ function ScrubberDemo(): JSX.Element {
   );
 }
 
+const PICK_POINTS: readonly ChartPoint[] = [
+  {id: 'input', label: 'input · 1.00x', x: 0, y: 100, filled: true},
+  {id: 'ring', label: 'ring · 1.18x', x: 3, y: 118, filled: true},
+  {id: 'batching', label: 'batching · 1.09x', x: 5, y: 109, filled: false},
+  {id: 'padding', label: 'padding · 1.27x', x: 6, y: 127, filled: true},
+];
+
+function PickChartDemo(): JSX.Element {
+  const [selected, setSelected] = useState('ring');
+  return (
+    <Chart
+      label="Throughput of each candidate; pick a point to select it"
+      size="strip"
+      points={PICK_POINTS}
+      steps={[
+        {x: 0, y: 100},
+        {x: 3, y: 118},
+        {x: 6, y: 127},
+      ]}
+      reference={{y: 100, label: 'input'}}
+      selected={selected}
+      pick={setSelected}
+      yTicks={[100, 120].map(value => ({value, label: `${value / 100}x`}))}
+      xTicks={[0, 3, 6].map(value => ({value, label: `${value}m`}))}
+    />
+  );
+}
+
 const LARGE_POINTS = [
   {x: 1, y: 18_000_000, filled: true},
   {x: 2, y: 17_200_000, filled: false},
@@ -473,6 +502,9 @@ export const RICH_ENTRIES = {
             xTicks={[1, 2, 3, 4, 5, 6].map(value => ({value, label: String(value)}))}
             xTitle="measurements"
           />
+        </Card>
+        <Card>
+          <PickChartDemo />
         </Card>
       </Stack>
     ),

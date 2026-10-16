@@ -1,0 +1,64 @@
+import type {JSX, ReactNode} from 'react';
+import {Icon} from './icon.js';
+
+/** How much a screen's parts are spaced: `comfortable` (default) or `compact` (dense rows, slim headers). */
+export type Density = 'comfortable' | 'compact';
+
+/**
+ * A screen that never scrolls as a whole: a fixed `header` (title, status, actions) above a body
+ * that fills the rest of its container. Whatever is long scrolls inside a `Pane`. `density` is
+ * read by the components inside (panes, pick rows, the scrubber), so a screen needs no overrides.
+ */
+export function Screen(props: {
+  readonly header: ReactNode;
+  readonly density?: Density;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <main className="vs-screen" data-density={props.density ?? 'comfortable'}>
+      <div className="vs-screen-header">{props.header}</div>
+      <div className="vs-screen-body">{props.children}</div>
+    </main>
+  );
+}
+
+/** One level of a drill-in path: the current level has no `press`. */
+export interface Crumb {
+  readonly id: string;
+  readonly label: string;
+  readonly press?: () => void;
+}
+
+/**
+ * Where the reader is: every zoom level from the top, each but the last a link back to it. The
+ * last names what the panes show now.
+ */
+export function Breadcrumb(props: {
+  readonly label: string;
+  readonly items: readonly Crumb[];
+}): JSX.Element {
+  return (
+    <nav className="vs-crumbs" aria-label={props.label}>
+      <ol>
+        {props.items.map((item, index) => (
+          <li key={item.id}>
+            {index === 0 ? null : (
+              <span className="vs-crumb-sep" aria-hidden="true">
+                <Icon name="chevron-right" />
+              </span>
+            )}
+            {item.press === undefined ? (
+              <span className="vs-crumb" aria-current="location">
+                {item.label}
+              </span>
+            ) : (
+              <button type="button" className="vs-crumb" onClick={item.press}>
+                {item.label}
+              </button>
+            )}
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}

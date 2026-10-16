@@ -196,16 +196,16 @@ describe('Thread', () => {
     await view.render(<Thread label="Turns" items={items(COUNT + 3)} />);
     let rows = view.container.querySelectorAll('.vs-thread-row');
     expect(rows[rows.length - 1]?.getAttribute('aria-posinset')).toBe(String(COUNT + 3));
-    expect(text(view.container)).not.toContain('Jump to latest');
+    expect(text(view.container)).not.toContain('New below');
 
     await scrollTo(pane, 0);
     rows = view.container.querySelectorAll('.vs-thread-row');
     expect(rows[0]?.getAttribute('aria-posinset')).toBe('1');
-    expect(text(view.container)).toContain('Jump to latest');
+    expect(text(view.container)).toContain('New below');
     await view.render(<Thread label="Turns" items={items(COUNT + 6)} />);
     rows = view.container.querySelectorAll('.vs-thread-row');
     expect(rows[0]?.getAttribute('aria-posinset')).toBe('1');
-    await click(button(view.container, 'Jump to latest'));
+    await click(button(view.container, 'New below'));
     rows = view.container.querySelectorAll('.vs-thread-row');
     expect(rows[rows.length - 1]?.getAttribute('aria-posinset')).toBe(String(COUNT + 6));
   });

@@ -1,0 +1,651 @@
+/* The frame: a screen that never scrolls, its panes, lists and time axes. Imported by components.css. */
+
+/* --- frame: a screen that never scrolls, panes that do ------------------------------------------ */
+
+.vs-screen {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--space-5) var(--space-6) var(--space-5);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-screen * {
+  box-sizing: border-box;
+}
+.vs-screen-header {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.vs-screen-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.vs-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-crumbs li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.vs-crumb-sep {
+  display: flex;
+  color: var(--muted);
+}
+.vs-crumb {
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+button.vs-crumb {
+  cursor: pointer;
+}
+button.vs-crumb:hover {
+  background: var(--panel-2);
+  color: var(--text);
+}
+button.vs-crumb:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-crumb[aria-current] {
+  color: var(--text);
+  font-weight: var(--text-body-strong-weight);
+}
+
+.vs-panes {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  gap: var(--space-4);
+}
+.vs-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  overflow: hidden;
+}
+.vs-pane[data-width="fill"] {
+  flex: 1 1 var(--column-main);
+}
+.vs-pane[data-width="list"] {
+  flex: 0 1 var(--pane-list);
+}
+.vs-pane[data-width="inspector"] {
+  flex: 1 1 var(--column-main);
+}
+.vs-pane[data-width="rail"] {
+  flex: 0 0 var(--column-tile);
+}
+.vs-pane-header {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.vs-pane[data-entering] {
+  animation: vs-pane-enter var(--duration-base) var(--easing);
+}
+.vs-pane[data-entering] > .vs-pane-header {
+  animation: vs-pane-flash calc(var(--duration-base) * 6) var(--easing);
+}
+@keyframes vs-pane-enter {
+  from {
+    opacity: 0;
+    transform: translateX(var(--space-6));
+  }
+}
+@keyframes vs-pane-flash {
+  from {
+    background: var(--chip-accent-bg);
+  }
+}
+.vs-pane-titles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-pane-title {
+  margin: 0;
+  font-family: var(--text-heading-family);
+  font-size: var(--text-heading-size);
+  line-height: var(--text-heading-line);
+  font-weight: var(--text-heading-weight);
+}
+/* The heading takes the focus when its pane opens, so readers hear what changed; the header's
+   flash shows it, so no ring. */
+.vs-pane-title:focus {
+  outline: none;
+}
+.vs-pane-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.vs-pane-actions {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+}
+.vs-pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  overflow-y: auto;
+}
+.vs-log[data-size="fill"],
+.vs-thread[data-size="fill"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.vs-log[data-size="fill"] > .vs-log-pane,
+.vs-thread[data-size="fill"] > .vs-thread-pane {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.vs-picklist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.vs-picklist-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.vs-picklist-rows:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-pickrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row);
+  padding: var(--space-3) var(--space-3);
+  border: var(--hairline) solid transparent;
+  border-left: var(--focus-ring) solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-pickrow:hover {
+  background: var(--panel-2);
+}
+.vs-pickrow:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-pickrow[aria-selected="true"] {
+  background: var(--selection);
+  border-color: var(--chip-accent-border);
+  border-left-color: var(--accent);
+}
+.vs-pickrow[data-fresh] {
+  animation: vs-pane-flash calc(var(--duration-base) * 8) var(--easing);
+  border-color: var(--chip-accent-border);
+}
+.vs-pickrow-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.vs-pickrow-text > .vs-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vs-guide {
+  position: relative;
+  flex: none;
+  align-self: stretch;
+  width: var(--space-5);
+  margin: calc(-1 * var(--space-3)) 0;
+}
+.vs-guide[data-guide="pipe"]::before,
+.vs-guide[data-guide="tee"]::before,
+.vs-guide[data-guide="elbow"]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  border-left: var(--hairline) solid var(--muted);
+}
+.vs-guide[data-guide="elbow"]::before {
+  bottom: 50%;
+}
+.vs-guide[data-guide="tee"]::after,
+.vs-guide[data-guide="elbow"]::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  right: 0;
+  top: 50%;
+  border-top: var(--hairline) solid var(--muted);
+}
+.vs-pickrow-bar {
+  flex: none;
+  width: var(--column-swatch);
+}
+.vs-pickrow-lead {
+  flex: none;
+  min-width: calc(var(--space-8) + var(--space-5));
+}
+.vs-pickrow-figure {
+  flex: none;
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  color: var(--text);
+}
+.vs-pickrow-figure[data-tone="ok"] {
+  color: var(--ok);
+}
+.vs-pickrow-figure[data-tone="err"] {
+  color: var(--err);
+}
+.vs-pickrow-figure[data-tone="muted"] {
+  color: var(--muted);
+}
+
+.vs-meter {
+  display: block;
+  width: 100%;
+  height: var(--dot);
+  border-radius: var(--radius-full);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.vs-meter-fill {
+  display: block;
+  width: var(--meter-share);
+  height: 100%;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+}
+.vs-meter[data-tone="ok"] .vs-meter-fill {
+  background: var(--ok);
+}
+.vs-meter[data-tone="muted"] .vs-meter-fill {
+  background: var(--muted);
+}
+
+.vs-new-below {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border: var(--hairline) solid var(--chip-accent-border);
+  border-radius: var(--radius-full);
+  background: var(--chip-accent-bg);
+  color: var(--text);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  cursor: pointer;
+}
+
+/* --- frame density: compact (dense rows, one-line pane headers, a slim time bar) ---------------- */
+
+.vs-screen[data-density="compact"] {
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5) var(--space-4);
+}
+.vs-screen[data-density="compact"] .vs-screen-header {
+  gap: var(--space-2);
+}
+.vs-screen[data-density="compact"] .vs-screen-body,
+.vs-screen[data-density="compact"] .vs-panes {
+  gap: var(--space-3);
+}
+.vs-screen[data-density="compact"] .vs-pane-header {
+  align-items: center;
+  padding: var(--space-2) var(--space-4);
+}
+.vs-screen[data-density="compact"] .vs-pane-titles {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-3);
+}
+.vs-screen[data-density="compact"] .vs-pane-title {
+  font-family: var(--text-body-strong-family);
+  font-size: var(--text-body-strong-size);
+  line-height: var(--text-body-strong-line);
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-screen[data-density="compact"] .vs-pane-body {
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-3);
+}
+.vs-screen[data-density="compact"] .vs-picklist,
+.vs-screen[data-density="compact"] .vs-picklist-rows {
+  gap: 0;
+}
+.vs-screen[data-density="compact"] .vs-pickrow {
+  min-height: var(--row-dense);
+  padding: var(--space-1) var(--space-3);
+}
+.vs-screen[data-density="compact"] .vs-pickrow-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+/* The name keeps its room; the line after it gives way first. */
+.vs-screen[data-density="compact"] .vs-pickrow-text > .vs-text {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.vs-screen[data-density="compact"] .vs-pickrow-text > .vs-text:first-child {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+.vs-screen[data-density="compact"] .vs-pickrow-lead {
+  min-width: calc(var(--space-8) * 2 + var(--space-3));
+}
+.vs-screen[data-density="compact"] .vs-guide {
+  margin: calc(-1 * var(--space-1)) 0;
+}
+/* The time bar on one line: the position and state, then the range with its ticks under it. */
+.vs-screen[data-density="compact"] .vs-scrubber {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-4);
+  row-gap: 0;
+  align-items: center;
+}
+.vs-screen[data-density="compact"] .vs-scrubber-head {
+  grid-row: span 2;
+  min-height: 0;
+}
+.vs-screen[data-density="compact"] .vs-scrubber-ticks {
+  grid-column: 2;
+}
+
+/* --- gantt: rows of bars on one time axis -------------------------------------------------------- */
+
+.vs-gantt {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.vs-gantt-row {
+  display: grid;
+  grid-template-columns: var(--gantt-label) 1fr var(--gantt-figure);
+  align-items: center;
+  column-gap: var(--space-3);
+  min-height: var(--row-dense);
+  padding: 0 var(--space-3);
+  border-left: var(--focus-ring) solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-gantt[data-strip] .vs-gantt-row {
+  grid-template-columns: 1fr var(--gantt-figure);
+  padding: 0;
+  cursor: default;
+}
+.vs-gantt-row[data-axis] {
+  min-height: var(--text-section-line);
+  cursor: default;
+}
+.vs-gantt-row:not([data-axis]):hover {
+  background: var(--panel-2);
+}
+.vs-gantt-row[aria-selected="true"] {
+  background: var(--selection);
+  border-left-color: var(--accent);
+}
+.vs-gantt-row[data-fresh] {
+  animation: vs-pane-flash calc(var(--duration-base) * 8) var(--easing);
+}
+.vs-gantt-row:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-gantt-name {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.vs-gantt-name .vs-guide {
+  margin: 0;
+}
+.vs-gantt-track {
+  position: relative;
+  align-self: stretch;
+  min-height: var(--row-dense);
+}
+.vs-gantt-row[data-axis] .vs-gantt-track {
+  min-height: var(--text-section-line);
+}
+.vs-gantt-tick {
+  position: absolute;
+  left: var(--gantt-from);
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  line-height: var(--text-section-line);
+  white-space: nowrap;
+}
+.vs-gantt-tick:first-child {
+  transform: none;
+}
+.vs-gantt-bar {
+  position: absolute;
+  top: 50%;
+  left: var(--gantt-from);
+  width: var(--gantt-span);
+  height: var(--gantt-bar);
+  transform: translateY(-50%);
+  border-radius: var(--radius-sm);
+  border-right: var(--focus-ring) solid var(--muted);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.vs-gantt-bar[data-outcome="ok"] {
+  border-right-color: var(--ok);
+}
+.vs-gantt-bar[data-outcome="err"] {
+  border-right-color: var(--err);
+}
+.vs-gantt-bar[data-outcome="live"] {
+  border-right-color: var(--accent);
+  animation: vs-gantt-live calc(var(--duration-base) * 8) var(--easing) infinite alternate;
+}
+@keyframes vs-gantt-live {
+  to {
+    border-right-color: transparent;
+  }
+}
+.vs-gantt-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--seg-from);
+  width: var(--seg-span);
+  border-right: var(--hairline) solid var(--panel);
+  cursor: pointer;
+}
+.vs-gantt-seg[data-kind="agent"] {
+  background: var(--accent);
+}
+.vs-gantt-seg[data-kind="gate"] {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--accent) 0 var(--space-1),
+    var(--chip-accent-bg) var(--space-1) var(--space-3)
+  );
+}
+.vs-gantt-seg[data-kind="judge"] {
+  background: var(--muted);
+}
+.vs-gantt-seg:hover {
+  outline: var(--hairline) solid var(--text);
+}
+.vs-gantt-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--gantt-from);
+  border-left: var(--hairline) dashed var(--text);
+  pointer-events: none;
+}
+.vs-gantt-figure {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  text-align: right;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.vs-gantt-figure[data-outcome="ok"] {
+  color: var(--ok);
+}
+.vs-gantt-figure[data-outcome="err"] {
+  color: var(--err);
+}
+
+.vs-chart-pick {
+  cursor: pointer;
+}
+.vs-chart-pick:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-chart-ring {
+  fill: none;
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vs-gantt-bar[data-outcome="live"] {
+    animation: none;
+  }
+}
+
+/* --- reading a tree: column header, dot tooltip, path to the root, dot legend ------------------- */
+
+.vs-listheader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-1) calc(var(--space-3) + var(--focus-ring));
+  color: var(--muted);
+  font-family: var(--text-caption-family);
+  font-size: var(--text-caption-size);
+  line-height: var(--text-caption-line);
+  white-space: nowrap;
+}
+.vs-gantt-name.vs-listheader,
+.vs-gantt-figure.vs-listheader {
+  padding: 0;
+  justify-content: flex-start;
+}
+.vs-gantt-figure.vs-listheader {
+  justify-content: flex-end;
+}
+.vs-listheader-start {
+  flex: 1;
+  min-width: 0;
+}
+.vs-listheader-col {
+  flex: none;
+  text-align: right;
+}
+.vs-listheader-col[data-bar] {
+  width: var(--column-swatch);
+  text-align: left;
+}
+.vs-pickrow-dot {
+  position: relative;
+  display: inline-flex;
+}
+/* The state's word, beside its dot, under the pointer and on the row that has the focus. */
+.vs-pickrow-dot:hover::after,
+.vs-pickrow:focus-visible .vs-pickrow-dot::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: calc(100% + var(--space-2));
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  padding: var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  box-shadow: var(--elevation-overlay);
+  color: var(--text);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.vs-pickrow[data-path] .vs-guide::before,
+.vs-pickrow[data-path] .vs-guide::after {
+  border-color: var(--accent);
+}
+.vs-pickrow[data-path]:not([aria-selected="true"]) {
+  background: var(--hover);
+}
+.vs-dotlegend {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+.vs-dotlegend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}

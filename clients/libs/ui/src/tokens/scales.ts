@@ -44,6 +44,11 @@ export type SizeToken =
   | 'column-field'
   | 'column-tile'
   | 'column-swatch'
+  | 'pane-list'
+  | 'row-dense'
+  | 'gantt-label'
+  | 'gantt-figure'
+  | 'gantt-bar'
   | 'hairline'
   | 'focus-ring'
   | 'focus-offset'
@@ -68,6 +73,11 @@ export const SIZE: Readonly<Record<SizeToken, number>> = {
   'column-field': 240,
   'column-tile': 200,
   'column-swatch': 160,
+  'pane-list': 380,
+  'row-dense': 28,
+  'gantt-label': 220,
+  'gantt-figure': 96,
+  'gantt-bar': 12,
   hairline: 1,
   'focus-ring': 2,
   'focus-offset': 1,
@@ -108,7 +118,8 @@ export type TextStyle =
   | 'caption'
   | 'code'
   | 'section'
-  | 'metric';
+  | 'metric'
+  | 'hero';
 
 export interface TextSpec {
   readonly family: FontFamily;
@@ -146,6 +157,7 @@ export const TYPE: Readonly<Record<TextStyle, TextSpec>> = {
   code: text('mono', 12.5, 18, 400),
   section: text('mono', 11.5, 16, 500, {tracking: 0.08, uppercase: true, color: 'muted'}),
   metric: text('mono', 22, 28, 600),
+  hero: text('mono', 34, 40, 600, {tracking: -0.02}),
 };
 
 /**

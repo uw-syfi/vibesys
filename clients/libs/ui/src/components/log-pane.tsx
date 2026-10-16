@@ -1,5 +1,5 @@
 import {type JSX, type UIEvent, useRef, useState} from 'react';
-import {Button} from './button.js';
+import {NewBelow} from './new-below.js';
 
 /** One line of output; `err` lines (standard error) are drawn in `err`. */
 export interface LogLine {
@@ -14,7 +14,7 @@ function atBottom(element: HTMLElement): boolean {
 
 /**
  * Monospace output on the log background in every theme. While scrolled to the bottom it follows
- * the tail as lines arrive; scrolling up stops following and offers "Jump to latest". Lines are
+ * the tail as lines arrive; scrolling up stops following and shows a "New below" pill that jumps to the tail. Lines are
  * text, never HTML.
  *
  * The ref callback is a new function on every render, so React calls it after every commit: the
@@ -23,7 +23,8 @@ function atBottom(element: HTMLElement): boolean {
 export function LogPane(props: {
   readonly label: string;
   readonly lines: readonly LogLine[];
-  readonly size?: 'sm' | 'md';
+  /** `fill` takes the height of its container (a pane body); the others have fixed heights. */
+  readonly size?: 'sm' | 'md' | 'fill';
 }): JSX.Element {
   const following = useRef(true);
   const pane = useRef<HTMLPreElement | null>(null);
@@ -42,7 +43,7 @@ export function LogPane(props: {
     if (pane.current !== null) pane.current.scrollTop = pane.current.scrollHeight;
   };
   return (
-    <div className="vs-log">
+    <div className="vs-log" data-size={props.size ?? 'md'}>
       <pre
         ref={follow}
         className="vs-log-pane"
@@ -63,13 +64,7 @@ export function LogPane(props: {
       </pre>
       {behind ? (
         <span className="vs-log-jump">
-          <Button
-            size="sm"
-            variant="primary"
-            icon="chevron-down"
-            text="Jump to latest"
-            press={jump}
-          />
+          <NewBelow text="New below" press={jump} />
         </span>
       ) : null}
     </div>
