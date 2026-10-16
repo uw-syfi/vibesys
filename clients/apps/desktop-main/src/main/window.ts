@@ -19,7 +19,7 @@ import {
   type WelcomeEvent,
 } from '@vibesys/ipc';
 import {BaseWindow, dialog, ipcMain, type MessagePortMain, type WebContentsView} from 'electron';
-import {APP_ENTRY_URL, SHELL_URL} from './app-assets.js';
+import {APP_ENTRY_URL, isSameAppPage, SHELL_URL} from './app-assets.js';
 import {sandboxedView} from './app-security.js';
 import {type PendingRunPort, RunIpcRegistry} from './run-ipc.js';
 import {observeRunPage, RunPageLifecycle} from './run-page-lifecycle.js';
@@ -117,7 +117,8 @@ export class AppWindow {
 
   constructor(deps: AppWindowDeps) {
     this.#deps = deps;
-    this.#runsInSurface = deps.surfaceUrl === SHELL_URL;
+    // The app shell's page, with or without a run window's query, shows runs in its own document.
+    this.#runsInSurface = isSameAppPage(deps.surfaceUrl, SHELL_URL);
     this.#window = new BaseWindow({
       width: 1440,
       height: 900,

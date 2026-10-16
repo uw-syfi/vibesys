@@ -50,7 +50,10 @@ function RunItem(props: {
       status={{tone: TONES[row.status], label: statusWord(row.status)}}
       active={sameScreen(state.selection, screen)}
       press={() => dispatch({type: 'select', screen})}
-      menu={[{id: 'archive', label: 'Archive', press: () => actions.archive(row.run)}]}
+      menu={[
+        {id: 'window', label: 'Open in new window', press: () => actions.openWindow(row.run)},
+        {id: 'archive', label: 'Archive', press: () => actions.archive(row.run)},
+      ]}
     />
   );
 }

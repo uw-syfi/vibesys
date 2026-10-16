@@ -27,7 +27,7 @@ import {
 } from '@vibesys/feature-settings/renderer';
 import {shownTheme} from '@vibesys/feature-settings/state';
 import {hostFromKey, hostLabel} from '@vibesys/hosts';
-import type {WelcomeBridge} from '@vibesys/ipc';
+import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
@@ -52,10 +52,35 @@ export interface ShellStores {
 
 const DEFAULT_APPEARANCE = {mode: 'system', light: 'paper', dark: 'ink'} as const;
 
-/** What the Run screen cannot do from this window yet, and why; it shows those actions disabled. */
-const RUN_UNAVAILABLE = {
-  'open-window': 'Opening a run in its own window arrives with multiple windows.',
-} as const;
+/**
+ * How the Run screen fits its window: in the main one it may open its run in a window of its own,
+ * and Run again goes to New run; in a run window (already its own) it may not, and Run again
+ * brings the main window, where New run is, to the front.
+ */
+interface RunPlace {
+  readonly unavailable: Partial<Record<'open-window', string>>;
+  navigation(run: RunRef): RunPageNavigation;
+}
+
+function mainWindowPlace(stores: ShellStores): RunPlace {
+  return {
+    unavailable: {},
+    navigation: run => ({
+      runAgain: () => stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run'}}),
+      openWindow: () => stores.sidebar.actions.openWindow(run),
+    }),
+  };
+}
+
+function runWindowPlace(stores: ShellStores): RunPlace {
+  return {
+    unavailable: {'open-window': 'This run is already in a window of its own.'},
+    navigation: () => ({
+      runAgain: () => void settled(stores.bridge.showMainWindow()),
+      openWindow: () => {},
+    }),
+  };
+}
 
 /**
  * Build the shell's stores over `bridge`, and keep the page's theme on what the Settings store
@@ -121,8 +146,9 @@ function RunRoute(props: {
   readonly run: RunRef;
   readonly sidebar: SidebarState;
   readonly stores: ShellStores;
+  readonly place: RunPlace;
 }): JSX.Element {
-  const {run, sidebar, stores} = props;
+  const {run, sidebar, stores, place} = props;
   const record = useMemo(() => runRecord(sidebar.listings, run), [sidebar.listings, run]);
   const recent = sidebar.recent.find(each => sameRun(each, run));
   const project = recent?.project ?? (record.kind === 'unlisted' ? '' : record.run.projectRoot);
@@ -130,13 +156,9 @@ function RunRoute(props: {
     identity: run,
     title: {project, task: recent?.task ?? null},
     hostLabel: hostLabel(hostFromKey(run.host)),
-    unavailable: RUN_UNAVAILABLE,
+    unavailable: place.unavailable,
   };
-  const ignore = (): void => {};
-  const navigation: RunPageNavigation = {
-    runAgain: () => stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run'}}),
-    openWindow: ignore,
-  };
+  const navigation = place.navigation(run);
   const page = useRunPage({
     seed,
     record,
@@ -202,6 +224,7 @@ export function Shell(props: {
             run={selected.run}
             sidebar={sidebarState}
             stores={props.stores}
+            place={mainWindowPlace(props.stores)}
           />
         );
       default:
@@ -215,6 +238,25 @@ export function Shell(props: {
       actions={sidebar.actions}
       version={props.version}
       screen={screen}
+    />
+  );
+}
+
+/**
+ * A run window: the Run screen for `run` alone, with no sidebar. The sidebar's store still runs,
+ * for the hosts' listings the run's record is read from.
+ */
+export function RunWindow(props: {
+  readonly stores: ShellStores;
+  readonly run: RunRef;
+}): JSX.Element {
+  const sidebarState = useStore(props.stores.sidebar.store);
+  return (
+    <RunRoute
+      run={props.run}
+      sidebar={sidebarState}
+      stores={props.stores}
+      place={runWindowPlace(props.stores)}
     />
   );
 }

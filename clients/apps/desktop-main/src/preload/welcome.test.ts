@@ -171,6 +171,7 @@ function cases(random: Seeded): Case[] {
       bridge => bridge.openRunWindow({host: key, runId: name}),
       {kind: 'open-run-window', run: {host: key, runId: name}},
     ],
+    [bridge => bridge.showMainWindow(), {kind: 'show-main-window'}],
   ];
 }
 

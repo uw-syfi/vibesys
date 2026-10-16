@@ -150,7 +150,9 @@ async function openWindow(
   });
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),
-    openPage: (runId, title) => windows.main.openRunPage(runId, title),
+    // A run shown in a window of its own is live there; any other run in the main window.
+    openPage: (runId, title) =>
+      (windows.runs.showing(runId) ?? windows.main).openRunPage(runId, title),
     confirm: text => windows.main.confirmStop(text),
     remember: (run, current) => settings.updateRecent(recent => remember(recent, run), current),
     changed,

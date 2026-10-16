@@ -4,6 +4,7 @@
  * asks for itself (`SidebarRequest`).
  */
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
+import {sameRun} from '@vibesys/runs';
 import {createStore, type Store} from '@vibesys/store';
 import {
   initialSidebar,
@@ -20,6 +21,7 @@ export type ShellBridge = Pick<
   | 'overview'
   | 'preferences'
   | 'archive'
+  | 'openRunWindow'
   | 'machines'
   | 'machine'
   | 'onListing'
@@ -92,6 +94,15 @@ export function createSidebarStore(bridge: ShellBridge): {
   });
   return {
     store,
-    actions: {archive: run => void settled(bridge.archive(run, true))},
+    actions: {
+      archive: run => void settled(bridge.archive(run, true)),
+      openWindow: run => {
+        const shown = store.getState().selection;
+        if (shown.kind === 'run' && sameRun(shown.run, run)) {
+          store.dispatch({type: 'select', screen: {kind: 'new-run'}});
+        }
+        void settled(bridge.openRunWindow(run));
+      },
+    },
   };
 }

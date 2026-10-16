@@ -98,7 +98,8 @@ type ScreenRequest = Extract<
       | 'copy-out'
       | 'start-run'
       | 'helper-features'
-      | 'open-run-window';
+      | 'open-run-window'
+      | 'show-main-window';
   }
 >;
 
@@ -386,6 +387,9 @@ export class Desktop {
         return machines.remove(request.host);
       case 'open-run-window':
         return Promise.resolve(this.#openRunWindow(request.run));
+      case 'show-main-window':
+        this.#deps.window.focus();
+        return Promise.resolve(null);
       default:
         return this.#deps.newRun.answer(request);
     }

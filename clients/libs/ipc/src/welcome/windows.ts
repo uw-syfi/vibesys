@@ -8,15 +8,20 @@ import type {ChannelOf} from './values.js';
 
 export const WINDOWS_CHANNELS = {
   openRunWindow: 'vibesys:welcome:open-run-window',
+  showMainWindow: 'vibesys:welcome:show-main-window',
 } as const;
 
 /** The welcome bridge's window requests. */
 export interface WindowsWelcomeBridge {
   /** Show `run` in a window of its own: the one already showing it, or a new one. */
   openRunWindow(run: RunRef): Promise<WelcomeResult<null>>;
+  /** Bring the main window (the sidebar and its screens) to the front. */
+  showMainWindow(): Promise<WelcomeResult<null>>;
 }
 
-export type WindowsRequest = {readonly kind: 'open-run-window'; readonly run: RunRef};
+export type WindowsRequest =
+  | {readonly kind: 'open-run-window'; readonly run: RunRef}
+  | {readonly kind: 'show-main-window'};
 
 /** The typed request on `channel` with `args`; throws naming the first invalid value. */
 export function parseWindowsRequest(
@@ -26,6 +31,8 @@ export function parseWindowsRequest(
   switch (channel) {
     case WINDOWS_CHANNELS.openRunWindow:
       return {kind: 'open-run-window', run: parseRunRef(args[0], 'run')};
+    case WINDOWS_CHANNELS.showMainWindow:
+      return {kind: 'show-main-window'};
   }
 }
 
