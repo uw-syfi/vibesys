@@ -138,6 +138,10 @@ const EVENT_DATA_HANDLERS = {
   winner_selected: runEventData(applyWinnerSelectedData),
   workstream_finished: runEventData(applyWorkstreamFinishedData),
   turn_usage_recorded: runEventData(applyTurnUsageData),
+  // The run trace is its own fold (`@vibesys/run-state/trace`), not part of the run's core state.
+  span_started: ignoredEventData,
+  span_updated: ignoredEventData,
+  span_ended: ignoredEventData,
 } satisfies Record<EventDataKind, EventDataHandlers>;
 
 export function eventDataHandlers(data: RunEvent['data']): EventDataHandlers | null | undefined {

@@ -50,7 +50,7 @@ WORKSTREAM = core.SpanKind(
 )
 TURN = core.SpanKind("agent_turn", attrs=TurnAttrs)
 KINDS = (WORKSTREAM, TURN)
-ROOT = core.SpanId(root="flow:#1")
+ROOT = "flow:#1"
 
 _ATTRS = st.integers(0, 9).flatmap(
     lambda n: st.sampled_from([WorkAttrs(n=n), {"n": n}])  # a model, or keys it validates
@@ -140,7 +140,7 @@ def test_labels_are_the_fold_of_the_calls_and_replay_identically(
     assert live.trace() == restarting.trace()
     previous: core.SpanId | None = None
     for number, ops in enumerate(programs):
-        span = live.trace().span(core.SpanId(root=f"flow:w{number}/#1"))
+        span = live.trace().span(f"flow:w{number}/#1")
         assert span is not None
         assert span.label == expected_label(ops, previous)
         assert span.status is core.SpanStatus.DONE  # a verdict never changes the status
@@ -188,10 +188,10 @@ def test_an_undeclared_kind_relation_verdict_or_attribute_is_refused_naming_it(n
 @settings(max_examples=examples(pr=6, nightly=60), deadline=None)
 @given(key=st.from_regex(r"w[0-9]", fullmatch=True))
 def test_a_link_to_a_span_the_run_never_recorded_is_refused(key: str) -> None:
-    missing = core.SpanId(root=f"flow:{key}/#1")
+    missing = f"flow:{key}/#1"
     link = core.SpanLink(rel="builds_on", to=missing)
     path = refused(lambda ctx: ctx.label(WORKSTREAM, links=(link,)))
-    assert path == f"label.workstream.links.{missing.root}"
+    assert path == f"label.workstream.links.{missing}"
 
 
 def test_a_span_keeps_the_kind_of_its_first_label() -> None:
@@ -228,3 +228,24 @@ def test_a_turn_is_labelled_when_issued(*, restarting: bool) -> None:
     assert root_span.label is None  # only what a flow labels carries a label
     play(run)
     assert run.finished is not None
+
+
+@settings(max_examples=examples(pr=4, nightly=60), deadline=None)
+@given(programs=PROGRAMS)
+def test_folding_the_span_changes_of_every_step_gives_the_trace(
+    programs: list[list[core.LabelFields]],
+) -> None:
+    run = FlowRun.start(search_of(root_of(programs)), Config())
+    folded: dict[core.SpanId, core.Span] = {}
+    before: core.RunTrace | None = None
+    for _ in range(20):
+        after = run.trace()
+        for change, span in core.span_changes(before, after):
+            assert (change is core.SpanChange.STARTED) == (span.id not in folded)
+            assert (change is core.SpanChange.ENDED) <= span.ended
+            folded[span.id] = span
+        assert tuple(folded.values()) == after.spans
+        if run.finished is not None:
+            break
+        before = after
+        run.reply(run.expect_turn("go"), Plan(n=1))

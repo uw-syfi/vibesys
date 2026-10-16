@@ -14,12 +14,16 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, NonNegativeInt, TypeAdapter
 
-from vibesys.events import GateKind
+from vibesys.events import GateKind, SpanId
 from vs_runtime.api.infrastructure import EnvironmentStartupStage
 
 
 class _Owner(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    span_id: SpanId | None = None
+    """The run-trace span the stream belongs to, when its writer knows it: what a client opens
+    a span's logs by (``logs.list`` filters on it)."""
 
 
 class StartupStep(_Owner):

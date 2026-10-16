@@ -530,8 +530,9 @@ def settlement(
     files that are missing or malformed, settle it ``failed``, so the next ask
     runs it again. A job that ended any other way than COMPLETED is ``failed``
     with no collection. A COMPLETED job not collected yet (``collected`` None),
-    or whose collection failed before it read any result (a ``ClusterUnknown``
-    without a result: the connection dropped, the scheduler did not answer),
+    or whose collection read no result (a ``ClusterUnknown`` without a
+    result: the connection dropped before, during or after a download, the
+    scheduler did not answer),
     cannot settle: its result files may be whole, and a run that attaches to it
     collects them again.
     """

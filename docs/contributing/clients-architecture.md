@@ -344,7 +344,7 @@ The redesigned screens are built only from the components of `@vibesys/ui`'s `.`
 CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components.css` once.
 
 - **Props are data and callbacks.** Variants are token names or small closed unions (`gap:
-  SpaceToken`, `style: TextStyle`, `tone: StatusTone`); no component accepts `className` or
+  SpaceToken`, `variant: TextStyle`, `tone: StatusTone`); no component accepts `className` or
   `style`, so a raw value cannot reach one (rule S1 of #2827, held by the types).
 - **Styles use tokens only.** `src/components.css` reads token variables (`--space-3`,
   `--control`, `--radius-lg`, `--text-body-size`, ...) and writes no color or length (rule S8);
@@ -362,7 +362,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `Stack`, `Row` | `gap?: SpaceToken`, `align?`, `justify?: 'start' \| 'center' \| 'end' \| 'between'`, `wrap?`, `grow?` |
 | `Split` | `main`, `aside`, `gap?`; the aside wraps under the main column when narrow |
 | `Grid` | `min: 'field' \| 'tile' \| 'swatch'`, `gap?`; auto-fit columns |
-| `Text` | `style?: TextStyle`, `tone?: 'default' \| 'muted' \| 'ok' \| 'warn' \| 'err'`, `as?` (element), `id?` |
+| `Text` | `variant?: TextStyle` (not `style`, which strict code may not pass), `tone?: 'default' \| 'muted' \| 'ok' \| 'warn' \| 'err'`, `as?` (element), `id?` |
 | `Wordmark` | `art` (the caller's ASCII art), `label`; scaled to fit its width |
 | `Icon` | `name: IconName` (closed set, `ICON_NAMES`), `label?` (decorative without one) |
 | `Button` | `text` or `icon` + `label`; one of `press`, `href` (renders `<a>`) or `submit`; `variant?: 'primary' \| 'secondary' \| 'quiet' \| 'danger'`, `size?: 'sm' \| 'md'`, `full?`, `disabledReason?`, `expanded?` |
@@ -376,6 +376,26 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `StatusDot` | `tone: 'neutral' \| 'live' \| 'ok' \| 'warn' \| 'err'`, `label` |
 | `Card` | `section?` (a titled region), `flush?` |
 | `Banner` | `title`, `tone?: 'neutral' \| 'ok' \| 'warn' \| 'err'`, `body?`, `actions?` |
+| `Menu` | the trigger's `text` or `icon` + `label`, `items: {id, label, press \| href, danger?}[]`, `variant?`, `size?`; raised, keyboard navigable, closes on Esc, a choice or the focus leaving |
+| `Dialog` | `open`, `title`, `dismiss`, children, `actions?`; the native modal `<dialog>` at the `overlay` elevation |
+| `Table` | `label`, `columns: {key, header, cell(row), mono?, align?}[]`, `rows`, `rowKey`, `selected?`, `select?`; sticky header, scrolls sideways in its own focusable box |
+| `Tabs` | `label`, `tabs: {value, label}[]`, `value`, `change`, the panel as children; arrows move and choose |
+| `Tree`, `TreeRow` | `Tree`: `label`, `selected?`. `TreeRow`: `id`, `depth`, `title`, `subtitle?`, `state?: {tone, label}`, `chips?`, `expanded?` + `toggle?` for a group, `select`; up, down, left, right, Home, End |
+| `KeyValue` | `items: {key, value, mono?}[]` |
+| `CheckList` | `items: {id, state: 'ok' \| 'warn' \| 'fail' \| 'pending', label, detail?, fix?: {text, press}}[]`; each state has its own icon and word |
+| `Timeline` | `stages: {id, state: 'done' \| 'active' \| 'waiting' \| 'failed', label, elapsed?, quietFor?, body?}[]`; a body discloses, open at first for an active or failed stage |
+| `LogPane` | `label`, `lines: {text, stream?: 'out' \| 'err'}[]`, `size?`; follows the tail while at the bottom, offers "Jump to latest" when scrolled up; text only |
+| `Scrubber` | `label`, `value`, `last`, `position` (words), `live`, `pastLabel`, `ticks?`, `change`, `backToLive` |
+| `Stat` | `label`, `value`, `sub?` |
+| `Chart` | `label`, `points: {x, y, filled}[]`, `steps?`, `reference?: {y, label}`, `playhead?`, `xTicks?`, `yTicks?`, `xTitle?`; SVG in `accent`, `muted` and `grid` |
+| `SidebarItem` | `label`, `href` or `press`, `icon?`, `status?: {tone, label}`, `count?`, `detail?`, `active?`, `menu?` |
+| `SidebarSection` | `title`, children, `showAll?: {label, href \| press}` |
+| `EmptyState` | `title`, `body?`, `action?` |
+
+Time-dependent values (elapsed, "quiet for", a scrubber position) are props the caller formats;
+no component reads a clock. Standard error in `LogPane` is drawn in `--log-err`, `err` mixed into
+`log-text` (`LOG_ERR_MIX` in `./tokens`), because a light theme's `err` does not read on the log
+pane's dark background; a token test checks it in every theme.
 
 ### The gallery and its screenshots
 
@@ -383,6 +403,8 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 with fixed content: no clock, randomness or network, and the bundled fonts. Its registry is typed
 over the entry's component exports, and `test_gallery_covers_every_public_component` fails a
 component with no gallery entry. Run it with `pnpm --filter @vibesys/app-ui-gallery dev`.
+The gallery is a strict package (`"design": "strict"`), so it also shows that a page built
+only from `@vibesys/ui` passes the strict rules.
 
 Its Playwright suite (in the `tui_e2e` group) loads each theme once, fails on any axe violation,
 and compares each component's screenshot against `e2e/__screenshots__/<theme>-<Component>.png`

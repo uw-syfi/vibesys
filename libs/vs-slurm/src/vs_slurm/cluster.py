@@ -503,6 +503,11 @@ class SlurmCluster:
     ) -> ClusterCollectOutcome:
         """Collect terminal evidence, preserving partial results as Unknown.
 
+        Partial results are result files that arrived whole but are missing or
+        malformed. A download that did not complete is Unknown with no result:
+        nothing is read from a partial copy, and a later collection reads the
+        remote files again.
+
         ``observed`` is a reading the caller just took of this target; passing it saves
         the scheduler and manifest queries a fresh inspection would make.
         """

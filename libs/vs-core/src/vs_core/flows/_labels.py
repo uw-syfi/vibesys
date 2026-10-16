@@ -133,8 +133,8 @@ def _link(kind: SpanKind, link: SpanLink, exists: Callable[[SpanId], bool]) -> S
         message = f"{link.rel!r} is not a link relation of {kind.name!r}: {kind.links}"
         raise ContractError(("label", kind.name, "links", link.rel), message)
     if not exists(link.to):
-        message = f"the link {link.rel!r} names no span of this run: {link.to.root}"
-        raise ContractError(("label", kind.name, "links", link.to.root), message)
+        message = f"the link {link.rel!r} names no span of this run: {link.to}"
+        raise ContractError(("label", kind.name, "links", link.to), message)
     return link
 
 

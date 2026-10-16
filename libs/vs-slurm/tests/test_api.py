@@ -33,6 +33,7 @@ from vs_slurm.api import (
     SlurmJobStatus,
     SlurmService,
     SlurmSubmissionRejectedError,
+    SlurmTransferInterruptedError,
     SlurmTreeArtifact,
     load_slurm_config,
     runtime_content_identity,
@@ -110,6 +111,9 @@ class _FakeConnector:
         self.batch_stage_results = batch_stage_results or {}
         self.fail_operation = "sync_to" if content_cache_behavior == "upload-failure" else None
         self.failed_get_suffix: str | None = None
+        # Whether the cluster then answers that the failed download's path is absent
+        # (a missing result) or present (the download was cut short).
+        self.failed_get_absent = False
         self.race_publish_before_next_publish = content_cache_behavior == "concurrent-publisher"
         self.content_cache_behavior = content_cache_behavior
         self.ready_content_objects: set[str] = set()
@@ -177,6 +181,16 @@ class _FakeConnector:
                 (local_path / "trace.csv").write_text("trace\n", encoding="utf-8")
         return ""
 
+    def _absent(self, remote_path: str) -> bool:
+        """Whether the remote path a failed download named does not exist."""
+        if remote_path.endswith("/.vibesys-slurm-results") and not self.batch_stage_results:
+            return True
+        return (
+            self.failed_get_absent
+            and self.failed_get_suffix is not None
+            and remote_path.endswith(self.failed_get_suffix)
+        )
+
     def _write_batch_results(self, local_path: Path) -> None:
         local_path.mkdir(parents=True, exist_ok=True)
         for result_index, result_files in self.batch_stage_results.items():
@@ -193,6 +207,8 @@ class _FakeConnector:
 
     def _answer(self, command: str) -> str:
         tokens = shlex.split(command)
+        if tokens[:3] == ["if", "test", "-e"]:
+            return "absent\n" if self._absent(tokens[3].rstrip(";")) else "present\n"
         cache_response = self._content_cache_response(tokens)
         if cache_response is not None:
             return cache_response
@@ -1307,9 +1323,14 @@ def test_batch_collection_keeps_available_evidence_when_metadata_is_missing(
 
 @pytest.mark.parametrize("allocation_exit", [0, 70])
 @pytest.mark.parametrize("failed_get", [".vibesys-slurm-results", "metrics.json"])
+@pytest.mark.parametrize("absent", [True, False], ids=["absent", "cut"])
 def test_batch_collection_transport_failures_never_publish_successful_evidence(
-    tmp_path: Path, allocation_exit: int, failed_get: str
+    tmp_path: Path, allocation_exit: int, failed_get: str, *, absent: bool
 ) -> None:
+    """A failed download is a missing result only when the cluster says the path is absent.
+
+    Otherwise the download was cut short: collection reads nothing from it and raises.
+    """
     workspace = tmp_path / "candidate"
     workspace.mkdir()
     connector = _FakeConnector(
@@ -1325,6 +1346,7 @@ def test_batch_collection_transport_failures_never_publish_successful_evidence(
         },
     )
     connector.failed_get_suffix = failed_get
+    connector.failed_get_absent = absent
     runner = SlurmJobRunner(_config(), processes=connector, clock=ManualClock())
     handle = runner.submit_batch(
         SlurmBatchRequest(
@@ -1339,6 +1361,10 @@ def test_batch_collection_transport_failures_never_publish_successful_evidence(
         )
     )
 
+    if not absent:
+        with pytest.raises(SlurmTransferInterruptedError, match=failed_get):
+            runner.collect_batch(handle)
+        return
     result = runner.collect_batch(handle)
 
     if failed_get == "metrics.json":

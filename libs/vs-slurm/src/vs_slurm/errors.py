@@ -112,6 +112,11 @@ class SlurmError(RuntimeError):
         return cls("Slurm setup script must be an absolute normalized POSIX path")
 
     @classmethod
+    def remote_path_absent(cls, remote: str) -> SlurmError:
+        """Describe a result path the cluster answered, whole, does not exist."""
+        return cls(f"{remote} does not exist on the cluster")
+
+    @classmethod
     def malformed_result(cls) -> SlurmError:
         """Describe missing or malformed job result files."""
         return cls("Slurm job returned a missing or malformed status artifact")
@@ -145,6 +150,21 @@ class SlurmError(RuntimeError):
     def invalid_handle(cls) -> SlurmError:
         """Describe a handle whose remote paths do not match its identity."""
         return cls("Slurm job handle contains paths outside its operation workspace")
+
+
+class SlurmTransferInterruptedError(SlurmError):
+    """A download from the cluster failed, and the cluster did not prove its source absent.
+
+    The local copy may be partial (cut before any file, mid-tree, or after the
+    last file but before the transfer reported success), so nothing it left
+    is evidence. Collection that meets it reads no result at all: the remote
+    files may be whole, and a later collection reads them again.
+    """
+
+    @classmethod
+    def of(cls, remote: str, cause: BaseException) -> SlurmTransferInterruptedError:
+        """Name the remote path whose download did not complete, and why."""
+        return cls(f"download of {remote} did not complete: {cause}")
 
 
 class SlurmSubmissionRejectedError(SlurmError):

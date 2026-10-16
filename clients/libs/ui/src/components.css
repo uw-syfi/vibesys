@@ -630,3 +630,567 @@ body {
   flex-wrap: wrap;
   gap: var(--space-3);
 }
+
+/* --- menu -------------------------------------------------------------------------------------- */
+
+.vs-menu {
+  position: relative;
+  display: inline-flex;
+}
+.vs-menu-list {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: var(--menu);
+  padding: var(--space-2);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--elevation-raised);
+}
+.vs-menu-list[data-align="start"] {
+  right: auto;
+  left: 0;
+}
+.vs-menu-item {
+  display: flex;
+  align-items: center;
+  min-height: var(--control);
+  margin: 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.vs-menu-item:hover,
+.vs-menu-item:focus-visible {
+  background: var(--panel-2);
+}
+.vs-menu-item:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--focus-offset) * -2);
+}
+.vs-menu-item[data-danger] {
+  color: var(--err);
+}
+
+/* --- dialog ------------------------------------------------------------------------------------ */
+
+/* A modal sits in the top layer, so percentages are of the window. */
+.vs-dialog {
+  max-width: calc(100% - 2 * var(--space-6));
+  max-height: calc(100% - 2 * var(--space-7));
+  overflow-y: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+}
+.vs-dialog::backdrop {
+  background: var(--scrim);
+}
+.vs-dialog-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: var(--content-narrow);
+  max-width: 100%;
+  padding: var(--space-6);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--elevation-overlay);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.vs-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+/* --- table ------------------------------------------------------------------------------------- */
+
+.vs-table-scroll {
+  overflow-x: auto;
+  min-width: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.vs-table-scroll:focus-visible,
+.vs-table tr[data-selectable]:focus-visible,
+.vs-tab:focus-visible,
+.vs-tree:focus-visible,
+.vs-tree-row:focus-visible,
+.vs-stage-head:focus-visible,
+.vs-log-pane:focus-visible,
+.vs-scrubber-range:focus-visible,
+.vs-sidebar-link:focus-visible,
+.vs-sidebar-more:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-table th {
+  position: sticky;
+  top: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  line-height: var(--text-section-line);
+  font-weight: var(--text-section-weight);
+  letter-spacing: var(--text-section-tracking);
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+.vs-table td {
+  padding: var(--space-3) var(--space-4);
+  border-top: var(--hairline) solid var(--line);
+  vertical-align: top;
+}
+.vs-table td[data-mono] {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.vs-table [data-align="end"] {
+  text-align: right;
+}
+.vs-table tr[data-selectable] {
+  cursor: pointer;
+}
+.vs-table tr[data-selectable]:hover {
+  background: var(--panel-2);
+}
+.vs-table tr[aria-current="true"] {
+  background: var(--selection);
+}
+
+/* --- tabs -------------------------------------------------------------------------------------- */
+
+.vs-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.vs-tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.vs-tab {
+  min-height: var(--control);
+  margin: 0 0 calc(var(--hairline) * -1);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-bottom: var(--focus-ring) solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  cursor: pointer;
+}
+.vs-tab:hover {
+  color: var(--text);
+}
+.vs-tab[aria-selected="true"] {
+  border-bottom-color: var(--text);
+  color: var(--text);
+  font-weight: var(--text-body-strong-weight);
+}
+
+/* --- tree -------------------------------------------------------------------------------------- */
+
+.vs-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.vs-tree-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row);
+  padding: var(--space-2) var(--space-3);
+  padding-left: calc(var(--space-3) + var(--space-5) * var(--tree-depth));
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-tree-row:hover {
+  background: var(--panel-2);
+}
+.vs-tree-row[aria-selected="true"] {
+  background: var(--selection);
+  border-color: var(--chip-accent-border);
+}
+.vs-tree-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.vs-tree-row[data-group] .vs-tree-text {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.vs-tree-chevron {
+  display: flex;
+  color: var(--muted);
+  transition: transform var(--duration-fast) var(--easing);
+}
+.vs-tree-chevron[data-open] {
+  transform: rotate(90deg);
+}
+
+/* --- key value, stat, empty state --------------------------------------------------------------- */
+
+.vs-key-value {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+.vs-key-value-row {
+  display: contents;
+}
+.vs-key-value dd {
+  margin: 0;
+  min-width: 0;
+}
+.vs-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+}
+.vs-empty-action {
+  padding-top: var(--space-3);
+}
+
+/* --- check list -------------------------------------------------------------------------------- */
+
+.vs-check-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-check-icon {
+  display: flex;
+  padding-top: var(--space-1);
+}
+.vs-check[data-state="ok"] .vs-check-icon {
+  color: var(--ok);
+}
+.vs-check[data-state="warn"] .vs-check-icon {
+  color: var(--warn);
+}
+.vs-check[data-state="fail"] .vs-check-icon {
+  color: var(--err);
+}
+.vs-check[data-state="pending"] .vs-check-icon {
+  color: var(--muted);
+}
+.vs-check-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-check-fix {
+  padding-top: var(--space-2);
+}
+
+/* --- timeline ---------------------------------------------------------------------------------- */
+
+.vs-timeline {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-stage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+button.vs-stage-head {
+  cursor: pointer;
+}
+.vs-stage-label {
+  flex: 1;
+  min-width: 0;
+}
+.vs-stage-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-left: var(--space-5);
+}
+
+/* --- log pane ---------------------------------------------------------------------------------- */
+
+.vs-log {
+  position: relative;
+  min-width: 0;
+}
+.vs-log-pane {
+  box-sizing: border-box;
+  height: var(--log);
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  overflow: auto;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--log-bg);
+  color: var(--log-text);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vs-log-pane[data-size="sm"] {
+  height: var(--log-sm);
+}
+.vs-log-line[data-stream="err"] {
+  color: var(--log-err);
+}
+.vs-log-jump {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+}
+
+/* --- scrubber ---------------------------------------------------------------------------------- */
+
+.vs-scrubber {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-scrubber-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--control-sm);
+}
+.vs-scrubber-label {
+  flex: 1;
+  min-width: 0;
+}
+.vs-scrubber-range {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.vs-scrubber-ticks {
+  position: relative;
+  height: var(--text-section-line);
+  margin: 0 var(--space-2);
+}
+.vs-scrubber-tick {
+  position: absolute;
+  left: var(--tick-at);
+  transform: translateX(-50%);
+  color: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  line-height: var(--text-section-line);
+  white-space: nowrap;
+}
+.vs-scrubber-tick:first-child {
+  transform: none;
+}
+.vs-scrubber-tick:last-child {
+  transform: translateX(-100%);
+}
+
+/* --- chart: drawn in the SVG's own units ------------------------------------------------------- */
+
+.vs-chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.vs-chart-grid,
+.vs-chart-axis {
+  stroke: var(--grid);
+}
+.vs-chart-label {
+  fill: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+}
+.vs-chart-reference {
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 5;
+}
+.vs-chart-step {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.vs-chart-point {
+  fill: var(--panel);
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.vs-chart-point[data-filled] {
+  fill: var(--accent);
+}
+.vs-chart-playhead {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+/* --- sidebar ----------------------------------------------------------------------------------- */
+
+.vs-sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-sidebar-title {
+  display: flex;
+  padding: 0 var(--space-3) var(--space-2);
+}
+.vs-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius);
+}
+.vs-sidebar-item:hover {
+  background: var(--panel-2);
+}
+.vs-sidebar-item[data-active] {
+  background: var(--selection);
+  border-color: var(--line);
+}
+.vs-sidebar-link {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: var(--space-3);
+  min-width: 0;
+  min-height: var(--control);
+  margin: 0;
+  padding: var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.vs-sidebar-link > .vs-icon {
+  margin-top: var(--space-1);
+}
+.vs-sidebar-dot {
+  display: flex;
+  padding-top: var(--space-2);
+}
+.vs-sidebar-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.vs-sidebar-more {
+  align-self: flex-start;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  text-decoration: none;
+  cursor: pointer;
+}
+.vs-sidebar-more:hover {
+  color: var(--text);
+}

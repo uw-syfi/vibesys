@@ -13,7 +13,8 @@
  *   not expose that operation on Windows, where a successful update promises atomic visibility but
  *   not crash-durable publication of the renamed directory entry.
  * - **Changes are announced.** `onRecentChanged` listeners hear every update of the recent runs, so
- *   no view has a refresh path to forget.
+ *   no view has a refresh path to forget. A failing listener is logged without skipping the other
+ *   listeners or changing the outcome of an update that already committed.
  * - **Invalid files are ignored by reads and reported** in the same host-settings snapshot; updates
  *   reject them before writing, so the bytes remain available for repair.
  *
@@ -99,7 +100,7 @@ export class SettingsStore {
     }
     if (read.kind === 'failed') {
       const failure = readFailure(this.#options.settingsPath, read.error);
-      this.#options.log(failure.message);
+      this.#log(failure.message);
       return {value: EMPTY_SETTINGS, failure};
     }
     try {
@@ -107,7 +108,7 @@ export class SettingsStore {
       return {value: parsed, failure: null};
     } catch (error) {
       const failure = invalidFile(this.#options.settingsPath, error);
-      this.#options.log(`ignoring ${failure.message}`);
+      this.#log(`ignoring ${failure.message}`);
       return {value: EMPTY_SETTINGS, failure};
     }
   }
@@ -122,14 +123,14 @@ export class SettingsStore {
     if (read.kind === 'missing') return {value: EMPTY_RECENT, failure: null};
     if (read.kind === 'failed') {
       const failure = readFailure(this.#options.recentPath, read.error);
-      this.#options.log(failure.message);
+      this.#log(failure.message);
       return {value: EMPTY_RECENT, failure};
     }
     try {
       return {value: parseRecent(JSON.parse(read.text) as unknown), failure: null};
     } catch (error) {
       const failure = invalidFile(this.#options.recentPath, error);
-      this.#options.log(`ignoring ${failure.message}`);
+      this.#log(`ignoring ${failure.message}`);
       return {value: EMPTY_RECENT, failure};
     }
   }
@@ -168,14 +169,40 @@ export class SettingsStore {
         (await writeJson(this.#filesystem, this.#options.recentPath, next, current)) === 'cancelled'
       )
         return;
-      for (const listener of this.#recentListeners) listener(next);
+      this.#notifyRecent(next);
     });
   }
 
-  /** Hear every update of the recent runs; returns the unsubscribe. */
+  /** Hear every update; failures are reported after commit and results are not awaited. */
   onRecentChanged(listener: (recent: RecentFile) => void): () => void {
     this.#recentListeners.add(listener);
     return () => this.#recentListeners.delete(listener);
+  }
+
+  /** Deliver a committed value without letting a non-owning observer rewrite its outcome. */
+  #notifyRecent(recent: RecentFile): void {
+    for (const listener of [...this.#recentListeners]) {
+      try {
+        const notified = listener(recent);
+        void Promise.resolve(notified).catch(error => {
+          this.#log(`could not notify a recent-runs listener: ${errorMessage(error)}`);
+        });
+      } catch (error) {
+        this.#log(`could not notify a recent-runs listener: ${errorMessage(error)}`);
+      }
+    }
+  }
+
+  /** Diagnostics are fire-and-forget and cannot change a durable read or update outcome. */
+  #log(message: string): void {
+    try {
+      const logged = this.#options.log(message);
+      void Promise.resolve(logged).catch(() => {
+        // The diagnostic has no later owner; consume its rejected thenable here.
+      });
+    } catch {
+      // Diagnostics cannot replace the settings result or the failure being reported.
+    }
   }
 
   #serialize<T>(write: () => Promise<T>): Promise<T> {
@@ -185,6 +212,14 @@ export class SettingsStore {
       () => undefined,
     );
     return next;
+  }
+}
+
+function errorMessage(error: unknown): string {
+  try {
+    return error instanceof Error ? String(error.message) : String(error);
+  } catch {
+    return 'an unprintable failure';
   }
 }
 

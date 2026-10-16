@@ -20,6 +20,9 @@ from vibesys.events import (
     IterationsChangedData,
     PhaseData,
     RoundFinishedData,
+    SpanEndedData,
+    SpanStartedData,
+    SpanUpdatedData,
     WinnerSelectedData,
     WorkstreamFailureData,
     WorkstreamFailureKind,
@@ -28,6 +31,7 @@ from vibesys.events import (
 )
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
+from vs_core.api import FlowDriver, FlowState, RunTrace, SpanChange, span_changes
 from vs_project.api import git_repositories
 from vs_runtime.api.core import RuntimeRecord, winner_selection
 from vs_runtime.api.infrastructure import (
@@ -333,6 +337,34 @@ def _emit_winner_selected(
     )
 
 
+_SPAN_EVENTS: dict[
+    SpanChange, tuple[CoreEventType, type[SpanStartedData | SpanUpdatedData | SpanEndedData]]
+] = {
+    SpanChange.STARTED: (CoreEventType.SPAN_STARTED, SpanStartedData),
+    SpanChange.UPDATED: (CoreEventType.SPAN_UPDATED, SpanUpdatedData),
+    SpanChange.ENDED: (CoreEventType.SPAN_ENDED, SpanEndedData),
+}
+
+
+def _run_trace(record: BaseModel | None) -> RunTrace | None:
+    """The run trace a committed record's flow state holds (None for any other strategy)."""
+    if not isinstance(record, RuntimeRecord):
+        return None
+    state = record.envelope.strategy
+    return FlowDriver.trace(state) if isinstance(state, FlowState) else None
+
+
+def _emit_span_changes(
+    events: EventJournal, before: RunTrace | None, after: RunTrace | None
+) -> None:
+    """Emit one span event per span the commit started, changed or ended, in trace order."""
+    if after is None:
+        return
+    for change, span in span_changes(before, after):
+        event_type, data = _SPAN_EVENTS[change]
+        events.emit(event_type, data=data(span=span))
+
+
 def _baseline_drift_detail(event: RootBaselineDrifted) -> str:
     """Describe which pre-run paths an attempt changed or removed."""
     parts = []
@@ -369,6 +401,7 @@ class _CoreCommitObserver:
             winner_selection(previous) if isinstance(previous, RuntimeRecord) else None,
             winner_selection(current) if isinstance(current, RuntimeRecord) else None,
         )
+        _emit_span_changes(self._integration.events, _run_trace(previous), _run_trace(current))
 
     def _project(self, value: BaseModel | None) -> _RunProjection | None:
         projector = self._projector

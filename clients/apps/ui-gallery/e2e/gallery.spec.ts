@@ -19,6 +19,7 @@ async function themeNames(page: Page): Promise<string[]> {
 async function open(page: Page, theme: string): Promise<void> {
   await page.goto(`./?theme=${theme}`);
   await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+  await page.mouse.move(0, 0);
   const loaded = await page.evaluate(async fonts => {
     await Promise.all(fonts.map(font => document.fonts.load(font)));
     await document.fonts.ready;
@@ -52,8 +53,35 @@ test('every component looks as agreed, and the page has no axe violation, in eve
     await expect
       .soft(page.locator('[data-gallery-entry="Button"]'))
       .toHaveScreenshot(`${theme}-focus-ring.png`);
+    await screenshotOverlays(page, theme);
   }
 });
+
+/** The states that only show after a press: an open menu, and the modal dialog. */
+async function screenshotOverlays(page: Page, theme: string): Promise<void> {
+  await page
+    .locator('[data-gallery-entry="Menu"]')
+    .getByRole('button', {name: 'More actions'})
+    .click();
+  const entry = await page.locator('[data-gallery-entry="Menu"]').boundingBox();
+  const menu = await page.getByRole('menu').boundingBox();
+  if (entry === null || menu === null)
+    throw new Error('the menu entry or its open menu is not shown');
+  const bottom = Math.max(entry.y + entry.height, menu.y + menu.height);
+  await page.mouse.move(0, 0);
+  await expect.soft(page).toHaveScreenshot(`${theme}-Menu-open.png`, {
+    clip: {x: entry.x, y: entry.y, width: entry.width, height: bottom - entry.y},
+  });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', {name: 'Open dialog'}).click();
+  const dialog = page.getByRole('dialog');
+  const axe = await new AxeBuilder({page}).include('dialog').analyze();
+  expect.soft(axe.violations, `axe violations in ${theme}'s dialog`).toEqual([]);
+  await page.mouse.move(0, 0);
+  await expect.soft(page).toHaveScreenshot(`${theme}-Dialog-open.png`);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+}
 
 test('a segmented control moves its one tab stop and its choice with the arrow keys', async ({
   page,
@@ -89,4 +117,94 @@ test('a path input highlights completions with the arrows and takes one with Ent
   await expect(input).toHaveValue('~/work/queue');
   await page.keyboard.press('Escape');
   await expect(input).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('a menu opens from the keyboard, moves with the arrows, and closes on Esc', async ({page}) => {
+  await page.goto('./');
+  const trigger = page
+    .locator('[data-gallery-entry="Menu"]')
+    .getByRole('button', {name: 'More actions'});
+  await trigger.focus();
+  await page.keyboard.press('ArrowDown');
+  const items = page.getByRole('menuitem');
+  await expect(items.first()).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(items.last()).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await page.getByRole('heading', {name: 'Menu'}).click();
+  await expect(page.getByRole('menu')).toHaveCount(0);
+});
+
+test('tabs move their one tab stop and the shown panel with the arrow keys', async ({page}) => {
+  await page.goto('./');
+  const tabs = page.getByRole('tablist', {name: 'Sections'}).getByRole('tab');
+  await tabs.first().focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabs.last()).toBeFocused();
+  await expect(tabs.last()).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel')).toHaveText('The logs panel.');
+  await page.keyboard.press('Home');
+  await expect(tabs.first()).toHaveAttribute('aria-selected', 'true');
+});
+
+test('a tree follows the tree keyboard model', async ({page}) => {
+  await page.goto('./');
+  const tree = page.getByRole('tree', {name: 'Workstreams'});
+  const row = (name: string) => tree.getByRole('treeitem', {name});
+  await row('Spin before parking').focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(row('Contention')).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(row('Contention')).toHaveAttribute('aria-expanded', 'false');
+  await expect(row('Pad the counters')).toHaveCount(0);
+  await page.keyboard.press('ArrowRight');
+  await expect(row('Contention')).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.press('ArrowRight');
+  await expect(row('Pad the counters')).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(row('Memory layout')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('ArrowDown');
+  await expect(row('Align the slots')).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(row('Align the slots')).toHaveAttribute('aria-selected', 'true');
+});
+
+test('a selectable table selects a row with Enter', async ({page}) => {
+  await page.goto('./');
+  const table = page.getByRole('table', {name: 'Attempts', exact: true});
+  const first = table.getByRole('row').nth(1);
+  await first.focus();
+  await page.keyboard.press('Enter');
+  await expect(first).toHaveAttribute('aria-current', 'true');
+});
+
+test('a log pane follows the tail until scrolled up, then offers to jump to it', async ({page}) => {
+  await page.goto('./');
+  const pane = page.getByRole('log', {name: 'Output', exact: true});
+  const atEnd = () =>
+    pane.evaluate(element => element.scrollHeight - element.scrollTop - element.clientHeight < 2);
+  expect(await atEnd()).toBe(true);
+  await pane.evaluate(element => {
+    element.scrollTop = 0;
+  });
+  const jump = page.getByRole('button', {name: 'Jump to latest'});
+  await expect(jump).toBeVisible();
+  await jump.click();
+  await expect(jump).toHaveCount(0);
+  expect(await atEnd()).toBe(true);
+});
+
+test('a scrubber steps with the arrow keys and goes back to live', async ({page}) => {
+  await page.goto('./');
+  const range = page.getByRole('slider', {name: 'Position', exact: true});
+  await range.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(range).toHaveAttribute('aria-valuetext', 'Step 25 of 40');
+  await page.getByRole('button', {name: 'Back to live'}).click();
+  await expect(range).toHaveAttribute('aria-valuetext', 'Step 40 of 40');
+  await expect(page.getByRole('button', {name: 'Back to live'})).toHaveCount(0);
 });

@@ -37,6 +37,22 @@ export function contrastRatio(left: string, right: string): number {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
+/** `first` mixed with `second`, `share` percent of `first`, channel by channel: CSS `color-mix(in srgb)`. */
+export function mixHex(first: string, share: number, second: string): string {
+  const [a, b] = [parseHex(first), parseHex(second)];
+  const channel = (index: 0 | 1 | 2): string =>
+    Math.trunc((a[index] * share + b[index] * (100 - share)) / 100 + 0.5)
+      .toString(16)
+      .padStart(2, '0');
+  return `#${channel(0)}${channel(1)}${channel(2)}`;
+}
+
+/**
+ * Standard error in the log pane: `err` mixed into `log-text`. The log background is dark in every
+ * theme, and a light theme's `err` is drawn for light surfaces, so it is lightened to read there.
+ */
+export const LOG_ERR_MIX = {role: 'err', share: 60, into: 'log-text', on: 'log-bg'} as const;
+
 export interface ContrastPair {
   readonly foreground: ColorRole;
   readonly background: ColorRole;

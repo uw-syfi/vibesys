@@ -234,7 +234,9 @@ class SemanticSlurmEvaluationExecutor:
         record = self._load(handle_id)
         if record is None:
             return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
-        polled = await self._availability.poll(handle_id)
+        execution = self._executions.get(handle_id)
+        executor = execution.executor if execution is not None else self._availability
+        polled = await executor.poll(handle_id)
         if polled.terminal is None:
             return polled
         return polled.model_copy(

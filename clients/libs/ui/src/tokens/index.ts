@@ -9,6 +9,8 @@ export {
   type ContrastPair,
   contrastRatio,
   GRAPHIC_FLOOR,
+  LOG_ERR_MIX,
+  mixHex,
   relativeLuminance,
   TEXT_FLOOR,
 } from './contrast.js';

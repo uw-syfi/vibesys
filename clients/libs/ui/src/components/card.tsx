@@ -24,7 +24,7 @@ export function Card(props: {
   return (
     <section className="vs-card" data-flush={flush} aria-labelledby={titleId}>
       <h2 className="vs-card-title" id={titleId}>
-        <Text style="section">{props.section}</Text>
+        <Text variant="section">{props.section}</Text>
       </h2>
       {props.children}
     </section>
@@ -41,7 +41,7 @@ export function Banner(props: {
   return (
     <div className="vs-banner" data-tone={props.tone ?? 'neutral'}>
       <div className="vs-banner-text">
-        <Text style="body-strong">{props.title}</Text>
+        <Text variant="body-strong">{props.title}</Text>
         {props.body === undefined ? null : <Text tone="muted">{props.body}</Text>}
       </div>
       {props.actions === undefined ? null : (
