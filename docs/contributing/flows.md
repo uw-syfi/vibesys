@@ -267,6 +267,7 @@ construct gets its span from the same few points.
 | `started_at`, `ended_at` | run-clock times |
 | `failure` | `outcome` when a `failed` span ended with a failure value (an operation answered `Failed`, a task returned `Failed` or `GaveUp`, the run finished as a failure) and `interruption` when a `stopped` span was interrupted (the stop landed, the flow abandoned the operation, a code change dropped it, the run ended around it) |
 | `stop` | when the operator's stop reached this flow, and whether it `landed` (raised `Stopped` in it) |
+| `invocation` | for an agent turn, the invocation it ran as: how the runtime names the turn's span on the agent's own records (its usage) |
 | `label` | the search's label of the span (see "Span labels"), or None |
 
 **Determinism.** Every journal step records its run-clock time (`Step.at`, the host's `now_at`
@@ -282,7 +283,8 @@ running or waiting span. A defect crashes the step that raised it, which is neve
 trace holds no defect.
 
 The shell reads the spans as `FlowDriver.trace(state)`, a frozen `RunTrace` of `Span`s (exported
-from `vs_core.api`); `FlowState` itself stays private. `test_flows_trace.py` and the sweep in
+from `vs_core.api`); `FlowState` itself stays private. Clients get the trace as span events and
+snapshot spans: see "Run trace events" in [wire-protocol.md](wire-protocol.md). `test_flows_trace.py` and the sweep in
 `test_flows_properties.py` check the properties, live and with a restart after every step.
 
 ### Span labels
