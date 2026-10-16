@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from vs_sim.api import Clock, CommandProbe, PipedProcessLauncher
 
 # Default container image for the cuda backend.  Carries CUDA toolkit + PyTorch.
-_DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
+DEFAULT_IMAGE = "nvcr.io/nvidia/pytorch:25.04-py3"
 
 
 class CudaAcceleratorUnavailableError(RuntimeError):
@@ -94,7 +94,7 @@ class CudaBackend:
         self._events = events
         self.log_dir = Path(log_dir)
         self._lprint = log or print
-        self.image = image or _DEFAULT_IMAGE
+        self.image = image or DEFAULT_IMAGE
         self.selected_device: GpuInfo | None = None
         self._monitor: GpuContentionMonitor | None = None
         # Sandboxes built so far, so maybe_rebalance can find them without

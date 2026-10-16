@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from vs_sandbox.lifecycle import SandboxLifecycleHooks
     from vs_sim.api import Clock, CommandProbe, PipedProcessLauncher, Threads
 
-_DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
+DEFAULT_CPU_IMAGE = "python:3.12-bookworm"
 
 HOST_ONLY_BACKENDS = frozenset({ComputeBackend.METAL})
 """Backends whose accelerator no container can reach (the capability's one source)."""
@@ -219,7 +219,7 @@ def cpu_backend(  # noqa: PLR0913
         ComputeBackend.CPU,
         log_dir,
         log=log,
-        image=image or _DEFAULT_CPU_IMAGE,
+        image=image or DEFAULT_CPU_IMAGE,
         docker=docker,
         threads=threads,
         launcher=launcher,

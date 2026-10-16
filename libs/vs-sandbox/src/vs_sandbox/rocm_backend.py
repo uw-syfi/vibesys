@@ -58,7 +58,7 @@ if TYPE_CHECKING:
 # container's ROCm must stay compatible with the host kernel driver —
 # a floating tag is the one most likely to drift past it. Override with
 # ``--docker-image`` when the host ROCm version differs.
-_DEFAULT_IMAGE = "rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0"
+DEFAULT_IMAGE = "rocm/pytorch:rocm6.3_ubuntu22.04_py3.10_pytorch_release_2.4.0"
 
 # PyTorch wheel index matching the image's ROCm. The agent is instructed to
 # use ``uv add torch`` in a fresh venv, which is isolated from the image's
@@ -105,7 +105,7 @@ class RocmBackend:
         del events  # ROCm contention monitoring is not implemented yet
         self.log_dir = Path(log_dir)
         self._lprint = log or print
-        self.image = image or _DEFAULT_IMAGE
+        self.image = image or DEFAULT_IMAGE
         self._docker = docker
         self._threads = threads
         self._launcher = launcher

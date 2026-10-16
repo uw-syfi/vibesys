@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 # PyTorch 2.9 / Python 3.12 / Neuron SDK 2.30 on Ubuntu 24.04.  Carries
 # torch-neuronx, torch_xla, and the neuronx-cc compiler.  Override with
 # ``--docker-image`` if the host SDK differs.
-_DEFAULT_IMAGE = (
+DEFAULT_IMAGE = (
     "public.ecr.aws/neuron/pytorch-inference-neuronx:2.9.0-neuronx-py312-sdk2.30.0-ubuntu24.04"
 )
 
@@ -93,7 +93,7 @@ class TrainiumBackend:
         del events  # Trainium contention monitoring is not implemented yet
         self.log_dir = Path(log_dir)
         self._lprint = log or print
-        self.image = image or _DEFAULT_IMAGE
+        self.image = image or DEFAULT_IMAGE
         self._docker = docker
         self._threads = threads
         self._launcher = launcher
