@@ -17,6 +17,7 @@ import {
 import {RunNotifier} from '@vibesys/feature-app-shell/main';
 import {Hosts} from '@vibesys/feature-hosts/main';
 import {MachinesMain} from '@vibesys/feature-machines/main';
+import {NewRunMain} from '@vibesys/feature-new-run/main';
 import {RunControl} from '@vibesys/feature-run-control/main';
 import {PreferencesMain} from '@vibesys/feature-settings/main';
 import type {HostId} from '@vibesys/hosts';
@@ -76,6 +77,15 @@ function watchNetwork(manager: ConnectionManager): void {
     realTimers(poll, NETWORK_POLL_MS);
   };
   realTimers(poll, NETWORK_POLL_MS);
+}
+
+/** New run's requests, answered over the hosts' connections, recording each start in Recent. */
+function newRunMain(hosts: Hosts, settings: SettingsStore): NewRunMain {
+  return new NewRunMain({
+    connect: id => hosts.connection(id),
+    remember: run => settings.updateRecent(recent => remember(recent, run)),
+    now: () => Date.now(),
+  });
 }
 
 async function openWindow(
@@ -159,6 +169,7 @@ async function openWindow(
     runs,
     settings,
     preferences,
+    newRun: newRunMain(hosts, settings),
     surfaceUrl: surface,
     welcomeIpc: {
       handle: (channel, listener) =>

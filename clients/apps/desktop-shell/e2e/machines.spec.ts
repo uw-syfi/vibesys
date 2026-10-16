@@ -1,6 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
+import {
+  type FakeBridgeSeed,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeNewRun,
+} from './fake-bridge.js';
 
 /** Where the journey's Ink screenshots go, when `MACHINES_SCREENSHOTS` names a directory. */
 const SHOTS = process.env['MACHINES_SCREENSHOTS'];
@@ -57,6 +62,7 @@ const row = (page: Page, name: string) => machineList(page).getByRole('treeitem'
 async function openMachines(page: Page): Promise<void> {
   await page.addInitScript(installFakeBridge, SEED);
   await page.addInitScript(installFakeMachines, SEED);
+  await page.addInitScript(installFakeNewRun, SEED);
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})

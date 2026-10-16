@@ -165,6 +165,14 @@ class FakeWelcomeBridge implements WelcomeBridge {
     value: {state: 'not_found'},
   });
   removeMachine = async (): Promise<WelcomeResult<MachineEntry[]>> => ({ok: true, value: []});
+  // New run is the redesigned shell's: this window never asks.
+  describeMachine = async () => ({ok: true as const, value: {kind: 'unsupported' as const}});
+  preflight = async () => ({ok: true as const, value: {kind: 'unsupported' as const}});
+  examples = async () => ({ok: true as const, value: {kind: 'unsupported' as const}});
+  createFromExample = async () => this.#refused();
+  copyOut = async () => this.#refused();
+  startRun = async () => this.#refused();
+  #refused = () => ({ok: false as const, error: 'not in this window', authNeeded: false});
 
   listenerCounts(): number[] {
     return [this.#chrome.length, this.#recent.length, this.#listing.length, this.#showHost.length];

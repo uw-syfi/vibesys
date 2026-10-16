@@ -1,11 +1,18 @@
 /**
- * The app shell's composition: the sidebar, Settings and Machines stores over the welcome bridge,
- * the theme following the Settings store, and the shell rendering the selected screen: Settings,
- * Machines, the Run screen for a selected run, or a placeholder for a screen not built yet.
+ * The app shell's composition: the sidebar, Settings, Machines and New run stores over the welcome
+ * bridge, the theme following the Settings store, and the shell rendering the selected screen: New
+ * run, Settings, Machines, the Run screen for a selected run, or a placeholder for a screen not
+ * built yet.
  */
-import {AppShell, createSidebarStore, PlaceholderScreen} from '@vibesys/feature-app-shell/renderer';
+import {
+  AppShell,
+  createSidebarStore,
+  PlaceholderScreen,
+  WORDMARK,
+} from '@vibesys/feature-app-shell/renderer';
 import type {Screen, SidebarState} from '@vibesys/feature-app-shell/state';
 import {createMachinesStore, MachinesScreen} from '@vibesys/feature-machines/renderer';
+import {createNewRunStore, machineOptions, NewRunScreen} from '@vibesys/feature-new-run/renderer';
 import {type RunPageNavigation, RunScreen, useRunPage} from '@vibesys/feature-run-page/renderer';
 import {runRecord} from '@vibesys/feature-run-page/state';
 import {
@@ -19,7 +26,7 @@ import type {WelcomeBridge} from '@vibesys/ipc';
 import type {RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
-import {applyTheme, Card, EmptyState, Page, type ThemeTarget} from '@vibesys/ui';
+import {applyTheme, Card, EmptyState, Page, type ThemeTarget, Wordmark} from '@vibesys/ui';
 import {type JSX, useMemo, useSyncExternalStore} from 'react';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
@@ -32,6 +39,7 @@ export interface ShellStores {
   readonly bridge: WelcomeBridge;
   readonly schedule: Schedule;
   readonly machines: ReturnType<typeof createMachinesStore>;
+  readonly newRun: ReturnType<typeof createNewRunStore>['store'];
 }
 
 const DEFAULT_APPEARANCE = {mode: 'system', light: 'paper', dark: 'ink'} as const;
@@ -44,7 +52,8 @@ const RUN_UNAVAILABLE = {
 
 /**
  * Build the shell's stores over `bridge`, and keep the page's theme on what the Settings store
- * shows (the preload already painted the first frame in the stored theme).
+ * shows (the preload already painted the first frame in the stored theme). New run hears the runs
+ * this user opened from the sidebar, and a run it starts is shown on its Run screen.
  */
 export function createShellStores(
   bridge: WelcomeBridge,
@@ -58,10 +67,24 @@ export function createShellStores(
     if (state.kind === 'ready') applyTheme(shownTheme(state, DEFAULT_APPEARANCE), document);
   };
   settings.subscribe(follow);
+  const sidebar = createSidebarStore(bridge);
+  const newRun = createNewRunStore(bridge, {
+    recent: sidebar.store.getState().recent,
+    schedule,
+    started: run => sidebar.store.dispatch({type: 'select', screen: {kind: 'run', run}}),
+  });
+  let recent = sidebar.store.getState().recent;
+  sidebar.store.subscribe(() => {
+    const next = sidebar.store.getState().recent;
+    if (next === recent) return;
+    recent = next;
+    newRun.store.dispatch({type: 'recent', recent});
+  });
   return {
-    sidebar: createSidebarStore(bridge),
+    sidebar,
     settings,
     machines: createMachinesStore(bridge),
+    newRun: newRun.store,
     bridge,
     schedule,
   };
@@ -118,12 +141,24 @@ export function Shell(props: {
   readonly stores: ShellStores;
   readonly version: string;
 }): JSX.Element {
-  const {sidebar, settings, machines} = props.stores;
+  const {sidebar, settings, machines, newRun} = props.stores;
   const sidebarState = useStore(sidebar.store);
   const settingsState = useStore(settings);
   const machinesState = useStore(machines);
+  const newRunState = useStore(newRun);
+  const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
   const screen = (selected: Screen): JSX.Element => {
     switch (selected.kind) {
+      case 'new-run':
+        return (
+          <NewRunScreen
+            snapshot={newRunState}
+            dispatch={newRun.dispatch}
+            machines={machineOptions(sidebarState.listings)}
+            hero={<Wordmark art={WORDMARK} label="VibeSys" align="center" tone="accent" />}
+            chooseCheckout={() => select({kind: 'machines'})}
+          />
+        );
       case 'settings':
         return <SettingsScreen state={settingsState} dispatch={settings.dispatch} />;
       case 'machines':

@@ -64,6 +64,7 @@ def test_bun_type_packages_match_the_packaged_runtime() -> None:
         "clients/features/app-shell/package.json",
         "clients/features/settings/package.json",
         "clients/features/run-page/package.json",
+        "clients/features/new-run/package.json",
         "clients/apps/web/package.json",
     }
     assert set(pins.values()) == {BUN_VERSION}

@@ -54,6 +54,9 @@
     },
     {
       "path": "../../features/settings/tsconfig.main.json"
+    },
+    {
+      "path": "../../features/new-run/tsconfig.main.json"
     }
   ]
 }

@@ -40,6 +40,7 @@
     "@vibesys/feature-app-shell": "workspace:*",
     "@vibesys/feature-hosts": "workspace:*",
     "@vibesys/feature-machines": "workspace:*",
+    "@vibesys/feature-new-run": "workspace:*",
     "@vibesys/feature-run-control": "workspace:*",
     "@vibesys/feature-settings": "workspace:*",
     "@vibesys/feature-start-run": "workspace:*",

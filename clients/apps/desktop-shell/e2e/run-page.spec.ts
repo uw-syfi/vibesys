@@ -1,6 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
-import {type FakeBridgeSeed, installFakeBridge, installFakeMachines} from './fake-bridge.js';
+import {
+  type FakeBridgeSeed,
+  installFakeBridge,
+  installFakeMachines,
+  installFakeNewRun,
+} from './fake-bridge.js';
 import {type FakeRunSeed, installFakeRun} from './fake-run.js';
 
 /**
@@ -87,6 +92,7 @@ const RUN: FakeRunSeed = {
 async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
   await page.addInitScript(installFakeBridge, seed);
   await page.addInitScript(installFakeMachines, seed);
+  await page.addInitScript(installFakeNewRun, seed);
   await page.addInitScript(installFakeRun, RUN);
   await page.goto('./shell.html');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');

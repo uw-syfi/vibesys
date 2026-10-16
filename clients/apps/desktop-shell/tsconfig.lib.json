@@ -25,19 +25,28 @@
   ],
   "references": [
     {
-      "path": "../../features/app-shell/tsconfig.state.json"
-    },
-    {
       "path": "../../features/app-shell/tsconfig.renderer.json"
     },
     {
       "path": "../../features/machines/tsconfig.renderer.json"
     },
     {
-      "path": "../../features/run-page/tsconfig.state.json"
+      "path": "../../features/new-run/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/new-run/tsconfig.state.json"
     },
     {
       "path": "../../features/run-page/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/run-page/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/settings/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/settings/tsconfig.state.json"
     },
     {
       "path": "../../features/settings/tsconfig.state.json"
@@ -46,13 +55,10 @@
       "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/runs/tsconfig.lib.json"
-    },
-    {
-      "path": "../../features/settings/tsconfig.renderer.json"
-    },
-    {
       "path": "../../libs/ipc/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/runs/tsconfig.lib.json"
     },
     {
       "path": "../../libs/store/tsconfig.lib.json"

@@ -1,11 +1,12 @@
 /**
  * The desktop's composition of its features over the one window: it routes each validated welcome
- * request to the feature that owns it (`hosts`, `machines`, `run-control`, `settings`), keeps the window's state
+ * request to the feature that owns it (`hosts`, `machines`, `new-run`, `run-control`, `settings`), keeps the window's state
  * (`ChromeState`) in step, and opens what a launch asked for.
  */
 
 import type {Hosts} from '@vibesys/feature-hosts/main';
 import type {MachinesMain} from '@vibesys/feature-machines/main';
+import type {NewRunMain} from '@vibesys/feature-new-run/main';
 import type {RunControl} from '@vibesys/feature-run-control/main';
 import type {PreferencesMain} from '@vibesys/feature-settings/main';
 import {shellWords} from '@vibesys/feature-start-run/state';
@@ -62,11 +63,30 @@ export interface DesktopDeps {
   >;
   readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recent'>;
   readonly preferences: Pick<PreferencesMain, 'answer'>;
+  readonly newRun: Pick<NewRunMain, 'answer'>;
   /** The page the window's trusted surface loads, the only one admitted to its requests. */
   readonly surfaceUrl: string;
   readonly welcomeIpc: WelcomeIpc;
   readonly log: (message: string) => void;
 }
+
+/** The requests of the redesigned window's Machines and New run screens. */
+type ScreenRequest = Extract<
+  WelcomeRequest,
+  {
+    readonly kind:
+      | 'machines'
+      | 'machine'
+      | 'inspect-checkout'
+      | 'remove-machine'
+      | 'describe-machine'
+      | 'preflight'
+      | 'examples'
+      | 'create-from-example'
+      | 'copy-out'
+      | 'start-run';
+  }
+>;
 
 /** The recent runs as the welcome view lists them. */
 function welcomeRecent(recent: RecentFile): RecentRun[] {
@@ -278,13 +298,33 @@ export class Desktop {
       case 'archive':
         return this.#deps.preferences.answer(request);
       case 'machines':
-        return this.#deps.machines.machines();
       case 'machine':
-        return this.#deps.machines.report(request.host);
       case 'inspect-checkout':
-        return this.#deps.machines.inspect(request.host, request.path);
       case 'remove-machine':
-        return this.#deps.machines.remove(request.host);
+      case 'describe-machine':
+      case 'preflight':
+      case 'examples':
+      case 'create-from-example':
+      case 'copy-out':
+      case 'start-run':
+        return this.#screen(request);
+    }
+  }
+
+  /** Answer one request of the redesigned window's Machines or New run screen. */
+  #screen(request: ScreenRequest): Promise<unknown> {
+    const {machines} = this.#deps;
+    switch (request.kind) {
+      case 'machines':
+        return machines.machines();
+      case 'machine':
+        return machines.report(request.host);
+      case 'inspect-checkout':
+        return machines.inspect(request.host, request.path);
+      case 'remove-machine':
+        return machines.remove(request.host);
+      default:
+        return this.#deps.newRun.answer(request);
     }
   }
 }

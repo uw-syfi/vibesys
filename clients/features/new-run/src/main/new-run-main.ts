@@ -1,0 +1,178 @@
+/**
+ * The New run feature in the main process: it answers the screen's requests with one host helper
+ * method each, over the host's connection, and records a started run in Recent.
+ */
+import {type ConnectionLease, HelperRequestError} from '@vibesys/connection';
+import type {
+  Check,
+  CreatedProject,
+  DetachedLaunchFailure,
+  ExampleList,
+  HelperRequest,
+  LiveInstanceRecord,
+  MachineDescription,
+} from '@vibesys/contracts/host-helper';
+import {type HostId, hostKey, hostLabel} from '@vibesys/hosts';
+import type {Offered, RunInputs, StartedRun, WelcomeRequest} from '@vibesys/ipc';
+import type {StoredRecentRun} from '@vibesys/settings';
+
+/** The New run requests a view sends, as `@vibesys/ipc` parsed them. */
+export type NewRunMainRequest = Extract<
+  WelcomeRequest,
+  {
+    readonly kind:
+      | 'describe-machine'
+      | 'preflight'
+      | 'examples'
+      | 'create-from-example'
+      | 'copy-out'
+      | 'start-run';
+  }
+>;
+
+export interface NewRunMainDeps {
+  /** A lease on `host`'s helper connection (the hosts feature's). */
+  readonly connect: (host: HostId) => Promise<ConnectionLease>;
+  /** Record a started run in Recent (the settings store). */
+  readonly remember: (run: StoredRecentRun) => Promise<void>;
+  readonly now: () => number;
+}
+
+/** One helper request without the fields the connection fills in (`request_id`, `deadline_ms`). */
+type HelperCall = HelperRequest extends infer Request
+  ? Request extends {readonly type: string}
+    ? Omit<Request, 'request_id' | 'deadline_ms'>
+    : never
+  : never;
+
+/** A failure the user reads: the helper's message, prefixed with what was being done. */
+function plain(error: unknown, doing: string): Error {
+  const detail = error instanceof Error ? error.message : String(error);
+  return new Error(`${doing}: ${detail}`);
+}
+
+/** The `run.start` and `run.preflight` fields for `inputs`, sending only what is set. */
+function runFields(inputs: RunInputs) {
+  return {
+    project: inputs.project,
+    task: inputs.task,
+    args: [...inputs.args],
+    options: inputs.options,
+    ...(inputs.harness === null ? {} : {harness: inputs.harness}),
+  };
+}
+
+function isFailure(
+  launch: LiveInstanceRecord | DetachedLaunchFailure,
+): launch is DetachedLaunchFailure {
+  return 'outcome' in launch || 'exit_code' in launch;
+}
+
+export class NewRunMain {
+  readonly #deps: NewRunMainDeps;
+
+  constructor(deps: NewRunMainDeps) {
+    this.#deps = deps;
+  }
+
+  /** Answer one validated New run request. */
+  answer(request: NewRunMainRequest): Promise<unknown> {
+    switch (request.kind) {
+      case 'describe-machine':
+        return this.#offered(
+          request.host,
+          {type: 'machine.describe'},
+          'Could not describe',
+          reply => (reply as {machine: MachineDescription}).machine,
+        );
+      case 'preflight':
+        return this.#offered(
+          request.host,
+          {type: 'run.preflight', ...runFields(request.inputs)},
+          'Could not check the run',
+          reply => (reply as {checks: Check[]}).checks,
+        );
+      case 'examples':
+        return this.#offered(
+          request.host,
+          {type: 'examples.list'},
+          'Could not list the examples',
+          reply => (reply as {listing: ExampleList}).listing,
+        );
+      case 'create-from-example':
+        return this.#created(
+          request.host,
+          {
+            type: 'project.create_from_example',
+            example: request.example,
+            destination: request.destination,
+          },
+          `Could not create ${request.destination}`,
+        );
+      case 'copy-out':
+        return this.#created(
+          request.host,
+          {type: 'project.copy_out', source: request.source, destination: request.destination},
+          `Could not copy ${request.source} out`,
+        );
+      case 'start-run':
+        return this.#start(request.host, request.inputs);
+    }
+  }
+
+  async #request(host: HostId, request: HelperCall): Promise<unknown> {
+    await using lease = await this.#deps.connect(host);
+    // Awaited here, so the lease is held until the reply arrives.
+    return await lease.connection.request(
+      request as Parameters<typeof lease.connection.request>[0],
+    );
+  }
+
+  async #offered<T>(
+    host: HostId,
+    request: HelperCall,
+    doing: string,
+    pick: (reply: unknown) => T,
+  ): Promise<Offered<T>> {
+    try {
+      return {kind: 'offered', value: pick(await this.#request(host, request))};
+    } catch (error) {
+      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+        return {kind: 'unsupported'};
+      }
+      throw plain(error, `${doing} on ${hostLabel(host)}`);
+    }
+  }
+
+  async #created(host: HostId, request: HelperCall, doing: string): Promise<CreatedProject> {
+    try {
+      return ((await this.#request(host, request)) as {created: CreatedProject}).created;
+    } catch (error) {
+      throw plain(error, doing);
+    }
+  }
+
+  async #start(host: HostId, inputs: RunInputs): Promise<StartedRun> {
+    let launch: LiveInstanceRecord | DetachedLaunchFailure;
+    try {
+      ({launch} = (await this.#request(host, {type: 'run.start', ...runFields(inputs)})) as {
+        launch: LiveInstanceRecord | DetachedLaunchFailure;
+      });
+    } catch (error) {
+      throw plain(error, 'Could not start the run');
+    }
+    if (isFailure(launch)) {
+      const log = launch.log_path == null ? '' : ` Its log is ${launch.log_path}.`;
+      throw new Error(`${launch.message} (${launch.code} at ${launch.stage}).${log}`);
+    }
+    await this.#deps.remember({
+      host: hostKey(host),
+      project: inputs.project,
+      task: inputs.task,
+      runId: launch.run_id,
+      instanceId: launch.id,
+      attachedAt: this.#deps.now(),
+    });
+    return {runId: launch.run_id, instanceId: launch.id};
+  }
+}

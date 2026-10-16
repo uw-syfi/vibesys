@@ -1,0 +1,119 @@
+import {expect, test} from 'bun:test';
+import type {RecentRun, RunRef} from '@vibesys/runs';
+import {readiness, startBlocked} from '../ui/view.js';
+import {createNewRunStore, type NewRunBridge} from './store.js';
+
+const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
+
+/** The bridge calls New run makes, answering at once from memory. */
+function fakeBridge(): NewRunBridge {
+  return {
+    describeMachine: () => ok({kind: 'unsupported' as const}),
+    harnesses: () =>
+      ok({kind: 'listed' as const, harnesses: [{provider: 'claude', model: 'm', default: true}]}),
+    examples: () => ok({kind: 'unsupported' as const}),
+    tasks: () => ok(['mpmc']),
+    preflight: () => ok({kind: 'offered' as const, value: []}),
+    createFromExample: (_host, _example, destination) => ok({project: destination, tasks: ['a']}),
+    copyOut: (_host, _source, destination) => ok({project: destination, tasks: ['a']}),
+    startRun: () => ok({runId: 'run-2', instanceId: '00000000000c'}),
+  };
+}
+
+function recentRun(host: string, project: string, attachedAt: number): RecentRun {
+  return {
+    host,
+    hostLabel: host,
+    project,
+    task: 'mpmc',
+    runId: `r${attachedAt}`,
+    instanceId: null,
+    attachedAt,
+  };
+}
+
+/** A schedule whose delays run when the test says. */
+function manualSchedule() {
+  const due: (() => void)[] = [];
+  return {
+    schedule: (callback: () => void) => {
+      due.push(callback);
+      return () => undefined;
+    },
+    runDue: () => {
+      for (const callback of due.splice(0)) callback();
+    },
+  };
+}
+
+async function settle(): Promise<void> {
+  for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+}
+
+test('the form follows the runs opened until the user changes an input', async () => {
+  const clock = manualSchedule();
+  const started: RunRef[] = [];
+  const {store} = createNewRunStore(fakeBridge(), {
+    recent: [],
+    schedule: clock.schedule,
+    started: run => started.push(run),
+  });
+  expect(store.getState().context.form.machine).toBe('local');
+  store.dispatch({type: 'recent', recent: [recentRun('ssh:gpu', '/p', 2)]});
+  expect(store.getState().context.form.machine).toBe('ssh:gpu');
+  expect(store.getState().context.form.project).toEqual({source: 'recent', path: '/p'});
+  store.dispatch({
+    type: 'project',
+    project: {source: 'example', example: 'kv', destination: '/kv'},
+  });
+  expect(store.getState().context.form.project).toEqual({
+    source: 'example',
+    example: 'kv',
+    destination: '/kv',
+  });
+  store.dispatch({type: 'recent', recent: [recentRun('local', '/q', 3)]});
+  expect(store.getState().context.form.machine).toBe('ssh:gpu');
+});
+
+test('a started run is handed on, and a fresh form on the same machine follows it', async () => {
+  const clock = manualSchedule();
+  const started: RunRef[] = [];
+  const {store} = createNewRunStore(fakeBridge(), {
+    recent: [recentRun('ssh:gpu', '/p', 2)],
+    schedule: clock.schedule,
+    started: run => started.push(run),
+  });
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(store.getState().matches({editing: {checks: 'ready'}})).toBe(true);
+  store.dispatch({type: 'start'});
+  await settle();
+  expect(started).toEqual([{host: 'ssh:gpu', runId: 'run-2'}]);
+  expect(store.getState().matches('editing')).toBe(true);
+  expect(store.getState().context.form.machine).toBe('ssh:gpu');
+  expect(store.getState().context.started).toBeNull();
+});
+
+test('Start says why it waits: inputs missing, being checked, or an item to fix', async () => {
+  const clock = manualSchedule();
+  const {store} = createNewRunStore(fakeBridge(), {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+  expect(startBlocked(store.getState())).toBe('Choose a project, task and agent to start.');
+  store.dispatch({type: 'project', project: {source: 'folder', path: '/p'}});
+  await settle();
+  expect(startBlocked(store.getState())).toBe('Checking these inputs.');
+  clock.runDue();
+  await settle();
+  expect(startBlocked(store.getState())).toBeUndefined();
+  store.dispatch({type: 'advanced', advanced: '--model x'});
+  expect(readiness(store.getState()).map(item => [item.id, item.state])).toContainEqual([
+    'advanced',
+    'fail',
+  ]);
+  expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+});

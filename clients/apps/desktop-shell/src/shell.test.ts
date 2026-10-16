@@ -31,6 +31,9 @@ function fakeBridge(): WelcomeBridge {
     onListing: ignore,
     onRecent: ignore,
     onPreferences: ignore,
+    describeMachine: () => ok({kind: 'unsupported' as const}),
+    harnesses: () => ok({kind: 'unsupported' as const}),
+    examples: () => ok({kind: 'unsupported' as const}),
   };
   return bridge as WelcomeBridge;
 }

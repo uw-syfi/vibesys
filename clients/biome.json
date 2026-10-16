@@ -77,6 +77,8 @@
         "features/settings/src/**/*.tsx",
         "features/run-page/src/**/*.ts",
         "features/run-page/src/**/*.tsx",
+        "features/new-run/src/**/*.ts",
+        "features/new-run/src/**/*.tsx",
         "!**/*.test.ts",
         "!**/*.test.tsx"
       ],

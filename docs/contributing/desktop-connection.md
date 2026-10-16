@@ -579,6 +579,11 @@ store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived
 Settings store (`@vibesys/feature-settings`) saves each change under a token, so a slow save
 cannot undo a newer choice. Both have invariants checked over seeded action sequences.
 
+The New run screen (`@vibesys/feature-new-run`) is an XState machine: its preflight checks are
+asked for the inputs' key and kept only for that key, so Start is enabled only when the checks
+shown are for the inputs now and none fails, and a reply for older inputs is never shown. Its
+model test checks that, and that an input never restarts what the machine offers.
+
 The Machines store (`@vibesys/feature-machines`) keeps the saved machines and derives each one's
 status from its last report rather than storing one: `Sign in` when the connection waits for
 credentials, `Checkout not found` when the bootstrap reports no

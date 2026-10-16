@@ -190,12 +190,53 @@ function desktopWorld(cleanups: RetirementCleanups = {}) {
         archived: [],
       }),
     },
+    newRun: {
+      answer: async request => {
+        events.push(`new-run:${request.kind}`);
+        return {kind: 'unsupported'};
+      },
+    },
     surfaceUrl: WELCOME_URL,
     welcomeIpc: ipc,
     log: message => logs.push(message),
   });
   return {ipc, document, starts, cancels, events, logs, releaseCleanup};
 }
+
+describe('Desktop New run routing', () => {
+  test('sends each New run request to the New run feature', async () => {
+    const w = desktopWorld();
+    const inputs = {
+      project: '/project',
+      task: 'spsc',
+      harness: {provider: 'claude', model: 'claude-a'},
+      options: {},
+      args: [],
+    };
+    const calls: readonly [string, ...unknown[]][] = [
+      [WELCOME_CHANNELS.describeMachine, 'local'],
+      [WELCOME_CHANNELS.preflight, 'local', inputs],
+      [WELCOME_CHANNELS.examples, 'local'],
+      [WELCOME_CHANNELS.createFromExample, 'local', 'queue-rs', '/projects/queue-rs'],
+      [WELCOME_CHANNELS.copyOut, 'local', '/repo/project', '/projects/project'],
+      [WELCOME_CHANNELS.startRun, 'local', inputs],
+    ];
+    for (const [channel, ...args] of calls) {
+      await expect(w.ipc.invoke('10:100', channel, ...args)).resolves.toEqual({
+        ok: true,
+        value: {kind: 'unsupported'},
+      });
+    }
+    expect(w.events.filter(event => event.startsWith('new-run:'))).toEqual([
+      'new-run:describe-machine',
+      'new-run:preflight',
+      'new-run:examples',
+      'new-run:create-from-example',
+      'new-run:copy-out',
+      'new-run:start-run',
+    ]);
+  });
+});
 
 async function spin(): Promise<void> {
   for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();

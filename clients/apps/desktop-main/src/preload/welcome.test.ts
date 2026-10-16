@@ -72,6 +72,23 @@ function cases(random: Seeded): Case[] {
   const force = random.pick([true, false]);
   const harness = random.pick([null, {provider: 'claude', model: 'claude-a'}]);
   const directory = path.endsWith('/') ? path : `${path}/`;
+  const inputs = {
+    project: path,
+    task: name,
+    harness: {provider: 'claude', model: 'claude-a'},
+    // As the main process reads them: every option present, null when the run's own applies.
+    options: random.pick([
+      {rounds: null, time_limit_s: null, results: null, roles: []},
+      {rounds: 2, time_limit_s: 3600, results: 'keep' as const, roles: []},
+      {
+        rounds: null,
+        time_limit_s: null,
+        results: 'publish_github' as const,
+        roles: [{role: 'judge', model: null, reasoning_effort: 'high' as const}],
+      },
+    ]),
+    args: random.pick([[], ['--max-in-flight', '3']]),
+  };
   const appearance = {
     mode: random.pick(['system', 'light', 'dark'] as const),
     light: random.pick(['paper', 'mist', 'sand'] as const),
@@ -132,6 +149,18 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.machine(key), {kind: 'machine', host}],
     [bridge => bridge.inspectCheckout(key, path), {kind: 'inspect-checkout', host, path}],
     [bridge => bridge.removeMachine(key), {kind: 'remove-machine', host}],
+    [bridge => bridge.describeMachine(key), {kind: 'describe-machine', host}],
+    [bridge => bridge.preflight(key, inputs), {kind: 'preflight', host, inputs}],
+    [bridge => bridge.examples(key), {kind: 'examples', host}],
+    [
+      bridge => bridge.createFromExample(key, name, path),
+      {kind: 'create-from-example', host, example: name, destination: path},
+    ],
+    [
+      bridge => bridge.copyOut(key, path, `${directory}copy`),
+      {kind: 'copy-out', host, source: path, destination: `${directory}copy`},
+    ],
+    [bridge => bridge.startRun(key, inputs), {kind: 'start-run', host, inputs}],
   ];
 }
 

@@ -67,6 +67,24 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.machine]: ['ssh:chelan4'],
   [WELCOME_CHANNELS.inspectCheckout]: ['ssh:chelan4', '~/vibesys'],
   [WELCOME_CHANNELS.removeMachine]: ['ssh:chelan4'],
+  [WELCOME_CHANNELS.describeMachine]: ['local'],
+  [WELCOME_CHANNELS.preflight]: [
+    'local',
+    {project: '/p', task: 'mpmc', harness: null, options: {rounds: 2}, args: []},
+  ],
+  [WELCOME_CHANNELS.examples]: ['local'],
+  [WELCOME_CHANNELS.createFromExample]: ['local', 'queue-rs', '~/projects/queue-rs'],
+  [WELCOME_CHANNELS.copyOut]: ['local', '/p/inner', '/p-own'],
+  [WELCOME_CHANNELS.startRun]: [
+    'local',
+    {
+      project: '/p',
+      task: 'mpmc',
+      harness: {provider: 'claude', model: 'claude-a'},
+      options: {},
+      args: ['--x'],
+    },
+  ],
 };
 
 /** What every accepted request guarantees, whatever the view sent. */

@@ -49,6 +49,12 @@ const CHANNELS: Channels = {
   machine: 'vibesys:welcome:machine',
   inspectCheckout: 'vibesys:welcome:inspect-checkout',
   removeMachine: 'vibesys:welcome:remove-machine',
+  describeMachine: 'vibesys:welcome:describe-machine',
+  preflight: 'vibesys:welcome:preflight',
+  examples: 'vibesys:welcome:examples',
+  createFromExample: 'vibesys:welcome:create-from-example',
+  copyOut: 'vibesys:welcome:copy-out',
+  startRun: 'vibesys:welcome:start-run',
 };
 const EVENTS: Events = {
   chrome: 'vibesys:welcome:chrome',
@@ -110,6 +116,13 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     machine: host => call(CHANNELS.machine, host),
     inspectCheckout: (host, path) => call(CHANNELS.inspectCheckout, host, path),
     removeMachine: host => call(CHANNELS.removeMachine, host),
+    describeMachine: host => call(CHANNELS.describeMachine, host),
+    preflight: (host, inputs) => call(CHANNELS.preflight, host, inputs),
+    examples: host => call(CHANNELS.examples, host),
+    createFromExample: (host, example, destination) =>
+      call(CHANNELS.createFromExample, host, example, destination),
+    copyOut: (host, source, destination) => call(CHANNELS.copyOut, host, source, destination),
+    startRun: (host, inputs) => call(CHANNELS.startRun, host, inputs),
     onChrome: on(EVENTS.chrome),
     onRecent: on(EVENTS.recent),
     onShowHost: on(EVENTS.showHost),
