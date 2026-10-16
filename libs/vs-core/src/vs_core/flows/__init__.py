@@ -82,15 +82,17 @@ from ._state import (
     Waiting,
 )
 from ._trace import operation_span
-from ._winner import INPUT, EndReason, Input, Kept, NoWinner
+from ._winner import ADOPTED, INPUT, NOT_ADOPTED, EndReason, Input, Kept, NoWinner
 from ._workspaces import Assessment, NotOpened, NotReopened, Workspace, Workspaces
 
 __all__ = [
+    "ADOPTED",
     "INPUT",
     "MAX_CORRECTIONS",
     "MAX_LOST_TURNS",
     "MAX_RENDER_SECONDS",
     "MAX_TURN_SECONDS",
+    "NOT_ADOPTED",
     "Again",
     "Agents",
     "Assessment",

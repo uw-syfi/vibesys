@@ -21,6 +21,7 @@ from vs_core.api.testing import FlowRun, Prompt, fake_search
 from vs_sim.api.testing import examples
 
 from .flow_support import (
+    FACTS,
     ROLES,
     WORKER,
     Config,
@@ -289,3 +290,149 @@ def test_a_flow_cannot_label_a_span_it_did_not_start() -> None:
 
     with pytest.raises(core.ContractError, match="its own span or one it started"):
         FlowRun.start(search_of(root), Config())
+
+
+# -- the span that adopts the winner ----------------------------------------------------------
+
+
+ADOPTION = core.SpanKind(
+    "adoption", attrs=WorkAttrs, verdicts=(core.ADOPTED, core.NOT_ADOPTED), links=("builds_on",)
+)
+
+
+def winner(name: str) -> core.Kept:
+    revision = core.RevisionRef(revision_id=core.RevisionId(root=name), digest=f"{name}-digest")
+    return core.Kept(
+        settlement=core.Settlement(
+            settlement_id=core.SettlementId(root=name),
+            attempt=core.AttemptRef(attempt_id=core.AttemptId(root=name), generation=0),
+            candidate=revision,
+            assessments=(),
+            eligible=True,
+            retention="candidate",
+            outcome="succeeded",
+        )
+    )
+
+
+def adopting_run(
+    chosen: list[core.Label | None], *, restarting: bool, adopting: bool = True
+) -> FlowRun[Config]:
+    """A run that names each label's winner in turn (the last stands), then waits for a timer."""
+
+    async def root(ctx: core.Flow, _config: Config) -> None:
+        for label in chosen:
+            ctx.choose(winner("a"), label)
+        await ctx.timer(5.0)
+
+    definition = fake_search("flows", Config, ROLES, (*KINDS, ADOPTION))(root)
+    run = FlowRun.start(definition, Config(), restarting=restarting, adopting=adopting)
+    run.advance_to(5.0)
+    return run
+
+
+def adoptions(run: FlowRun[Config]) -> list[core.Span]:
+    return [s for s in run.trace().spans if s.label is not None and s.label.kind == "adoption"]
+
+
+@pytest.mark.parametrize("restarting", [False, True], ids=["live", "restarting"])
+def test_the_span_that_adopts_the_winner_carries_the_chosen_label_and_is_adopted(
+    *, restarting: bool
+) -> None:
+    label = core.Label(ADOPTION, title="a", attrs=WorkAttrs(n=3))
+    run = adopting_run([label], restarting=restarting)
+    (span,) = adoptions(run)
+    assert span.label == core.SpanLabel(
+        kind="adoption", title="a", attrs_json='{"n":3}', verdict=core.ADOPTED
+    )
+    assert span.type is core.SpanType.OPERATION
+    assert run.finished is not None
+    assert run.finished.result.outcome == "success"
+
+
+@pytest.mark.parametrize("restarting", [False, True], ids=["live", "restarting"])
+def test_the_adopting_span_is_labelled_before_core_answers_and_not_adopted_when_refused(
+    *, restarting: bool
+) -> None:
+    label = core.Label(ADOPTION, attrs=WorkAttrs(n=1))
+    run = adopting_run([label], restarting=restarting, adopting=False)
+    proposal = run.expect(core.ProposeWinner)
+    (waiting,) = adoptions(run)
+    assert waiting.label is not None
+    assert waiting.label.verdict is None
+    assert not waiting.ended
+    run.refuse_adoption(proposal, core.AdoptionFailureReason.CONTENT_MISMATCH)
+    (span,) = adoptions(run)
+    assert span.label is not None
+    assert (span.label.verdict, span.label.reason) == (core.NOT_ADOPTED, "content-mismatch")
+
+
+def test_a_choice_without_a_label_adopts_unlabelled_whatever_was_chosen_before() -> None:
+    label = core.Label(ADOPTION, attrs=WorkAttrs(n=1))
+    run = adopting_run([label, None], restarting=False)
+    assert adoptions(run) == []
+
+
+def test_a_label_whose_kind_lacks_the_adoption_verdicts_is_refused_where_it_is_given() -> None:
+    bare = core.SpanKind("adoption", attrs=WorkAttrs, verdicts=(core.ADOPTED,))
+    label = core.Label(bare, attrs=WorkAttrs(n=1))
+
+    async def root(ctx: core.Flow, _config: Config) -> None:
+        ctx.choose(winner("a"), label)
+
+    definition = fake_search("flows", Config, ROLES, (*KINDS, bare))(root)
+    with pytest.raises(core.ContractError) as error:
+        FlowRun.start(definition, Config())
+    assert ".".join(map(str, error.value.path)) == "choose.label.kind"
+    undeclared = core.Label(core.SpanKind("ghost", verdicts=(core.ADOPTED, core.NOT_ADOPTED)))
+    assert refused(lambda ctx: ctx.choose(winner("a"), undeclared)) == "label.kind"
+
+
+def falling_back(
+    steps: list[Callable[[core.Flow], None]], *, restarting: bool = False
+) -> FlowRun[Config]:
+    """A run that applies ``steps`` and waits for a timer, which ends it."""
+
+    async def root(ctx: core.Flow, _config: Config) -> None:
+        for step in steps:
+            step(ctx)
+        await ctx.timer(5.0)
+
+    definition = fake_search("flows", Config, ROLES, (*KINDS, ADOPTION))(root)
+    run = FlowRun.start(definition, Config(), restarting=restarting)
+    run.advance_to(5.0)
+    return run
+
+
+@pytest.mark.parametrize("restarting", [False, True], ids=["live", "restarting"])
+def test_falling_back_to_the_input_labels_the_adoption_of_a_run_that_chose_nothing_else(
+    *, restarting: bool
+) -> None:
+    first = core.Label(ADOPTION, attrs=WorkAttrs(n=1))
+    later = core.Label(ADOPTION, attrs=WorkAttrs(n=2))
+    run = falling_back(
+        [lambda ctx: ctx.fall_back_to_input(first), lambda ctx: ctx.fall_back_to_input(later)],
+        restarting=restarting,
+    )
+    (span,) = adoptions(run)
+    assert span.label == core.SpanLabel(
+        kind="adoption", attrs_json='{"n":2}', verdict=core.ADOPTED
+    )  # the later reading of the input replaced the first
+    assert run.finished is not None
+    assert run.finished.result.selection == core.TrustedBaseline(revision=FACTS.baseline)
+
+
+def test_falling_back_to_the_input_keeps_a_candidate_already_chosen() -> None:
+    chosen = core.Label(ADOPTION, attrs=WorkAttrs(n=1))
+    input_label = core.Label(ADOPTION, attrs=WorkAttrs(n=2))
+    run = falling_back(
+        [
+            lambda ctx: ctx.choose(winner("a"), chosen),
+            lambda ctx: ctx.fall_back_to_input(input_label),
+        ]
+    )
+    (span,) = adoptions(run)
+    assert span.label is not None
+    assert span.label.attrs_json == '{"n":1}'
+    assert run.finished is not None
+    assert isinstance(run.finished.result.selection, core.RetainedCandidate)

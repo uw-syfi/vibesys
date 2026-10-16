@@ -7,6 +7,7 @@
  */
 import type {Span} from '@vibesys/contracts';
 import {
+  adoption,
   bestVsBaseline,
   type GateReading,
   gateTrajectory,
@@ -119,20 +120,42 @@ function objectiveView(run: RunAtView): ObjectiveView | null {
   };
 }
 
-function bestNumber(run: RunAtView, spans: readonly Span[], ended: boolean): KeyNumber {
-  const best = bestVsBaseline(spans, run.overview?.objective.direction);
-  if (best === null) {
-    return {label: 'Best vs baseline', value: '–', sub: 'no candidate has passed yet'};
-  }
+/** A candidate's headline: its ratio to the input's (else its value) and what it measured. */
+function headline(
+  run: RunAtView,
+  reading: {readonly metricValue: number | null; readonly vsBaseline: number | null},
+  when: string,
+): Pick<KeyNumber, 'value' | 'sub'> {
   const unit = run.overview?.objective.unit ?? null;
   const measured =
-    best.metricValue === null ? '' : `${formatValue(best.metricValue)}${unit ? ` ${unit}` : ''}`;
-  const when = ended ? 'final' : 'so far';
+    reading.metricValue === null
+      ? ''
+      : `${formatValue(reading.metricValue)}${unit ? ` ${unit}` : ''}`;
   return {
-    label: 'Best vs baseline',
-    value: best.vsBaseline === null ? measured || '–' : ratio(best.vsBaseline),
-    sub: best.vsBaseline === null || measured === '' ? when : `${measured} · ${when}`,
+    value: reading.vsBaseline === null ? measured || '–' : ratio(reading.vsBaseline),
+    sub: reading.vsBaseline === null || measured === '' ? when : `${measured} · ${when}`,
   };
+}
+
+/**
+ * The run's best candidate: the one it adopted, once it has (the search's own account). While the
+ * run is live and has not adopted, the best passed gate so far; a run that ended without adopting
+ * names no candidate.
+ */
+function bestNumber(run: RunAtView, spans: readonly Span[], ended: boolean): KeyNumber {
+  const label = 'Best vs baseline';
+  const adopted = adoption(spans);
+  if (adopted?.verdict === 'adopted') {
+    if (adopted.candidate === null) return {label, value: '–', sub: 'no candidate beat the input'};
+    return {label, ...headline(run, adopted, 'adopted')};
+  }
+  if (ended) {
+    const why = adopted?.verdict === 'not_adopted' ? 'the adoption failed' : 'no candidate adopted';
+    return {label, value: '–', sub: why};
+  }
+  const best = bestVsBaseline(spans, run.overview?.objective.direction);
+  if (best === null) return {label, value: '–', sub: 'no candidate has passed yet'};
+  return {label, ...headline(run, best, 'so far')};
 }
 
 /**

@@ -8,7 +8,8 @@ core's to decide at adoption; a measurement that ended without one simply leaves
 be refused, which ends the run with core's typed reason.
 """
 
-from vs_core.api.search import Flow, Kept, MeasurementRecipe
+from vibesys.search_spans.api import GATE, GateAttrs
+from vs_core.api.search import Flow, Kept, Label, MeasurementRecipe
 
 
 async def prove(ctx: Flow, tip: Kept) -> None:
@@ -19,4 +20,5 @@ async def prove(ctx: Flow, tip: Kept) -> None:
         return
     recipe = MeasurementRecipe.of(ctx.facts)
     plan = recipe.plan(tip.revision, purpose="official", now_at=ctx.clock.now(), stages=(stage,))
-    await ctx.evaluation.measure(plan, within=recipe.budget((stage,)))
+    label = Label(GATE, title=stage, attrs=GateAttrs(stage=stage))
+    await ctx.evaluation.measure(plan, within=recipe.budget((stage,)), label=label)

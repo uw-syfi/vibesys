@@ -14,6 +14,7 @@ from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter, ValidationError
 
 from entrypoints.protocol_schema import built_in_span_attributes
+from launch import built_in_orchestrations
 from server.api.protocol import (
     MAX_ACTIVE_EXECUTIONS_CHUNKS,
     ProtocolRequest,
@@ -90,20 +91,29 @@ def test_committed_protocol_schema_matches_python_contract() -> None:
     assert _committed_schema() == protocol_json_schema(built_in_span_attributes())
 
 
-def test_the_protocol_exports_each_declared_span_kinds_attribute_schema() -> None:
-    defs = protocol_json_schema(built_in_span_attributes())["$defs"]
-    for search in (
-        "Dynamic",
-        "SingleAgent",
-        "ProfileGuidedSingleAgent",
-        "MultiAgent",
-        "ProfileGuidedMultiAgent",
-    ):
-        kinds = defs[f"{search}SpanAttributes"]["properties"]
-        assert set(kinds) == {"planning_call", "workstream", "agent_turn", "gate"}, search
+def test_the_protocol_exports_the_span_kinds_attribute_schema_of_every_built_in_search() -> None:
+    registered = {r.plugin.id for r in built_in_orchestrations().registrations()}
+    assert registered == {
+        "dynamic",
+        "single-agent",
+        "profile-guided-single-agent",
+        "multi-agent",
+        "profile-guided-multi-agent",
+        "evolve",
+        "plain",
+    }, "a new built-in search labels its spans and is added here"
+    exported = built_in_span_attributes()
+    defs = protocol_json_schema(exported)["$defs"]
+    assert set(exported) == registered
+    for search in registered:
+        kinds = {kind: model.__name__ for kind, model in exported[search].items()}
+        assert set(kinds) == {"planning_call", "workstream", "agent_turn", "gate", "adoption"}
+        listed = defs["SpanAttributes"]["properties"][search]
+        assert listed["anyOf"][0]["$ref"].startswith("#/$defs/"), search
     workstream = defs["WorkstreamAttrs"]["properties"]
     assert set(workstream) == {"hypothesis_id", "parent_revision", "round"}
     assert set(defs["GateAttrs"]["properties"]) == {"stage", "metric_value", "vs_baseline"}
+    assert set(defs["AdoptionAttrs"]["properties"]) == {"candidate", "metric_value", "vs_baseline"}
 
 
 @given(

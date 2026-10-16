@@ -248,6 +248,7 @@ def issue_queue_core_policy() -> CorePolicy:
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(CORE_PROTOCOL_DIR,),
         owned_operations=board_entries,
+        span_kinds=issue_queue.spans,
     )
 
 

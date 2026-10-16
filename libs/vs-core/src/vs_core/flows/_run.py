@@ -59,7 +59,7 @@ from ._sources import (
     Task,
     Timer,
 )
-from ._spans import RunTrace
+from ._spans import RunTrace, SpanLabel
 from ._state import (
     Dropped,
     Held,
@@ -73,6 +73,7 @@ from ._state import (
     RestartSettleReason,
 )
 from ._trace import Trace, operation_span
+from ._winner import ADOPTED, NOT_ADOPTED
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -121,6 +122,7 @@ class _Run:
         self.closed = False
         self.published: str | None = None
         self.choice: Selection | None = None
+        self.choice_label: SpanLabel | None = None
         self.out: list[Decision] = []
         self.dropped: list[Dropped] = []
         self.restart_settled: list[RestartSettled] = []
@@ -179,6 +181,7 @@ class _Run:
         self.trace = Trace(base.trace)
         self._begin(view, recorded, at)
         self.stop, self.published, self.choice = base.stop, base.published, base.choice
+        self.choice_label = base.choice_label
         self._issued = {(i.path, i.label): i.count for i in base.issued}
         self._in_flight = list(base.in_flight)
         self._restorable = {
@@ -283,6 +286,7 @@ class _Run:
             stop=self.stop,
             published=self.published,
             choice=self.choice,
+            choice_label=self.choice_label,
             in_flight=(*self._in_flight, *measuring),
             trace=self.trace.snapshot(),
         )
@@ -454,6 +458,32 @@ class _Run:
         current = self.trace.label_of(span_id)
         found = labeled(self.wiring.spans, current, kind, fields, self.trace.exists)
         self.trace.labeled(span_id, found)
+
+    def chose(self, selection: Selection, label: Label | None) -> None:
+        """The flow named ``selection`` its winner; ``label`` is how the span that adopts it reads.
+
+        The label is checked as it is given, so a flow that names one the search did not declare
+        fails where it chose, not at the end of the run.
+        """
+        self.choice = selection
+        if label is None:
+            self.choice_label = None
+            return
+        missing = {ADOPTED, NOT_ADOPTED} - set(label.kind.verdicts)
+        if missing:
+            message = f"the kind {label.kind.name!r} of an adoption must declare {sorted(missing)}"
+            raise ContractError(("choose", "label", "kind"), message)
+        self.choice_label = labeled(
+            self.wiring.spans, None, label.kind, label.fields(), self.trace.exists
+        )
+
+    def adopting(self, pending: Pending, verdict: str | None, reason: str | None) -> None:
+        """Label the span of the adoption ``pending`` with the label given to ``choose``, if any."""
+        chosen = self.choice_label
+        if chosen is None:
+            return
+        found = chosen.model_copy(update={"verdict": verdict, "reason": reason})
+        self.trace.labeled(operation_span(pending.decision), found)
 
     def forget(self, pending: Pending) -> None:
         """Abandon a request's outcome: if it arrives later it is dropped and recorded."""

@@ -36,7 +36,9 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from ._labels import LabelFields, SpanKind
+    from vs_core.types.settlement import Selection
+
+    from ._labels import Label, LabelFields, SpanKind
     from ._run import _Run
     from ._spans import SpanId
 
@@ -230,19 +232,33 @@ class Flow:
 
     # the run
 
-    def choose(self, candidate: Kept | Input) -> None:
+    def choose(self, candidate: Kept | Input, label: Label | None = None) -> None:
         """Name the current winner: a kept candidate, or ``INPUT``. The last choice stands.
 
-        The framework adopts the last choice when the run ends, however it ends.
+        The framework adopts the last choice when the run ends, however it ends. ``label`` says
+        what the span that adopts it means to the search: its kind declares the verdicts
+        ``ADOPTED`` and ``NOT_ADOPTED``, which the framework sets once core has answered. The
+        label is the last choice's own, so a later choice without one adopts unlabelled.
         """
         if candidate is INPUT:
-            self._run.choice = TrustedBaseline(revision=self.facts.baseline)
+            chosen: Selection = TrustedBaseline(revision=self.facts.baseline)
         elif isinstance(candidate, Kept):
-            self._run.choice = RetainedCandidate(
+            chosen = RetainedCandidate(
                 settlement_id=candidate.settlement.settlement_id, revision=candidate.revision
             )
         else:
             raise ContractError(("choose",), "choose a kept candidate or INPUT")
+        self._run.chose(chosen, label)
+
+    def fall_back_to_input(self, label: Label | None = None) -> None:
+        """Name the input the winner, unless a candidate is already chosen (a restart keeps it).
+
+        A search that labels its adoption starts with this, and again when it learns more about
+        the input, so that a run that ends before any candidate led (a stop, a deadline) adopts
+        the input through a labelled span too. Nothing chosen already meant the input.
+        """
+        if not isinstance(self._run.choice, RetainedCandidate):
+            self._run.chose(TrustedBaseline(revision=self.facts.baseline), label)
 
     def publish(self, record: BaseModel) -> None:
         """Replace the flow's published record: what status views and tests read of a run."""

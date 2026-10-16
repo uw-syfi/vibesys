@@ -147,6 +147,50 @@
       "title": "ActiveExecutionsChunkMessage",
       "type": "object"
     },
+    "AdoptionAttrs": {
+      "additionalProperties": false,
+      "description": "The adoption of the run's winner: the candidate, what it measured and how it compares.\n\n``candidate`` is the adopted revision; None when the input itself stands. The value is the\ncandidate's headline (the input's when it stands) and ``vs_baseline`` its ratio to the\ninput's; either is None while it is unknown.",
+      "properties": {
+        "candidate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate"
+        },
+        "metric_value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric Value"
+        },
+        "vs_baseline": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vs Baseline"
+        }
+      },
+      "title": "AdoptionAttrs",
+      "type": "object"
+    },
     "AgentExecutionActivityData": {
       "additionalProperties": false,
       "description": "Complete current activity for an active agent execution.",
@@ -1414,6 +1458,17 @@
     "DynamicSpanAttributes": {
       "additionalProperties": false,
       "properties": {
+        "adoption": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdoptionAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "agent_turn": {
           "anyOf": [
             {
@@ -1859,6 +1914,68 @@
         "type"
       ],
       "title": "EventsQuery",
+      "type": "object"
+    },
+    "EvolveSpanAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "adoption": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdoptionAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "agent_turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTurnAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "planning_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workstream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "EvolveSpanAttributes",
       "type": "object"
     },
     "ExperimentCursor": {
@@ -3430,6 +3547,17 @@
     "MultiAgentSpanAttributes": {
       "additionalProperties": false,
       "properties": {
+        "adoption": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdoptionAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "agent_turn": {
           "anyOf": [
             {
@@ -3893,6 +4021,68 @@
       "title": "PhaseData",
       "type": "object"
     },
+    "PlainSpanAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "adoption": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdoptionAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "agent_turn": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentTurnAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "gate": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "planning_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanningAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "workstream": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WorkstreamAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "PlainSpanAttributes",
+      "type": "object"
+    },
     "PlanningAttrs": {
       "additionalProperties": false,
       "description": "A planning call: which call of the run it is.",
@@ -3911,6 +4101,17 @@
     "ProfileGuidedMultiAgentSpanAttributes": {
       "additionalProperties": false,
       "properties": {
+        "adoption": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdoptionAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "agent_turn": {
           "anyOf": [
             {
@@ -3962,6 +4163,17 @@
     "ProfileGuidedSingleAgentSpanAttributes": {
       "additionalProperties": false,
       "properties": {
+        "adoption": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdoptionAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "agent_turn": {
           "anyOf": [
             {
@@ -5718,6 +5930,17 @@
     "SingleAgentSpanAttributes": {
       "additionalProperties": false,
       "properties": {
+        "adoption": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AdoptionAttrs"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "agent_turn": {
           "anyOf": [
             {
@@ -6002,10 +6225,32 @@
           ],
           "default": null
         },
+        "evolve": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvolveSpanAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "multi-agent": {
           "anyOf": [
             {
               "$ref": "#/$defs/MultiAgentSpanAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "plain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlainSpanAttributes"
             },
             {
               "type": "null"

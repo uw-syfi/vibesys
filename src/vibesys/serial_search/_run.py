@@ -14,12 +14,14 @@ from vibesys.candidates import api as candidates
 from vibesys.hypothesis import Finished, HypothesisConfig, RunEnding, rounds
 from vibesys.hypothesis.state import HypothesisState
 from vibesys.metrics import MetricRow
+from vibesys.search_spans.api import adoption_label
 from vibesys.serial_search._ledger import LedgerJson
 from vibesys.serial_search._plan_view import LastProfile
 from vs_core.api.search import (
     INPUT,
     Input,
     Kept,
+    Label,
     NoWinner,
     RevisionRef,
     Settlement,
@@ -177,18 +179,25 @@ class SerialRun:
 
     def leader(self) -> Kept | Input:
         """The kept candidate that leads now, else the input: what the run adopts if it ends."""
+        return self.leading()[0]
+
+    def leading(self) -> tuple[Kept | Input, Label]:
+        """The leader, with the label of the span that adopts it (``ctx.choose``'s arguments)."""
         winner = candidates.choose_winner(
             self.eligible(),
             space=candidates.space_of(self.terms),
             baseline=self.input,
             when_unranked=candidates.Unranked.LATEST,
         )
-        if winner.settlement is None:
-            return INPUT
-        for item in self.closed:
-            if item.kept is not None and item.kept.settlement.settlement_id == winner.settlement:
-                return item.kept
-        return INPUT
+        base = candidates.input_value(self.baseline)
+        if winner.settlement is not None:
+            for item in self.closed:
+                if (
+                    item.kept is not None
+                    and item.kept.settlement.settlement_id == winner.settlement
+                ):
+                    return item.kept, adoption_label(item.kept, winner.value, base)
+        return INPUT, adoption_label(INPUT, base, base)
 
     def ending(self) -> NoWinner | None:
         """None when the run ends with a winner or the trusted input standing; else why not."""

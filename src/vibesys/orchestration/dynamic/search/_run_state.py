@@ -74,7 +74,8 @@ from vibesys.orchestration.dynamic.search._values import (
     WorkKind,
     WorkPlan,
 )
-from vs_core.api.search import INPUT, Input, Kept, NoWinner, RevisionRef, TaskTerms, Value
+from vibesys.search_spans.api import adoption_label
+from vs_core.api.search import INPUT, Input, Kept, Label, NoWinner, RevisionRef, TaskTerms, Value
 
 _DROPPED_SHOWN = 8
 """The most recent dropped evaluations the orchestrator is shown."""
@@ -818,10 +819,16 @@ class RunRecord:
 
     def leader(self) -> Kept | Input:
         """The candidate that leads now, else the input: what the run would adopt if it ended."""
+        return self.leading()[0]
+
+    def leading(self) -> tuple[Kept | Input, Label]:
+        """The leader, with the label of the span that adopts it (``ctx.choose``'s arguments)."""
         winner = self.winner()
-        if winner.settlement is None:
-            return INPUT
-        return self.kept.get(winner.settlement.root, INPUT)
+        base = candidates.input_value(self.baseline)
+        found = None if winner.settlement is None else self.kept.get(winner.settlement.root)
+        if found is None:
+            return INPUT, adoption_label(INPUT, base, base)
+        return found, adoption_label(found, winner.value, base)
 
     def ending(self) -> NoWinner | None:
         """None when the run ends with a winner or with the input standing; else why it has none."""

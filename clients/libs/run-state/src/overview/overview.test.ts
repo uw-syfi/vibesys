@@ -1,6 +1,7 @@
 import {describe, expect, it} from 'bun:test';
 import type {RunEvent, RunOverview, RunSnapshot, Span} from '@vibesys/contracts';
 import {
+  adoption,
   bestVsBaseline,
   foldOverview,
   type GateReading,
@@ -176,5 +177,59 @@ describe('run overview', () => {
     expect(workstreamCounts([plain]).total).toBe(0);
     expect(bestVsBaseline([plain], 'max')).toBeNull();
     expect(runningBest([plain], 'max')).toEqual([]);
+  });
+});
+
+describe('adoption', () => {
+  const adoptionSpan = (label: NonNullable<Span['label']> | undefined, id = 'op:adopt.1'): Span =>
+    ({
+      id,
+      parent: 'flow:#1',
+      type: 'operation',
+      name: 'propose_winner',
+      status: 'done',
+      started_at: 1,
+      label,
+    }) as Span;
+  const labelled = (verdict: string | null, attrs: object): NonNullable<Span['label']> => ({
+    kind: 'adoption',
+    verdict,
+    attrs_json: JSON.stringify(attrs),
+  });
+
+  it('is null for a run that has not begun to adopt, or whose search labels no spans', () => {
+    expect(adoption([])).toBeNull();
+    expect(adoption([adoptionSpan(undefined)])).toBeNull();
+  });
+
+  it('reads the candidate, what it measured, its ratio and the verdict', () => {
+    const span = adoptionSpan(
+      labelled('adopted', {candidate: 'c2', metric_value: 150, vs_baseline: 1.5}),
+    );
+    expect(adoption([span])).toEqual({
+      span: 'op:adopt.1',
+      candidate: 'c2',
+      metricValue: 150,
+      vsBaseline: 1.5,
+      verdict: 'adopted',
+    });
+  });
+
+  it('reads an adoption of the input, still adopting, or with unknown values as nulls', () => {
+    const adopted = adoption([
+      adoptionSpan(labelled(null, {candidate: null, metric_value: null, vs_baseline: null})),
+    ]);
+    expect(adopted).toMatchObject({
+      candidate: null,
+      metricValue: null,
+      vsBaseline: null,
+      verdict: null,
+    });
+  });
+
+  it('is the latest adoption when a restart proposed the winner again', () => {
+    const first = adoptionSpan(labelled('not_adopted', {candidate: 'c1'}), 'op:adopt.1');
+    const second = adoptionSpan(labelled('adopted', {candidate: 'c2'}), 'op:adopt.2');
+    expect(adoption([first, second])?.candidate).toBe('c2');
   });
 });

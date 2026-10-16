@@ -12,9 +12,9 @@ from vibesys.orchestration.single.search._config import SingleConfig
 from vibesys.orchestration.single.search._operations import OPERATIONS
 from vibesys.orchestration.single.search._roles import ROLES
 from vibesys.orchestration.single.search._round import SingleRound, play_round
-from vibesys.search_spans.api import SPANS
+from vibesys.search_spans.api import SPANS, adoption_label
 from vibesys.serial_search.api import ROADMAP, RoundDone, SerialRun
-from vs_core.api.search import Flow, NoWinner, StopRequested, TaskStopped, search
+from vs_core.api.search import INPUT, Flow, NoWinner, StopRequested, TaskStopped, search
 
 
 @search(
@@ -23,7 +23,9 @@ from vs_core.api.search import Flow, NoWinner, StopRequested, TaskStopped, searc
 async def single(ctx: Flow, config: SingleConfig) -> NoWinner | None:
     """Measure the input, play the rounds in order within budget, name the best candidate."""
     ctx.checkpoint(config)
+    ctx.fall_back_to_input(adoption_label(INPUT, None, None))
     run = SerialRun(config.hypotheses, ctx.facts.baseline, ctx.task.terms, await measure_input(ctx))
+    ctx.fall_back_to_input(run.leading()[1])
     async with ctx.group(limit=1) as rounds:
         while not run.over(stopping=ctx.stop_requested):
             begin = run.start()
@@ -31,7 +33,7 @@ async def single(ctx: Flow, config: SingleConfig) -> NoWinner | None:
             match await ctx.first(rounds, ctx.stopped):
                 case RoundDone() as done:
                     run.finished(done, task.span)
-                    ctx.choose(run.leader())
+                    ctx.choose(*run.leading())
                 case TaskStopped():
                     run.stopped = True
                 case StopRequested():

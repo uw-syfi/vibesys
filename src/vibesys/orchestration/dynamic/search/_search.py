@@ -79,6 +79,7 @@ async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner |
         run = RunRecord.resumed(given.config, base, terms, given.record)
     else:
         run = RunRecord(given, base, None, terms)
+    ctx.fall_back_to_input(run.leading()[1])
     # typed, so the match on what they yield below is checked exhaustive
     # unbounded: the record bounds the workstreams whose agents work (`RunRecord.free_agents`)
     workstreams: Group[WorkstreamDone] = ctx.group()
@@ -137,12 +138,13 @@ def fold(ctx: Flow, run: RunRecord, event: Event) -> None:
     match event:
         case Measured() | Unmeasurable() | NotConfigured() as baseline:
             run.measured(baseline)
+            ctx.fall_back_to_input(run.leading()[1])  # the input's reading is known now
             ctx.latch(INPUT_MEASURED).set(baseline)  # the workstreams waiting for it go on
         case Scheduled() | NoPlan() | Outlined() as outcome:
             run.planned(outcome)
         case WorkstreamDone() as done:
             run.finished(done)
-            ctx.choose(run.leader())
+            ctx.choose(*run.leading())
         case Submission() as submission:
             run.submit(submission)
         case Released(key=key):

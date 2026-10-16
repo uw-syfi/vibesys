@@ -19,7 +19,7 @@ from vibesys.orchestration.issue_queue.search._values import (
     PerfDone,
     PerfRecord,
 )
-from vs_core.api.search import Kept, RevisionRef, TaskStopped, Value
+from vs_core.api.search import Kept, RevisionRef, SpanId, TaskStopped, Value
 from vs_issue_tracker.api import IssueRow
 
 DRAINED = "the board is drained and the last evaluation filed nothing"
@@ -57,6 +57,8 @@ class Queue(Value):
     """That evaluation filed issues."""
     tip: Kept | None = None
     """The last closed issue's retained candidate: what the next job builds on."""
+    tip_span: SpanId | None = None
+    """The workstream of the job that kept the tip."""
     performance: tuple[PerfRecord, ...] = ()
     ending: Ending | None = None
     stopping: bool = False
@@ -107,17 +109,20 @@ class Queue(Value):
         """The run reached its ending."""
         return self.model_copy(update={"ending": ending})
 
-    def folded(self, done: JobDone | PerfDone | TaskStopped) -> "Queue":
-        """Fold whatever the job that just ended left: a result, or the operator's stop."""
+    def folded(self, done: JobDone | PerfDone | TaskStopped, span: SpanId | None = None) -> "Queue":
+        """Fold whatever the job that just ended left: a result, or the operator's stop.
+
+        ``span`` is the job's own workstream, which the next job links to when it kept the tip.
+        """
         match done:
             case JobDone():
-                return self.after_issue(done)
+                return self.after_issue(done, span)
             case PerfDone():
                 return self.after_perf(done)
             case TaskStopped():
                 return self.stopped()
 
-    def after_issue(self, done: JobDone) -> "Queue":
+    def after_issue(self, done: JobDone, span: SpanId | None = None) -> "Queue":
         """Fold a finished issue job.
 
         A finished issue counts toward the round's cap. One that closed with a change moves the
@@ -137,6 +142,7 @@ class Queue(Value):
                 "processed": self.processed + 1,
                 "assessed": False,
                 "tip": done.kept or self.tip,
+                "tip_span": span if done.kept is not None else self.tip_span,
                 "ending": ending or self.ending,
             }
         )

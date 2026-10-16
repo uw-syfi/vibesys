@@ -142,6 +142,12 @@ def reading(baseline: Baseline) -> InputReading | None:
             return None
 
 
+def input_value(baseline: Baseline | None) -> float | None:
+    """The input's headline value, when it was measured."""
+    seen = baseline.reading if isinstance(baseline, Measured) else None
+    return seen.metrics[0].value if seen is not None and seen.metrics else None
+
+
 def failure(baseline: Baseline) -> InputFailure | None:
     """Why the input is unmeasurable, or None."""
     return baseline.failure if isinstance(baseline, Unmeasurable) else None

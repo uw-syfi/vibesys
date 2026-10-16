@@ -28,6 +28,8 @@ from vs_core.types.strategy import Finish, ProposeWinner
 from vs_core.types.until import Failed, FailureReason
 
 if TYPE_CHECKING:
+    from vs_core.types.search import Event
+
     from ._kit import Kit
 
 
@@ -41,6 +43,11 @@ class Input:
 
 INPUT: Final = Input()
 """``ctx.choose(INPUT)``: no candidate beat the input."""
+
+ADOPTED: Final = "adopted"
+"""The verdict of the span that adopted the chosen winner, when core adopted it."""
+NOT_ADOPTED: Final = "not_adopted"
+"""The verdict of that span when core would not (its reason says why)."""
 
 
 class NoWinner(Value):
@@ -114,11 +121,25 @@ def reason_text(ending: EndReason, detail: str = "") -> str:
 
 
 async def adopt(kit: Kit, selection: Selection) -> Adopted | NotAdopted:
-    """Ask core to adopt ``selection`` and report how it went."""
+    """Ask core to adopt ``selection`` and report how it went.
+
+    The span of the request carries the label ``ctx.choose`` gave the choice, with the verdict
+    ``ADOPTED`` or ``NOT_ADOPTED`` once core has answered.
+    """
     request = ProposeWinner(
         decision_id=DecisionId(root="adopt"), scope=THIS_RUN, selection=selection
     )
-    event = await kit.wait(request, kit.cleanup_within())
+    pending = kit.start(request, kit.cleanup_within())
+    kit.run.adopting(pending, None, None)
+    outcome = _adoption_of(selection, await kit.settle(pending))
+    if isinstance(outcome, Adopted):
+        kit.run.adopting(pending, ADOPTED, None)
+    else:
+        kit.run.adopting(pending, NOT_ADOPTED, outcome.reason.value)
+    return outcome
+
+
+def _adoption_of(selection: Selection, event: Event) -> Adopted | NotAdopted:
     match event:
         case AdoptionFinished(result=AdoptionResult(observation=seen)):
             if seen.status is ObservationStatus.SUCCEEDED:

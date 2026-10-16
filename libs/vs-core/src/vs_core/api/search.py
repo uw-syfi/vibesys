@@ -21,6 +21,7 @@ module (``tests/quality/test_searches_import_only_the_search_facade.py``).
 from __future__ import annotations
 
 from vs_core.api import (
+    ADOPTED,
     INPUT,
     MAX_CORRECTIONS,
     MAX_LOST_TURNS,
@@ -29,6 +30,7 @@ from vs_core.api import (
     MAX_REQUEST_RETRIES,
     MAX_SUBMISSIONS_PER_MEASUREMENT,
     MAX_TURN_SECONDS,
+    NOT_ADOPTED,
     THIS_RUN,
     Access,
     AdoptionFailed,
@@ -217,6 +219,7 @@ from vs_core.api import (
 from vs_core.flows import search
 
 __all__ = [
+    "ADOPTED",
     "INPUT",
     "MAX_CORRECTIONS",
     "MAX_LOST_TURNS",
@@ -225,6 +228,7 @@ __all__ = [
     "MAX_REQUEST_RETRIES",
     "MAX_SUBMISSIONS_PER_MEASUREMENT",
     "MAX_TURN_SECONDS",
+    "NOT_ADOPTED",
     "THIS_RUN",
     "Access",
     "AdoptionFailed",

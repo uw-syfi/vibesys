@@ -203,6 +203,7 @@ def evolve_core_policy() -> CorePolicy:
         retention_label=RETENTION_LABEL,
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(CORE_PROTOCOL_DIR, PROMPTS_DIR / "shared"),
+        span_kinds=evolve.spans,
     )
 
 

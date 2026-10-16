@@ -77,10 +77,15 @@ trace's order. A span that starts and ends within one commit gets a `span_starte
   a generated TypeScript type. An orchestration declares its kinds once, at `@search(spans=...)`.
   Its core policy carries the same declaration (`CorePolicy.span_kinds`), and
   `python -m entrypoints.protocol_schema` exports the built-in ones
-  (`tests/server/test_protocol_schema.py` holds the committed schema to it). Today only the
-  dynamic search labels spans: `planning_call`, `workstream` (verdicts `accepted`, `rejected`;
-  link `builds_on`), `agent_turn` and `gate` (verdicts `passed`, `failed_check`, `slower`). A gate span covers one measurement; each of its stages (`build`, `accuracy`, `benchmark`) has its own `gate_started`/`gate_finished` events (`GateKind`) and its own log stream, whose `GateStage` owner names the span. The
-  other searches' spans carry no label and render plainly.
+  (`tests/server/test_protocol_schema.py` holds the committed schema to it). Every search
+  labels the same kinds (`vibesys.search_spans`): `planning_call`, `workstream` (verdicts
+  `accepted`, `rejected`; link `builds_on`), `agent_turn`, `gate` (verdicts `passed`,
+  `failed_check`, `slower`) and `adoption` (verdicts `adopted`, `not_adopted`; attributes
+  `candidate`, `metric_value`, `vs_baseline`). The adoption span is the operation that adopts the
+  run's winner; a run that has not adopted yet has none, and `candidate` is null when the input
+  itself stands. A gate span covers one measurement; each of its stages (`build`, `accuracy`, `benchmark`) has its own `gate_started`/`gate_finished` events (`GateKind`) and its own log stream, whose `GateStage` owner names the span. The
+  kinds are additive within `PROTOCOL_VERSION` 1: a client that does not know one renders it
+  from its name and label.
 - **Ids.** `flow:<path>#<n>` for a flow task, `op:<decision id>` for an operation, both plain
   strings. A span id is stable across replay and restart.
 - **Contract choices.** `waiting_on[].kind` is `operation`, `slot`, `time` or `stop`. There is no

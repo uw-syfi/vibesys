@@ -882,11 +882,14 @@ export type Logger = string;
 export type Thread = string;
 export type Message3 = string;
 export type Traceback = string | null;
+export type Candidate = string | null;
+export type MetricValue = number | null;
+export type VsBaseline = number | null;
 export type Role1 = string;
 export type Model8 = string | null;
 export type Stage3 = string;
-export type MetricValue = number | null;
-export type VsBaseline = number | null;
+export type MetricValue1 = number | null;
+export type VsBaseline1 = number | null;
 export type Call = number;
 export type HypothesisId1 = string | null;
 export type ParentRevision = string | null;
@@ -2333,16 +2336,31 @@ export interface NarrationLine {
 }
 export interface SpanAttributes {
   dynamic?: DynamicSpanAttributes | null;
+  evolve?: EvolveSpanAttributes | null;
   "multi-agent"?: MultiAgentSpanAttributes | null;
+  plain?: PlainSpanAttributes | null;
   "profile-guided-multi-agent"?: ProfileGuidedMultiAgentSpanAttributes | null;
   "profile-guided-single-agent"?: ProfileGuidedSingleAgentSpanAttributes | null;
   "single-agent"?: SingleAgentSpanAttributes | null;
 }
 export interface DynamicSpanAttributes {
+  adoption?: AdoptionAttrs | null;
   agent_turn?: AgentTurnAttrs | null;
   gate?: GateAttrs | null;
   planning_call?: PlanningAttrs | null;
   workstream?: WorkstreamAttrs | null;
+}
+/**
+ * The adoption of the run's winner: the candidate, what it measured and how it compares.
+ *
+ * ``candidate`` is the adopted revision; None when the input itself stands. The value is the
+ * candidate's headline (the input's when it stands) and ``vs_baseline`` its ratio to the
+ * input's; either is None while it is unknown.
+ */
+export interface AdoptionAttrs {
+  candidate?: Candidate;
+  metric_value?: MetricValue;
+  vs_baseline?: VsBaseline;
 }
 /**
  * An agent turn: the role asked and the model it runs on (None: the run's default).
@@ -2358,8 +2376,8 @@ export interface AgentTurnAttrs {
  */
 export interface GateAttrs {
   stage: Stage3;
-  metric_value?: MetricValue;
-  vs_baseline?: VsBaseline;
+  metric_value?: MetricValue1;
+  vs_baseline?: VsBaseline1;
 }
 /**
  * A planning call: which call of the run it is.
@@ -2379,25 +2397,43 @@ export interface WorkstreamAttrs {
   parent_revision?: ParentRevision;
   round?: Round3;
 }
+export interface EvolveSpanAttributes {
+  adoption?: AdoptionAttrs | null;
+  agent_turn?: AgentTurnAttrs | null;
+  gate?: GateAttrs | null;
+  planning_call?: PlanningAttrs | null;
+  workstream?: WorkstreamAttrs | null;
+}
 export interface MultiAgentSpanAttributes {
+  adoption?: AdoptionAttrs | null;
+  agent_turn?: AgentTurnAttrs | null;
+  gate?: GateAttrs | null;
+  planning_call?: PlanningAttrs | null;
+  workstream?: WorkstreamAttrs | null;
+}
+export interface PlainSpanAttributes {
+  adoption?: AdoptionAttrs | null;
   agent_turn?: AgentTurnAttrs | null;
   gate?: GateAttrs | null;
   planning_call?: PlanningAttrs | null;
   workstream?: WorkstreamAttrs | null;
 }
 export interface ProfileGuidedMultiAgentSpanAttributes {
+  adoption?: AdoptionAttrs | null;
   agent_turn?: AgentTurnAttrs | null;
   gate?: GateAttrs | null;
   planning_call?: PlanningAttrs | null;
   workstream?: WorkstreamAttrs | null;
 }
 export interface ProfileGuidedSingleAgentSpanAttributes {
+  adoption?: AdoptionAttrs | null;
   agent_turn?: AgentTurnAttrs | null;
   gate?: GateAttrs | null;
   planning_call?: PlanningAttrs | null;
   workstream?: WorkstreamAttrs | null;
 }
 export interface SingleAgentSpanAttributes {
+  adoption?: AdoptionAttrs | null;
   agent_turn?: AgentTurnAttrs | null;
   gate?: GateAttrs | null;
   planning_call?: PlanningAttrs | null;

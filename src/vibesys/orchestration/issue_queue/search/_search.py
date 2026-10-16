@@ -28,10 +28,21 @@ from vibesys.orchestration.issue_queue.search._queue import (
     Work,
 )
 from vibesys.orchestration.issue_queue.search._roles import ROLES
+from vibesys.orchestration.issue_queue.search._spans import builds_on
 from vibesys.orchestration.issue_queue.search._tracker import apply, read_board
 from vibesys.orchestration.issue_queue.search._values import Ending, Failure, IssueJob, PerfJob
 from vibesys.orchestration.issue_queue.search._writes import bootstrap
-from vs_core.api.search import INPUT, Flow, NoWinner, TaskStopped, flow, search
+from vibesys.search_spans.api import SPANS, adoption_label
+from vs_core.api.search import (
+    INPUT,
+    Flow,
+    Input,
+    Kept,
+    NoWinner,
+    TaskStopped,
+    flow,
+    search,
+)
 
 if TYPE_CHECKING:
     from vs_issue_tracker.api import IssueRow
@@ -41,10 +52,18 @@ BLANK_OBJECTIVE = (
 )
 
 
-@search("plain", config=IssueQueueConfig, operations=OPERATIONS, roles=ROLES, owned=BOARD)
+@search(
+    "plain",
+    config=IssueQueueConfig,
+    operations=OPERATIONS,
+    roles=ROLES,
+    owned=BOARD,
+    spans=SPANS,
+)
 async def issue_queue(ctx: Flow, config: IssueQueueConfig) -> NoWinner | None:
     """File the task as the first issue, work the board in rounds, and name the last closed issue."""
     ctx.checkpoint(config)
+    ctx.fall_back_to_input(adoption_label(INPUT, None, None))
     title = bootstrap_title(ctx.task.objective)
     if not title:
         return NoWinner(reason=BLANK_OBJECTIVE)
@@ -106,11 +125,12 @@ async def work_queue(ctx: Flow, run: QueueRun) -> Queue:
                     continue
                 case Work(issue=issue):
                     start = IssueJob(**common, issue=issue)
-                    jobs.start(start.key, issue_job, start)
+                    span = jobs.start(start.key, issue_job, start).span
+                    builds_on(ctx, span, queue.tip_span)
                 case Assess():
                     evaluation = PerfJob(**common, prior=queue.performance)
-                    jobs.start(evaluation.key, perf_job, evaluation)
-            queue = queue.started().folded(await jobs)
+                    span = jobs.start(evaluation.key, perf_job, evaluation).span
+            queue = queue.started().folded(await jobs, span)
             name_tip(ctx, queue)
     ctx.publish(QueueSnapshot.of(queue, issues, None))
     return queue
@@ -123,7 +143,16 @@ def name_tip(ctx: Flow, queue: Queue) -> None:
     proof adopts only a proven revision, so there the tip is named after `prove`, in `conclude`.
     """
     if queue.tip is not None and not ctx.task.terms.requires_accuracy_proof:
-        ctx.choose(queue.tip)
+        choose(ctx, queue.tip)
+
+
+def choose(ctx: Flow, winner: Kept | Input) -> None:
+    """Name ``winner``, with the label of the span that adopts it.
+
+    Nothing measures the tip but the accuracy proof, whose reading core decides on, so the
+    label says which candidate is adopted and nothing of its value.
+    """
+    ctx.choose(winner, adoption_label(winner, None, None))
 
 
 async def conclude(ctx: Flow, queue: Queue) -> NoWinner | None:
@@ -139,12 +168,12 @@ async def conclude(ctx: Flow, queue: Queue) -> NoWinner | None:
     ending = queue.ending
     tip = queue.tip
     if tip is None:
-        ctx.choose(INPUT)
+        choose(ctx, INPUT)
         if ending is not None and ending.outcome == "failure":
             return NoWinner(reason=ending.reason)
         return None
     await prove(ctx, tip)
-    ctx.choose(tip)
+    choose(ctx, tip)
     if ending is not None and ending.outcome == "failure":
         return NoWinner(reason=ending.reason, keep_choice=True)
     return None

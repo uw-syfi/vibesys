@@ -32,9 +32,12 @@ role data). A search whose flows act on a system another library owns (an issue 
 typed outcome or a `Failed`, and the declaration requires the host to provide an owner for each.
 A search that labels its spans passes `spans=` (its `SpanKind` declarations; see "Span labels").
 The hypothesis searches share one vocabulary, `SPANS` in `vibesys.search_spans` (planning calls,
-workstreams, agent turns, gates), which the run page reads; each maps its own steps onto it: the
-dynamic search in `src/vibesys/orchestration/dynamic/search/_spans.py`, the serial searches
-(single, multi; each round is a workstream) in `src/vibesys/serial_search/_spans.py`.
+workstreams, agent turns, gates, the adoption), which the run page reads; each maps its own steps
+onto it: the dynamic search in `src/vibesys/orchestration/dynamic/search/_spans.py`, the serial
+searches (single, multi; each round is a workstream) in `src/vibesys/serial_search/_spans.py`,
+evolve (each child is a workstream) in `src/vibesys/orchestration/evolve/search/_spans.py` and the
+issue queue (each job is a workstream) in
+`src/vibesys/orchestration/issue_queue/search/_spans.py`.
 The id scheme derives from the search name.
 
 The root flow starts with the config and returns `None` or `NoWinner(reason)`. **A flow never
@@ -76,7 +79,8 @@ outside world is an aspect.
 | `ctx.timer(at)` | A source that fires at a run-clock time |
 | `ctx.stopped`, `ctx.stop_requested` | The operator's stop, as a source and as a flag |
 | `ctx.checkpoint(snapshot)` | Where a code change may resume this flow |
-| `ctx.choose(kept_or_INPUT)` | Name the current winner |
+| `ctx.choose(kept_or_INPUT, label=...)` | Name the current winner, and label the span that adopts it |
+| `ctx.fall_back_to_input(label=...)` | Name the input the winner unless a candidate is already chosen |
 | `ctx.publish(record)` | Make a typed record of the flow's progress visible outside |
 | `ctx.label(kind, title=..., links=..., attrs=..., verdict=..., reason=...)`, `ctx.span` | Label this flow's span; the span's id, for another span's link |
 | `ctx.facts`, `ctx.task`, `ctx.capabilities`, `ctx.clock.now()` | The run's facts and view (journaled reads); `ctx.task.run_id` keeps two runs' shared writes apart |
@@ -434,7 +438,14 @@ ctx.choose(kept)        # a Kept candidate a closed workspace retained
 ctx.choose(INPUT)       # nothing beat the input
 ```
 
-`ctx.choose` may be called at any time, from any flow; the last choice stands. When the root
+`ctx.choose` may be called at any time, from any flow; the last choice stands. It takes the
+`Label` of the span that adopts it (`ctx.choose(kept, adoption_label(...))`): the adoption is one
+operation (the `ProposeWinner`), the framework labels its span with the last choice's label when
+it is issued, and sets the verdict `ADOPTED` or `NOT_ADOPTED` (with the typed reason) once core has
+answered, so the kind must declare both verdicts. A choice without a label adopts unlabelled,
+and so does a run that chose nothing (the input stands): a search that labels its adoption starts
+with `ctx.fall_back_to_input(label)`, and calls it again as it learns more about the input; it
+never replaces a candidate already chosen. When the root
 returns, or the operator stops the run, or the deadline passes, the framework ends the run by one
 path:
 

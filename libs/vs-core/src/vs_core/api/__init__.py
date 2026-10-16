@@ -129,11 +129,13 @@ from vs_core.api.routing import EVENT_ROUTES
 from vs_core.attempts import advance_attempt
 from vs_core.evaluation import advance_evaluation
 from vs_core.flows import (
+    ADOPTED,
     INPUT,
     MAX_CORRECTIONS,
     MAX_LOST_TURNS,
     MAX_RENDER_SECONDS,
     MAX_TURN_SECONDS,
+    NOT_ADOPTED,
     Again,
     Assessment,
     AttemptOutcome,
@@ -736,6 +738,7 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "ADOPTED",
     "CAPTURE_SUFFIX",
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
@@ -751,6 +754,7 @@ __all__ = [
     "MAX_TURN_SECONDS",
     "MAY_WAIT_ON",
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
+    "NOT_ADOPTED",
     "RENDER_SUFFIX",
     "REPLY_ERROR_MESSAGE_LIMIT",
     "RESOLUTIONS",

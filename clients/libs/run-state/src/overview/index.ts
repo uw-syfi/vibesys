@@ -4,9 +4,9 @@
  * selectors over the run trace's spans. Trajectories and counts are queries over spans: there is
  * no second record of the run's work.
  *
- * The selectors read the span kinds every hypothesis search labels (`workstream`, `gate`; the
- * vocabulary is `vibesys.search_spans`); a run whose search labels no spans yields empty
- * trajectories and zero counts.
+ * The selectors read the span kinds every hypothesis search labels (`workstream`, `gate`,
+ * `adoption`; the vocabulary is `vibesys.search_spans`); a run whose search labels no spans yields
+ * empty trajectories and zero counts.
  */
 import type {RunEvent, RunOverview, RunSnapshot, Span} from '@vibesys/contracts';
 
@@ -63,6 +63,36 @@ export function bestVsBaseline(
     }
   }
   return best;
+}
+
+/**
+ * What the run adopted: the search's own account of its winner, the `adoption` span (the
+ * operation that adopts it) with its verdict.
+ */
+export interface Adoption {
+  readonly span: string;
+  /** The adopted revision; null when the input itself stands (no candidate beat it). */
+  readonly candidate: string | null;
+  readonly metricValue: number | null;
+  /** The adopted candidate's value divided by the input's. */
+  readonly vsBaseline: number | null;
+  /** `adopted` or `not_adopted` once core has answered; null while it is adopting. */
+  readonly verdict: string | null;
+}
+
+/** The run's latest adoption, or null when none has begun (the run is still searching). */
+export function adoption(spans: readonly Span[]): Adoption | null {
+  const found = spans.filter(span => span.label?.kind === 'adoption').at(-1);
+  if (found === undefined) return null;
+  const attrs = attributes(found);
+  const candidate = attrs['candidate'];
+  return {
+    span: found.id,
+    candidate: typeof candidate === 'string' && candidate !== '' ? candidate : null,
+    metricValue: numberOrNull(attrs['metric_value']),
+    vsBaseline: numberOrNull(attrs['vs_baseline']),
+    verdict: found.label?.verdict ?? null,
+  };
 }
 
 /**

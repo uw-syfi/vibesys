@@ -20,6 +20,7 @@ from vibesys.orchestration.evolve.search._values import (
 )
 from vibesys.orchestration.profilers import ProfilerSummary
 from vibesys.orchestration.review import Verdict as ReviewVerdict
+from vibesys.search_spans.api import turn_label
 from vs_core.api.search import (
     Declined,
     Failed,
@@ -67,7 +68,7 @@ async def mutate(ctx: Flow, start: ChildStart, ws: Workspace) -> Closing:
     good, is a failed individual.
     """
     mutator = ctx.agents.session(MUTATOR, workspace=ws, revision=start.base)
-    match await mutator.turn(start.prompt):
+    match await mutator.turn(start.prompt, label=turn_label(mutator)):
         case TurnFinished(reply=MutatorResponse() as reply, checkpoint=Declined() as declined):
             declining = Failure(kind=FailureKind.CHECKPOINT_DECLINED, declined=declined.reason)
             return Closing(summary=reply.summary).ended_by(declining)
@@ -88,7 +89,7 @@ async def review(ctx: Flow, ws: Workspace, closing: Closing) -> Closing:
         raise ValueError(message)
     judge = ctx.agents.session(JUDGE, workspace=ws)
     prompt = JudgePrompt(candidate=revision, cited_evidence=ctx.evaluation.taken(ws, revision))
-    match await judge.turn(prompt, revision=revision):
+    match await judge.turn(prompt, revision=revision, label=turn_label(judge)):
         case TurnFinished(reply=JudgeResponse() as reply, invocation=invocation):
             passed = reply.verdict is ReviewVerdict.PASS
             return closing.model_copy(
@@ -116,7 +117,9 @@ async def profile(ctx: Flow, ws: Workspace, closing: Closing) -> Closing:
         for item in ctx.task.terms.objectives
     )
     profiler = ctx.agents.session(PROFILER, workspace=ws, revision=revision)
-    match await profiler.turn(ProfilerPrompt(candidate=revision, objectives=axes)):
+    match await profiler.turn(
+        ProfilerPrompt(candidate=revision, objectives=axes), label=turn_label(profiler)
+    ):
         case TurnFinished(reply=ProfilerSummary() as summary):
             reading = ProfileReading(
                 perf_metric=summary.perf_metric,

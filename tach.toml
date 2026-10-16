@@ -1371,7 +1371,7 @@ from = ["vibesys.orchestration.issue_queue.models"]
 # The issue-queue search as one flow: its roles, its values and the pure helpers its flows share.
 path = "vibesys.orchestration.issue_queue.search"
 layer = "loops"
-depends_on = ["vs_core", "vs_issue_tracker", "vibesys.candidates", "vibesys.metrics", "vibesys.orchestration.issue_queue.models"]
+depends_on = ["vs_core", "vs_issue_tracker", "vibesys.candidates", "vibesys.metrics", "vibesys.orchestration.issue_queue.models", "vibesys.search_spans"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.issue_queue.search"]
@@ -1675,7 +1675,7 @@ from = ["vibesys.orchestration.evolve.models"]
 # The evolve search as one flow: its roles, its values and the pure helpers its flows share.
 path = "vibesys.orchestration.evolve.search"
 layer = "loops"
-depends_on = ["vs_core", "vibesys.candidates", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.population", "vibesys.orchestration.profilers", "vibesys.orchestration.review"]
+depends_on = ["vs_core", "vibesys.candidates", "vibesys.hypothesis", "vibesys.metrics", "vibesys.orchestration.evolve.models", "vibesys.orchestration.evolve.population", "vibesys.orchestration.profilers", "vibesys.orchestration.review", "vibesys.search_spans"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.evolve.search"]

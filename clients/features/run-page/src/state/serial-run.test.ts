@@ -2,6 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {RunEvent, RunOverview, Span} from '@vibesys/contracts';
 import {EMPTY_TRACE, foldTrace} from '@vibesys/run-state/trace';
 import {
+  type KeyNumber,
   overviewView,
   type RunAtView,
   type RunPageState,
@@ -200,5 +201,103 @@ describe('a multi-agent run', () => {
     expect(view.current.map(item => [item.title, item.doing])).toEqual([
       ['round 2', 'Orchestrator turn, 0s'],
     ]);
+  });
+});
+
+/**
+ * The adoption the run ends with, as its span events arrive: the operation that adopts the
+ * winner is labelled with the adopted candidate, what it measured and its ratio to the input's,
+ * and gets its verdict once core has answered (`tests/vibesys/search_faults.py` holds every
+ * search to it). The Overview shows what the run adopted, not what it inferred from its gates.
+ */
+
+const ENDED: RunPageState = {
+  ...LIVE,
+  record: {
+    kind: 'ended',
+    run: {...(LIVE.record as {run: object}).run, phase: 'completed', end: null},
+  } as RunPageState['record'],
+};
+
+interface Adopting {
+  readonly candidate: string | null;
+  readonly value: number | null;
+  readonly vs: number | null;
+  readonly verdict: 'adopted' | 'not_adopted' | null;
+}
+
+function adopting(run: Recording, adoption: Adopting): void {
+  run.start('op:adopt.1', 'flow:#1', 'propose_winner', {
+    kind: 'adoption',
+    title: adoption.candidate ?? 'the input',
+    attrs_json: JSON.stringify({
+      candidate: adoption.candidate,
+      metric_value: adoption.value,
+      vs_baseline: adoption.vs,
+    }),
+  });
+  if (adoption.verdict === null) return;
+  run.end('op:adopt.1', {verdict: adoption.verdict});
+}
+
+function bestOf(run: Recording, state: RunPageState): KeyNumber {
+  const best = overviewView(at(run.events), state).numbers.find(
+    number => number.label === 'Best vs baseline',
+  );
+  if (best === undefined) throw new Error('the Overview has no best candidate number');
+  return best;
+}
+
+describe('the best candidate of a run that adopts', () => {
+  test('is the adopted one, even when a passed gate measured better', () => {
+    const run = recorded();
+    adopting(run, {candidate: 'c1', value: 80, vs: 1.6, verdict: 'adopted'});
+    // round 1 measured 100 (2.00×) and passed, but the search adopted a candidate that read 80
+    expect(bestOf(run, ENDED)).toEqual({
+      label: 'Best vs baseline',
+      value: '1.60×',
+      sub: '80 ops/s · adopted',
+    });
+    expect(bestOf(run, LIVE)).toEqual(bestOf(run, ENDED));
+  });
+
+  test('is the best passed gate while the run is live and has not adopted yet', () => {
+    const run = recorded();
+    const expected = {label: 'Best vs baseline', value: '2.00×', sub: '100 ops/s · so far'};
+    expect(bestOf(run, LIVE)).toEqual(expected);
+    adopting(run, {candidate: 'c1', value: 100, vs: 2, verdict: null});
+    expect(bestOf(run, LIVE)).toEqual(expected); // core has not answered: not adopted yet
+  });
+
+  test('names no candidate once the run ended without adopting one', () => {
+    const run = recorded();
+    expect(bestOf(run, ENDED)).toEqual({
+      label: 'Best vs baseline',
+      value: '–',
+      sub: 'no candidate adopted',
+    });
+    adopting(run, {candidate: 'c1', value: 100, vs: 2, verdict: 'not_adopted'});
+    expect(bestOf(run, ENDED).sub).toBe('the adoption failed');
+    expect(bestOf(run, LIVE).value).toBe('2.00×'); // while it runs, the gates are all there is
+  });
+
+  test('says the input stood when that is what was adopted', () => {
+    const run = recorded();
+    adopting(run, {candidate: null, value: 50, vs: 1, verdict: 'adopted'});
+    expect(bestOf(run, ENDED)).toEqual({
+      label: 'Best vs baseline',
+      value: '–',
+      sub: 'no candidate beat the input',
+    });
+  });
+
+  test('shows the measured value when the input was never measured', () => {
+    const run = recorded();
+    adopting(run, {candidate: 'c1', value: 100, vs: null, verdict: 'adopted'});
+    expect(bestOf(run, ENDED)).toEqual({
+      label: 'Best vs baseline',
+      value: '100 ops/s',
+      sub: 'adopted',
+    });
   });
 });
