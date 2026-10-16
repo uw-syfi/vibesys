@@ -13,6 +13,7 @@ from hypothesis import strategies as st
 from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter, ValidationError
 
+from entrypoints.protocol_schema import built_in_span_attributes
 from server.api.protocol import (
     MAX_ACTIVE_EXECUTIONS_CHUNKS,
     ProtocolRequest,
@@ -86,7 +87,15 @@ def _definition(document: dict[str, Any], ref: str) -> dict[str, Any]:
 
 
 def test_committed_protocol_schema_matches_python_contract() -> None:
-    assert _committed_schema() == protocol_json_schema()
+    assert _committed_schema() == protocol_json_schema(built_in_span_attributes())
+
+
+def test_the_protocol_exports_each_declared_span_kinds_attribute_schema() -> None:
+    defs = protocol_json_schema(built_in_span_attributes())["$defs"]
+    dynamic = defs["DynamicSpanAttributes"]["properties"]
+    assert set(dynamic) == {"planning_call", "workstream", "agent_turn", "gate"}
+    assert set(defs["WorkstreamAttrs"]["properties"]) == {"hypothesis_id", "parent_revision"}
+    assert set(defs["GateAttrs"]["properties"]) == {"stage", "metric_value", "vs_baseline"}
 
 
 @given(

@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Never
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, create_model
 
 from server.api.iterations import IterationSlice
 from server.api.protocol import ProtocolRequest, Response, RunSnapshot, ServerMessage
@@ -37,7 +37,7 @@ from vibesys.api import (
 from vs_logs.api import NarrationLine
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Mapping
 
 _LOCAL_REF_PREFIX = "#/"
 _OPTION_ARGUMENT_COUNT = 2
@@ -243,14 +243,40 @@ def _require_keywords(node: object, supported: frozenset[str], path: str) -> Non
             _require_keywords(child, supported, f"{path}.{key}")
 
 
-def protocol_json_schema() -> dict[str, Any]:
+type SpanAttributeModels = Mapping[str, Mapping[str, type[BaseModel]]]
+"""For each orchestration, the attribute model of each kind of span it labels."""
+
+
+def protocol_json_schema(span_attributes: SpanAttributeModels | None = None) -> dict[str, Any]:
     """Return the published JSON Schema document for the server protocol.
 
     This is the authoritative export. The committed
     ``protocol.schema.json`` artifact and every generated client come from
     here, not from ``ProtocolDocument.model_json_schema()`` directly.
+    ``span_attributes`` are the orchestrations' span kinds (the composition root supplies the
+    built-in ones): the document's ``span_attributes`` holds each kind's attribute schema, so a
+    span label's ``attrs_json`` has a generated type per kind.
     """
-    return require_tagged_union_discriminants(ProtocolDocument.model_json_schema())
+    document = create_model(
+        "ProtocolDocument",
+        __base__=ProtocolDocument,
+        span_attributes=(_span_attributes_model(span_attributes or {}), None),
+    )
+    return require_tagged_union_discriminants(document.model_json_schema())
+
+
+def _span_attributes_model(span_attributes: SpanAttributeModels) -> type[BaseModel]:
+    """One optional field per orchestration, each one optional field per kind of span."""
+    fields: dict[str, Any] = {}
+    for orchestration, kinds in sorted(span_attributes.items()):
+        name = "".join(part.title() for part in orchestration.replace("-", "_").split("_"))
+        per_kind = {kind: (model | None, None) for kind, model in sorted(kinds.items())}
+        model = create_model(f"{name}SpanAttributes", __config__=_STRICT, **per_kind)
+        fields[orchestration] = (model | None, None)
+    return create_model("SpanAttributes", __config__=_STRICT, **fields)
+
+
+_STRICT = ConfigDict(extra="forbid")
 
 
 def response_payload_json_schema() -> dict[str, Any]:
@@ -1209,9 +1235,7 @@ def _mark_required(member: dict[str, Any], property_name: str, path: str) -> Non
 def main() -> None:
     """Write the public protocol JSON schema to the requested path."""
     arguments = sys.argv[1:]
-    if len(arguments) == 1:
-        document, output = protocol_json_schema(), Path(arguments[0])
-    elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--host-helper-schema":
+    if len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--host-helper-schema":
         document, output = host_helper_json_schema(), Path(arguments[1])
     elif len(arguments) == _OPTION_ARGUMENT_COUNT and arguments[0] == "--response-payload-schema":
         document, output = response_payload_json_schema(), Path(arguments[1])
@@ -1238,9 +1262,10 @@ def main() -> None:
     else:
         message = (
             "usage: python -m server.api.schema "
-            "[--host-helper-schema|--host-helper-module|--response-payload-schema|"
+            "(--host-helper-schema|--host-helper-module|--response-payload-schema|"
             "--response-payload-module|"
-            "--response-payload-fixture|--run-event-module] OUTPUT"
+            "--response-payload-fixture|--run-event-module) OUTPUT; the protocol schema itself "
+            "is written by python -m entrypoints.protocol_schema OUTPUT"
         )
         raise SystemExit(message)
     output.parent.mkdir(parents=True, exist_ok=True)

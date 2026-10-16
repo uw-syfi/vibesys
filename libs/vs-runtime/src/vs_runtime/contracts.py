@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from vs_core.api import EvidenceRequirements
+from vs_core.api import EvidenceRequirements, SpanKind
 from vs_evaluation.api import EvidenceFailureKind
 from vs_evaluator_protocol.api import PartialMeasurement
 
@@ -799,6 +799,9 @@ class CorePolicy:
     The runtime offers them beside the role operations, so a strategy that declares one as
     required fails at composition when the policy supplies no owner.
     """
+    span_kinds: tuple[SpanKind, ...] = ()
+    """The kinds of span the strategy labels (its ``SearchDef.spans``): the protocol exports
+    each kind's attribute schema, so clients get its types before any run starts."""
 
 
 @dataclass(frozen=True, slots=True)

@@ -861,10 +861,15 @@ export type Logger = string;
 export type Thread = string;
 export type Message3 = string;
 export type Traceback = string | null;
+export type Role1 = string;
+export type Model8 = string | null;
+export type Stage3 = string;
+export type MetricValue = number | null;
+export type VsBaseline = number | null;
+export type Call = number;
+export type HypothesisId1 = string;
+export type ParentRevision = string;
 
-/**
- * Root schema document for the public server protocol.
- */
 export interface ProtocolDocument {
   request: Request;
   response: Response;
@@ -873,6 +878,7 @@ export interface ProtocolDocument {
   server_message: ServerMessage;
   log_owner: LogOwner;
   narration_line: NarrationLine;
+  span_attributes?: SpanAttributes;
 }
 /**
  * Request pausing after the active agent call.
@@ -2226,4 +2232,43 @@ export interface NarrationLine {
   thread: Thread;
   message: Message3;
   traceback?: Traceback;
+}
+export interface SpanAttributes {
+  dynamic?: DynamicSpanAttributes | null;
+}
+export interface DynamicSpanAttributes {
+  agent_turn?: AgentTurnAttrs | null;
+  gate?: GateAttrs | null;
+  planning_call?: PlanningAttrs | null;
+  workstream?: WorkstreamAttrs | null;
+}
+/**
+ * An agent turn: the role asked and the model it runs on (None: the run's default).
+ *
+ * The provider and the reasoning effort are the host's settings, which the search never sees.
+ */
+export interface AgentTurnAttrs {
+  role: Role1;
+  model?: Model8;
+}
+/**
+ * A trusted measurement of a candidate: its stages, its value, and the ratio to the input's.
+ */
+export interface GateAttrs {
+  stage: Stage3;
+  metric_value?: MetricValue;
+  vs_baseline?: VsBaseline;
+}
+/**
+ * A planning call: which call of the run it is.
+ */
+export interface PlanningAttrs {
+  call: Call;
+}
+/**
+ * A workstream: the hypothesis it works on and the revision it builds on.
+ */
+export interface WorkstreamAttrs {
+  hypothesis_id: HypothesisId1;
+  parent_revision: ParentRevision;
 }

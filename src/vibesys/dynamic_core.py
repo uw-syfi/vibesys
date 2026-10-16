@@ -223,6 +223,7 @@ def dynamic_core_policy() -> CorePolicy:
         prompt_templates=Path(prompts.__file__).parent,
         prompt_fallback_roots=(CORE_PROTOCOL_DIR,),
         owned_operations=handoff_entries,
+        span_kinds=dynamic.spans,
     )
 
 
