@@ -628,12 +628,25 @@ Each component has `name`, nonnegative `cost`, `share` between zero and one, and
 an optional `evidence` string list. This configuration is task capability, not
 a modality. Other loops ignore it.
 
-The command runs in the run's own command environment: under `--run-environment
-slurm` that is the editor container, not a Slurm job, so a Python environment that
-exists only on the host (or is exposed to GPU jobs through `read_only_paths`) is not
-there. Make the command self-contained in the workspace. When it fails, the run stops
-at the first capture and the error names the command, where it ran, and the output tail
-(exit code 127 means a program it calls was not found).
+The command runs in the candidate workspace through the run's capture-command
+environment. Under `--run-environment slurm` with local transport and
+`[vibesys.agent_gpu]`, that means a confined Slurm GPU job with the same partition,
+job-name prefix, concurrency cap, `read_only_paths`, host environment policy, and
+run-scoped launcher as `vibesys-gpu`. Its seconds timeout is rounded up for Slurm's
+minute allocation while VibeSys still cancels at the exact requested second. Without
+`[vibesys.agent_gpu]`, and in every other run environment, capture keeps using the
+editor command runner. Local validation commands always use the editor runner; enabling
+agent GPU jobs does not move validation to Slurm.
+
+Make the command and its dependencies visible in the environment selected above. When
+it fails, the run stops at the first capture and the error names the command, where it
+ran, and the bounded diagnostic tail (exit code 127 means a program it calls was not
+found). Before submission, VibeSys durably records the capture's stable Slurm job
+name. Cancellation drains the capture before its temporary output and candidate are
+removed. If Slurm cannot confirm the named job is gone, VibeSys reports an unresolved
+stop and retains those resources rather than deleting files a live job may still use.
+A resumed host cancels and queries the recorded name; it removes the candidate only
+after the scheduler confirms that job is absent.
 
 `[agent].domain` in `vibesys.input.toml` supplies cross-cutting problem-space
 context for the agent and evolve loops. Registered domains include:

@@ -15,6 +15,7 @@ from vs_runtime._agent_gpu_commands import (
     agent_gpu_launcher,
 )
 from vs_runtime._brokered_session import BrokeredRunEnvironmentSession, HostBroker
+from vs_runtime._command_environment_session import command_environment_session
 from vs_runtime._container_runtime_policy import reject_docker_in_docker
 from vs_runtime._host_command_bridge import (
     agent_paths,
@@ -54,6 +55,8 @@ from vs_sandbox.api import HostResource, HostResourceAccess, SandboxSession
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
     BrokerTransport,
+    GpuCaptureRecovery,
+    GpuCommandRunner,
     GpuCommands,
     HostCommandBroker,
     RunRoots,
@@ -150,6 +153,12 @@ class _Mode(Protocol):
         """What the host command broker offers as GPU commands, if anything."""
         ...
 
+    def capture_recovery(
+        self, run_id: str, *, system: EnvironmentSystem
+    ) -> GpuCaptureRecovery | None:
+        """Return a run owner that reconciles captures without opening an editor."""
+        ...
+
     def editor_env(self, launcher: Path) -> dict[str, str] | None:
         """The container variables the client launcher needs, if any."""
         ...
@@ -190,6 +199,9 @@ class _ClusterOnly:
         self, request: RunEnvironmentRequest, confinement: JobConfinement | None
     ) -> None:
         del request, confinement
+
+    def capture_recovery(self, run_id: str, *, system: EnvironmentSystem) -> None:
+        del run_id, system
 
     def editor_env(self, launcher: Path) -> None:
         del launcher
@@ -258,21 +270,27 @@ class _AgentGpuMode:
             config,
             workspace=request.workspace,
             project_path_policy=request.project_path_policy,
-            launcher=self._launcher(config, request),
+            launcher=self._launcher(config, request.run_id, request.system),
             confinement=confinement,
         )
+
+    def capture_recovery(self, run_id: str, *, system: EnvironmentSystem) -> GpuCaptureRecovery:
+        """Build the scheduler owner before any replacement workspace session exists."""
+        config = self.config.for_run(run_id)
+        return GpuCaptureRecovery(config, self._launcher(config, run_id, system))
 
     def editor_env(self, launcher: Path) -> dict[str, str]:
         return agent_gpu_env(launcher)
 
-    def _launcher(self, config: AgentGpuConfig, request: RunEnvironmentRequest) -> GpuLauncher:
+    def _launcher(
+        self, config: AgentGpuConfig, run_id: str, system: EnvironmentSystem
+    ) -> GpuLauncher:
         # Sessions may open concurrently: ``setdefault`` is one atomic dictionary
         # operation, so every session gets the same launcher even if two built one.
         # *config* is the run's (its job name prefix carries the run), so the key
         # carries the run too: two runs never share a launcher, nor a cap.
-        system = request.system
         built = (system, agent_gpu_launcher(config, self.shell_command, system))
-        return self.launchers.setdefault((request.run_id, id(system)), built)[1]
+        return self.launchers.setdefault((run_id, id(system)), built)[1]
 
 
 #: The profilers whose directories the agent is told when a job's PATH lacks them.
@@ -355,6 +373,12 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
         run and reports it once, not logged by every open.
         """
         return self._deprecation
+
+    def capture_recovery(
+        self, run_id: str, *, system: EnvironmentSystem
+    ) -> GpuCaptureRecovery | None:
+        """Return the run's scheduler owner without opening a root editor session."""
+        return self._mode.capture_recovery(run_id, system=system)
 
     # What the run consults before it prepares the environment. The profiler
     # follows the mode: the agent's own GPU commands run where the agent's
@@ -530,12 +554,19 @@ class SlurmEnvironment(_NoopWorkspaceRecovery):
                 cluster_evaluation=ClusterEvaluationFacts(self._settings, plans.plan),
             )
             with _starting_container(request) as output:
-                session = SandboxSession.start(sandbox, view, output=output)
+                session = command_environment_session(
+                    SandboxSession.start(sandbox, view, output=output)
+                )
         except BaseException:
             for broker in reversed(brokers):
                 broker.close()
             raise
-        return BrokeredRunEnvironmentSession(session, tuple(brokers))
+        capture = (
+            None
+            if gpu is None
+            else GpuCommandRunner(gpu, request.workspace, threads=request.system.threads)
+        )
+        return BrokeredRunEnvironmentSession(session, tuple(brokers), capture_override=capture)
 
     def _write_plans(
         self,

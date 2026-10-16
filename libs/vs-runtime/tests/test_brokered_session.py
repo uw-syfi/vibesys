@@ -47,6 +47,10 @@ class _Session(_CloseRecord):
         self.sandbox = FakeCommandRunner()
         self.view = RunEnvironmentView(paths=AgentPaths())
 
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
+
     def __enter__(self) -> _Session:
         return self
 

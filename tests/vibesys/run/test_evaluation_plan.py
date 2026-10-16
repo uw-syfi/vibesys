@@ -32,6 +32,10 @@ class _Session:
         )
     )
 
+    @property
+    def capture_commands(self) -> CommandRunner:
+        return self.sandbox
+
     def __enter__(self) -> _Session:
         return self
 

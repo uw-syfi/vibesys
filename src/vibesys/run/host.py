@@ -183,7 +183,7 @@ class _ProductHostFactory:
         return self._components(resources, ownership)
 
     def _components(self, resources: _PreparedRun, ownership: ReleaseStack) -> RunHostComponents:
-        blocking = BlockingOperations(self.blocking)
+        blocking = BlockingOperations(self.blocking, self.timing.threads)
         project = resources.project_resources
         environment = resources.environment_resources
         logger = project.logger
@@ -457,6 +457,7 @@ class _ProductHostFactory:
                 evaluation_diagnostics=self._evaluation_diagnostic,
                 stateless_tool_servers=self._stateless_tool_servers(tool_context),
                 commands=agent_runtime.commands,
+                capture_commands=agent_runtime.capture_commands,
                 # No round_label: this instance is built once for the run and
                 # shared across every candidate's local-validation attempts,
                 # so no single label identifies "one attempt" for it (see

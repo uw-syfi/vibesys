@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from vs_github.api import GitHubClient
     from vs_mcp.api import ToolServerDescriptor
     from vs_project.api import Project, StateNamespace, StateStore
-    from vs_runtime.api import AgentRole, Commands, CorePolicy, RunFacts
+    from vs_runtime.api import AgentRole, CaptureCommands, Commands, CorePolicy, RunFacts
     from vs_runtime.api.core import (
         CommitObserver,
         CoreRuntimeBindings,
@@ -175,7 +175,9 @@ class CoreResources:
     stateless_tool_servers: Mapping[str, ToolServerDescriptor] = field(default_factory=dict)
     """The server of each stateless tool a role may declare, keyed by tool id."""
     commands: Commands | None = None
-    """Sandboxed process execution in a run workspace, which a command-capturing operation uses."""
+    """Ordinary editor process execution in a run workspace, used by local validation."""
+    capture_commands: CaptureCommands | None = None
+    """Role-specific process execution used only by command-capturing operations."""
     local_validation_events: LocalValidationEvents | None = None
     """Hears each recipe's start and settled result, for the host's event stream."""
 
@@ -428,6 +430,7 @@ def _catalog(
         retention_label=policy.retention_label,
         variables=plan.prompt_variables,
         commands=resources.commands,
+        capture_commands=resources.capture_commands,
         replies=plan.search.reply_schemas,
         validation_passes=StateValidationPasses(
             resources.project.state.local_namespace(resources.run_id, "validation")

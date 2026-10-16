@@ -11,7 +11,7 @@ import shutil
 import sys
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, cast
 
 import pytest
 from tests.vibesys.orchestration.dynamic.core_policy._inputs import (
@@ -41,14 +41,26 @@ from vs_runtime.api.testing import (
     daemon_engine,
     idle_environment_system,
 )
-from vs_sandbox.api import ComputeBackendImpl, DockerSandbox, SandboxKind
+from vs_sandbox.api import (
+    CaptureExecutionIdentity,
+    CaptureExecutionKind,
+    ComputeBackendImpl,
+    DockerSandbox,
+    SandboxKind,
+)
 from vs_sandbox.api.slurm import (
     AgentGpuConfig,
     SlurmPolicyError,
     load_slurm_operator_settings,
 )
 from vs_sandbox.api.testing import FakeComputeBackend
-from vs_sim.api import OsThreads, SubprocessPipedProcessLauncher, SubprocessProbe, UnixNetwork
+from vs_sim.api import (
+    OsThreads,
+    ProcessSpec,
+    SubprocessPipedProcessLauncher,
+    SubprocessProbe,
+    UnixNetwork,
+)
 from vs_sim.api.testing import (
     NO_PROCESSES,
     FakeProcesses,
@@ -62,7 +74,14 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from vs_runtime.api.infrastructure import RunEnvironmentSession
+    from vs_sim.api import Threads
 from vs_sim.api import DISCARD
+
+
+class _RecoverableCaptureSession(Protocol):
+    @property
+    def capture_execution(self) -> CaptureExecutionIdentity | None: ...
+
 
 _SLURM_CONFIG = """[slurm]
 name = "test-cluster"
@@ -137,6 +156,19 @@ class _PassThroughConfinement:
     def wrap(self, workspace: Path, argv: Sequence[str]) -> list[str]:
         del workspace
         return list(argv)
+
+
+class _ImmediateSleepThreads:
+    """Keep this real-confinement tier concurrent without waiting on scheduler observation gaps."""
+
+    def __init__(self, delegate: Threads) -> None:
+        self._delegate = delegate
+
+    def sleep(self, seconds: float) -> None:
+        del seconds
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._delegate, name)
 
 
 def _write_agent_gpu_slurm_config(tmp_path: Path, srun_log: Path) -> Path:
@@ -246,6 +278,17 @@ def test_the_agent_never_runs_on_the_host_for_either_slurm_environment(
         # Only an agent that may run GPU commands reaches a broker at all.
         has_broker = any(token.startswith("VIBESYS_COMMAND_BROKER_TOKEN=") for token in run)
         assert has_broker is (name not in ("slurm", "slurm-local"))
+        # Profile attribution has its own role: agent_gpu routes it through the
+        # shared Slurm launcher, while every other mode keeps the editor runner.
+        assert (session.capture_commands is not session.sandbox) is has_broker
+        if has_broker:
+            identity = cast("_RecoverableCaptureSession", session).capture_execution
+            assert identity is not None
+            assert session.capture_commands.id == identity.execution_id
+            assert identity.kind is CaptureExecutionKind.SLURM_GPU
+        else:
+            identity = cast("_RecoverableCaptureSession", session).capture_execution
+            assert identity is None
     finally:
         session.close()
 
@@ -617,7 +660,34 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
     backend = DaemonBackend(
         daemon_engine(tmp_path, launcher=SubprocessPipedProcessLauncher()), threads=OsThreads()
     )
-    request = _request(tmp_path, backend)
+    scheduler_actions: list[str] = []
+
+    def settled_scheduler(spec: ProcessSpec) -> ProcessScript:
+        shell_command = spec.argv[-1]
+        if shell_command == "sinfo" or shell_command.startswith("sinfo "):
+            return ProcessScript(stdout=b"main* 2:00:00\n")
+        action = next(
+            (
+                name
+                for name in ("scancel", "squeue")
+                if shell_command == name or shell_command.startswith(f"{name} ")
+            ),
+            None,
+        )
+        assert action is not None, spec.argv
+        scheduler_actions.append(action)
+        return ProcessScript()
+
+    scheduler = FakeProcesses(settled_scheduler, lambda _seconds: None)
+    base_request = _request(tmp_path, backend)
+    request = replace(
+        base_request,
+        system=replace(
+            base_request.system,
+            threads=cast("Threads", _ImmediateSleepThreads(base_request.system.threads)),
+            slurm_processes=scheduler,
+        ),
+    )
     environment = _real_confinement_environment(tmp_path, backend, [tools] if exposed else [])
     session = open_run_environment(environment, request)
     try:
@@ -632,6 +702,8 @@ def test_a_gpu_job_reads_an_operator_declared_path_outside_the_workspace_and_nev
         assert ("operator interpreter" in read.output) is exposed
         assert write.exit_code != 0
         assert not (tools / "written.txt").exists()
+        failed_commands = 1 if exposed else 2
+        assert scheduler_actions == ["scancel", *("squeue",) * 6] * failed_commands
     finally:
         session.close()
 
