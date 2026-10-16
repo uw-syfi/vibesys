@@ -85,4 +85,5 @@ signal.pause()
     assert leader_and_group[1] == leader_and_group[2]
     assert status == -signal.SIGTERM
     programs = [argv[-1].split()[0] for argv, _timeout in probe.calls]
-    assert programs == ["scancel", "squeue"]
+    # The partition-limit query before submission, then the cancel and its queue check.
+    assert programs == ["sinfo", "scancel", "squeue"]
