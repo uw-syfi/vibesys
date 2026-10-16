@@ -25,8 +25,10 @@
     "@vibesys/feature-settings": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/run-session": "workspace:*",
     "@vibesys/runs": "workspace:*",
     "@vibesys/store": "workspace:*",
+    "@vibesys/transport": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1"

@@ -1,4 +1,6 @@
 /** The Run screen's renderer entry: the screen, and its store over the ports the app provides. */
+
+export type {LiveSession, OpenSession, SessionObserver} from './effects/live-session.js';
 export {
   createRunPageStore,
   type RunPageLogs,
@@ -9,6 +11,7 @@ export {type RunPageOptions, useRunPage} from './effects/use-run-page.js';
 export {
   type RunPageBridge,
   type RunPageNavigation,
+  type RunPagePage,
   type RunPageTarget,
   welcomeRunPorts,
 } from './effects/welcome-ports.js';

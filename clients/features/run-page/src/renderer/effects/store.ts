@@ -2,8 +2,10 @@
  * The Run screen's shell: its store over the ports the app provides. It performs the reducer's
  * requests (commands through the app's run-control paths, the force-stop bound on the injected
  * clock, the stream listing) and keeps one log follower per stream the screen needs
- * (`followedStreams`), feeding each follower's view back as an action. `dispose` stops every
- * follower and cancels the bound; a reply that arrives later is dropped by its token.
+ * (`followedStreams`), feeding each follower's view back as an action. It attaches the live run
+ * when the reducer asks, and keeps the run's session open while the run is attached
+ * (`SessionHolder`). `dispose` stops every follower, closes the session, lets the run go and cancels
+ * the bound; a reply that arrives later is dropped by its token.
  */
 import {type LogListOutcome, type LogTransport, startLogFollower} from '@vibesys/logs';
 import type {ScheduleTimeout} from '@vibesys/machine';
@@ -17,6 +19,7 @@ import {
   runPageInitial,
   runPageStep,
 } from '../../state/index.js';
+import {type OpenSession, SessionHolder} from './live-session.js';
 
 /** The run's logs as the app reads them. */
 export interface RunPageLogs {
@@ -28,8 +31,12 @@ export interface RunPageLogs {
 export interface RunPagePorts {
   /** Stop the run (`force`: without waiting for a safe point); resolves false when it could not. */
   stop(force: boolean): Promise<boolean>;
-  pause(): void;
-  resume(): void;
+  /** Attach the live run's server `instance` to this window; resolves null, or why it could not. */
+  attach(instance: string): Promise<string | null>;
+  /** Let the attached run go. */
+  release(): void;
+  /** Open the attached run's session. */
+  readonly openSession: OpenSession;
   /** Resume an ended run that its end record says can resume. */
   resumeEnded(fromRound: number | null): void;
   openWindow(): void;
@@ -89,12 +96,6 @@ class Followers {
 
 function performCommand(ports: RunPagePorts, request: RunPageRequest): void {
   switch (request.kind) {
-    case 'pause':
-      ports.pause();
-      return;
-    case 'resume':
-      ports.resume();
-      return;
     case 'resume-ended':
       ports.resumeEnded(request.fromRound);
       return;
@@ -119,6 +120,8 @@ export function createRunPageStore(
 ): RunPageStore {
   const cancels = new Set<() => void>();
   let disposed = false;
+  // Reports reach the store only while it lives; `store` is assigned before any can arrive.
+  const sessions = new SessionHolder(ports.openSession, action => store.dispatch(action));
   const live =
     (dispatch: Dispatch): Dispatch =>
     action => {
@@ -152,6 +155,23 @@ export function createRunPageStore(
           );
         return;
       }
+      case 'attach':
+        void ports.attach(request.instance).then(
+          error => dispatch({type: 'attached', token: request.token, error}),
+          (error: unknown) =>
+            dispatch({type: 'attached', token: request.token, error: String(error)}),
+        );
+        return;
+      case 'release':
+        sessions.close();
+        ports.release();
+        return;
+      case 'pause':
+      case 'resume':
+        void sessions.command(request.kind).then(refused => {
+          if (refused !== null) dispatch({type: 'command-refused', message: refused});
+        });
+        return;
       default:
         performCommand(ports, request);
     }
@@ -163,13 +183,19 @@ export function createRunPageStore(
   );
   const followers =
     ports.logs === null ? null : new Followers(ports.logs, schedule, live(store.dispatch));
-  const unsubscribe = store.subscribe(() => followers?.reconcile(store.getState()));
+  const unsubscribe = store.subscribe(() => {
+    const state = store.getState();
+    followers?.reconcile(state);
+    sessions.reconcile(state);
+  });
   return {
     ...store,
     dispose: () => {
       disposed = true;
       unsubscribe();
       followers?.stop();
+      sessions.close();
+      if (store.getState().link.kind !== 'none') ports.release();
       for (const cancel of cancels) cancel();
       cancels.clear();
     },

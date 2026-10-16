@@ -3,7 +3,8 @@ import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import type {LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
 import type {AbortSignalLike} from '@vibesys/transport';
-import {stopBannerView} from '../../state/index.js';
+import {headerView, stopBannerView} from '../../state/index.js';
+import type {LiveSession, SessionObserver} from '../index.js';
 import {createRunPageStore, type RunPagePorts} from '../index.js';
 
 /** A clock the test advances by hand: the shell's only source of time. */
@@ -45,15 +46,43 @@ function running(): HostRun {
   };
 }
 
-function fakePorts(stops: boolean[]): RunPagePorts {
+/** The app's side, recording what the store asked; its one session is held open for the test. */
+class FakeApp {
+  readonly asked: string[] = [];
+  observer: SessionObserver | null = null;
+  refuse: string | null = null;
+
+  session(): LiveSession {
+    return {
+      command: kind => {
+        this.asked.push(kind);
+        return Promise.resolve(this.refuse);
+      },
+      close: () => {
+        this.asked.push('close');
+        this.observer = null;
+      },
+    };
+  }
+}
+
+function fakePorts(stops: boolean[], app = new FakeApp()): RunPagePorts {
   const ignore = (): void => {};
   return {
     stop: force => {
       stops.push(force);
       return Promise.resolve(true);
     },
-    pause: ignore,
-    resume: ignore,
+    attach: instance => {
+      app.asked.push(`attach ${instance}`);
+      return Promise.resolve(null);
+    },
+    release: () => app.asked.push('release'),
+    openSession: observer => {
+      app.asked.push('open');
+      app.observer = observer;
+      return app.session();
+    },
     resumeEnded: ignore,
     openWindow: ignore,
     archive: ignore,
@@ -147,5 +176,43 @@ test('an instance replacement restarts a follower even when the stream id is reu
     'a1b2c3d4e5f6',
     'fedcba654321',
   ]);
+  store.dispose();
+});
+
+const LIVE_VIEW = {hasSnapshot: true, streaming: true, controls: true, error: null};
+
+test('a live run is attached, its session opened, and Pause and Resume go through it', async () => {
+  const app = new FakeApp();
+  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+  await Promise.resolve();
+  expect(app.asked).toEqual(['attach a1b2c3d4e5f6', 'open']);
+  expect(headerView(store.getState()).pause.disabledReason).toBe('Connecting to the run…');
+  app.observer?.session(LIVE_VIEW);
+  expect(headerView(store.getState()).pause.disabledReason).toBeNull();
+  store.dispatch({type: 'pause'});
+  app.refuse = 'not now';
+  store.dispatch({type: 'pause'});
+  await Promise.resolve();
+  expect(app.asked.slice(2)).toEqual(['pause', 'pause']);
+  expect(store.getState().notice).toBe('not now');
+  // The run ends: its session closes and the window lets it go.
+  store.dispatch({
+    type: 'record',
+    record: {kind: 'ended', run: {...running(), phase: 'completed'}},
+  });
+  expect(app.asked.slice(4)).toEqual(['close', 'release']);
+  store.dispose();
+});
+
+test('a session that reports after its run ended reaches nothing', async () => {
+  const app = new FakeApp();
+  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+  await Promise.resolve();
+  const late = app.observer;
+  store.dispatch({type: 'record', record: {kind: 'unlisted'}});
+  late?.session(LIVE_VIEW);
+  expect(store.getState().session).toBeNull();
   store.dispose();
 });

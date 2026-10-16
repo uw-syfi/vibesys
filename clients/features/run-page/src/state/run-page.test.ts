@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import type {RunEvent} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import {emptyLogView, foldChunk} from '@vibesys/logs';
@@ -118,8 +119,54 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'work-outcome', outcome: 'accepted'},
 ];
 
+/** A span event at `sequence`, or another event the trace must skip. */
+function runEvent(random: Seeded, sequence: number): RunEvent {
+  const type = random.pick(['span_started', 'span_ended', 'agent_output_chunk'] as const);
+  const span = {id: `s${random.int(4)}`, name: 'turn', status: 'running'};
+  return {
+    sequence,
+    type,
+    data: type === 'agent_output_chunk' ? null : {span},
+  } as unknown as RunEvent;
+}
+
+/** What the attached run's session might report, current or late. */
+function liveAction(random: Seeded, issued: readonly number[]): RunPageAction {
+  switch (random.int(4)) {
+    case 0:
+      return {
+        type: 'attached',
+        token: random.pick(issued),
+        error: random.bool() ? null : 'refused',
+      };
+    case 1:
+      return {
+        type: 'session',
+        session: {
+          hasSnapshot: random.bool(),
+          streaming: true,
+          controls: random.bool(),
+          error: null,
+        },
+      };
+    case 2:
+      return {
+        type: 'run-data',
+        data: {
+          kind: random.pick(['events', 'rebootstrap'] as const),
+          events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
+        },
+      };
+    default:
+      return {type: 'view', view: random.bool() ? {at: 'live'} : {at: random.int(30)}};
+  }
+}
+
 function randomAction(random: Seeded, issued: readonly number[]): RunPageAction {
-  switch (random.int(6)) {
+  switch (random.int(8)) {
+    case 6:
+    case 7:
+      return liveAction(random, issued);
     case 0:
       return {type: 'record', record: random.pick(RECORDS)};
     case 1:
@@ -140,19 +187,23 @@ function randomAction(random: Seeded, issued: readonly number[]): RunPageAction 
 }
 
 function issues(request: RunPageRequest): number | null {
-  return request.kind === 'arm-bound' || request.kind === 'list-logs' ? request.token : null;
+  return request.kind === 'arm-bound' || request.kind === 'list-logs' || request.kind === 'attach'
+    ? request.token
+    : null;
 }
 
 function awaited(state: RunPageState) {
   return {
     bound: state.stop.kind === 'stopping' ? state.stop.bound : null,
     logs: state.logs.kind === 'listing' ? state.logs.token : null,
+    attach: state.link.kind === 'attaching' ? state.link.token : null,
   };
 }
 
 function reply(action: RunPageAction) {
   if (action.type === 'bound-elapsed') return {slot: 'bound', token: action.token};
   if (action.type === 'streams') return {slot: 'logs', token: action.token};
+  if (action.type === 'attached') return {slot: 'attach', token: action.token};
   return null;
 }
 

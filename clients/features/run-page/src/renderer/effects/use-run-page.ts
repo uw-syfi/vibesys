@@ -4,16 +4,23 @@
  * the logs channel let go) when it unmounts or shows another run.
  */
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {useEffect, useState, useSyncExternalStore} from 'react';
+import {useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {
   type RunPageAction,
   type RunPageSeed,
   type RunPageState,
   type RunRecord,
   sameRecord,
+  type ViewedRun,
+  viewedRun,
 } from '../../state/index.js';
 import {createRunPageStore, type RunPageStore} from './store.js';
-import {type RunPageBridge, type RunPageNavigation, welcomeRunPorts} from './welcome-ports.js';
+import {
+  type RunPageBridge,
+  type RunPageNavigation,
+  type RunPagePage,
+  welcomeRunPorts,
+} from './welcome-ports.js';
 
 export interface RunPageOptions {
   readonly seed: RunPageSeed;
@@ -21,6 +28,8 @@ export interface RunPageOptions {
   readonly bridge: RunPageBridge;
   readonly navigation: RunPageNavigation;
   readonly schedule: ScheduleTimeout;
+  /** The page the run's session runs in (its document, window and navigator). */
+  readonly page: RunPagePage;
 }
 
 const NO_STORE = {
@@ -32,8 +41,10 @@ const NO_STORE = {
 export function useRunPage(options: RunPageOptions): {
   readonly state: RunPageState;
   readonly dispatch: (action: RunPageAction) => void;
+  /** The run at the view's sequence, for the tabs (`viewedRun`). */
+  readonly run: ViewedRun;
 } | null {
-  const {seed, record, bridge, navigation, schedule} = options;
+  const {seed, record, bridge, navigation, schedule, page} = options;
   const [store, setStore] = useState<RunPageStore | null>(null);
   const key = `${seed.identity.host} ${seed.identity.runId}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the store belongs to one run (`key`). Listing `seed`, `bridge`, `navigation` and `schedule` would dispose the store, its followers and its stop bound whenever the caller passes a new but equal object; a ref copy of them would hide the same choice less visibly. The record reaches the store through the effect below.
@@ -47,13 +58,14 @@ export function useRunPage(options: RunPageOptions): {
       bridge,
       {run: seed.identity, project: seed.title.project, instance},
       navigation,
+      page,
     );
     created = createRunPageStore(seed, ports, schedule);
     setStore(created);
     const owned = created;
     return () => {
       owned.dispose();
-      ports.release();
+      ports.releaseLogs();
       setStore(null);
     };
   }, [key]);
@@ -64,5 +76,11 @@ export function useRunPage(options: RunPageOptions): {
   }, [store, record]);
   const source = store ?? NO_STORE;
   const state = useSyncExternalStore(source.subscribe, source.getState, source.getState);
-  return store === null || state === null ? null : {state, dispatch: store.dispatch};
+  const runSlice = state?.run;
+  const view = state?.view;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the viewed run depends only on the run slice and the view; recomputing it for every other change of `state` would refold the trace on each log line.
+  const run = useMemo(() => (state === null ? null : viewedRun(state)), [runSlice, view]);
+  return store === null || state === null || run === null
+    ? null
+    : {state, dispatch: store.dispatch, run};
 }

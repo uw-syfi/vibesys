@@ -22,6 +22,15 @@
       "path": "../../libs/contracts/tsconfig.host-helper.json"
     },
     {
+      "path": "../../libs/contracts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.trace.json"
+    },
+    {
       "path": "../../libs/hosts/tsconfig.lib.json"
     },
     {

@@ -37,6 +37,12 @@
       "path": "../../libs/transport/tsconfig.lib.json"
     },
     {
+      "path": "../../libs/run-session/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/machine/tsconfig.lib.json"
     },
     {

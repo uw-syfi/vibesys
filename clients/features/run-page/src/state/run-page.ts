@@ -8,12 +8,26 @@
  * token comes back while the run is still stopping is "Force stop" offered, and a reply for an
  * earlier stop is dropped. Commands are requests the shell performs through the existing
  * run-control paths; the reducer does no I/O and reads no clock.
+ *
+ * A live run is attached under a token (`link`); once attached, the shell runs the run's session
+ * (`@vibesys/run-session`) and reports what it says (`session`) and what it folded (`run`). Pause
+ * and Resume are protocol commands, so they are offered only while the session can deliver one.
  */
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
+import type {CoreState} from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
 import {WORK_FILTER_ALL, type WorkFilter, type WorkOutcome} from './work-filter.js';
+import {
+  EMPTY_RUN_FOLD,
+  type RunData,
+  type RunFold,
+  type RunLink,
+  type SessionView,
+  traceProblems,
+  traceStep,
+} from './live.js';
 
 /** How long a Stop may take before "Force stop" is offered. */
 export const FORCE_STOP_BOUND_MS = 2 * 60 * 1000;
@@ -22,7 +36,7 @@ export type RunTab = 'overview' | 'map' | 'work' | 'logs';
 export const RUN_TABS: readonly RunTab[] = ['overview', 'map', 'work', 'logs'];
 
 /** What the app could not do for this run, with why; an action named here is shown disabled. */
-export type RunCapability = 'pause' | 'open-window' | 'logs';
+export type RunCapability = 'open-window' | 'logs';
 export type Unavailable = Readonly<Partial<Record<RunCapability, string>>>;
 
 /** The run as the host's registry lists it: live, ended, or not (yet) listed. */
@@ -79,6 +93,16 @@ export interface RunPageState {
   readonly selected: string | null;
   /** The Work tab's search query and outcome filter. */
   readonly work: WorkFilter;
+  /** The window's hold on the live run. */
+  readonly link: RunLink;
+  /** What the attached run's session reports; null while none runs. */
+  readonly session: SessionView | null;
+  /** The run fold and trace so far. */
+  readonly run: RunFold;
+  /** The sequence the tabs show: the live end, or a past one the scrubber chose. */
+  readonly view: {readonly at: 'live'} | {readonly at: number};
+  /** Why the last command the run refused failed, until the next one. */
+  readonly notice: string | null;
   readonly next: number;
 }
 
@@ -102,7 +126,13 @@ export type RunPageAction =
   | {readonly type: 'resume-ended'}
   | {readonly type: 'open-window'}
   | {readonly type: 'archive'}
-  | {readonly type: 'run-again'};
+  | {readonly type: 'run-again'}
+  | {readonly type: 'attached'; readonly token: number; readonly error: string | null}
+  | {readonly type: 'session'; readonly session: SessionView | null}
+  | {readonly type: 'run-core'; readonly core: CoreState}
+  | {readonly type: 'run-data'; readonly data: RunData}
+  | {readonly type: 'command-refused'; readonly message: string}
+  | {readonly type: 'view'; readonly view: RunPageState['view']};
 
 export type RunPageRequest =
   | {readonly kind: 'stop'; readonly force: boolean}
@@ -113,7 +143,11 @@ export type RunPageRequest =
   | {readonly kind: 'resume-ended'; readonly fromRound: number | null}
   | {readonly kind: 'open-window'}
   | {readonly kind: 'archive'}
-  | {readonly kind: 'run-again'};
+  | {readonly kind: 'run-again'}
+  /** Attach the live run's server `instance` to this window, answering `attached` with `token`. */
+  | {readonly kind: 'attach'; readonly token: number; readonly instance: string}
+  /** Let the attached run go (its session closes with it). */
+  | {readonly kind: 'release'};
 
 export interface RunPageStep {
   readonly state: RunPageState;
@@ -137,6 +171,11 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     views: {},
     selected: null,
     work: WORK_FILTER_ALL,
+    link: {kind: 'none'},
+    session: null,
+    run: EMPTY_RUN_FOLD,
+    view: {at: 'live'},
+    notice: null,
     next: 1,
   };
 }
@@ -209,11 +248,43 @@ function recordInstance(record: RunRecord): string | null {
   return record.kind === 'unlisted' ? null : record.run.id;
 }
 
+/**
+ * The link the record calls for: a live run's server attached to this window, nothing otherwise.
+ * A new server (a resume, a restart) is attached afresh; leaving a live run releases it.
+ */
+function linked(state: RunPageState): RunPageStep {
+  const {record, link} = state;
+  const wanted = record.kind === 'live' ? record.run.id : null;
+  const held = link.kind === 'none' ? null : link.instance;
+  if (wanted === held) return {state, requests: []};
+  const release: RunPageRequest[] = link.kind === 'none' ? [] : [{kind: 'release'}];
+  if (wanted === null) {
+    return {state: {...state, link: {kind: 'none'}, session: null}, requests: release};
+  }
+  const token = state.next;
+  return {
+    state: {
+      ...state,
+      next: token + 1,
+      link: {kind: 'attaching', token, instance: wanted},
+      session: null,
+      run: EMPTY_RUN_FOLD,
+    },
+    requests: [...release, {kind: 'attach', token, instance: wanted}],
+  };
+}
+
 function withRecord(state: RunPageState, record: RunRecord): RunPageStep {
   const instanceChanged = recordInstance(state.record) !== recordInstance(record);
-  const next: RunPageState = instanceChanged
+  const fenced: RunPageState = instanceChanged
     ? {...state, record, logs: {kind: 'idle'}, views: {}, selected: null}
     : {...state, record};
+  const link = linked(fenced);
+  const step = recordStep(link.state, record);
+  return {state: step.state, requests: [...link.requests, ...step.requests]};
+}
+
+function recordStep(next: RunPageState, record: RunRecord): RunPageStep {
   if (record.kind !== 'live') {
     // The run ended (or left the listing): no stop is pending and no force is offered.
     const settled = {...next, stop: STOP_IDLE};
@@ -320,6 +391,11 @@ function stoppingStep(state: RunPageState, action: RunPageAction): RunPageStep |
   }
 }
 
+/** Whether a protocol command (Pause, Resume) can reach the run now: its session's controls are up. */
+export function commandable(state: RunPageState): boolean {
+  return state.link.kind === 'attached' && state.session?.controls === true;
+}
+
 /** A command the screen offers, sent only when the current state offers it. */
 function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
   const phase = runPhase(state);
@@ -329,12 +405,11 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
   });
   switch (action.type) {
     case 'pause':
-      return offered(
-        state.unavailable.pause === undefined && phase.kind === 'running' && !phase.pausing,
-        {kind: 'pause'},
-      );
+      return offered(commandable(state) && phase.kind === 'running' && !phase.pausing, {
+        kind: 'pause',
+      });
     case 'resume':
-      return offered(state.unavailable.pause === undefined && phase.kind === 'paused', {
+      return offered(commandable(state) && phase.kind === 'paused', {
         kind: 'resume',
       });
     case 'resume-ended': {
@@ -368,6 +443,8 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
   if (stop !== null) return stop;
   const command = commandStep(state, action);
   if (command !== null) return command;
+  const live = liveStep(state, action);
+  if (live !== null) return live;
   switch (action.type) {
     case 'record':
       return withRecord(state, action.record);
@@ -393,9 +470,60 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
   }
 }
 
+function withAttached(state: RunPageState, token: number, error: string | null): RunPageStep {
+  const {link} = state;
+  if (link.kind !== 'attaching' || link.token !== token) return {state, requests: []};
+  const next: RunLink =
+    error === null
+      ? {kind: 'attached', instance: link.instance}
+      : {kind: 'failed', instance: link.instance, message: error};
+  return {state: {...state, link: next}, requests: []};
+}
+
+/** What the attached run's session reports and folds; nothing once the link is gone. */
+function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
+  const attached = state.link.kind === 'attached';
+  switch (action.type) {
+    case 'attached':
+      return withAttached(state, action.token, action.error);
+    case 'session':
+      return {state: attached ? {...state, session: action.session} : state, requests: []};
+    case 'run-core':
+      return {
+        state: attached ? {...state, run: {...state.run, core: action.core}} : state,
+        requests: [],
+      };
+    case 'run-data':
+      return {
+        state: attached
+          ? {...state, run: {...state.run, trace: traceStep(state.run.trace, action.data)}}
+          : state,
+        requests: [],
+      };
+    case 'command-refused':
+      return {state: {...state, notice: action.message}, requests: []};
+    case 'view':
+      return {state: {...state, view: action.view}, requests: []};
+    default:
+      return null;
+  }
+}
+
+/** What must hold of the live link and the run data it brings. */
+function liveProblems(state: RunPageState): string[] {
+  const problems: string[] = [...traceProblems(state.run.trace)];
+  const live = state.record.kind === 'live' ? state.record.run.id : null;
+  const held = state.link.kind === 'none' ? null : state.link.instance;
+  if (held !== live) problems.push(`the link holds ${held} while the live server is ${live}`);
+  if (state.session !== null && state.link.kind !== 'attached') {
+    problems.push('a session reports without an attached run');
+  }
+  return problems;
+}
+
 /** What must hold in every state; empty when all do. */
 export function runPageInvariants(state: RunPageState): string[] {
-  const problems: string[] = [];
+  const problems: string[] = liveProblems(state);
   const phase = runPhase(state);
   if (state.stop.kind === 'stopping' && state.stop.forceOffered && phase.kind !== 'stopping') {
     problems.push('force stop is offered outside stopping');

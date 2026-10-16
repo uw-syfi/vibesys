@@ -13,7 +13,12 @@ import {
 import type {Screen, SidebarState} from '@vibesys/feature-app-shell/state';
 import {createMachinesStore, MachinesScreen} from '@vibesys/feature-machines/renderer';
 import {createNewRunStore, machineOptions, NewRunScreen} from '@vibesys/feature-new-run/renderer';
-import {type RunPageNavigation, RunScreen, useRunPage} from '@vibesys/feature-run-page/renderer';
+import {
+  type RunPageNavigation,
+  type RunPagePage,
+  RunScreen,
+  useRunPage,
+} from '@vibesys/feature-run-page/renderer';
 import {runRecord} from '@vibesys/feature-run-page/state';
 import {
   createSettingsStore,
@@ -40,13 +45,14 @@ export interface ShellStores {
   readonly schedule: Schedule;
   readonly machines: ReturnType<typeof createMachinesStore>;
   readonly newRun: ReturnType<typeof createNewRunStore>['store'];
+  /** The page a run's live session runs in. */
+  readonly page: RunPagePage;
 }
 
 const DEFAULT_APPEARANCE = {mode: 'system', light: 'paper', dark: 'ink'} as const;
 
 /** What the Run screen cannot do from this window yet, and why; it shows those actions disabled. */
 const RUN_UNAVAILABLE = {
-  pause: 'Pausing from this window arrives with the live run connection.',
   'open-window': 'Opening a run in its own window arrives with multiple windows.',
 } as const;
 
@@ -60,6 +66,7 @@ export function createShellStores(
   system: SystemAppearance,
   document: ThemeTarget,
   schedule: Schedule,
+  page: RunPagePage,
 ): ShellStores {
   const settings = createSettingsStore(bridge, system);
   const follow = (): void => {
@@ -87,6 +94,7 @@ export function createShellStores(
     newRun: newRun.store,
     bridge,
     schedule,
+    page,
   };
 }
 
@@ -114,8 +122,6 @@ function RunRoute(props: {
   const navigation: RunPageNavigation = {
     runAgain: () => stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'new-run'}}),
     openWindow: ignore,
-    pause: ignore,
-    resume: ignore,
   };
   const page = useRunPage({
     seed,
@@ -123,6 +129,7 @@ function RunRoute(props: {
     bridge: stores.bridge,
     navigation,
     schedule: stores.schedule,
+    page: stores.page,
   });
   if (page === null) {
     return (

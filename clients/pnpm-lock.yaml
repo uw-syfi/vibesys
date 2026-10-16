@@ -173,12 +173,18 @@ importers:
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/run-session':
+        specifier: workspace:*
+        version: link:../../libs/run-session
       '@vibesys/runs':
         specifier: workspace:*
         version: link:../../libs/runs
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../libs/transport
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../../libs/ui
@@ -756,6 +762,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../../libs/machine
+      '@vibesys/run-session':
+        specifier: workspace:*
+        version: link:../../libs/run-session
       '@vibesys/run-state':
         specifier: workspace:*
         version: link:../../libs/run-state

@@ -3,6 +3,8 @@ import type {PreferencesView, WelcomeBridge, WelcomeEvent} from '@vibesys/ipc';
 import type {ThemeMode, ThemeName} from '@vibesys/ui/tokens';
 import {createShellStores} from './shell.js';
 
+const ignore = (): void => undefined;
+
 const STORED: PreferencesView = {
   appearance: {mode: 'system', light: 'mist', dark: 'midnight'},
   notifications: {enabled: true},
@@ -46,6 +48,12 @@ test('the page follows the stored theme for the system mode, and each change of 
     {mode: 'dark', onChange: listener => (systemListener = listener)},
     {setAttribute: (_name, value) => painted.push(value)},
     () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
   );
   await Promise.resolve();
   await Promise.resolve();
