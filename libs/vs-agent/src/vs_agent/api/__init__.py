@@ -81,7 +81,6 @@ from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
     CLI_VERSIONS,
     DEFAULT_CLI_PROVIDER,
-    HARNESSES,
     NODE_VERSION,
     SHIPPED_PROVIDERS,
     Harness,
@@ -90,6 +89,7 @@ from vs_agent.provider_policy import (
     cli_mcp_config_files,
     cli_skill_dirs,
     default_model,
+    harnesses,
     vetted_models,
 )
 from vs_agent.provider_profiles import provider_binary
@@ -172,7 +172,6 @@ __all__ = [
     "DEFAULT_CLI_PROVIDER",
     "DEFAULT_TURN_TIMEOUT_S",
     "DOCKER_PROVIDER_ENV",
-    "HARNESSES",
     "MAX_REPLY_BYTES",
     "MAX_WHITESPACE_RUN",
     "NODE_VERSION",
@@ -285,6 +284,7 @@ __all__ = [
     "task_agent_host_resources",
     "todos_from_tool_call",
     "validate_env_names",
+    "harnesses",
     "vetted_models",
 ]
 

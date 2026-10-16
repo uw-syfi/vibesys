@@ -105,12 +105,11 @@ from vibesys.log_owners import (
 from vibesys.plugin_catalog import OrchestrationRegistry
 from vibesys.repository import RepositoryVisibility
 from vibesys.run import CoreAgentEventSink
-from vs_agent.api import HARNESSES, AgentBackend, AgentSpec, Harness, check_harness, vetted_models
+from vs_agent.api import AgentBackend, AgentSpec, Harness, check_harness, harnesses, vetted_models
 from vs_runtime.api import boot_trace
 from vs_runtime.api.infrastructure import RunStopped
 
 __all__ = [
-    "HARNESSES",
     "KNOWN_COMPUTE_BACKENDS",
     "AgentBackend",
     "AgentExecutionStartedData",
@@ -204,5 +203,6 @@ __all__ = [
     "domain_modalities",
     "load_config",
     "open_run_store",
+    "harnesses",
     "vetted_models",
 ]
