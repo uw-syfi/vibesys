@@ -33,7 +33,16 @@ if (bridge === undefined) {
     </Page>,
   );
 } else {
-  const stores = createShellStores(bridge, pageAppearance(window), document.documentElement);
+  const schedule = (callback: () => void, delayMs: number): (() => void) => {
+    const timer = window.setTimeout(callback, delayMs);
+    return () => window.clearTimeout(timer);
+  };
+  const stores = createShellStores(
+    bridge,
+    pageAppearance(window),
+    document.documentElement,
+    schedule,
+  );
   createRoot(root).render(
     <StrictMode>
       <Shell stores={stores} version={String(import.meta.env['VITE_APP_VERSION'])} />

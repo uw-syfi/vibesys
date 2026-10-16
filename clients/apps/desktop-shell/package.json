@@ -19,8 +19,11 @@
   },
   "dependencies": {
     "@vibesys/feature-app-shell": "workspace:*",
+    "@vibesys/feature-run-page": "workspace:*",
     "@vibesys/feature-settings": "workspace:*",
+    "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
+    "@vibesys/runs": "workspace:*",
     "@vibesys/store": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",

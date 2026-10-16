@@ -1,0 +1,68 @@
+/**
+ * The Run screen's store for as long as the screen shows one run: created when it mounts, fed the
+ * run's record as the host's watch pushes it, and disposed (followers stopped, the bound cancelled,
+ * the logs channel let go) when it unmounts or shows another run.
+ */
+import type {ScheduleTimeout} from '@vibesys/machine';
+import {useEffect, useState, useSyncExternalStore} from 'react';
+import {
+  type RunPageAction,
+  type RunPageSeed,
+  type RunPageState,
+  type RunRecord,
+  sameRecord,
+} from '../../state/index.js';
+import {createRunPageStore, type RunPageStore} from './store.js';
+import {type RunPageBridge, type RunPageNavigation, welcomeRunPorts} from './welcome-ports.js';
+
+export interface RunPageOptions {
+  readonly seed: RunPageSeed;
+  readonly record: RunRecord;
+  readonly bridge: RunPageBridge;
+  readonly navigation: RunPageNavigation;
+  readonly schedule: ScheduleTimeout;
+}
+
+const NO_STORE = {
+  subscribe: () => () => {},
+  getState: () => null,
+};
+
+/** The screen's state and dispatch, or null on the first render before its store exists. */
+export function useRunPage(options: RunPageOptions): {
+  readonly state: RunPageState;
+  readonly dispatch: (action: RunPageAction) => void;
+} | null {
+  const {seed, record, bridge, navigation, schedule} = options;
+  const [store, setStore] = useState<RunPageStore | null>(null);
+  const key = `${seed.identity.host} ${seed.identity.runId}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the store belongs to one run (`key`). Listing `seed`, `bridge`, `navigation` and `schedule` would dispose the store, its followers and its stop bound whenever the caller passes a new but equal object; a ref copy of them would hide the same choice less visibly. The record reaches the store through the effect below.
+  useEffect(() => {
+    let created: RunPageStore | null = null;
+    const instance = (): string | null => {
+      const current = created?.getState().record;
+      return current === undefined || current.kind === 'unlisted' ? null : current.run.id;
+    };
+    const ports = welcomeRunPorts(
+      bridge,
+      {run: seed.identity, project: seed.title.project, instance},
+      navigation,
+    );
+    created = createRunPageStore(seed, ports, schedule);
+    setStore(created);
+    const owned = created;
+    return () => {
+      owned.dispose();
+      ports.release();
+      setStore(null);
+    };
+  }, [key]);
+  useEffect(() => {
+    if (store !== null && !sameRecord(store.getState().record, record)) {
+      store.dispatch({type: 'record', record});
+    }
+  }, [store, record]);
+  const source = store ?? NO_STORE;
+  const state = useSyncExternalStore(source.subscribe, source.getState, source.getState);
+  return store === null || state === null ? null : {state, dispatch: store.dispatch};
+}

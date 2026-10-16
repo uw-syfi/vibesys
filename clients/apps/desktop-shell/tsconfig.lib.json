@@ -31,7 +31,19 @@
       "path": "../../features/app-shell/tsconfig.renderer.json"
     },
     {
+      "path": "../../features/run-page/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/run-page/tsconfig.renderer.json"
+    },
+    {
       "path": "../../features/settings/tsconfig.state.json"
+    },
+    {
+      "path": "../../libs/hosts/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/runs/tsconfig.lib.json"
     },
     {
       "path": "../../features/settings/tsconfig.renderer.json"

@@ -149,12 +149,21 @@ importers:
       '@vibesys/feature-app-shell':
         specifier: workspace:*
         version: link:../../features/app-shell
+      '@vibesys/feature-run-page':
+        specifier: workspace:*
+        version: link:../../features/run-page
       '@vibesys/feature-settings':
         specifier: workspace:*
         version: link:../../features/settings
+      '@vibesys/hosts':
+        specifier: workspace:*
+        version: link:../../libs/hosts
       '@vibesys/ipc':
         specifier: workspace:*
         version: link:../../libs/ipc
+      '@vibesys/runs':
+        specifier: workspace:*
+        version: link:../../libs/runs
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
@@ -634,6 +643,9 @@ importers:
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../../libs/hosts
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../../libs/ipc
       '@vibesys/logs':
         specifier: workspace:*
         version: link:../../libs/logs
@@ -646,6 +658,9 @@ importers:
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../libs/transport
       '@vibesys/ui':
         specifier: workspace:*
         version: link:../../libs/ui

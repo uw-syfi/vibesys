@@ -2,6 +2,7 @@
  * The Run screen's pure state: its store (`runPageStep`, a reducer with request tokens) and the
  * selectors the screen renders: header, stop and ended banners, startup timeline, and logs.
  */
+export {runRecord, sameRecord} from './record.js';
 export {
   FORCE_STOP_BOUND_MS,
   RUN_TABS,

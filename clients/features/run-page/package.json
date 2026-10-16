@@ -35,10 +35,12 @@
   "dependencies": {
     "@vibesys/contracts": "workspace:*",
     "@vibesys/hosts": "workspace:*",
+    "@vibesys/ipc": "workspace:*",
     "@vibesys/logs": "workspace:*",
     "@vibesys/machine": "workspace:*",
     "@vibesys/runs": "workspace:*",
     "@vibesys/store": "workspace:*",
+    "@vibesys/transport": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1"
   },

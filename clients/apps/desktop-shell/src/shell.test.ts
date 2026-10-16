@@ -41,6 +41,7 @@ test('the page follows the stored theme for the system mode, and each change of 
     fakeBridge(),
     {mode: 'dark', onChange: listener => (systemListener = listener)},
     {setAttribute: (_name, value) => painted.push(value)},
+    () => () => undefined,
   );
   await Promise.resolve();
   await Promise.resolve();

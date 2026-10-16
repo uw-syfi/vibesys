@@ -25,7 +25,16 @@
       "path": "./tsconfig.state.json"
     },
     {
+      "path": "../../libs/ipc/tsconfig.lib.json"
+    },
+    {
       "path": "../../libs/logs/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/runs/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/transport/tsconfig.lib.json"
     },
     {
       "path": "../../libs/machine/tsconfig.lib.json"
